@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertUserSchema, insertDailyLogSchema, users, dailyLogs, weeklyCheckins } from './schema';
+import { insertUserSchema, insertDailyLogSchema, users, weightLogs, workoutLogs, stepLogs, weeklyCheckins } from './schema';
 
 // ============================================
 // SHARED ERROR SCHEMAS
@@ -37,19 +37,11 @@ export const api = {
         404: errorSchemas.notFound,
       },
     },
-    getLogs: {
-        method: 'GET' as const,
-        path: '/api/users/:id/logs' as const,
-        responses: {
-            200: z.array(z.custom<typeof dailyLogs.$inferSelect>()),
-            404: errorSchemas.notFound,
-        }
-    },
     flagged: {
         method: 'GET' as const,
         path: '/api/admin/flagged' as const,
         responses: {
-            200: z.array(z.custom<any>()), // Should be FlaggedUser but using custom for simplicity with extended types
+            200: z.array(z.custom<any>()),
         }
     }
   },
@@ -57,18 +49,36 @@ export const api = {
     whatsapp: {
         method: 'POST' as const,
         path: '/api/webhooks/whatsapp' as const,
-        input: z.any(), // Twilio payload
+        input: z.any(),
         responses: {
-            200: z.string(), // TwiML
+            200: z.string(),
         }
     },
     payfast: {
         method: 'POST' as const,
         path: '/api/webhooks/payfast' as const,
-        input: z.any(), // PayFast payload
+        input: z.any(),
         responses: {
             200: z.void(),
         }
+    }
+  },
+  admin: {
+    runTest: {
+      method: 'POST' as const,
+      path: '/api/admin/run-test' as const,
+      input: z.object({
+        testId: z.enum(['A', 'B', 'C', 'D', 'E', 'F']),
+        liveMode: z.boolean().default(false)
+      }),
+      responses: {
+        200: z.object({
+          success: z.boolean(),
+          logs: z.array(z.string()),
+          dbChanges: z.any(),
+          whatsappSent: z.string().optional()
+        })
+      }
     }
   }
 };
