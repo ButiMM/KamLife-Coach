@@ -1,8 +1,8 @@
 import { db } from "./db";
 import {
-  users, dailyLogs, weeklyCheckins, chatHistory,
+  users, weightLogs, workoutLogs, stepLogs, weeklyCheckins, chatHistory,
   type User, type InsertUser, type UpdateUserRequest,
-  type DailyLog, type InsertDailyLog,
+  type WeightLog, type WorkoutLog, type StepLog,
   type WeeklyCheckin, type InsertWeeklyCheckin,
   type ChatLog,
   type FlaggedUser
@@ -11,29 +11,34 @@ import { eq, desc, and, gte, sql } from "drizzle-orm";
 
 export interface IStorage {
   // User CRUD
-  getUser(id: number): Promise<User | undefined>;
+  getUser(id: string): Promise<User | undefined>;
   getUserByPhone(phoneNumber: string): Promise<User | undefined>;
   getAllUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
-  updateUser(id: number, updates: UpdateUserRequest): Promise<User>;
+  updateUser(id: string, updates: UpdateUserRequest): Promise<User>;
 
-  // Daily Logs
-  getDailyLogs(userId: number): Promise<DailyLog[]>;
-  createDailyLog(log: InsertDailyLog): Promise<DailyLog>;
-  getLastLog(userId: number): Promise<DailyLog | undefined>;
+  // Logs
+  getWeightLogs(userId: string): Promise<WeightLog[]>;
+  getWorkoutLogs(userId: string): Promise<WorkoutLog[]>;
+  getStepLogs(userId: string): Promise<StepLog[]>;
+  
+  createWeightLog(userId: string, weight: string): Promise<WeightLog>;
+  createWorkoutLog(userId: string, completed: boolean): Promise<WorkoutLog>;
+  createStepLog(userId: string, steps: number): Promise<StepLog>;
 
   // Weekly Checkins
+  getWeeklyCheckins(userId: string): Promise<WeeklyCheckin[]>;
   createWeeklyCheckin(checkin: InsertWeeklyCheckin): Promise<WeeklyCheckin>;
 
   // Chat History
-  logChat(userId: number, messageIn: string, messageOut: string, intent: string): Promise<ChatLog>;
+  logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<ChatLog>;
 
   // Admin / Flagged
   getFlaggedUsers(): Promise<FlaggedUser[]>;
 }
 
 export class DatabaseStorage implements IStorage {
-  async getUser(id: number): Promise<User | undefined> {
+  async getUser(id: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.id, id));
     return user;
   }
@@ -44,7 +49,7 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getAllUsers(): Promise<User[]> {
-    return await db.select().from(users).orderBy(desc(users.joinedAt));
+    return await db.select().from(users).orderBy(desc(users.createdAt));
   }
 
   async createUser(insertUser: InsertUser): Promise<User> {
@@ -52,28 +57,40 @@ export class DatabaseStorage implements IStorage {
     return user;
   }
 
-  async updateUser(id: number, updates: UpdateUserRequest): Promise<User> {
+  async updateUser(id: string, updates: UpdateUserRequest): Promise<User> {
     const [user] = await db.update(users).set(updates).where(eq(users.id, id)).returning();
     return user;
   }
 
-  async getDailyLogs(userId: number): Promise<DailyLog[]> {
-    return await db.select().from(dailyLogs)
-      .where(eq(dailyLogs.userId, userId))
-      .orderBy(desc(dailyLogs.date));
+  async getWeightLogs(userId: string): Promise<WeightLog[]> {
+    return await db.select().from(weightLogs).where(eq(weightLogs.userId, userId)).orderBy(desc(weightLogs.loggedAt));
   }
 
-  async createDailyLog(log: InsertDailyLog): Promise<DailyLog> {
-    const [newLog] = await db.insert(dailyLogs).values(log).returning();
-    return newLog;
+  async getWorkoutLogs(userId: string): Promise<WorkoutLog[]> {
+    return await db.select().from(workoutLogs).where(eq(workoutLogs.userId, userId)).orderBy(desc(workoutLogs.loggedAt));
   }
 
-  async getLastLog(userId: number): Promise<DailyLog | undefined> {
-    const [log] = await db.select().from(dailyLogs)
-      .where(eq(dailyLogs.userId, userId))
-      .orderBy(desc(dailyLogs.date))
-      .limit(1);
+  async getStepLogs(userId: string): Promise<StepLog[]> {
+    return await db.select().from(stepLogs).where(eq(stepLogs.userId, userId)).orderBy(desc(stepLogs.loggedAt));
+  }
+
+  async createWeightLog(userId: string, weight: string): Promise<WeightLog> {
+    const [log] = await db.insert(weightLogs).values({ userId, weight }).returning();
     return log;
+  }
+
+  async createWorkoutLog(userId: string, completed: boolean): Promise<WorkoutLog> {
+    const [log] = await db.insert(workoutLogs).values({ userId, workoutCompleted: completed }).returning();
+    return log;
+  }
+
+  async createStepLog(userId: string, steps: number): Promise<StepLog> {
+    const [log] = await db.insert(stepLogs).values({ userId, steps }).returning();
+    return log;
+  }
+
+  async getWeeklyCheckins(userId: string): Promise<WeeklyCheckin[]> {
+    return await db.select().from(weeklyCheckins).where(eq(weeklyCheckins.userId, userId)).orderBy(desc(weeklyCheckins.weekStartDate));
   }
 
   async createWeeklyCheckin(checkin: InsertWeeklyCheckin): Promise<WeeklyCheckin> {
@@ -81,7 +98,7 @@ export class DatabaseStorage implements IStorage {
     return newCheckin;
   }
 
-  async logChat(userId: number, messageIn: string, messageOut: string, intent: string): Promise<ChatLog> {
+  async logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<ChatLog> {
     const [log] = await db.insert(chatHistory).values({
       userId,
       messageIn,
@@ -92,11 +109,6 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getFlaggedUsers(): Promise<FlaggedUser[]> {
-    // This is a simplified implementation. Real-world might need complex SQL or multiple queries.
-    // For now, let's just get all users and filter in memory for simplicity in MVP, 
-    // or use a smart query.
-    
-    // Let's use raw SQL for a more efficient query if needed, but for MVP:
     const allUsers = await this.getAllUsers();
     const flagged: FlaggedUser[] = [];
 
@@ -106,39 +118,26 @@ export class DatabaseStorage implements IStorage {
     for (const user of allUsers) {
       if (user.subscriptionStatus !== 'active') continue;
 
-      const lastLog = await this.getLastLog(user.id);
-      
-      // Check 1: Inactive > 7 days
-      if (!lastLog || new Date(lastLog.date) < sevenDaysAgo) {
+      if (!user.lastActiveAt || new Date(user.lastActiveAt) < sevenDaysAgo) {
         flagged.push({
           ...user,
           flagReason: "inactive_7_days",
-          lastLogDate: lastLog ? lastLog.date.toString() : null
+          lastLogDate: user.lastActiveAt ? user.lastActiveAt.toString() : null
         });
         continue;
       }
 
-      // Check 2: Plateau (same weight for 2 weeks) - Simplified logic
-      // Get last 14 logs
-      const logs = await db.select().from(dailyLogs)
-        .where(eq(dailyLogs.userId, user.id))
-        .orderBy(desc(dailyLogs.date))
-        .limit(14);
+      const checkins = await this.getWeeklyCheckins(user.id);
       
-      if (logs.length >= 7) {
-        // Very basic plateau check: variance is low? or simply no change?
-        // Let's just check if max weight - min weight < 0.5kg in last 2 weeks
-        const weights = logs.map(l => Number(l.weight)).filter(w => !isNaN(w) && w > 0);
-        if (weights.length > 5) {
-            const maxW = Math.max(...weights);
-            const minW = Math.min(...weights);
-            if ((maxW - minW) < 0.5) {
-                 flagged.push({
-                    ...user,
-                    flagReason: "plateau_2_weeks",
-                    lastLogDate: lastLog.date.toString()
-                });
-            }
+      if (checkins.length >= 2) {
+        const w1 = Number(checkins[0].weight);
+        const w2 = Number(checkins[1].weight);
+        if (w1 >= w2) { // plateau or gain
+             flagged.push({
+                ...user,
+                flagReason: "plateau_2_weeks",
+                lastLogDate: user.lastActiveAt.toString()
+            });
         }
       }
     }

@@ -79,6 +79,15 @@ export const weeklyCheckins = pgTable("weekly_checkins", {
   };
 });
 
+export const chatHistory = pgTable("chat_history", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  messageIn: text("message_in"),
+  messageOut: text("message_out"),
+  intent: text("intent"),
+  createdAt: timestamp("created_at").defaultNow(),
+});
+
 // For Replit AI Integrations compatibility
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
@@ -101,6 +110,11 @@ export const usersRelations = relations(users, ({ many }) => ({
   workoutLogs: many(workoutLogs),
   stepLogs: many(stepLogs),
   weeklyCheckins: many(weeklyCheckins),
+  chatHistory: many(chatHistory),
+}));
+
+export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({
+  user: one(users, { fields: [chatHistory.userId], references: [users.id] }),
 }));
 
 export const weightLogsRelations = relations(weightLogs, ({ one }) => ({
@@ -125,6 +139,7 @@ export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: t
 export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id: true, loggedAt: true });
 export const insertStepLogSchema = createInsertSchema(stepLogs).omit({ id: true, loggedAt: true });
 export const insertWeeklyCheckinSchema = createInsertSchema(weeklyCheckins).omit({ id: true, createdAt: true });
+export const insertChatLogSchema = createInsertSchema(chatHistory).omit({ id: true, createdAt: true });
 
 // === EXPLICIT API CONTRACT TYPES ===
 
@@ -134,7 +149,13 @@ export type WeightLog = typeof weightLogs.$inferSelect;
 export type WorkoutLog = typeof workoutLogs.$inferSelect;
 export type StepLog = typeof stepLogs.$inferSelect;
 export type WeeklyCheckin = typeof weeklyCheckins.$inferSelect;
+export type ChatLog = typeof chatHistory.$inferSelect;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UserResponse = User;
 export type UserListResponse = User[];
+
+export interface FlaggedUser extends User {
+  flagReason: "inactive_7_days" | "plateau_2_weeks";
+  lastLogDate: string | null;
+}
