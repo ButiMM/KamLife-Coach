@@ -83,10 +83,13 @@ function runRulesEngine(user: any, logs: any, checkins: any) {
   return { updatedTargets, adjustments, escalationFlag };
 }
 
+import { registerAdminTestRoutes } from "./admin-test";
+
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  registerAdminTestRoutes(app);
 
   app.get(api.users.list.path, async (req, res) => {
     const users = await storage.getAllUsers();
