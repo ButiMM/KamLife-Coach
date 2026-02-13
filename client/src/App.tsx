@@ -9,6 +9,8 @@ import Dashboard from "@/pages/dashboard";
 import UsersList from "@/pages/users";
 import UserDetail from "@/pages/user-detail";
 
+import AdminTest from "@/pages/admin/test";
+
 function Router() {
   return (
     <Switch>
@@ -16,6 +18,7 @@ function Router() {
       <Route path="/dashboard" component={Dashboard} />
       <Route path="/users" component={UsersList} />
       <Route path="/users/:id" component={UserDetail} />
+      <Route path="/admin/test" component={AdminTest} />
       <Route component={NotFound} />
     </Switch>
   );

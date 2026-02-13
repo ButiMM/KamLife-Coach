@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { insertUserSchema, insertDailyLogSchema, users, weightLogs, workoutLogs, stepLogs, weeklyCheckins } from './schema';
+import { insertUserSchema, users, weightLogs, workoutLogs, stepLogs, weeklyCheckins } from './schema';
 
 // ============================================
 // SHARED ERROR SCHEMAS
