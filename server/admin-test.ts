@@ -1,5 +1,5 @@
 import type { Express, Request, Response } from "express";
-import { storage } from "../storage";
+import { storage } from "./storage";
 import { api } from "@shared/routes";
 import { format } from "date-fns";
 
