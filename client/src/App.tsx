@@ -8,6 +8,7 @@ import LandingPage from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import UsersList from "@/pages/users";
 import UserDetail from "@/pages/user-detail";
+import BetaTesters from "@/pages/admin/beta-testers";
 
 import AdminTest from "@/pages/admin/test";
 
@@ -19,6 +20,7 @@ function Router() {
       <Route path="/users" component={UsersList} />
       <Route path="/users/:id" component={UserDetail} />
       <Route path="/admin/test" component={AdminTest} />
+      <Route path="/admin/beta" component={BetaTesters} />
       <Route component={NotFound} />
     </Switch>
   );

@@ -43,6 +43,13 @@ export const api = {
         responses: {
             200: z.array(z.custom<any>()),
         }
+    },
+    betaTesters: {
+      method: 'GET' as const,
+      path: '/api/admin/beta-testers' as const,
+      responses: {
+        200: z.array(z.custom<typeof users.$inferSelect>()),
+      }
     }
   },
   webhooks: {

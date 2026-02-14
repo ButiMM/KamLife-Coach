@@ -20,6 +20,7 @@ export const users = pgTable("users", {
   stepsTarget: integer("steps_target"),
   subscriptionStatus: text("subscription_status").default("inactive").notNull(), // active | inactive | trial
   onboardingState: text("onboarding_state"),
+  betaBypassUntil: timestamp("beta_bypass_until"),
   lastActiveAt: timestamp("last_active_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {

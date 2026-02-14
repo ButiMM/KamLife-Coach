@@ -104,6 +104,12 @@ export async function registerRoutes(
     res.json(flagged);
   });
 
+  app.get(api.users.betaTesters.path, async (req, res) => {
+    const allUsers = await storage.getAllUsers();
+    const betaTesters = allUsers.filter(u => u.betaBypassUntil !== null);
+    res.json(betaTesters);
+  });
+
   app.post(api.webhooks.whatsapp.path, async (req, res) => {
     const { From, Body } = req.body;
     const phoneNumber = From;
@@ -111,6 +117,34 @@ export async function registerRoutes(
 
     let user = await storage.getUserByPhone(phoneNumber);
     const paymentLink = "https://payfast.co.za/mock-pay";
+
+    // Beta Tester Logic
+    const betaTesters = (process.env.BETA_TESTERS || "").split(",").map(p => p.trim());
+    const isBetaTester = betaTesters.includes(phoneNumber);
+
+    if (!user && isBetaTester) {
+      const bypassExpiry = new Date();
+      bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+      user = await storage.createUser({
+        phoneNumber,
+        subscriptionStatus: "active",
+        betaBypassUntil: bypassExpiry,
+      });
+      console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
+    } else if (user && isBetaTester && (!user.betaBypassUntil || new Date(user.betaBypassUntil) > new Date())) {
+      if (user.subscriptionStatus !== "active") {
+        const bypassExpiry = user.betaBypassUntil || new Date();
+        if (!user.betaBypassUntil) {
+          bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+        }
+        await storage.updateUser(user.id, { 
+          subscriptionStatus: "active",
+          betaBypassUntil: bypassExpiry 
+        });
+        user.subscriptionStatus = "active";
+        console.log(`[BETA BYPASS] Activated existing beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
+      }
+    }
 
     if (!user) {
       return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
