@@ -23,7 +23,9 @@ export function registerAdminTestRoutes(app: Express) {
         if (user) await storage.updateUser(user.id, { subscriptionStatus: 'inactive' });
         
         // Mock incoming webhook
-        const response = await fetch(`http://localhost:5000${api.webhooks.whatsapp.path}`, {
+        // Ensure we use the full URL including protocol and host for server-to-self calls
+        const baseUrl = `http://localhost:5000`;
+        const response = await fetch(`${baseUrl}${api.webhooks.whatsapp.path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ From: phone, Body: "Hello" })
@@ -38,7 +40,8 @@ export function registerAdminTestRoutes(app: Express) {
         const user = await storage.getUserByPhone(phone);
         if (!user) throw new Error("Seed user not found");
         
-        const response = await fetch(`http://localhost:5000${api.webhooks.whatsapp.path}`, {
+        const baseUrl = `http://localhost:5000`;
+        const response = await fetch(`${baseUrl}${api.webhooks.whatsapp.path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ From: phone, Body: "I did 7500 steps" })
@@ -55,7 +58,8 @@ export function registerAdminTestRoutes(app: Express) {
         const user = await storage.getUserByPhone(phone);
         if (!user) throw new Error("Seed user not found");
 
-        const response = await fetch(`http://localhost:5000${api.webhooks.whatsapp.path}`, {
+        const baseUrl = `http://localhost:5000`;
+        const response = await fetch(`${baseUrl}${api.webhooks.whatsapp.path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ From: phone, Body: "I skipped gym" })
@@ -72,7 +76,8 @@ export function registerAdminTestRoutes(app: Express) {
         const user = await storage.getUserByPhone(phone);
         if (!user) throw new Error("Seed user not found");
 
-        const response = await fetch(`http://localhost:5000${api.webhooks.whatsapp.path}`, {
+        const baseUrl = `http://localhost:5000`;
+        const response = await fetch(`${baseUrl}${api.webhooks.whatsapp.path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ From: phone, Body: "Weight 92, waist 95, workouts 3, steps 6500, hunger 6" })
@@ -111,7 +116,8 @@ export function registerAdminTestRoutes(app: Express) {
           escalationFlag: false
         });
 
-        const response = await fetch(`http://localhost:5000${api.webhooks.whatsapp.path}`, {
+        const baseUrl = `http://localhost:5000`;
+        const response = await fetch(`${baseUrl}${api.webhooks.whatsapp.path}`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ From: phone, Body: "Weight 90, waist 100, workouts 3, steps 7000, hunger 5" })

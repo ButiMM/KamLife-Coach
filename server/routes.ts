@@ -1,4 +1,4 @@
-import type { Express } from "express";
+import express, { type Express } from "express";
 import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import { api } from "@shared/routes";
@@ -89,6 +89,9 @@ export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: false }));
+
   registerAdminTestRoutes(app);
 
   app.get(api.users.list.path, async (req, res) => {
