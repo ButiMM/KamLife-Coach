@@ -150,6 +150,7 @@ export type WeightLog = typeof weightLogs.$inferSelect;
 export type WorkoutLog = typeof workoutLogs.$inferSelect;
 export type StepLog = typeof stepLogs.$inferSelect;
 export type WeeklyCheckin = typeof weeklyCheckins.$inferSelect;
+export type InsertWeeklyCheckin = z.infer<typeof insertWeeklyCheckinSchema>;
 export type ChatLog = typeof chatHistory.$inferSelect;
 
 export type UpdateUserRequest = Partial<InsertUser>;

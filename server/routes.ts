@@ -194,6 +194,7 @@ export async function registerRoutes(
     const reply = await generateReply(message, intent, { user });
     await storage.logChat(user.id, message, reply, intent);
 
+    console.log("PROVIDER DETECTED: Twilio");
     res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
   });
 
