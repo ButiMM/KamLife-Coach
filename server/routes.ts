@@ -122,40 +122,63 @@ export async function registerRoutes(
     const betaTesters = (process.env.BETA_TESTERS || "").split(",").map(p => p.trim());
     const isBetaTester = betaTesters.includes(phoneNumber);
 
-    if (!user && isBetaTester) {
-      const bypassExpiry = new Date();
-      bypassExpiry.setDate(bypassExpiry.getDate() + 14);
-      user = await storage.createUser({
-        phoneNumber,
-        subscriptionStatus: "active",
-        betaBypassUntil: bypassExpiry,
-      });
-      console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-    } else if (user && isBetaTester && (!user.betaBypassUntil || new Date(user.betaBypassUntil) > new Date())) {
-      if (user.subscriptionStatus !== "active") {
-        const bypassExpiry = user.betaBypassUntil || new Date();
-        if (!user.betaBypassUntil) {
-          bypassExpiry.setDate(bypassExpiry.getDate() + 14);
-        }
-        await storage.updateUser(user.id, { 
+    if (!user) {
+      if (isBetaTester) {
+        const bypassExpiry = new Date();
+        bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+        user = await storage.createUser({
+          phoneNumber,
           subscriptionStatus: "active",
-          betaBypassUntil: bypassExpiry 
+          betaBypassUntil: bypassExpiry,
+          onboardingState: "AWAITING_NAME"
         });
-        user.subscriptionStatus = "active";
-        console.log(`[BETA BYPASS] Activated existing beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
+        console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife! Let's get started. What is your full name?</Message></Response>`);
+      } else {
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
       }
     }
 
-    if (!user) {
-      return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
+    if (user.subscriptionStatus !== "active" && !isBetaTester) {
+      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink}</Message></Response>`);
     }
 
-    if (user.subscriptionStatus !== "active") {
-      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink}</Message></Response>`);
+    // Process Beta Bypass for existing inactive users
+    if (isBetaTester && user.subscriptionStatus !== "active") {
+      const bypassExpiry = new Date();
+      bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+      await storage.updateUser(user.id, { 
+        subscriptionStatus: "active",
+        betaBypassUntil: bypassExpiry,
+        onboardingState: user.onboardingState || "AWAITING_NAME"
+      });
+      user.subscriptionStatus = "active";
     }
 
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
     const { intent, data } = await parseIntent(message);
+
+    // Onboarding Logic
+    if (intent === "onboarding_answer" || !user.onboardingState || user.onboardingState !== "COMPLETED") {
+      const currentState = user.onboardingState || "AWAITING_NAME";
+      let nextState = currentState;
+      let reply = "";
+
+      if (currentState === "AWAITING_NAME") {
+        await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
+        reply = `Thanks ${message}! What is your main fitness goal? (Fat Loss or Muscle Gain)`;
+      } else if (currentState === "AWAITING_GOAL") {
+        await storage.updateUser(user.id, { goalType: message, onboardingState: "AWAITING_WEIGHT" });
+        reply = "Got it. What is your current weight in kg?";
+      } else if (currentState === "AWAITING_WEIGHT") {
+        await storage.updateUser(user.id, { currentWeight: message, onboardingState: "COMPLETED" });
+        reply = "Onboarding complete! You can now log your steps, workouts, and weight daily. I'll check in with you every Sunday!";
+      }
+
+      const coachingReply = await generateReply(message, intent, { user, onboarding: true });
+      await storage.logChat(user.id, message, coachingReply, "onboarding");
+      return res.type('text/xml').send(`<Response><Message>${coachingReply || reply}</Message></Response>`);
+    }
     
     if (intent === "log_steps" && data?.steps) await storage.createStepLog(user.id, data.steps);
     if (intent === "log_weight" && data?.weight) {
