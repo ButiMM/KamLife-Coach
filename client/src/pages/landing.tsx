@@ -56,10 +56,12 @@ export default function LandingPage() {
             <Button 
                 size="lg" 
                 className="h-14 px-8 rounded-2xl text-lg font-semibold shadow-xl shadow-primary/25 hover:shadow-2xl hover:scale-105 transition-all"
-                onClick={() => window.location.href = "https://wa.me/27123456789?text=Hi%2C%20I%27d%20like%20to%20start%20coaching"}
+                asChild
             >
-              <MessageCircle className="w-5 h-5 mr-2" />
-              Start Coaching Now
+              <a href="https://wa.me/27123456789?text=Hi%2C%20I%27d%20like%20to%20start%20coaching" target="_blank" rel="noopener noreferrer">
+                <MessageCircle className="w-5 h-5 mr-2" />
+                Start Coaching Now
+              </a>
             </Button>
             <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-lg border-2">
               How it works
