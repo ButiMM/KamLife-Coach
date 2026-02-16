@@ -1,0 +1,198 @@
+Implement KamLife Coach Loop v1 (WhatsApp-first) on top of the existing working system (tests A–F pass). Do NOT rebuild. Add only what’s described.
+
+GOALS:
+- Simple enough for a 60–80 year old South African to use.
+- Feels like a real coach (KamLife), not a bank bot.
+- Keep AI costs low: use rules/schedules for 80%, AI only for parsing free-text and writing short replies.
+- Support gym/home/walk-only users with progressive levels and plain language.
+
+=====================
+A) USER PROFILE UPGRADES
+=====================
+Extend Users with:
+- training_mode (gym | home | walk_only)
+- equipment (none | bands | dumbbells | other)
+- capability_level (0 frail/elderly, 1 beginner, 2 moderate, 3 advanced)
+- height_known (boolean)
+- injuries (json array)
+- allergies (json array)
+- preferred_training_time (morning | afternoon | evening)
+- meal_prompt_style (3x_day | 1x_day)
+- coach_tone (strict | friendly | balanced)
+- program_day_index (int default 1)
+- program_week_index (int default 1)
+
+Height handling:
+- During onboarding ask: “Do you know your height? YES/NO”
+- If NO: set height_known=false and continue; do NOT block onboarding. Use conservative calorie estimate.
+
+=====================
+B) ONBOARDING V2 (SIMPLE, OLD-PERSON FRIENDLY)
+=====================
+Replace jargon with simple options.
+Ask in this order, one question at a time, using 1/2/3 choices or YES/NO:
+
+1) Goal: 1 Fat loss 2 Muscle gain
+2) Age (number)
+3) Weight (number)
+4) Height known? YES/NO
+   - If YES ask height cm
+   - If NO skip
+5) Where will you train?
+   1 Gym 2 Home 3 I can only walk
+6) If Home: what equipment?
+   1 Nothing 2 Bands 3 Dumbbells
+7) Any pain or injuries? (Reply: none / knee / back / shoulder / other)
+8) Any allergies? (Reply: none / eggs / dairy / peanuts / other)
+9) When do you prefer to train?
+   1 Morning 2 Afternoon 3 Evening
+10) Meal reminders?
+   1 Remind me 3 times/day
+   2 Remind me once/day
+11) Coach style?
+   1 Strict 2 Friendly 3 Balanced
+
+After onboarding:
+- Calculate targets (existing logic ok).
+- Assign training_mode + capability_level.
+Capability_level rule (simple v1):
+- age >= 65 OR “I can only walk” => level 0
+- age 50–64 OR training_mode=home and sedentary => level 1
+- else default level 2
+- level 3 only if user explicitly says they train regularly 4+ days (optional question: “Do you exercise often? YES/NO”)
+
+Send: “✅ Setup done. Coaching starts tomorrow morning at 07:00.”
+
+=====================
+C) WORKOUT PROGRAM ENGINE (TEMPLATES, NO JARGON)
+=====================
+Create a WorkoutTemplates library (hardcoded JSON or DB table) for:
+- training_mode: gym/home/walk_only
+- capability_level: 0–3
+- days_per_week: 2,3,4
+
+Each “day” must include:
+- simple title (“Walk Day”, “Strength Day”)
+- plain-language instructions
+- optional short video link only if available (later ok)
+
+Examples (must be plain language):
+Level 0 walk_only:
+- “Walk 10 minutes at an easy pace. If tired, rest and continue.”
+- “Chair sit-to-stand 5 times” (explain: sit on chair, stand up slowly, sit again)
+
+Level 1 home none:
+- “Wall push-ups” (explain)
+- “Sit-to-stand”
+- “March in place 2 minutes”
+
+Level 2 home bands:
+- “Band row”
+- “Band press”
+(brief instructions)
+
+Gym templates can be more advanced but still simple.
+
+After onboarding completion:
+- Assign the correct template to the user.
+- Store assigned_template_id and schedule for the week.
+- Do NOT invent workouts with AI.
+
+=====================
+D) DAILY COACHING LOOP (SCHEDULED MESSAGES, LOW AI COST)
+=====================
+Implement these scheduled WhatsApp messages (Africa/Johannesburg):
+
+1) 07:00 Daily “Today Plan”
+Send a single simple instruction based on program_day_index:
+- “Morning {Name} 🔥 Today: {Plan}. Reply DONE when finished.”
+
+2) 09:00 Breakfast reminder (only if meal_prompt_style=3x_day)
+- “Log breakfast: reply like ‘Breakfast: eggs + toast’”
+
+3) 13:00 Lunch reminder (only if 3x_day)
+- “Log lunch: reply like ‘Lunch: chicken + pap’”
+
+4) 19:00 Dinner reminder (only if 3x_day)
+- “Log dinner: reply like ‘Dinner: tinned fish + veg’”
+
+If meal_prompt_style=1x_day:
+- 19:00 “Log today’s food in one message: Breakfast / Lunch / Dinner”
+
+5) 16:00 Gym reminder ONLY on Mon/Wed/Fri for gym users (or based on their training days)
+- “Reminder: Gym today. Even 20 minutes counts.”
+
+6) 20:00 Compliance check
+- “Did you do today’s plan? Reply YES/NO.”
+
+Logging:
+- If they reply DONE/YES => log workout_completed=true for that day.
+- If NO => log workout_completed=false and send a short accountability message.
+
+IMPORTANT:
+- Do NOT call OpenAI for “YES/NO/DONE” replies. Handle with rules.
+- Call OpenAI only for free-text meal logs and unclear messages.
+
+=====================
+E) FOOD GUIDANCE (SA, CHEAP, SIMPLE)
+=====================
+Create a “FoodRules” template per budget_level (low/medium/high) with SA foods.
+Daily food tip sent at 07:05 (optional):
+- Low budget: oats, eggs, tinned fish, chicken, beans, frozen veg, pap portion control.
+Rules:
+- Never recommend foods listed in allergies.
+- No medical claims. Keep it general.
+
+Meal logging:
+- When user sends “Breakfast: …” or “Log food: …”
+Use AI intent parser to extract foods into MealLogs.
+Reply with simple confirmation + one small suggestion.
+
+=====================
+F) KAMLIFE VOICE (NOT A BANK BOT)
+=====================
+Create a Reply Writer style guide:
+- Short, direct, supportive.
+- Use the user’s name.
+- Reference last logged step or workout when possible.
+- Avoid corporate phrases.
+- No long paragraphs.
+- No emojis overload (max 1–2).
+
+Create 3 tone modes:
+- strict: firm, “no excuses”
+- friendly: supportive
+- balanced: mix
+Pick based on user.coach_tone.
+
+=====================
+G) ADMIN MONITORING (SUPERVISE, NOT CHAT)
+=====================
+Admin Panel additions:
+- Show users by status: Green/Yellow/Red
+Green: checked in within 48h
+Yellow: missed 2 daily check-ins
+Red: missed 5 days OR red-flag words OR plateau 2 weeks
+
+Show per user:
+- last_active_at
+- last 7 days compliance %
+- assigned training_mode + capability_level
+- next scheduled message times
+Buttons:
+- Pause outbound (global kill switch already exists)
+- Trigger daily / weekly already exists
+
+=====================
+H) FINAL VERIFICATION
+=====================
+After implementing:
+- Ensure /admin/test A–F still pass.
+- Add new tests for:
+  - Daily schedule message generation (dry run)
+  - Meal reminder selection (3x vs 1x)
+  - Workout template assignment (gym/home/walk_only + level)
+Return:
+- list of files changed
+- any new env vars
+- confirmation tests pass
