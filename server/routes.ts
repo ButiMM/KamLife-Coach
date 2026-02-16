@@ -110,6 +110,25 @@ export async function registerRoutes(
     res.json(betaTesters);
   });
 
+  app.post(api.admin.triggerDaily.path, async (req, res) => {
+    const users = await storage.getAllUsers();
+    let count = 0;
+    for (const user of users) {
+      if (user.subscriptionStatus === "active") {
+        // Morning message
+        const morningMsg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
+        await storage.logChat(user.id, "", morningMsg, "DAILY_MORNING");
+        
+        // Gym reminder
+        const gymMsg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
+        await storage.logChat(user.id, "", gymMsg, "DAILY_GYM");
+        
+        count++;
+      }
+    }
+    res.json({ success: true, count });
+  });
+
   app.post(api.webhooks.whatsapp.path, async (req, res) => {
     const { From, Body } = req.body;
     const phoneNumber = From;
@@ -156,6 +175,38 @@ export async function registerRoutes(
     }
 
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
+
+    // 3) Rule-based parsing first
+    const cleanMsg = message.trim().toUpperCase();
+    
+    // Workout DONE/YES/NO
+    if (cleanMsg === "DONE" || cleanMsg === "YES") {
+      await storage.createWorkoutLog(user.id, true);
+      await storage.logChat(user.id, message, "Strong work! Logged.", "RULES_LOG");
+      return res.type('text/xml').send(`<Response><Message>Strong work! Logged.</Message></Response>`);
+    }
+    if (cleanMsg === "NO") {
+      await storage.createWorkoutLog(user.id, false);
+      await storage.logChat(user.id, message, "Consistency is key. Tomorrow is a new day!", "RULES_LOG");
+      return res.type('text/xml').send(`<Response><Message>Consistency is key. Tomorrow is a new day!</Message></Response>`);
+    }
+
+    // Numbers (Steps/Weight)
+    const numMatch = message.match(/^\d+$/);
+    if (numMatch) {
+      const val = parseInt(numMatch[0]);
+      if (val > 500) { // Steps
+        await storage.createStepLog(user.id, val);
+        await storage.logChat(user.id, message, `Logged ${val} steps!`, "RULES_LOG");
+        return res.type('text/xml').send(`<Response><Message>Logged ${val} steps!</Message></Response>`);
+      } else if (val > 30 && val < 250) { // Weight
+        await storage.createWeightLog(user.id, String(val));
+        await storage.updateUser(user.id, { currentWeight: String(val) });
+        await storage.logChat(user.id, message, `Logged ${val}kg!`, "RULES_LOG");
+        return res.type('text/xml').send(`<Response><Message>Logged ${val}kg!</Message></Response>`);
+      }
+    }
+
     const { intent, data } = await parseIntent(message);
 
     // Onboarding Logic
@@ -220,6 +271,33 @@ export async function registerRoutes(
     console.log("PROVIDER DETECTED: Twilio");
     res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
   });
+
+  // Daily scheduler
+  setInterval(async () => {
+    const now = new Date();
+    // Daily 07:00
+    if (now.getHours() === 7 && now.getMinutes() === 0) {
+      const users = await storage.getAllUsers();
+      for (const user of users) {
+        if (user.subscriptionStatus === "active") {
+          const msg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
+          console.log(`[SCHEDULE] Sending morning check-in to ${user.phoneNumber}`);
+          // await storage.logChat(user.id, "", msg, "DAILY_MORNING");
+        }
+      }
+    }
+    // Daily 16:00
+    if (now.getHours() === 16 && now.getMinutes() === 0) {
+      const users = await storage.getAllUsers();
+      for (const user of users) {
+        if (user.subscriptionStatus === "active") {
+          const msg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
+          console.log(`[SCHEDULE] Sending gym reminder to ${user.phoneNumber}`);
+          // await storage.logChat(user.id, "", msg, "DAILY_GYM");
+        }
+      }
+    }
+  }, 60000);
 
   // Weekly scheduler
   setInterval(async () => {

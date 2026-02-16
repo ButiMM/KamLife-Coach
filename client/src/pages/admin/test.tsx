@@ -38,6 +38,21 @@ export default function AdminTest() {
     },
   });
 
+  const triggerMutation = useMutation({
+    mutationFn: async () => {
+      const response = await fetch(api.admin.triggerDaily.path, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      if (!response.ok) throw new Error(await response.text());
+      return response.json();
+    },
+    onSuccess: (data) => {
+      alert(`Triggered daily messages for ${data.count} active users.`);
+    },
+  });
+
   return (
     <div className="container mx-auto py-8 px-4 max-w-5xl">
       <div className="flex items-center justify-between mb-8">
@@ -45,10 +60,21 @@ export default function AdminTest() {
           <h1 className="text-3xl font-bold tracking-tight">WhatsApp Integration Test Plan</h1>
           <p className="text-muted-foreground">Verify core MVP functionality and coaching logic.</p>
         </div>
-        <div className="flex items-center space-x-2 bg-card p-3 rounded-lg border">
-          <Label htmlFor="live-mode" className="font-semibold">Live Mode</Label>
-          <Switch id="live-mode" checked={liveMode} onCheckedChange={setLiveMode} />
-          <span className="text-xs text-muted-foreground">{liveMode ? "Real Sending" : "Dry Run (Mocked)"}</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center space-x-2 bg-card p-3 rounded-lg border">
+            <Label htmlFor="live-mode" className="font-semibold">Live Mode</Label>
+            <Switch id="live-mode" checked={liveMode} onCheckedChange={setLiveMode} />
+            <span className="text-xs text-muted-foreground">{liveMode ? "Real Sending" : "Dry Run (Mocked)"}</span>
+          </div>
+          <Button 
+            variant="outline"
+            className="border-primary text-primary hover:bg-primary/10"
+            disabled={triggerMutation.isPending}
+            onClick={() => triggerMutation.mutate()}
+          >
+            {triggerMutation.isPending && <Loader2 className="h-4 w-4 animate-spin mr-2" />}
+            Trigger Daily Messages
+          </Button>
         </div>
       </div>
 

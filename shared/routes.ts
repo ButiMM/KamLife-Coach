@@ -86,6 +86,14 @@ export const api = {
           whatsappSent: z.string().optional()
         })
       }
+    },
+    triggerDaily: {
+      method: 'POST' as const,
+      path: '/api/admin/trigger-daily' as const,
+      input: z.object({}),
+      responses: {
+        200: z.object({ success: z.boolean(), count: z.number() })
+      }
     }
   }
 };
