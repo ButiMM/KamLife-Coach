@@ -40,17 +40,28 @@ export default function AdminTest() {
 
   const triggerMutation = useMutation({
     mutationFn: async () => {
-      const response = await fetch(api.admin.triggerDaily.path, {
+      console.log("Trigger Daily Messages clicked");
+      // Use the specified endpoint
+      const response = await fetch("/functions/v1/admin-actions?action=trigger_daily", {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
-      if (!response.ok) throw new Error(await response.text());
+      
+      console.log("Response:", response);
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Status ${response.status}: ${errorText}`);
+      }
       return response.json();
     },
     onSuccess: (data) => {
-      alert(`Triggered daily messages for ${data.count} active users.`);
+      alert(`Triggered daily messages for ${data.count || 0} active users.`);
     },
+    onError: (error: Error) => {
+      alert(`Error triggering messages: ${error.message}`);
+    }
   });
 
   return (

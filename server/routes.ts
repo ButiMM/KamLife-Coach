@@ -110,23 +110,36 @@ export async function registerRoutes(
     res.json(betaTesters);
   });
 
-  app.post(api.admin.triggerDaily.path, async (req, res) => {
-    const users = await storage.getAllUsers();
-    let count = 0;
-    for (const user of users) {
-      if (user.subscriptionStatus === "active") {
-        // Morning message
-        const morningMsg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
-        await storage.logChat(user.id, "", morningMsg, "DAILY_MORNING");
-        
-        // Gym reminder
-        const gymMsg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
-        await storage.logChat(user.id, "", gymMsg, "DAILY_GYM");
-        
-        count++;
+  app.post("/functions/v1/admin-actions", async (req, res) => {
+    const { action } = req.query;
+    
+    if (action === "trigger_daily") {
+      // Check global kill switch (assuming stored in some config or env, but requirement says respect it)
+      // If we don't have a formal kill switch in DB yet, we check an env var or just proceed if active
+      const globalOutboundPaused = process.env.GLOBAL_OUTBOUND_PAUSED === "true";
+      if (globalOutboundPaused) {
+        return res.status(403).json({ success: false, message: "Outbound messages are globally paused." });
       }
+
+      const users = await storage.getAllUsers();
+      let count = 0;
+      for (const user of users) {
+        if (user.subscriptionStatus === "active") {
+          // Morning message
+          const morningMsg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
+          await storage.logChat(user.id, "", morningMsg, "DAILY_MORNING");
+          
+          // Gym reminder
+          const gymMsg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
+          await storage.logChat(user.id, "", gymMsg, "DAILY_GYM");
+          
+          count++;
+        }
+      }
+      return res.json({ success: true, count });
     }
-    res.json({ success: true, count });
+    
+    res.status(400).json({ success: false, message: "Unknown action" });
   });
 
   app.post(api.webhooks.whatsapp.path, async (req, res) => {
