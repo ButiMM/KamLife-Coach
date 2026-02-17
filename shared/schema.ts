@@ -22,6 +22,8 @@ export const users = pgTable("users", {
   onboardingState: text("onboarding_state"),
   betaBypassUntil: timestamp("beta_bypass_until"),
   lastActiveAt: timestamp("last_active_at"),
+  trainingMode: text("training_mode").default("home"), // gym | home | walk_only
+  programDayIndex: integer("program_day_index").default(1),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
   return {

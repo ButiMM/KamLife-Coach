@@ -114,8 +114,7 @@ export async function registerRoutes(
     const { action } = req.query;
     
     if (action === "trigger_daily") {
-      // Check global kill switch (assuming stored in some config or env, but requirement says respect it)
-      // If we don't have a formal kill switch in DB yet, we check an env var or just proceed if active
+      // Check global kill switch
       const globalOutboundPaused = process.env.GLOBAL_OUTBOUND_PAUSED === "true";
       if (globalOutboundPaused) {
         return res.status(403).json({ success: false, message: "Outbound messages are globally paused." });
@@ -125,14 +124,21 @@ export async function registerRoutes(
       let count = 0;
       for (const user of users) {
         if (user.subscriptionStatus === "active") {
-          // Morning message
-          const morningMsg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
-          await storage.logChat(user.id, "", morningMsg, "DAILY_MORNING");
-          
-          // Gym reminder
-          const gymMsg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
-          await storage.logChat(user.id, "", gymMsg, "DAILY_GYM");
-          
+          let msg = "";
+          if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
+            msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
+          } else {
+            const day = user.programDayIndex || 1;
+            const workouts = {
+              walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
+              home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
+              gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
+            };
+            const mode = (user.trainingMode as keyof typeof workouts) || "home";
+            const workout = workouts[mode][(day - 1) % 3];
+            msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+          }
+          await storage.logChat(user.id, "", msg, "DAILY_TRIGGER");
           count++;
         }
       }
@@ -189,14 +195,39 @@ export async function registerRoutes(
 
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
+    // 2.5) Training Mode Capture (Minimal)
+    if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
+      const cleanMsg = message.trim().toUpperCase();
+      if (cleanMsg === "1" || cleanMsg.includes("GYM")) {
+        await storage.updateUser(user.id, { trainingMode: "gym" });
+        return res.type('text/xml').send(`<Response><Message>Got it! Gym mode active. Day 1: Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets. Reply DONE when finished.</Message></Response>`);
+      } else if (cleanMsg === "2" || cleanMsg.includes("HOME")) {
+        await storage.updateUser(user.id, { trainingMode: "home" });
+        return res.type('text/xml').send(`<Response><Message>Got it! Home mode active. Day 1: Chair sit-to-stand 5-10 times. Wall push-ups 5-10. Walk 5-10 minutes. Reply DONE when finished.</Message></Response>`);
+      } else if (cleanMsg === "3" || cleanMsg.includes("WALK")) {
+        await storage.updateUser(user.id, { trainingMode: "walk_only" });
+        return res.type('text/xml').send(`<Response><Message>Got it! Walk mode active. Day 1: Walk 10-20 minutes. Easy pace. Stop if dizzy. Reply DONE when finished.</Message></Response>`);
+      }
+      
+      return res.type('text/xml').send(`<Response><Message>Where will you train?\n1) Gym\n2) Home\n3) I can only walk</Message></Response>`);
+    }
+
     // 3) Rule-based parsing first
     const cleanMsg = message.trim().toUpperCase();
     
     // Workout DONE/YES/NO
     if (cleanMsg === "DONE" || cleanMsg === "YES") {
       await storage.createWorkoutLog(user.id, true);
-      await storage.logChat(user.id, message, "Strong work! Logged.", "RULES_LOG");
-      return res.type('text/xml').send(`<Response><Message>Strong work! Logged.</Message></Response>`);
+      
+      // Increment program day index
+      let nextDay = (user.programDayIndex || 1) + 1;
+      // Cycle back to 1 after Day 3 (simple v1)
+      if (nextDay > 3) nextDay = 1;
+      await storage.updateUser(user.id, { programDayIndex: nextDay });
+
+      const reply = "Good. Tomorrow we continue. Small wins.";
+      await storage.logChat(user.id, message, reply, "RULES_LOG");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg === "NO") {
       await storage.createWorkoutLog(user.id, false);
@@ -293,9 +324,22 @@ export async function registerRoutes(
       const users = await storage.getAllUsers();
       for (const user of users) {
         if (user.subscriptionStatus === "active") {
-          const msg = `Morning ${user.name || "there"}. Reply with:\n- Steps yesterday (number)\n- Workout done? (YES/NO)\n- Weight today (optional)`;
-          console.log(`[SCHEDULE] Sending morning check-in to ${user.phoneNumber}`);
-          // await storage.logChat(user.id, "", msg, "DAILY_MORNING");
+          let msg = "";
+          if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
+            msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
+          } else {
+            const day = user.programDayIndex || 1;
+            const workouts = {
+              walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
+              home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
+              gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
+            };
+            const mode = (user.trainingMode as keyof typeof workouts) || "home";
+            const workout = workouts[mode][(day - 1) % 3];
+            msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+          }
+          console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
+          await storage.logChat(user.id, "", msg, "DAILY_MORNING");
         }
       }
     }

@@ -1,0 +1,82 @@
+Implement Workout Delivery v1 on top of the existing system (onboarding + Daily Coaching Loop v1 already working). Do NOT overhaul onboarding. Add only minimal fields and templates needed.
+
+Rules:
+- Do NOT rebuild the app.
+- Keep changes additive.
+- Use templates, not AI-generated workouts.
+- Keep language simple (60–80 year old friendly).
+- Ensure tests A–F still pass.
+
+1) Minimal user fields
+Add to Users:
+- training_mode (gym | home | walk_only) default home
+- training_days_per_week (2 | 3 | 4) default 3
+- program_day_index (int) default 1
+
+If these already exist, reuse them.
+
+2) Quick training_mode capture (no full onboarding overhaul)
+If training_mode is missing for an ACTIVE user, ask:
+“Where will you train?
+1) Gym
+2) Home
+3) I can only walk”
+
+Save the answer and continue.
+
+If Home, ask:
+“How many days per week can you train?
+1) 2 days
+2) 3 days
+3) 4 days”
+Save it.
+
+3) Workout templates (hardcoded is fine)
+Create simple templates:
+
+A) walk_only (all ages)
+Day 1: “Walk 10–20 minutes. Easy pace. Stop if dizzy.”
+Day 2: “Walk 10–20 minutes.”
+Day 3: “Walk 15–25 minutes.”
+
+B) home (no jargon)
+Day 1: “Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.”
+Day 2: “Walk 10–20 minutes.”
+Day 3: “Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes.”
+
+C) gym (simple machines/standard moves)
+Day 1: “Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.”
+Day 2: “Walk 10 min + Light full body circuit.”
+Day 3: “Repeat Day 1.”
+
+For 2/3/4 days per week, cycle days appropriately.
+
+4) Delivery rules
+After onboarding completes (or after training_mode is captured):
+Send a WhatsApp message:
+“✅ Your plan is ready.
+Today is Day {program_day_index}:
+{Workout for today}
+Reply DONE when finished.”
+
+5) Progression
+When user replies DONE:
+- log workout complete (existing logic ok)
+- increment program_day_index (cycle back to 1 after last day in template)
+- reply: “Good. Tomorrow we continue. Small wins.”
+
+6) Daily 07:00 message integration
+Modify the 07:00 daily message to include today’s plan:
+“Morning {name}. Today: {Workout}. Reply DONE when finished.”
+(If training_mode unknown, ask the training_mode question instead.)
+
+7) Admin visibility (minimal)
+In admin panel/user list, display:
+- training_mode
+- program_day_index
+- last_workout_logged_at
+
+Deliver:
+- list of files changed
+- confirm tests A–F still pass
+- explain how to test with one user (send Hi, complete onboarding, answer training_mode, receive Day 1, reply DONE)
