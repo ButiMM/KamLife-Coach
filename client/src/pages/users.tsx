@@ -96,6 +96,7 @@ export default function UsersList() {
               <TableRow>
                 <TableHead className="w-[250px]">User</TableHead>
                 <TableHead>Status</TableHead>
+                <TableHead>Training</TableHead>
                 <TableHead>Goal</TableHead>
                 <TableHead>Joined</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -119,6 +120,12 @@ export default function UsersList() {
                     </TableCell>
                     <TableCell>
                       <StatusBadge status={user.subscriptionStatus} />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex flex-col text-xs">
+                        <span className="font-medium capitalize">{user.trainingMode || "Home"}</span>
+                        <span className="text-muted-foreground">Day {user.programDayIndex || 1}</span>
+                      </div>
                     </TableCell>
                     <TableCell>
                       <div className="text-sm">
