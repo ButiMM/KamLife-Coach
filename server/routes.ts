@@ -94,6 +94,199 @@ export async function registerRoutes(
 
   registerAdminTestRoutes(app);
 
+  // Twilio WhatsApp Webhook
+  app.post("/twilio/whatsapp", async (req, res) => {
+    const { From, Body } = req.body;
+    const phoneNumber = From;
+    const message = Body || "";
+
+    // CANARY v2
+    const canaryMsg = message.trim().toUpperCase();
+    if (canaryMsg === "PING") {
+      return res.type('text/xml').send(`<Response><Message>PONG v2 ✅ Replit webhook live</Message></Response>`);
+    }
+
+    let user = await storage.getUserByPhone(phoneNumber);
+    const paymentLink = "https://payfast.co.za/mock-pay";
+
+    // Beta Tester Logic
+    const betaTesters = (process.env.BETA_TESTERS || "").split(",").map(p => p.trim());
+    const isBetaTester = betaTesters.includes(phoneNumber);
+
+    if (!user) {
+      if (isBetaTester) {
+        const bypassExpiry = new Date();
+        bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+        user = await storage.createUser({
+          phoneNumber,
+          subscriptionStatus: "active",
+          betaBypassUntil: bypassExpiry,
+          onboardingState: "AWAITING_NAME"
+        });
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife! Let's get started. What is your full name?</Message></Response>`);
+      } else {
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
+      }
+    }
+
+    if (user.subscriptionStatus !== "active" && !isBetaTester) {
+      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink}</Message></Response>`);
+    }
+
+    // Process Beta Bypass for existing inactive users
+    if (isBetaTester && user.subscriptionStatus !== "active") {
+      const bypassExpiry = new Date();
+      bypassExpiry.setDate(bypassExpiry.getDate() + 14);
+      await storage.updateUser(user.id, { 
+        subscriptionStatus: "active",
+        betaBypassUntil: bypassExpiry,
+        onboardingState: user.onboardingState || "AWAITING_NAME"
+      });
+      user.subscriptionStatus = "active";
+    }
+
+    await storage.updateUser(user.id, { lastActiveAt: new Date() });
+
+    const cleanMsg = message.trim().toUpperCase();
+    
+    // 1) Logic Priority
+    let detectedIntent = null;
+    const menuKeywords = ["HI", "HELLO", "START", "HELP", "MENU"];
+    if (menuKeywords.includes(cleanMsg)) detectedIntent = "COACH_MENU";
+
+    // Map 1-6 to intents
+    if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
+    if (cleanMsg === "2") detectedIntent = "LOG_FOOD";
+    if (cleanMsg === "3") detectedIntent = "LOG_STEPS";
+    if (cleanMsg === "4") detectedIntent = "LOG_SLEEP";
+    if (cleanMsg === "5") detectedIntent = "LOG_WEIGHT";
+    if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
+
+    // Keyword mapping
+    if (!detectedIntent) {
+      if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
+      if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
+      if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg)) detectedIntent = "LOG_FOOD";
+      if (/SLEEP|SLEPT/.test(cleanMsg)) detectedIntent = "LOG_SLEEP";
+      if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
+      if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
+      if (cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
+    }
+
+    console.log("INTENT:", detectedIntent);
+
+    // 2) Handle Intents
+    if (detectedIntent === "COACH_MENU" || !detectedIntent) {
+      // Onboarding Logic
+      if (!user.onboardingState || user.onboardingState !== "COMPLETED") {
+        const currentState = user.onboardingState || "AWAITING_NAME";
+        let reply = "";
+
+        if (currentState === "AWAITING_NAME") {
+          await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
+          reply = `Thanks ${message}! What is your main fitness goal? (Fat Loss or Muscle Gain)`;
+        } else if (currentState === "AWAITING_GOAL") {
+          await storage.updateUser(user.id, { goalType: message, onboardingState: "AWAITING_WEIGHT" });
+          reply = "Got it. What is your current weight in kg?";
+        } else if (currentState === "AWAITING_WEIGHT") {
+          await storage.updateUser(user.id, { currentWeight: message, onboardingState: "COMPLETED" });
+          reply = "Onboarding complete! You can now log your steps, workouts, and weight daily. I'll check in with you every Sunday!";
+        }
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+
+      const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      await storage.logChat(user.id, message, menu, "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+    }
+
+    if (detectedIntent === "GET_WORKOUT") {
+      const day = user.programDayIndex || 1;
+      const workouts = {
+        walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
+        home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
+        gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
+      };
+      const mode = (user.trainingMode as keyof typeof workouts) || "home";
+      const workout = workouts[mode][(day - 1) % 3];
+      const reply = `Today is Day ${day}: ${workout}\nReply DONE when finished.`;
+      await storage.logChat(user.id, message, reply, "GET_WORKOUT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    if (detectedIntent === "LOG_STEPS") {
+      const stepsMatch = cleanMsg.match(/\d+/);
+      const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+      
+      if (steps !== null) {
+        await storage.createStepLog(user.id, steps);
+        const prevLogs = await storage.getStepLogs(user.id);
+        const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
+        
+        let reaction = "";
+        if (steps < 2000) reaction = "Firm push: You need to move. Do a 5-min walk now. Reply DONE.";
+        else if (steps < 6000) reaction = "Good start. Try to squeeze in a 10-min walk later today.";
+        else if (steps < (user.stepsTarget || 8000)) reaction = "Great work! Almost at your target. Keep pushing!";
+        else reaction = "Amazing! You hit your target. Consistency is key.";
+
+        const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
+        const reply = `${reaction}${comparison}`;
+        await storage.logChat(user.id, message, reply, "LOG_STEPS");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+
+    if (detectedIntent === "LOG_FOOD") {
+      let advice = "Got it! ";
+      if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
+      if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
+      advice += "What did you drink today?";
+      await storage.logChat(user.id, message, advice, "LOG_FOOD");
+      return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+    }
+
+    if (detectedIntent === "LOG_SLEEP") {
+      const sleepMatch = cleanMsg.match(/\d+/);
+      const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
+      if (hours !== null) {
+        let reaction = "";
+        if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
+        else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
+        else reaction = "Perfect! Great sleep is the foundation of your progress.";
+        await storage.logChat(user.id, message, reaction, "LOG_SLEEP");
+        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
+      }
+    }
+
+    if (detectedIntent === "LOG_WEIGHT") {
+      const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
+      if (weightMatch) {
+        const val = weightMatch[0];
+        await storage.createWeightLog(user.id, val);
+        await storage.updateUser(user.id, { currentWeight: val });
+        const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
+        await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+
+    if (detectedIntent === "SHOW_TARGETS") {
+      const reply = `Your targets:\nCalories: ${user.calorieTarget || 2000}kcal\nProtein: ${user.proteinTarget || 150}g\nSteps: ${user.stepsTarget || 8000}`;
+      await storage.logChat(user.id, message, reply, "SHOW_TARGETS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    if (detectedIntent === "WORKOUT_DONE") {
+      await storage.createWorkoutLog(user.id, true);
+      let nextDay = (user.programDayIndex || 1) + 1;
+      if (nextDay > 3) nextDay = 1;
+      await storage.updateUser(user.id, { programDayIndex: nextDay });
+      const reply = `Good job! Workout logged. Tomorrow is Day ${nextDay}. Small wins lead to big changes.`;
+      await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+  });
+
   app.get(api.users.list.path, async (req, res) => {
     const users = await storage.getAllUsers();
     res.json(users);
