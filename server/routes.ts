@@ -220,14 +220,36 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
 
+        const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+        const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+        
+        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg)) {
+          await storage.updateUser(user.id, { awaitingInputType: "portion" });
+          const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+          await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
+          return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
+        }
+
         let advice = "Logged. ";
-        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+        if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
         if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
         advice += "What did you drink?";
         
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
         await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
         return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "portion") {
+        const portionMatch = cleanMsg.match(/[1-3]/);
+        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
+        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
+        
+        let reaction = level === 1 ? "Perfect portion. " : "That's a lot of carbs. Stick to 1 fist for fat loss. ";
+        reaction += "What did you drink?";
+        
+        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
       }
 
       if (inputType === "drink") {
@@ -575,14 +597,36 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
 
+        const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+        const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+        
+        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg)) {
+          await storage.updateUser(user.id, { awaitingInputType: "portion" });
+          const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+          await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
+          return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
+        }
+
         let advice = "Logged. ";
-        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+        if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
         if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
         advice += "What did you drink?";
         
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
         await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
         return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "portion") {
+        const portionMatch = cleanMsg.match(/[1-3]/);
+        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
+        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
+        
+        let reaction = level === 1 ? "Perfect portion. " : "That's a lot of carbs. Stick to 1 fist for fat loss. ";
+        reaction += "What did you drink?";
+        
+        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
       }
 
       if (inputType === "drink") {

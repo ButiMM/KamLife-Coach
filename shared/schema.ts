@@ -24,9 +24,10 @@ export const users = pgTable("users", {
   lastActiveAt: timestamp("last_active_at"),
   trainingMode: text("training_mode").default("home"), // gym | home | walk_only
   programDayIndex: integer("program_day_index").default(1),
-  awaitingInputType: text("awaiting_input_type"), // steps, food, sleep, weight
+  awaitingInputType: text("awaiting_input_type"), // steps, food, drink, sleep, weight, portion
   weeklyScore: integer("weekly_score").default(0),
   complianceLevel: text("compliance_level").default("RESET"), // RESET | BUILDING | CONSISTENT | LOCKED IN
+  carbPortionLevel: integer("carb_portion_level"), // 1, 2, 3
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
   return {
