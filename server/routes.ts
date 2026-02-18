@@ -197,37 +197,40 @@ export async function registerRoutes(
 
     const cleanMsg = message.trim().toUpperCase();
     
-    // 1) Coach Menu & Intent Routing
+    // 1) Logic Priority
+    let detectedIntent = null;
     const menuKeywords = ["HI", "HELLO", "START", "HELP", "MENU"];
-    const isMenuRequest = menuKeywords.includes(cleanMsg);
+    if (menuKeywords.includes(cleanMsg)) detectedIntent = "COACH_MENU";
 
-    if (isMenuRequest) {
+    // Map 1-6 to intents
+    if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
+    if (cleanMsg === "2") detectedIntent = "LOG_FOOD";
+    if (cleanMsg === "3") detectedIntent = "LOG_STEPS";
+    if (cleanMsg === "4") detectedIntent = "LOG_SLEEP";
+    if (cleanMsg === "5") detectedIntent = "LOG_WEIGHT";
+    if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
+
+    // Keyword mapping
+    if (!detectedIntent) {
+      if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
+      if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
+      if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg)) detectedIntent = "LOG_FOOD";
+      if (/SLEEP|SLEPT/.test(cleanMsg)) detectedIntent = "LOG_SLEEP";
+      if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
+      if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
+      if (cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
+    }
+
+    console.log("INTENT:", detectedIntent);
+
+    // 2) Handle Intents
+    if (detectedIntent === "COACH_MENU" || !detectedIntent) {
       const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
       await storage.logChat(user.id, message, menu, "COACH_MENU");
       return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
     }
 
-    // Map 1-6 to intents
-    let forcedIntent = null;
-    if (cleanMsg === "1") forcedIntent = "get_workout";
-    if (cleanMsg === "2") forcedIntent = "log_food";
-    if (cleanMsg === "3") forcedIntent = "log_steps";
-    if (cleanMsg === "4") forcedIntent = "log_sleep";
-    if (cleanMsg === "5") forcedIntent = "log_weight";
-    if (cleanMsg === "6") forcedIntent = "show_targets";
-
-    // Keyword mapping
-    if (!forcedIntent) {
-      if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) forcedIntent = "get_workout";
-      if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) forcedIntent = "log_steps";
-      if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg)) forcedIntent = "log_food";
-      if (/SLEEP|SLEPT/.test(cleanMsg)) forcedIntent = "log_sleep";
-      if (/WEIGHT|KG/.test(cleanMsg)) forcedIntent = "log_weight";
-      if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) forcedIntent = "show_targets";
-    }
-
-    // 2) Handle Intents with Coach Reactions
-    if (forcedIntent === "get_workout") {
+    if (detectedIntent === "GET_WORKOUT") {
       const day = user.programDayIndex || 1;
       const workouts = {
         walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
@@ -241,7 +244,7 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
-    if (forcedIntent === "log_steps") {
+    if (detectedIntent === "LOG_STEPS") {
       const stepsMatch = cleanMsg.match(/\d+/);
       const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
       
@@ -263,7 +266,7 @@ export async function registerRoutes(
       }
     }
 
-    if (forcedIntent === "log_food") {
+    if (detectedIntent === "LOG_FOOD") {
       let advice = "Got it! ";
       if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
       if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
@@ -272,7 +275,7 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
     }
 
-    if (forcedIntent === "log_sleep") {
+    if (detectedIntent === "LOG_SLEEP") {
       const sleepMatch = cleanMsg.match(/\d+/);
       const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
       if (hours !== null) {
@@ -285,7 +288,7 @@ export async function registerRoutes(
       }
     }
 
-    if (forcedIntent === "log_weight") {
+    if (detectedIntent === "LOG_WEIGHT") {
       const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
       if (weightMatch) {
         const val = weightMatch[0];
@@ -297,14 +300,13 @@ export async function registerRoutes(
       }
     }
 
-    if (forcedIntent === "show_targets") {
+    if (detectedIntent === "SHOW_TARGETS") {
       const reply = `Your targets:\nCalories: ${user.calorieTarget || 2000}kcal\nProtein: ${user.proteinTarget || 150}g\nSteps: ${user.stepsTarget || 8000}`;
       await storage.logChat(user.id, message, reply, "SHOW_TARGETS");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
-    // Handle DONE for workout progression
-    if (cleanMsg === "DONE") {
+    if (detectedIntent === "WORKOUT_DONE") {
       await storage.createWorkoutLog(user.id, true);
       let nextDay = (user.programDayIndex || 1) + 1;
       if (nextDay > 3) nextDay = 1;
