@@ -60,7 +60,7 @@ function classifyFood(text: string) {
   };
 }
 
-// ... existing code ...
+async function parseIntent(message: string): Promise<{ intent: string; data?: any }> {
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-5.1",
