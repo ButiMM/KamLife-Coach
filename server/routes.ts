@@ -237,9 +237,9 @@ export async function registerRoutes(
     // 0) Handle Active Input States
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
-      await storage.updateUser(user.id, { awaitingInputType: null });
 
       if (inputType === "steps") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const stepsMatch = cleanMsg.match(/\d+/);
         const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
         if (steps !== null) {
@@ -259,34 +259,39 @@ export async function registerRoutes(
       }
 
       if (inputType === "food") {
-        const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
-        if (nothingWords.some(word => cleanMsg.includes(word))) {
-          const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
-          await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+          if (nothingWords.some(word => cleanMsg.includes(word))) {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+            await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
+            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          }
+
+          const classification = classifyFood(message);
+          console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
+
+          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+          
+          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
+            await storage.updateUser(user.id, { awaitingInputType: "portion" });
+            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+            await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
+            return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
+          }
+
+          let advice = "Logged. ";
+          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+          advice += "What did you drink?";
+          
+          await storage.updateUser(user.id, { awaitingInputType: "drink" });
+          await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${advice}</Message></Message></Response>`);
         }
-
-        const classification = classifyFood(message);
-        console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
-
-        const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
-        const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
-        
-        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
-          await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
-          await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
-          return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
-        }
-
-        let advice = "Logged. ";
-        if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
-        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
-        advice += "What did you drink?";
-        
-        await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
-        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
       }
 
       if (inputType === "portion") {
@@ -302,6 +307,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "drink") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
           const reply = "You need water. Drink 1 glass now. Reply DONE.";
           await storage.logChat(user.id, message, reply, "DRINK_NONE");
@@ -314,6 +320,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "sleep") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const sleepMatch = cleanMsg.match(/\d+/);
         const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
         if (hours !== null) {
@@ -327,6 +334,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "weight") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
         if (weightMatch) {
           const val = weightMatch[0];
@@ -617,9 +625,9 @@ export async function registerRoutes(
     // 0) Handle Active Input States
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
-      await storage.updateUser(user.id, { awaitingInputType: null });
 
       if (inputType === "steps") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const stepsMatch = cleanMsg.match(/\d+/);
         const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
         if (steps !== null) {
@@ -639,34 +647,39 @@ export async function registerRoutes(
       }
 
       if (inputType === "food") {
-        const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
-        if (nothingWords.some(word => cleanMsg.includes(word))) {
-          const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
-          await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+          if (nothingWords.some(word => cleanMsg.includes(word))) {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+            await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
+            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          }
+
+          const classification = classifyFood(message);
+          console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
+
+          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+          
+          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
+            await storage.updateUser(user.id, { awaitingInputType: "portion" });
+            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+            await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
+            return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
+          }
+
+          let advice = "Logged. ";
+          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+          advice += "What did you drink?";
+          
+          await storage.updateUser(user.id, { awaitingInputType: "drink" });
+          await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${advice}</Message></Message></Response>`);
         }
-
-        const classification = classifyFood(message);
-        console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
-
-        const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
-        const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
-        
-        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
-          await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
-          await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
-          return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
-        }
-
-        let advice = "Logged. ";
-        if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
-        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
-        advice += "What did you drink?";
-        
-        await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
-        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
       }
 
       if (inputType === "portion") {
@@ -682,6 +695,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "drink") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
           const reply = "You need water. Drink 1 glass now. Reply DONE.";
           await storage.logChat(user.id, message, reply, "DRINK_NONE");
@@ -694,6 +708,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "sleep") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const sleepMatch = cleanMsg.match(/\d+/);
         const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
         if (hours !== null) {
@@ -707,6 +722,7 @@ export async function registerRoutes(
       }
 
       if (inputType === "weight") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
         const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
         if (weightMatch) {
           const val = weightMatch[0];
