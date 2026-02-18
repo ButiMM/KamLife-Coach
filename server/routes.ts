@@ -5,6 +5,9 @@ import { api } from "@shared/routes";
 import { z } from "zod";
 import OpenAI from "openai";
 import { format } from "date-fns";
+import { db } from "./db";
+import { chatHistory } from "@shared/schema";
+import { eq, and, gte } from "drizzle-orm";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -314,7 +317,12 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
-      const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      const toneMsg = user.complianceLevel === "LOCKED IN" ? "Keep leading the way." :
+                      user.complianceLevel === "CONSISTENT" ? "Stay focused." :
+                      user.complianceLevel === "BUILDING" ? "One day at a time." :
+                      "Let's get back on track.";
+
+      const menu = `${toneMsg}\n\nKamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
       await storage.logChat(user.id, message, menu, "COACH_MENU");
       return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
     }
@@ -842,6 +850,47 @@ export async function registerRoutes(
     }
   }, 60000);
 
+async function calculateWeeklyCompliance(userId: string) {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+
+  const [steps, workouts, chat] = await Promise.all([
+    storage.getStepLogs(userId),
+    storage.getWorkoutLogs(userId),
+    db.select().from(chatHistory).where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, sevenDaysAgo)))
+  ]);
+
+  const user = await storage.getUser(userId);
+  if (!user) return { score: 0, level: "RESET" };
+
+  // 1) Steps (25%)
+  const stepsTarget = user.stepsTarget || 8000;
+  const daysStepsMet = steps.filter(s => s.loggedAt && new Date(s.loggedAt) >= sevenDaysAgo && s.steps >= stepsTarget).length;
+  const stepsScore = Math.min(25, (daysStepsMet / 7) * 25);
+
+  // 2) Workouts (25%)
+  const workoutsDone = workouts.filter(w => w.loggedAt && new Date(w.loggedAt) >= sevenDaysAgo && w.workoutCompleted).length;
+  const workoutScore = Math.min(25, (workoutsDone / 3) * 25); // Assuming 3 scheduled
+
+  // 3) Food (25%) - Days without junk/alcohol mentions in logs
+  const foodLogs = chat.filter(c => c.intent === "LOG_FOOD_FOLLOWUP" || c.intent === "log_food");
+  const badFoodDays = new Set(foodLogs.filter(c => /JUNK|ALCOHOL|SWEETS|CAKE|BEER|WINE/.test(c.messageIn?.toUpperCase() || "")).map(c => new Date(c.createdAt!).toDateString())).size;
+  const foodScore = Math.max(0, 25 - (badFoodDays * 5));
+
+  // 4) Logging consistency (25%)
+  const activeDays = new Set(chat.map(c => new Date(c.createdAt!).toDateString())).size;
+  const loggingScore = Math.min(25, (activeDays / 7) * 25);
+
+  const totalScore = Math.round(stepsScore + workoutScore + foodScore + loggingScore);
+  
+  let level = "RESET";
+  if (totalScore >= 90) level = "LOCKED IN";
+  else if (totalScore >= 70) level = "CONSISTENT";
+  else if (totalScore >= 40) level = "BUILDING";
+
+  return { score: totalScore, level };
+}
+
   // Weekly scheduler
   setInterval(async () => {
     const now = new Date();
@@ -850,8 +899,18 @@ export async function registerRoutes(
       const users = await storage.getAllUsers();
       for (const user of users) {
         if (user.subscriptionStatus === "active") {
-          console.log(`Sending check-in prompt to ${user.phoneNumber}`);
-          // Mock send: await storage.logChat(user.id, "", "Time for your weekly check-in! Reply with weight, waist, workouts, and steps.", "CHECKIN_PROMPT");
+          const { score, level } = await calculateWeeklyCompliance(user.id);
+          await storage.updateUser(user.id, { weeklyScore: score, complianceLevel: level });
+
+          const report = `📊 *Weekly Compliance Report*\n\nScore: ${score}/100\nLevel: ${level}\n\n${
+            level === "LOCKED IN" ? "Elite performance. Keep this intensity." :
+            level === "CONSISTENT" ? "Solid work. You're building real momentum." :
+            level === "BUILDING" ? "Room for improvement. Let's tighten up next week." :
+            "Time to reset. We start again tomorrow. No excuses."
+          }\n\nReply MENU to continue.`;
+
+          console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
+          await storage.logChat(user.id, "", report, "WEEKLY_REPORT");
         }
       }
     }
