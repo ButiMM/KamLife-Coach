@@ -169,17 +169,88 @@ export async function registerRoutes(
 
     const cleanMsg = message.trim().toUpperCase();
     
+    // 0) Handle Active Input States
+    if (user.awaitingInputType) {
+      const inputType = user.awaitingInputType;
+      await storage.updateUser(user.id, { awaitingInputType: null });
+
+      if (inputType === "steps") {
+        const stepsMatch = cleanMsg.match(/\d+/);
+        const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+        if (steps !== null) {
+          await storage.createStepLog(user.id, steps);
+          const prevLogs = await storage.getStepLogs(user.id);
+          const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
+          let reaction = "";
+          if (steps < 2000) reaction = "Firm push: You need to move. Do a 5-min walk now. Reply DONE.";
+          else if (steps < 6000) reaction = "Good start. Try to squeeze in a 10-min walk later today.";
+          else if (steps < (user.stepsTarget || 8000)) reaction = "Great work! Almost at your target. Keep pushing!";
+          else reaction = "Amazing! You hit your target. Consistency is key.";
+          const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
+          const reply = `${reaction}${comparison}`;
+          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "food") {
+        let advice = "Got it! ";
+        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
+        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
+        advice += "What did you drink today?";
+        await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
+        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "sleep") {
+        const sleepMatch = cleanMsg.match(/\d+/);
+        const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
+        if (hours !== null) {
+          let reaction = "";
+          if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
+          else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
+          else reaction = "Perfect! Great sleep is the foundation of your progress.";
+          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "weight") {
+        const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
+        if (weightMatch) {
+          const val = weightMatch[0];
+          await storage.createWeightLog(user.id, val);
+          await storage.updateUser(user.id, { currentWeight: val });
+          const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
+          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
+    }
+
     // 1) Logic Priority
     let detectedIntent = null;
     const menuKeywords = ["HI", "HELLO", "START", "HELP", "MENU"];
     if (menuKeywords.includes(cleanMsg)) detectedIntent = "COACH_MENU";
 
-    // Map 1-6 to intents
+    // Map 1-6 to intents with state setting
     if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
-    if (cleanMsg === "2") detectedIntent = "LOG_FOOD";
-    if (cleanMsg === "3") detectedIntent = "LOG_STEPS";
-    if (cleanMsg === "4") detectedIntent = "LOG_SLEEP";
-    if (cleanMsg === "5") detectedIntent = "LOG_WEIGHT";
+    if (cleanMsg === "2") {
+      await storage.updateUser(user.id, { awaitingInputType: "food" });
+      return res.type('text/xml').send(`<Response><Message>What did you eat?</Message></Response>`);
+    }
+    if (cleanMsg === "3") {
+      await storage.updateUser(user.id, { awaitingInputType: "steps" });
+      return res.type('text/xml').send(`<Response><Message>How many steps today?</Message></Response>`);
+    }
+    if (cleanMsg === "4") {
+      await storage.updateUser(user.id, { awaitingInputType: "sleep" });
+      return res.type('text/xml').send(`<Response><Message>How many hours did you sleep?</Message></Response>`);
+    }
+    if (cleanMsg === "5") {
+      await storage.updateUser(user.id, { awaitingInputType: "weight" });
+      return res.type('text/xml').send(`<Response><Message>What is your weight today (kg)?</Message></Response>`);
+    }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
 
     // Keyword mapping
@@ -191,6 +262,13 @@ export async function registerRoutes(
       if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
       if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
       if (cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
+      
+      // Special check for unclear food questions
+      if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
+        const advice = "For fat loss, focus on high-protein and fibre: \n- Oats or Eggs for breakfast\n- Grilled chicken or tinned fish with veg for lunch/dinner\n- Limit pap/rice to one fist size per meal.\nWhat are you planning to eat next?";
+        await storage.logChat(user.id, message, advice, "FOOD_ADVICE");
+        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
     }
 
     console.log("INTENT:", detectedIntent);
@@ -420,17 +498,88 @@ export async function registerRoutes(
 
     const cleanMsg = message.trim().toUpperCase();
     
+    // 0) Handle Active Input States
+    if (user.awaitingInputType) {
+      const inputType = user.awaitingInputType;
+      await storage.updateUser(user.id, { awaitingInputType: null });
+
+      if (inputType === "steps") {
+        const stepsMatch = cleanMsg.match(/\d+/);
+        const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+        if (steps !== null) {
+          await storage.createStepLog(user.id, steps);
+          const prevLogs = await storage.getStepLogs(user.id);
+          const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
+          let reaction = "";
+          if (steps < 2000) reaction = "Firm push: You need to move. Do a 5-min walk now. Reply DONE.";
+          else if (steps < 6000) reaction = "Good start. Try to squeeze in a 10-min walk later today.";
+          else if (steps < (user.stepsTarget || 8000)) reaction = "Great work! Almost at your target. Keep pushing!";
+          else reaction = "Amazing! You hit your target. Consistency is key.";
+          const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
+          const reply = `${reaction}${comparison}`;
+          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "food") {
+        let advice = "Got it! ";
+        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
+        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
+        advice += "What did you drink today?";
+        await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
+        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "sleep") {
+        const sleepMatch = cleanMsg.match(/\d+/);
+        const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
+        if (hours !== null) {
+          let reaction = "";
+          if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
+          else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
+          else reaction = "Perfect! Great sleep is the foundation of your progress.";
+          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "weight") {
+        const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
+        if (weightMatch) {
+          const val = weightMatch[0];
+          await storage.createWeightLog(user.id, val);
+          await storage.updateUser(user.id, { currentWeight: val });
+          const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
+          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
+    }
+
     // 1) Logic Priority
     let detectedIntent = null;
     const menuKeywords = ["HI", "HELLO", "START", "HELP", "MENU"];
     if (menuKeywords.includes(cleanMsg)) detectedIntent = "COACH_MENU";
 
-    // Map 1-6 to intents
+    // Map 1-6 to intents with state setting
     if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
-    if (cleanMsg === "2") detectedIntent = "LOG_FOOD";
-    if (cleanMsg === "3") detectedIntent = "LOG_STEPS";
-    if (cleanMsg === "4") detectedIntent = "LOG_SLEEP";
-    if (cleanMsg === "5") detectedIntent = "LOG_WEIGHT";
+    if (cleanMsg === "2") {
+      await storage.updateUser(user.id, { awaitingInputType: "food" });
+      return res.type('text/xml').send(`<Response><Message>What did you eat?</Message></Response>`);
+    }
+    if (cleanMsg === "3") {
+      await storage.updateUser(user.id, { awaitingInputType: "steps" });
+      return res.type('text/xml').send(`<Response><Message>How many steps today?</Message></Response>`);
+    }
+    if (cleanMsg === "4") {
+      await storage.updateUser(user.id, { awaitingInputType: "sleep" });
+      return res.type('text/xml').send(`<Response><Message>How many hours did you sleep?</Message></Response>`);
+    }
+    if (cleanMsg === "5") {
+      await storage.updateUser(user.id, { awaitingInputType: "weight" });
+      return res.type('text/xml').send(`<Response><Message>What is your weight today (kg)?</Message></Response>`);
+    }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
 
     // Keyword mapping
@@ -442,6 +591,13 @@ export async function registerRoutes(
       if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
       if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
       if (cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
+      
+      // Special check for unclear food questions
+      if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
+        const advice = "For fat loss, focus on high-protein and fibre: \n- Oats or Eggs for breakfast\n- Grilled chicken or tinned fish with veg for lunch/dinner\n- Limit pap/rice to one fist size per meal.\nWhat are you planning to eat next?";
+        await storage.logChat(user.id, message, advice, "FOOD_ADVICE");
+        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
     }
 
     console.log("INTENT:", detectedIntent);

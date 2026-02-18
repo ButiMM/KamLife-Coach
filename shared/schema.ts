@@ -24,6 +24,7 @@ export const users = pgTable("users", {
   lastActiveAt: timestamp("last_active_at"),
   trainingMode: text("training_mode").default("home"), // gym | home | walk_only
   programDayIndex: integer("program_day_index").default(1),
+  awaitingInputType: text("awaiting_input_type"), // steps, food, sleep, weight
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
   return {
