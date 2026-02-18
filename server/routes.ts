@@ -233,10 +233,87 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+    const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
     
-    // 0) Handle Active Input States
+    // 0) Handle Active Input States (Priority Over Menu)
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
+
+      if (inputType === "drink") {
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const reply = "Nice! Hydration is key. Anything else to log? (yes/no)";
+          await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
+          await storage.logChat(user.id, message, reply + debugState, "DRINK_LOGGED");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "anything_else") {
+        if (cleanMsg.includes("YES")) {
+          await storage.updateUser(user.id, { awaitingInputType: "food" });
+          const reply = "What did you eat?";
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+          // Fall through to menu logic
+        } else {
+          const reply = "Please reply YES or NO. Anything else to log?";
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "food" && !/^\d+$/.test(cleanMsg)) {
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+          if (nothingWords.some(word => cleanMsg.includes(word))) {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+            await storage.logChat(user.id, message, reply + debugState, "FOOD_SKIPPED");
+            return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+          }
+
+          const classification = classifyFood(message);
+          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+          
+          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
+            await storage.updateUser(user.id, { awaitingInputType: "portion" });
+            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+            await storage.logChat(user.id, message, portionCheck + debugState, "PORTION_CHECK");
+            return res.type('text/xml').send(`<Response><Message>${portionCheck}${debugState}</Message></Response>`);
+          }
+
+          let advice = "Logged. ";
+          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+          advice += "What did you drink?";
+          
+          await storage.updateUser(user.id, { awaitingInputType: "drink" });
+          await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "portion") {
+        const portionMatch = cleanMsg.match(/[1-3]/);
+        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
+        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
+        
+        const cals = user.calorieTarget || 2000;
+        let targetFists = "1";
+        if (cals >= 1800 && cals <= 2400) targetFists = "1–2";
+        else if (cals > 2400) targetFists = "2";
+
+        let reaction = level === 1 ? "Perfect portion. " : `That's a lot of carbs. Your target is ${targetFists} fist(s) carbs per meal for fat loss. `;
+        reaction += "What did you drink?";
+        
+        await storage.logChat(user.id, message, reaction + debugState, "PORTION_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reaction}${debugState}</Message></Response>`);
+      }
 
       if (inputType === "steps") {
         await storage.updateUser(user.id, { awaitingInputType: null });
@@ -253,70 +330,9 @@ export async function registerRoutes(
           else reaction = "Amazing! You hit your target. Consistency is key.";
           const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
           const reply = `${reaction}${comparison}`;
-          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          await storage.logChat(user.id, message, reply + debugState, "LOG_STEPS_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
         }
-      }
-
-      if (inputType === "food") {
-        if (cleanMsg === "MENU") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-        } else {
-          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
-          if (nothingWords.some(word => cleanMsg.includes(word))) {
-            await storage.updateUser(user.id, { awaitingInputType: null });
-            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
-            await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-          }
-
-          const classification = classifyFood(message);
-          console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
-
-          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
-          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
-          
-          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
-            await storage.updateUser(user.id, { awaitingInputType: "portion" });
-            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
-            await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
-            return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
-          }
-
-          let advice = "Logged. ";
-          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
-          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
-          advice += "What did you drink?";
-          
-          await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${advice}</Message></Message></Response>`);
-        }
-      }
-
-      if (inputType === "portion") {
-        const portionMatch = cleanMsg.match(/[1-3]/);
-        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
-        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
-        
-        let reaction = level === 1 ? "Perfect portion. " : "That's a lot of carbs. Stick to 1 fist for fat loss. ";
-        reaction += "What did you drink?";
-        
-        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
-      }
-
-      if (inputType === "drink") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
-          const reply = "You need water. Drink 1 glass now. Reply DONE.";
-          await storage.logChat(user.id, message, reply, "DRINK_NONE");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-        
-        const menu = `Good. What next?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
-        await storage.logChat(user.id, message, menu, "DRINK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
 
       if (inputType === "sleep") {
@@ -328,8 +344,8 @@ export async function registerRoutes(
           if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
           else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
           else reaction = "Perfect! Great sleep is the foundation of your progress.";
-          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
+          await storage.logChat(user.id, message, reaction + debugState, "LOG_SLEEP_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reaction}${debugState}</Message></Response>`);
         }
       }
 
@@ -341,8 +357,8 @@ export async function registerRoutes(
           await storage.createWeightLog(user.id, val);
           await storage.updateUser(user.id, { currentWeight: val });
           const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
-          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          await storage.logChat(user.id, message, reply + debugState, "LOG_WEIGHT_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
         }
       }
     }
@@ -621,10 +637,87 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+    const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
     
-    // 0) Handle Active Input States
+    // 0) Handle Active Input States (Priority Over Menu)
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
+
+      if (inputType === "drink") {
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const reply = "Nice! Hydration is key. Anything else to log? (yes/no)";
+          await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
+          await storage.logChat(user.id, message, reply + debugState, "DRINK_LOGGED");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "anything_else") {
+        if (cleanMsg.includes("YES")) {
+          await storage.updateUser(user.id, { awaitingInputType: "food" });
+          const reply = "What did you eat?";
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+          // Fall through to menu logic
+        } else {
+          const reply = "Please reply YES or NO. Anything else to log?";
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "food" && !/^\d+$/.test(cleanMsg)) {
+        if (cleanMsg === "MENU") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+        } else {
+          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+          if (nothingWords.some(word => cleanMsg.includes(word))) {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+            await storage.logChat(user.id, message, reply + debugState, "FOOD_SKIPPED");
+            return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+          }
+
+          const classification = classifyFood(message);
+          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
+          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
+          
+          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
+            await storage.updateUser(user.id, { awaitingInputType: "portion" });
+            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
+            await storage.logChat(user.id, message, portionCheck + debugState, "PORTION_CHECK");
+            return res.type('text/xml').send(`<Response><Message>${portionCheck}${debugState}</Message></Response>`);
+          }
+
+          let advice = "Logged. ";
+          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+          advice += "What did you drink?";
+          
+          await storage.updateUser(user.id, { awaitingInputType: "drink" });
+          await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
+        }
+      }
+
+      if (inputType === "portion") {
+        const portionMatch = cleanMsg.match(/[1-3]/);
+        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
+        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
+        
+        const cals = user.calorieTarget || 2000;
+        let targetFists = "1";
+        if (cals >= 1800 && cals <= 2400) targetFists = "1–2";
+        else if (cals > 2400) targetFists = "2";
+
+        let reaction = level === 1 ? "Perfect portion. " : `That's a lot of carbs. Your target is ${targetFists} fist(s) carbs per meal for fat loss. `;
+        reaction += "What did you drink?";
+        
+        await storage.logChat(user.id, message, reaction + debugState, "PORTION_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reaction}${debugState}</Message></Response>`);
+      }
 
       if (inputType === "steps") {
         await storage.updateUser(user.id, { awaitingInputType: null });
@@ -641,70 +734,9 @@ export async function registerRoutes(
           else reaction = "Amazing! You hit your target. Consistency is key.";
           const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
           const reply = `${reaction}${comparison}`;
-          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          await storage.logChat(user.id, message, reply + debugState, "LOG_STEPS_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
         }
-      }
-
-      if (inputType === "food") {
-        if (cleanMsg === "MENU") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-        } else {
-          const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
-          if (nothingWords.some(word => cleanMsg.includes(word))) {
-            await storage.updateUser(user.id, { awaitingInputType: null });
-            const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
-            await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-          }
-
-          const classification = classifyFood(message);
-          console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
-
-          const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
-          const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
-          
-          if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
-            await storage.updateUser(user.id, { awaitingInputType: "portion" });
-            const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
-            await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
-            return res.type('text/xml').send(`<Response><Message>${portionCheck}</Message></Response>`);
-          }
-
-          let advice = "Logged. ";
-          if (highRiskCarbs.test(cleanMsg)) advice += "Keep starch to fist-size. ";
-          if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
-          advice += "What did you drink?";
-          
-          await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${advice}</Message></Message></Response>`);
-        }
-      }
-
-      if (inputType === "portion") {
-        const portionMatch = cleanMsg.match(/[1-3]/);
-        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
-        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
-        
-        let reaction = level === 1 ? "Perfect portion. " : "That's a lot of carbs. Stick to 1 fist for fat loss. ";
-        reaction += "What did you drink?";
-        
-        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
-      }
-
-      if (inputType === "drink") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
-          const reply = "You need water. Drink 1 glass now. Reply DONE.";
-          await storage.logChat(user.id, message, reply, "DRINK_NONE");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-        
-        const menu = `Good. What next?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
-        await storage.logChat(user.id, message, menu, "DRINK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
 
       if (inputType === "sleep") {
@@ -716,8 +748,8 @@ export async function registerRoutes(
           if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
           else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
           else reaction = "Perfect! Great sleep is the foundation of your progress.";
-          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
+          await storage.logChat(user.id, message, reaction + debugState, "LOG_SLEEP_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reaction}${debugState}</Message></Response>`);
         }
       }
 
@@ -729,8 +761,8 @@ export async function registerRoutes(
           await storage.createWeightLog(user.id, val);
           await storage.updateUser(user.id, { currentWeight: val });
           const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
-          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          await storage.logChat(user.id, message, reply + debugState, "LOG_WEIGHT_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
         }
       }
     }
