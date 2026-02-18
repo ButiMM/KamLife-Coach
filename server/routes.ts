@@ -14,7 +14,53 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-async function parseIntent(message: string): Promise<{ intent: string; data?: any }> {
+function classifyFood(text: string) {
+  const upper = text.toUpperCase();
+  const categories: string[] = [];
+  let isJunk = false;
+  let isAlcohol = false;
+  let isCarbHeavy = false;
+  let isLeanProtein = false;
+
+  // South African food keywords
+  const leanProteinKeywords = ["CHICKEN BREAST", "TINNED FISH", "PILCHARDS", "EGGS", "EGG WHITES", "BEANS", "LENTILS", "CHICKEN FEET", "CHICKEN LIVER", "LIVER", "HARD-BODY CHICKEN", "SUGAR BEANS", "KIDNEY BEANS"];
+  const highFatProteinKeywords = ["WORS", "TRIPE", "BEEF STEW", "CHUCK", "LAMB CHOP", "STEAK"];
+  const junkKeywords = ["PIZZA", "DONUT", "CHOCOLATE", "CHIPS", "FRIES", "MAGWINYA", "KOTA", "BURGER", "SWEETS", "CAKE", "BISCUITS"];
+  const alcoholKeywords = ["BEER", "WINE", "WHISKY", "VODKA", "GIN", "BRANDY", "SAVANNA", "HUNTERS", "CIDER"];
+  const sugaryDrinkKeywords = ["COKE", "PEPSI", "FANTA", "SPRITE", "JUICE", "SODA"];
+  const carbKeywords = ["PAP", "RICE", "PASTA", "BREAD", "SAMP", "POTATO", "DUMPLING"];
+
+  if (leanProteinKeywords.some(k => upper.includes(k))) {
+    categories.push("Lean protein");
+    isLeanProtein = true;
+  }
+  if (highFatProteinKeywords.some(k => upper.includes(k))) categories.push("High-fat protein");
+  if (junkKeywords.some(k => upper.includes(k))) {
+    categories.push("Junk food");
+    isJunk = true;
+  }
+  if (sugaryDrinkKeywords.some(k => upper.includes(k))) categories.push("Sugary drink");
+  if (alcoholKeywords.some(k => upper.includes(k))) {
+    categories.push("Alcohol");
+    isAlcohol = true;
+  }
+  if (carbKeywords.some(k => upper.includes(k))) {
+    categories.push("Carb-heavy meal");
+    isCarbHeavy = true;
+  }
+
+  const isBalanced = categories.includes("Lean protein") && categories.includes("Carb-heavy meal");
+  if (isBalanced) categories.push("Balanced meal");
+
+  return {
+    categories,
+    flags: { isJunk, isAlcohol, isCarbHeavy, isBalanced },
+    toneSeverity: (isJunk || isAlcohol) ? "high" : "normal",
+    recoveryEligibility: !isJunk && !isAlcohol && isLeanProtein
+  };
+}
+
+// ... existing code ...
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-5.1",
@@ -220,10 +266,13 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
 
+        const classification = classifyFood(message);
+        console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
+
         const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
         const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
         
-        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg)) {
+        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
           const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
           await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
@@ -597,10 +646,13 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
 
+        const classification = classifyFood(message);
+        console.log(`[FOOD_ENGINE] User: ${user.phoneNumber}, Classification:`, classification);
+
         const highRiskCarbs = /PAP|RICE|PASTA|PIZZA|KOTA|WORS ROLL|CHIPS|FRIES|BREAD|BURGER|MAGWINYA/;
         const sizeKeywords = /BIG PLATE|2 PLATES|EXTRA|LARGE|HUGE|LOTS/;
         
-        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg)) {
+        if (highRiskCarbs.test(cleanMsg) || sizeKeywords.test(cleanMsg) || classification.flags.isJunk) {
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
           const portionCheck = "Portion check: how much carbs was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists";
           await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
