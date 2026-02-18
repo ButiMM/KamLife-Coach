@@ -151,7 +151,17 @@ export async function registerRoutes(
   app.post(api.webhooks.whatsapp.path, async (req, res) => {
     const { From, Body } = req.body;
     const phoneNumber = From;
-    const message = Body;
+    const message = Body || "";
+
+    // CANARY v2
+    const canaryMsg = message.trim().toUpperCase();
+    if (canaryMsg === "PING") {
+      return res.type('text/xml').send(`<Response><Message>PONG v2 ✅ Coach Brain is deployed</Message></Response>`);
+    }
+    if (canaryMsg === "MENU") {
+      const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+    }
 
     let user = await storage.getUserByPhone(phoneNumber);
     const paymentLink = "https://payfast.co.za/mock-pay";
