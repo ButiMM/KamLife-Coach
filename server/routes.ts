@@ -113,6 +113,26 @@ export async function registerRoutes(
     const betaTesters = (process.env.BETA_TESTERS || "").split(",").map(p => p.trim());
     const isBetaTester = betaTesters.includes(phoneNumber);
 
+    // ADMIN BYPASS COMMANDS
+    if (canaryMsg === "BYPASS ON") {
+      if (user) {
+        await storage.updateUser(user.id, { subscriptionStatus: "active" });
+      } else {
+        user = await storage.createUser({
+          phoneNumber,
+          subscriptionStatus: "active",
+          onboardingState: "AWAITING_NAME"
+        });
+      }
+      return res.type('text/xml').send(`<Response><Message>Admin Bypass: ON ✅ You are now an active user.</Message></Response>`);
+    }
+    if (canaryMsg === "BYPASS OFF") {
+      if (user) {
+        await storage.updateUser(user.id, { subscriptionStatus: "inactive" });
+      }
+      return res.type('text/xml').send(`<Response><Message>Admin Bypass: OFF ❌ Subscription required.</Message></Response>`);
+    }
+
     if (!user) {
       if (isBetaTester) {
         const bypassExpiry = new Date();
