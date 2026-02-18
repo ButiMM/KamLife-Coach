@@ -194,12 +194,33 @@ export async function registerRoutes(
       }
 
       if (inputType === "food") {
-        let advice = "Got it! ";
-        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
-        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
-        advice += "What did you drink today?";
+        const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+        if (nothingWords.some(word => cleanMsg.includes(word))) {
+          const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+          await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+
+        let advice = "Logged. ";
+        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+        advice += "What did you drink?";
+        
+        await storage.updateUser(user.id, { awaitingInputType: "drink" });
         await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
         return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "drink") {
+        if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
+          const reply = "You need water. Drink 1 glass now. Reply DONE.";
+          await storage.logChat(user.id, message, reply, "DRINK_NONE");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+        
+        const menu = `Good. What next?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+        await storage.logChat(user.id, message, menu, "DRINK_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
 
       if (inputType === "sleep") {
@@ -523,12 +544,33 @@ export async function registerRoutes(
       }
 
       if (inputType === "food") {
-        let advice = "Got it! ";
-        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Try to keep the portion to about the size of your fist. ";
-        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
-        advice += "What did you drink today?";
+        const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
+        if (nothingWords.some(word => cleanMsg.includes(word))) {
+          const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+          await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+
+        let advice = "Logged. ";
+        if (/PAP|BREAD|RICE/.test(cleanMsg)) advice += "Keep starch to fist-size. ";
+        if (!/CHICKEN|EGGS|FISH|BEANS|MEAT|PROTEIN/.test(cleanMsg)) advice += "Add protein (eggs/chicken/beans) next time. ";
+        advice += "What did you drink?";
+        
+        await storage.updateUser(user.id, { awaitingInputType: "drink" });
         await storage.logChat(user.id, message, advice, "LOG_FOOD_FOLLOWUP");
         return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      if (inputType === "drink") {
+        if (/NOTHING|NO DRINK|NONE/.test(cleanMsg)) {
+          const reply = "You need water. Drink 1 glass now. Reply DONE.";
+          await storage.logChat(user.id, message, reply, "DRINK_NONE");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+        
+        const menu = `Good. What next?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+        await storage.logChat(user.id, message, menu, "DRINK_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
 
       if (inputType === "sleep") {
