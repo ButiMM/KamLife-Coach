@@ -136,6 +136,22 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>Admin Bypass: OFF ❌ Subscription required.</Message></Response>`);
     }
 
+    if (canaryMsg === "RUN WEEKLY REPORT") {
+      const isAdmin = (process.env.ADMIN_PHONE_NUMBERS || "").split(",").map(p => p.trim()).includes(phoneNumber);
+      if (isAdmin) {
+        const users = await storage.getAllUsers();
+        let report = "📊 *Manual Weekly Report Triggered*\n\n";
+        for (const u of users) {
+          if (u.subscriptionStatus === "active") {
+            const { score, level } = await calculateWeeklyCompliance(u.id);
+            await storage.updateUser(u.id, { weeklyScore: score, complianceLevel: level });
+            report += `• ${u.name || u.phoneNumber}: ${score}/100 (${level})\n`;
+          }
+        }
+        return res.type('text/xml').send(`<Response><Message>${report}</Message></Response>`);
+      }
+    }
+
     if (!user) {
       if (isBetaTester) {
         const bypassExpiry = new Date();
