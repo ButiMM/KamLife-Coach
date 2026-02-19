@@ -376,10 +376,16 @@ export async function registerRoutes(
           await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         } else {
+          const context = await getRecentFoodContext(user.id);
+          const { reply } = await getKamLifeFoodReply(
+            message,
+            user.calorieTarget || 2000,
+            context,
+            user.name || "there"
+          );
           await storage.updateUser(user.id, { awaitingInputType: null });
-          user.awaitingInputType = null;
-          await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
-          return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
+          await storage.logChat(user.id, message, reply, "EXTRA_LOG");
+          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
       }
 
