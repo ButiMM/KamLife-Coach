@@ -252,6 +252,14 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+
+    if (cleanMsg === "RESET") {
+      await storage.updateUser(user.id, { awaitingInputType: null });
+      const menu = `Reset done. KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      await storage.logChat(user.id, message, menu + " [STATE: none]", "COACH_RESET");
+      return res.type('text/xml').send(`<Response><Message>${menu} [STATE: none]</Message></Response>`);
+    }
+
     const isGreeting = /^(HI|HELLO|HEY|HOWZIT|YO|SUP|SAWUBONA|DUMELA|MOLO|MOLWENI)$/.test(cleanMsg) && 
                       message.length <= 15 && 
                       !/\d/.test(message);
@@ -269,7 +277,31 @@ export async function registerRoutes(
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
 
-      if (inputType === "portion") {
+      // Timeout check (10 mins)
+      const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+      const now = Date.now();
+      if (now - lastActive > 10 * 60 * 1000) {
+        await storage.updateUser(user.id, { awaitingInputType: null });
+        user.awaitingInputType = null;
+      } else {
+        if (inputType === "anything_else") {
+          if (cleanMsg.includes("YES")) {
+            await storage.updateUser(user.id, { awaitingInputType: "food" });
+            const reply = "What did you eat?";
+            return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+          } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            // Fall through to menu logic
+          } else {
+            // Escape hatch: clear state and continue routing
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            user.awaitingInputType = null;
+          }
+        }
+      }
+
+      // Re-check inputType after timeout/escape hatch
+      if (user.awaitingInputType) {
         const portionMatch = cleanMsg.match(/[1-3]/);
         const level = portionMatch ? parseInt(portionMatch[0]) : 1;
         await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
@@ -725,6 +757,14 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+
+    if (cleanMsg === "RESET") {
+      await storage.updateUser(user.id, { awaitingInputType: null });
+      const menu = `Reset done. KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      await storage.logChat(user.id, message, menu + " [STATE: none]", "COACH_RESET");
+      return res.type('text/xml').send(`<Response><Message>${menu} [STATE: none]</Message></Response>`);
+    }
+
     const isGreeting = /^(HI|HELLO|HEY|HOWZIT|YO|SUP|SAWUBONA|DUMELA|MOLO|MOLWENI)$/.test(cleanMsg) && 
                       message.length <= 15 && 
                       !/\d/.test(message);
@@ -742,7 +782,31 @@ export async function registerRoutes(
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
 
-      if (inputType === "portion") {
+      // Timeout check (10 mins)
+      const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
+      const now = Date.now();
+      if (now - lastActive > 10 * 60 * 1000) {
+        await storage.updateUser(user.id, { awaitingInputType: null });
+        user.awaitingInputType = null;
+      } else {
+        if (inputType === "anything_else") {
+          if (cleanMsg.includes("YES")) {
+            await storage.updateUser(user.id, { awaitingInputType: "food" });
+            const reply = "What did you eat?";
+            return res.type('text/xml').send(`<Response><Message>${reply}${debugState}</Message></Response>`);
+          } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            // Fall through to menu logic
+          } else {
+            // Escape hatch: clear state and continue routing
+            await storage.updateUser(user.id, { awaitingInputType: null });
+            user.awaitingInputType = null;
+          }
+        }
+      }
+
+      // Re-check inputType after timeout/escape hatch
+      if (user.awaitingInputType) {
         const portionMatch = cleanMsg.match(/[1-3]/);
         const level = portionMatch ? parseInt(portionMatch[0]) : 1;
         await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
