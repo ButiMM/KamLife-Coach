@@ -15,80 +15,124 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-async function getKamLifeFoodReply(foods: string[], junk: string[], carbs: string[], protein: string[], userCalories: number): Promise<string> {
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 120,
-      messages: [
-        {
-          role: "system",
-          content: `You are KAM Life Coach — a firm, direct South African fitness coach on WhatsApp. 
-Never say you're AI. Never use "Got it", "Nice", "Great job" generically.
-Be specific to what they ate. Max 2 sentences. No emojis. No fluff.
-If they ate junk: call it out firmly but not cruelly. Tell them what to do next meal.
-If they ate well: acknowledge it briefly and reinforce the habit.
-If protein is missing: tell them exactly what to add.
-Speak like a real coach, not a chatbot.`
-        },
-        {
-          role: "user",
-          content: `User ate: ${[...foods, ...junk, ...carbs, ...protein].join(", ")}.
-Junk detected: ${junk.length > 0 ? junk.join(", ") : "none"}.
-Protein present: ${protein.length > 0 ? "yes" : "no"}.
-User calorie target: ${userCalories}kcal.
-Give a coaching response.`
-        }
-      ]
-    });
-    return completion.choices[0].message.content || R.foodGood();
-  } catch (e) {
-    return R.foodGood();
-  }
-}
-
 function parseFoodMessage(text: string) {
   const upper = text.toUpperCase();
   const tokens = upper.split(/[\s,.;]+/).filter(t => t.length > 1);
-  
-  const foods: string[] = [];
+
+  const proteinKeywords = ["CHICKEN", "EGGS", "EGG", "FISH", "BEANS", "LENTILS", "LIVER", "PILCHARDS", "BEEF", "STEAK", "TUNA", "SARDINES", "YOGURT", "COTTAGE", "MINCE"];
+  const junkKeywords = ["PIZZA", "DONUT", "DOUGHNUT", "CHOCOLATE", "CHIPS", "FRIES", "MAGWINYA", "KOTA", "BURGER", "SWEETS", "CAKE", "BISCUITS", "MCDONALDS", "KFC", "STEERS", "NANDOS"];
+  const alcoholKeywords = ["BEER", "WINE", "WHISKY", "VODKA", "SAVANNA", "HUNTERS", "SPIRITS", "BRANDY", "GIN", "RUM", "CIDER"];
+  const carbKeywords = ["PAP", "RICE", "PASTA", "BREAD", "SAMP", "POTATO", "POTATOES", "DUMPLING", "DUMPLINGS", "OATS", "MEALIE"];
+  const drinkKeywords = ["WATER", "COKE", "PEPSI", "FANTA", "SPRITE", "JUICE", "SODA", "TEA", "COFFEE", "MILK", "SHAKE"];
+  const mealKeywords = ["BREAKFAST", "LUNCH", "DINNER", "SNACK", "SUPPER"];
+
+  const proteinItems: string[] = [];
+  const junkItems: string[] = [];
+  const alcoholItems: string[] = [];
+  const carbItems: string[] = [];
   const drinks: string[] = [];
   const mealHints: string[] = [];
-  const carbItems: string[] = [];
-  const junkItems: string[] = [];
-  const proteinItems: string[] = [];
-  
-  // South African food keywords
-  const proteinKeywords = ["CHICKEN", "EGGS", "FISH", "BEANS", "LENTILS", "LIVER", "PILCHARDS", "BEEF", "STEW", "TRIPE", "WORS", "STEAK"];
-  const junkKeywords = ["PIZZA", "DONUT", "CHOCOLATE", "CHIPS", "FRIES", "MAGWINYA", "KOTA", "BURGER", "SWEETS", "CAKE", "BISCUITS", "COKE", "PEPSI", "FANTA", "SPRITE", "SAVANNA", "HUNTERS", "BEER", "WINE", "WHISKY"];
-  const carbKeywords = ["PAP", "RICE", "PASTA", "BREAD", "SAMP", "POTATO", "DUMPLING", "KOTA", "PIZZA", "BURGER"];
-  const drinkKeywords = ["WATER", "COKE", "PEPSI", "FANTA", "SPRITE", "JUICE", "SODA", "BEER", "WINE", "WHISKY", "TEA", "COFFEE", "MILK"];
-  const mealKeywords = ["BREAKFAST", "LUNCH", "DINNER", "SNACK"];
 
   tokens.forEach(t => {
     if (proteinKeywords.includes(t)) proteinItems.push(t);
-    if (carbKeywords.includes(t)) carbItems.push(t);
     if (junkKeywords.includes(t)) junkItems.push(t);
+    if (alcoholKeywords.includes(t)) alcoholItems.push(t);
+    if (carbKeywords.includes(t)) carbItems.push(t);
     if (drinkKeywords.includes(t)) drinks.push(t);
     if (mealKeywords.includes(t)) mealHints.push(t);
   });
 
-  // Extract quantities (simple regex)
-  const quantities = text.match(/\d+(\.\d+)?\s*(L|ML|KG|G|FISTS?|PLATES?|BEERS?|GLASSES?)/gi) || [];
-
-  const isDailyDump = mealHints.length >= 2 || tokens.length >= 6 || mealHints.some(m => ["BREAKFAST", "LUNCH", "DINNER"].includes(m));
+  const quantities = text.match(/\d+(\.\d+)?\s*(L|ML|KG|G|FISTS?|PLATES?|SLICES?|PIECES?|BEERS?|GLASSES?|CUPS?)/gi) || [];
+  const isDailyDump = mealHints.length >= 2 || tokens.length >= 8 || mealHints.some(m => ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"].includes(m));
 
   return {
-    foods: tokens.filter(t => !drinkKeywords.includes(t) && !mealKeywords.includes(t)),
+    foods: tokens.filter(t => ![...drinkKeywords, ...mealKeywords, ...alcoholKeywords].includes(t)),
     drinks,
     mealHints,
     quantities,
     carbItems: Array.from(new Set(carbItems)),
     junkItems: Array.from(new Set(junkItems)),
+    alcoholItems: Array.from(new Set(alcoholItems)),
     proteinItems: Array.from(new Set(proteinItems)),
     isDailyDump,
     tokenCount: tokens.length
   };
+}
+
+async function getKamLifeFoodReply(
+  parsing: ReturnType<typeof parseFoodMessage>,
+  userCalories: number,
+  recentHistory: string
+): Promise<string> {
+  const foodSummary = [
+    ...parsing.proteinItems,
+    ...parsing.carbItems,
+    ...parsing.junkItems,
+    ...parsing.alcoholItems,
+    ...parsing.drinks
+  ].join(", ") || "unknown food";
+
+  const isJunk = parsing.junkItems.length > 0;
+  const isAlcohol = parsing.alcoholItems.length > 0;
+  const hasProtein = parsing.proteinItems.length > 0;
+  const hasCarbs = parsing.carbItems.length > 0;
+
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 100,
+      messages: [
+        {
+          role: "system",
+          content: `You are KAM Life Coach — a firm, direct South African fitness coach on WhatsApp.
+Rules:
+- Max 2 sentences. No fluff. No emojis.
+- Never say "Got it", "Nice", "Great job", "Well done" generically.
+- Be specific to exactly what they ate.
+- If junk food: call it out firmly but not cruelly. Tell them exactly what next meal must be.
+- If alcohol: be strict. State the cost clearly.
+- If no protein: tell them exactly what to add.
+- If balanced meal: acknowledge briefly and reinforce ONE specific habit.
+- Sound like a real SA coach, not a chatbot.
+- Never mention calories or macros by number — use food-based guidance only.
+- Recent context: ${recentHistory || "No recent history."}`
+        },
+        {
+          role: "user",
+          content: `User ate: ${foodSummary}.
+Junk: ${isJunk ? parsing.junkItems.join(", ") : "none"}.
+Alcohol: ${isAlcohol ? parsing.alcoholItems.join(", ") : "none"}.
+Protein present: ${hasProtein ? "yes" : "no"}.
+Carbs present: ${hasCarbs ? "yes" : "no"}.
+User calorie target: ${userCalories}kcal.
+Write a coaching response.`
+        }
+      ]
+    });
+    return completion.choices[0].message.content?.trim() || "Logged. Make your next meal count.";
+  } catch (e) {
+    if (isJunk || isAlcohol) return "That's your cheat. Next meal is clean protein and vegetables — no negotiation.";
+    if (!hasProtein) return "No protein detected. Add eggs, chicken, or tinned fish to your next meal.";
+    return "Logged. Keep that standard.";
+  }
+}
+
+async function getRecentFoodContext(userId: string): Promise<string> {
+  try {
+    const yesterday = new Date();
+    yesterday.setHours(yesterday.getHours() - 24);
+    const recent = await db.select().from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, yesterday)));
+    const foodLogs = recent
+      .filter(c => c.intent && ["LOG_FOOD", "JUNK_LOGGED", "DAILY_DUMP_LOGGED", "PORTION_CHECK"].includes(c.intent))
+      .map(c => c.messageIn)
+      .filter(Boolean)
+      .slice(0, 3)
+      .join(", ");
+    return foodLogs ? `Last 24hrs they ate: ${foodLogs}` : "";
+  } catch (e) {
+    return "";
+  }
 }
 
 function classifyFood(text: string) {
@@ -394,13 +438,8 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
         }
 
-        const coachReply = await getKamLifeFoodReply(
-          parsing.foods,
-          parsing.junkItems,
-          parsing.carbItems,
-          parsing.proteinItems,
-          user.calorieTarget || 2000
-        );
+        const recentContext = await getRecentFoodContext(user.id);
+        const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, recentContext);
 
         if (parsing.drinks.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
@@ -565,13 +604,8 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
       }
 
-      const coachReply = await getKamLifeFoodReply(
-        parsing.foods,
-        parsing.junkItems,
-        parsing.carbItems,
-        parsing.proteinItems,
-        user.calorieTarget || 2000
-      );
+      const recentContext = await getRecentFoodContext(user.id);
+      const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, recentContext);
 
       if (parsing.drinks.length > 0) {
         const advice = coachReply + "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
