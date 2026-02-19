@@ -50,9 +50,9 @@ function parseFoodMessage(text: string) {
     drinks,
     mealHints,
     quantities,
-    carbItems: [...new Set(carbItems)],
-    junkItems: [...new Set(junkItems)],
-    proteinItems: [...new Set(proteinItems)],
+    carbItems: Array.from(new Set(carbItems)),
+    junkItems: Array.from(new Set(junkItems)),
+    proteinItems: Array.from(new Set(proteinItems)),
     isDailyDump,
     tokenCount: tokens.length
   };
