@@ -259,8 +259,8 @@ export async function registerRoutes(
     if (isGreeting) {
       await storage.updateUser(user.id, { awaitingInputType: null });
       const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
-      await storage.logChat(user.id, message, menu, "COACH_MENU");
-      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+      await storage.logChat(user.id, message, menu + " [STATE: none]", "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menu} [STATE: none]</Message></Response>`);
     }
 
     const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
@@ -732,8 +732,8 @@ export async function registerRoutes(
     if (isGreeting) {
       await storage.updateUser(user.id, { awaitingInputType: null });
       const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
-      await storage.logChat(user.id, message, menu, "COACH_MENU");
-      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+      await storage.logChat(user.id, message, menu + " [STATE: none]", "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menu} [STATE: none]</Message></Response>`);
     }
 
     const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
