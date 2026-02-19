@@ -346,6 +346,15 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
 
+        if (parsing.junkItems.length > 0) {
+          const isAlcohol = /BEER|WINE|WHISKY|VODKA|SAVANNA|HUNTERS/.test(cleanMsg);
+          const reply = isAlcohol ? R.alcoholDetected() : R.junkDetected();
+          await storage.updateUser(user.id, { awaitingInputType: "drink" });
+          const full = `${reply} ${R.promptDrink()}`;
+          await storage.logChat(user.id, message, full + " [STATE: drink]", "JUNK_LOGGED");
+          return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
+        }
+
         if (parsing.carbItems.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
           const portionCheck = R.portionCheck(parsing.carbItems[0]);
@@ -353,12 +362,7 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
         }
 
-        let advice = "";
-        if (parsing.junkItems.length > 0) {
-          advice = R.junkDetected();
-        } else {
-          advice = R.foodGood();
-        }
+        let advice = R.foodGood();
         if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
 
         if (parsing.drinks.length > 0) {
@@ -508,6 +512,15 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
       }
 
+      if (parsing.junkItems.length > 0) {
+        const isAlcohol = /BEER|WINE|WHISKY|VODKA|SAVANNA|HUNTERS/.test(cleanMsg);
+        const reply = isAlcohol ? R.alcoholDetected() : R.junkDetected();
+        await storage.updateUser(user.id, { awaitingInputType: "drink" });
+        const full = `${reply} ${R.promptDrink()}`;
+        await storage.logChat(user.id, message, full + " [STATE: drink]", "JUNK_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
+      }
+
       if (parsing.carbItems.length > 0) {
         await storage.updateUser(user.id, { awaitingInputType: "portion" });
         const portionCheck = R.portionCheck(parsing.carbItems[0]);
@@ -515,12 +528,7 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
       }
 
-      let advice = "";
-      if (parsing.junkItems.length > 0) {
-        advice = R.junkDetected();
-      } else {
-        advice = R.foodGood();
-      }
+      let advice = R.foodGood();
       if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
 
       if (parsing.drinks.length > 0) {
