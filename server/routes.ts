@@ -356,11 +356,10 @@ export async function registerRoutes(
         let advice = "";
         if (parsing.junkItems.length > 0) {
           advice = R.junkDetected();
-        } else if (parsing.proteinItems.length === 0) {
-          advice = R.noProtein();
         } else {
           advice = R.foodGood();
         }
+        if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
 
         if (parsing.drinks.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
@@ -519,11 +518,10 @@ export async function registerRoutes(
       let advice = "";
       if (parsing.junkItems.length > 0) {
         advice = R.junkDetected();
-      } else if (parsing.proteinItems.length === 0) {
-        advice = R.noProtein();
       } else {
         advice = R.foodGood();
       }
+      if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
 
       if (parsing.drinks.length > 0) {
         advice += "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
