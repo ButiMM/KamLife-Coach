@@ -403,13 +403,21 @@ export async function registerRoutes(
       if (inputType === "drink") {
         if (cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
-        const reply = `${R.drinkLogged()} Anything else to log? (yes/no)`;
+
+        const context = await getRecentFoodContext(user.id);
+        const { reply } = await getKamLifeFoodReply(
+          `They drank: ${message}`,
+          user.calorieTarget || 2000,
+          context,
+          user.name || "there"
+        );
+
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
-        await storage.logChat(user.id, message, reply + " [STATE: anything_else]", "DRINK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: anything_else]</Message></Response>`);
+        const full = `${reply} Anything else to log? (yes/no)`;
+        await storage.logChat(user.id, message, full, "DRINK_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${full} [STATE: anything_else]</Message></Response>`);
       }
 
       if (inputType === "food" && !/^\d+$/.test(cleanMsg)) {
