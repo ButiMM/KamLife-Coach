@@ -394,17 +394,22 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
         }
 
-        let advice = R.foodGood();
-        if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
+        const coachReply = await getKamLifeFoodReply(
+          parsing.foods,
+          parsing.junkItems,
+          parsing.carbItems,
+          parsing.proteinItems,
+          user.calorieTarget || 2000
+        );
 
         if (parsing.drinks.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
-          advice += "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
+          const advice = coachReply + "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
           await storage.logChat(user.id, message, advice + " [STATE: anything_else]", "LOG_FOOD_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${advice} [STATE: anything_else]</Message></Response>`);
         } else {
           await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          advice += "\n" + R.promptDrink();
+          const advice = coachReply + "\n" + R.promptDrink();
           await storage.logChat(user.id, message, advice + " [STATE: drink]", "LOG_FOOD_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${advice} [STATE: drink]</Message></Response>`);
         }
@@ -560,19 +565,25 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
       }
 
-      let advice = R.foodGood();
-      if (parsing.proteinItems.length === 0) advice += " " + R.noProtein();
+      const coachReply = await getKamLifeFoodReply(
+        parsing.foods,
+        parsing.junkItems,
+        parsing.carbItems,
+        parsing.proteinItems,
+        user.calorieTarget || 2000
+      );
 
       if (parsing.drinks.length > 0) {
-        advice += "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
+        const advice = coachReply + "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
+        await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD");
+        return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
       } else {
-        advice += "\n" + R.promptDrinkToday();
+        const advice = coachReply + "\n" + R.promptDrinkToday();
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
+        await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD");
+        return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
       }
-
-      await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD");
-      return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
     }
 
     if (detectedIntent === "GET_WORKOUT") {
