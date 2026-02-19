@@ -418,26 +418,23 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
 
-        const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
-        if (nothingWords.some(w => cleanMsg.includes(w))) {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          const reply = "Skipping meals slows fat loss and triggers cravings. Get 2 eggs or a tin of fish in now. Reply DONE after eating.";
-          await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
-        }
-
         const context = await getRecentFoodContext(user.id);
-        const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, context, user.name || "there");
+        const { reply, nextState } = await getKamLifeFoodReply(
+          message,
+          user.calorieTarget || 2000,
+          context,
+          user.name || "there"
+        );
 
         if (nextState === "portion") {
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const full = `${coachReply}\nPortion check: 1 / 2 / 3+ fists?`;
-          await storage.logChat(user.id, message, full, "PORTION_CHECK");
+          const full = `${reply}\nHow much carbs: 1 fist / 2 fists / 3+ fists?`;
+          await storage.logChat(user.id, message, full, "FOOD_LOGGED");
           return res.type('text/xml').send(`<Response><Message>${full} [STATE: portion]</Message></Response>`);
         }
 
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        const full = `${coachReply} What did you drink?`;
+        const full = `${reply} What did you drink?`;
         await storage.logChat(user.id, message, full, "FOOD_LOGGED");
         return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
       }
