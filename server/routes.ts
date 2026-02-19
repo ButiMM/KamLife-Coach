@@ -252,6 +252,17 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+    const isGreeting = /^(HI|HELLO|HEY|HOWZIT|YO|SUP|SAWUBONA|DUMELA|MOLO|MOLWENI)$/.test(cleanMsg) && 
+                      message.length <= 15 && 
+                      !/\d/.test(message);
+
+    if (isGreeting) {
+      await storage.updateUser(user.id, { awaitingInputType: null });
+      const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      await storage.logChat(user.id, message, menu, "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+    }
+
     const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
     
     // 0) Handle Active Input States (Priority Over Menu)
@@ -429,7 +440,13 @@ export async function registerRoutes(
     // Keyword mapping
     if (!detectedIntent) {
       const parsing = parseFoodMessage(message);
-      if (parsing.foods.length > 0 || parsing.drinks.length > 0) {
+      const foodEvidence = parsing.foods.length > 0 || 
+                          parsing.drinks.length > 0 || 
+                          parsing.quantities.length > 0 || 
+                          parsing.mealHints.length > 0 ||
+                          /WATER|COKE|BEER|LITRE|PORTION/.test(cleanMsg);
+
+      if (foodEvidence) {
         detectedIntent = "LOG_FOOD";
       }
 
@@ -708,6 +725,17 @@ export async function registerRoutes(
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
     const cleanMsg = message.trim().toUpperCase();
+    const isGreeting = /^(HI|HELLO|HEY|HOWZIT|YO|SUP|SAWUBONA|DUMELA|MOLO|MOLWENI)$/.test(cleanMsg) && 
+                      message.length <= 15 && 
+                      !/\d/.test(message);
+
+    if (isGreeting) {
+      await storage.updateUser(user.id, { awaitingInputType: null });
+      const menu = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+      await storage.logChat(user.id, message, menu, "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+    }
+
     const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
     
     // 0) Handle Active Input States (Priority Over Menu)
@@ -885,7 +913,13 @@ export async function registerRoutes(
     // Keyword mapping
     if (!detectedIntent) {
       const parsing = parseFoodMessage(message);
-      if (parsing.foods.length > 0 || parsing.drinks.length > 0) {
+      const foodEvidence = parsing.foods.length > 0 || 
+                          parsing.drinks.length > 0 || 
+                          parsing.quantities.length > 0 || 
+                          parsing.mealHints.length > 0 ||
+                          /WATER|COKE|BEER|LITRE|PORTION/.test(cleanMsg);
+
+      if (foodEvidence) {
         detectedIntent = "LOG_FOOD";
       }
 
