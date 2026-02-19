@@ -345,6 +345,14 @@ export async function registerRoutes(
       const inputType = user.awaitingInputType;
 
       if (inputType === "anything_else") {
+        const anythingParsing = parseFoodMessage(message);
+        if (anythingParsing.alcoholItems.length > 0) {
+          const context = await getRecentFoodContext(user.id);
+          const coachReply = await getKamLifeFoodReply(anythingParsing, user.calorieTarget || 2000, context);
+          await storage.updateUser(user.id, { awaitingInputType: null });
+          await storage.logChat(user.id, message, coachReply, "ALCOHOL_FLAGGED");
+          return res.type('text/xml').send(`<Response><Message>${coachReply} [STATE: none]</Message></Response>`);
+        }
         if (cleanMsg.includes("YES")) {
           await storage.updateUser(user.id, { awaitingInputType: "food" });
           const reply = R.promptFood();
