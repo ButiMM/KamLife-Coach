@@ -112,4 +112,49 @@ export const R = {
     "Below 60%. That means we start again. Commit to just 3 things this week: protein every meal, 6k steps daily, 3 workouts.",
     "We reset. No excuses — just action. Reply MENU to start fresh.",
   ]),
+
+  weightLogged: (val: string) => pick([
+    `Logged ${val}kg. The scale is just data — consistency is what matters.`,
+    `${val}kg recorded. Don't obsess over the number — focus on the process.`,
+    `Weight logged: ${val}kg. Keep tracking weekly. Trends matter more than single readings.`,
+  ]),
+
+  drinkFollowUp: () => pick([
+    "Hydration tracked. Anything else to log? (yes/no)",
+    "Drink logged. Stay on water. Anything else? (yes/no)",
+    "Noted. Keep water as your main drink. Anything else to log? (yes/no)",
+  ]),
+
+  onboardingName: (name: string) => pick([
+    `Welcome ${name}. What's your main goal? (Fat Loss or Muscle Gain)`,
+    `Got it, ${name}. What are we working towards? (Fat Loss or Muscle Gain)`,
+    `${name} — let's get started. What's the goal? (Fat Loss or Muscle Gain)`,
+  ]),
+
+  onboardingGoal: () => pick([
+    "Locked in. What's your current weight in kg?",
+    "Got it. Now tell me your current weight in kg.",
+    "Goal set. What do you weigh right now? (in kg)",
+  ]),
+
+  onboardingComplete: () => pick([
+    "You're in. Log your food, steps, sleep, and workouts daily. I'll check in every Sunday. Reply MENU to start.",
+    "Onboarding done. The real work starts now. Reply MENU to see your options.",
+    "Setup complete. No more excuses — just action. Reply MENU to begin.",
+  ]),
+
+  promptFood: () => "What did you eat?",
+  promptSteps: () => "How many steps today?",
+  promptSleep: () => "How many hours did you sleep?",
+  promptWeight: () => "What is your weight today (kg)?",
+  promptDrink: () => "What did you drink?",
+  promptDrinkToday: () => "What did you drink today?",
+  promptAnythingElse: () => "Anything else to log? (yes/no)",
+
+  portionCheck: (carb: string) => `Portion check for ${carb}: how much was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists`,
+
+  workoutToday: (day: number, workout: string) => `Today is Day ${day}: ${workout}\nReply DONE when finished.`,
+
+  targets: (cals: number, protein: number, steps: number) =>
+    `Your targets:\nCalories: ${cals}kcal\nProtein: ${protein}g\nSteps: ${steps}`,
 };

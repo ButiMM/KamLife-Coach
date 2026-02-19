@@ -8,6 +8,7 @@ import { format } from "date-fns";
 import { db } from "./db";
 import { chatHistory } from "@shared/schema";
 import { eq, and, gte } from "drizzle-orm";
+import { R } from "./responses";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -270,7 +271,7 @@ export async function registerRoutes(
       if (inputType === "anything_else") {
         if (cleanMsg.includes("YES")) {
           await storage.updateUser(user.id, { awaitingInputType: "food" });
-          const reply = "What did you eat?";
+          const reply = R.promptFood();
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: food]</Message></Response>`);
         } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
@@ -294,8 +295,8 @@ export async function registerRoutes(
         if (cals >= 1800 && cals <= 2400) targetFists = "1–2";
         else if (cals > 2400) targetFists = "2";
 
-        let reaction = level === 1 ? "Perfect portion. " : `That's a lot of carbs. Your target is ${targetFists} fist(s) carbs per meal for fat loss. `;
-        reaction += "What did you drink?";
+        let reaction = level === 1 ? R.portionGood() + " " : R.portionHigh(targetFists) + " ";
+        reaction += R.promptDrink();
 
         await storage.logChat(user.id, message, reaction + " [STATE: drink]", "PORTION_LOGGED");
         return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: drink]</Message></Response>`);
@@ -307,7 +308,7 @@ export async function registerRoutes(
           await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
-        const reply = "Nice! Hydration is key. Anything else to log? (yes/no)";
+        const reply = R.drinkFollowUp();
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
         await storage.logChat(user.id, message, reply + " [STATE: anything_else]", "DRINK_LOGGED");
         return res.type('text/xml').send(`<Response><Message>${reply} [STATE: anything_else]</Message></Response>`);
@@ -329,7 +330,7 @@ export async function registerRoutes(
           if (parsing.carbItems.length > 0) {
             const carb = parsing.carbItems[0];
             await storage.updateUser(user.id, { awaitingInputType: "portion" });
-            reply += `\nPortion check for ${carb}: 1 / 2 / 3+ fists`;
+            reply += "\n" + R.portionCheck(carb);
             return res.type('text/xml').send(`<Response><Message>${reply} [STATE: portion]</Message></Response>`);
           }
 
@@ -340,29 +341,35 @@ export async function registerRoutes(
         const nothingWords = ["NOTHING", "DIDN'T EAT", "SKIPPED", "NO FOOD", "NONE"];
         if (nothingWords.some(word => cleanMsg.includes(word))) {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          const reply = "Skipping meals slows fat loss and causes cravings. Have 1 protein source now (2 eggs / yogurt / tinned fish). Reply DONE after eating.";
+          const reply = R.mealSkipped();
           await storage.logChat(user.id, message, reply + " [STATE: none]", "FOOD_SKIPPED");
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
 
         if (parsing.carbItems.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const portionCheck = `Portion check for ${parsing.carbItems[0]}: how much was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists`;
+          const portionCheck = R.portionCheck(parsing.carbItems[0]);
           await storage.logChat(user.id, message, portionCheck + " [STATE: portion]", "PORTION_CHECK");
           return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
         }
 
-        let advice = "Logged. ";
-        if (parsing.proteinItems.length === 0) advice += "Add protein (eggs/chicken/beans) next time. ";
+        let advice = "";
+        if (parsing.junkItems.length > 0) {
+          advice = R.junkDetected();
+        } else if (parsing.proteinItems.length === 0) {
+          advice = R.noProtein();
+        } else {
+          advice = R.foodGood();
+        }
 
         if (parsing.drinks.length > 0) {
           await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
-          advice += "Anything else to log? (yes/no)";
+          advice += "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
           await storage.logChat(user.id, message, advice + " [STATE: anything_else]", "LOG_FOOD_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${advice} [STATE: anything_else]</Message></Response>`);
         } else {
           await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          advice += "What did you drink?";
+          advice += "\n" + R.promptDrink();
           await storage.logChat(user.id, message, advice + " [STATE: drink]", "LOG_FOOD_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${advice} [STATE: drink]</Message></Response>`);
         }
@@ -377,10 +384,9 @@ export async function registerRoutes(
           const prevLogs = await storage.getStepLogs(user.id);
           const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
           let reaction = "";
-          if (steps < 2000) reaction = "Firm push: You need to move. Do a 5-min walk now. Reply DONE.";
-          else if (steps < 6000) reaction = "Good start. Try to squeeze in a 10-min walk later today.";
-          else if (steps < (user.stepsTarget || 8000)) reaction = "Great work! Almost at your target. Keep pushing!";
-          else reaction = "Amazing! You hit your target. Consistency is key.";
+          if (steps < 2000) reaction = R.stepsLow();
+          else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
+          else reaction = R.stepsGood();
           const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
           const reply = `${reaction}${comparison}`;
           await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_STEPS_FOLLOWUP");
@@ -394,9 +400,8 @@ export async function registerRoutes(
         const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
         if (hours !== null) {
           let reaction = "";
-          if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
-          else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
-          else reaction = "Perfect! Great sleep is the foundation of your progress.";
+          if (hours < 5) reaction = R.sleepPoor();
+          else reaction = R.sleepGood();
           await storage.logChat(user.id, message, reaction + " [STATE: none]", "LOG_SLEEP_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: none]</Message></Response>`);
         }
@@ -409,7 +414,7 @@ export async function registerRoutes(
           const val = weightMatch[0];
           await storage.createWeightLog(user.id, val);
           await storage.updateUser(user.id, { currentWeight: val });
-          const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
+          const reply = R.weightLogged(val);
           await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_WEIGHT_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
@@ -423,13 +428,13 @@ export async function registerRoutes(
 
       if (currentState === "AWAITING_NAME") {
         await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
-        reply = `Thanks ${message}! What is your main fitness goal? (Fat Loss or Muscle Gain)`;
+        reply = R.onboardingName(message);
       } else if (currentState === "AWAITING_GOAL") {
         await storage.updateUser(user.id, { goalType: message, onboardingState: "AWAITING_WEIGHT" });
-        reply = "Got it. What is your current weight in kg?";
+        reply = R.onboardingGoal();
       } else if (currentState === "AWAITING_WEIGHT") {
         await storage.updateUser(user.id, { currentWeight: message, onboardingState: "COMPLETED" });
-        reply = "Onboarding complete! You can now log your steps, workouts, and weight daily. I'll check in with you every Sunday!";
+        reply = R.onboardingComplete();
       }
 
       if (reply) {
@@ -444,19 +449,19 @@ export async function registerRoutes(
     if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
     if (cleanMsg === "2") {
       await storage.updateUser(user.id, { awaitingInputType: "food" });
-      return res.type('text/xml').send(`<Response><Message>What did you eat? [STATE: food]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptFood()} [STATE: food]</Message></Response>`);
     }
     if (cleanMsg === "3") {
       await storage.updateUser(user.id, { awaitingInputType: "steps" });
-      return res.type('text/xml').send(`<Response><Message>How many steps today? [STATE: steps]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptSteps()} [STATE: steps]</Message></Response>`);
     }
     if (cleanMsg === "4") {
       await storage.updateUser(user.id, { awaitingInputType: "sleep" });
-      return res.type('text/xml').send(`<Response><Message>How many hours did you sleep? [STATE: sleep]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptSleep()} [STATE: sleep]</Message></Response>`);
     }
     if (cleanMsg === "5") {
       await storage.updateUser(user.id, { awaitingInputType: "weight" });
-      return res.type('text/xml').send(`<Response><Message>What is your weight today (kg)? [STATE: weight]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptWeight()} [STATE: weight]</Message></Response>`);
     }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
 
@@ -497,7 +502,7 @@ export async function registerRoutes(
         if (parsing.carbItems.length > 0) {
           const carb = parsing.carbItems[0];
           await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          reply += `\nPortion check for ${carb}: 1 / 2 / 3+ fists`;
+          reply += "\n" + R.portionCheck(carb);
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: portion]</Message></Response>`);
         }
         await storage.logChat(user.id, message, reply + " [STATE: none]", "DAILY_DUMP_LOGGED");
@@ -506,19 +511,25 @@ export async function registerRoutes(
 
       if (parsing.carbItems.length > 0) {
         await storage.updateUser(user.id, { awaitingInputType: "portion" });
-        const portionCheck = `Portion check for ${parsing.carbItems[0]}: how much was it?\n1) 1 fist\n2) 2 fists\n3) 3+ fists`;
+        const portionCheck = R.portionCheck(parsing.carbItems[0]);
         await storage.logChat(user.id, message, portionCheck + " [STATE: portion]", "PORTION_CHECK");
         return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
       }
 
-      let advice = "Got it! ";
-      if (parsing.proteinItems.length === 0) advice += "Try adding some protein like eggs, chicken, or beans next time. ";
+      let advice = "";
+      if (parsing.junkItems.length > 0) {
+        advice = R.junkDetected();
+      } else if (parsing.proteinItems.length === 0) {
+        advice = R.noProtein();
+      } else {
+        advice = R.foodGood();
+      }
 
       if (parsing.drinks.length > 0) {
-        advice += "Logged your food and drink. Anything else to log? (yes/no)";
+        advice += "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
       } else {
-        advice += "What did you drink today?";
+        advice += "\n" + R.promptDrinkToday();
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
       }
 
@@ -535,7 +546,7 @@ export async function registerRoutes(
       };
       const mode = (user.trainingMode as keyof typeof workouts) || "home";
       const workout = workouts[mode][(day - 1) % 3];
-      const reply = `Today is Day ${day}: ${workout}\nReply DONE when finished.`;
+      const reply = R.workoutToday(day, workout);
       await storage.logChat(user.id, message, reply + " [STATE: none]", "GET_WORKOUT");
       return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
     }
@@ -550,10 +561,9 @@ export async function registerRoutes(
         const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
 
         let reaction = "";
-        if (steps < 2000) reaction = "Firm push: You need to move. Do a 5-min walk now. Reply DONE.";
-        else if (steps < 6000) reaction = "Good start. Try to squeeze in a 10-min walk later today.";
-        else if (steps < (user.stepsTarget || 8000)) reaction = "Great work! Almost at your target. Keep pushing!";
-        else reaction = "Amazing! You hit your target. Consistency is key.";
+        if (steps < 2000) reaction = R.stepsLow();
+        else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
+        else reaction = R.stepsGood();
 
         const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
         const reply = `${reaction}${comparison}`;
@@ -567,9 +577,8 @@ export async function registerRoutes(
       const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
       if (hours !== null) {
         let reaction = "";
-        if (hours < 5) reaction = "Warning: Lack of sleep can trigger cravings. Try to get to bed 30 mins earlier tonight.";
-        else if (hours < 7) reaction = "Not bad, but try to aim for 7-8 hours for better recovery.";
-        else reaction = "Perfect! Great sleep is the foundation of your progress.";
+        if (hours < 5) reaction = R.sleepPoor();
+        else reaction = R.sleepGood();
         await storage.logChat(user.id, message, reaction + " [STATE: none]", "LOG_SLEEP");
         return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: none]</Message></Response>`);
       }
@@ -581,14 +590,14 @@ export async function registerRoutes(
         const val = weightMatch[0];
         await storage.createWeightLog(user.id, val);
         await storage.updateUser(user.id, { currentWeight: val });
-        const reply = `Logged ${val}kg! Consistency is what brings results. Keep it up!`;
+        const reply = R.weightLogged(val);
         await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_WEIGHT");
         return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
       }
     }
 
     if (detectedIntent === "SHOW_TARGETS") {
-      const reply = `Your targets:\nCalories: ${user.calorieTarget || 2000}kcal\nProtein: ${user.proteinTarget || 150}g\nSteps: ${user.stepsTarget || 8000}`;
+      const reply = R.targets(user.calorieTarget || 2000, user.proteinTarget || 150, user.stepsTarget || 8000);
       await storage.logChat(user.id, message, reply + " [STATE: none]", "SHOW_TARGETS");
       return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
     }
@@ -598,7 +607,7 @@ export async function registerRoutes(
       let nextDay = (user.programDayIndex || 1) + 1;
       if (nextDay > 3) nextDay = 1;
       await storage.updateUser(user.id, { programDayIndex: nextDay });
-      const reply = `Good job! Workout logged. Tomorrow is Day ${nextDay}. Small wins lead to big changes.`;
+      const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.`;
       await storage.logChat(user.id, message, reply + " [STATE: none]", "WORKOUT_DONE");
       return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
     }
@@ -760,12 +769,11 @@ export async function registerRoutes(
           const { score, level } = await calculateWeeklyCompliance(user.id);
           await storage.updateUser(user.id, { weeklyScore: score, complianceLevel: level });
 
-          const report = `📊 *Weekly Compliance Report*\n\nScore: ${score}/100\nLevel: ${level}\n\n${
-            level === "LOCKED IN" ? "Elite performance. Keep this intensity." :
-            level === "CONSISTENT" ? "Solid work. You're building real momentum." :
-            level === "BUILDING" ? "Room for improvement. Let's tighten up next week." :
-            "Time to reset. We start again tomorrow. No excuses."
-          }\n\nReply MENU to continue.`;
+          const levelMsg = level === "LOCKED IN" ? R.weeklyLockedIn() :
+            level === "CONSISTENT" ? R.weeklyConsistent() :
+            level === "BUILDING" ? R.weeklyBuilding() :
+            R.weeklyReset();
+          const report = `*Weekly Compliance Report*\n\nScore: ${score}/100\nLevel: ${level}\n\n${levelMsg}\n\nReply MENU to continue.`;
 
           console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
           await storage.logChat(user.id, "", report, "WEEKLY_REPORT");
