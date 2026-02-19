@@ -15,6 +15,38 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+async function getKamLifeFoodReply(foods: string[], junk: string[], carbs: string[], protein: string[], userCalories: number): Promise<string> {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-5.1",
+      max_tokens: 120,
+      messages: [
+        {
+          role: "system",
+          content: `You are KAM Life Coach — a firm, direct South African fitness coach on WhatsApp. 
+Never say you're AI. Never use "Got it", "Nice", "Great job" generically.
+Be specific to what they ate. Max 2 sentences. No emojis. No fluff.
+If they ate junk: call it out firmly but not cruelly. Tell them what to do next meal.
+If they ate well: acknowledge it briefly and reinforce the habit.
+If protein is missing: tell them exactly what to add.
+Speak like a real coach, not a chatbot.`
+        },
+        {
+          role: "user",
+          content: `User ate: ${[...foods, ...junk, ...carbs, ...protein].join(", ")}.
+Junk detected: ${junk.length > 0 ? junk.join(", ") : "none"}.
+Protein present: ${protein.length > 0 ? "yes" : "no"}.
+User calorie target: ${userCalories}kcal.
+Give a coaching response.`
+        }
+      ]
+    });
+    return completion.choices[0].message.content || R.foodGood();
+  } catch (e) {
+    return R.foodGood();
+  }
+}
+
 function parseFoodMessage(text: string) {
   const upper = text.toUpperCase();
   const tokens = upper.split(/[\s,.;]+/).filter(t => t.length > 1);
