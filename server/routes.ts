@@ -279,7 +279,8 @@ export async function registerRoutes(
         } else {
           await storage.updateUser(user.id, { awaitingInputType: null });
           user.awaitingInputType = null;
-          // fall through to intent routing
+          await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
+          return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
       }
 
