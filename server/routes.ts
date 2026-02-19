@@ -18,7 +18,7 @@ const openai = new OpenAI({
 async function getKamLifeFoodReply(foods: string[], junk: string[], carbs: string[], protein: string[], userCalories: number): Promise<string> {
   try {
     const completion = await openai.chat.completions.create({
-      model: "gpt-5.1",
+      model: "gpt-4o-mini",
       max_tokens: 120,
       messages: [
         {
