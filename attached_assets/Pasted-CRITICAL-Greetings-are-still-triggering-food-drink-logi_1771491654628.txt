@@ -1,0 +1,48 @@
+CRITICAL: Greetings are still triggering food/drink logic and setting states incorrectly.
+We need single-exit routing + hard greeting override.
+
+Implement these changes:
+
+1) SINGLE EXIT (NO DOUBLE HANDLERS)
+Restructure webhook handler so ONLY ONE path can run per inbound message.
+Use early returns. After sending a response, return immediately.
+No function should continue processing after reply is generated.
+
+2) HARD GREETING OVERRIDE (TOP PRIORITY)
+At the VERY TOP of the handler (before any state handling, parsing, or intent routing):
+- Normalize message: trim, lowercase, remove emojis/punctuation.
+- If message matches greeting-only:
+  ["hi","hello","hey","howzit","sup","yo","sawubona","dumela","molo","molweni"]
+  OR message length <= 20 and contains only greeting + emoji
+THEN:
+  - Clear ALL awaiting states for this user:
+    awaiting_food_input=false
+    awaiting_drink_input=false
+    awaiting_portion_input=false
+    awaiting_anything_else=false
+  - Reply with the menu (1–6) and nothing else.
+  - RETURN immediately. Do NOT run parseFoodMessage.
+
+3) STATE GUARD: ONLY honor states if they were set by the bot AND are fresh
+Store state_updated_at.
+If any awaiting_* state is older than 10 minutes, clear it before processing.
+
+4) PARSER GUARD
+Only run parseFoodMessage when the message contains evidence of food/drink:
+- contains any known food keyword OR drink keyword OR meal labels (breakfast/lunch/dinner/snack)
+- OR contains quantities (e.g., "2L", "litre", "ml", "glass", "beer")
+Otherwise do NOT parse.
+
+5) DEBUG (TEMP, internal consistency)
+Debug marker must reflect active state flags AFTER processing begins:
+- If no awaiting flags active => [STATE: none]
+- If awaiting_anything_else => [STATE: anything_else]
+- If awaiting_drink_input => [STATE: drink]
+- If awaiting_food_input => [STATE: food]
+- If awaiting_portion_input => [STATE: portion]
+Ensure greetings always return [STATE: none] and menu.
+
+Test must pass:
+- Send "Hello 👋" 3 times => always get menu only, [STATE: none]
+- Send "Pap and chicken" => enter food flow
+- Send "2L water" => hydration log
