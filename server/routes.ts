@@ -461,11 +461,12 @@ export async function registerRoutes(
 
     if (!detectedIntent) {
       const parsing = parseFoodMessage(message);
-      const foodEvidence = parsing.foods.length > 0 ||
+      const foodEvidence = parsing.proteinItems.length > 0 ||
+                          parsing.carbItems.length > 0 ||
+                          parsing.junkItems.length > 0 ||
                           parsing.drinks.length > 0 ||
-                          parsing.quantities.length > 0 ||
                           parsing.mealHints.length > 0 ||
-                          /WATER|COKE|BEER|LITRE|PORTION/.test(cleanMsg);
+                          parsing.quantities.length > 0;
 
       if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
       else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
