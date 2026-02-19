@@ -308,7 +308,7 @@ export async function registerRoutes(
           await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
-        const reply = R.drinkFollowUp();
+        const reply = `${R.drinkLogged()} Anything else to log? (yes/no)`;
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
         await storage.logChat(user.id, message, reply + " [STATE: anything_else]", "DRINK_LOGGED");
         return res.type('text/xml').send(`<Response><Message>${reply} [STATE: anything_else]</Message></Response>`);
