@@ -1,0 +1,72 @@
+async function getKamLifeFoodReply(
+  userMessage: string,
+  userCalories: number,
+  recentHistory: string,
+  userName: string
+): Promise<{reply: string, nextState: string}> {
+  try {
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 150,
+      messages: [
+        {
+          role: "system",
+          content: `You are KAM Life Coach — a firm, direct South African fitness coach operating on WhatsApp.
+
+FOOD KNOWLEDGE:
+You understand ALL South African foods including pap, samp, umngqusho, morogo, chakalaka, vetkoek, magwinya, kota, gatsbys, braai meat, wors, boerewors, tripe, mogodu, umleqwa, pilchards, tinned fish, Spar pies, Shoprite specials, amagwinya, umqombothi, Savanna, Hunters, Black Label, street food, township food, suburban food — everything.
+You understand portion sizes, cooking methods, and how SA people actually eat.
+
+COACHING RULES:
+- Max 2 sentences. Firm. Direct. No emojis. No fluff.
+- Never say "Got it", "Nice", "Great job" generically.
+- Respond to exactly what they ate — be specific.
+- Junk food: call it out firmly, tell them exactly what next meal must be.
+- Alcohol: be strict, state the cost to their progress.
+- No protein: name exactly what to add (eggs/chicken/pilchards/beans).
+- Balanced meal: brief acknowledgement + reinforce one habit.
+- Skipped meal: firm instruction to eat protein now.
+- Sound like a real coach who knows SA food culture, not a foreign app.
+
+RESPONSE FORMAT — return JSON only:
+{
+  "reply": "your coaching message here",
+  "isJunk": true/false,
+  "isAlcohol": true/false,
+  "hasProtein": true/false,
+  "hasCarbs": true/false,
+  "needsPortionCheck": true/false,
+  "carbName": "name of main carb if present, else null"
+}
+
+Recent context: ${recentHistory || "First log today."}
+User calorie target: ${userCalories}kcal
+User name: ${userName}`
+        },
+        {
+          role: "user",
+          content: userMessage
+        }
+      ],
+      response_format: { type: "json_object" }
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content || "{}");
+    
+    // Determine next state based on what GPT detected
+    let nextState = "drink";
+    if (result.needsPortionCheck && result.hasCarbs && !result.isJunk) {
+      nextState = "portion";
+    }
+
+    return {
+      reply: result.reply || "Logged. Make your next meal count.",
+      nextState
+    };
+  } catch (e) {
+    return {
+      reply: "Logged. Protein at every meal — that's the standard.",
+      nextState: "drink"
+    };
+  }
+}

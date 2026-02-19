@@ -60,60 +60,74 @@ function parseFoodMessage(text: string) {
 }
 
 async function getKamLifeFoodReply(
-  parsing: ReturnType<typeof parseFoodMessage>,
+  userMessage: string,
   userCalories: number,
-  recentHistory: string
-): Promise<string> {
-  const foodSummary = [
-    ...parsing.proteinItems,
-    ...parsing.carbItems,
-    ...parsing.junkItems,
-    ...parsing.alcoholItems,
-    ...parsing.drinks
-  ].join(", ") || "unknown food";
-
-  const isJunk = parsing.junkItems.length > 0;
-  const isAlcohol = parsing.alcoholItems.length > 0;
-  const hasProtein = parsing.proteinItems.length > 0;
-  const hasCarbs = parsing.carbItems.length > 0;
-
+  recentHistory: string,
+  userName: string
+): Promise<{reply: string, nextState: string}> {
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 100,
+      max_tokens: 150,
       messages: [
         {
           role: "system",
-          content: `You are KAM Life Coach — a firm, direct South African fitness coach on WhatsApp.
-Rules:
-- Max 2 sentences. No fluff. No emojis.
-- Never say "Got it", "Nice", "Great job", "Well done" generically.
-- Be specific to exactly what they ate.
-- If junk food: call it out firmly but not cruelly. Tell them exactly what next meal must be.
-- If alcohol: be strict. State the cost clearly.
-- If no protein: tell them exactly what to add.
-- If balanced meal: acknowledge briefly and reinforce ONE specific habit.
-- Sound like a real SA coach, not a chatbot.
-- Never mention calories or macros by number — use food-based guidance only.
-- Recent context: ${recentHistory || "No recent history."}`
+          content: `You are KAM Life Coach — a firm, direct South African fitness coach operating on WhatsApp.
+
+FOOD KNOWLEDGE:
+You understand ALL South African foods including pap, samp, umngqusho, morogo, chakalaka, vetkoek, magwinya, kota, gatsbys, braai meat, wors, boerewors, tripe, mogodu, umleqwa, pilchards, tinned fish, Spar pies, Shoprite specials, amagwinya, umqombothi, Savanna, Hunters, Black Label, street food, township food, suburban food — everything.
+You understand portion sizes, cooking methods, and how SA people actually eat.
+
+COACHING RULES:
+- Max 2 sentences. Firm. Direct. No emojis. No fluff.
+- Never say "Got it", "Nice", "Great job" generically.
+- Respond to exactly what they ate — be specific.
+- Junk food: call it out firmly, tell them exactly what next meal must be.
+- Alcohol: be strict, state the cost to their progress.
+- No protein: name exactly what to add (eggs/chicken/pilchards/beans).
+- Balanced meal: brief acknowledgement + reinforce one habit.
+- Skipped meal: firm instruction to eat protein now.
+- Sound like a real coach who knows SA food culture, not a foreign app.
+
+RESPONSE FORMAT — return JSON only:
+{
+  "reply": "your coaching message here",
+  "isJunk": true/false,
+  "isAlcohol": true/false,
+  "hasProtein": true/false,
+  "hasCarbs": true/false,
+  "needsPortionCheck": true/false,
+  "carbName": "name of main carb if present, else null"
+}
+
+Recent context: ${recentHistory || "First log today."}
+User calorie target: ${userCalories}kcal
+User name: ${userName}`
         },
         {
           role: "user",
-          content: `User ate: ${foodSummary}.
-Junk: ${isJunk ? parsing.junkItems.join(", ") : "none"}.
-Alcohol: ${isAlcohol ? parsing.alcoholItems.join(", ") : "none"}.
-Protein present: ${hasProtein ? "yes" : "no"}.
-Carbs present: ${hasCarbs ? "yes" : "no"}.
-User calorie target: ${userCalories}kcal.
-Write a coaching response.`
+          content: userMessage
         }
-      ]
+      ],
+      response_format: { type: "json_object" }
     });
-    return completion.choices[0].message.content?.trim() || "Logged. Make your next meal count.";
+
+    const result = JSON.parse(completion.choices[0].message.content || "{}");
+
+    let nextState = "drink";
+    if (result.needsPortionCheck && result.hasCarbs && !result.isJunk) {
+      nextState = "portion";
+    }
+
+    return {
+      reply: result.reply || "Logged. Make your next meal count.",
+      nextState
+    };
   } catch (e) {
-    if (isJunk || isAlcohol) return "That's your cheat. Next meal is clean protein and vegetables — no negotiation.";
-    if (!hasProtein) return "No protein detected. Add eggs, chicken, or tinned fish to your next meal.";
-    return "Logged. Keep that standard.";
+    return {
+      reply: "Logged. Protein at every meal — that's the standard.",
+      nextState: "drink"
+    };
   }
 }
 
@@ -348,10 +362,10 @@ export async function registerRoutes(
         const anythingParsing = parseFoodMessage(message);
         if (anythingParsing.alcoholItems.length > 0) {
           const context = await getRecentFoodContext(user.id);
-          const coachReply = await getKamLifeFoodReply(anythingParsing, user.calorieTarget || 2000, context);
+          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, context, user.name || "there");
           await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, coachReply, "ALCOHOL_FLAGGED");
-          return res.type('text/xml').send(`<Response><Message>${coachReply} [STATE: none]</Message></Response>`);
+          await storage.logChat(user.id, message, reply, "ALCOHOL_FLAGGED");
+          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
         if (cleanMsg.includes("YES")) {
           await storage.updateUser(user.id, { awaitingInputType: "food" });
@@ -404,8 +418,6 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
         }
 
-        const parsing = parseFoodMessage(message);
-
         const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
         if (nothingWords.some(w => cleanMsg.includes(w))) {
           await storage.updateUser(user.id, { awaitingInputType: null });
@@ -414,47 +426,16 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
         }
 
-        if (parsing.alcoholItems.length > 0) {
-          const context = await getRecentFoodContext(user.id);
-          const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, context);
-          await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          const full = `${coachReply} What did you drink (water/juice)?`;
-          await storage.logChat(user.id, message, full, "ALCOHOL_LOGGED");
-          return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
-        }
-
-        if (parsing.junkItems.length > 0) {
-          const context = await getRecentFoodContext(user.id);
-          const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, context);
-          await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          const full = `${coachReply} What did you drink?`;
-          await storage.logChat(user.id, message, full, "JUNK_LOGGED");
-          return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
-        }
-
-        if (parsing.isDailyDump) {
-          const context = await getRecentFoodContext(user.id);
-          const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, context);
-          if (parsing.carbItems.length > 0) {
-            await storage.updateUser(user.id, { awaitingInputType: "portion" });
-            const full = `${coachReply}\nPortion check for ${parsing.carbItems[0]}: 1 / 2 / 3+ fists?`;
-            return res.type('text/xml').send(`<Response><Message>${full} [STATE: portion]</Message></Response>`);
-          }
-          await storage.updateUser(user.id, { awaitingInputType: "drink" });
-          const full = `${coachReply} What did you drink?`;
-          await storage.logChat(user.id, message, full, "DAILY_DUMP_LOGGED");
-          return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
-        }
-
-        if (parsing.carbItems.length > 0) {
-          await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const portionCheck = `Portion check for ${parsing.carbItems[0]}: how much?\n1) 1 fist\n2) 2 fists\n3) 3+ fists`;
-          await storage.logChat(user.id, message, portionCheck, "PORTION_CHECK");
-          return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
-        }
-
         const context = await getRecentFoodContext(user.id);
-        const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, context);
+        const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, context, user.name || "there");
+
+        if (nextState === "portion") {
+          await storage.updateUser(user.id, { awaitingInputType: "portion" });
+          const full = `${coachReply}\nPortion check: 1 / 2 / 3+ fists?`;
+          await storage.logChat(user.id, message, full, "PORTION_CHECK");
+          return res.type('text/xml').send(`<Response><Message>${full} [STATE: portion]</Message></Response>`);
+        }
+
         await storage.updateUser(user.id, { awaitingInputType: "drink" });
         const full = `${coachReply} What did you drink?`;
         await storage.logChat(user.id, message, full, "FOOD_LOGGED");
@@ -581,50 +562,27 @@ export async function registerRoutes(
     // ── Priority 11: INTENT HANDLERS ──
 
     if (detectedIntent === "LOG_FOOD") {
-      const parsing = parseFoodMessage(message);
-
-      if (parsing.isDailyDump) {
-        let reply = `Logged: ${parsing.mealHints.length || 1} meals, ${parsing.foods.length} items, ${parsing.drinks.length} drinks.`;
-        if (parsing.carbItems.length > 0) {
-          const carb = parsing.carbItems[0];
-          await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          reply += "\n" + R.portionCheck(carb);
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: portion]</Message></Response>`);
-        }
-        await storage.logChat(user.id, message, reply + " [STATE: none]", "DAILY_DUMP_LOGGED");
+      const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
+      if (nothingWords.some(w => cleanMsg.includes(w))) {
+        const reply = "Skipping meals slows fat loss and triggers cravings. Get 2 eggs or a tin of fish in now. Reply DONE after eating.";
+        await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
         return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
       }
 
-      if (parsing.junkItems.length > 0) {
-        const isAlcohol = /BEER|WINE|WHISKY|VODKA|SAVANNA|HUNTERS/.test(cleanMsg);
-        const reply = isAlcohol ? R.alcoholDetected() : R.junkDetected();
-        await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        const full = `${reply} ${R.promptDrink()}`;
-        await storage.logChat(user.id, message, full + " [STATE: drink]", "JUNK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
-      }
-
-      if (parsing.carbItems.length > 0) {
-        await storage.updateUser(user.id, { awaitingInputType: "portion" });
-        const portionCheck = R.portionCheck(parsing.carbItems[0]);
-        await storage.logChat(user.id, message, portionCheck + " [STATE: portion]", "PORTION_CHECK");
-        return res.type('text/xml').send(`<Response><Message>${portionCheck} [STATE: portion]</Message></Response>`);
-      }
-
       const recentContext = await getRecentFoodContext(user.id);
-      const coachReply = await getKamLifeFoodReply(parsing, user.calorieTarget || 2000, recentContext);
+      const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, recentContext, user.name || "there");
 
-      if (parsing.drinks.length > 0) {
-        const advice = coachReply + "\n" + R.drinkLogged() + "\n" + R.promptAnythingElse();
-        await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
-        await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD");
-        return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
-      } else {
-        const advice = coachReply + "\n" + R.promptDrinkToday();
-        await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        await storage.logChat(user.id, message, advice + debugState, "LOG_FOOD");
-        return res.type('text/xml').send(`<Response><Message>${advice}${debugState}</Message></Response>`);
+      if (nextState === "portion") {
+        await storage.updateUser(user.id, { awaitingInputType: "portion" });
+        const full = `${coachReply}\nPortion check: 1 / 2 / 3+ fists?`;
+        await storage.logChat(user.id, message, full + debugState, "PORTION_CHECK");
+        return res.type('text/xml').send(`<Response><Message>${full}${debugState}</Message></Response>`);
       }
+
+      await storage.updateUser(user.id, { awaitingInputType: "drink" });
+      const full = `${coachReply} What did you drink?`;
+      await storage.logChat(user.id, message, full + debugState, "LOG_FOOD");
+      return res.type('text/xml').send(`<Response><Message>${full}${debugState}</Message></Response>`);
     }
 
     if (detectedIntent === "GET_WORKOUT") {
