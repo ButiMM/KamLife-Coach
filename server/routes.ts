@@ -501,28 +501,32 @@ export async function registerRoutes(
       const inputType = user.awaitingInputType;
 
       if (inputType === "awaiting_cancel") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
         if (cleanMsg === "CONFIRM") {
-          await storage.updateUser(user.id, { subscriptionStatus: "inactive" });
+          await storage.updateUser(user.id, { awaitingInputType: null, subscriptionStatus: "inactive" });
           const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Keep pushing — even without us.";
           await storage.logChat(user.id, message, reply, "CANCEL_CONFIRMED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        } else if (cleanMsg === "STAY") {
+          await storage.updateUser(user.id, { awaitingInputType: null });
+          const reply = `Great decision. Let's get back to work.\n\n${menuText}`;
+          await storage.logChat(user.id, message, reply, "CANCEL_STAYED");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "1") {
-          const reply = "We hear you. Reply STAY and we will sort something out.";
+          const reply = "We hear you. Reply STAY and we will sort something out. Or reply CONFIRM to cancel.";
           await storage.logChat(user.id, message, reply, "CANCEL_REASON_PRICE");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "2") {
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-          const reply = `Results come from consistency. You have been here ${daysSinceJoin} days. Give it 30 more — one month of full commitment. Reply STAY to continue.`;
+          const reply = `Results come from consistency. You have been here ${daysSinceJoin} days. Give it 30 more — one month of full commitment. Reply STAY to continue or CONFIRM to cancel.`;
           await storage.logChat(user.id, message, reply, "CANCEL_REASON_RESULTS");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "3") {
-          const reply = "KamLife Coach takes 5 minutes a day. Just log your food and steps. Reply STAY to continue.";
+          const reply = "KamLife Coach takes 5 minutes a day. Just log your food and steps. Reply STAY to continue or CONFIRM to cancel.";
           await storage.logChat(user.id, message, reply, "CANCEL_REASON_BUSY");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg === "STAY") {
-          const reply = `Great decision. Let's get back to work.\n\n${menuText}`;
-          await storage.logChat(user.id, message, reply, "CANCEL_STAYED");
+        } else {
+          const reply = "Reply 1, 2, or 3 for your reason. Or reply CONFIRM to cancel, or STAY to keep going.";
+          await storage.logChat(user.id, message, reply, "CANCEL_REPROMPT");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
       }
@@ -625,8 +629,20 @@ export async function registerRoutes(
           const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
           let winMoment = "";
           const target = user.stepsTarget || 8000;
-          if (prevLogs.length >= 7 && prevLogs.slice(0, 7).every(s => s.steps >= target)) {
-            winMoment = "\n\n🔥 7 days straight hitting your target. That is elite discipline. Screenshot this.";
+          if (prevLogs.length >= 7) {
+            const now = new Date();
+            let streakValid = true;
+            for (let i = 0; i < 7; i++) {
+              const log = prevLogs[i];
+              if (!log.loggedAt || log.steps < target) { streakValid = false; break; }
+              const logDate = new Date(log.loggedAt);
+              const expectedDate = new Date(now);
+              expectedDate.setDate(expectedDate.getDate() - i);
+              if (logDate.toDateString() !== expectedDate.toDateString()) { streakValid = false; break; }
+            }
+            if (streakValid) {
+              winMoment = "\n\n7 days straight hitting your target. That is elite discipline. Screenshot this.";
+            }
           }
           const reply = `${reaction}${comparison}${winMoment}`;
           await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
@@ -657,9 +673,12 @@ export async function registerRoutes(
           await storage.updateUser(user.id, { currentWeight: val });
           let reply = R.weightLogged(val);
           const allWeights = await storage.getWeightLogs(user.id);
-          const twoWeeksAgo = allWeights.find(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= 14 * 24 * 60 * 60 * 1000);
-          if (twoWeeksAgo && (parseFloat(twoWeeksAgo.weight) - parseFloat(val)) >= 2) {
-            reply += "\n\n⚡ Down 2kg. That is the work paying off. Screenshot this and share it.";
+          const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+          const baseline = allWeights
+            .filter(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= fourteenDaysMs)
+            .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime())[0];
+          if (baseline && (parseFloat(baseline.weight) - parseFloat(val)) >= 2) {
+            reply += "\n\nDown 2kg+ in the last 2 weeks. That is the work paying off. Screenshot this and share it.";
           }
           await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -826,8 +845,20 @@ export async function registerRoutes(
         const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
         let winMoment = "";
         const target = user.stepsTarget || 8000;
-        if (prevLogs.length >= 7 && prevLogs.slice(0, 7).every(s => s.steps >= target)) {
-          winMoment = "\n\n🔥 7 days straight hitting your target. That is elite discipline. Screenshot this.";
+        if (prevLogs.length >= 7) {
+          const now = new Date();
+          let streakValid = true;
+          for (let i = 0; i < 7; i++) {
+            const log = prevLogs[i];
+            if (!log.loggedAt || log.steps < target) { streakValid = false; break; }
+            const logDate = new Date(log.loggedAt);
+            const expectedDate = new Date(now);
+            expectedDate.setDate(expectedDate.getDate() - i);
+            if (logDate.toDateString() !== expectedDate.toDateString()) { streakValid = false; break; }
+          }
+          if (streakValid) {
+            winMoment = "\n\n7 days straight hitting your target. That is elite discipline. Screenshot this.";
+          }
         }
         const reply = `${reaction}${comparison}${winMoment}`;
         await storage.logChat(user.id, message, reply, "LOG_STEPS");
@@ -856,9 +887,12 @@ export async function registerRoutes(
         await storage.updateUser(user.id, { currentWeight: val });
         let reply = R.weightLogged(val);
         const allWeights = await storage.getWeightLogs(user.id);
-        const twoWeeksAgo = allWeights.find(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= 14 * 24 * 60 * 60 * 1000);
-        if (twoWeeksAgo && (parseFloat(twoWeeksAgo.weight) - parseFloat(val)) >= 2) {
-          reply += "\n\n⚡ Down 2kg. That is the work paying off. Screenshot this and share it.";
+        const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
+        const baseline = allWeights
+          .filter(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= fourteenDaysMs)
+          .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime())[0];
+        if (baseline && (parseFloat(baseline.weight) - parseFloat(val)) >= 2) {
+          reply += "\n\nDown 2kg+ in the last 2 weeks. That is the work paying off. Screenshot this and share it.";
         }
         await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -965,12 +999,17 @@ export async function registerRoutes(
         }
       }
     }
-    // Daily 10:00 — Re-engagement
+    // Daily 10:00 — Re-engagement (once per 3 days max)
     if (now.getHours() === 10 && now.getMinutes() === 0) {
       const users = await storage.getAllUsers();
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
       for (const user of users) {
         if (user.subscriptionStatus === "active" && user.lastActiveAt && new Date(user.lastActiveAt) < threeDaysAgo) {
+          const recentChats = await storage.getChatHistory(user.id, 10);
+          const lastReengagement = recentChats.find(c => c.intent === "RE_ENGAGEMENT");
+          if (lastReengagement && lastReengagement.createdAt && (Date.now() - new Date(lastReengagement.createdAt).getTime()) < 3 * 24 * 60 * 60 * 1000) {
+            continue;
+          }
           const msg = "You've gone quiet. Your body doesn't take days off — and neither should your mindset. Log one thing today: food, steps, or a workout. One thing. That's all it takes.";
           console.log(`[SCHEDULE] Re-engagement nudge to ${user.phoneNumber}`);
           await storage.logChat(user.id, "", msg, "RE_ENGAGEMENT");

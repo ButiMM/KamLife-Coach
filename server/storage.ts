@@ -32,6 +32,7 @@ export interface IStorage {
 
   // Chat History
   logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<ChatLog>;
+  getChatHistory(userId: string, limit?: number): Promise<ChatLog[]>;
 
   // Admin / Flagged
   getFlaggedUsers(): Promise<FlaggedUser[]>;
@@ -109,6 +110,10 @@ export class DatabaseStorage implements IStorage {
       intent
     }).returning();
     return log;
+  }
+
+  async getChatHistory(userId: string, limitCount: number = 50): Promise<ChatLog[]> {
+    return await db.select().from(chatHistory).where(eq(chatHistory.userId, userId)).orderBy(desc(chatHistory.createdAt)).limit(limitCount);
   }
 
   async getFlaggedUsers(): Promise<FlaggedUser[]> {
