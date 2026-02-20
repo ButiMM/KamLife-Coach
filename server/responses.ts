@@ -8,7 +8,7 @@ export const R = {
     "Logged. That's how it's done.",
     "Solid meal. Keep that standard.",
     "Logged. Consistency is what gets results.",
-    "That's the KAM Life way. Keep it up.",
+    "That's the KamLife Coach way. Keep it up.",
   ]),
 
   noProtein: () => pick([
@@ -72,7 +72,7 @@ export const R = {
   sleepGood: () => "Solid sleep. That's how you recover properly and keep cravings in check.",
 
   weeklyLockedIn: () => pick([
-    "Elite week. That's the KAM Life standard. Keep this intensity.",
+    "Elite week. That's the KamLife Coach standard. Keep this intensity.",
     "90%+ compliance. You're not just building a body — you're building discipline.",
     "Locked in. This is what separates people who get results from people who don't.",
   ]),
