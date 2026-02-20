@@ -177,7 +177,7 @@ async function parseIntent(message: string): Promise<{ intent: string; data?: an
       messages: [
         {
           role: "system",
-          content: `You are 'KamLife Coach' Intent Parser.
+          content: `You are 'KAM Life Coach' Intent Parser.
           Supported intents: onboarding_answer, log_steps, log_workout, log_weight, weekly_checkin_response, hungry, general_question.
           Return JSON only: { "intent": "...", "data": { ... } }`
         },
@@ -198,7 +198,7 @@ async function generateReply(message: string, intent: string, context: any): Pro
       messages: [
         {
           role: "system",
-          content: `You are 'KamLife Coach'. 
+          content: `You are 'KAM Life Coach'. 
           Write short, direct, motivational replies in South African English. No fluff. No 'AI' mentions.
           Context: ${JSON.stringify(context)}`
         },
@@ -267,7 +267,7 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>Voice notes aren't supported yet — please type your message. Reply MENU to see your options.</Message></Response>`);
     }
 
-    const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
+    const menuText = `KAM Life Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
 
     // ── Priority 1: GREETING GUARD ──
     const rawMsg = message.trim().toLowerCase().replace(/[^\w\s]/g, "");
@@ -305,9 +305,9 @@ export async function registerRoutes(
           onboardingState: "AWAITING_NAME"
         });
         console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife! Let's get started. What is your full name?</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KAM Life! Let's get started. What is your full name?</Message></Response>`);
       } else {
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KAM Life. Subscribe here: ${paymentLink}</Message></Response>`);
       }
     }
 
@@ -358,7 +358,7 @@ export async function registerRoutes(
 
     // ── Priority 8.5: HELP command ──
     if (cleanMsg === "HELP") {
-      const helpReply = "Need help?\n\n- Reply MENU for main menu\n- Reply RESET if bot seems stuck\n- Reply 7 to update your profile\n- Type your food, steps or workout anytime\n\nKAM Life runs 24/7. We have your back.";
+      const helpReply = "Need help?\n\n- Reply MENU to see your options\n- Reply RESET if something seems stuck\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nKAM Life is here 24/7. Keep pushing.";
       await storage.logChat(user.id, message, helpReply, "HELP");
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
     }
