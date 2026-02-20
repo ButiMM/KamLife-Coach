@@ -465,6 +465,7 @@ export async function registerRoutes(
         if (hours !== null) {
           let reaction = "";
           if (hours < 5) reaction = R.sleepPoor();
+          else if (hours < 7) reaction = R.sleepOk();
           else reaction = R.sleepGood();
           await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
@@ -603,7 +604,7 @@ export async function registerRoutes(
       };
       const mode = (user.trainingMode as keyof typeof workouts) || "home";
       const workout = workouts[mode][(day - 1) % 3];
-      const reply = R.workoutToday(day, workout);
+      const reply = `Day ${day} — ${workout} Get it done. Reply DONE when finished.`;
       await storage.logChat(user.id, message, reply, "GET_WORKOUT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -635,6 +636,7 @@ export async function registerRoutes(
       if (hours !== null) {
         let reaction = "";
         if (hours < 5) reaction = R.sleepPoor();
+        else if (hours < 7) reaction = R.sleepOk();
         else reaction = R.sleepGood();
         await storage.logChat(user.id, message, reaction, "LOG_SLEEP");
         return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);

@@ -65,17 +65,11 @@ export const R = {
     "Solid. One more session in the bank. Keep the standard.",
   ]),
 
-  sleepPoor: () => pick([
-    "Under 5 hours kills recovery and spikes cravings. Protect your sleep — it's part of the programme.",
-    "Poor sleep slows fat loss. Get to bed 30 minutes earlier tonight.",
-    "Sleep is part of training. Less than 5 hours is not enough. Fix this.",
-  ]),
+  sleepPoor: () => "Under 5 hours is not enough. Your body can't recover or burn fat properly. Get to bed earlier tonight — this is non-negotiable.",
 
-  sleepGood: () => pick([
-    "Good sleep. Your body recovers and burns fat at night — protect that.",
-    "Solid rest. That's how you recover properly.",
-    "Sleep logged. That's the foundation — keep it consistent.",
-  ]),
+  sleepOk: () => "Not bad but not optimal. Aim for 7-8 hours — that's when your body does its best work.",
+
+  sleepGood: () => "Solid sleep. That's how you recover properly and keep cravings in check.",
 
   weeklyLockedIn: () => pick([
     "Elite week. That's the KAM Life standard. Keep this intensity.",
