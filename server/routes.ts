@@ -15,6 +15,38 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+async function sendWhatsAppMessage(to: string, body: string) {
+  try {
+    const accountSid = process.env.TWILIO_ACCOUNT_SID;
+    const authToken = process.env.TWILIO_AUTH_TOKEN;
+    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER;
+    if (!accountSid || !authToken || !fromNumber) {
+      console.error('[TWILIO] Missing credentials — skipping send');
+      return false;
+    }
+    const toNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
+    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
+        'Content-Type': 'application/x-www-form-urlencoded'
+      },
+      body: new URLSearchParams({
+        From: `whatsapp:${fromNumber}`,
+        To: toNumber,
+        Body: body
+      }).toString()
+    });
+    if (!response.ok) {
+      console.error(`[TWILIO] Send failed: ${response.status} ${await response.text()}`);
+    }
+    return response.ok;
+  } catch (e) {
+    console.error('[TWILIO] Failed to send WhatsApp message:', e);
+    return false;
+  }
+}
+
 const WORKOUTS_21DAY: Record<string, string[]> = {
   gym: [
     "Bike 10 min warm up. Chest press 3x10. Seated row 3x10. Shoulder press 3x10. Rest 60 seconds between sets.",
@@ -362,6 +394,33 @@ export async function registerRoutes(
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
         await storage.logChat(user.id, message, menuText, "COACH_MENU");
         return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+      }
+    }
+
+    // ── Priority 1.5: INFORMAL SA LANGUAGE ──
+    const sharpWords = ["SHARP SHARP", "KE SHARP", "SHARP"];
+    if (sharpWords.some(w => cleanMsg === w || cleanMsg.startsWith(w + " "))) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
+        await storage.logChat(user.id, message, menuText, "SA_SLANG_SHARP");
+        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+      }
+    }
+    if (cleanMsg.includes("EISH")) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        const reply = "Talk to me — what is going on? Type what you ate or how you are feeling and I will help you get back on track.";
+        await storage.logChat(user.id, message, reply, "SA_SLANG_EISH");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+    if (cleanMsg.includes("HAYIBO")) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        const reply = "Ha — tell me more. What happened today?";
+        await storage.logChat(user.id, message, reply, "SA_SLANG_HAYIBO");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
 
@@ -737,6 +796,28 @@ export async function registerRoutes(
       }
     }
 
+    // ── Priority 9.7: EMOTIONAL INTELLIGENCE ──
+    const giveUpWords = ["GIVE UP", "GIVING UP", "CANT DO THIS", "NOT WORKING", "NO RESULTS", "WASTE OF MONEY", "USELESS"];
+    if (giveUpWords.some(w => cleanMsg.includes(w))) {
+      const reply = "I hear you. Results are not always visible on the scale — but they are happening. Tell me: are you sleeping? Are you moving? Are you eating protein? Answer those three and we fix this together.";
+      await storage.logChat(user.id, message, reply, "EMOTIONAL_GIVEUP");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    const stressWords = ["STRESSED", "STRESS", "ANXIETY", "DEPRESSED", "SAD", "CANT COPE", "OVERWHELMED"];
+    if (stressWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Your mental health matters more than any workout. Take today off if you need to — but do not disappear. Check in tomorrow. Even just a walk and water counts. I am here.";
+      await storage.logChat(user.id, message, reply, "EMOTIONAL_STRESS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.8: SUPPLEMENT GUIDANCE ──
+    const suppWords = ["PROTEIN SHAKE", "PROTEIN POWDER", "CREATINE", "FAT BURNER", "PRE WORKOUT", "SUPPLEMENTS", "SUPPS"];
+    if (suppWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Supplements are optional — food comes first. If your diet is clean and consistent, protein powder can help hit your daily target. Creatine is safe and effective for strength. Fat burners are mostly marketing — avoid them. Sort your food first, then we talk supplements.";
+      await storage.logChat(user.id, message, reply, "SUPPLEMENT_ADVICE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
     // ── Priority 10: INTENT ROUTING ──
     let detectedIntent: string | null = null;
 
@@ -995,6 +1076,7 @@ export async function registerRoutes(
             msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
           }
           console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
+          await sendWhatsAppMessage(user.phoneNumber, msg);
           await storage.logChat(user.id, "", msg, "DAILY_MORNING");
         }
       }
@@ -1012,6 +1094,7 @@ export async function registerRoutes(
           }
           const msg = "You've gone quiet. Your body doesn't take days off — and neither should your mindset. Log one thing today: food, steps, or a workout. One thing. That's all it takes.";
           console.log(`[SCHEDULE] Re-engagement nudge to ${user.phoneNumber}`);
+          await sendWhatsAppMessage(user.phoneNumber, msg);
           await storage.logChat(user.id, "", msg, "RE_ENGAGEMENT");
         }
       }
@@ -1093,9 +1176,15 @@ export async function registerRoutes(
           const aSteps = avgSteps || 0;
           const aDays = activeDays || 0;
           const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
-          const report = `*Weekly Compliance Report*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
+          let report = `*Weekly Compliance Report*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
+
+          const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+          if (daysSinceJoin >= 28) {
+            report += "\n\nYou have been on this programme for 4 weeks. Take a photo today — front, side, back. Same time, same lighting. This is your progress marker. You will thank yourself later.";
+          }
 
           console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
+          await sendWhatsAppMessage(user.phoneNumber, report);
           await storage.logChat(user.id, "", report, "WEEKLY_REPORT");
         }
       }
