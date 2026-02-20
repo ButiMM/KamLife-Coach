@@ -47,23 +47,11 @@ export const R = {
     "Logged. Water first, always.",
   ]),
 
-  stepsLow: () => pick([
-    "That's too low. Get up and do a 10-minute walk right now. Small movement adds up.",
-    "Not good enough. You need to move more. Even 10 minutes outside counts.",
-    "Below target. Do a 5-minute walk before bed. Every step counts.",
-  ]),
+  stepsLow: () => "That's not enough movement. Get outside for 10 minutes right now — even a short walk counts.",
 
-  stepsGood: () => pick([
-    "Solid. That's how you build the habit.",
-    "Good work. Keep that momentum tomorrow.",
-    "Steps done. Consistency over perfection.",
-  ]),
+  stepsGood: () => "Decent effort. Push for your daily target tomorrow — consistency is what moves the scale.",
 
-  stepsTarget: () => pick([
-    "Target hit. That's discipline.",
-    "Full target. That's the standard — repeat it tomorrow.",
-    "You hit it. Now do it again tomorrow.",
-  ]),
+  stepsTarget: () => "Target hit. That's the standard — repeat it tomorrow.",
 
   mealSkipped: () => pick([
     "Skipping meals slows fat loss and triggers cravings later. Eat 2 eggs or a tin of fish now.",

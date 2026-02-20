@@ -275,8 +275,8 @@ export async function registerRoutes(
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
-        return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, menuText, "COACH_MENU");
+        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
       }
     }
 
@@ -301,20 +301,20 @@ export async function registerRoutes(
           onboardingState: "AWAITING_NAME"
         });
         console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife! Let's get started. What is your full name? [STATE: none]</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife! Let's get started. What is your full name?</Message></Response>`);
       } else {
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink} [STATE: none]</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife. Subscribe here: ${paymentLink}</Message></Response>`);
       }
     }
 
     // ── Priority 4: ADMIN BYPASS (BYPASS ON/OFF) ──
     if (cleanMsg === "BYPASS ON") {
       await storage.updateUser(user.id, { subscriptionStatus: "active" });
-      return res.type('text/xml').send(`<Response><Message>Admin Bypass: ON ✅ You are now an active user. [STATE: none]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>Admin Bypass: ON ✅ You are now an active user.</Message></Response>`);
     }
     if (cleanMsg === "BYPASS OFF") {
       await storage.updateUser(user.id, { subscriptionStatus: "inactive" });
-      return res.type('text/xml').send(`<Response><Message>Admin Bypass: OFF ❌ Subscription required. [STATE: none]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>Admin Bypass: OFF ❌ Subscription required.</Message></Response>`);
     }
 
     // ── Priority 5: Subscription check ──
@@ -329,7 +329,7 @@ export async function registerRoutes(
       user.subscriptionStatus = "active";
     }
     if (user.subscriptionStatus !== "active" && !isBetaTester) {
-      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink} [STATE: none]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink}</Message></Response>`);
     }
 
     // ── Priority 6: TIMEOUT GUARD ──
@@ -344,14 +344,12 @@ export async function registerRoutes(
     // ── Priority 7: Update lastActiveAt ──
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
-    const debugState = user.awaitingInputType ? ` [STATE: ${user.awaitingInputType}]` : " [STATE: none]";
-
     // ── Priority 8: RESET command ──
     if (cleanMsg === "RESET") {
       await storage.updateUser(user.id, { awaitingInputType: null });
       const menu = `Reset done. ${menuText}`;
-      await storage.logChat(user.id, message, menu + " [STATE: none]", "COACH_RESET");
-      return res.type('text/xml').send(`<Response><Message>${menu} [STATE: none]</Message></Response>`);
+      await storage.logChat(user.id, message, menu, "COACH_RESET");
+      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
     }
 
     // ── Priority 9: STATE HANDLING (single-exit routing) ──
@@ -365,16 +363,16 @@ export async function registerRoutes(
           const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, context, user.name || "there");
           await storage.updateUser(user.id, { awaitingInputType: null });
           await storage.logChat(user.id, message, reply, "ALCOHOL_FLAGGED");
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
         if (cleanMsg.includes("YES")) {
           await storage.updateUser(user.id, { awaitingInputType: "food" });
           const reply = R.promptFood();
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: food]</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
-          return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
+          await storage.logChat(user.id, message, menuText, "COACH_MENU");
+          return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
         } else {
           const context = await getRecentFoodContext(user.id);
           const { reply } = await getKamLifeFoodReply(
@@ -385,7 +383,7 @@ export async function registerRoutes(
           );
           await storage.updateUser(user.id, { awaitingInputType: null });
           await storage.logChat(user.id, message, reply, "EXTRA_LOG");
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
       }
 
@@ -402,14 +400,14 @@ export async function registerRoutes(
         let reaction = level === 1 ? R.portionGood() + " " : R.portionHigh(targetFists) + " ";
         reaction += R.promptDrink();
 
-        await storage.logChat(user.id, message, reaction + " [STATE: drink]", "PORTION_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: drink]</Message></Response>`);
+        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
       }
 
       if (inputType === "drink") {
         if (cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
         }
 
         const context = await getRecentFoodContext(user.id);
@@ -423,7 +421,7 @@ export async function registerRoutes(
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
         const full = `${reply} Anything else to log? (yes/no)`;
         await storage.logChat(user.id, message, full, "DRINK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${full} [STATE: anything_else]</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
 
       if (inputType === "food") {
@@ -436,7 +434,7 @@ export async function registerRoutes(
         );
         await storage.updateUser(user.id, { awaitingInputType: null });
         await storage.logChat(user.id, message, reply, "FOOD_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
       if (inputType === "sleep") {
@@ -447,8 +445,8 @@ export async function registerRoutes(
           let reaction = "";
           if (hours < 5) reaction = R.sleepPoor();
           else reaction = R.sleepGood();
-          await storage.logChat(user.id, message, reaction + " [STATE: none]", "LOG_SLEEP_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: none]</Message></Response>`);
+          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
         }
       }
 
@@ -460,8 +458,8 @@ export async function registerRoutes(
           await storage.createWeightLog(user.id, val);
           await storage.updateUser(user.id, { currentWeight: val });
           const reply = R.weightLogged(val);
-          await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_WEIGHT_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
       }
     }
@@ -478,13 +476,25 @@ export async function registerRoutes(
         await storage.updateUser(user.id, { goalType: message, onboardingState: "AWAITING_WEIGHT" });
         reply = R.onboardingGoal();
       } else if (currentState === "AWAITING_WEIGHT") {
-        await storage.updateUser(user.id, { currentWeight: message, onboardingState: "COMPLETED" });
-        reply = R.onboardingComplete();
+        const weightVal = parseFloat(message);
+        if (!weightVal || weightVal < 30 || weightVal > 300) {
+          reply = "Please enter a valid weight in kg (e.g. 85).";
+        } else {
+          const goalStr = (user.goalType || "").toLowerCase();
+          let calorieTarget: number;
+          if (goalStr.includes("fat") || goalStr.includes("loss")) {
+            calorieTarget = Math.max(1500, Math.round(weightVal * 22 - 500));
+          } else {
+            calorieTarget = Math.round(weightVal * 22 + 300);
+          }
+          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "COMPLETED", calorieTarget });
+          reply = R.onboardingComplete();
+        }
       }
 
       if (reply) {
-        await storage.logChat(user.id, message, reply + " [STATE: none]", "ONBOARDING");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, reply, "ONBOARDING");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
 
@@ -494,19 +504,19 @@ export async function registerRoutes(
     if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
     if (cleanMsg === "2") {
       await storage.updateUser(user.id, { awaitingInputType: "food" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptFood()} [STATE: food]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptFood()}</Message></Response>`);
     }
     if (cleanMsg === "3") {
       await storage.updateUser(user.id, { awaitingInputType: "steps" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptSteps()} [STATE: steps]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptSteps()}</Message></Response>`);
     }
     if (cleanMsg === "4") {
       await storage.updateUser(user.id, { awaitingInputType: "sleep" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptSleep()} [STATE: sleep]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptSleep()}</Message></Response>`);
     }
     if (cleanMsg === "5") {
       await storage.updateUser(user.id, { awaitingInputType: "weight" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptWeight()} [STATE: weight]</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>${R.promptWeight()}</Message></Response>`);
     }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
 
@@ -530,8 +540,8 @@ export async function registerRoutes(
 
       if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
         const advice = "For fat loss, focus on high-protein and fibre: \n- Oats or Eggs for breakfast\n- Grilled chicken or tinned fish with veg for lunch/dinner\n- Limit pap/rice to one fist size per meal.\nWhat are you planning to eat next?";
-        await storage.logChat(user.id, message, advice + " [STATE: none]", "FOOD_ADVICE");
-        return res.type('text/xml').send(`<Response><Message>${advice} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, advice, "FOOD_ADVICE");
+        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
       }
     }
 
@@ -544,7 +554,7 @@ export async function registerRoutes(
       if (nothingWords.some(w => cleanMsg.includes(w))) {
         const reply = "Skipping meals slows fat loss and triggers cravings. Get 2 eggs or a tin of fish in now. Reply DONE after eating.";
         await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
       const recentContext = await getRecentFoodContext(user.id);
@@ -553,14 +563,14 @@ export async function registerRoutes(
       if (nextState === "portion") {
         await storage.updateUser(user.id, { awaitingInputType: "portion" });
         const full = `${coachReply}\nPortion check: 1 / 2 / 3+ fists?`;
-        await storage.logChat(user.id, message, full + debugState, "PORTION_CHECK");
-        return res.type('text/xml').send(`<Response><Message>${full}${debugState}</Message></Response>`);
+        await storage.logChat(user.id, message, full, "PORTION_CHECK");
+        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
 
       await storage.updateUser(user.id, { awaitingInputType: "drink" });
       const full = `${coachReply} What did you drink?`;
-      await storage.logChat(user.id, message, full + debugState, "LOG_FOOD");
-      return res.type('text/xml').send(`<Response><Message>${full}${debugState}</Message></Response>`);
+      await storage.logChat(user.id, message, full, "LOG_FOOD");
+      return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
     }
 
     if (detectedIntent === "GET_WORKOUT") {
@@ -573,8 +583,8 @@ export async function registerRoutes(
       const mode = (user.trainingMode as keyof typeof workouts) || "home";
       const workout = workouts[mode][(day - 1) % 3];
       const reply = R.workoutToday(day, workout);
-      await storage.logChat(user.id, message, reply + " [STATE: none]", "GET_WORKOUT");
-      return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+      await storage.logChat(user.id, message, reply, "GET_WORKOUT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     if (detectedIntent === "LOG_STEPS") {
@@ -593,8 +603,8 @@ export async function registerRoutes(
 
         const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
         const reply = `${reaction}${comparison}`;
-        await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_STEPS");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, reply, "LOG_STEPS");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
 
@@ -605,8 +615,8 @@ export async function registerRoutes(
         let reaction = "";
         if (hours < 5) reaction = R.sleepPoor();
         else reaction = R.sleepGood();
-        await storage.logChat(user.id, message, reaction + " [STATE: none]", "LOG_SLEEP");
-        return res.type('text/xml').send(`<Response><Message>${reaction} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, reaction, "LOG_SLEEP");
+        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
       }
     }
 
@@ -617,15 +627,15 @@ export async function registerRoutes(
         await storage.createWeightLog(user.id, val);
         await storage.updateUser(user.id, { currentWeight: val });
         const reply = R.weightLogged(val);
-        await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_WEIGHT");
-        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+        await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
 
     if (detectedIntent === "SHOW_TARGETS") {
       const reply = R.targets(user.calorieTarget || 2000, user.proteinTarget || 150, user.stepsTarget || 8000);
-      await storage.logChat(user.id, message, reply + " [STATE: none]", "SHOW_TARGETS");
-      return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+      await storage.logChat(user.id, message, reply, "SHOW_TARGETS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     if (detectedIntent === "WORKOUT_DONE") {
@@ -634,13 +644,13 @@ export async function registerRoutes(
       if (nextDay > 3) nextDay = 1;
       await storage.updateUser(user.id, { programDayIndex: nextDay });
       const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.`;
-      await storage.logChat(user.id, message, reply + " [STATE: none]", "WORKOUT_DONE");
-      return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
+      await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     // ── Priority 12: DEFAULT ──
-    await storage.logChat(user.id, message, menuText + " [STATE: none]", "COACH_MENU");
-    return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
+    await storage.logChat(user.id, message, menuText, "COACH_MENU");
+    return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
   });
 
   // ============================================================
@@ -781,7 +791,11 @@ export async function registerRoutes(
     else if (totalScore >= 70) level = "CONSISTENT";
     else if (totalScore >= 40) level = "BUILDING";
 
-    return { score: totalScore, level };
+    const weekSteps = steps.filter(s => s.loggedAt && new Date(s.loggedAt) >= sevenDaysAgo);
+    const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((sum, s) => sum + s.steps, 0) / weekSteps.length) : 0;
+    const foodLogDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
+
+    return { score: totalScore, level, workoutsDone, avgSteps, foodLogDays, activeDays };
   }
 
   // Weekly scheduler
@@ -792,14 +806,18 @@ export async function registerRoutes(
       const users = await storage.getAllUsers();
       for (const user of users) {
         if (user.subscriptionStatus === "active") {
-          const { score, level } = await calculateWeeklyCompliance(user.id);
+          const { score, level, workoutsDone, avgSteps, foodLogDays, activeDays } = await calculateWeeklyCompliance(user.id);
           await storage.updateUser(user.id, { weeklyScore: score, complianceLevel: level });
 
           const levelMsg = level === "LOCKED IN" ? R.weeklyLockedIn() :
             level === "CONSISTENT" ? R.weeklyConsistent() :
             level === "BUILDING" ? R.weeklyBuilding() :
             R.weeklyReset();
-          const report = `*Weekly Compliance Report*\n\nScore: ${score}/100\nLevel: ${level}\n\n${levelMsg}\n\nReply MENU to continue.`;
+          const fDays = foodLogDays || 0;
+          const aSteps = avgSteps || 0;
+          const aDays = activeDays || 0;
+          const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
+          const report = `*Weekly Compliance Report*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
 
           console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
           await storage.logChat(user.id, "", report, "WEEKLY_REPORT");
