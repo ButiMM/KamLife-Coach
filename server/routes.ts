@@ -1054,9 +1054,62 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
-    // ── Priority 12: DEFAULT ──
-    await storage.logChat(user.id, message, menuText, "COACH_MENU");
-    return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+    // ── Priority 12: INTELLIGENT FALLBACK ──
+    try {
+      const compliance = await calculateWeeklyCompliance(user.id);
+      const recentChats = await storage.getChatHistory(user.id, 5);
+      const recentFoodContext = recentChats
+        .filter(c => c.intent === "LOG_FOOD" || c.intent === "FOOD_PORTION")
+        .map(c => c.userMessage)
+        .slice(0, 3);
+
+      const personalContext = {
+        name: user.name || "there",
+        goal: user.fitnessGoal || "general fitness",
+        calorieTarget: user.calorieTarget || 2000,
+        proteinTarget: user.proteinTarget || 120,
+        stepTarget: user.stepTarget || 8000,
+        complianceScore: compliance.score,
+        complianceLevel: compliance.level,
+        recentFoods: recentFoodContext,
+        age: user.age || null,
+        workoutMode: user.workoutMode || "gym",
+      };
+
+      const fallbackCompletion = await openai.chat.completions.create({
+        model: "gpt-5.1",
+        messages: [
+          {
+            role: "system",
+            content: `${KAMLIFE_MASTER_PROMPT}
+
+You are responding to a client message that did not match any specific command. Respond naturally as their personal coach. Be helpful, direct, and personalised.
+
+Client profile:
+- Name: ${personalContext.name}
+- Goal: ${personalContext.goal}
+- Daily calorie target: ${personalContext.calorieTarget} kcal
+- Daily protein target: ${personalContext.proteinTarget}g
+- Daily step target: ${personalContext.stepTarget.toLocaleString()}
+- Compliance: ${personalContext.complianceScore}/100 (${personalContext.complianceLevel})
+- Workout mode: ${personalContext.workoutMode}
+${personalContext.age ? `- Age: ${personalContext.age}` : ""}
+${personalContext.recentFoods.length > 0 ? `- Recent foods logged: ${personalContext.recentFoods.join(", ")}` : ""}
+
+Keep your reply under 300 words. Do not use emojis. End your response naturally — do NOT add a menu.`
+          },
+          { role: "user", content: message }
+        ]
+      });
+
+      const aiReply = fallbackCompletion.choices[0].message.content || "Keep pushing!";
+      const fullReply = `${aiReply}\n\nReply MENU to see your options.`;
+      await storage.logChat(user.id, message, fullReply, "INTELLIGENT_FALLBACK");
+      return res.type('text/xml').send(`<Response><Message>${fullReply}</Message></Response>`);
+    } catch (e) {
+      await storage.logChat(user.id, message, menuText, "COACH_MENU");
+      return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+    }
   });
 
   // ============================================================
