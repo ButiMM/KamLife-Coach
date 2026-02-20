@@ -264,7 +264,7 @@ export async function registerRoutes(
     const paymentLink = "https://payfast.co.za/mock-pay";
 
     if (req.body.MediaContentType0 && req.body.MediaContentType0.includes("audio")) {
-      return res.type('text/xml').send(`<Response><Message>Voice notes aren't supported yet — please type your message. Reply MENU to see your options.</Message></Response>`);
+      return res.type('text/xml').send(`<Response><Message>Please send a text message — type what you ate, your steps, or how your workout went.</Message></Response>`);
     }
 
     const menuText = `KAM Life Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
@@ -358,7 +358,7 @@ export async function registerRoutes(
 
     // ── Priority 8.5: HELP command ──
     if (cleanMsg === "HELP") {
-      const helpReply = "Need help?\n\n- Reply MENU to see your options\n- Reply RESET if something seems stuck\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nKAM Life is here 24/7. Keep pushing.";
+      const helpReply = "Here to help.\n\n- Reply MENU to see your options\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nKAM Life is with you 24/7. Keep pushing.";
       await storage.logChat(user.id, message, helpReply, "HELP");
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
     }
