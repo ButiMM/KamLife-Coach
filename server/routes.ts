@@ -437,6 +437,27 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
+      if (inputType === "steps") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
+        const stepsMatch = cleanMsg.match(/\d+/);
+        const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+        if (steps !== null) {
+          await storage.createStepLog(user.id, steps);
+          const prevLogs = await storage.getStepLogs(user.id);
+          const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
+
+          let reaction = "";
+          if (steps < 2000) reaction = R.stepsLow();
+          else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
+          else reaction = R.stepsGood();
+
+          const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
+          const reply = `${reaction}${comparison}`;
+          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
+
       if (inputType === "sleep") {
         await storage.updateUser(user.id, { awaitingInputType: null });
         const sleepMatch = cleanMsg.match(/\d+/);
