@@ -426,50 +426,17 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${full} [STATE: anything_else]</Message></Response>`);
       }
 
-      if (inputType === "food" && !/^\d+$/.test(cleanMsg)) {
-        if (cleanMsg === "MENU") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          return res.type('text/xml').send(`<Response><Message>${menuText} [STATE: none]</Message></Response>`);
-        }
-
+      if (inputType === "food") {
         const context = await getRecentFoodContext(user.id);
-        const { reply, nextState } = await getKamLifeFoodReply(
+        const { reply } = await getKamLifeFoodReply(
           message,
           user.calorieTarget || 2000,
           context,
           user.name || "there"
         );
-
-        if (nextState === "portion") {
-          await storage.updateUser(user.id, { awaitingInputType: "portion" });
-          const full = `${reply}\nHow much carbs: 1 fist / 2 fists / 3+ fists?`;
-          await storage.logChat(user.id, message, full, "FOOD_LOGGED");
-          return res.type('text/xml').send(`<Response><Message>${full} [STATE: portion]</Message></Response>`);
-        }
-
-        await storage.updateUser(user.id, { awaitingInputType: "drink" });
-        const full = `${reply} What did you drink?`;
-        await storage.logChat(user.id, message, full, "FOOD_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${full} [STATE: drink]</Message></Response>`);
-      }
-
-      if (inputType === "steps") {
         await storage.updateUser(user.id, { awaitingInputType: null });
-        const stepsMatch = cleanMsg.match(/\d+/);
-        const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
-        if (steps !== null) {
-          await storage.createStepLog(user.id, steps);
-          const prevLogs = await storage.getStepLogs(user.id);
-          const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
-          let reaction = "";
-          if (steps < 2000) reaction = R.stepsLow();
-          else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
-          else reaction = R.stepsGood();
-          const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
-          const reply = `${reaction}${comparison}`;
-          await storage.logChat(user.id, message, reply + " [STATE: none]", "LOG_STEPS_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
-        }
+        await storage.logChat(user.id, message, reply, "FOOD_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${reply} [STATE: none]</Message></Response>`);
       }
 
       if (inputType === "sleep") {
