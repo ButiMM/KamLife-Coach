@@ -444,6 +444,14 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
     }
 
+    // ── Priority 8.55: CANCEL command ──
+    if (cleanMsg === "CANCEL") {
+      const cancelReply = "Before you go — tell us why you want to cancel. Reply:\n1) Too expensive\n2) Not getting results\n3) Too busy\nOr reply CONFIRM to cancel.";
+      await storage.updateUser(user.id, { awaitingInputType: "awaiting_cancel" });
+      await storage.logChat(user.id, message, cancelReply, "CANCEL_INIT");
+      return res.type('text/xml').send(`<Response><Message>${cancelReply}</Message></Response>`);
+    }
+
     // ── Priority 8.6: MEAL SUGGESTIONS ──
     const mealTriggers = ["WHAT SHOULD I EAT", "MEAL IDEAS", "FOOD SUGGESTIONS", "WHAT CAN I EAT"];
     if (mealTriggers.some(t => cleanMsg.includes(t))) {
@@ -491,6 +499,33 @@ export async function registerRoutes(
     // ── Priority 9: STATE HANDLING (single-exit routing) ──
     if (user.awaitingInputType) {
       const inputType = user.awaitingInputType;
+
+      if (inputType === "awaiting_cancel") {
+        await storage.updateUser(user.id, { awaitingInputType: null });
+        if (cleanMsg === "CONFIRM") {
+          await storage.updateUser(user.id, { subscriptionStatus: "inactive" });
+          const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Keep pushing — even without us.";
+          await storage.logChat(user.id, message, reply, "CANCEL_CONFIRMED");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        } else if (cleanMsg === "1") {
+          const reply = "We hear you. Reply STAY and we will sort something out.";
+          await storage.logChat(user.id, message, reply, "CANCEL_REASON_PRICE");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        } else if (cleanMsg === "2") {
+          const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+          const reply = `Results come from consistency. You have been here ${daysSinceJoin} days. Give it 30 more — one month of full commitment. Reply STAY to continue.`;
+          await storage.logChat(user.id, message, reply, "CANCEL_REASON_RESULTS");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        } else if (cleanMsg === "3") {
+          const reply = "KamLife Coach takes 5 minutes a day. Just log your food and steps. Reply STAY to continue.";
+          await storage.logChat(user.id, message, reply, "CANCEL_REASON_BUSY");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        } else if (cleanMsg === "STAY") {
+          const reply = `Great decision. Let's get back to work.\n\n${menuText}`;
+          await storage.logChat(user.id, message, reply, "CANCEL_STAYED");
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+      }
 
       if (inputType === "anything_else") {
         const anythingParsing = parseFoodMessage(message);
@@ -588,7 +623,12 @@ export async function registerRoutes(
           else reaction = R.stepsGood();
 
           const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
-          const reply = `${reaction}${comparison}`;
+          let winMoment = "";
+          const target = user.stepsTarget || 8000;
+          if (prevLogs.length >= 7 && prevLogs.slice(0, 7).every(s => s.steps >= target)) {
+            winMoment = "\n\n🔥 7 days straight hitting your target. That is elite discipline. Screenshot this.";
+          }
+          const reply = `${reaction}${comparison}${winMoment}`;
           await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
@@ -615,7 +655,12 @@ export async function registerRoutes(
           const val = weightMatch[0];
           await storage.createWeightLog(user.id, val);
           await storage.updateUser(user.id, { currentWeight: val });
-          const reply = R.weightLogged(val);
+          let reply = R.weightLogged(val);
+          const allWeights = await storage.getWeightLogs(user.id);
+          const twoWeeksAgo = allWeights.find(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= 14 * 24 * 60 * 60 * 1000);
+          if (twoWeeksAgo && (parseFloat(twoWeeksAgo.weight) - parseFloat(val)) >= 2) {
+            reply += "\n\n⚡ Down 2kg. That is the work paying off. Screenshot this and share it.";
+          }
           await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         }
@@ -779,7 +824,12 @@ export async function registerRoutes(
         else reaction = R.stepsGood();
 
         const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
-        const reply = `${reaction}${comparison}`;
+        let winMoment = "";
+        const target = user.stepsTarget || 8000;
+        if (prevLogs.length >= 7 && prevLogs.slice(0, 7).every(s => s.steps >= target)) {
+          winMoment = "\n\n🔥 7 days straight hitting your target. That is elite discipline. Screenshot this.";
+        }
+        const reply = `${reaction}${comparison}${winMoment}`;
         await storage.logChat(user.id, message, reply, "LOG_STEPS");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -804,7 +854,12 @@ export async function registerRoutes(
         const val = weightMatch[0];
         await storage.createWeightLog(user.id, val);
         await storage.updateUser(user.id, { currentWeight: val });
-        const reply = R.weightLogged(val);
+        let reply = R.weightLogged(val);
+        const allWeights = await storage.getWeightLogs(user.id);
+        const twoWeeksAgo = allWeights.find(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= 14 * 24 * 60 * 60 * 1000);
+        if (twoWeeksAgo && (parseFloat(twoWeeksAgo.weight) - parseFloat(val)) >= 2) {
+          reply += "\n\n⚡ Down 2kg. That is the work paying off. Screenshot this and share it.";
+        }
         await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -907,6 +962,18 @@ export async function registerRoutes(
           }
           console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
           await storage.logChat(user.id, "", msg, "DAILY_MORNING");
+        }
+      }
+    }
+    // Daily 10:00 — Re-engagement
+    if (now.getHours() === 10 && now.getMinutes() === 0) {
+      const users = await storage.getAllUsers();
+      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      for (const user of users) {
+        if (user.subscriptionStatus === "active" && user.lastActiveAt && new Date(user.lastActiveAt) < threeDaysAgo) {
+          const msg = "You've gone quiet. Your body doesn't take days off — and neither should your mindset. Log one thing today: food, steps, or a workout. One thing. That's all it takes.";
+          console.log(`[SCHEDULE] Re-engagement nudge to ${user.phoneNumber}`);
+          await storage.logChat(user.id, "", msg, "RE_ENGAGEMENT");
         }
       }
     }
