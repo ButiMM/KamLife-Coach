@@ -263,6 +263,10 @@ export async function registerRoutes(
     const cleanMsg = message.trim().toUpperCase();
     const paymentLink = "https://payfast.co.za/mock-pay";
 
+    if (req.body.MediaContentType0 && req.body.MediaContentType0.includes("audio")) {
+      return res.type('text/xml').send(`<Response><Message>Voice notes aren't supported yet — please type your message. Reply MENU to see your options.</Message></Response>`);
+    }
+
     const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
 
     // ── Priority 1: GREETING GUARD ──
@@ -350,6 +354,13 @@ export async function registerRoutes(
       const menu = `Reset done. ${menuText}`;
       await storage.logChat(user.id, message, menu, "COACH_RESET");
       return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
+    }
+
+    // ── Priority 8.5: HELP command ──
+    if (cleanMsg === "HELP") {
+      const helpReply = "Need help?\n\n- Reply MENU for main menu\n- Reply RESET if bot seems stuck\n- Reply 7 to update your profile\n- Type your food, steps or workout anytime\n\nKAM Life runs 24/7. We have your back.";
+      await storage.logChat(user.id, message, helpReply, "HELP");
+      return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
     }
 
     // ── Priority 9: STATE HANDLING (single-exit routing) ──
