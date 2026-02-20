@@ -522,7 +522,10 @@ export async function registerRoutes(
         else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
         if (mode) {
           await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "COMPLETED" });
-          reply = `Profile updated. You are ready. Let's get to work.\n\n${menuText}`;
+          const isProfileUpdate = !!user.name;
+          reply = isProfileUpdate
+            ? `Profile updated. You are ready. Let's get to work.\n\n${menuText}`
+            : `${R.onboardingComplete()}\n\n${menuText}`;
         } else {
           reply = "Please reply 1, 2, or 3.\n1) Gym\n2) Home\n3) Walking only";
         }
