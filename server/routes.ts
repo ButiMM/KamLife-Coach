@@ -15,6 +15,78 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+const WORKOUTS_21DAY: Record<string, string[]> = {
+  gym: [
+    "Bike 10 min warm up. Chest press 3x10. Seated row 3x10. Shoulder press 3x10. Rest 60 seconds between sets.",
+    "Treadmill 15 min incline walk. Leg press 3x12. Leg curl 3x12. Calf raises 3x15.",
+    "Rest day — 20 min walk outside. Stretch for 10 minutes.",
+    "Bike 10 min. Bicep curls 3x12. Tricep pushdown 3x12. Lat pulldown 3x10.",
+    "Full body circuit — 3 rounds: 10 squats, 10 push ups, 10 rows, 10 shoulder press. 90 sec rest between rounds.",
+    "Cardio day — 30 min treadmill or bike at moderate pace.",
+    "Rest day — light walk and stretch.",
+    "Bike 10 min. Chest press 4x10. Seated row 4x10. Shoulder press 4x10. Rest 60 sec.",
+    "Treadmill 15 min incline. Leg press 3x14. Leg curl 3x14. Calf raises 3x17.",
+    "Rest day — 25 min walk outside. Stretch 10 minutes.",
+    "Bike 10 min. Bicep curls 3x14. Tricep pushdown 3x14. Lat pulldown 3x12.",
+    "Full body circuit — 3 rounds: 12 squats, 12 push ups, 12 rows, 12 shoulder press. 90 sec rest.",
+    "Cardio day — 35 min treadmill or bike at moderate pace.",
+    "Rest day — light walk and stretch.",
+    "Bike 10 min. Chest press 4x12. Seated row 4x12. Shoulder press 4x12. Rest 60 sec.",
+    "Treadmill 20 min incline. Leg press 4x12. Leg curl 4x12. Calf raises 4x15.",
+    "Rest day — 30 min walk outside. Stretch 10 minutes.",
+    "Bike 10 min. Bicep curls 4x12. Tricep pushdown 4x12. Lat pulldown 4x10.",
+    "Full body circuit — 4 rounds: 12 squats, 12 push ups, 12 rows, 12 shoulder press. 90 sec rest.",
+    "Cardio day — 40 min treadmill or bike at moderate pace.",
+    "Rest day — light walk and full body stretch. You earned it."
+  ],
+  home: [
+    "Squats 3x10. Push ups 3x10 (or knees). Wall sit 30 sec x3. Plank 30 sec x3.",
+    "Lunges 3x10 each leg. Mountain climbers 3x20. Push ups 3x10. Plank 45 sec x3.",
+    "Rest day — 20 min walk outside. Stretch for 10 minutes.",
+    "Squats 3x12. Push ups 3x12. Step ups on chair 3x10 each leg. Plank 45 sec x3.",
+    "Full body circuit — 3 rounds: 10 squats, 10 push ups, 10 lunges, 20 mountain climbers. 90 sec rest.",
+    "Cardio day — 30 min brisk walk or jog. Keep moving the whole time.",
+    "Rest day — light walk and stretch.",
+    "Squats 4x10. Push ups 4x10. Wall sit 45 sec x3. Plank 45 sec x3.",
+    "Lunges 3x12 each leg. Mountain climbers 3x25. Push ups 3x12. Plank 60 sec x3.",
+    "Rest day — 25 min walk outside. Stretch 10 minutes.",
+    "Squats 3x14. Push ups 3x14. Step ups 3x12 each leg. Plank 60 sec x3.",
+    "Full body circuit — 3 rounds: 12 squats, 12 push ups, 12 lunges, 25 mountain climbers. 90 sec rest.",
+    "Cardio day — 35 min brisk walk or jog.",
+    "Rest day — light walk and stretch.",
+    "Squats 4x12. Push ups 4x12. Wall sit 60 sec x3. Plank 60 sec x3.",
+    "Lunges 4x12 each leg. Mountain climbers 4x25. Push ups 4x12. Plank 60 sec x3.",
+    "Rest day — 30 min walk outside. Stretch 10 minutes.",
+    "Squats 4x14. Push ups 4x14. Step ups 4x12 each leg. Plank 60 sec x3.",
+    "Full body circuit — 4 rounds: 12 squats, 12 push ups, 12 lunges, 25 mountain climbers. 90 sec rest.",
+    "Cardio day — 40 min brisk walk or jog.",
+    "Rest day — light walk and full body stretch. You earned it."
+  ],
+  walk_only: [
+    "Walk 10 minutes at easy pace. Focus on posture — head up, shoulders back.",
+    "Walk 12 minutes. Slightly faster than yesterday.",
+    "Walk 15 minutes. Find a route with a gentle hill if you can.",
+    "Rest day — 10 min easy walk and stretch.",
+    "Walk 18 minutes at a steady pace. No stopping.",
+    "Walk 20 minutes. Push the pace for the last 5 minutes.",
+    "Rest day — light 10 min walk.",
+    "Walk 22 minutes. Keep a brisk pace the whole way.",
+    "Walk 25 minutes. Add an incline or stairs if possible.",
+    "Walk 25 minutes at a steady pace. No stopping.",
+    "Rest day — 15 min easy walk and stretch.",
+    "Walk 28 minutes. Push pace for the last 8 minutes.",
+    "Walk 30 minutes. Find a new route to keep it interesting.",
+    "Rest day — 15 min easy walk.",
+    "Walk 30 minutes brisk pace. No stopping.",
+    "Walk 33 minutes. Push pace for the last 10 minutes.",
+    "Walk 35 minutes. Add incline or stairs.",
+    "Rest day — 15 min easy walk and stretch.",
+    "Walk 38 minutes at a brisk pace.",
+    "Walk 40 minutes. Push hard for the last 10 minutes.",
+    "Walk 45 minutes. Full effort. You earned this distance."
+  ]
+};
+
 function parseFoodMessage(text: string) {
   const upper = text.toUpperCase();
   const tokens = upper.split(/[\s,.;]+/).filter(t => t.length > 1);
@@ -267,6 +339,13 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>Please send a text message — type what you ate, your steps, or how your workout went.</Message></Response>`);
     }
 
+    const redFlagWords = ["dizzy", "dizziness", "chest pain", "can't breathe", "faint", "fainting", "heart", "collapsed", "vomiting"];
+    const lowerMsg = message.toLowerCase();
+    if (redFlagWords.some(w => lowerMsg.includes(w))) {
+      const safetyReply = "Stop what you are doing. If you are experiencing chest pain, dizziness or difficulty breathing — stop exercising immediately and contact a medical professional or call 10177. Your safety comes first. We will be here when you are ready to continue.";
+      return res.type('text/xml').send(`<Response><Message>${safetyReply}</Message></Response>`);
+    }
+
     const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
 
     // ── Priority 1: GREETING GUARD ──
@@ -361,6 +440,50 @@ export async function registerRoutes(
       const helpReply = "Here to help.\n\n- Reply MENU to see your options\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nKamLife Coach is with you 24/7. Keep pushing.";
       await storage.logChat(user.id, message, helpReply, "HELP");
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
+    }
+
+    // ── Priority 8.6: MEAL SUGGESTIONS ──
+    const mealTriggers = ["WHAT SHOULD I EAT", "MEAL IDEAS", "FOOD SUGGESTIONS", "WHAT CAN I EAT"];
+    if (mealTriggers.some(t => cleanMsg.includes(t))) {
+      try {
+        const mealRes = await openai.chat.completions.create({
+          model: "gpt-4o-mini",
+          max_tokens: 200,
+          messages: [
+            {
+              role: "system",
+              content: `You are KamLife Coach. Generate a specific one day meal plan for a South African person. Use SA foods — pap, samp, pilchards, eggs, chicken, beans, vetkoek alternatives, oats. Give breakfast, lunch, dinner and one snack. Keep it affordable, practical and high protein. Calorie target: ${user.calorieTarget || 2000}. Goal: ${user.goalType || "general fitness"}. Max 150 words. Firm and specific, no fluff.`
+            },
+            { role: "user", content: message }
+          ]
+        });
+        const mealPlan = mealRes.choices[0]?.message?.content || "Eat eggs for breakfast, chicken and veg for lunch, pilchards with pap for dinner. Snack on biltong or fruit.";
+        await storage.logChat(user.id, message, mealPlan, "MEAL_SUGGESTION");
+        return res.type('text/xml').send(`<Response><Message>${mealPlan}</Message></Response>`);
+      } catch {
+        const fallback = "Eat eggs for breakfast, chicken and veg for lunch, pilchards with pap for dinner. Snack on biltong or fruit.";
+        await storage.logChat(user.id, message, fallback, "MEAL_SUGGESTION");
+        return res.type('text/xml').send(`<Response><Message>${fallback}</Message></Response>`);
+      }
+    }
+
+    // ── Priority 8.7: PROGRESS command ──
+    if (cleanMsg === "PROGRESS") {
+      const weightLogs = await storage.getWeightLogs(user.id);
+      const stepLogs = await storage.getStepLogs(user.id);
+      const compliance = await calculateWeeklyCompliance(user.id);
+
+      const currentWeight = weightLogs.length > 0 ? weightLogs[0].weight : user.currentWeight || "unknown";
+      const fourWeeksAgoWeight = weightLogs.length >= 4 ? weightLogs[3].weight : (weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : "unknown");
+
+      const recentSteps = stepLogs.slice(0, 7);
+      const avgSteps = recentSteps.length > 0
+        ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length)
+        : 0;
+
+      const progressReply = `*Progress Report — ${user.name || "Hey"}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}\n\nReply MENU to continue.`;
+      await storage.logChat(user.id, message, progressReply, "PROGRESS");
+      return res.type('text/xml').send(`<Response><Message>${progressReply}</Message></Response>`);
     }
 
     // ── Priority 9: STATE HANDLING (single-exit routing) ──
@@ -631,13 +754,9 @@ export async function registerRoutes(
 
     if (detectedIntent === "GET_WORKOUT") {
       const day = user.programDayIndex || 1;
-      const workouts = {
-        walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
-        home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
-        gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
-      };
-      const mode = (user.trainingMode as keyof typeof workouts) || "home";
-      const workout = workouts[mode][(day - 1) % 3];
+      const mode = (user.trainingMode as string) || "home";
+      const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
+      const workout = program[(day - 1) % 21];
       const reply = `Day ${day} — ${workout} Get it done. Reply DONE when finished.`;
       await storage.logChat(user.id, message, reply, "GET_WORKOUT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -698,7 +817,7 @@ export async function registerRoutes(
     if (detectedIntent === "WORKOUT_DONE") {
       await storage.createWorkoutLog(user.id, true);
       let nextDay = (user.programDayIndex || 1) + 1;
-      if (nextDay > 3) nextDay = 1;
+      if (nextDay > 21) nextDay = 1;
       await storage.updateUser(user.id, { programDayIndex: nextDay });
       const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.`;
       await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
@@ -747,13 +866,9 @@ export async function registerRoutes(
             msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
           } else {
             const day = user.programDayIndex || 1;
-            const workouts = {
-              walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
-              home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
-              gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
-            };
-            const mode = (user.trainingMode as keyof typeof workouts) || "home";
-            const workout = workouts[mode][(day - 1) % 3];
+            const mode = (user.trainingMode as string) || "home";
+            const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
+            const workout = program[(day - 1) % 21];
             msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
           }
           await storage.logChat(user.id, "", msg, "DAILY_TRIGGER");
@@ -783,13 +898,9 @@ export async function registerRoutes(
             msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
           } else {
             const day = user.programDayIndex || 1;
-            const workouts = {
-              walk_only: ["Walk 10–20 minutes. Easy pace. Stop if dizzy.", "Walk 10–20 minutes.", "Walk 15–25 minutes."],
-              home: ["Chair sit-to-stand 5–10 times. Wall push-ups 5–10. Walk 5–10 minutes.", "Walk 10–20 minutes.", "Chair sit-to-stand 5–10. Wall push-ups 5–10. March in place 2 minutes."],
-              gym: ["Bike 10 min + Leg press 2 sets + Chest press 2 sets + Row 2 sets.", "Walk 10 min + Light full body circuit.", "Repeat Day 1."]
-            };
-            const mode = (user.trainingMode as keyof typeof workouts) || "home";
-            const workout = workouts[mode][(day - 1) % 3];
+            const mode = (user.trainingMode as string) || "home";
+            const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
+            const workout = program[(day - 1) % 21];
             msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
           }
           console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
