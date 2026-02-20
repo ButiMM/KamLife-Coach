@@ -263,7 +263,7 @@ export async function registerRoutes(
     const cleanMsg = message.trim().toUpperCase();
     const paymentLink = "https://payfast.co.za/mock-pay";
 
-    const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\nReply 1–6.`;
+    const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
 
     // ── Priority 1: GREETING GUARD ──
     const rawMsg = message.trim().toLowerCase().replace(/[^\w\s]/g, "");
@@ -495,7 +495,10 @@ export async function registerRoutes(
         await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
         reply = R.onboardingName(message);
       } else if (currentState === "AWAITING_GOAL") {
-        await storage.updateUser(user.id, { goalType: message, onboardingState: "AWAITING_WEIGHT" });
+        let goalValue = message;
+        if (cleanMsg === "1") goalValue = "Fat Loss";
+        else if (cleanMsg === "2") goalValue = "Muscle Gain";
+        await storage.updateUser(user.id, { goalType: goalValue, onboardingState: "AWAITING_WEIGHT" });
         reply = R.onboardingGoal();
       } else if (currentState === "AWAITING_WEIGHT") {
         const weightVal = parseFloat(message);
@@ -509,8 +512,19 @@ export async function registerRoutes(
           } else {
             calorieTarget = Math.round(weightVal * 22 + 300);
           }
-          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "COMPLETED", calorieTarget });
-          reply = R.onboardingComplete();
+          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "AWAITING_TRAINING_MODE", calorieTarget });
+          reply = "Where will you train?\n1) Gym\n2) Home\n3) Walking only";
+        }
+      } else if (currentState === "AWAITING_TRAINING_MODE") {
+        let mode: string | null = null;
+        if (cleanMsg === "1" || cleanMsg.includes("GYM")) mode = "gym";
+        else if (cleanMsg === "2" || cleanMsg.includes("HOME")) mode = "home";
+        else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
+        if (mode) {
+          await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "COMPLETED" });
+          reply = `Profile updated. You are ready. Let's get to work.\n\n${menuText}`;
+        } else {
+          reply = "Please reply 1, 2, or 3.\n1) Gym\n2) Home\n3) Walking only";
         }
       }
 
@@ -541,6 +555,12 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${R.promptWeight()}</Message></Response>`);
     }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
+    if (cleanMsg === "7") {
+      await storage.updateUser(user.id, { onboardingState: "AWAITING_GOAL", awaitingInputType: null });
+      const reply = "Let's update your profile. What is your main goal?\n1) Fat Loss\n2) Muscle Gain";
+      await storage.logChat(user.id, message, reply, "PROFILE_UPDATE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
 
     if (!detectedIntent) {
       const parsing = parseFoodMessage(message);
