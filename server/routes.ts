@@ -339,10 +339,12 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>Please send a text message — type what you ate, your steps, or how your workout went.</Message></Response>`);
     }
 
-    const redFlagWords = ["dizzy", "dizziness", "chest pain", "can't breathe", "faint", "fainting", "heart", "collapsed", "vomiting"];
+    const redFlagWords = ["dizzy", "dizziness", "chest pain", "can't breathe", "faint", "fainting", "heart pain", "collapsed", "vomiting"];
     const lowerMsg = message.toLowerCase();
     if (redFlagWords.some(w => lowerMsg.includes(w))) {
       const safetyReply = "Stop what you are doing. If you are experiencing chest pain, dizziness or difficulty breathing — stop exercising immediately and contact a medical professional or call 10177. Your safety comes first. We will be here when you are ready to continue.";
+      const safetyUser = await storage.getUserByPhone(phoneNumber);
+      if (safetyUser) await storage.logChat(safetyUser.id, message, safetyReply, "RED_FLAG_ESCALATION");
       return res.type('text/xml').send(`<Response><Message>${safetyReply}</Message></Response>`);
     }
 
