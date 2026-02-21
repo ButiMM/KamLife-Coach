@@ -340,6 +340,16 @@ Return JSON only: { "intent": "...", "data": { ... } }`
   }
 }
 
+const ROTATING_MOTIVATIONS = [
+  "Stay consistent.",
+  "One meal at a time.",
+  "Show up tomorrow.",
+  "The work is the answer."
+];
+function getRotatingMotivation(): string {
+  return ROTATING_MOTIVATIONS[Math.floor(Math.random() * ROTATING_MOTIVATIONS.length)];
+}
+
 async function generateReply(message: string, intent: string, context: any): Promise<string> {
   try {
     const completion = await openai.chat.completions.create({
@@ -354,9 +364,9 @@ Context: ${JSON.stringify(context)}`
         { role: "user", content: message }
       ]
     });
-    return completion.choices[0].message.content || "Keep pushing!";
+    return completion.choices[0].message.content || getRotatingMotivation();
   } catch (e) {
-    return "Keep pushing!";
+    return getRotatingMotivation();
   }
 }
 
@@ -595,9 +605,16 @@ export async function registerRoutes(
 
     // ── Priority 8.5: HELP command ──
     if (cleanMsg === "HELP") {
-      const helpReply = "Here to help.\n\n- Reply MENU to see your options\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nKamLife Coach is with you 24/7. Keep pushing.";
+      const helpReply = "Here to help.\n\n- Reply MENU to see your options\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nReply SUPPORT and we will get back to you within 24 hours.";
       await storage.logChat(user.id, message, helpReply, "HELP");
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
+    }
+
+    // ── Priority 8.51: SUPPORT command ──
+    if (cleanMsg === "SUPPORT") {
+      const supportReply = "Your support request has been noted. We will follow up with you within 24 hours. In the meantime reply MENU to continue or RESET if something seems stuck.";
+      await storage.logChat(user.id, message, supportReply, "SUPPORT_REQUEST");
+      return res.type('text/xml').send(`<Response><Message>${supportReply}</Message></Response>`);
     }
 
     // ── Priority 8.55: CANCEL command ──
@@ -688,7 +705,7 @@ export async function registerRoutes(
       if (inputType === "awaiting_cancel") {
         if (cleanMsg === "CONFIRM") {
           await storage.updateUser(user.id, { awaitingInputType: null, subscriptionStatus: "inactive", cancelledAt: new Date() });
-          const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Keep pushing — even without us.";
+          const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Stay consistent — even without us.";
           await storage.logChat(user.id, message, reply, "CANCEL_CONFIRMED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "STAY") {
@@ -1486,7 +1503,7 @@ export async function registerRoutes(
           const aSteps = avgSteps || 0;
           const aDays = activeDays || 0;
           const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
-          let report = `*Weekly Compliance Report*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
+          let report = `*Weekly Report — ${user.name || "Hey"}*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
 
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
           if (daysSinceJoin >= 28) {

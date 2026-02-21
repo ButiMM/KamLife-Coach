@@ -108,9 +108,9 @@ export const R = {
   ]),
 
   onboardingName: (name: string) => pick([
-    `Welcome ${name}. What's your main goal? (Fat Loss or Muscle Gain)`,
-    `Got it, ${name}. What are we working towards? (Fat Loss or Muscle Gain)`,
-    `${name} — let's get started. What's the goal? (Fat Loss or Muscle Gain)`,
+    `Welcome ${name}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nWhat's your main goal? (Fat Loss or Muscle Gain)`,
+    `Got it, ${name}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nWhat are we working towards? (Fat Loss or Muscle Gain)`,
+    `${name} — let's get started. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nWhat's the goal? (Fat Loss or Muscle Gain)`,
   ]),
 
   onboardingGoal: () => pick([
