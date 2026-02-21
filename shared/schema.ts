@@ -30,6 +30,7 @@ export const users = pgTable("users", {
   carbPortionLevel: integer("carb_portion_level"), // 1, 2, 3
   referralCode: text("referral_code"),
   referredBy: text("referred_by"),
+  injuries: text("injuries"),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {

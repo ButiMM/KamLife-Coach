@@ -923,14 +923,26 @@ export async function registerRoutes(
         else if (cleanMsg === "2" || cleanMsg.includes("HOME")) mode = "home";
         else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
         if (mode) {
-          await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "COMPLETED" });
-          const isProfileUpdate = !!user.name;
-          reply = isProfileUpdate
-            ? `Profile updated. You are ready. Let's get to work.\n\n${menuText}`
-            : `${R.onboardingComplete()}\n\n${menuText}`;
+          await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_AGE" });
+          reply = "One last thing — how old are you? This helps us personalise your programme.";
         } else {
           reply = "Please reply 1, 2, or 3.\n1) Gym\n2) Home\n3) Walking only";
         }
+      } else if (currentState === "AWAITING_AGE") {
+        const ageVal = parseInt(message);
+        if (!ageVal || ageVal < 10 || ageVal > 100) {
+          reply = "Please enter your age as a number (e.g. 32).";
+        } else {
+          await storage.updateUser(user.id, { age: ageVal, onboardingState: "AWAITING_CONDITIONS" });
+          reply = "Do you have any injuries, chronic conditions, or health issues we should know about? (Examples: bad knee, diabetes, high blood pressure, asthma, PCOS)\n\nReply NONE if nothing to report.";
+        }
+      } else if (currentState === "AWAITING_CONDITIONS") {
+        const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
+        await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "COMPLETED" });
+        const isProfileUpdate = user.goalType && user.trainingMode;
+        reply = isProfileUpdate
+          ? `Profile updated. You are ready. Let's get to work.\n\n${menuText}`
+          : `${R.onboardingComplete()}\n\n${menuText}`;
       }
 
       if (reply) {
@@ -1219,6 +1231,62 @@ export async function registerRoutes(
     if (loadsheddingWords.some(w => cleanMsg.includes(w))) {
       const reply = "Load shedding is SA life. If it disrupted your workout or meal prep — noted. Cold food still counts. Walking outside during load shedding counts. Do not use it as a reason to skip entirely. Adapt and keep moving.";
       await storage.logChat(user.id, message, reply, "LOADSHEDDING_GRACE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.987: POSTPARTUM ──
+    const postpartumWords = ["JUST HAD A BABY", "POSTPARTUM", "POST NATAL", "AFTER BIRTH", "C SECTION", "CAESAREAN"];
+    if (postpartumWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Congratulations. Your body just did something extraordinary. No crunches, no sit ups, no heavy lifting until cleared by your doctor — especially after C-section. Start with walking, pelvic floor exercises, and deep breathing. Food is your priority right now — high protein, no restriction. We build slowly and safely.";
+      await storage.logChat(user.id, message, reply, "POSTPARTUM");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.988: DOMESTIC WORKER FOOD SITUATION ──
+    const domesticWorkerWords = ["DOMESTIC WORKER", "WORK IN A HOUSE", "EMPLOYERS FOOD", "MADAM FOOD", "EAT THEIR LEFTOVERS", "EAT WHAT THEY GIVE ME"];
+    if (domesticWorkerWords.some(w => cleanMsg.includes(w))) {
+      const reply = "This is a real challenge many face. Prioritise protein from whatever is available — eggs, chicken, meat. Avoid finishing everything on the plate out of obligation. Eat slowly, stop at 80% full. If you can bring your own food — tinned pilchards and eggs are affordable and powerful. You have more control than you think.";
+      await storage.logChat(user.id, message, reply, "DOMESTIC_WORKER");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.989: CANCER TREATMENT ──
+    const cancerWords = ["CHEMOTHERAPY", "CHEMO", "CANCER TREATMENT", "RADIATION TREATMENT", "ONCOLOGY"];
+    if (cancerWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Your health and treatment come first — always. Do not focus on fat loss during active treatment. Focus on eating enough protein to maintain muscle, staying hydrated, and gentle walking when energy allows. Please work closely with your oncologist. We are here to support you gently through this.";
+      await storage.logChat(user.id, message, reply, "CANCER_TREATMENT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.990: ARV MEDICATION ──
+    const arvWords = ["ARVS", "ANTIRETROVIRAL", "HIV MEDICATION", "ON TREATMENT"];
+    if (arvWords.some(w => cleanMsg.includes(w))) {
+      const reply = "ARV medication affects appetite and metabolism for many people. This is manageable. Focus on protein at every meal to maintain muscle, stay hydrated, and be consistent with movement. Your programme works alongside your treatment. No judgment here — only support.";
+      await storage.logChat(user.id, message, reply, "ARV_MEDICATION");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.991: PRISON RELEASE ──
+    const prisonWords = ["JUST GOT OUT", "RELEASED FROM PRISON", "OUT OF JAIL", "EX CONVICT", "FRESH OUT"];
+    if (prisonWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Welcome back. This is one of the best decisions you can make right now. Structure, discipline, and physical health will anchor everything else you are rebuilding. We start simple — walking daily, protein at every meal, sleep consistently. You have already done hard things. This is the good kind of hard.";
+      await storage.logChat(user.id, message, reply, "PRISON_RELEASE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.992: TEENAGER EATING DISORDER SIGNS ──
+    const edWords = ["NOT EATING AT ALL", "EATING NOTHING", "ONLY EATING 500", "ONLY EATING 300", "SCARED TO EAT", "AFRAID OF FOOD", "CANNOT EAT", "PURGING", "MAKING MYSELF SICK"];
+    if (edWords.some(w => cleanMsg.includes(w))) {
+      const reply = "What you are describing concerns me deeply. This is not about willpower or discipline — this needs proper support. Please speak to a trusted adult, a parent, a school counsellor, or call SADAG on 0800 567 567. You deserve real help, not a fitness programme right now.";
+      await storage.logChat(user.id, message, reply, "EATING_DISORDER_FLAG");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.993: 12 HOUR SHIFT WORKERS ──
+    const shiftWords = ["12 HOUR SHIFT", "TWELVE HOUR SHIFT", "LONG SHIFT", "DOUBLE SHIFT"];
+    if (shiftWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Long shifts make meal timing hard. Pack these before your shift: boiled eggs, tinned fish, an apple, nuts if affordable. Eat every 4-5 hours even if just a small protein snack. Do not arrive home starving — that is when bad choices happen. Prep the night before.";
+      await storage.logChat(user.id, message, reply, "LONG_SHIFT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
