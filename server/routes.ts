@@ -1050,11 +1050,9 @@ export async function registerRoutes(
         const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
         await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "COMPLETED" });
         const calTarget = user.calorieTarget || 2000;
-        const stepsTarget = user.stepsTarget || 8000;
-        const isProfileUpdate = user.goalType && user.trainingMode && user.name;
-        reply = isProfileUpdate
-          ? `Profile updated, ${user.name}. Your daily calorie target is ${calTarget}kcal. Your step target is ${stepsTarget} steps per day. Reply MENU to continue.`
-          : `Profile complete, ${user.name || "coach"}. Your daily calorie target is ${calTarget}kcal. Your step target is ${stepsTarget} steps per day. Your programme starts today. Reply MENU to begin.`;
+        const proteinTarget = Math.round((calTarget * 0.3) / 4);
+        const userName = user.name || "coach";
+        reply = `Profile complete, ${userName}. Here is your plan:\n\nCalorie target: ${calTarget}kcal daily\nProtein target: ${proteinTarget}g daily\nStep target: 8,000 steps daily\nWorkouts: minimum 3x per week\n\nStart right now:\n1) Log what you ate today\n2) Check your first workout\n3) Log your steps\n\nThe work starts today — not tomorrow. Reply MENU to begin.`;
       }
 
       if (reply) {

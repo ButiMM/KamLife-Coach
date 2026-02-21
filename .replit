@@ -44,4 +44,4 @@ integrations = ["javascript_openai_ai_integrations:2.0.0"]
 [userenv]
 
 [userenv.development]
-BETA_TESTERS = "whatsapp:+27990001111"
+BETA_TESTERS = "whatsapp:+27990001111,whatsapp:+27990002222"
