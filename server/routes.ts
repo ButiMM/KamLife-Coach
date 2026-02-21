@@ -1070,6 +1070,78 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
+    // ── Priority 9.971: FAMILY SABOTAGE ──
+    const familySabotageWords = ["HUSBAND DOESNT SUPPORT", "HUSBAND DOESN'T SUPPORT", "FAMILY DOESNT SUPPORT", "FAMILY DOESN'T SUPPORT", "MY MOTHER COOKS", "MY WIFE COOKS", "THEY DONT UNDERSTAND", "THEY DON'T UNDERSTAND", "EATING ALONE", "NO ONE SUPPORTS ME"];
+    if (familySabotageWords.some(w => cleanMsg.includes(w))) {
+      const reply = "This is one of the hardest parts of the journey — changing when people around you aren't. You cannot control what they cook. You can control your portion. Eat your protein first, take smaller carb portions, and never explain yourself. Results will say everything words cannot.";
+      await storage.logChat(user.id, message, reply, "FAMILY_SABOTAGE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.972: BODY IMAGE LANGUAGE ──
+    const bodyImageWords = ["I HATE MY BODY", "IM SO FAT", "I'M SO FAT", "IM DISGUSTING", "I'M DISGUSTING", "IM UGLY", "I'M UGLY", "HATE MYSELF", "HATE HOW I LOOK"];
+    if (bodyImageWords.some(w => cleanMsg.includes(w))) {
+      const reply = "What you just said about yourself — would you say that to someone you love? Your body has carried you through everything. We are here to make it stronger, not to punish it. One kind thing you can do for your body today: feed it protein and take a 10 minute walk.";
+      await storage.logChat(user.id, message, reply, "BODY_IMAGE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.973: SHAME SPIRAL ──
+    const shameSpiralWords = ["ATE EVERYTHING THIS WEEKEND", "COMPLETELY FAILED", "SO ASHAMED", "DISGUSTED WITH MYSELF", "FELL OFF COMPLETELY", "RUINED EVERYTHING"];
+    if (shameSpiralWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Shame does not burn calories and it does not build muscle. What happened this weekend stays this weekend. Right now — today — what is your next meal? Tell me and we fix it together. One meal at a time.";
+      await storage.logChat(user.id, message, reply, "SHAME_SPIRAL");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.974: PLATEAU EMOTIONAL CRISIS ──
+    const plateauWords = ["NOTHING IS WORKING", "BEEN CONSISTENT AND NOTHING", "DOING EVERYTHING RIGHT", "SO FRUSTRATED", "WANT TO GIVE UP"];
+    if (plateauWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Six weeks of consistency and the scale not moving is one of the most demoralising things in fitness. But your body is changing even when the scale lies. Measurements, energy levels, how clothes fit — these tell the real story. Have you noticed any of these changing? Tell me.";
+      await storage.logChat(user.id, message, reply, "PLATEAU_CRISIS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.975: SCALE TRAUMA ──
+    const scaleTraumaWords = ["I HAVE ALWAYS BEEN FAT", "BEEN OVERWEIGHT MY WHOLE LIFE", "TRIED EVERYTHING MY WHOLE LIFE", "DIETED MY WHOLE LIFE"];
+    if (scaleTraumaWords.some(w => cleanMsg.includes(w))) {
+      const reply = "A lifetime of dieting creates a complicated relationship with food and your body. We are not doing another diet. We are building a sustainable way of eating that you can maintain forever. No restriction. No punishment. Just structure, protein, and consistency. Different approach, different results.";
+      await storage.logChat(user.id, message, reply, "SCALE_TRAUMA");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.976: COMMON COACHING QUESTIONS ──
+    if (cleanMsg.includes("HOW LONG TO LOSE 10KG") || cleanMsg.includes("HOW LONG WILL IT TAKE")) {
+      const reply = "Sustainable fat loss is 0.5 to 1kg per week. At that rate, 10kg takes 10 to 20 weeks. Anyone promising faster is selling you something. Slow and consistent means it stays off.";
+      await storage.logChat(user.id, message, reply, "FAQ_WEIGHT_LOSS_TIME");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    if (cleanMsg.includes("LOSE WEIGHT WITHOUT EXERCISE") || cleanMsg.includes("WITHOUT EXERCISING")) {
+      const reply = "Yes — but it is harder and you will lose muscle with fat. Exercise preserves muscle while you lose fat. Even 20 minutes of walking daily makes a significant difference. Start there.";
+      await storage.logChat(user.id, message, reply, "FAQ_NO_EXERCISE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    if (cleanMsg.includes("EATING AFTER 6PM") || cleanMsg.includes("EATING AT NIGHT") || cleanMsg.includes("EAT AFTER 6")) {
+      const reply = "The 6pm myth is exactly that — a myth. Total calories over the day is what matters, not timing. If your daily target is met, eating at 9pm changes nothing. Do not skip meals to avoid eating late.";
+      await storage.logChat(user.id, message, reply, "FAQ_EATING_LATE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    if (cleanMsg.includes("LOSE BELLY FAT") || cleanMsg.includes("SPOT REDUCE") || cleanMsg.includes("STOMACH FAT")) {
+      const reply = "You cannot choose where you lose fat — spot reduction is a myth. Overall fat loss through calorie deficit reduces belly fat over time. Core exercises build muscle under the fat but do not burn the fat itself. Deficit plus consistency is the only answer.";
+      await storage.logChat(user.id, message, reply, "FAQ_BELLY_FAT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    if (cleanMsg.includes("CARDIO OR WEIGHTS FIRST") || cleanMsg.includes("WEIGHTS OR CARDIO")) {
+      const reply = "Weights first — always. You need full energy for resistance training. Cardio after weights. If fat loss is the goal, walking is your cardio. Save the intense cardio for after you have built some muscle.";
+      await storage.logChat(user.id, message, reply, "FAQ_CARDIO_WEIGHTS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+    if (cleanMsg.includes("IS FASTING BETTER") || cleanMsg.includes("INTERMITTENT FASTING")) {
+      const reply = "Fasting works if it helps you maintain your calorie deficit. It does not have magical metabolic benefits beyond that. If skipping breakfast makes you binge at lunch — it is not for you. If it helps you control portions — use it. The best diet is the one you can sustain.";
+      await storage.logChat(user.id, message, reply, "FAQ_FASTING");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
     // ── Priority 10: INTENT ROUTING ──
     let detectedIntent: string | null = null;
 
@@ -1506,6 +1578,9 @@ export async function registerRoutes(
           let report = `*Weekly Report — ${user.name || "Hey"}*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
 
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+          if (daysSinceJoin >= 14 && daysSinceJoin <= 21) {
+            report += "\n\nYou are in week 3 — the hardest week of any programme. Motivation is low, results feel slow, life is getting in the way. This is exactly where most people quit. The ones who push through week 3 are the ones who get results. You are not most people. Show up this week.";
+          }
           if (daysSinceJoin >= 28) {
             const prevChats = await storage.getChatHistory(user.id, 50);
             const alreadyPrompted = prevChats.some(c => c.intent === "PHOTO_PROMPT");
