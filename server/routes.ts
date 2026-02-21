@@ -402,6 +402,13 @@ export async function registerRoutes(
   registerAdminTestRoutes(app);
 
   // ============================================================
+  // Health Check
+  // ============================================================
+  app.get("/health", (req, res) => {
+    res.status(200).json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+  });
+
+  // ============================================================
   // SINGLE Twilio WhatsApp Webhook (consolidated)
   // ============================================================
   app.post("/twilio/whatsapp", async (req, res) => {
