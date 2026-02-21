@@ -1,0 +1,52 @@
+"In server/routes.ts, update the getKamLifeFoodReply function and the intelligent fallback at Priority 12. Instead of passing just recent food context, build a full user profile context and pass it to every single OpenAI call. Create a new function called buildUserContext that takes the user object and returns a context string. Implement it as follows:
+typescriptasync function buildUserContext(user: any): Promise<string> {
+  try {
+    const now = new Date();
+    const joinedDaysAgo = user.createdAt ? Math.floor((now.getTime() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+    const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+    const daysSinceActive = user.lastActiveAt ? Math.floor((now.getTime() - new Date(user.lastActiveAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+    const recentFood = await getRecentFoodContext(user.id);
+    const weightLogs = await storage.getWeightLogs(user.id);
+    const stepLogs = await storage.getStepLogs(user.id);
+
+    const recentWeights = weightLogs.slice(0, 3).map((w: any) => w.weight);
+    const weightTrend = recentWeights.length >= 2 
+      ? (recentWeights[0] < recentWeights[1] ? 'losing' : recentWeights[0] > recentWeights[1] ? 'gaining' : 'plateauing')
+      : 'unknown';
+
+    const recentSteps = stepLogs.slice(0, 7).map((s: any) => s.steps);
+    const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((a: number, b: number) => a + b, 0) / recentSteps.length) : 0;
+    const stepTrend = recentSteps.length >= 2
+      ? (recentSteps[0] > recentSteps[1] ? 'improving' : 'declining')
+      : 'unknown';
+
+    return `
+CLIENT PROFILE:
+Name: ${user.name || 'unknown'}
+Age: ${user.age || 'unknown'}
+Goal: ${user.goalType || 'fat loss'}
+Training mode: ${user.trainingMode || 'home'}
+Days on programme: ${joinedDaysAgo}
+Compliance level: ${user.complianceLevel || 'BUILDING'}
+Weekly score: ${user.weeklyScore || 0}/100
+Calorie target: ${user.calorieTarget || 2000}kcal
+Step target: ${user.stepsTarget || 8000}
+Current weight: ${user.currentWeight || 'unknown'}kg
+Weight trend: ${weightTrend}
+Average steps this week: ${avgSteps}
+Step trend: ${stepTrend}
+Days since last active: ${daysSinceActive}
+Day of week: ${dayOfWeek}
+Health conditions noted: ${user.healthConditions || 'none'}
+Recent food: ${recentFood || 'nothing logged recently'}
+    `.trim();
+  } catch (e) {
+    return `Client: ${user.name || 'unknown'}, Goal: ${user.goalType || 'fat loss'}`;
+  }
+}
+Then update getKamLifeFoodReply to accept and use this full context instead of the simple recentHistory string.
+Then update the Priority 12 intelligent fallback to call buildUserContext and pass the full context to getKamLifeFoodReply.
+Then update the LOG_FOOD intent handler to also call buildUserContext and pass full context.
+This means every single AI response now knows exactly who this person is, how long they have been on the programme, whether they are losing or gaining, their compliance level, and what they ate recently. Every response adapts to the individual.
+Restart the server."

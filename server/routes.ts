@@ -247,10 +247,57 @@ function parseFoodMessage(text: string) {
   };
 }
 
+async function buildUserContext(user: any): Promise<string> {
+  try {
+    const now = new Date();
+    const joinedDaysAgo = user.createdAt ? Math.floor((now.getTime() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+    const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
+    const daysSinceActive = user.lastActiveAt ? Math.floor((now.getTime() - new Date(user.lastActiveAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+
+    const recentFood = await getRecentFoodContext(user.id);
+    const weightLogs = await storage.getWeightLogs(user.id);
+    const stepLogs = await storage.getStepLogs(user.id);
+
+    const recentWeights = weightLogs.slice(0, 3).map((w: any) => w.weight);
+    const weightTrend = recentWeights.length >= 2
+      ? (parseFloat(recentWeights[0]) < parseFloat(recentWeights[1]) ? 'losing' : parseFloat(recentWeights[0]) > parseFloat(recentWeights[1]) ? 'gaining' : 'plateauing')
+      : 'unknown';
+
+    const recentSteps = stepLogs.slice(0, 7).map((s: any) => s.steps);
+    const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((a: number, b: number) => a + b, 0) / recentSteps.length) : 0;
+    const stepTrend = recentSteps.length >= 2
+      ? (recentSteps[0] > recentSteps[1] ? 'improving' : 'declining')
+      : 'unknown';
+
+    return `
+CLIENT PROFILE:
+Name: ${user.name || 'unknown'}
+Age: ${user.age || 'unknown'}
+Goal: ${user.goalType || 'fat loss'}
+Training mode: ${user.trainingMode || 'home'}
+Days on programme: ${joinedDaysAgo}
+Compliance level: ${user.complianceLevel || 'BUILDING'}
+Weekly score: ${user.weeklyScore || 0}/100
+Calorie target: ${user.calorieTarget || 2000}kcal
+Step target: ${user.stepsTarget || 8000}
+Current weight: ${user.currentWeight || 'unknown'}kg
+Weight trend: ${weightTrend}
+Average steps this week: ${avgSteps}
+Step trend: ${stepTrend}
+Days since last active: ${daysSinceActive}
+Day of week: ${dayOfWeek}
+Health conditions noted: ${user.injuries || 'none'}
+Recent food: ${recentFood || 'nothing logged recently'}
+    `.trim();
+  } catch (e) {
+    return `Client: ${user.name || 'unknown'}, Goal: ${user.goalType || 'fat loss'}`;
+  }
+}
+
 async function getKamLifeFoodReply(
   userMessage: string,
   userCalories: number,
-  recentHistory: string,
+  userContext: string,
   userName: string
 ): Promise<{reply: string, nextState: string}> {
   try {
@@ -278,9 +325,7 @@ RESPONSE FORMAT — return JSON only:
   "carbName": "name of main carb if present, else null"
 }
 
-Recent context: ${recentHistory || "First log today."}
-User calorie target: ${userCalories}kcal
-User name: ${userName}`
+${userContext}`
         },
         {
           role: "user",
@@ -794,8 +839,8 @@ export async function registerRoutes(
       if (inputType === "anything_else") {
         const anythingParsing = parseFoodMessage(message);
         if (anythingParsing.alcoholItems.length > 0) {
-          const context = await getRecentFoodContext(user.id);
-          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, context, user.name || "there");
+          const ctx = await buildUserContext(user);
+          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, ctx, user.name || "there");
           await storage.updateUser(user.id, { awaitingInputType: null });
           await storage.logChat(user.id, message, reply, "ALCOHOL_FLAGGED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -809,11 +854,11 @@ export async function registerRoutes(
           await storage.logChat(user.id, message, menuText, "COACH_MENU");
           return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
         } else {
-          const context = await getRecentFoodContext(user.id);
+          const ctx = await buildUserContext(user);
           const { reply } = await getKamLifeFoodReply(
             message,
             user.calorieTarget || 2000,
-            context,
+            ctx,
             user.name || "there"
           );
           await storage.updateUser(user.id, { awaitingInputType: null });
@@ -845,11 +890,11 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
         }
 
-        const context = await getRecentFoodContext(user.id);
+        const ctx = await buildUserContext(user);
         const { reply } = await getKamLifeFoodReply(
           `They drank: ${message}`,
           user.calorieTarget || 2000,
-          context,
+          ctx,
           user.name || "there"
         );
 
@@ -860,11 +905,11 @@ export async function registerRoutes(
       }
 
       if (inputType === "food") {
-        const context = await getRecentFoodContext(user.id);
+        const ctx = await buildUserContext(user);
         const { reply } = await getKamLifeFoodReply(
           message,
           user.calorieTarget || 2000,
-          context,
+          ctx,
           user.name || "there"
         );
         await storage.updateUser(user.id, { awaitingInputType: null });
@@ -1423,8 +1468,8 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
-      const recentContext = await getRecentFoodContext(user.id);
-      const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, recentContext, user.name || "there");
+      const fullCtx = await buildUserContext(user);
+      const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, fullCtx, user.name || "there");
 
       if (detectedIntent === "LOG_FOOD_INFORMAL") {
         const full = `${coachReply}\n\nReply MENU to see your options.`;
@@ -1554,11 +1599,11 @@ export async function registerRoutes(
     }
 
     // ── Priority 12: INTELLIGENT FALLBACK ──
-    const context = await getRecentFoodContext(user.id);
+    const fallbackCtx = await buildUserContext(user);
     const { reply } = await getKamLifeFoodReply(
       message,
       user.calorieTarget || 2000,
-      context,
+      fallbackCtx,
       user.name || "there"
     );
     await storage.logChat(user.id, message, reply, "INTELLIGENT_FALLBACK");
