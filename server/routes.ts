@@ -874,8 +874,14 @@ export async function registerRoutes(
 
       if (inputType === "steps") {
         await storage.updateUser(user.id, { awaitingInputType: null });
-        const stepsMatch = cleanMsg.match(/\d+/);
-        const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+        const kMatch = cleanMsg.match(/(\d+(\.\d+)?)\s*K\b/);
+        let steps: number | null = null;
+        if (kMatch) {
+          steps = Math.round(parseFloat(kMatch[1]) * 1000);
+        } else {
+          const stepsMatch = cleanMsg.match(/\d+/);
+          steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+        }
         if (steps !== null) {
           await storage.createStepLog(user.id, steps);
           const prevLogs = await storage.getStepLogs(user.id);
@@ -1385,14 +1391,15 @@ export async function registerRoutes(
                           parsing.mealHints.length > 0 ||
                           parsing.quantities.length > 0;
 
-      if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
+      if (/^(GYM DONE|WORKOUT DONE|DONE GYM|TRAINING DONE|SESSION DONE)$/.test(cleanMsg) || cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
+      else if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
       else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
-      else if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg) && foodEvidence) detectedIntent = "LOG_FOOD";
+      else if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg) && foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
       else if (/SLEEP|SLEPT/.test(cleanMsg)) detectedIntent = "LOG_SLEEP";
       else if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
       else if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
-      else if (cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
-      else if (foodEvidence) detectedIntent = "LOG_FOOD";
+      else if (/^(ATE |HAD |JUST ATE|EATING NOW|EATING |I ATE )/.test(cleanMsg)) detectedIntent = "LOG_FOOD_INFORMAL";
+      else if (foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
 
       if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
         const advice = "For fat loss, focus on high-protein and fibre: \n- Oats or Eggs for breakfast\n- Grilled chicken or tinned fish with veg for lunch/dinner\n- Limit pap/rice to one fist size per meal.\nWhat are you planning to eat next?";
@@ -1405,7 +1412,7 @@ export async function registerRoutes(
 
     // ── Priority 11: INTENT HANDLERS ──
 
-    if (detectedIntent === "LOG_FOOD") {
+    if (detectedIntent === "LOG_FOOD" || detectedIntent === "LOG_FOOD_INFORMAL") {
       const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
       if (nothingWords.some(w => cleanMsg.includes(w))) {
         const reply = "Skipping meals slows fat loss and triggers cravings. Get 2 eggs or a tin of fish in now. Reply DONE after eating.";
@@ -1415,6 +1422,12 @@ export async function registerRoutes(
 
       const recentContext = await getRecentFoodContext(user.id);
       const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, recentContext, user.name || "there");
+
+      if (detectedIntent === "LOG_FOOD_INFORMAL") {
+        const full = `${coachReply}\n\nReply MENU to see your options.`;
+        await storage.logChat(user.id, message, full, "LOG_FOOD");
+        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
+      }
 
       if (nextState === "portion") {
         await storage.updateUser(user.id, { awaitingInputType: "portion" });
@@ -1440,8 +1453,14 @@ export async function registerRoutes(
     }
 
     if (detectedIntent === "LOG_STEPS") {
-      const stepsMatch = cleanMsg.match(/\d+/);
-      const steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+      const kMatchIntent = cleanMsg.match(/(\d+(\.\d+)?)\s*K\b/);
+      let steps: number | null = null;
+      if (kMatchIntent) {
+        steps = Math.round(parseFloat(kMatchIntent[1]) * 1000);
+      } else {
+        const stepsMatch = cleanMsg.match(/\d+/);
+        steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
+      }
 
       if (steps !== null) {
         await storage.createStepLog(user.id, steps);
