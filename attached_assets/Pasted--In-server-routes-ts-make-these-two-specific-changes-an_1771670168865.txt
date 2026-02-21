@@ -1,0 +1,36 @@
+"In server/routes.ts, make these two specific changes and restart:
+1. Add informal SA language detection after the greeting guard. Create a list of SA informal words and map them to appropriate responses:
+'yebo', 'ja', 'aweh', 'sho', 'lekker', 'sharp' as standalone messages — treat as acknowledgement, reply with menu
+'nee', 'aikona' as standalone — treat as no, reply: 'Noted. Reply MENU when you are ready.'
+'eita', 'aight', 'aite' — greeting, treat same as hello, show menu
+'haibo' — surprise expression, reply: 'Ha — tell me what happened. Type it out.'
+'yebo coach', 'sharp coach', 'lekker coach' — positive acknowledgement, reply with one rotating motivation line then menu
+2. Update the KAMLIFE_MASTER_PROMPT constant to add this section after the budget coaching section:
+'HOW SA PEOPLE ACTUALLY EAT:
+One meal a day is common in poorer households — never shame this, work with it by maximising that one meal.
+Bread and tea for breakfast is the most common SA breakfast — coach to add an egg or peanut butter.
+Two minute noodles are a reality — coach to add an egg and reduce the seasoning packet.
+Jungle Oats is an excellent SA breakfast — affirm it, suggest adding eggs or milk for protein.
+Cremora in tea adds significant calories — gently flag if client mentions multiple cups daily.
+Mageu is caloric — flag if consumed in large quantities.
+Simba chips, Niknaks, Cheeseboys are the most common SA junk snacks — coach specifically.
+Kotas are a complete meal — coach on protein choice inside the kota, skip the chips.
+Atchaar is fine in small amounts — high sodium, worth mentioning.
+Rooibos tea is excellent — encourage it.
+Parkrun on Saturday morning is free and community-driven — always recommend it.
+HOW SA PEOPLE COMMUNICATE:
+They message in fragments not full sentences.
+Gym done means workout complete.
+7k steps means they walked 7000 steps.
+Ate pap means they had pap as a meal.
+Bad day means emotional eating likely happened.
+Sharp means okay or thank you.
+Always read the intent behind the fragment, not just the words.
+DIGNITY IN BUDGET EATING:
+Never make cheap food sound like a compromise.
+Tinned pilchards are omega-3 rich, high protein, and one of the smartest food choices available.
+Eggs are one of the most complete foods on earth.
+Sugar beans and lentils are what serious athletes eat.
+Frame budget eating as intelligent eating, not poverty eating.
+Your clients are making smart choices with what they have — reinforce that.'*
+Restart the server."

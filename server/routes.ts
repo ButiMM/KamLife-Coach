@@ -93,6 +93,36 @@ If Friday or message mentions braai, party, wedding, funeral — acknowledge the
 BUDGET COACHING:
 If client mentions no money or cant afford food — suggest: eggs 6 pack R25, tin pilchards R12, chicken portions R40, sugar beans R20. Full day of protein under R60.
 
+HOW SA PEOPLE ACTUALLY EAT:
+One meal a day is common in poorer households — never shame this, work with it by maximising that one meal.
+Bread and tea for breakfast is the most common SA breakfast — coach to add an egg or peanut butter.
+Two minute noodles are a reality — coach to add an egg and reduce the seasoning packet.
+Jungle Oats is an excellent SA breakfast — affirm it, suggest adding eggs or milk for protein.
+Cremora in tea adds significant calories — gently flag if client mentions multiple cups daily.
+Mageu is caloric — flag if consumed in large quantities.
+Simba chips, Niknaks, Cheeseboys are the most common SA junk snacks — coach specifically.
+Kotas are a complete meal — coach on protein choice inside the kota, skip the chips.
+Atchaar is fine in small amounts — high sodium, worth mentioning.
+Rooibos tea is excellent — encourage it.
+Parkrun on Saturday morning is free and community-driven — always recommend it.
+
+HOW SA PEOPLE COMMUNICATE:
+They message in fragments not full sentences.
+Gym done means workout complete.
+7k steps means they walked 7000 steps.
+Ate pap means they had pap as a meal.
+Bad day means emotional eating likely happened.
+Sharp means okay or thank you.
+Always read the intent behind the fragment, not just the words.
+
+DIGNITY IN BUDGET EATING:
+Never make cheap food sound like a compromise.
+Tinned pilchards are omega-3 rich, high protein, and one of the smartest food choices available.
+Eggs are one of the most complete foods on earth.
+Sugar beans and lentils are what serious athletes eat.
+Frame budget eating as intelligent eating, not poverty eating.
+Your clients are making smart choices with what they have — reinforce that.
+
 TONE RULES:
 Max 3 sentences per response.
 Never say Got it, Nice, Great job, Well done generically.
@@ -469,13 +499,49 @@ export async function registerRoutes(
     }
 
     // ── Priority 1.5: INFORMAL SA LANGUAGE ──
-    const sharpWords = ["SHARP SHARP", "KE SHARP", "SHARP"];
-    if (sharpWords.some(w => cleanMsg === w || cleanMsg.startsWith(w + " "))) {
+    const saAckWords = ["YEBO", "JA", "AWEH", "SHO", "LEKKER", "SHARP", "SHARP SHARP", "KE SHARP"];
+    if (saAckWords.includes(cleanMsg)) {
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        await storage.logChat(user.id, message, menuText, "SA_SLANG_SHARP");
+        await storage.logChat(user.id, message, menuText, "SA_SLANG_ACK");
         return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+      }
+    }
+    const saNoWords = ["NEE", "AIKONA"];
+    if (saNoWords.includes(cleanMsg)) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        const reply = "Noted. Reply MENU when you are ready.";
+        await storage.logChat(user.id, message, reply, "SA_SLANG_NO");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+    const saGreetWords = ["EITA", "AIGHT", "AITE"];
+    if (saGreetWords.includes(cleanMsg)) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
+        await storage.logChat(user.id, message, menuText, "SA_SLANG_GREET");
+        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+      }
+    }
+    const saCoachWords = ["YEBO COACH", "SHARP COACH", "LEKKER COACH"];
+    if (saCoachWords.includes(cleanMsg)) {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        const motivation = getRotatingMotivation();
+        const reply = `${motivation}\n\n${menuText}`;
+        await storage.logChat(user.id, message, reply, "SA_SLANG_COACH");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+    if (cleanMsg === "HAIBO" || cleanMsg === "HAYIBO") {
+      let user = await storage.getUserByPhone(phoneNumber);
+      if (user) {
+        const reply = "Ha — tell me what happened. Type it out.";
+        await storage.logChat(user.id, message, reply, "SA_SLANG_HAIBO");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
     if (cleanMsg.includes("EISH")) {
@@ -483,14 +549,6 @@ export async function registerRoutes(
       if (user) {
         const reply = "Talk to me — what is going on? Type what you ate or how you are feeling and I will help you get back on track.";
         await storage.logChat(user.id, message, reply, "SA_SLANG_EISH");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-    if (cleanMsg.includes("HAYIBO")) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        const reply = "Ha — tell me more. What happened today?";
-        await storage.logChat(user.id, message, reply, "SA_SLANG_HAYIBO");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
     }
