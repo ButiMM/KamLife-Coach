@@ -1,0 +1,16 @@
+All three perfect. ✅
+
+All or nothing thinking — reframed, specific action
+Comparison — shut down firmly, redirected
+Night shift — practical, restructured
+
+That's real coaching. Now Prompt 4 — referral system and retention. Paste into Agent:
+
+"In server/routes.ts, add these features and restart:
+1. REFERRAL SYSTEM: Add a handler for when cleanMsg === 'REFER'. Generate a unique referral code for the user based on their name + last 4 digits of phone number. Save it to the user record as referralCode. Reply: 'Your referral code is [CODE]. Share this with a friend — they get 7 days free when they sign up. When they join you get one week free added to your account. Share this number and tell them to message: REFER [CODE] when they sign up.'
+When a new user signs up and their first message contains 'REFER' followed by a code — find the referring user, add 7 days to their account, give the new user 7 days free, and reply: 'Welcome to KamLife Coach. Your 7 free days are activated — courtesy of a friend who believes in you. Let us get started. What is your name?'
+2. WIN-BACK SEQUENCE: When a user cancels (subscriptionStatus set to inactive), schedule 3 follow up messages. Day 3 after cancellation: 'You have been gone 3 days. Your body has not forgotten the progress you made. Come back — reply REJOIN to reactivate.' Day 7: 'One week since you left. Most people who quit wish they had stayed consistent. Reply REJOIN to come back at the same rate.' Day 14: 'Two weeks gone. This is your last nudge from us. Reply REJOIN to restart your journey. We will be here if you do.'
+Add handler for REJOIN command — set subscriptionStatus back to active and reply: 'Welcome back. That took courage. Let us pick up where you left off. Reply MENU to continue.'
+3. PROGRESS PHOTO PROMPT: In the weekly Sunday report, check if user has been active for 28 days or more. If yes add to report: 'You have been on this programme for 4 weeks. Take a front and side photo today — same time, same lighting. This is your progress marker. You will thank yourself in 4 more weeks.'
+4. CONSISTENCY STREAK: Track consecutive days logged. If user logs something 7 days in a row, add to their reply: 'Day 7 streak. You have logged every single day this week. That is the 1% habit. Keep it going.' If they reach 30 days: '30 day streak. You are no longer trying to build a habit — you have one. Screenshot this.'
+Restart the server."

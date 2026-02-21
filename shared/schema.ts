@@ -28,6 +28,9 @@ export const users = pgTable("users", {
   weeklyScore: integer("weekly_score").default(0),
   complianceLevel: text("compliance_level").default("RESET"), // RESET | BUILDING | CONSISTENT | LOCKED IN
   carbPortionLevel: integer("carb_portion_level"), // 1, 2, 3
+  referralCode: text("referral_code"),
+  referredBy: text("referred_by"),
+  cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
   return {
