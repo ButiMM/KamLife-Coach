@@ -1142,6 +1142,86 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
+    // ── Priority 9.977: RELIGIOUS FASTING ──
+    const religiousFastWords = ["RAMADAN", "FASTING FOR RELIGION", "RELIGIOUS FAST", "LENT FASTING"];
+    if (religiousFastWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Ramadan and religious fasting can absolutely work with your fitness goals. Break your fast with protein and water first — eggs, chicken, dates. Avoid bingeing at iftar. Keep training light during fasting hours — walking only. Suhoor must include protein and slow carbs to sustain you. This is manageable.";
+      await storage.logChat(user.id, message, reply, "RELIGIOUS_FASTING");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.978: VEGETARIAN AND VEGAN ──
+    const veganWords = ["VEGETARIAN", "VEGAN", "NO MEAT", "PLANT BASED", "DONT EAT MEAT", "DON'T EAT MEAT"];
+    if (veganWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Vegetarian and vegan fat loss is absolutely possible. Your protein sources are: eggs and dairy if vegetarian, tofu, tempeh, lentils, chickpeas, beans, edamame, soy milk if vegan. You need to be more deliberate about hitting protein targets without meat. What does a typical day of eating look like for you?";
+      await storage.logChat(user.id, message, reply, "VEGETARIAN_VEGAN");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.979: HALAAL ──
+    const halaalWords = ["HALAAL", "HALAL", "NO PORK", "MUSLIM", "HALAAL ONLY"];
+    if (halaalWords.some(w => cleanMsg.includes(w))) {
+      const reply = "All our meal recommendations are halaal friendly. We never recommend pork or non-halaal meat. Stick to chicken, beef, lamb, fish and eggs. Your programme works fully within halaal dietary requirements.";
+      await storage.logChat(user.id, message, reply, "HALAAL");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.980: WHEELCHAIR AND SEVERE MOBILITY ──
+    const wheelchairWords = ["WHEELCHAIR", "CANT WALK", "CANNOT WALK", "DISABLED", "PARALYSED", "PARALYZED"];
+    if (wheelchairWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Your programme is fully adaptable. Upper body resistance training is highly effective for fat loss and strength. Seated exercises: chair push ups, seated dumbbell press, seated rows with resistance band, wheelchair push intervals. Food and calorie control becomes even more important. Let us build around what you can do.";
+      await storage.logChat(user.id, message, reply, "WHEELCHAIR_MOBILITY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.981: MORBIDLY OBESE MODIFICATIONS ──
+    const obeseWords = ["VERY OVERWEIGHT", "MORBIDLY OBESE", "OVER 150KG", "OVER 130KG", "CANT GET OFF FLOOR", "KNEES CANT HANDLE"];
+    if (obeseWords.some(w => cleanMsg.includes(w))) {
+      const reply = "We start where you are — not where you think you should be. No floor exercises. No jumping. No high impact. Your programme is: seated exercises, wall push ups, chair squats, and walking — even 5 minutes to start. Food is 80% of your results at this stage. Protein at every meal. Small consistent steps. That is the plan.";
+      await storage.logChat(user.id, message, reply, "MORBID_OBESITY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.982: CULTURAL FOOD IDENTITY ──
+    const culturalFoodWords = ["PAP IS OUR CULTURE", "CANT STOP EATING PAP", "ITS OUR TRADITION", "MY CULTURE", "TRADITIONAL FOOD", "GRANDMOTHER COOKS"];
+    if (culturalFoodWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Pap is not the enemy — portions are. One fist of pap per meal fits into any fat loss plan. You do not have to abandon your culture to reach your goals. Eat your cultural foods in controlled portions with a strong protein source alongside. That is sustainable. That is real life.";
+      await storage.logChat(user.id, message, reply, "CULTURAL_FOOD");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.983: STROKE AND LIMITED MOBILITY ──
+    const strokeWords = ["HAD A STROKE", "STROKE", "ONE SIDE WEAK", "HEMIPLEGIA"];
+    if (strokeWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Post stroke training requires care and patience. Focus on what the stronger side can do while gently working the affected side. Walking with support, seated exercises, resistance bands. Always train with doctor clearance after a stroke. We adapt everything to where you are today.";
+      await storage.logChat(user.id, message, reply, "STROKE_MOBILITY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.984: FLAT WITH NO OUTDOOR ACCESS ──
+    const noSpaceWords = ["NO SPACE", "LIVE IN A FLAT", "NO GARDEN", "CANT GO OUTSIDE", "NO OUTDOOR ACCESS", "LOAD SHEDDING CANT TRAIN"];
+    if (noSpaceWords.some(w => cleanMsg.includes(w))) {
+      const reply = "No space is not an excuse — it is a challenge we solve. Your entire workout fits in 2 square metres: squats, push ups, lunges, plank, wall sit, mountain climbers. No equipment. No excuses. 20 minutes in your flat is enough to maintain progress.";
+      await storage.logChat(user.id, message, reply, "NO_SPACE_FLAT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.985: STEROID AND MEDICATION WEIGHT GAIN ──
+    const medWeightWords = ["ON STEROIDS", "MEDICATION WEIGHT", "PILL WEIGHT", "ANTIDEPRESSANTS WEIGHT", "CORTISONE WEIGHT GAIN"];
+    if (medWeightWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Medication induced weight gain is real and frustrating. It is not your fault and it does not mean fat loss is impossible. It means you have to be more consistent and patient than the average person. Do not stop medication for weight loss reasons — ever. Work with your doctor and work with us simultaneously.";
+      await storage.logChat(user.id, message, reply, "MEDICATION_WEIGHT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.986: LOADSHEDDING GRACE MODE ──
+    const loadsheddingWords = ["LOAD SHEDDING", "LOADSHEDDING", "NO ELECTRICITY", "ESKOM"];
+    if (loadsheddingWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Load shedding is SA life. If it disrupted your workout or meal prep — noted. Cold food still counts. Walking outside during load shedding counts. Do not use it as a reason to skip entirely. Adapt and keep moving.";
+      await storage.logChat(user.id, message, reply, "LOADSHEDDING_GRACE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
     // ── Priority 10: INTENT ROUTING ──
     let detectedIntent: string | null = null;
 
