@@ -234,6 +234,7 @@ async function getKamLifeFoodReply(
 
 FOOD-SPECIFIC INSTRUCTIONS:
 You understand ALL South African foods including pap, samp, umngqusho, morogo, chakalaka, vetkoek, magwinya, kota, gatsbys, braai meat, wors, boerewors, tripe, mogodu, umleqwa, pilchards, tinned fish, Spar pies, Shoprite specials, amagwinya, umqombothi, Savanna, Hunters, Black Label, street food, township food, suburban food — everything.
+SPAZA SHOP FOODS: Russians and polony are high fat processed meat — coach firmly to limit these. Fat cakes and vetkoek are junk — coach firmly to avoid. Also recognise pap en vleis, chakalaka, umngqusho, samp, mogodu, mashonzha as SA staples.
 Respond to exactly what they ate — be specific. Junk food: call it out firmly. Alcohol: be strict. No protein: name what to add. Skipped meal: firm instruction to eat protein now.
 
 RESPONSE FORMAT — return JSON only:
@@ -880,6 +881,48 @@ export async function registerRoutes(
     if (suppWords.some(w => cleanMsg.includes(w))) {
       const reply = "Supplements are optional — food comes first. If your diet is clean and consistent, protein powder can help hit your daily target. Creatine is safe and effective for strength. Fat burners are mostly marketing — avoid them. Sort your food first, then we talk supplements.";
       await storage.logChat(user.id, message, reply, "SUPPLEMENT_ADVICE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.9: SA LIFE SCENARIO HANDLERS ──
+    const funeralWords = ["FUNERAL", "UMNGCWABO", "BURIAL", "PASSED AWAY", "WE LOST", "MOURNING"];
+    if (funeralWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Condolences on your loss. During this time do not stress about your programme. Eat what is available, stay hydrated, and come back when you are ready. We will be here.";
+      await storage.logChat(user.id, message, reply, "FUNERAL_GRACE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    if (cleanMsg.includes("BRAAI")) {
+      const reply = "Braai is life — here is how to navigate it. Load your plate with meat first — boerewors, chicken, chops. Skip the rolls. Limit pap to one fist. One beer maximum. Enjoy it and get back on track tomorrow morning.";
+      await storage.logChat(user.id, message, reply, "BRAAI_STRATEGY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    const brokeWords = ["NO MONEY", "BROKE", "MONTH END", "NO FOOD", "CANT AFFORD", "NO CASH"];
+    if (brokeWords.some(w => cleanMsg.includes(w))) {
+      const reply = "This is what you buy right now: 6 eggs R25, tin pilchards R12, sugar beans R20. That is R57 for 3 days of protein. Eggs for breakfast, beans for lunch, pilchards for dinner. Simple and effective.";
+      await storage.logChat(user.id, message, reply, "MONTH_END_HUNGER");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    const tavernWords = ["TAVERN", "SHEBEEN"];
+    if (tavernWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Tavern nights happen. If you are going — eat a full protein meal before you go. Limit to 2 drinks. Drink water between drinks. Get back on track tomorrow morning — not Monday.";
+      await storage.logChat(user.id, message, reply, "TAVERN_CULTURE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    const churchWords = ["CHURCH", "SUNDAY LUNCH", "AFTER CHURCH"];
+    if (churchWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Church lunch is a social reality. Fill half your plate with protein — chicken, meat. Take one small scoop of starchy sides. Enjoy the fellowship and log what you ate after.";
+      await storage.logChat(user.id, message, reply, "CHURCH_SUNDAY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    const holidayWords = ["DECEMBER", "HOLIDAYS", "VACATION", "ON HOLIDAY"];
+    if (holidayWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Holiday mode does not mean stop. Walk every morning — 20 minutes minimum. Watch the alcohol. Eat protein at every meal. You will come back in January ahead of everyone else.";
+      await storage.logChat(user.id, message, reply, "DECEMBER_HOLIDAY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 

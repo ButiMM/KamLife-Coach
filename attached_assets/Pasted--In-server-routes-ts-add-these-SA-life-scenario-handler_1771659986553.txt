@@ -1,0 +1,10 @@
+
+"In server/routes.ts, add these SA life scenario handlers. Add them after the emotional intelligence checks, before the intent routing. All are keyword checks on the message:
+1. FUNERAL GRACE MODE: If message contains 'funeral', 'umngcwabo', 'burial', 'passed away', 'we lost', 'mourning' — reply: 'Condolences on your loss. During this time do not stress about your programme. Eat what is available, stay hydrated, and come back when you are ready. We will be here.'
+2. BRAAI STRATEGY: If message contains 'braai' — reply: 'Braai is life — here is how to navigate it. Load your plate with meat first — boerewors, chicken, chops. Skip the rolls. Limit pap to one fist. One beer maximum. Enjoy it and get back on track tomorrow morning.'
+3. MONTH END HUNGER: If message contains 'no money', 'broke', 'month end', 'no food', 'cant afford', 'no cash' — reply: 'This is what you buy right now: 6 eggs R25, tin pilchards R12, sugar beans R20. That is R57 for 3 days of protein. Eggs for breakfast, beans for lunch, pilchards for dinner. Simple and effective.'
+4. SPAZA SHOP FOODS: Add to food classification — Russians, polony, fat cakes, vetkoek, pap en vleis, chakalaka, umngqusho, samp, mogodu, mashonzha. Russians and polony are high fat processed meat — coach firmly to limit. Fat cakes and vetkoek are junk — coach firmly.
+5. TAVERN CULTURE: If message contains 'tavern', 'shebeen' — reply: 'Tavern nights happen. If you are going — eat a full protein meal before you go. Limit to 2 drinks. Drink water between drinks. Get back on track tomorrow morning — not Monday.'
+6. CHURCH SUNDAY LUNCH: If message contains 'church', 'sunday lunch', 'after church' — reply: 'Church lunch is a social reality. Fill half your plate with protein — chicken, meat. Take one small scoop of starchy sides. Enjoy the fellowship and log what you ate after.'
+7. DECEMBER HOLIDAY MODE: If message contains 'december', 'holidays', 'vacation', 'on holiday' — reply: 'Holiday mode does not mean stop. Walk every morning — 20 minutes minimum. Watch the alcohol. Eat protein at every meal. You will come back in January ahead of everyone else.'
+Restart the server."
