@@ -432,6 +432,15 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${safetyReply}</Message></Response>`);
     }
 
+    // ── CRISIS LANGUAGE — highest priority after red flags ──
+    const crisisWords = ["want to die", "kill myself", "suicide", "end my life", "not worth living", "give up on life"];
+    if (crisisWords.some(w => lowerMsg.includes(w))) {
+      const crisisReply = "I hear you and I am concerned about you. Please call Samaritans South Africa right now: 0800 567 567 — it is free and available 24 hours. You matter more than any fitness goal.";
+      const crisisUser = await storage.getUserByPhone(phoneNumber);
+      if (crisisUser) await storage.logChat(crisisUser.id, message, crisisReply, "CRISIS");
+      return res.type('text/xml').send(`<Response><Message>${crisisReply}</Message></Response>`);
+    }
+
     const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
 
     // ── Priority 1: GREETING GUARD ──
@@ -923,6 +932,73 @@ export async function registerRoutes(
     if (holidayWords.some(w => cleanMsg.includes(w))) {
       const reply = "Holiday mode does not mean stop. Walk every morning — 20 minutes minimum. Watch the alcohol. Eat protein at every meal. You will come back in January ahead of everyone else.";
       await storage.logChat(user.id, message, reply, "DECEMBER_HOLIDAY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.91: BINGE EATING DETECTION ──
+    const bingeWords = ["ATE EVERYTHING", "COULDNT STOP EATING", "ATE THE WHOLE", "LOST CONTROL", "ATE UNTIL SICK", "BINGED"];
+    if (bingeWords.some(w => cleanMsg.includes(w))) {
+      const reply = "What you are describing sounds like a binge episode. This is not about willpower — it is often triggered by restriction or stress. Do not punish yourself with less food tomorrow. Eat normally, add protein, and tell me what triggered it today.";
+      await storage.logChat(user.id, message, reply, "BINGE_DETECTION");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.92: SCALE OBSESSION ──
+    const weightMention = /\b\d{2,3}\s*(kg|kilos?)\b/i.test(message) || /^[\d.]+\s*kg$/i.test(message.trim());
+    if (weightMention && user.awaitingInputType !== "weight") {
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const weightLogs = await storage.getWeightLogs(user.id);
+      const loggedToday = weightLogs.some(l => new Date(l.createdAt!) >= todayStart);
+      if (loggedToday) {
+        const reply = "You already logged your weight today. Weighing multiple times daily creates anxiety and gives false readings. Once per week same day same time is the standard. Step away from the scale.";
+        await storage.logChat(user.id, message, reply, "SCALE_OBSESSION");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+    }
+
+    // ── Priority 9.93: ALL OR NOTHING THINKING ──
+    const allOrNothingWords = ["RUINED IT", "MESSED UP", "FAILED", "STARTING OVER", "STARTING MONDAY", "START FRESH MONDAY"];
+    if (allOrNothingWords.some(w => cleanMsg.includes(w))) {
+      const reply = "One bad meal does not ruin a week. One bad week does not ruin a month. Get back on track with your very next meal — not Monday. What are you eating in the next 2 hours?";
+      await storage.logChat(user.id, message, reply, "ALL_OR_NOTHING");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.94: COMPARISON CLIENT ──
+    const comparisonWords = ["MY FRIEND LOST", "EVERYONE ELSE", "WHY IS SHE LOSING", "LOSING FASTER THAN ME", "NOT LOSING AS FAST"];
+    if (comparisonWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Stop comparing. Different bodies, different hormones, different histories. Your job is to beat last week's version of you — nobody else. What did you do better this week than last week?";
+      await storage.logChat(user.id, message, reply, "COMPARISON_CLIENT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.95: CHRONIC CONDITIONS ──
+    if (cleanMsg.includes("PCOS") || cleanMsg.includes("POLYCYSTIC")) {
+      const reply = "PCOS makes fat loss harder but not impossible. Key focus: reduce refined carbs significantly, prioritise strength training over cardio, manage stress and sleep aggressively. Weight loss will be slower — that is normal. Consistency over months is what works.";
+      await storage.logChat(user.id, message, reply, "CHRONIC_PCOS");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    if (cleanMsg.includes("THYROID") || cleanMsg.includes("HYPOTHYROID") || cleanMsg.includes("HYPERTHYROID")) {
+      const reply = "Thyroid conditions affect metabolism significantly. Get your medication sorted with your doctor first. From our side — focus on protein, manage portions strictly, and keep training consistently. Progress will be slower but it will come. Do not compare your speed to anyone else.";
+      await storage.logChat(user.id, message, reply, "CHRONIC_THYROID");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.96: NIGHT SHIFT ──
+    const nightShiftWords = ["NIGHT SHIFT", "NIGHTSHIFT", "WORK NIGHTS", "WORKING NIGHTS"];
+    if (nightShiftWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Night shift changes everything. Your meal 1 is when you wake up — treat it like breakfast regardless of the time. Avoid heavy carbs before your shift. Sleep is your biggest challenge — protect it aggressively. Walk for 20 minutes after your shift before sleeping.";
+      await storage.logChat(user.id, message, reply, "NIGHT_SHIFT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 9.97: MENSTRUAL CYCLE AWARENESS ──
+    const periodWords = ["PERIOD", "TIME OF MONTH", "PMS", "BLOATED", "WATER RETENTION"];
+    if (periodWords.some(w => cleanMsg.includes(w))) {
+      const reply = "Completely normal. Week 3 and 4 of your cycle causes water retention of up to 2kg. The scale will go up — ignore it. Stay on programme, reduce sodium, increase water. It will drop after your period. Do not panic.";
+      await storage.logChat(user.id, message, reply, "MENSTRUAL_CYCLE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
