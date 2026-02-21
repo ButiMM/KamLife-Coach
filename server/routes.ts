@@ -583,7 +583,7 @@ export async function registerRoutes(
           await storage.updateUser(referrer.id, { betaBypassUntil: referrerExpiry });
           await storage.logChat(user.id, message, "Referral signup", "REFERRAL_NEW_USER");
           await storage.logChat(referrer.id, `Referral used by ${phoneNumber}`, "7 days added to your account", "REFERRAL_REWARD");
-          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. Your 7 free days are activated — courtesy of a friend who believes in you. Let us get started. What is your name?</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. No fad diets. No detox teas. No shortcuts. Just real coaching that works. Your 7 free days are activated — courtesy of a friend who believes in you. What is your name?</Message></Response>`);
         }
       }
       if (isBetaTester) {
@@ -596,7 +596,7 @@ export async function registerRoutes(
           onboardingState: "AWAITING_NAME"
         });
         console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach! Let's get started. What is your full name?</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. No fad diets. No detox teas. No shortcuts. Just real coaching that works. Let's build your profile. What is your name?</Message></Response>`);
       } else {
         return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. Subscribe here: ${paymentLink}</Message></Response>`);
       }
@@ -959,13 +959,14 @@ export async function registerRoutes(
 
       if (currentState === "AWAITING_NAME") {
         await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
-        reply = R.onboardingName(message);
+        reply = `Good to meet you, ${message}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nOne question — what is your main goal right now?\n1) Lose fat\n2) Build muscle\n3) Get fit and healthy`;
       } else if (currentState === "AWAITING_GOAL") {
         let goalValue = message;
         if (cleanMsg === "1") goalValue = "Fat Loss";
         else if (cleanMsg === "2") goalValue = "Muscle Gain";
+        else if (cleanMsg === "3") goalValue = "General Fitness";
         await storage.updateUser(user.id, { goalType: goalValue, onboardingState: "AWAITING_WEIGHT" });
-        reply = R.onboardingGoal();
+        reply = "Understood. How much do you weigh right now? Just the number in kg — no judgment here, just data.";
       } else if (currentState === "AWAITING_WEIGHT") {
         const weightVal = parseFloat(message);
         if (!weightVal || weightVal < 30 || weightVal > 300) {
@@ -979,7 +980,7 @@ export async function registerRoutes(
             calorieTarget = Math.round(weightVal * 22 + 300);
           }
           await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "AWAITING_TRAINING_MODE", calorieTarget });
-          reply = "Where will you train?\n1) Gym\n2) Home\n3) Walking only";
+          reply = "Good. Where will you be training?\n1) Gym\n2) At home\n3) Walking only";
         }
       } else if (currentState === "AWAITING_TRAINING_MODE") {
         let mode: string | null = null;
@@ -988,9 +989,9 @@ export async function registerRoutes(
         else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
         if (mode) {
           await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_AGE" });
-          reply = "One last thing — how old are you? This helps us personalise your programme.";
+          reply = "How old are you? This helps us personalise your programme.";
         } else {
-          reply = "Please reply 1, 2, or 3.\n1) Gym\n2) Home\n3) Walking only";
+          reply = "Please reply 1, 2, or 3.\n1) Gym\n2) At home\n3) Walking only";
         }
       } else if (currentState === "AWAITING_AGE") {
         const ageVal = parseInt(message);
@@ -998,15 +999,17 @@ export async function registerRoutes(
           reply = "Please enter your age as a number (e.g. 32).";
         } else {
           await storage.updateUser(user.id, { age: ageVal, onboardingState: "AWAITING_CONDITIONS" });
-          reply = "Do you have any injuries, chronic conditions, or health issues we should know about? (Examples: bad knee, diabetes, high blood pressure, asthma, PCOS)\n\nReply NONE if nothing to report.";
+          reply = "Last thing — any injuries, chronic conditions or health issues we should know about before we start? Examples: bad knee, diabetes, hypertension, pregnancy. Reply NONE if nothing to declare.";
         }
       } else if (currentState === "AWAITING_CONDITIONS") {
         const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
         await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "COMPLETED" });
-        const isProfileUpdate = user.goalType && user.trainingMode;
+        const calTarget = user.calorieTarget || 2000;
+        const stepsTarget = user.stepsTarget || 8000;
+        const isProfileUpdate = user.goalType && user.trainingMode && user.name;
         reply = isProfileUpdate
-          ? `Profile updated. You are ready. Let's get to work.\n\n${menuText}`
-          : `${R.onboardingComplete()}\n\n${menuText}`;
+          ? `Profile updated, ${user.name}. Your daily calorie target is ${calTarget}kcal. Your step target is ${stepsTarget} steps per day. Reply MENU to continue.`
+          : `Profile complete, ${user.name || "coach"}. Your daily calorie target is ${calTarget}kcal. Your step target is ${stepsTarget} steps per day. Your programme starts today. Reply MENU to begin.`;
       }
 
       if (reply) {
