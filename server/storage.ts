@@ -34,6 +34,9 @@ export interface IStorage {
   logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<ChatLog>;
   getChatHistory(userId: string, limit?: number): Promise<ChatLog[]>;
 
+  // Referral
+  getUserByReferralCode(code: string): Promise<User | undefined>;
+
   // Admin / Flagged
   getFlaggedUsers(): Promise<FlaggedUser[]>;
 }
@@ -114,6 +117,11 @@ export class DatabaseStorage implements IStorage {
 
   async getChatHistory(userId: string, limitCount: number = 50): Promise<ChatLog[]> {
     return await db.select().from(chatHistory).where(eq(chatHistory.userId, userId)).orderBy(desc(chatHistory.createdAt)).limit(limitCount);
+  }
+
+  async getUserByReferralCode(code: string): Promise<User | undefined> {
+    const [user] = await db.select().from(users).where(eq(users.referralCode, code));
+    return user;
   }
 
   async getFlaggedUsers(): Promise<FlaggedUser[]> {

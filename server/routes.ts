@@ -496,6 +496,28 @@ export async function registerRoutes(
     const isBetaTester = betaTesters.includes(phoneNumber);
 
     if (!user) {
+      const referMatch = cleanMsg.match(/^REFER\s+(\w+)$/);
+      if (referMatch) {
+        const referCode = referMatch[1].toUpperCase();
+        const referrer = await storage.getUserByReferralCode(referCode);
+        if (referrer && referrer.phoneNumber !== phoneNumber) {
+          const trialExpiry = new Date();
+          trialExpiry.setDate(trialExpiry.getDate() + 7);
+          user = await storage.createUser({
+            phoneNumber,
+            subscriptionStatus: "active",
+            betaBypassUntil: trialExpiry,
+            referredBy: referCode,
+            onboardingState: "AWAITING_NAME"
+          });
+          const referrerExpiry = referrer.betaBypassUntil ? new Date(referrer.betaBypassUntil) : new Date();
+          referrerExpiry.setDate(referrerExpiry.getDate() + 7);
+          await storage.updateUser(referrer.id, { betaBypassUntil: referrerExpiry });
+          await storage.logChat(user.id, message, "Referral signup", "REFERRAL_NEW_USER");
+          await storage.logChat(referrer.id, `Referral used by ${phoneNumber}`, "7 days added to your account", "REFERRAL_REWARD");
+          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. Your 7 free days are activated — courtesy of a friend who believes in you. Let us get started. What is your name?</Message></Response>`);
+        }
+      }
       if (isBetaTester) {
         const bypassExpiry = new Date();
         bypassExpiry.setDate(bypassExpiry.getDate() + 14);
@@ -586,6 +608,35 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${cancelReply}</Message></Response>`);
     }
 
+    // ── Priority 8.56: REFER command ──
+    if (cleanMsg === "REFER") {
+      if (user.referralCode) {
+        const code = user.referralCode;
+        const reply = `Your referral code is ${code}. Share this with a friend — they get 7 days free when they sign up. When they join you get one week free added to your account. Share this number and tell them to message: REFER ${code} when they sign up.`;
+        await storage.logChat(user.id, message, reply, "REFERRAL_CODE");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+      const namePart = (user.name || "KAM").replace(/\s+/g, "").toUpperCase().slice(0, 4);
+      const phonePart = phoneNumber.slice(-4);
+      let code = `${namePart}${phonePart}`;
+      const existing = await storage.getUserByReferralCode(code);
+      if (existing && existing.id !== user.id) {
+        code = `${namePart}${phonePart}${Math.floor(Math.random() * 90 + 10)}`;
+      }
+      await storage.updateUser(user.id, { referralCode: code });
+      const reply = `Your referral code is ${code}. Share this with a friend — they get 7 days free when they sign up. When they join you get one week free added to your account. Share this number and tell them to message: REFER ${code} when they sign up.`;
+      await storage.logChat(user.id, message, reply, "REFERRAL_CODE");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── Priority 8.57: REJOIN command ──
+    if (cleanMsg === "REJOIN") {
+      await storage.updateUser(user.id, { subscriptionStatus: "active", cancelledAt: null });
+      const reply = "Welcome back. That took courage. Let us pick up where you left off. Reply MENU to continue.";
+      await storage.logChat(user.id, message, reply, "REJOIN");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
     // ── Priority 8.6: MEAL SUGGESTIONS ──
     const mealTriggers = ["WHAT SHOULD I EAT", "MEAL IDEAS", "FOOD SUGGESTIONS", "WHAT CAN I EAT"];
     if (mealTriggers.some(t => cleanMsg.includes(t))) {
@@ -636,7 +687,7 @@ export async function registerRoutes(
 
       if (inputType === "awaiting_cancel") {
         if (cleanMsg === "CONFIRM") {
-          await storage.updateUser(user.id, { awaitingInputType: null, subscriptionStatus: "inactive" });
+          await storage.updateUser(user.id, { awaitingInputType: null, subscriptionStatus: "inactive", cancelledAt: new Date() });
           const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Keep pushing — even without us.";
           await storage.logChat(user.id, message, reply, "CANCEL_CONFIRMED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -1125,7 +1176,9 @@ export async function registerRoutes(
             winMoment = "\n\n7 days straight hitting your target. That is elite discipline. Screenshot this.";
           }
         }
-        const reply = `${reaction}${comparison}${winMoment}`;
+        const streak = await getConsistencyStreak(user.id);
+        const streakMsg = getStreakMessage(streak);
+        const reply = `${reaction}${comparison}${winMoment}${streakMsg}`;
         await storage.logChat(user.id, message, reply, "LOG_STEPS");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -1159,6 +1212,8 @@ export async function registerRoutes(
         if (baseline && (parseFloat(baseline.weight) - parseFloat(val)) >= 2) {
           reply += "\n\nDown 2kg+ in the last 2 weeks. That is the work paying off. Screenshot this and share it.";
         }
+        const wStreak = await getConsistencyStreak(user.id);
+        reply += getStreakMessage(wStreak);
         await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -1175,7 +1230,8 @@ export async function registerRoutes(
       let nextDay = (user.programDayIndex || 1) + 1;
       if (nextDay > 21) nextDay = 1;
       await storage.updateUser(user.id, { programDayIndex: nextDay });
-      const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.`;
+      const woStreak = await getConsistencyStreak(user.id);
+      const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.${getStreakMessage(woStreak)}`;
       await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1290,6 +1346,34 @@ export async function registerRoutes(
         }
       }
     }
+    // Daily 11:00 — Win-back sequence for cancelled users
+    if (now.getHours() === 11 && now.getMinutes() === 0) {
+      const allUsers = await storage.getAllUsers();
+      for (const u of allUsers) {
+        if (u.subscriptionStatus === "inactive" && u.cancelledAt) {
+          const daysSinceCancel = Math.floor((Date.now() - new Date(u.cancelledAt).getTime()) / (1000 * 60 * 60 * 24));
+          const recentChats = await storage.getChatHistory(u.id, 20);
+          const sentIntents = recentChats.filter(c => c.intent && c.intent.startsWith("WINBACK_DAY_")).map(c => c.intent);
+          let winBackMsg = "";
+          let winBackIntent = "";
+          if (daysSinceCancel >= 3 && daysSinceCancel < 7 && !sentIntents.includes("WINBACK_DAY_3")) {
+            winBackMsg = "You have been gone 3 days. Your body has not forgotten the progress you made. Come back — reply REJOIN to reactivate.";
+            winBackIntent = "WINBACK_DAY_3";
+          } else if (daysSinceCancel >= 7 && daysSinceCancel < 14 && !sentIntents.includes("WINBACK_DAY_7")) {
+            winBackMsg = "One week since you left. Most people who quit wish they had stayed consistent. Reply REJOIN to come back at the same rate.";
+            winBackIntent = "WINBACK_DAY_7";
+          } else if (daysSinceCancel >= 14 && !sentIntents.includes("WINBACK_DAY_14")) {
+            winBackMsg = "Two weeks gone. This is your last nudge from us. Reply REJOIN to restart your journey. After this we will not message again.";
+            winBackIntent = "WINBACK_DAY_14";
+          }
+          if (winBackMsg) {
+            console.log(`[SCHEDULE] Win-back ${winBackIntent} to ${u.phoneNumber}`);
+            await sendWhatsAppMessage(u.phoneNumber, winBackMsg);
+            await storage.logChat(u.id, "", winBackMsg, winBackIntent);
+          }
+        }
+      }
+    }
     // Daily 16:00
     if (now.getHours() === 16 && now.getMinutes() === 0) {
       const users = await storage.getAllUsers();
@@ -1356,6 +1440,33 @@ export async function registerRoutes(
     return { score: totalScore, level, workoutsDone, avgSteps, foodLogDays, activeDays };
   }
 
+  async function getConsistencyStreak(userId: string): Promise<number> {
+    const chats = await storage.getChatHistory(userId, 100);
+    const logIntents = ["LOG_FOOD", "LOG_FOOD_FOLLOWUP", "LOG_STEPS", "LOG_STEPS_FOLLOWUP", "LOG_WEIGHT", "LOG_WEIGHT_FOLLOWUP", "WORKOUT_DONE", "FOOD_PORTION", "LOG_SLEEP"];
+    const loggedDates = new Set(
+      chats.filter(c => c.intent && logIntents.includes(c.intent) && c.createdAt)
+        .map(c => new Date(c.createdAt!).toDateString())
+    );
+    let streak = 0;
+    const today = new Date();
+    for (let i = 0; i < 60; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() - i);
+      if (loggedDates.has(d.toDateString())) {
+        streak++;
+      } else {
+        break;
+      }
+    }
+    return streak;
+  }
+
+  function getStreakMessage(streak: number): string {
+    if (streak === 7) return "\n\nDay 7 streak. You have logged every single day this week. That is the 1% habit. Keep it going.";
+    if (streak === 30) return "\n\n30 day streak. You are no longer trying to build a habit — you have one. Screenshot this.";
+    return "";
+  }
+
   // Weekly scheduler
   setInterval(async () => {
     const now = new Date();
@@ -1379,7 +1490,12 @@ export async function registerRoutes(
 
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
           if (daysSinceJoin >= 28) {
-            report += "\n\nYou have been on this programme for 4 weeks. Take a photo today — front, side, back. Same time, same lighting. This is your progress marker. You will thank yourself later.";
+            const prevChats = await storage.getChatHistory(user.id, 50);
+            const alreadyPrompted = prevChats.some(c => c.intent === "PHOTO_PROMPT");
+            if (!alreadyPrompted) {
+              report += "\n\nYou have been on this programme for 4 weeks. Take a front and side photo today — same time, same lighting. This is your progress marker. You will thank yourself in 4 more weeks.";
+              await storage.logChat(user.id, "", "Photo prompt sent", "PHOTO_PROMPT");
+            }
           }
 
           console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
