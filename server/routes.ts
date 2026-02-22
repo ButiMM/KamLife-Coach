@@ -289,6 +289,64 @@ function getModeKey(trainingMode: string): string {
   return "home";
 }
 
+const INJURY_FILTERS: Record<string, string[]> = {
+  knee: ["squat_jump", "lunge_walking", "pistol", "burpee"],
+  back: ["deadlift_conventional", "row_bent", "bent_row"],
+  shoulder: ["press_shoulder", "press_bench_incline", "pushup_decline"],
+  wrist: [],
+};
+
+const PHASE_CONTEXT: Record<number, string> = {
+  1: "You are building the foundation. Show up consistently — results come later.",
+  2: "The habit is forming. This is where your body starts to change.",
+  3: "You have earned this phase. This is where serious results happen.",
+  4: "Peak phase. Your body is ready for this. Push beyond what feels comfortable.",
+  5: "Deload week. This is not weakness — this is intelligence. Recovery is part of the programme.",
+};
+
+const REST_DAY_MESSAGES: Record<number, string> = {
+  1: "10 minute walk and stretch your legs.",
+  2: "20 minute walk and foam roll if you have one.",
+  3: "30 minute walk — active recovery keeps fat burning.",
+  4: "20 minute walk and full body stretch.",
+  5: "20 minute gentle walk. Your body is recovering.",
+};
+
+function filterExercisesForInjuries(exercises: Exercise[], user: any): Exercise[] {
+  const injuries = (user.injuries || "").toLowerCase();
+  if (!injuries || injuries === "none" || injuries === "no") return exercises;
+
+  let filtered = [...exercises];
+  const removedIds: string[] = [];
+
+  for (const [injury, blockedIds] of Object.entries(INJURY_FILTERS)) {
+    if (injuries.includes(injury)) {
+      if (injury === "wrist") {
+        filtered = filtered.filter(ex => {
+          if (ex.modification.toLowerCase().includes("wrist")) {
+            removedIds.push(ex.id);
+            return false;
+          }
+          return true;
+        });
+      } else {
+        filtered = filtered.filter(ex => {
+          const blocked = blockedIds.some(bid => ex.id.includes(bid));
+          if (blocked) removedIds.push(ex.id);
+          return !blocked;
+        });
+      }
+    }
+  }
+
+  if (removedIds.length > 0) {
+    const keptIds = filtered.map(e => e.id);
+    console.log(`[INJURY FILTER] ${user.name} (${injuries}): removed [${removedIds.join(", ")}], kept [${keptIds.join(", ")}]`);
+  }
+
+  return filtered;
+}
+
 function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: boolean } {
   const phase = user.programmePhase || 1;
   const mode = getModeKey((user.trainingMode as string) || "home");
@@ -309,7 +367,14 @@ function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: bool
     return { exercises: [], isRestDay: true };
   }
 
-  const library = EXERCISE_LIBRARY[mode]?.[phaseKey] || EXERCISE_LIBRARY.home.phase1;
+  let library = EXERCISE_LIBRARY[mode]?.[phaseKey] || EXERCISE_LIBRARY.home.phase1;
+  library = filterExercisesForInjuries(library, user);
+
+  if (library.length === 0) {
+    library = EXERCISE_LIBRARY[mode]?.phase1 || EXERCISE_LIBRARY.home.phase1;
+    library = filterExercisesForInjuries(library, user);
+  }
+
   const exerciseCount = Math.min(library.length, mode === "walk" ? 2 : 4);
   const startIdx = (dayIndex * 2) % library.length;
   const selected: Exercise[] = [];
@@ -319,29 +384,53 @@ function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: bool
   return { exercises: selected, isRestDay: false };
 }
 
-function shouldShowModification(user: any): boolean {
-  const age = user.age ? parseInt(user.age) : 0;
-  const hasConditions = user.injuries && user.injuries.toLowerCase() !== "none" && user.injuries.toLowerCase() !== "no";
-  return age >= 55 || !!hasConditions;
+function adjustSetsForAge(sets: string, age: number): string {
+  if (age < 70) return sets;
+  const match = sets.match(/^(\d+)x(\d+)/);
+  if (match) {
+    const newSets = Math.max(1, parseInt(match[1]) - 1);
+    return sets.replace(/^\d+x/, `${newSets}x`);
+  }
+  return sets;
 }
 
 function formatWorkoutMessage(user: any, exercises: Exercise[], isRestDay: boolean): string {
   const phase = user.programmePhase || 1;
   const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
   const day = user.programDayIndex || 1;
+  const age = user.age ? parseInt(user.age) : 30;
+  const goal = (user.goalType || "").toLowerCase();
+  const mode = getModeKey((user.trainingMode as string) || "home");
 
   if (isRestDay) {
-    return `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n\nRest day. 20 min easy walk and stretch. Recovery is part of the programme — your muscles grow when you rest, not when you train.\n\nReply DONE when finished.`;
+    const restMsg = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
+    return `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n\nRest day — but not a lazy day. Today: ${restMsg} This is part of the programme — do it.\n\nReply DONE when finished.`;
   }
 
-  const showMods = shouldShowModification(user);
-  let msg = `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n`;
+  const phaseContext = PHASE_CONTEXT[phase] || PHASE_CONTEXT[1];
+  const showMods = age >= 60 || (user.injuries && user.injuries.toLowerCase() !== "none" && user.injuries.toLowerCase() !== "no");
+  let msg = `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n${phaseContext}\n`;
 
   for (const ex of exercises) {
-    msg += `\n${ex.name} — ${ex.sets}\n${ex.plainEnglish}\n`;
+    const displaySets = adjustSetsForAge(ex.sets, age);
+    msg += `\n${ex.name} — ${displaySets}\n${ex.plainEnglish}\n`;
     if (showMods && ex.modification && ex.modification !== "None needed." && ex.modification !== "None needed — weight is already very light.") {
       msg += `⚠️ ${ex.modification}\n`;
     }
+  }
+
+  if (age >= 70) {
+    msg += `\nAt your level recovery is priority. Quality over quantity always.\n`;
+  }
+  if (age <= 17) {
+    msg += `\nFocus on form today — not weight. Building correct movement patterns now means less injury for life.\n`;
+  }
+
+  if ((goal.includes("fat") || goal.includes("loss")) && (mode === "gym" || mode === "home")) {
+    msg += `\nFinisher: 10 minutes of continuous movement — jump rope, mountain climbers, or fast bodyweight squats. This is what accelerates fat loss.\n`;
+  }
+  if (goal.includes("muscle")) {
+    msg += `\nRest exactly 90 seconds between sets. Eat protein within 30 minutes of finishing this session.\n`;
   }
 
   msg += `\nReply DONE when finished.`;
@@ -351,11 +440,11 @@ function formatWorkoutMessage(user: any, exercises: Exercise[], isRestDay: boole
 function formatDailyWorkoutSummary(user: any): string {
   const { exercises, isRestDay } = getExercisesForDay(user);
   const phase = user.programmePhase || 1;
-  const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
   const day = user.programDayIndex || 1;
 
   if (isRestDay) {
-    return `Rest day. 20 min walk and stretch. Recovery matters.`;
+    const restMsg = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
+    return `Rest day — but not a lazy day. ${restMsg}`;
   }
 
   const names = exercises.map(e => `${e.name} ${e.sets}`).join(". ");
@@ -1678,8 +1767,19 @@ export async function registerRoutes(
     }
 
     if (detectedIntent === "GET_WORKOUT") {
+      let stalePrefix = "";
+      if (user.lastWorkoutDate) {
+        const daysSinceWorkout = Math.floor((Date.now() - new Date(user.lastWorkoutDate).getTime()) / (1000 * 60 * 60 * 24));
+        if (daysSinceWorkout > 7) {
+          const phase = user.programmePhase || 1;
+          const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+          const day = user.programDayIndex || 1;
+          stalePrefix = `Welcome back. You have been away for ${daysSinceWorkout} days. We are not going backwards — pick up exactly where you left off. Day ${day} of Phase ${phase}: ${phaseConfig.name}. Here is today's session:\n\n`;
+        }
+      }
+
       const { exercises, isRestDay } = getExercisesForDay(user);
-      const workoutMsg = formatWorkoutMessage(user, exercises, isRestDay);
+      const workoutMsg = stalePrefix + formatWorkoutMessage(user, exercises, isRestDay);
 
       if (!isRestDay && exercises.length > 0) {
         try {
