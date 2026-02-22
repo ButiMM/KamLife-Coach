@@ -153,6 +153,51 @@ function getPostWorkoutNutrition(phase: number): string {
   return "Post workout: eat protein within 30 minutes. Light protein meal — eggs or yoghurt.";
 }
 
+async function buildSharecard(user: any): Promise<string> {
+  const phase = user.programmePhase || 1;
+  const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+  const phaseName = phaseConfig.name;
+  const startDate = user.programmeStartDate || user.createdAt;
+  const daysOnProgramme = startDate ? Math.floor((Date.now() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+  const weightLogs = await storage.getWeightLogs(user.id);
+  let weightLost = "0";
+  if (weightLogs.length >= 2) {
+    const sorted = [...weightLogs].sort((a, b) => new Date(a.loggedAt || 0).getTime() - new Date(b.loggedAt || 0).getTime());
+    const first = parseFloat(sorted[0].weight as string);
+    const latest = parseFloat(sorted[sorted.length - 1].weight as string);
+    const diff = first - latest;
+    weightLost = diff > 0 ? diff.toFixed(1) : "0";
+  }
+  const stepLogs = await storage.getStepLogs(user.id);
+  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+  const thisWeekSteps = stepLogs.filter(l => l.loggedAt && new Date(l.loggedAt) >= weekAgo);
+  const avgSteps = thisWeekSteps.length > 0 ? Math.round(thisWeekSteps.reduce((sum, l) => sum + l.steps, 0) / thisWeekSteps.length) : 0;
+  const score = user.weeklyScore || 0;
+  const complianceLevel = user.complianceLevel || "BUILDING";
+
+  const sharecard = [
+    `╔══════════════════════════╗`,
+    `║   KAMLIFE COACH          ║`,
+    `║   PHASE ${phase}: ${phaseName.padEnd(16)}║`,
+    `╠══════════════════════════╣`,
+    `║ ${('Name: ' + (user.name || 'Coach')).padEnd(26)}║`,
+    `║ ${('Days: ' + daysOnProgramme).padEnd(26)}║`,
+    `║ ${('Lost: ' + weightLost + 'kg').padEnd(26)}║`,
+    `║ ${('Workouts: ' + (user.totalWorkoutsCompleted || 0)).padEnd(26)}║`,
+    `║ ${('Avg steps: ' + avgSteps.toLocaleString()).padEnd(26)}║`,
+    `║ ${('Compliance: ' + score + '%').padEnd(26)}║`,
+    `╠══════════════════════════╣`,
+    `║ ${('Level: ' + complianceLevel).padEnd(26)}║`,
+    `║ "Consistency over        ║`,
+    `║  perfection. Always."   ║`,
+    `╚══════════════════════════╝`,
+    ``,
+    `Join KamLife Coach — WhatsApp +1 415 523 8886`
+  ].join('\n');
+
+  return sharecard;
+}
+
 async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string | null; newPhase: number; newWeek: number }> {
   const phase = user.programmePhase || 1;
   const week = user.programmeWeek || 1;
@@ -186,7 +231,9 @@ async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string |
       const avgSteps = phaseSteps.length > 0 ? Math.round(phaseSteps.reduce((sum, l) => sum + l.steps, 0) / phaseSteps.length) : 0;
       const complianceScore = Math.min(100, Math.round((phaseWorkouts / (config.weeklyWorkouts * config.weeks)) * 100));
 
-      phaseTransitionMsg = `Phase ${phase}: ${config.name} — Complete. You have finished ${config.weeks} weeks of consistent work.\n\nPhase ${phase} Summary:\nWorkouts completed: ${phaseWorkouts}\nAverage steps: ${avgSteps.toLocaleString()}\nCompliance: ${complianceScore}%\n\nBefore we move to Phase ${nextPhase} — how are you feeling?\nReply READY to advance to Phase ${nextPhase}: ${nextConfig.theme}\nOr reply REPEAT to own this phase one more week and advance stronger.`;
+      const sharecard = await buildSharecard(user);
+
+      phaseTransitionMsg = `Phase ${phase}: ${config.name} — Complete. You have finished ${config.weeks} weeks of consistent work.\n\nPhase ${phase} Summary:\nWorkouts completed: ${phaseWorkouts}\nAverage steps: ${avgSteps.toLocaleString()}\nCompliance: ${complianceScore}%\n\n${sharecard}\n\nBefore we move to Phase ${nextPhase} — how are you feeling?\nReply READY to advance to Phase ${nextPhase}: ${nextConfig.theme}\nOr reply REPEAT to own this phase one more week and advance stronger.`;
 
       newWeek = week;
       newDay = dayInWeek - 1 || 7;
@@ -1769,6 +1816,7 @@ export async function registerRoutes(
       else if (cleanMsg === "REPEAT WEEK") detectedIntent = "REPEAT_WEEK";
       else if (cleanMsg === "READY") detectedIntent = "PHASE_READY";
       else if (cleanMsg === "REPEAT") detectedIntent = "PHASE_REPEAT";
+      else if (cleanMsg === "SHARECARD" || /SHARE MY PROGRESS|SHARE CARD|PROGRESS CARD/.test(cleanMsg)) detectedIntent = "SHARECARD";
       else if (/^NUTRITION$|^FOOD PLAN$|^MEAL PLAN$|^DIET$|^EATING PLAN$/.test(cleanMsg)) detectedIntent = "NUTRITION_PLAN";
       else if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
       else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
@@ -2056,6 +2104,14 @@ export async function registerRoutes(
       });
       const reply = `Phase ${phase} reset. Smart decision. Owning a phase before advancing is what separates serious people from everyone else. Start Week 1 again — this time leave nothing on the table.`;
       await storage.logChat(user.id, message, reply, "PHASE_REPEAT");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── SHARECARD ──
+    if (detectedIntent === "SHARECARD") {
+      const sharecard = await buildSharecard(user);
+      const reply = `${sharecard}\n\nScreenshot this and share it. Every person you inspire is proof the work is real.`;
+      await storage.logChat(user.id, message, reply, "SHARECARD");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
