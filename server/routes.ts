@@ -1678,15 +1678,33 @@ export async function registerRoutes(
     }
 
     if (detectedIntent === "GET_WORKOUT") {
-      const day = user.programDayIndex || 1;
-      const mode = (user.trainingMode as string) || "home";
-      const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
-      const workout = program[(day - 1) % 21];
-      const phase = user.programmePhase || 1;
-      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-      const reply = `Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}.\nDay ${day} — ${workout} Get it done. Reply DONE when finished.`;
-      await storage.logChat(user.id, message, reply, "GET_WORKOUT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      const { exercises, isRestDay } = getExercisesForDay(user);
+      const workoutMsg = formatWorkoutMessage(user, exercises, isRestDay);
+
+      if (!isRestDay && exercises.length > 0) {
+        try {
+          const ctx = await buildUserContext(user);
+          const motivationCompletion = await openai.chat.completions.create({
+            model: "gpt-4o-mini",
+            max_tokens: 60,
+            messages: [
+              { role: "system", content: `${KAMLIFE_MASTER_PROMPT}\n\nCONTEXT:\n${ctx}\n\nWrite ONE short motivational sentence (max 15 words) specific to this user — their age, goal, phase, and conditions. No generic motivation. Be direct and personal.` },
+              { role: "user", content: "Give me one motivational line for today's workout." },
+            ],
+          });
+          const motivation = motivationCompletion.choices[0]?.message?.content?.trim();
+          if (motivation) {
+            const reply = workoutMsg.replace("Reply DONE when finished.", `${motivation}\n\nReply DONE when finished.`);
+            await storage.logChat(user.id, message, reply, "GET_WORKOUT");
+            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+          }
+        } catch (e) {
+          console.error("[GET_WORKOUT] GPT motivation failed:", e);
+        }
+      }
+
+      await storage.logChat(user.id, message, workoutMsg, "GET_WORKOUT");
+      return res.type('text/xml').send(`<Response><Message>${workoutMsg}</Message></Response>`);
     }
 
     if (detectedIntent === "LOG_STEPS") {
@@ -1841,13 +1859,10 @@ export async function registerRoutes(
           if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
             msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
           } else {
-            const day = user.programDayIndex || 1;
-            const mode = (user.trainingMode as string) || "home";
-            const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
-            const workout = program[(day - 1) % 21];
             const phase = user.programmePhase || 1;
             const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            const summary = formatDailyWorkoutSummary(user);
+            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
             const triggerNow = new Date();
             if (triggerNow.getDay() === 1) {
               msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
@@ -1883,13 +1898,10 @@ export async function registerRoutes(
           if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
             msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
           } else {
-            const day = user.programDayIndex || 1;
-            const mode = (user.trainingMode as string) || "home";
-            const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
-            const workout = program[(day - 1) % 21];
             const phase = user.programmePhase || 1;
             const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            const summary = formatDailyWorkoutSummary(user);
+            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
             if (now.getDay() === 1) {
               msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
             }
