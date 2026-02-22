@@ -139,6 +139,20 @@ const PHASE_CONFIG: Record<number, { name: string; theme: string; weeks: number;
   5: { name: "Deload", theme: "Intentional recovery. Your body needs this", weeks: 2, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000 },
 };
 
+const NUTRITION_BY_PHASE: Record<number, { name: string; focus: string; carbTiming: string; keyHabit: string; weeklyTarget: string }> = {
+  1: { name: "Foundation", focus: "Build 3 consistent meals daily. Protein at every meal. No skipping.", carbTiming: "Carbs around training only. Rest of day protein and vegetables.", keyHabit: "Log every meal this week — accuracy comes before perfection.", weeklyTarget: "Hit protein target 5 out of 7 days." },
+  2: { name: "Build", focus: "Increase protein by 10g daily. Add a fourth meal if training 4x per week.", carbTiming: "Carbs before and after training. Reduce carbs on rest days.", keyHabit: "Meal prep Sunday. Prepare 3 days of food in advance.", weeklyTarget: "Hit protein target 6 out of 7 days. Zero junk food days." },
+  3: { name: "Push", focus: "Precision eating. Every meal tracked. No guessing portions.", carbTiming: "High carb on training days. Low carb on rest days. Protein stays constant.", keyHabit: "Weigh or measure portions for one week to recalibrate your eye.", weeklyTarget: "Perfect logging 7 out of 7 days. This phase demands it." },
+  4: { name: "Peak", focus: "Maximum fuel for maximum output. Do not undereat during peak phase.", carbTiming: "Carbs at every meal on training days. Your body needs the fuel.", keyHabit: "Eat within 30 minutes of waking. Eat within 30 minutes of training.", weeklyTarget: "No missed meals. No junk. This is your peak — protect it." },
+  5: { name: "Deload", focus: "Reduce calories by 10 percent. Your training is lighter so fuel accordingly.", carbTiming: "Reduce carbs slightly. Keep protein identical to peak phase.", keyHabit: "Use this week to reset food habits. Cook from scratch at least 3 meals.", weeklyTarget: "Clean eating only this week. Deload is for full recovery." },
+};
+
+function getPostWorkoutNutrition(phase: number): string {
+  if (phase <= 2) return "Post workout: eat protein within 30 minutes. Chicken, eggs or tinned fish with rice or pap.";
+  if (phase <= 4) return "Post workout: eat protein within 30 minutes. Protein shake or chicken breast with sweet potato.";
+  return "Post workout: eat protein within 30 minutes. Light protein meal — eggs or yoghurt.";
+}
+
 async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string | null; newPhase: number; newWeek: number }> {
   const phase = user.programmePhase || 1;
   const week = user.programmeWeek || 1;
@@ -520,6 +534,7 @@ async function buildUserContext(user: any): Promise<string> {
 
     const phase = user.programmePhase || 1;
     const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+    const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
 
     return `
 CLIENT PROFILE:
@@ -544,6 +559,13 @@ Days since last active: ${daysSinceActive}
 Day of week: ${dayOfWeek}
 Health conditions noted: ${user.injuries || 'none'}
 Recent food: ${recentFood || 'nothing logged recently'}
+
+PHASE ${phase} NUTRITION CONTEXT:
+Focus: ${nutrition.focus}
+Carb timing: ${nutrition.carbTiming}
+Key habit: ${nutrition.keyHabit}
+Weekly target: ${nutrition.weeklyTarget}
+Coach food responses according to this phase. Phase 1-2: encourage consistency. Phase 3-4: demand precision. Phase 5: emphasize clean recovery eating.
     `.trim();
   } catch (e) {
     return `Client: ${user.name || 'unknown'}, Goal: ${user.goalType || 'fat loss'}`;
@@ -1722,6 +1744,7 @@ export async function registerRoutes(
       else if (cleanMsg === "HISTORY") detectedIntent = "WORKOUT_HISTORY";
       else if (cleanMsg === "PHASE") detectedIntent = "PHASE_PROGRESS";
       else if (cleanMsg === "REPEAT WEEK") detectedIntent = "REPEAT_WEEK";
+      else if (/^NUTRITION$|^FOOD PLAN$|^MEAL PLAN$|^DIET$|^EATING PLAN$/.test(cleanMsg)) detectedIntent = "NUTRITION_PLAN";
       else if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
       else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
       else if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg) && foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
@@ -1968,6 +1991,18 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
+    // ── NUTRITION PLAN ──
+    if (detectedIntent === "NUTRITION_PLAN") {
+      const phase = user.programmePhase || 1;
+      const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
+      const calories = user.calorieTarget || 2000;
+      const protein = Math.round(calories / 8);
+      const trainingDayCarbs = phase <= 2 ? "moderate — rice, pap or bread with meals around training" : phase <= 4 ? "high — carbs at every training-day meal for fuel" : "reduced — lighter carbs this week";
+      const reply = `Phase ${phase} Nutrition — ${nutrition.name}\n\nFocus: ${nutrition.focus}\nCarb timing: ${nutrition.carbTiming}\nThis week's habit: ${nutrition.keyHabit}\nWeekly target: ${nutrition.weeklyTarget}\n\nYour daily targets:\nCalories: ${calories}kcal\nProtein: ${protein}g\nCarbs: ${trainingDayCarbs}\n\nReply MENU to continue.`;
+      await storage.logChat(user.id, message, reply, "NUTRITION_PLAN");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
     if (detectedIntent === "LOG_STEPS") {
       const kMatchIntent = cleanMsg.match(/(\d+(\.\d+)?)\s*K\b/);
       let steps: number | null = null;
@@ -2061,6 +2096,7 @@ export async function registerRoutes(
       const woStreak = await getConsistencyStreak(user.id);
       const phaseConfig = PHASE_CONFIG[newPhase] || PHASE_CONFIG[1];
       let reply = `${R.workoutDone()} Phase ${newPhase}: ${phaseConfig.name}, Week ${newWeek}.${getStreakMessage(woStreak)}`;
+      reply += `\n\n${getPostWorkoutNutrition(newPhase)}`;
       if (phaseTransitionMsg) {
         reply += `\n\n${phaseTransitionMsg}`;
       }
@@ -2164,7 +2200,9 @@ export async function registerRoutes(
             const summary = formatDailyWorkoutSummary(user);
             msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
             if (now.getDay() === 1) {
+              const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
               msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
+              msg += `\n\nThis week nutrition focus: ${nutrition.keyHabit}`;
             }
             const milestone = getMilestoneMessage(user);
             if (milestone) {
