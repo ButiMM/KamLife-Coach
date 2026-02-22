@@ -874,7 +874,18 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${crisisReply}</Message></Response>`);
     }
 
-    const menuText = `KamLife Coach ✅ What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1–7.`;
+    function getMenuText(u: any): string {
+      const created = u?.createdAt ? new Date(u.createdAt) : null;
+      const daysActive = created ? Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24)) : 0;
+      if (daysActive > 30) {
+        return `KamLife — go:\n1) Workout 2) Food 3) Steps 4-7 for more\nOr just type it.`;
+      }
+      if (daysActive > 7) {
+        return `KamLife Coach — what do you need?\n1) Workout 2) Food 3) Steps 4) Sleep 5) Weight\nOr just tell me what you ate, your steps, or how training went.`;
+      }
+      return `KamLife Coach — What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1-7.`;
+    }
+    const menuText = getMenuText(null);
 
     // ── Priority 1: GREETING GUARD ──
     const rawMsg = message.trim().toLowerCase().replace(/[^\w\s]/g, "");
@@ -1351,8 +1362,14 @@ export async function registerRoutes(
       let reply = "";
 
       if (currentState === "AWAITING_NAME") {
-        await storage.updateUser(user.id, { name: message, onboardingState: "AWAITING_GOAL" });
-        reply = `Good to meet you, ${message}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nOne question — what is your main goal right now?\n1) Lose fat\n2) Build muscle\n3) Get fit and healthy`;
+        const nameInput = message.trim();
+        if (/^\d+$/.test(nameInput) || nameInput.length < 2) {
+          reply = "Please enter your name so we can get started.";
+        } else {
+          const formattedName = nameInput.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+          await storage.updateUser(user.id, { name: formattedName, onboardingState: "AWAITING_GOAL" });
+          reply = `Good to meet you, ${formattedName}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nOne question — what is your main goal right now?\n1) Lose fat\n2) Build muscle\n3) Get fit and healthy`;
+        }
       } else if (currentState === "AWAITING_GOAL") {
         let goalValue = message;
         if (cleanMsg === "1") goalValue = "Fat Loss";

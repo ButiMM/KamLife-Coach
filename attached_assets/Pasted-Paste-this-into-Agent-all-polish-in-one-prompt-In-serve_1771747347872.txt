@@ -1,0 +1,18 @@
+Paste this into Agent — all polish in one prompt:
+
+"In server/routes.ts and responses.ts, make these polish changes and restart:
+1. NAME FORMATTING: In the AWAITING_NAME onboarding handler, after saving the name, format it properly. Convert to title case: first letter of each word capitalised, rest lowercase. So 'THABO' becomes 'Thabo', 'thabo mokgokol' becomes 'Thabo Mokgokol'. Also validate — if the input is purely numeric or less than 2 characters, reply: 'Please enter your name so we can get started.' and keep state as AWAITING_NAME.
+2. MENU PERSONALITY: Replace the static menuText variable with a function getMenuText(user) that returns different menus based on context:
+- First 7 days: full menu with all options
+- After 7 days: shorter version: 'KamLife Coach — what do you need?\n1) Workout 2) Food 3) Steps 4) Sleep 5) Weight\nOr just tell me what you ate, your steps, or how training went.'
+- After 30 days: even shorter: 'KamLife — go:\n1) Workout 2) Food 3) Steps 4-7 for more\nOr just type it.'
+Remove 'Reply MENU to see your options' from every single response in the file — replace with nothing or a single relevant action prompt instead.
+3. PATTERN RECOGNITION: Add a function checkFoodPatterns(userId) that queries the last 3 food logs. If the same junk food appears in all 3 logs, add to the food coaching reply: 'This is the third time this week I have seen [food]. That is a pattern not a slip. What is triggering this — stress, habit, or availability? Tell me and we fix it.' If no protein appears in last 3 logs, add: 'Three meals in a row with no protein logged. Your body is losing muscle right now. Fix the next meal.'
+4. STEP RESPONSE VARIATION: Replace the static step responses with rotating variants. Create arrays:
+stepsLow: ['That is not enough. Get outside for 10 minutes right now.', 'Under 2000 steps means you barely moved today. What happened?', 'That is below minimum. Your fat loss depends on daily movement — not just gym sessions.']
+stepsGood: ['Decent. Push for your target tomorrow.', 'Building momentum. Keep adding.', 'Not bad. You are closer than yesterday.']
+stepsTarget: ['Target hit. That is the standard — repeat it tomorrow.', 'Step target done. That is what consistency looks like.', 'Exactly where you need to be. Same again tomorrow.']
+Pick randomly from each array on every response.
+5. PERFECT DAY DETECTION: After any log — food, steps, workout — check if the user has logged a workout, hit their step target, AND logged at least 2 clean meals today. If all three are true, send: '[Name] — perfect day. Workout done. Steps hit. Food clean. This is exactly what results are made of. Screenshot this day.'
+6. RESPONSE LENGTH CONTROL: In getKamLifeFoodReply and generateReply, add to the system prompt: Maximum 3 sentences for WhatsApp. Never more than 60 words per response. If the coaching point needs more than 60 words it needs to be split into a separate conversation not one message.
+Restart the server."
