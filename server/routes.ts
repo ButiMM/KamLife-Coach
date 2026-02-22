@@ -131,6 +131,67 @@ Never recommend supplements as first solution.
 Always end with one specific action they must take right now.
 Sound like a coach who has seen everything and still believes in this client.`;
 
+const PHASE_CONFIG: Record<number, { name: string; theme: string; weeks: number; intensityLevel: number; weeklyWorkouts: number; stepTarget: number }> = {
+  1: { name: "Foundation", theme: "Build the habit, not the body", weeks: 4, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000 },
+  2: { name: "Build", theme: "The habit is forming. Now we add load", weeks: 4, intensityLevel: 2, weeklyWorkouts: 4, stepTarget: 8000 },
+  3: { name: "Push", theme: "No excuses. This is where results happen", weeks: 4, intensityLevel: 3, weeklyWorkouts: 4, stepTarget: 9000 },
+  4: { name: "Peak", theme: "Highest intensity. Your body is ready", weeks: 4, intensityLevel: 4, weeklyWorkouts: 5, stepTarget: 10000 },
+  5: { name: "Deload", theme: "Intentional recovery. Your body needs this", weeks: 2, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000 },
+};
+
+async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string | null; newPhase: number; newWeek: number }> {
+  const phase = user.programmePhase || 1;
+  const week = user.programmeWeek || 1;
+  const dayInWeek = (user.programmeDayInWeek || 1) + 1;
+  const config = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+
+  let newPhase = phase;
+  let newWeek = week;
+  let newDay = dayInWeek;
+  let phaseTransitionMsg: string | null = null;
+
+  if (newDay > 7) {
+    newDay = 1;
+    newWeek = week + 1;
+    if (newWeek > config.weeks) {
+      newWeek = 1;
+      if (phase === 4) {
+        newPhase = 5;
+      } else if (phase === 5) {
+        newPhase = 2;
+      } else if (phase < 4) {
+        newPhase = phase + 1;
+      }
+      const nextConfig = PHASE_CONFIG[newPhase] || PHASE_CONFIG[1];
+      phaseTransitionMsg = `Phase ${phase} complete. You have earned Phase ${newPhase}: ${nextConfig.name}. ${nextConfig.theme}. Step target is now ${nextConfig.stepTarget.toLocaleString()} per day. Workouts: ${nextConfig.weeklyWorkouts}x per week.`;
+    }
+  }
+
+  let nextProgramDay = (user.programDayIndex || 1) + 1;
+  if (nextProgramDay > 21) nextProgramDay = 1;
+
+  await storage.updateUser(user.id, {
+    programmePhase: newPhase,
+    programmeWeek: newWeek,
+    programmeDayInWeek: newDay,
+    programDayIndex: nextProgramDay,
+    totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + 1,
+    lastWorkoutDate: new Date(),
+  });
+
+  return { phaseTransitionMsg, newPhase, newWeek };
+}
+
+function getMilestoneMessage(user: any): string | null {
+  if (!user.programmeStartDate) return null;
+  const daysOnProgramme = Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / (1000 * 60 * 60 * 24));
+  if (daysOnProgramme === 30) return "30 days on KamLife. Most people quit in week 3. You are not most people.";
+  if (daysOnProgramme === 90) return "90 days. You have been consistent for 3 months. That is not a programme anymore — that is a lifestyle.";
+  if (daysOnProgramme === 180) return "6 months. You are no longer someone trying to get fit. You are fit. Keep going.";
+  if (daysOnProgramme === 365) return "One year on KamLife. Think about who you were 365 days ago. That is the distance you have covered.";
+  return null;
+}
+
 const WORKOUTS_21DAY: Record<string, string[]> = {
   gym: [
     "Bike 10 min warm up. Chest press 3x10. Seated row 3x10. Shoulder press 3x10. Rest 60 seconds between sets.",
@@ -269,17 +330,24 @@ async function buildUserContext(user: any): Promise<string> {
       ? (recentSteps[0] > recentSteps[1] ? 'improving' : 'declining')
       : 'unknown';
 
+    const phase = user.programmePhase || 1;
+    const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+
     return `
 CLIENT PROFILE:
 Name: ${user.name || 'unknown'}
 Age: ${user.age || 'unknown'}
 Goal: ${user.goalType || 'fat loss'}
 Training mode: ${user.trainingMode || 'home'}
+Training experience: ${user.trainingExperience || 'unknown'}
+Programme phase: Phase ${phase} — ${phaseConfig.name}
+Programme week: ${user.programmeWeek || 1} of ${phaseConfig.weeks}
 Days on programme: ${joinedDaysAgo}
+Total workouts completed: ${user.totalWorkoutsCompleted || 0}
 Compliance level: ${user.complianceLevel || 'BUILDING'}
 Weekly score: ${user.weeklyScore || 0}/100
 Calorie target: ${user.calorieTarget || 2000}kcal
-Step target: ${user.stepsTarget || 8000}
+Step target: ${phaseConfig.stepTarget}
 Current weight: ${user.currentWeight || 'unknown'}kg
 Weight trend: ${weightTrend}
 Average steps this week: ${avgSteps}
@@ -1048,11 +1116,34 @@ export async function registerRoutes(
         }
       } else if (currentState === "AWAITING_CONDITIONS") {
         const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
-        await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "COMPLETED" });
+        await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "AWAITING_EXPERIENCE" });
+        reply = "Last question — how long have you been training consistently?\n1) Never or just starting\n2) A few months on and off\n3) More than 6 months consistently";
+      } else if (currentState === "AWAITING_EXPERIENCE") {
+        let experience = message;
+        let startingPhase = 1;
+        if (cleanMsg === "1" || cleanMsg.includes("NEVER") || cleanMsg.includes("JUST START")) {
+          experience = "beginner";
+          startingPhase = 1;
+        } else if (cleanMsg === "2" || cleanMsg.includes("FEW MONTHS") || cleanMsg.includes("ON AND OFF")) {
+          experience = "intermediate";
+          startingPhase = 2;
+        } else if (cleanMsg === "3" || cleanMsg.includes("6 MONTHS") || cleanMsg.includes("CONSISTENTLY")) {
+          experience = "advanced";
+          startingPhase = 3;
+        }
+        const phaseConfig = PHASE_CONFIG[startingPhase];
+        await storage.updateUser(user.id, {
+          trainingExperience: experience,
+          programmePhase: startingPhase,
+          programmeWeek: 1,
+          programmeDayInWeek: 1,
+          programmeStartDate: new Date(),
+          onboardingState: "COMPLETED",
+        });
         const calTarget = user.calorieTarget || 2000;
         const proteinTarget = Math.round((calTarget * 0.3) / 4);
         const userName = user.name || "coach";
-        reply = `Profile complete, ${userName}. Here is your plan:\n\nCalorie target: ${calTarget}kcal daily\nProtein target: ${proteinTarget}g daily\nStep target: 8,000 steps daily\nWorkouts: minimum 3x per week\n\nStart right now:\n1) Log what you ate today\n2) Check your first workout\n3) Log your steps\n\nThe work starts today — not tomorrow. Reply MENU to begin.`;
+        reply = `Profile complete, ${userName}. You are starting on Phase ${startingPhase}: ${phaseConfig.name}. ${phaseConfig.theme}.\n\nHere is your plan:\n\nCalorie target: ${calTarget}kcal daily\nProtein target: ${proteinTarget}g daily\nStep target: ${phaseConfig.stepTarget.toLocaleString()} steps daily\nWorkouts: ${phaseConfig.weeklyWorkouts}x per week\n\nStart right now:\n1) Log what you ate today\n2) Check your first workout\n3) Log your steps\n\nThe work starts today — not tomorrow. Reply MENU to begin.`;
       }
 
       if (reply) {
@@ -1493,7 +1584,9 @@ export async function registerRoutes(
       const mode = (user.trainingMode as string) || "home";
       const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
       const workout = program[(day - 1) % 21];
-      const reply = `Day ${day} — ${workout} Get it done. Reply DONE when finished.`;
+      const phase = user.programmePhase || 1;
+      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+      const reply = `Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}.\nDay ${day} — ${workout} Get it done. Reply DONE when finished.`;
       await storage.logChat(user.id, message, reply, "GET_WORKOUT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1587,11 +1680,17 @@ export async function registerRoutes(
 
     if (detectedIntent === "WORKOUT_DONE") {
       await storage.createWorkoutLog(user.id, true);
-      let nextDay = (user.programDayIndex || 1) + 1;
-      if (nextDay > 21) nextDay = 1;
-      await storage.updateUser(user.id, { programDayIndex: nextDay });
+      const { phaseTransitionMsg, newPhase, newWeek } = await advanceProgram(user);
       const woStreak = await getConsistencyStreak(user.id);
-      const reply = `${R.workoutDone()} Tomorrow is Day ${nextDay}.${getStreakMessage(woStreak)}`;
+      const phaseConfig = PHASE_CONFIG[newPhase] || PHASE_CONFIG[1];
+      let reply = `${R.workoutDone()} Phase ${newPhase}: ${phaseConfig.name}, Week ${newWeek}.${getStreakMessage(woStreak)}`;
+      if (phaseTransitionMsg) {
+        reply += `\n\n${phaseTransitionMsg}`;
+      }
+      const milestone = getMilestoneMessage(user);
+      if (milestone) {
+        reply += `\n\n${milestone}`;
+      }
       await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1648,7 +1747,17 @@ export async function registerRoutes(
             const mode = (user.trainingMode as string) || "home";
             const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
             const workout = program[(day - 1) % 21];
-            msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            const phase = user.programmePhase || 1;
+            const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            const triggerNow = new Date();
+            if (triggerNow.getDay() === 1) {
+              msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
+            }
+            const milestone = getMilestoneMessage(user);
+            if (milestone) {
+              msg += `\n\n${milestone}`;
+            }
           }
           await storage.logChat(user.id, "", msg, "DAILY_TRIGGER");
           count++;
@@ -1680,7 +1789,16 @@ export async function registerRoutes(
             const mode = (user.trainingMode as string) || "home";
             const program = WORKOUTS_21DAY[mode] || WORKOUTS_21DAY.home;
             const workout = program[(day - 1) % 21];
-            msg = `Morning ${user.name || "there"}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            const phase = user.programmePhase || 1;
+            const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. Today is Day ${day}: ${workout}. Reply DONE when finished.`;
+            if (now.getDay() === 1) {
+              msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
+            }
+            const milestone = getMilestoneMessage(user);
+            if (milestone) {
+              msg += `\n\n${milestone}`;
+            }
           }
           console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
           await sendWhatsAppMessage(user.phoneNumber, msg);
