@@ -976,7 +976,7 @@ export async function registerRoutes(
           await storage.updateUser(referrer.id, { betaBypassUntil: referrerExpiry });
           await storage.logChat(user.id, message, "Referral signup", "REFERRAL_NEW_USER");
           await storage.logChat(referrer.id, `Referral used by ${phoneNumber}`, "7 days added to your account", "REFERRAL_REWARD");
-          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. No fad diets. No detox teas. No shortcuts. Just real coaching that works. Your 7 free days are activated — courtesy of a friend who believes in you. What is your name?</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nYou just made a decision that most people talk about and never act on. That already makes you different.\n\nNo keto. No detox teas. No shortcuts. Just structure, protein, and consistency — applied to your life, your food, your schedule.\n\nI have coached people aged 14 to 80. Domestic workers, executives, students, grandmothers. The ones who get results are not the most talented — they are the most consistent.\n\nLet us build your profile. What is your name?</Message></Response>`);
         }
       }
       if (isBetaTester) {
@@ -989,9 +989,9 @@ export async function registerRoutes(
           onboardingState: "AWAITING_NAME"
         });
         console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. No fad diets. No detox teas. No shortcuts. Just real coaching that works. Let's build your profile. What is your name?</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nNo keto. No detox teas. No waist trainers. No shortcuts.\n\nJust real coaching built for real South Africans — by someone who has spent 20 years in the trenches with real people.\n\nThis is not an app. This is a coach in your pocket.\n\nWhat is your name?</Message></Response>`);
       } else {
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach. Subscribe here: ${paymentLink}</Message></Response>`);
+        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nYou just made a decision that most people talk about and never act on. That already makes you different.\n\nNo keto. No detox teas. No shortcuts. Just structure, protein, and consistency — applied to your life, your food, your schedule.\n\nI have coached people aged 14 to 80. Domestic workers, executives, students, grandmothers. The ones who get results are not the most talented — they are the most consistent.\n\nSubscribe here to begin: ${paymentLink}</Message></Response>`);
       }
     }
 
@@ -1423,7 +1423,7 @@ export async function registerRoutes(
         const calTarget = user.calorieTarget || 2000;
         const proteinTarget = Math.round((calTarget * 0.3) / 4);
         const userName = user.name || "coach";
-        reply = `Profile complete, ${userName}. You are starting on Phase ${startingPhase}: ${phaseConfig.name}. ${phaseConfig.theme}.\n\nHere is your plan:\n\nCalorie target: ${calTarget}kcal daily\nProtein target: ${proteinTarget}g daily\nStep target: ${phaseConfig.stepTarget.toLocaleString()} steps daily\nWorkouts: ${phaseConfig.weeklyWorkouts}x per week\n\nStart right now:\n1) Log what you ate today\n2) Check your first workout\n3) Log your steps\n\nThe work starts today — not tomorrow. Reply MENU to begin.`;
+        reply = `Profile complete, ${userName}.\n\nYour programme starts today — not tomorrow, not Monday. Today.\n\nHere is what KamLife Coach does every day:\n- Morning: Your workout for the day\n- Anytime: Log your food, steps, sleep\n- Sunday: Your weekly performance report\n- Always: Real coaching when you need it\n\nYour targets:\nCalories: ${calTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${phaseConfig.stepTarget.toLocaleString()} per day\n\nReply MENU to begin. The work starts now.`;
       }
 
       if (reply) {

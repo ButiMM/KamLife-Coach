@@ -120,9 +120,7 @@ export const R = {
   ]),
 
   onboardingComplete: () => pick([
-    "You're in. Log your food, steps, sleep, and workouts daily. I'll check in every Sunday. Reply MENU to start.",
-    "Onboarding done. The real work starts now. Reply MENU to see your options.",
-    "Setup complete. No more excuses — just action. Reply MENU to begin.",
+    "The work starts now. Reply MENU to begin.",
   ]),
 
   promptFood: () => "What did you eat?",
