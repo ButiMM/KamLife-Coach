@@ -163,21 +163,44 @@ async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string |
   let newWeek = week;
   let newDay = dayInWeek;
   let phaseTransitionMsg: string | null = null;
+  let phaseComplete = false;
 
   if (newDay > 7) {
     newDay = 1;
     newWeek = week + 1;
     if (newWeek > config.weeks) {
-      newWeek = 1;
-      if (phase === 4) {
-        newPhase = 5;
-      } else if (phase === 5) {
-        newPhase = 2;
-      } else if (phase < 4) {
-        newPhase = phase + 1;
-      }
-      const nextConfig = PHASE_CONFIG[newPhase] || PHASE_CONFIG[1];
-      phaseTransitionMsg = `Phase ${phase} complete. You have earned Phase ${newPhase}: ${nextConfig.name}. ${nextConfig.theme}. Step target is now ${nextConfig.stepTarget.toLocaleString()} per day. Workouts: ${nextConfig.weeklyWorkouts}x per week.`;
+      phaseComplete = true;
+      let nextPhase = phase;
+      if (phase === 4) nextPhase = 5;
+      else if (phase === 5) nextPhase = 2;
+      else if (phase < 4) nextPhase = phase + 1;
+
+      const nextConfig = PHASE_CONFIG[nextPhase] || PHASE_CONFIG[1];
+
+      const daysInPhase = config.weeks * 7;
+      const phaseStartDate = new Date(Date.now() - daysInPhase * 24 * 60 * 60 * 1000);
+      const allWorkoutLogs = await storage.getWorkoutLogs(user.id);
+      const phaseWorkouts = allWorkoutLogs.filter(l => l.workoutCompleted && l.loggedAt && new Date(l.loggedAt) >= phaseStartDate).length;
+      const allStepLogs = await storage.getStepLogs(user.id);
+      const phaseSteps = allStepLogs.filter(l => l.loggedAt && new Date(l.loggedAt) >= phaseStartDate);
+      const avgSteps = phaseSteps.length > 0 ? Math.round(phaseSteps.reduce((sum, l) => sum + l.steps, 0) / phaseSteps.length) : 0;
+      const complianceScore = Math.min(100, Math.round((phaseWorkouts / (config.weeklyWorkouts * config.weeks)) * 100));
+
+      phaseTransitionMsg = `Phase ${phase}: ${config.name} — Complete. You have finished ${config.weeks} weeks of consistent work.\n\nPhase ${phase} Summary:\nWorkouts completed: ${phaseWorkouts}\nAverage steps: ${avgSteps.toLocaleString()}\nCompliance: ${complianceScore}%\n\nBefore we move to Phase ${nextPhase} — how are you feeling?\nReply READY to advance to Phase ${nextPhase}: ${nextConfig.theme}\nOr reply REPEAT to own this phase one more week and advance stronger.`;
+
+      newWeek = week;
+      newDay = dayInWeek - 1 || 7;
+
+      await storage.updateUser(user.id, {
+        phaseReadyToAdvance: true,
+        programmeDayInWeek: newDay,
+        programDayIndex: (user.programDayIndex || 1),
+        totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + 1,
+        lastWorkoutDate: new Date(),
+      });
+
+      await sendWhatsAppMessage(user.phoneNumber, phaseTransitionMsg);
+      return { phaseTransitionMsg, newPhase: phase, newWeek: week };
     }
   }
 
@@ -193,7 +216,7 @@ async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string |
     lastWorkoutDate: new Date(),
   });
 
-  return { phaseTransitionMsg, newPhase, newWeek };
+  return { phaseTransitionMsg: null, newPhase, newWeek };
 }
 
 function getMilestoneMessage(user: any): string | null {
@@ -1744,6 +1767,8 @@ export async function registerRoutes(
       else if (cleanMsg === "HISTORY") detectedIntent = "WORKOUT_HISTORY";
       else if (cleanMsg === "PHASE") detectedIntent = "PHASE_PROGRESS";
       else if (cleanMsg === "REPEAT WEEK") detectedIntent = "REPEAT_WEEK";
+      else if (cleanMsg === "READY") detectedIntent = "PHASE_READY";
+      else if (cleanMsg === "REPEAT") detectedIntent = "PHASE_REPEAT";
       else if (/^NUTRITION$|^FOOD PLAN$|^MEAL PLAN$|^DIET$|^EATING PLAN$/.test(cleanMsg)) detectedIntent = "NUTRITION_PLAN";
       else if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
       else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
@@ -1988,6 +2013,49 @@ export async function registerRoutes(
       });
       const reply = `Week ${week} reset. Sometimes you need to own a week before moving forward. Show up every day this week and earn Phase ${nextPhase} properly.`;
       await storage.logChat(user.id, message, reply, "REPEAT_WEEK");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── PHASE READY (advance) ──
+    if (detectedIntent === "PHASE_READY") {
+      if (!user.phaseReadyToAdvance) {
+        const reply = "You are not at a phase transition point. Keep going with your current phase. Reply WORKOUT to get today's session.";
+        await storage.logChat(user.id, message, reply, "PHASE_READY");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+      const phase = user.programmePhase || 1;
+      let nextPhase = phase;
+      if (phase === 4) nextPhase = 5;
+      else if (phase === 5) nextPhase = 2;
+      else if (phase < 4) nextPhase = phase + 1;
+      const nextConfig = PHASE_CONFIG[nextPhase] || PHASE_CONFIG[1];
+      await storage.updateUser(user.id, {
+        programmePhase: nextPhase,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        phaseReadyToAdvance: false,
+      });
+      const reply = `Phase ${nextPhase}: ${nextConfig.name} starts now. ${nextConfig.theme}. New step target: ${nextConfig.stepTarget.toLocaleString()} per day. New workout frequency: ${nextConfig.weeklyWorkouts} per week. You earned this. Show up.`;
+      await storage.logChat(user.id, message, reply, "PHASE_READY");
+      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    }
+
+    // ── PHASE REPEAT (stay same phase) ──
+    if (detectedIntent === "PHASE_REPEAT") {
+      if (!user.phaseReadyToAdvance) {
+        const reply = "You are not at a phase transition point. Reply REPEAT WEEK if you want to redo this week.";
+        await storage.logChat(user.id, message, reply, "PHASE_REPEAT");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+      const phase = user.programmePhase || 1;
+      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
+      await storage.updateUser(user.id, {
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        phaseReadyToAdvance: false,
+      });
+      const reply = `Phase ${phase} reset. Smart decision. Owning a phase before advancing is what separates serious people from everyone else. Start Week 1 again — this time leave nothing on the table.`;
+      await storage.logChat(user.id, message, reply, "PHASE_REPEAT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 

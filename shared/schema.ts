@@ -38,6 +38,7 @@ export const users = pgTable("users", {
   trainingExperience: text("training_experience"),
   lastWorkoutDate: timestamp("last_workout_date"),
   totalWorkoutsCompleted: integer("total_workouts_completed").default(0),
+  phaseReadyToAdvance: boolean("phase_ready_to_advance").default(false),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
