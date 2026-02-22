@@ -1,0 +1,101 @@
+"In server/routes.ts, create a comprehensive exercise library constant called EXERCISE_LIBRARY at the top of the file. Each exercise must have: name, plainEnglish description, modification for injury or age, reason it's in the programme, and phase level it belongs to. Then update the GET_WORKOUT handler to pull from this library based on the user's phase, training mode, age group, and conditions instead of the WORKOUTS_21DAY array.
+Create the library as follows:
+typescriptconst EXERCISE_LIBRARY = {
+  gym: {
+    phase1: [
+      { id: "squat_goblet", name: "Goblet Squat", sets: "3x10", plainEnglish: "Hold a dumbbell at your chest. Feet shoulder width. Lower yourself like sitting on a chair. Keep your chest up and knees tracking over your toes. Stand back up by pushing through your heels.", modification: "If knees hurt, only lower halfway. If over 60, hold a chair for balance.", reason: "Builds the entire lower body and core. Foundation of all movement.", phase: 1 },
+      { id: "push_wall", name: "Dumbbell Chest Press", sets: "3x10", plainEnglish: "Lie on bench. Hold dumbbells at chest height. Push straight up until arms are extended. Lower slowly back to chest. Do not drop the weights.", modification: "If shoulder pain, reduce range of motion. Use lighter weight.", reason: "Builds chest and shoulder strength. One of the most effective upper body exercises.", phase: 1 },
+      { id: "row_seated", name: "Seated Cable Row", sets: "3x10", plainEnglish: "Sit at the cable machine. Grab the handle with both hands. Pull toward your belly button. Squeeze your shoulder blades together at the end. Return slowly.", modification: "If back pain, keep the weight very light and focus on posture.", reason: "Builds the back muscles that improve posture and balance the chest work.", phase: 1 },
+      { id: "walk_treadmill", name: "Treadmill Walk", sets: "15 minutes", plainEnglish: "Set treadmill to incline 4-6. Walk at a pace where you can talk but feel slightly breathless. Hold posture upright — do not lean on the rails.", modification: "If knees hurt, reduce incline to 2. If over 65, keep flat.", reason: "Burns fat while protecting joints. More effective than flat walking.", phase: 1 },
+      { id: "plank_standard", name: "Plank", sets: "3x20 seconds", plainEnglish: "Forearms on floor. Body in a straight line from head to heels. Squeeze your stomach like someone is about to punch you. Hold. Do not let your hips drop or rise.", modification: "If wrists hurt, stay on forearms. If too hard, drop knees to floor.", reason: "Builds the deep core muscles that protect your spine and improve all other movements.", phase: 1 },
+    ],
+    phase2: [
+      { id: "squat_barbell", name: "Barbell Back Squat", sets: "4x8", plainEnglish: "Bar rests on upper back not neck. Feet shoulder width. Squat until thighs are parallel to floor. Drive through heels to stand. Keep chest tall throughout.", modification: "If back pain, use goblet squat instead. If new to barbell, use empty bar first.", reason: "The king of all exercises. Builds maximum lower body strength and burns the most calories.", phase: 2 },
+      { id: "deadlift_romanian", name: "Romanian Deadlift", sets: "4x8", plainEnglish: "Hold dumbbells in front of thighs. Hinge at the hips — push your bum back. Lower the weights down your legs until you feel a stretch in your hamstrings. Drive hips forward to stand.", modification: "If lower back pain, reduce range of motion significantly. Keep weights light.", reason: "Builds hamstrings and glutes — the most powerful muscles in your body.", phase: 2 },
+      { id: "press_shoulder", name: "Dumbbell Shoulder Press", sets: "4x10", plainEnglish: "Sit or stand. Hold dumbbells at shoulder height. Press straight up until arms are nearly extended. Lower slowly. Do not arch your back.", modification: "If shoulder pain, reduce range of motion. Press to eye level only.", reason: "Builds shoulder strength and size. Creates the broad shoulder appearance.", phase: 2 },
+      { id: "pull_lat", name: "Lat Pulldown", sets: "4x10", plainEnglish: "Sit at the machine. Grab the bar wider than shoulder width. Pull down to your upper chest. Lean back slightly. Squeeze your back muscles. Return slowly.", modification: "If shoulder pain, use a closer grip. Pull to chin level only.", reason: "Builds the V-shape back. One of the best exercises for upper body width.", phase: 2 },
+      { id: "lunge_walking", name: "Walking Lunges", sets: "3x12 each leg", plainEnglish: "Step forward with one foot. Lower your back knee toward the floor. Push through the front heel to stand and step forward with the other foot. Keep your torso upright.", modification: "If knee pain, do static split squats instead — no walking. Hold a chair for balance.", reason: "Builds each leg independently. Fixes muscle imbalances and improves stability.", phase: 2 },
+    ],
+    phase3: [
+      { id: "squat_front", name: "Front Squat", sets: "4x6", plainEnglish: "Bar rests on front of shoulders, elbows high. Squat deep — below parallel. Drive through heels to stand. This is harder than back squat — use less weight.", modification: "If wrist pain with bar, use crossed arm position. If too difficult, use goblet squat.", reason: "Demands more core and quad strength than back squat. Accelerates strength gains.", phase: 3 },
+      { id: "press_bench_incline", name: "Incline Bench Press", sets: "4x8", plainEnglish: "Set bench to 30-45 degrees. Press dumbbells or barbell from upper chest. Lower to chest level. Press back up explosively. Control the descent.", modification: "If shoulder pain, reduce incline or use flat bench.", reason: "Builds upper chest which creates the full chest appearance.", phase: 3 },
+      { id: "row_bent", name: "Bent Over Row", sets: "4x8", plainEnglish: "Hinge forward at hips, back flat, knees slightly bent. Pull the bar to your lower chest. Squeeze shoulder blades. Lower slowly. Do not round your back.", modification: "If lower back pain, do seated cable rows instead.", reason: "Builds maximum back thickness. One of the most effective compound movements.", phase: 3 },
+      { id: "deadlift_conventional", name: "Conventional Deadlift", sets: "4x5", plainEnglish: "Bar over mid-foot. Hinge down and grip just outside knees. Back flat, chest up. Push the floor away — do not pull with your back. Lock out hips at top.", modification: "If any back pain, skip this and do Romanian deadlift only.", reason: "The most effective full-body strength movement. Nothing burns more calories or builds more strength.", phase: 3 },
+    ],
+    phase4: [
+      { id: "complex_barbell", name: "Barbell Complex", sets: "4 rounds", plainEnglish: "Without putting the bar down: 6 deadlifts, 6 bent rows, 6 hang cleans, 6 front squats, 6 push press. Rest 90 seconds between rounds. Use a light bar.", modification: "If any injury, remove that specific movement from the complex.", reason: "Peak phase conditioning. Burns maximum calories and builds full body strength simultaneously.", phase: 4 },
+      { id: "superset_push_pull", name: "Push-Pull Superset", sets: "4x10 each", plainEnglish: "Do chest press immediately followed by rows with no rest between. Rest 60 seconds after both. This pairing means one muscle rests while the other works.", modification: "Reduce weight on each exercise when doing supersets.", reason: "Peak phase intensity. Doubles the training density in the same time.", phase: 4 },
+    ],
+    deload: [
+      { id: "deload_squat", name: "Light Squat", sets: "3x10 at 50% weight", plainEnglish: "Use half your normal weight. Focus entirely on perfect form. Slow and controlled. This is active recovery — not a test.", modification: "None needed — weight is already very light.", reason: "Deload week allows your joints, muscles and nervous system to recover fully before the next phase.", phase: 5 },
+    ]
+  },
+  home: {
+    phase1: [
+      { id: "squat_bodyweight", name: "Bodyweight Squat", sets: "3x12", plainEnglish: "Stand feet shoulder width. Arms out in front for balance. Lower yourself like sitting on a chair. Go as deep as comfortable. Push through heels to stand.", modification: "If knees hurt, only lower halfway. Hold a chair for balance if over 60.", reason: "Builds the entire lower body with no equipment. Foundation of all movement.", phase: 1 },
+      { id: "pushup_standard", name: "Push Up", sets: "3x8", plainEnglish: "Hands slightly wider than shoulders. Body in a straight line. Lower your chest to the floor. Push back up. If this is too hard, drop your knees to the floor.", modification: "Knees down if too difficult. Wall push ups if knees are also painful.", reason: "The most effective upper body exercise that requires no equipment.", phase: 1 },
+      { id: "lunge_static", name: "Static Lunge", sets: "3x10 each leg", plainEnglish: "Step one foot forward. Lower the back knee toward the floor. Push back up. Complete all reps on one leg then switch. Hold a chair for balance if needed.", modification: "If knee pain, reduce range of motion. Only lower halfway.", reason: "Builds each leg independently without any equipment.", phase: 1 },
+      { id: "plank_home", name: "Plank Hold", sets: "3x20 seconds", plainEnglish: "Forearms on floor. Body straight. Squeeze your core. Hold. Build time each week.", modification: "Drop knees if too difficult.", reason: "Core strength that transfers to every other movement.", phase: 1 },
+      { id: "glute_bridge", name: "Glute Bridge", sets: "3x15", plainEnglish: "Lie on your back. Knees bent, feet flat. Push your hips up toward the ceiling. Squeeze your glutes hard at the top. Lower slowly.", modification: "Single leg version if too easy. Keep weight on shoulders for more challenge.", reason: "Activates glutes which most people underuse. Protects the lower back.", phase: 1 },
+    ],
+    phase2: [
+      { id: "squat_jump", name: "Jump Squat", sets: "4x10", plainEnglish: "Squat down then explode up into a jump. Land softly with bent knees. Immediately go into the next squat. Control the landing — do not crash down.", modification: "If knees or joints hurt, do fast bodyweight squats instead without the jump.", reason: "Adds power and calorie burn to the squat pattern. Elevates heart rate significantly.", phase: 2 },
+      { id: "pushup_decline", name: "Decline Push Up", sets: "4x10", plainEnglish: "Feet elevated on chair or bed. Hands on floor. Push up from this angle. This targets the upper chest and shoulders more than standard push up.", modification: "If too hard, do standard push ups instead.", reason: "Progressive overload without equipment — harder version builds more strength.", phase: 2 },
+      { id: "mountain_climber", name: "Mountain Climbers", sets: "3x30 seconds", plainEnglish: "Start in push up position. Drive one knee toward chest, then the other, alternating quickly. Keep hips down. Move with control — not just speed.", modification: "If wrists hurt, elevate hands on a chair.", reason: "Full body cardio that burns fat while building core strength.", phase: 2 },
+      { id: "lunge_reverse", name: "Reverse Lunge", sets: "4x12 each", plainEnglish: "Step backward instead of forward. Lower the back knee toward floor. Push through the front heel to return. Easier on knees than forward lunge.", modification: "Hold a chair for balance. Reduce range of motion if knee pain.", reason: "Less knee stress than forward lunge with same muscle activation.", phase: 2 },
+    ],
+    phase3: [
+      { id: "burpee", name: "Burpee", sets: "4x8", plainEnglish: "Stand, drop hands to floor, jump feet back to plank, do one push up, jump feet forward, jump up and clap overhead. That is one rep. Rest as needed between reps.", modification: "Remove the jump at the top. Remove the push up. Step feet instead of jumping.", reason: "The most complete bodyweight exercise. Maximum calorie burn in minimum time.", phase: 3 },
+      { id: "pistol_squat_assisted", name: "Assisted Single Leg Squat", sets: "3x6 each leg", plainEnglish: "Hold a door frame or chair. Stand on one leg. Lower yourself slowly on that single leg as far as comfortable. Push back up. This is extremely hard.", modification: "Only lower a few inches if needed. Use significant support from the door frame.", reason: "Ultimate lower body strength challenge with no equipment.", phase: 3 },
+    ],
+    phase4: [
+      { id: "tabata_circuit", name: "Tabata Home Circuit", sets: "8 rounds", plainEnglish: "20 seconds maximum effort, 10 seconds rest, 8 rounds. Exercises: jump squats, push ups, mountain climbers, burpees. Rotate through them.", modification: "Remove jumps and burpees if joint pain. Replace with fast bodyweight versions.", reason: "Peak phase home training. Maximum fat burn in 4 minutes per exercise.", phase: 4 },
+    ],
+    deload: [
+      { id: "deload_walk", name: "Easy Walk", sets: "30 minutes", plainEnglish: "Comfortable pace. No rush. This is recovery not training.", modification: "None needed.", reason: "Active recovery. Keeps blood flowing without adding training stress.", phase: 5 },
+    ]
+  },
+  walk: {
+    phase1: [
+      { id: "walk_10", name: "10 Minute Walk", sets: "10 minutes", plainEnglish: "Walk at a comfortable pace. Head up, shoulders back. Breathe through your nose if possible. This is your starting point — we build from here.", modification: "If joint pain, walk slower. If stairs cause pain, find flat route.", reason: "Phase 1 is about building the daily movement habit. 10 minutes done is better than 30 minutes not done.", phase: 1 },
+      { id: "walk_15", name: "15 Minute Brisk Walk", sets: "15 minutes", plainEnglish: "Walk faster than comfortable. You should feel slightly breathless but still able to talk. Swing your arms. This pace burns significantly more calories than a slow walk.", modification: "Reduce to comfortable pace if breathless to the point of discomfort.", reason: "Brisk walking activates fat burning without joint stress.", phase: 1 },
+    ],
+    phase2: [
+      { id: "walk_30_intervals", name: "Interval Walk", sets: "30 minutes", plainEnglish: "Walk 2 minutes slow, 1 minute as fast as possible. Repeat for 30 minutes. The fast intervals are what drive fat loss.", modification: "If breathless during fast intervals, slow down slightly. Build tolerance over time.", reason: "Interval training burns 30% more calories than steady walking.", phase: 2 },
+      { id: "walk_hill", name: "Hill Walk", sets: "20 minutes", plainEnglish: "Find a hill or bridge or stairs. Walk up and down repeatedly for 20 minutes. The incline dramatically increases calorie burn and builds leg strength.", modification: "If knees painful going down hill, find stairs with a railing.", reason: "Incline walking is the most effective low-impact fat burning exercise available.", phase: 2 },
+    ],
+    phase3: [
+      { id: "walk_45", name: "45 Minute Power Walk", sets: "45 minutes", plainEnglish: "Sustained brisk pace for 45 minutes. Arm swing engaged. Posture tall. This is your main fat burning session of the week.", modification: "Break into two 22-minute sessions if needed.", reason: "At 45 minutes of sustained activity the body primarily uses fat as fuel.", phase: 3 },
+    ],
+    phase4: [
+      { id: "walk_60", name: "60 Minute Endurance Walk", sets: "60 minutes", plainEnglish: "One hour. Sustained brisk pace. You have built to this over 12 weeks. This is your peak walk.", modification: "Two 30-minute sessions if joint pain prevents one hour.", reason: "Peak phase endurance. Maximum fat burning and cardiovascular benefit.", phase: 4 },
+    ],
+    deload: [
+      { id: "deload_gentle_walk", name: "Gentle Recovery Walk", sets: "20 minutes", plainEnglish: "Slow comfortable pace. Enjoy it. This is earned recovery.", modification: "None needed.", reason: "Deload week. Your body recovers while staying active.", phase: 5 },
+    ]
+  }
+};
+```
+
+*Then update the GET_WORKOUT handler to:*
+*1. Get user's programmePhase, trainingMode, age, and injuries*
+*2. Select exercises from EXERCISE_LIBRARY based on phase and training mode*
+*3. For the day's workout, pick 4-5 exercises cycling through the library*
+*4. Build the workout message including: phase name, week number, exercise name, sets, plain English description, modification if user has injuries or is over 60, and reason*
+*5. Use GPT to wrap the workout in a personalised coaching message using buildUserContext — so a 55 year old woman gets different energy than a 22 year old man even if the exercises are the same*
+*6. Format the message as:*
+```
+Phase [X]: [Phase Name] — Week [Y]
+Today: [Day number of programme]
+
+[Exercise 1 name] — [sets]
+[Plain English description]
+[Modification if relevant]
+
+[Exercise 2 name] — [sets]
+[Plain English description]
+
+[Why today matters — one GPT-generated sentence specific to this user]
+
+Reply DONE when finished.
+Restart the server."
