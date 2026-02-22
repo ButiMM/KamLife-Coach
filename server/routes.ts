@@ -131,12 +131,12 @@ Never recommend supplements as first solution.
 Always end with one specific action they must take right now.
 Sound like a coach who has seen everything and still believes in this client.`;
 
-const PHASE_CONFIG: Record<number, { name: string; theme: string; weeks: number; intensityLevel: number; weeklyWorkouts: number; stepTarget: number }> = {
-  1: { name: "Foundation", theme: "Build the habit, not the body", weeks: 4, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000 },
-  2: { name: "Build", theme: "The habit is forming. Now we add load", weeks: 4, intensityLevel: 2, weeklyWorkouts: 4, stepTarget: 8000 },
-  3: { name: "Push", theme: "No excuses. This is where results happen", weeks: 4, intensityLevel: 3, weeklyWorkouts: 4, stepTarget: 9000 },
-  4: { name: "Peak", theme: "Highest intensity. Your body is ready", weeks: 4, intensityLevel: 4, weeklyWorkouts: 5, stepTarget: 10000 },
-  5: { name: "Deload", theme: "Intentional recovery. Your body needs this", weeks: 2, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000 },
+const PHASE_CONFIG: Record<number, { name: string; theme: string; weeks: number; intensityLevel: number; weeklyWorkouts: number; stepTarget: number; rest: string }> = {
+  1: { name: "Foundation", theme: "Build the habit, not the body", weeks: 4, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000, rest: "60s" },
+  2: { name: "Build", theme: "The habit is forming. Now we add load", weeks: 4, intensityLevel: 2, weeklyWorkouts: 4, stepTarget: 8000, rest: "60-90s" },
+  3: { name: "Push", theme: "No excuses. This is where results happen", weeks: 4, intensityLevel: 3, weeklyWorkouts: 4, stepTarget: 9000, rest: "90s" },
+  4: { name: "Peak", theme: "Highest intensity. Your body is ready", weeks: 4, intensityLevel: 4, weeklyWorkouts: 5, stepTarget: 10000, rest: "90-120s" },
+  5: { name: "Deload", theme: "Intentional recovery. Your body needs this", weeks: 2, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000, rest: "60s" },
 };
 
 const NUTRITION_BY_PHASE: Record<number, { name: string; focus: string; carbTiming: string; keyHabit: string; weeklyTarget: string }> = {
@@ -151,6 +151,66 @@ function getPostWorkoutNutrition(phase: number): string {
   if (phase <= 2) return "Post workout: eat protein within 30 minutes. Chicken, eggs or tinned fish with rice or pap.";
   if (phase <= 4) return "Post workout: eat protein within 30 minutes. Protein shake or chicken breast with sweet potato.";
   return "Post workout: eat protein within 30 minutes. Light protein meal — eggs or yoghurt.";
+}
+
+async function checkFoodPatterns(userId: string): Promise<string> {
+  const chatLogs = await storage.getChatHistory(userId);
+  const foodLogs = chatLogs
+    .filter(l => l.intent === "LOG_FOOD" || l.intent === "LOG_FOOD_FOLLOWUP" || l.intent === "FOOD_PORTION")
+    .slice(0, 3);
+
+  if (foodLogs.length < 3) return "";
+
+  const junkWords = ["chips", "chocolate", "sweets", "cake", "biscuit", "cookie", "ice cream", "vetkoek", "fat cake", "magwinya", "russian", "polony", "kota", "gatsby", "pie", "sausage roll", "fizzy", "coke", "fanta", "sprite"];
+  const junkCounts: Record<string, number> = {};
+  for (const log of foodLogs) {
+    const msg = (log.messageIn || "").toLowerCase();
+    for (const junk of junkWords) {
+      if (msg.includes(junk)) {
+        junkCounts[junk] = (junkCounts[junk] || 0) + 1;
+      }
+    }
+  }
+  const repeatedJunk = Object.entries(junkCounts).find(([_, count]) => count >= 3);
+  if (repeatedJunk) {
+    return `\n\nThis is the third time this week I have seen ${repeatedJunk[0]}. That is a pattern not a slip. What is triggering this — stress, habit, or availability? Tell me and we fix it.`;
+  }
+
+  const proteinWords = ["chicken", "egg", "fish", "tuna", "pilchard", "beef", "steak", "mince", "protein", "yoghurt", "yogurt", "beans", "lentils", "milk", "cheese", "biltong", "wors", "boerewors", "tripe", "mogodu"];
+  const hasProtein = foodLogs.some(l => {
+    const msg = (l.messageIn || "").toLowerCase();
+    return proteinWords.some(p => msg.includes(p));
+  });
+  if (!hasProtein) {
+    return "\n\nThree meals in a row with no protein logged. Your body is losing muscle right now. Fix the next meal.";
+  }
+
+  return "";
+}
+
+async function checkPerfectDay(user: any): Promise<string> {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const workoutLogs = await storage.getWorkoutLogs(user.id);
+  const todayWorkout = workoutLogs.some(l => l.workoutCompleted && l.loggedAt && new Date(l.loggedAt) >= today);
+
+  const stepLogs = await storage.getStepLogs(user.id);
+  const todaySteps = stepLogs.find(l => l.loggedAt && new Date(l.loggedAt) >= today);
+  const stepsHit = todaySteps ? todaySteps.steps >= (user.stepsTarget || 8000) : false;
+
+  const chatLogs = await storage.getChatHistory(user.id);
+  const todayFoodLogs = chatLogs.filter(l =>
+    (l.intent === "LOG_FOOD" || l.intent === "LOG_FOOD_FOLLOWUP") &&
+    l.createdAt && new Date(l.createdAt) >= today
+  );
+  const cleanMeals = todayFoodLogs.length >= 2;
+
+  if (todayWorkout && stepsHit && cleanMeals) {
+    const name = user.name || "Coach";
+    return `\n\n${name} — perfect day. Workout done. Steps hit. Food clean. This is exactly what results are made of. Screenshot this day.`;
+  }
+  return "";
 }
 
 async function buildSharecard(user: any): Promise<string> {
@@ -285,88 +345,77 @@ type Exercise = {
   reason: string;
   phase: number;
   muscleGroup: string;
+  videoUrl?: string;
 };
 
-const EXERCISE_LIBRARY: Record<string, Record<string, Exercise[]>> = {
+type ExerciseEntry = {
+  id: string;
+  name: string;
+  muscleGroup: string;
+  plainEnglish: string;
+  modification: string;
+  reason: string;
+  videoUrl: string;
+};
+
+const EXERCISE_LIBRARY = {
   gym: {
-    phase1: [
-      { id: "squat_goblet", name: "Goblet Squat", sets: "3x10", plainEnglish: "Hold a dumbbell at your chest. Feet shoulder width. Lower yourself like sitting on a chair. Keep your chest up and knees tracking over your toes. Stand back up by pushing through your heels.", modification: "If knees hurt, only lower halfway. If over 60, hold a chair for balance.", reason: "Builds the entire lower body and core. Foundation of all movement.", phase: 1, muscleGroup: "legs" },
-      { id: "push_wall", name: "Dumbbell Chest Press", sets: "3x10", plainEnglish: "Lie on bench. Hold dumbbells at chest height. Push straight up until arms are extended. Lower slowly back to chest. Do not drop the weights.", modification: "If shoulder pain, reduce range of motion. Use lighter weight.", reason: "Builds chest and shoulder strength. One of the most effective upper body exercises.", phase: 1, muscleGroup: "chest" },
-      { id: "row_seated", name: "Seated Cable Row", sets: "3x10", plainEnglish: "Sit at the cable machine. Grab the handle with both hands. Pull toward your belly button. Squeeze your shoulder blades together at the end. Return slowly.", modification: "If back pain, keep the weight very light and focus on posture.", reason: "Builds the back muscles that improve posture and balance the chest work.", phase: 1, muscleGroup: "back" },
-      { id: "walk_treadmill", name: "Treadmill Walk", sets: "15 minutes", plainEnglish: "Set treadmill to incline 4-6. Walk at a pace where you can talk but feel slightly breathless. Hold posture upright — do not lean on the rails.", modification: "If knees hurt, reduce incline to 2. If over 65, keep flat.", reason: "Burns fat while protecting joints. More effective than flat walking.", phase: 1, muscleGroup: "cardio" },
-      { id: "plank_standard", name: "Plank", sets: "3x20 seconds", plainEnglish: "Forearms on floor. Body in a straight line from head to heels. Squeeze your stomach like someone is about to punch you. Hold. Do not let your hips drop or rise.", modification: "If wrists hurt, stay on forearms. If too hard, drop knees to floor.", reason: "Builds the deep core muscles that protect your spine and improve all other movements.", phase: 1, muscleGroup: "core" },
+    push: [
+      { id: "bench_press", name: "Bench Press", muscleGroup: "chest", plainEnglish: "Lie on bench. Bar or dumbbells at chest level. Press up until arms extended. Lower slowly to chest. Keep feet flat on floor, back natural.", modification: "If shoulder pain, use dumbbells with neutral grip. If over 60, reduce range of motion.", reason: "The fundamental upper body push movement. Builds chest, shoulders and triceps.", videoUrl: "https://www.youtube.com/results?search_query=bench+press+proper+form+tutorial" },
+      { id: "overhead_press", name: "Overhead Press", muscleGroup: "shoulders", plainEnglish: "Stand or sit. Bar or dumbbells at shoulder height. Press straight overhead until arms locked out. Lower slowly back to shoulders. Keep core tight throughout.", modification: "If shoulder pain, press to eye level only. Seated version reduces lower back stress.", reason: "The fundamental shoulder movement. Builds overhead strength and shoulder size.", videoUrl: "https://www.youtube.com/results?search_query=overhead+press+proper+form+tutorial" },
     ],
-    phase2: [
-      { id: "squat_barbell", name: "Barbell Back Squat", sets: "4x8", plainEnglish: "Bar rests on upper back not neck. Feet shoulder width. Squat until thighs are parallel to floor. Drive through heels to stand. Keep chest tall throughout.", modification: "If back pain, use goblet squat instead. If new to barbell, use empty bar first.", reason: "The king of all exercises. Builds maximum lower body strength and burns the most calories.", phase: 2, muscleGroup: "legs" },
-      { id: "deadlift_romanian", name: "Romanian Deadlift", sets: "4x8", plainEnglish: "Hold dumbbells in front of thighs. Hinge at the hips — push your bum back. Lower the weights down your legs until you feel a stretch in your hamstrings. Drive hips forward to stand.", modification: "If lower back pain, reduce range of motion significantly. Keep weights light.", reason: "Builds hamstrings and glutes — the most powerful muscles in your body.", phase: 2, muscleGroup: "legs" },
-      { id: "press_shoulder", name: "Dumbbell Shoulder Press", sets: "4x10", plainEnglish: "Sit or stand. Hold dumbbells at shoulder height. Press straight up until arms are nearly extended. Lower slowly. Do not arch your back.", modification: "If shoulder pain, reduce range of motion. Press to eye level only.", reason: "Builds shoulder strength and size. Creates the broad shoulder appearance.", phase: 2, muscleGroup: "shoulders" },
-      { id: "pull_lat", name: "Lat Pulldown", sets: "4x10", plainEnglish: "Sit at the machine. Grab the bar wider than shoulder width. Pull down to your upper chest. Lean back slightly. Squeeze your back muscles. Return slowly.", modification: "If shoulder pain, use a closer grip. Pull to chin level only.", reason: "Builds the V-shape back. One of the best exercises for upper body width.", phase: 2, muscleGroup: "back" },
-      { id: "lunge_walking", name: "Walking Lunges", sets: "3x12 each leg", plainEnglish: "Step forward with one foot. Lower your back knee toward the floor. Push through the front heel to stand and step forward with the other foot. Keep your torso upright.", modification: "If knee pain, do static split squats instead — no walking. Hold a chair for balance.", reason: "Builds each leg independently. Fixes muscle imbalances and improves stability.", phase: 2, muscleGroup: "legs" },
+    pull: [
+      { id: "barbell_row", name: "Barbell Row", muscleGroup: "back", plainEnglish: "Hinge forward at hips, back flat. Pull bar to lower chest. Squeeze shoulder blades together at top. Lower slowly. Do not round your back.", modification: "If lower back pain, use seated cable row instead. Keep weight light and focus on form.", reason: "The fundamental upper back movement. Builds thickness and posture.", videoUrl: "https://www.youtube.com/results?search_query=barbell+row+proper+form+tutorial" },
+      { id: "pull_up_or_lat", name: "Pull Up or Lat Pulldown", muscleGroup: "back", plainEnglish: "Pull Up: hang from bar, pull chest to bar, lower slowly. Lat Pulldown: sit at machine, pull bar to upper chest, return slowly. Both — squeeze your back at the top.", modification: "If pull ups too hard, use lat pulldown machine. If shoulder pain, use closer grip.", reason: "The fundamental vertical pull movement. Builds width and the V-shape.", videoUrl: "https://www.youtube.com/results?search_query=lat+pulldown+proper+form+tutorial" },
     ],
-    phase3: [
-      { id: "squat_front", name: "Front Squat", sets: "4x6", plainEnglish: "Bar rests on front of shoulders, elbows high. Squat deep — below parallel. Drive through heels to stand. This is harder than back squat — use less weight.", modification: "If wrist pain with bar, use crossed arm position. If too difficult, use goblet squat.", reason: "Demands more core and quad strength than back squat. Accelerates strength gains.", phase: 3, muscleGroup: "legs" },
-      { id: "press_bench_incline", name: "Incline Bench Press", sets: "4x8", plainEnglish: "Set bench to 30-45 degrees. Press dumbbells or barbell from upper chest. Lower to chest level. Press back up explosively. Control the descent.", modification: "If shoulder pain, reduce incline or use flat bench.", reason: "Builds upper chest which creates the full chest appearance.", phase: 3, muscleGroup: "chest" },
-      { id: "row_bent", name: "Bent Over Row", sets: "4x8", plainEnglish: "Hinge forward at hips, back flat, knees slightly bent. Pull the bar to your lower chest. Squeeze shoulder blades. Lower slowly. Do not round your back.", modification: "If lower back pain, do seated cable rows instead.", reason: "Builds maximum back thickness. One of the most effective compound movements.", phase: 3, muscleGroup: "back" },
-      { id: "deadlift_conventional", name: "Conventional Deadlift", sets: "4x5", plainEnglish: "Bar over mid-foot. Hinge down and grip just outside knees. Back flat, chest up. Push the floor away — do not pull with your back. Lock out hips at top.", modification: "If any back pain, skip this and do Romanian deadlift only.", reason: "The most effective full-body strength movement. Nothing burns more calories or builds more strength.", phase: 3, muscleGroup: "legs" },
+    legs: [
+      { id: "squat", name: "Squat", muscleGroup: "legs", plainEnglish: "Bar on upper back. Feet shoulder width. Lower until thighs parallel to floor. Drive through heels to stand. Keep chest up and knees tracking over toes throughout.", modification: "If knee pain, reduce depth. If back pain, use goblet squat with dumbbell. If new, use bodyweight first.", reason: "The king of all exercises. Builds the entire lower body and burns maximum calories.", videoUrl: "https://www.youtube.com/results?search_query=squat+proper+form+tutorial" },
+      { id: "deadlift", name: "Deadlift", muscleGroup: "posterior chain", plainEnglish: "Bar over mid-foot. Hinge down, grip just outside knees, back flat. Push floor away — do not pull with back. Stand tall, lock hips at top. Lower bar with control.", modification: "If lower back pain, do Romanian deadlift only — lighter weight, hinge at hips. If new, start with dumbbells.", reason: "The most complete strength movement. Works everything from neck to floor.", videoUrl: "https://www.youtube.com/results?search_query=deadlift+proper+form+tutorial" },
     ],
-    phase4: [
-      { id: "complex_barbell", name: "Barbell Complex", sets: "4 rounds", plainEnglish: "Without putting the bar down: 6 deadlifts, 6 bent rows, 6 hang cleans, 6 front squats, 6 push press. Rest 90 seconds between rounds. Use a light bar.", modification: "If any injury, remove that specific movement from the complex.", reason: "Peak phase conditioning. Burns maximum calories and builds full body strength simultaneously.", phase: 4, muscleGroup: "full_body" },
-      { id: "superset_push_pull", name: "Push-Pull Superset", sets: "4x10 each", plainEnglish: "Do chest press immediately followed by rows with no rest between. Rest 60 seconds after both. This pairing means one muscle rests while the other works.", modification: "Reduce weight on each exercise when doing supersets.", reason: "Peak phase intensity. Doubles the training density in the same time.", phase: 4, muscleGroup: "chest" },
+    core: [
+      { id: "plank", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body in straight line from head to heels. Squeeze stomach hard. Hold. Do not let hips drop or rise. Breathe steadily.", modification: "Drop knees if too difficult. Build time by 5 seconds each week.", reason: "Builds deep core stability that protects the spine and improves every other movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
     ],
-    deload: [
-      { id: "deload_squat", name: "Light Squat", sets: "3x10 at 50% weight", plainEnglish: "Use half your normal weight. Focus entirely on perfect form. Slow and controlled. This is active recovery — not a test.", modification: "None needed — weight is already very light.", reason: "Deload week allows your joints, muscles and nervous system to recover fully before the next phase.", phase: 5, muscleGroup: "legs" },
-    ],
+    phases: {
+      1: { setsReps: "3x10", rest: "90 seconds", note: "Focus entirely on form. Weight is secondary. Learn the movement." },
+      2: { setsReps: "4x8", rest: "90 seconds", note: "Add weight only when form is perfect. Progressive overload starts here." },
+      3: { setsReps: "4x6", rest: "120 seconds", note: "Heavier weight. Controlled tempo. Feel every rep." },
+      4: { setsReps: "5x5", rest: "120 seconds", note: "Maximum strength phase. Heavy, controlled, deliberate." },
+      5: { setsReps: "3x10", rest: "60 seconds", note: "Deload. Half your normal weight. Perfect form only." },
+    }
   },
   home: {
-    phase1: [
-      { id: "squat_bodyweight", name: "Bodyweight Squat", sets: "3x12", plainEnglish: "Stand feet shoulder width. Arms out in front for balance. Lower yourself like sitting on a chair. Go as deep as comfortable. Push through heels to stand.", modification: "If knees hurt, only lower halfway. Hold a chair for balance if over 60.", reason: "Builds the entire lower body with no equipment. Foundation of all movement.", phase: 1, muscleGroup: "legs" },
-      { id: "pushup_standard", name: "Push Up", sets: "3x8", plainEnglish: "Hands slightly wider than shoulders. Body in a straight line. Lower your chest to the floor. Push back up. If this is too hard, drop your knees to the floor.", modification: "Knees down if too difficult. Wall push ups if knees are also painful.", reason: "The most effective upper body exercise that requires no equipment.", phase: 1, muscleGroup: "chest" },
-      { id: "lunge_static", name: "Static Lunge", sets: "3x10 each leg", plainEnglish: "Step one foot forward. Lower the back knee toward the floor. Push back up. Complete all reps on one leg then switch. Hold a chair for balance if needed.", modification: "If knee pain, reduce range of motion. Only lower halfway.", reason: "Builds each leg independently without any equipment.", phase: 1, muscleGroup: "legs" },
-      { id: "plank_home", name: "Plank Hold", sets: "3x20 seconds", plainEnglish: "Forearms on floor. Body straight. Squeeze your core. Hold. Build time each week.", modification: "Drop knees if too difficult.", reason: "Core strength that transfers to every other movement.", phase: 1, muscleGroup: "core" },
-      { id: "glute_bridge", name: "Glute Bridge", sets: "3x15", plainEnglish: "Lie on your back. Knees bent, feet flat. Push your hips up toward the ceiling. Squeeze your glutes hard at the top. Lower slowly.", modification: "Single leg version if too easy. Keep weight on shoulders for more challenge.", reason: "Activates glutes which most people underuse. Protects the lower back.", phase: 1, muscleGroup: "legs" },
+    push: [
+      { id: "pushup", name: "Push Up", muscleGroup: "chest", plainEnglish: "Hands slightly wider than shoulders. Body straight from head to heels. Lower chest to floor. Push back up. If too hard — knees on floor. If too easy — feet elevated.", modification: "Wall push ups for elderly or injury. Knees down for beginners. Decline for advanced.", reason: "The fundamental bodyweight push movement. Works chest, shoulders, triceps with zero equipment.", videoUrl: "https://www.youtube.com/results?search_query=push+up+proper+form+tutorial" },
     ],
-    phase2: [
-      { id: "squat_jump", name: "Jump Squat", sets: "4x10", plainEnglish: "Squat down then explode up into a jump. Land softly with bent knees. Immediately go into the next squat. Control the landing — do not crash down.", modification: "If knees or joints hurt, do fast bodyweight squats instead without the jump.", reason: "Adds power and calorie burn to the squat pattern. Elevates heart rate significantly.", phase: 2, muscleGroup: "legs" },
-      { id: "pushup_decline", name: "Decline Push Up", sets: "4x10", plainEnglish: "Feet elevated on chair or bed. Hands on floor. Push up from this angle. This targets the upper chest and shoulders more than standard push up.", modification: "If too hard, do standard push ups instead.", reason: "Progressive overload without equipment — harder version builds more strength.", phase: 2, muscleGroup: "chest" },
-      { id: "mountain_climber", name: "Mountain Climbers", sets: "3x30 seconds", plainEnglish: "Start in push up position. Drive one knee toward chest, then the other, alternating quickly. Keep hips down. Move with control — not just speed.", modification: "If wrists hurt, elevate hands on a chair.", reason: "Full body cardio that burns fat while building core strength.", phase: 2, muscleGroup: "core" },
-      { id: "lunge_reverse", name: "Reverse Lunge", sets: "4x12 each", plainEnglish: "Step backward instead of forward. Lower the back knee toward floor. Push through the front heel to return. Easier on knees than forward lunge.", modification: "Hold a chair for balance. Reduce range of motion if knee pain.", reason: "Less knee stress than forward lunge with same muscle activation.", phase: 2, muscleGroup: "legs" },
+    pull: [
+      { id: "row_towel", name: "Table Row or Resistance Band Row", muscleGroup: "back", plainEnglish: "Table row: lie under a sturdy table, grip edge, pull chest to table, lower slowly. Band row: anchor band, pull toward lower chest, squeeze shoulder blades, return slowly.", modification: "If no table or band, do Superman holds: lie face down, lift arms and chest off floor, hold 2 seconds.", reason: "The only way to train the back at home without equipment. Non-negotiable for posture.", videoUrl: "https://www.youtube.com/results?search_query=table+row+bodyweight+tutorial" },
     ],
-    phase3: [
-      { id: "burpee", name: "Burpee", sets: "4x8", plainEnglish: "Stand, drop hands to floor, jump feet back to plank, do one push up, jump feet forward, jump up and clap overhead. That is one rep. Rest as needed between reps.", modification: "Remove the jump at the top. Remove the push up. Step feet instead of jumping.", reason: "The most complete bodyweight exercise. Maximum calorie burn in minimum time.", phase: 3, muscleGroup: "full_body" },
-      { id: "pistol_squat_assisted", name: "Assisted Single Leg Squat", sets: "3x6 each leg", plainEnglish: "Hold a door frame or chair. Stand on one leg. Lower yourself slowly on that single leg as far as comfortable. Push back up. This is extremely hard.", modification: "Only lower a few inches if needed. Use significant support from the door frame.", reason: "Ultimate lower body strength challenge with no equipment.", phase: 3, muscleGroup: "legs" },
+    legs: [
+      { id: "squat_bw", name: "Bodyweight Squat", muscleGroup: "legs", plainEnglish: "Feet shoulder width. Arms out front for balance. Lower like sitting on a chair. Push through heels to stand. Go as deep as comfortable. Chest stays up throughout.", modification: "Hold chair for balance if needed. Reduce depth if knee pain. Single leg if too easy.", reason: "Builds the entire lower body with zero equipment. Foundation of all movement.", videoUrl: "https://www.youtube.com/results?search_query=bodyweight+squat+proper+form+tutorial" },
+      { id: "glute_bridge", name: "Glute Bridge", muscleGroup: "posterior chain", plainEnglish: "Lie on back. Knees bent, feet flat. Push hips toward ceiling. Squeeze glutes hard at top. Hold 2 seconds. Lower slowly. Repeat.", modification: "Single leg version if too easy. Place weight on hips for more resistance.", reason: "Activates the glutes which most people underuse. Protects knees and lower back.", videoUrl: "https://www.youtube.com/results?search_query=glute+bridge+proper+form+tutorial" },
+      { id: "lunge", name: "Reverse Lunge", muscleGroup: "legs", plainEnglish: "Stand tall. Step one foot backward. Lower back knee toward floor. Push through front heel to return. Complete all reps one side then switch. Hold wall for balance if needed.", modification: "Reduce range of motion if knee pain. Hold chair for balance if elderly or unstable.", reason: "Builds each leg independently. Fixes imbalances. Easier on knees than forward lunge.", videoUrl: "https://www.youtube.com/results?search_query=reverse+lunge+proper+form+tutorial" },
     ],
-    phase4: [
-      { id: "tabata_circuit", name: "Tabata Home Circuit", sets: "8 rounds", plainEnglish: "20 seconds maximum effort, 10 seconds rest, 8 rounds. Exercises: jump squats, push ups, mountain climbers, burpees. Rotate through them.", modification: "Remove jumps and burpees if joint pain. Replace with fast bodyweight versions.", reason: "Peak phase home training. Maximum fat burn in 4 minutes per exercise.", phase: 4, muscleGroup: "full_body" },
+    core: [
+      { id: "plank_home", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body straight. Squeeze stomach. Hold. Do not let hips drop. Breathe.", modification: "Knees down if too difficult. Build 5 seconds per week.", reason: "Core stability foundation. Protects the spine and improves every movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
     ],
-    deload: [
-      { id: "deload_walk", name: "Easy Walk", sets: "30 minutes", plainEnglish: "Comfortable pace. No rush. This is recovery not training.", modification: "None needed.", reason: "Active recovery. Keeps blood flowing without adding training stress.", phase: 5, muscleGroup: "cardio" },
-    ],
+    phases: {
+      1: { setsReps: "3x10", rest: "60 seconds", note: "Learn the movement. Form first. Every time." },
+      2: { setsReps: "3x15", rest: "60 seconds", note: "More reps. Controlled tempo. Feel the muscle working." },
+      3: { setsReps: "4x12", rest: "45 seconds", note: "Less rest, more work. This is where home training gets hard." },
+      4: { setsReps: "4x15", rest: "30 seconds", note: "Maximum home phase. Minimum rest. Push through." },
+      5: { setsReps: "2x10", rest: "90 seconds", note: "Deload. Light and controlled. Recovery week." },
+    }
   },
   walk: {
-    phase1: [
-      { id: "walk_10", name: "10 Minute Walk", sets: "10 minutes", plainEnglish: "Walk at a comfortable pace. Head up, shoulders back. Breathe through your nose if possible. This is your starting point — we build from here.", modification: "If joint pain, walk slower. If stairs cause pain, find flat route.", reason: "Phase 1 is about building the daily movement habit. 10 minutes done is better than 30 minutes not done.", phase: 1, muscleGroup: "cardio" },
-      { id: "walk_15", name: "15 Minute Brisk Walk", sets: "15 minutes", plainEnglish: "Walk faster than comfortable. You should feel slightly breathless but still able to talk. Swing your arms. This pace burns significantly more calories than a slow walk.", modification: "Reduce to comfortable pace if breathless to the point of discomfort.", reason: "Brisk walking activates fat burning without joint stress.", phase: 1, muscleGroup: "cardio" },
-    ],
-    phase2: [
-      { id: "walk_30_intervals", name: "Interval Walk", sets: "30 minutes", plainEnglish: "Walk 2 minutes slow, 1 minute as fast as possible. Repeat for 30 minutes. The fast intervals are what drive fat loss.", modification: "If breathless during fast intervals, slow down slightly. Build tolerance over time.", reason: "Interval training burns 30% more calories than steady walking.", phase: 2, muscleGroup: "cardio" },
-      { id: "walk_hill", name: "Hill Walk", sets: "20 minutes", plainEnglish: "Find a hill or bridge or stairs. Walk up and down repeatedly for 20 minutes. The incline dramatically increases calorie burn and builds leg strength.", modification: "If knees painful going down hill, find stairs with a railing.", reason: "Incline walking is the most effective low-impact fat burning exercise available.", phase: 2, muscleGroup: "cardio" },
-    ],
-    phase3: [
-      { id: "walk_45", name: "45 Minute Power Walk", sets: "45 minutes", plainEnglish: "Sustained brisk pace for 45 minutes. Arm swing engaged. Posture tall. This is your main fat burning session of the week.", modification: "Break into two 22-minute sessions if needed.", reason: "At 45 minutes of sustained activity the body primarily uses fat as fuel.", phase: 3, muscleGroup: "cardio" },
-    ],
-    phase4: [
-      { id: "walk_60", name: "60 Minute Endurance Walk", sets: "60 minutes", plainEnglish: "One hour. Sustained brisk pace. You have built to this over 12 weeks. This is your peak walk.", modification: "Two 30-minute sessions if joint pain prevents one hour.", reason: "Peak phase endurance. Maximum fat burning and cardiovascular benefit.", phase: 4, muscleGroup: "cardio" },
-    ],
-    deload: [
-      { id: "deload_gentle_walk", name: "Gentle Recovery Walk", sets: "20 minutes", plainEnglish: "Slow comfortable pace. Enjoy it. This is earned recovery.", modification: "None needed.", reason: "Deload week. Your body recovers while staying active.", phase: 5, muscleGroup: "cardio" },
-    ],
-  },
+    phases: {
+      1: { duration: "15 minutes", pace: "comfortable", note: "Build the habit. 15 minutes every day beats 60 minutes once a week." },
+      2: { duration: "25 minutes", pace: "brisk", note: "Slightly breathless but can still talk. This pace burns fat." },
+      3: { duration: "35 minutes", pace: "brisk with 5 minute fast intervals every 10 minutes", note: "Intervals accelerate fat loss significantly." },
+      4: { duration: "45 minutes", pace: "sustained brisk", note: "Your peak walk. 45 minutes of sustained movement." },
+      5: { duration: "20 minutes", pace: "comfortable", note: "Deload walk. Active recovery. Enjoy it." },
+    }
+  }
 };
-
-function getPhaseKey(phase: number): string {
-  if (phase === 5) return "deload";
-  return `phase${phase}`;
-}
 
 function getModeKey(trainingMode: string): string {
   if (trainingMode === "walk_only") return "walk";
@@ -375,9 +424,9 @@ function getModeKey(trainingMode: string): string {
 }
 
 const INJURY_FILTERS: Record<string, string[]> = {
-  knee: ["squat_jump", "lunge_walking", "pistol", "burpee"],
-  back: ["deadlift_conventional", "row_bent", "bent_row"],
-  shoulder: ["press_shoulder", "press_bench_incline", "pushup_decline"],
+  knee: ["squat", "squat_bw", "lunge", "deadlift"],
+  back: ["deadlift", "barbell_row"],
+  shoulder: ["overhead_press", "bench_press", "pushup"],
   wrist: [],
 };
 
@@ -397,45 +446,43 @@ const REST_DAY_MESSAGES: Record<number, string> = {
   5: "20 minute gentle walk. Your body is recovering.",
 };
 
+function filterEntriesForInjuries(entries: ExerciseEntry[], user: any): ExerciseEntry[] {
+  const injuries = (user.injuries || "").toLowerCase();
+  if (!injuries || injuries === "none" || injuries === "no") return entries;
+
+  let filtered = [...entries];
+  for (const [injury, blockedIds] of Object.entries(INJURY_FILTERS)) {
+    if (injuries.includes(injury)) {
+      if (injury === "wrist") {
+        filtered = filtered.filter(ex => !ex.modification.toLowerCase().includes("wrist"));
+      } else {
+        filtered = filtered.filter(ex => !blockedIds.some(bid => ex.id.includes(bid)));
+      }
+    }
+  }
+  return filtered;
+}
+
 function filterExercisesForInjuries(exercises: Exercise[], user: any): Exercise[] {
   const injuries = (user.injuries || "").toLowerCase();
   if (!injuries || injuries === "none" || injuries === "no") return exercises;
 
   let filtered = [...exercises];
-  const removedIds: string[] = [];
-
   for (const [injury, blockedIds] of Object.entries(INJURY_FILTERS)) {
     if (injuries.includes(injury)) {
       if (injury === "wrist") {
-        filtered = filtered.filter(ex => {
-          if (ex.modification.toLowerCase().includes("wrist")) {
-            removedIds.push(ex.id);
-            return false;
-          }
-          return true;
-        });
+        filtered = filtered.filter(ex => !ex.modification.toLowerCase().includes("wrist"));
       } else {
-        filtered = filtered.filter(ex => {
-          const blocked = blockedIds.some(bid => ex.id.includes(bid));
-          if (blocked) removedIds.push(ex.id);
-          return !blocked;
-        });
+        filtered = filtered.filter(ex => !blockedIds.some(bid => ex.id.includes(bid)));
       }
     }
   }
-
-  if (removedIds.length > 0) {
-    const keptIds = filtered.map(e => e.id);
-    console.log(`[INJURY FILTER] ${user.name} (${injuries}): removed [${removedIds.join(", ")}], kept [${keptIds.join(", ")}]`);
-  }
-
   return filtered;
 }
 
 function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: boolean } {
   const phase = user.programmePhase || 1;
   const mode = getModeKey((user.trainingMode as string) || "home");
-  const phaseKey = getPhaseKey(phase);
   const dayIndex = (user.programDayIndex || 1) - 1;
   const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
   const workoutsPerWeek = phaseConfig.weeklyWorkouts;
@@ -452,20 +499,63 @@ function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: bool
     return { exercises: [], isRestDay: true };
   }
 
-  let library = EXERCISE_LIBRARY[mode]?.[phaseKey] || EXERCISE_LIBRARY.home.phase1;
-  library = filterExercisesForInjuries(library, user);
-
-  if (library.length === 0) {
-    library = EXERCISE_LIBRARY[mode]?.phase1 || EXERCISE_LIBRARY.home.phase1;
-    library = filterExercisesForInjuries(library, user);
+  if (mode === "walk") {
+    const walkPhase = (EXERCISE_LIBRARY.walk.phases as any)[phase] || EXERCISE_LIBRARY.walk.phases[1];
+    const walkExercise: Exercise = {
+      id: `walk_phase${phase}`,
+      name: `${walkPhase.duration} Walk`,
+      sets: walkPhase.duration,
+      plainEnglish: `Pace: ${walkPhase.pace}. ${walkPhase.note}`,
+      modification: "Reduce pace if breathless or in pain.",
+      reason: walkPhase.note,
+      phase,
+      muscleGroup: "cardio",
+    };
+    return { exercises: [walkExercise], isRestDay: false };
   }
 
-  const exerciseCount = Math.min(library.length, mode === "walk" ? 2 : 4);
-  const startIdx = (dayIndex * 2) % library.length;
+  const lib = mode === "gym" ? EXERCISE_LIBRARY.gym : EXERCISE_LIBRARY.home;
+  const phaseSettings = (lib.phases as any)[phase] || (lib.phases as any)[1];
+  const setsReps = phaseSettings.setsReps;
+
+  const pushPool = filterEntriesForInjuries([...lib.push], user);
+  const pullPool = filterEntriesForInjuries([...lib.pull], user);
+  const legsPool = filterEntriesForInjuries([...lib.legs], user);
+  const corePool = filterEntriesForInjuries([...lib.core], user);
+
+  function pickRotating(pool: ExerciseEntry[], dayIdx: number): ExerciseEntry | null {
+    if (pool.length === 0) return null;
+    return pool[dayIdx % pool.length];
+  }
+
   const selected: Exercise[] = [];
-  for (let i = 0; i < exerciseCount; i++) {
-    selected.push(library[(startIdx + i) % library.length]);
+
+  const pushEx = pickRotating(pushPool, dayIndex);
+  if (pushEx) {
+    selected.push({ ...pushEx, sets: setsReps, phase, videoUrl: pushEx.videoUrl });
   }
+
+  const pullEx = pickRotating(pullPool, dayIndex);
+  if (pullEx) {
+    selected.push({ ...pullEx, sets: setsReps, phase, videoUrl: pullEx.videoUrl });
+  }
+
+  const leg1 = pickRotating(legsPool, dayIndex);
+  if (leg1) {
+    selected.push({ ...leg1, sets: setsReps, phase, videoUrl: leg1.videoUrl });
+  }
+  if (legsPool.length > 1) {
+    const leg2 = pickRotating(legsPool, dayIndex + 1);
+    if (leg2 && leg2.id !== leg1?.id) {
+      selected.push({ ...leg2, sets: setsReps, phase, videoUrl: leg2.videoUrl });
+    }
+  }
+
+  const coreEx = pickRotating(corePool, dayIndex);
+  if (coreEx) {
+    selected.push({ ...coreEx, sets: setsReps, phase, videoUrl: coreEx.videoUrl });
+  }
+
   return { exercises: selected, isRestDay: false };
 }
 
@@ -500,25 +590,31 @@ function formatWorkoutMessage(user: any, exercises: Exercise[], isRestDay: boole
     const displaySets = adjustSetsForAge(ex.sets, age);
     msg += `\n${ex.name} — ${displaySets}\n${ex.plainEnglish}\n`;
     if (showMods && ex.modification && ex.modification !== "None needed." && ex.modification !== "None needed — weight is already very light.") {
-      msg += `⚠️ ${ex.modification}\n`;
+      msg += `Modify: ${ex.modification}\n`;
+    }
+    if (ex.videoUrl) {
+      msg += `Watch: ${ex.videoUrl}\n`;
     }
   }
 
+  const restBetween = phaseConfig.rest || "60s";
+  msg += `\nRest between sets: ${restBetween}`;
+
   if (age >= 70) {
-    msg += `\nAt your level recovery is priority. Quality over quantity always.\n`;
+    msg += `\nAt your level recovery is priority. Quality over quantity always.`;
   }
   if (age <= 17) {
-    msg += `\nFocus on form today — not weight. Building correct movement patterns now means less injury for life.\n`;
+    msg += `\nFocus on form today — not weight. Building correct movement patterns now means less injury for life.`;
   }
 
   if ((goal.includes("fat") || goal.includes("loss")) && (mode === "gym" || mode === "home")) {
-    msg += `\nFinisher: 10 minutes of continuous movement — jump rope, mountain climbers, or fast bodyweight squats. This is what accelerates fat loss.\n`;
+    msg += `\nFinisher: 10 min continuous movement — jump rope, mountain climbers, or fast squats.`;
   }
   if (goal.includes("muscle")) {
-    msg += `\nRest exactly 90 seconds between sets. Eat protein within 30 minutes of finishing this session.\n`;
+    msg += `\nEat protein within 30 min of finishing.`;
   }
 
-  msg += `\nReply DONE when finished.`;
+  msg += `\n\nReply DONE when finished.`;
   return msg;
 }
 
@@ -661,6 +757,7 @@ FOOD-SPECIFIC INSTRUCTIONS:
 You understand ALL South African foods including pap, samp, umngqusho, morogo, chakalaka, vetkoek, magwinya, kota, gatsbys, braai meat, wors, boerewors, tripe, mogodu, umleqwa, pilchards, tinned fish, Spar pies, Shoprite specials, amagwinya, umqombothi, Savanna, Hunters, Black Label, street food, township food, suburban food — everything.
 SPAZA SHOP FOODS: Russians and polony are high fat processed meat — coach firmly to limit these. Fat cakes and vetkoek are junk — coach firmly to avoid. Also recognise pap en vleis, chakalaka, umngqusho, samp, mogodu, mashonzha as SA staples.
 Respond to exactly what they ate — be specific. Junk food: call it out firmly. Alcohol: be strict. No protein: name what to add. Skipped meal: firm instruction to eat protein now.
+RESPONSE LENGTH: Maximum 3 sentences for WhatsApp. Never more than 60 words per response.
 
 RESPONSE FORMAT — return JSON only:
 {
@@ -782,6 +879,8 @@ async function generateReply(message: string, intent: string, context: any): Pro
           role: "system",
           content: `${KAMLIFE_MASTER_PROMPT}
 
+RESPONSE LENGTH: Maximum 3 sentences for WhatsApp. Never more than 60 words per response.
+
 Context: ${JSON.stringify(context)}`
         },
         { role: "user", content: message }
@@ -891,14 +990,15 @@ export async function registerRoutes(
     const rawMsg = message.trim().toLowerCase().replace(/[^\w\s]/g, "");
     const greetings = ["hi", "hello", "hey", "howzit", "sup", "yo", "sawubona", "dumela", "molo", "molweni"];
     const rawWords = rawMsg.split(/\s+/);
-    const isGreeting = greetings.includes(rawMsg) || (message.length <= 20 && rawWords.some(w => greetings.includes(w)) && !/\d/.test(message));
+    const isGreeting = greetings.includes(rawMsg) || (message.length <= 20 && rawWords.some((w: string) => greetings.includes(w)) && !/\d/.test(message));
 
     if (isGreeting) {
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        await storage.logChat(user.id, message, menuText, "COACH_MENU");
-        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+        const menu = getMenuText(user);
+        await storage.logChat(user.id, message, menu, "COACH_MENU");
+        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
     }
 
@@ -908,15 +1008,16 @@ export async function registerRoutes(
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        await storage.logChat(user.id, message, menuText, "SA_SLANG_ACK");
-        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+        const menu = getMenuText(user);
+        await storage.logChat(user.id, message, menu, "SA_SLANG_ACK");
+        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
     }
     const saNoWords = ["NEE", "AIKONA"];
     if (saNoWords.includes(cleanMsg)) {
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
-        const reply = "Noted. Reply MENU when you are ready.";
+        const reply = "Noted. Just tell me what you need when you are ready.";
         await storage.logChat(user.id, message, reply, "SA_SLANG_NO");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -926,8 +1027,9 @@ export async function registerRoutes(
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        await storage.logChat(user.id, message, menuText, "SA_SLANG_GREET");
-        return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+        const menu = getMenuText(user);
+        await storage.logChat(user.id, message, menu, "SA_SLANG_GREET");
+        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
       }
     }
     const saCoachWords = ["YEBO COACH", "SHARP COACH", "LEKKER COACH"];
@@ -935,7 +1037,8 @@ export async function registerRoutes(
       let user = await storage.getUserByPhone(phoneNumber);
       if (user) {
         const motivation = getRotatingMotivation();
-        const reply = `${motivation}\n\n${menuText}`;
+        const menu = getMenuText(user);
+        const reply = `${motivation}\n\n${menu}`;
         await storage.logChat(user.id, message, reply, "SA_SLANG_COACH");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -1060,14 +1163,14 @@ export async function registerRoutes(
     // ── Priority 8: RESET command ──
     if (cleanMsg === "RESET") {
       await storage.updateUser(user.id, { awaitingInputType: null });
-      const menu = `Reset done. ${menuText}`;
+      const menu = `Reset done. ${getMenuText(user)}`;
       await storage.logChat(user.id, message, menu, "COACH_RESET");
       return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
     }
 
     // ── Priority 8.5: HELP command ──
     if (cleanMsg === "HELP") {
-      const helpReply = "Here to help.\n\n- Reply MENU to see your options\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nReply SUPPORT and we will get back to you within 24 hours.";
+      const helpReply = "Here to help.\n\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nReply SUPPORT and we will get back to you within 24 hours.";
       await storage.logChat(user.id, message, helpReply, "HELP");
       return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
     }
@@ -1111,7 +1214,7 @@ export async function registerRoutes(
     // ── Priority 8.57: REJOIN command ──
     if (cleanMsg === "REJOIN") {
       await storage.updateUser(user.id, { subscriptionStatus: "active", cancelledAt: null });
-      const reply = "Welcome back. That took courage. Let us pick up where you left off. Reply MENU to continue.";
+      const reply = "Welcome back. That took courage. Let us pick up where you left off. What do you need?";
       await storage.logChat(user.id, message, reply, "REJOIN");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1155,7 +1258,7 @@ export async function registerRoutes(
         ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length)
         : 0;
 
-      const progressReply = `*Progress Report — ${user.name || "Hey"}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}\n\nReply MENU to continue.`;
+      const progressReply = `*Progress Report — ${user.name || "Hey"}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}`;
       await storage.logChat(user.id, message, progressReply, "PROGRESS");
       return res.type('text/xml').send(`<Response><Message>${progressReply}</Message></Response>`);
     }
@@ -1172,7 +1275,7 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "STAY") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          const reply = `Great decision. Let's get back to work.\n\n${menuText}`;
+          const reply = `Great decision. Let's get back to work.\n\n${getMenuText(user)}`;
           await storage.logChat(user.id, message, reply, "CANCEL_STAYED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg === "1") {
@@ -1210,8 +1313,9 @@ export async function registerRoutes(
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
         } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, menuText, "COACH_MENU");
-          return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+          const menu = getMenuText(user);
+          await storage.logChat(user.id, message, menu, "COACH_MENU");
+          return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
         } else {
           const ctx = await buildUserContext(user);
           const { reply } = await getKamLifeFoodReply(
@@ -1246,7 +1350,7 @@ export async function registerRoutes(
       if (inputType === "drink") {
         if (cleanMsg === "MENU") {
           await storage.updateUser(user.id, { awaitingInputType: null });
-          return res.type('text/xml').send(`<Response><Message>${menuText}</Message></Response>`);
+          return res.type('text/xml').send(`<Response><Message>${getMenuText(user)}</Message></Response>`);
         }
 
         const ctx = await buildUserContext(user);
@@ -1366,7 +1470,7 @@ export async function registerRoutes(
         if (/^\d+$/.test(nameInput) || nameInput.length < 2) {
           reply = "Please enter your name so we can get started.";
         } else {
-          const formattedName = nameInput.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
+          const formattedName = nameInput.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
           await storage.updateUser(user.id, { name: formattedName, onboardingState: "AWAITING_GOAL" });
           reply = `Good to meet you, ${formattedName}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nOne question — what is your main goal right now?\n1) Lose fat\n2) Build muscle\n3) Get fit and healthy`;
         }
@@ -1440,7 +1544,7 @@ export async function registerRoutes(
         const calTarget = user.calorieTarget || 2000;
         const proteinTarget = Math.round((calTarget * 0.3) / 4);
         const userName = user.name || "coach";
-        reply = `Profile complete, ${userName}.\n\nYour programme starts today — not tomorrow, not Monday. Today.\n\nHere is what KamLife Coach does every day:\n- Morning: Your workout for the day\n- Anytime: Log your food, steps, sleep\n- Sunday: Your weekly performance report\n- Always: Real coaching when you need it\n\nYour targets:\nCalories: ${calTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${phaseConfig.stepTarget.toLocaleString()} per day\n\nReply MENU to begin. The work starts now.`;
+        reply = `Profile complete, ${userName}.\n\nYour programme starts today — not tomorrow, not Monday. Today.\n\nHere is what KamLife Coach does every day:\n- Morning: Your workout for the day\n- Anytime: Log your food, steps, sleep\n- Sunday: Your weekly performance report\n- Always: Real coaching when you need it\n\nYour targets:\nCalories: ${calTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${phaseConfig.stepTarget.toLocaleString()} per day\n\nThe work starts now. Tell me what you ate today or type WORKOUT to begin.`;
       }
 
       if (reply) {
@@ -1527,7 +1631,7 @@ export async function registerRoutes(
       const todayStart = new Date();
       todayStart.setHours(0, 0, 0, 0);
       const weightLogs = await storage.getWeightLogs(user.id);
-      const loggedToday = weightLogs.some(l => new Date(l.createdAt!) >= todayStart);
+      const loggedToday = weightLogs.some(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
       if (loggedToday) {
         const reply = "You already logged your weight today. Weighing multiple times daily creates anxiety and gives false readings. Once per week same day same time is the standard. Step away from the scale.";
         await storage.logChat(user.id, message, reply, "SCALE_OBSESSION");
@@ -1867,7 +1971,9 @@ export async function registerRoutes(
       const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, fullCtx, user.name || "there");
 
       if (detectedIntent === "LOG_FOOD_INFORMAL") {
-        const full = `${coachReply}\n\nReply MENU to see your options.`;
+        const foodPattern = await checkFoodPatterns(user.id);
+        const perfectDay = await checkPerfectDay(user);
+        const full = `${coachReply}${foodPattern}${perfectDay}`;
         await storage.logChat(user.id, message, full, "LOG_FOOD");
         return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
@@ -1938,31 +2044,19 @@ export async function registerRoutes(
         }
       }
 
-      const phase = user.programmePhase || 1;
       const mode = getModeKey((user.trainingMode as string) || "home");
-      const phaseKey = getPhaseKey(phase);
       const { exercises: currentExercises } = getExercisesForDay(user);
       const currentIds = new Set(currentExercises.map(e => e.id));
       const currentMuscleGroups = new Set(currentExercises.map(e => e.muscleGroup));
 
-      let allPhaseExercises = EXERCISE_LIBRARY[mode]?.[phaseKey] || EXERCISE_LIBRARY.home.phase1;
-      allPhaseExercises = filterExercisesForInjuries(allPhaseExercises, user);
-      const sameGroupAlts = allPhaseExercises.filter(e => !currentIds.has(e.id) && currentMuscleGroups.has(e.muscleGroup));
-
+      const lib = mode === "gym" ? EXERCISE_LIBRARY.gym : EXERCISE_LIBRARY.home;
+      const allEntries: ExerciseEntry[] = [...lib.push, ...lib.pull, ...lib.legs, ...lib.core];
+      const filtered = filterEntriesForInjuries(allEntries, user);
+      const sameGroupAlts = filtered.filter(e => !currentIds.has(e.id) && currentMuscleGroups.has(e.muscleGroup));
       let pool = [...sameGroupAlts];
       if (pool.length < 3) {
-        const anyPhaseAlts = allPhaseExercises.filter(e => !currentIds.has(e.id) && !sameGroupAlts.includes(e));
-        pool.push(...anyPhaseAlts);
-      }
-      if (pool.length < 3) {
-        const allPhaseKeys = ["phase1", "phase2", "phase3", "phase4", "deload"];
-        for (const pk of allPhaseKeys) {
-          if (pk !== phaseKey && pool.length < 3) {
-            const phaseExercises = EXERCISE_LIBRARY[mode]?.[pk] || [];
-            const filtered = filterExercisesForInjuries(phaseExercises, user).filter(e => !currentIds.has(e.id) && !pool.some(p => p.id === e.id));
-            pool.push(...filtered);
-          }
-        }
+        const others = filtered.filter(e => !currentIds.has(e.id) && !pool.some(p => p.id === e.id));
+        pool.push(...others);
       }
       const picked = pool.slice(0, 3);
 
@@ -1972,8 +2066,8 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
 
-      let reply = "Here are 3 alternatives for today:\n";
-      picked.forEach((ex, i) => {
+      let reply = "Here are alternatives for today:\n";
+      picked.forEach((ex: ExerciseEntry, i: number) => {
         reply += `${i + 1}) ${ex.name} — ${ex.plainEnglish}\n`;
       });
       reply += "\nReply SWAP 1, SWAP 2, or SWAP 3 to choose.";
@@ -1989,19 +2083,10 @@ export async function registerRoutes(
         await storage.logChat(user.id, message, reply, "NO_EQUIPMENT");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
-      const phase = user.programmePhase || 1;
-      const phaseKey = getPhaseKey(phase);
       const tempUser = { ...user, trainingMode: "home" };
-      let library = EXERCISE_LIBRARY.home[phaseKey] || EXERCISE_LIBRARY.home.phase1;
-      library = filterExercisesForInjuries(library, tempUser);
-      const exerciseCount = Math.min(library.length, 4);
-      const dayIndex = (user.programDayIndex || 1) - 1;
-      const startIdx = (dayIndex * 2) % library.length;
-      const selected: Exercise[] = [];
-      for (let i = 0; i < exerciseCount; i++) {
-        selected.push(library[(startIdx + i) % library.length]);
-      }
-      const workoutMsg = formatWorkoutMessage(tempUser, selected, false);
+      const { exercises: homeExercises } = getExercisesForDay(tempUser);
+      const phase = user.programmePhase || 1;
+      const workoutMsg = formatWorkoutMessage(tempUser, homeExercises, false);
       const reply = `No gym today — no problem. Here is your home session for Phase ${phase}:\n\n${workoutMsg}`;
       await storage.logChat(user.id, message, reply, "NO_EQUIPMENT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -2139,7 +2224,7 @@ export async function registerRoutes(
       const calories = user.calorieTarget || 2000;
       const protein = Math.round(calories / 8);
       const trainingDayCarbs = phase <= 2 ? "moderate — rice, pap or bread with meals around training" : phase <= 4 ? "high — carbs at every training-day meal for fuel" : "reduced — lighter carbs this week";
-      const reply = `Phase ${phase} Nutrition — ${nutrition.name}\n\nFocus: ${nutrition.focus}\nCarb timing: ${nutrition.carbTiming}\nThis week's habit: ${nutrition.keyHabit}\nWeekly target: ${nutrition.weeklyTarget}\n\nYour daily targets:\nCalories: ${calories}kcal\nProtein: ${protein}g\nCarbs: ${trainingDayCarbs}\n\nReply MENU to continue.`;
+      const reply = `Phase ${phase} Nutrition — ${nutrition.name}\n\nFocus: ${nutrition.focus}\nCarb timing: ${nutrition.carbTiming}\nThis week's habit: ${nutrition.keyHabit}\nWeekly target: ${nutrition.weeklyTarget}\n\nYour daily targets:\nCalories: ${calories}kcal\nProtein: ${protein}g\nCarbs: ${trainingDayCarbs}`;
       await storage.logChat(user.id, message, reply, "NUTRITION_PLAN");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2184,7 +2269,8 @@ export async function registerRoutes(
         }
         const streak = await getConsistencyStreak(user.id);
         const streakMsg = getStreakMessage(streak);
-        const reply = `${reaction}${comparison}${winMoment}${streakMsg}`;
+        const perfectDay = await checkPerfectDay(user);
+        const reply = `${reaction}${comparison}${winMoment}${streakMsg}${perfectDay}`;
         await storage.logChat(user.id, message, reply, "LOG_STEPS");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -2245,6 +2331,8 @@ export async function registerRoutes(
       if (milestone) {
         reply += `\n\n${milestone}`;
       }
+      const perfectDay = await checkPerfectDay(user);
+      reply += perfectDay;
       await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2258,7 +2346,7 @@ export async function registerRoutes(
       user.name || "there"
     );
     await storage.logChat(user.id, message, reply, "INTELLIGENT_FALLBACK");
-    return res.type('text/xml').send(`<Response><Message>${reply}\n\nReply MENU to see your options.</Message></Response>`);
+    return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
   });
 
   // ============================================================
@@ -2514,7 +2602,7 @@ export async function registerRoutes(
           const aSteps = avgSteps || 0;
           const aDays = activeDays || 0;
           const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
-          let report = `*Weekly Report — ${user.name || "Hey"}*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}\n\nReply MENU to continue.`;
+          let report = `*Weekly Report — ${user.name || "Hey"}*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}`;
 
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
           if (daysSinceJoin >= 14 && daysSinceJoin <= 21) {
