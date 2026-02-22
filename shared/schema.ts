@@ -31,6 +31,13 @@ export const users = pgTable("users", {
   referralCode: text("referral_code"),
   referredBy: text("referred_by"),
   injuries: text("injuries"),
+  programmePhase: integer("programme_phase").default(1),
+  programmeWeek: integer("programme_week").default(1),
+  programmeDayInWeek: integer("programme_day_in_week").default(1),
+  programmeStartDate: timestamp("programme_start_date"),
+  trainingExperience: text("training_experience"),
+  lastWorkoutDate: timestamp("last_workout_date"),
+  totalWorkoutsCompleted: integer("total_workouts_completed").default(0),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
