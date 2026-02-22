@@ -1,0 +1,66 @@
+"In server/routes.ts, replace the entire EXERCISE_LIBRARY constant with this simplified version built on fundamental movements only. Delete everything in the current library and replace with this:
+typescriptconst EXERCISE_LIBRARY = {
+  gym: {
+    push: [
+      { id: "bench_press", name: "Bench Press", muscleGroup: "chest", plainEnglish: "Lie on bench. Bar or dumbbells at chest level. Press up until arms extended. Lower slowly to chest. Keep feet flat on floor, back natural.", modification: "If shoulder pain, use dumbbells with neutral grip. If over 60, reduce range of motion.", reason: "The fundamental upper body push movement. Builds chest, shoulders and triceps.", videoUrl: "https://www.youtube.com/results?search_query=bench+press+proper+form+tutorial" },
+      { id: "overhead_press", name: "Overhead Press", muscleGroup: "shoulders", plainEnglish: "Stand or sit. Bar or dumbbells at shoulder height. Press straight overhead until arms locked out. Lower slowly back to shoulders. Keep core tight throughout.", modification: "If shoulder pain, press to eye level only. Seated version reduces lower back stress.", reason: "The fundamental shoulder movement. Builds overhead strength and shoulder size.", videoUrl: "https://www.youtube.com/results?search_query=overhead+press+proper+form+tutorial" },
+    ],
+    pull: [
+      { id: "barbell_row", name: "Barbell Row", muscleGroup: "back", plainEnglish: "Hinge forward at hips, back flat. Pull bar to lower chest. Squeeze shoulder blades together at top. Lower slowly. Do not round your back.", modification: "If lower back pain, use seated cable row instead. Keep weight light and focus on form.", reason: "The fundamental upper back movement. Builds thickness and posture.", videoUrl: "https://www.youtube.com/results?search_query=barbell+row+proper+form+tutorial" },
+      { id: "pull_up_or_lat", name: "Pull Up or Lat Pulldown", muscleGroup: "back", plainEnglish: "Pull Up: hang from bar, pull chest to bar, lower slowly. Lat Pulldown: sit at machine, pull bar to upper chest, return slowly. Both — squeeze your back at the top.", modification: "If pull ups too hard, use lat pulldown machine. If shoulder pain, use closer grip.", reason: "The fundamental vertical pull movement. Builds width and the V-shape.", videoUrl: "https://www.youtube.com/results?search_query=lat+pulldown+proper+form+tutorial" },
+    ],
+    legs: [
+      { id: "squat", name: "Squat", muscleGroup: "legs", plainEnglish: "Bar on upper back. Feet shoulder width. Lower until thighs parallel to floor. Drive through heels to stand. Keep chest up and knees tracking over toes throughout.", modification: "If knee pain, reduce depth. If back pain, use goblet squat with dumbbell. If new, use bodyweight first.", reason: "The king of all exercises. Builds the entire lower body and burns maximum calories.", videoUrl: "https://www.youtube.com/results?search_query=squat+proper+form+tutorial+beginners" },
+      { id: "deadlift", name: "Deadlift", muscleGroup: "posterior chain", plainEnglish: "Bar over mid-foot. Hinge down, grip just outside knees, back flat. Push floor away — do not pull with back. Stand tall, lock hips at top. Lower bar with control.", modification: "If lower back pain, do Romanian deadlift only — lighter weight, hinge at hips. If new, start with dumbbells.", reason: "The most complete strength movement. Works everything from neck to floor.", videoUrl: "https://www.youtube.com/results?search_query=deadlift+proper+form+tutorial+beginners" },
+    ],
+    core: [
+      { id: "plank", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body in straight line from head to heels. Squeeze stomach hard. Hold. Do not let hips drop or rise. Breathe steadily.", modification: "Drop knees if too difficult. Build time by 5 seconds each week.", reason: "Builds deep core stability that protects the spine and improves every other movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
+    ],
+    phases: {
+      1: { setsReps: "3x10", rest: "90 seconds", note: "Focus entirely on form. Weight is secondary. Learn the movement." },
+      2: { setsReps: "4x8", rest: "90 seconds", note: "Add weight only when form is perfect. Progressive overload starts here." },
+      3: { setsReps: "4x6", rest: "120 seconds", note: "Heavier weight. Controlled tempo. Feel every rep." },
+      4: { setsReps: "5x5", rest: "120 seconds", note: "Maximum strength phase. Heavy, controlled, deliberate." },
+      5: { setsReps: "3x10", rest: "60 seconds", note: "Deload. Half your normal weight. Perfect form only." },
+    }
+  },
+  home: {
+    push: [
+      { id: "pushup", name: "Push Up", muscleGroup: "chest", plainEnglish: "Hands slightly wider than shoulders. Body straight from head to heels. Lower chest to floor. Push back up. If too hard — knees on floor. If too easy — feet elevated.", modification: "Wall push ups for elderly or injury. Knees down for beginners. Decline for advanced.", reason: "The fundamental bodyweight push movement. Works chest, shoulders, triceps with zero equipment.", videoUrl: "https://www.youtube.com/results?search_query=push+up+proper+form+beginners" },
+    ],
+    pull: [
+      { id: "row_towel", name: "Table Row or Resistance Band Row", muscleGroup: "back", plainEnglish: "Table row: lie under a sturdy table, grip edge, pull chest to table, lower slowly. Band row: anchor band, pull toward lower chest, squeeze shoulder blades, return slowly.", modification: "If no table or band, do Superman holds: lie face down, lift arms and chest off floor, hold 2 seconds.", reason: "The only way to train the back at home without equipment. Non-negotiable for posture.", videoUrl: "https://www.youtube.com/results?search_query=bodyweight+row+home+workout+tutorial" },
+    ],
+    legs: [
+      { id: "squat_bw", name: "Bodyweight Squat", muscleGroup: "legs", plainEnglish: "Feet shoulder width. Arms out front for balance. Lower like sitting on a chair. Push through heels to stand. Go as deep as comfortable. Chest stays up throughout.", modification: "Hold chair for balance if needed. Reduce depth if knee pain. Single leg if too easy.", reason: "Builds the entire lower body with zero equipment. Foundation of all movement.", videoUrl: "https://www.youtube.com/results?search_query=bodyweight+squat+proper+form+beginners" },
+      { id: "glute_bridge", name: "Glute Bridge", muscleGroup: "posterior chain", plainEnglish: "Lie on back. Knees bent, feet flat. Push hips toward ceiling. Squeeze glutes hard at top. Hold 2 seconds. Lower slowly. Repeat.", modification: "Single leg version if too easy. Place weight on hips for more resistance.", reason: "Activates the glutes which most people underuse. Protects knees and lower back.", videoUrl: "https://www.youtube.com/results?search_query=glute+bridge+proper+form+tutorial" },
+      { id: "lunge", name: "Reverse Lunge", muscleGroup: "legs", plainEnglish: "Stand tall. Step one foot backward. Lower back knee toward floor. Push through front heel to return. Complete all reps one side then switch. Hold wall for balance if needed.", modification: "Reduce range of motion if knee pain. Hold chair for balance if elderly or unstable.", reason: "Builds each leg independently. Fixes imbalances. Easier on knees than forward lunge.", videoUrl: "https://www.youtube.com/results?search_query=reverse+lunge+proper+form+tutorial" },
+    ],
+    core: [
+      { id: "plank_home", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body straight. Squeeze stomach. Hold. Do not let hips drop. Breathe.", modification: "Knees down if too difficult. Build 5 seconds per week.", reason: "Core stability foundation. Protects the spine and improves every movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
+    ],
+    phases: {
+      1: { setsReps: "3x10", rest: "60 seconds", note: "Learn the movement. Form first. Every time." },
+      2: { setsReps: "3x15", rest: "60 seconds", note: "More reps. Controlled tempo. Feel the muscle working." },
+      3: { setsReps: "4x12", rest: "45 seconds", note: "Less rest, more work. This is where home training gets hard." },
+      4: { setsReps: "4x15", rest: "30 seconds", note: "Maximum home phase. Minimum rest. Push through." },
+      5: { setsReps: "2x10", rest: "90 seconds", note: "Deload. Light and controlled. Recovery week." },
+    }
+  },
+  walk: {
+    phases: {
+      1: { duration: "15 minutes", pace: "comfortable", note: "Build the habit. 15 minutes every day beats 60 minutes once a week." },
+      2: { duration: "25 minutes", pace: "brisk", note: "Slightly breathless but can still talk. This pace burns fat." },
+      3: { duration: "35 minutes", pace: "brisk with 5 minute fast intervals every 10 minutes", note: "Intervals accelerate fat loss significantly." },
+      4: { duration: "45 minutes", pace: "sustained brisk", note: "Your peak walk. 45 minutes of sustained movement." },
+      5: { duration: "20 minutes", pace: "comfortable", note: "Deload walk. Active recovery. Enjoy it." },
+    }
+  }
+};
+Then update getExercisesForDay to build each gym and home session as: one push exercise, one pull exercise, one or two leg exercises, one core exercise — always in that order. This is the fundamental push-pull-legs structure used by every serious coach.
+For gym users: each session picks from push, pull, legs and core arrays. Rotate through exercises within each category across days so they are not doing bench press every single session.
+For home users: same push-pull-legs-core structure using bodyweight movements.
+For walk users: just the walk duration and pace for their phase.
+Apply the phase sets and reps from the phases object — so a Phase 1 gym user does 3x10 of each movement, a Phase 4 gym user does 5x5.
+Keep all existing personalisation — age modifications, injury filtering, goal emphasis, GPT coaching message, video links.
+Restart the server."
