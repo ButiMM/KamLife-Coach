@@ -44,7 +44,7 @@ The project uses a single-repo structure with three main directories:
 - **Database**: PostgreSQL (required, referenced via `DATABASE_URL` environment variable)
 - **ORM**: Drizzle ORM with `drizzle-zod` for schema-to-validation integration
 - **Schema** (`shared/schema.ts`):
-  - `users` — Core user table with phone number, fitness goals, subscription status, onboarding state, calorie/protein/step targets
+  - `users` — Core user table with phone number, fitness goals, subscription status, onboarding state, calorie/protein/step targets, homeEquipment, lifeSituation, jobType, activityLevel, primaryFocusArea, baselineWeekActive/Complete, profileNotes
   - `weight_logs` — Weight tracking entries per user
   - `workout_logs` — Workout completion tracking per user
   - `step_logs` — Daily step count logs per user
@@ -62,6 +62,7 @@ The project uses a single-repo structure with three main directories:
 ### Key Design Decisions
 1. **Shared API Contract**: The `shared/routes.ts` file acts as a typed contract between frontend and backend, with Zod schemas for request/response validation. The `buildUrl` helper handles parameterized routes.
 2. **Intent-Based WhatsApp Processing**: Messages are classified into intents (onboarding_answer, log_steps, log_workout, log_weight, weekly_checkin_response, hungry, general_question) before being processed, allowing structured data extraction from natural language.
+5. **Extended Onboarding Flow**: Name → Weight → Training Mode → Equipment (home only) → Goal (4 options: fat loss, muscle gain, recomposition, general fitness) → Focus Area (muscle gain/recomp only) → Activity Level (5 levels with calorie multipliers) → Job Type → Life Situation → Age → Conditions → Experience → Baseline Week (intermediate/advanced only) → COMPLETED. Calorie target uses activity level multipliers (sedentary 1.2x to extremely active 1.9x).
 3. **No Authentication (MVP)**: The admin dashboard currently has no auth — noted as a future concern in requirements. The landing page "Coach Login" link goes directly to the dashboard.
 4. **UUID Primary Keys**: All main tables use UUID primary keys with `gen_random_uuid()`.
 

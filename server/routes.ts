@@ -258,6 +258,24 @@ async function buildSharecard(user: any): Promise<string> {
   return sharecard;
 }
 
+function buildOnboardingComplete(user: any, experience: string, calorieTarget: number, proteinTarget: number, phaseConfig: any, startingPhase: number): string {
+  const userName = user.name || "coach";
+  const goal = user.goalType || "General Fitness";
+  const mode = user.trainingMode || "home";
+  const stepTarget = phaseConfig.stepTarget || 7000;
+
+  const situationLines: string[] = [];
+  if (user.lifeSituation === "night shift") situationLines.push("Night shift life is tough on the body. We will time your meals and training around your shifts.");
+  else if (user.lifeSituation === "student in res") situationLines.push("Res life means limited kitchen access and budget. We work with what you have.");
+  else if (user.lifeSituation === "domestic worker") situationLines.push("Your job is already physical. We adjust training intensity so you are not burning out.");
+  else if (user.lifeSituation === "long commute") situationLines.push("Long commute means less time. Your workouts are short, focused, and effective.");
+  else if (user.lifeSituation === "unemployed") situationLines.push("Budget is tight. Every meal plan will be affordable. Eggs, pilchards, and beans are your weapons.");
+
+  const coachLine = situationLines.length > 0 ? situationLines[0] : "Consistency beats perfection. Show up every day and the results will come.";
+
+  return `Profile complete, ${userName}.\n\nHere is your setup:\nName: ${userName}\nGoal: ${goal}\nTraining: ${mode}\nPhase: ${startingPhase} — ${phaseConfig.name}\n\nYour daily targets:\nCalories: ${calorieTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${stepTarget.toLocaleString()}\n\n${coachLine}\n\nYour programme starts today — not tomorrow, not Monday. Today. Tell me what you ate today or type WORKOUT to begin.`;
+}
+
 async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string | null; newPhase: number; newWeek: number }> {
   const phase = user.programmePhase || 1;
   const week = user.programmeWeek || 1;
@@ -1146,6 +1164,22 @@ export async function registerRoutes(
     // ── Priority 7: Update lastActiveAt ──
     await storage.updateUser(user.id, { lastActiveAt: new Date() });
 
+    // ── Priority 7.1: BASELINE WEEK COMPLETION CHECK ──
+    if (user.baselineWeekActive && !user.baselineWeekComplete && user.programmeStartDate) {
+      const daysSinceStart = Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / (1000 * 60 * 60 * 24));
+      if (daysSinceStart >= 7) {
+        const phaseNum = user.programmePhase || 1;
+        const phaseConfig = PHASE_CONFIG[phaseNum];
+        const calTarget = user.calorieTarget || 2000;
+        const protTarget = user.proteinTarget || 150;
+        await storage.updateUser(user.id, { baselineWeekActive: false, baselineWeekComplete: true });
+        const userName = user.name || "coach";
+        const baselineReply = `${userName} — your baseline week is done. I have seen your patterns. Your full personalised programme starts now.\n\nHere is your setup:\nGoal: ${user.goalType || "General Fitness"}\nTraining: ${user.trainingMode || "home"}\nPhase: ${phaseNum} — ${phaseConfig.name}\n\nYour daily targets:\nCalories: ${calTarget}kcal\nProtein: ${protTarget}g\nSteps: ${(phaseConfig.stepTarget || 7000).toLocaleString()}\n\nThe real work starts today. Type WORKOUT to get your first session.`;
+        await storage.logChat(user.id, message, baselineReply, "BASELINE_COMPLETE");
+        return res.type('text/xml').send(`<Response><Message>${baselineReply}</Message></Response>`);
+      }
+    }
+
     // ── Priority 7.5: AGE DETECTION ──
     const ageMatch = lowerMsg.match(/(?:i am|im|i'm)\s*(\d{1,2})\s*(?:years?\s*old)?/) || lowerMsg.match(/(\d{1,2})\s*years?\s*old/);
     if (ageMatch) {
@@ -1471,29 +1505,15 @@ export async function registerRoutes(
           reply = "Please enter your name so we can get started.";
         } else {
           const formattedName = nameInput.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
-          await storage.updateUser(user.id, { name: formattedName, onboardingState: "AWAITING_GOAL" });
-          reply = `Good to meet you, ${formattedName}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nOne question — what is your main goal right now?\n1) Lose fat\n2) Build muscle\n3) Get fit and healthy`;
+          await storage.updateUser(user.id, { name: formattedName, onboardingState: "AWAITING_WEIGHT" });
+          reply = `Good to meet you, ${formattedName}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nHow much do you weigh right now? Just the number in kg — no judgment here, just data.`;
         }
-      } else if (currentState === "AWAITING_GOAL") {
-        let goalValue = message;
-        if (cleanMsg === "1") goalValue = "Fat Loss";
-        else if (cleanMsg === "2") goalValue = "Muscle Gain";
-        else if (cleanMsg === "3") goalValue = "General Fitness";
-        await storage.updateUser(user.id, { goalType: goalValue, onboardingState: "AWAITING_WEIGHT" });
-        reply = "Understood. How much do you weigh right now? Just the number in kg — no judgment here, just data.";
       } else if (currentState === "AWAITING_WEIGHT") {
         const weightVal = parseFloat(message);
         if (!weightVal || weightVal < 30 || weightVal > 300) {
           reply = "Please enter a valid weight in kg (e.g. 85).";
         } else {
-          const goalStr = (user.goalType || "").toLowerCase();
-          let calorieTarget: number;
-          if (goalStr.includes("fat") || goalStr.includes("loss")) {
-            calorieTarget = Math.max(1500, Math.round(weightVal * 22 - 500));
-          } else {
-            calorieTarget = Math.round(weightVal * 22 + 300);
-          }
-          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "AWAITING_TRAINING_MODE", calorieTarget });
+          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "AWAITING_TRAINING_MODE" });
           reply = "Good. Where will you be training?\n1) Gym\n2) At home\n3) Walking only";
         }
       } else if (currentState === "AWAITING_TRAINING_MODE") {
@@ -1502,18 +1522,88 @@ export async function registerRoutes(
         else if (cleanMsg === "2" || cleanMsg.includes("HOME")) mode = "home";
         else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
         if (mode) {
-          await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_AGE" });
-          reply = "How old are you? This helps us personalise your programme.";
+          if (mode === "home") {
+            await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_EQUIPMENT" });
+            reply = "What equipment do you have at home? Reply with numbers —\n1) No equipment\n2) Resistance bands\n3) Dumbbells\n4) Kettlebell\n5) Pull up bar\n6) Skipping rope\n7) Mix — tell me what you have";
+          } else {
+            await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_GOAL" });
+            reply = "What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
+          }
         } else {
           reply = "Please reply 1, 2, or 3.\n1) Gym\n2) At home\n3) Walking only";
         }
+      } else if (currentState === "AWAITING_EQUIPMENT") {
+        let equipmentValue = message.trim();
+        if (cleanMsg === "1") equipmentValue = "none";
+        else if (cleanMsg === "2") equipmentValue = "resistance bands";
+        else if (cleanMsg === "3") equipmentValue = "dumbbells";
+        else if (cleanMsg === "4") equipmentValue = "kettlebell";
+        else if (cleanMsg === "5") equipmentValue = "pull up bar";
+        else if (cleanMsg === "6") equipmentValue = "skipping rope";
+        else if (cleanMsg === "7") equipmentValue = message.trim();
+        await storage.updateUser(user.id, { homeEquipment: equipmentValue, onboardingState: "AWAITING_GOAL" });
+        reply = "What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
+      } else if (currentState === "AWAITING_GOAL") {
+        let goalValue = message;
+        const weight = parseFloat(user.currentWeight as string) || 70;
+        let notes = user.profileNotes || "";
+        if (cleanMsg === "1") goalValue = "Fat Loss";
+        else if (cleanMsg === "2") goalValue = "Muscle Gain";
+        else if (cleanMsg === "3") {
+          goalValue = "Recomposition";
+          notes += "Recomposition client — scale may not move but body will transform. Measure progress with measurements and photos not weight. ";
+        }
+        else if (cleanMsg === "4") goalValue = "General Fitness";
+
+        await storage.updateUser(user.id, { goalType: goalValue, profileNotes: notes || null, onboardingState: "AWAITING_ACTIVITY" });
+
+        if ((goalValue === "Muscle Gain" || goalValue === "Recomposition")) {
+          await storage.updateUser(user.id, { onboardingState: "AWAITING_FOCUS" });
+          reply = "What is your priority focus area?\n1) Full body general\n2) Glutes and legs — bigger and stronger lower body\n3) Upper body strength\n4) Core and stomach";
+        } else {
+          reply = "How active are you during the day?\n1) Sedentary — desk job or mostly sitting\n2) Lightly active — some movement\n3) Moderately active\n4) Very active — on feet all day retail nursing teaching construction\n5) Extremely active — physical labour or train twice daily";
+        }
+      } else if (currentState === "AWAITING_FOCUS") {
+        let focusValue = message.trim();
+        if (cleanMsg === "1") focusValue = "full body";
+        else if (cleanMsg === "2") focusValue = "glutes and legs";
+        else if (cleanMsg === "3") focusValue = "upper body";
+        else if (cleanMsg === "4") focusValue = "core and stomach";
+        await storage.updateUser(user.id, { primaryFocusArea: focusValue, onboardingState: "AWAITING_ACTIVITY" });
+        reply = "How active are you during the day?\n1) Sedentary — desk job or mostly sitting\n2) Lightly active — some movement\n3) Moderately active\n4) Very active — on feet all day retail nursing teaching construction\n5) Extremely active — physical labour or train twice daily";
+      } else if (currentState === "AWAITING_ACTIVITY") {
+        let actLevel: string | null = null;
+        if (cleanMsg === "1") actLevel = "sedentary";
+        else if (cleanMsg === "2") actLevel = "lightly active";
+        else if (cleanMsg === "3") actLevel = "moderately active";
+        else if (cleanMsg === "4") actLevel = "very active";
+        else if (cleanMsg === "5") actLevel = "extremely active";
+        if (actLevel) {
+          await storage.updateUser(user.id, { activityLevel: actLevel, onboardingState: "AWAITING_JOB" });
+          reply = "What do you do for work or study? Examples: student, retail, office, construction, domestic work, unemployed, nursing, driving. Just tell me briefly.";
+        } else {
+          reply = "Please reply 1, 2, 3, 4, or 5.\n1) Sedentary\n2) Lightly active\n3) Moderately active\n4) Very active\n5) Extremely active";
+        }
+      } else if (currentState === "AWAITING_JOB") {
+        await storage.updateUser(user.id, { jobType: message.trim(), onboardingState: "AWAITING_LIFE_SITUATION" });
+        reply = "Any of these apply to you? Reply with numbers —\n1) Student in res or shared house\n2) Domestic worker\n3) Night shift worker\n4) Long commute 2 plus hours daily\n5) Unemployed\n6) None of these";
+      } else if (currentState === "AWAITING_LIFE_SITUATION") {
+        let sitValue = message.trim();
+        if (cleanMsg === "1") sitValue = "student in res";
+        else if (cleanMsg === "2") sitValue = "domestic worker";
+        else if (cleanMsg === "3") sitValue = "night shift";
+        else if (cleanMsg === "4") sitValue = "long commute";
+        else if (cleanMsg === "5") sitValue = "unemployed";
+        else if (cleanMsg === "6") sitValue = "none";
+        await storage.updateUser(user.id, { lifeSituation: sitValue, onboardingState: "AWAITING_AGE" });
+        reply = "How old are you? This helps us personalise your programme.";
       } else if (currentState === "AWAITING_AGE") {
         const ageVal = parseInt(message);
         if (!ageVal || ageVal < 10 || ageVal > 100) {
           reply = "Please enter your age as a number (e.g. 32).";
         } else {
           await storage.updateUser(user.id, { age: ageVal, onboardingState: "AWAITING_CONDITIONS" });
-          reply = "Last thing — any injuries, chronic conditions or health issues we should know about before we start? Examples: bad knee, diabetes, hypertension, pregnancy. Reply NONE if nothing to declare.";
+          reply = "Any injuries, chronic conditions or health issues we should know about before we start? Examples: bad knee, diabetes, hypertension, pregnancy. Reply NONE if nothing to declare.";
         }
       } else if (currentState === "AWAITING_CONDITIONS") {
         const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
@@ -1532,19 +1622,84 @@ export async function registerRoutes(
           experience = "advanced";
           startingPhase = 3;
         }
+
+        const updatedUser = await storage.getUser(user.id);
+        const weight = parseFloat((updatedUser?.currentWeight || user.currentWeight || "70") as string);
+        const goalStr = (updatedUser?.goalType || user.goalType || "").toLowerCase();
+        const actLevel = updatedUser?.activityLevel || user.activityLevel || "sedentary";
+
+        const actMultipliers: Record<string, number> = {
+          "sedentary": 1.2,
+          "lightly active": 1.375,
+          "moderately active": 1.55,
+          "very active": 1.725,
+          "extremely active": 1.9,
+        };
+        const multiplier = actMultipliers[actLevel] || 1.2;
+
+        let calorieTarget: number;
+        if (goalStr.includes("fat") || goalStr.includes("loss")) {
+          calorieTarget = Math.max(1500, Math.round((weight * 22 - 500) * multiplier));
+        } else if (goalStr.includes("recomp")) {
+          calorieTarget = Math.round(weight * 24 * multiplier);
+        } else if (goalStr.includes("muscle") || goalStr.includes("gain")) {
+          calorieTarget = Math.round((weight * 22 + 300) * multiplier);
+        } else {
+          calorieTarget = Math.round(weight * 22 * multiplier);
+        }
+        const proteinTarget = Math.round((calorieTarget * 0.3) / 4);
         const phaseConfig = PHASE_CONFIG[startingPhase];
-        await storage.updateUser(user.id, {
-          trainingExperience: experience,
-          programmePhase: startingPhase,
-          programmeWeek: 1,
-          programmeDayInWeek: 1,
-          programmeStartDate: new Date(),
-          onboardingState: "COMPLETED",
-        });
-        const calTarget = user.calorieTarget || 2000;
-        const proteinTarget = Math.round((calTarget * 0.3) / 4);
-        const userName = user.name || "coach";
-        reply = `Profile complete, ${userName}.\n\nYour programme starts today — not tomorrow, not Monday. Today.\n\nHere is what KamLife Coach does every day:\n- Morning: Your workout for the day\n- Anytime: Log your food, steps, sleep\n- Sunday: Your weekly performance report\n- Always: Real coaching when you need it\n\nYour targets:\nCalories: ${calTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${phaseConfig.stepTarget.toLocaleString()} per day\n\nThe work starts now. Tell me what you ate today or type WORKOUT to begin.`;
+
+        if (experience === "intermediate" || experience === "advanced") {
+          await storage.updateUser(user.id, {
+            trainingExperience: experience,
+            programmePhase: startingPhase,
+            programmeWeek: 1,
+            programmeDayInWeek: 1,
+            calorieTarget,
+            proteinTarget,
+            stepsTarget: phaseConfig.stepTarget,
+            onboardingState: "AWAITING_BASELINE",
+          });
+          reply = "Before I build your programme I want one week of real data. From today until Sunday send me your steps, food, water, and sleep daily. Do not change anything — just live normally. On Monday your full programme is ready.\n\nReply YES to do a baseline week or SKIP to start your programme today.";
+        } else {
+          await storage.updateUser(user.id, {
+            trainingExperience: experience,
+            programmePhase: startingPhase,
+            programmeWeek: 1,
+            programmeDayInWeek: 1,
+            programmeStartDate: new Date(),
+            calorieTarget,
+            proteinTarget,
+            stepsTarget: phaseConfig.stepTarget,
+            onboardingState: "COMPLETED",
+          });
+          reply = buildOnboardingComplete(updatedUser || user, experience, calorieTarget, proteinTarget, phaseConfig, startingPhase);
+        }
+      } else if (currentState === "AWAITING_BASELINE") {
+        if (cleanMsg === "YES" || cleanMsg === "Y") {
+          await storage.updateUser(user.id, {
+            baselineWeekActive: true,
+            programmeStartDate: new Date(),
+            onboardingState: "COMPLETED",
+          });
+          const userName = user.name || "coach";
+          reply = `Baseline week started, ${userName}. From today until Sunday just live your normal life and log everything:\n\n- What you eat\n- Your steps\n- Your water\n- Your sleep\n\nDo not try to be perfect. I need your real data. On Monday your full personalised programme drops. Start by telling me what you ate today.`;
+        } else if (cleanMsg === "SKIP" || cleanMsg === "NO" || cleanMsg === "N") {
+          const updatedUser = await storage.getUser(user.id);
+          const phaseNum = updatedUser?.programmePhase || user.programmePhase || 1;
+          const phaseConfig = PHASE_CONFIG[phaseNum];
+          await storage.updateUser(user.id, {
+            baselineWeekActive: false,
+            programmeStartDate: new Date(),
+            onboardingState: "COMPLETED",
+          });
+          const calTarget = updatedUser?.calorieTarget || user.calorieTarget || 2000;
+          const protTarget = updatedUser?.proteinTarget || user.proteinTarget || 150;
+          reply = buildOnboardingComplete(updatedUser || user, updatedUser?.trainingExperience || "beginner", calTarget, protTarget, phaseConfig, phaseNum);
+        } else {
+          reply = "Reply YES to do a baseline week or SKIP to start your programme today.";
+        }
       }
 
       if (reply) {
@@ -1914,8 +2069,8 @@ export async function registerRoutes(
     }
     if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
     if (cleanMsg === "7") {
-      await storage.updateUser(user.id, { onboardingState: "AWAITING_GOAL", awaitingInputType: null });
-      const reply = "Let's update your profile. What is your main goal?\n1) Fat Loss\n2) Muscle Gain";
+      await storage.updateUser(user.id, { onboardingState: "AWAITING_GOAL", awaitingInputType: null, primaryFocusArea: null });
+      const reply = "Let's update your profile. What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
       await storage.logChat(user.id, message, reply, "PROFILE_UPDATE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }

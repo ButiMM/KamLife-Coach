@@ -72,9 +72,9 @@ export default function UserDetail() {
                 </div>
                 <p className="text-muted-foreground text-sm font-medium">Avg Steps</p>
                 <h3 className="text-3xl font-bold font-display" data-testid="text-avg-steps">
-                    {user.dailyStepGoal || "-"}
+                    {user.stepsTarget || "-"}
                 </h3>
-                <p className="text-xs text-muted-foreground">Per day logged</p>
+                <p className="text-xs text-muted-foreground">Step target</p>
             </Card>
 
             <Card className="p-6 border-border/50 flex flex-col items-center justify-center text-center space-y-2">
@@ -148,7 +148,7 @@ export default function UserDetail() {
                     </div>
                     <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
                         <span className="text-muted-foreground">Phase:</span>
-                        <span className="ml-2 font-medium">{user.currentPhase || 1}</span>
+                        <span className="ml-2 font-medium">{user.programmePhase || 1}</span>
                     </div>
                     <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
                         <span className="text-muted-foreground">Goal:</span>
@@ -156,11 +156,11 @@ export default function UserDetail() {
                     </div>
                     <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
                         <span className="text-muted-foreground">Step Goal:</span>
-                        <span className="ml-2 font-medium">{user.dailyStepGoal || "-"}</span>
+                        <span className="ml-2 font-medium">{user.stepsTarget || "-"}</span>
                     </div>
                     <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
                         <span className="text-muted-foreground">Calorie Target:</span>
-                        <span className="ml-2 font-medium">{user.dailyCalorieTarget || "-"}</span>
+                        <span className="ml-2 font-medium">{user.calorieTarget || "-"}</span>
                     </div>
                 </div>
             </Card>
