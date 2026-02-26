@@ -810,6 +810,72 @@ Coach food responses according to this phase. Phase 1-2: encourage consistency. 
   }
 }
 
+// ── Change 3: In-memory response cache ──
+const responseCache = new Map<string, { reply: string; timestamp: number }>();
+const CACHE_MAX_SIZE = 100;
+const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
+
+function getCachedResponse(message: string, phase: number): string | null {
+  const key = message.toLowerCase().slice(0, 50) + "|phase:" + phase;
+  const entry = responseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    responseCache.delete(key);
+    return null;
+  }
+  return entry.reply;
+}
+
+function setCachedResponse(message: string, phase: number, reply: string): void {
+  if (responseCache.size >= CACHE_MAX_SIZE) {
+    const oldestKey = responseCache.keys().next().value;
+    if (oldestKey) responseCache.delete(oldestKey);
+  }
+  const key = message.toLowerCase().slice(0, 50) + "|phase:" + phase;
+  responseCache.set(key, { reply, timestamp: Date.now() });
+}
+
+// ── Change 2: Rule-based intercept — avoids GPT for simple messages ──
+function getRuleBasedResponse(message: string, menuText: string): string | null {
+  const upper = message.toUpperCase().trim();
+  const lower = message.toLowerCase();
+
+  if (upper === "MENU" || upper.includes("MENU")) return menuText;
+
+  const stepMatch = lower.match(/(?:steps?|walked?|walk)[^\d]*(\d[\d,]+)|(\d[\d,]+)[^\d]*(?:steps?|walked?)/i);
+  if (stepMatch) {
+    const steps = parseInt((stepMatch[1] || stepMatch[2]).replace(/,/g, ""));
+    if (!isNaN(steps)) {
+      if (steps < 2000) return "Under 2000 steps. Get outside for 10 minutes right now.";
+      if (steps >= 10000) return `${steps.toLocaleString()} steps. Target hit. Repeat tomorrow.`;
+      return `${steps.toLocaleString()} steps logged. Keep building.`;
+    }
+  }
+
+  const waterMatch = lower.match(/(?:drank?|had|finished|done)[^\d]*(\d+(?:\.\d+)?)\s*(?:l(?:itre)?s?|litres?|liters?)|(\d+(?:\.\d+)?)\s*(?:l(?:itre)?s?|litres?|liters?)[^\d]*(?:water|rooibos)?|(\d+)\s*(?:ml)\b|(\d+)\s*(?:glass(?:es)?|bottle(?:s)?)\b/i);
+  if (waterMatch || /water done|finished water|drank water|had water/.test(lower)) {
+    return "Water logged. Keep going — minimum 2L daily.";
+  }
+
+  const sleepMatch = lower.match(/(?:slept?|sleep)[^\d]*(\d+)|(\d+)\s*(?:hours?)[^\d]*(?:sleep|slept)/i);
+  if (sleepMatch) {
+    const hours = parseInt(sleepMatch[1] || sleepMatch[2]);
+    if (!isNaN(hours)) {
+      if (hours < 5) return "Under 5 hours is not enough. Get to bed earlier tonight — this is non-negotiable.";
+      if (hours < 7) return "Not bad but not optimal. Aim for 7 to 8 hours tonight.";
+      return "Solid sleep. That is how you recover and keep cravings in check.";
+    }
+  }
+
+  const weightMatch = lower.match(/(?:weight|weigh(?:ed)?)[^\d]*(\d+(?:\.\d+)?)\s*kg|(\d+(?:\.\d+)?)\s*kg[^\d]*(?:weight|weigh)/i);
+  if (weightMatch) {
+    const val = weightMatch[1] || weightMatch[2];
+    return `${val}kg logged. The scale is just data — consistency is what matters.`;
+  }
+
+  return null;
+}
+
 async function getKamLifeFoodReply(
   userMessage: string,
   userCalories: number,
@@ -817,6 +883,14 @@ async function getKamLifeFoodReply(
   userName: string
 ): Promise<{reply: string, nextState: string}> {
   try {
+    const phaseMatch = userContext.match(/Programme phase: Phase (\d+)/);
+    const phase = phaseMatch ? parseInt(phaseMatch[1]) : 1;
+
+    const cached = getCachedResponse(userMessage, phase);
+    if (cached) {
+      return { reply: cached, nextState: "drink" };
+    }
+
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 150,
@@ -859,8 +933,11 @@ ${userContext}`
       nextState = "portion";
     }
 
+    const replyText = result.reply || "Logged. Make your next meal count.";
+    setCachedResponse(userMessage, phase, replyText);
+
     return {
-      reply: result.reply || "Logged. Make your next meal count.",
+      reply: replyText,
       nextState
     };
   } catch (e) {
@@ -914,6 +991,7 @@ async function parseIntent(message: string): Promise<{ intent: string; data?: an
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
+      max_tokens: 150,
       messages: [
         {
           role: "system",
@@ -946,6 +1024,7 @@ async function generateReply(message: string, intent: string, context: any): Pro
   try {
     const completion = await openai.chat.completions.create({
       model: "gpt-4o-mini",
+      max_tokens: 150,
       messages: [
         {
           role: "system",
@@ -1313,7 +1392,7 @@ export async function registerRoutes(
       try {
         const mealRes = await openai.chat.completions.create({
           model: "gpt-4o-mini",
-          max_tokens: 200,
+          max_tokens: 150,
           messages: [
             {
               role: "system",
@@ -2289,6 +2368,12 @@ export async function registerRoutes(
       }
       if (isNewClient && isFirstFoodToday) {
         extraInstruction += "\nNEW CLIENT FIRST LOG: Ask one contextual question before coaching. If tea mentioned ask what was in it. If fast food mentioned ask if this was planned or impulse. If sweets mentioned ask if this is daily or occasional.";
+      }
+
+      const ruleReply = getRuleBasedResponse(message, getMenuText(user));
+      if (ruleReply) {
+        await storage.logChat(user.id, message, ruleReply, "RULE_BASED");
+        return res.type('text/xml').send(`<Response><Message>${ruleReply}</Message></Response>`);
       }
 
       const fullCtx = await buildUserContext(user);
