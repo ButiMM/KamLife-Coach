@@ -1,3152 +1,949 @@
-import express, { type Express } from "express";
-import { createServer, type Server } from "http";
-import { storage } from "./storage";
-import { api } from "@shared/routes";
-import { z } from "zod";
-import OpenAI from "openai";
-import { format } from "date-fns";
+import { type Express } from "express";
+import { type Server } from "http";
 import { db } from "./db";
-import { chatHistory } from "@shared/schema";
-import { eq, and, gte } from "drizzle-orm";
-import { R } from "./responses";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins } from "../shared/schema";
+import { eq, desc, and, gte, sql } from "drizzle-orm";
+import OpenAI from "openai";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
-async function sendWhatsAppMessage(to: string, body: string) {
-  try {
-    const accountSid = process.env.TWILIO_ACCOUNT_SID;
-    const authToken = process.env.TWILIO_AUTH_TOKEN;
-    const fromNumber = process.env.TWILIO_WHATSAPP_NUMBER;
-    if (!accountSid || !authToken || !fromNumber) {
-      console.error('[TWILIO] Missing credentials — skipping send');
-      return false;
-    }
-    const toNumber = to.startsWith('whatsapp:') ? to : `whatsapp:${to}`;
-    const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Basic ' + Buffer.from(`${accountSid}:${authToken}`).toString('base64'),
-        'Content-Type': 'application/x-www-form-urlencoded'
-      },
-      body: new URLSearchParams({
-        From: `whatsapp:${fromNumber}`,
-        To: toNumber,
-        Body: body
-      }).toString()
-    });
-    if (!response.ok) {
-      console.error(`[TWILIO] Send failed: ${response.status} ${await response.text()}`);
-    }
-    return response.ok;
-  } catch (e) {
-    console.error('[TWILIO] Failed to send WhatsApp message:', e);
-    return false;
-  }
-}
+// ============================================================
+// COACH K MASTER PROMPT — 20 YEARS SA COACHING KNOWLEDGE
+// ============================================================
 
-const KAMLIFE_MASTER_PROMPT = `You are Coach K. You are a South African fitness and nutrition coach with 20 years of experience coaching real South Africans from all walks of life. You have coached domestic workers, executives, students, grandmothers, mineworkers, retail workers, nurses, unemployed clients, teenagers, and elderly clients. You know South Africa deeply — the food, the culture, the economics, the language, the struggles.
+const COACH_K_SYSTEM = `You are Coach K. A South African fitness and nutrition coach with 20 years experience coaching real South Africans — domestic workers, students, executives, nurses, mineworkers, grandmothers, teenagers, and everyone in between. You know South Africa deeply. The food, the culture, the economics, the language, the real struggles.
 
-Your voice is firm, warm, direct, and human. You sound like a real coach who has seen everything and still believes in every client. You never sound like an AI, a bot, a system, or a generic wellness platform.
+YOUR VOICE:
+Firm. Warm. Direct. Human. SA. Never corporate. Never generic. Never American.
+Maximum 3 sentences per response. Always end with ONE specific action.
+Never say: "Got it", "Nice", "Great job", "Well done", "Amazing", "As an AI", "I understand that", "That is understandable", "I acknowledge your frustration".
 
-HARD RULES FOR EVERY RESPONSE:
-Maximum 3 sentences. Always. No exceptions.
-Always end with one specific action the client must take right now.
-Never say Got it, Nice, Great job, Well done, Amazing as standalone praise.
-Never say As an AI, As your coach I want to say, I understand that, That is understandable.
-Never mention calories, macros, or numbers unless the client specifically asked.
-Never shame food choices. Coach the next meal not the last one.
-Always frame budget eating as intelligent eating. Never as poverty eating.
-One bad meal changes nothing. Three bad days changes something. Three bad weeks needs a programme adjustment.
+SA LANGUAGE — understand and respond naturally to:
+eish, sharp, yebo, ja, aweh, lekker, mara, haibo, aikona, sho, eita, howzit, shame, bru, sis, babe, china, laaitie
 
-SA LANGUAGE UNDERSTANDING:
-Understand and respond naturally to: eish, sharp, yebo, ja, nee, aweh, lekker, mara, haibo, aikona, sho, eita, howzit, shame, bru, sis, babe, laaitie, china, mlungu, township, spaza, shebeen, tavern, braai, pap, samp, kota, vetkoek, magwinya, morogo, mogodu, walkie talkies, smileys, umngqusho, mabele, Jungle Oats, Maltabella, pilchards, Russians, polony, fat cakes, Simba, Niknaks, Cremora, Mageu, cool drink.
-When a client uses SA slang respond with natural SA English. Do not correct their language. Do not ignore it. Mirror their register appropriately.
+FOOD RULES — know every SA food:
+- Pap: not the enemy. One fist portion. Always with protein. Never eliminate.
+- Samp and beans: excellent. High protein and fibre. Always encourage.
+- Kota: coach the filling not the kota. Egg kota beats chips kota.
+- Fat cakes and magwinya: finish what you have, do not buy again. Never say throw away.
+- KFC: happens. Remove skin. Skip chips. Back on track next meal.
+- Viennas and polony: already bought means already bought. Chicken polony next shop.
+- Pilchards: always encourage. Elite budget protein.
+- Baked beans: excellent. Protein and fibre.
+- Speckled Eggs and sweets: finish them, do not restock.
+- Green tea: does not improve gut health. Rooibos is better. Correct gently.
+- Hennessy, henny, Henry: alcohol. Coach forward not backward.
+- Cool drinks, Coke, Fanta: liquid sugar. Flag once only.
+- Month end after 20th: always reference R57 budget plan. Eggs R25. Pilchards R12. Sugar beans R20.
 
-FOOD COACHING RULES:
-Pap — not the enemy. One fist portion. Always with protein. Never eliminate.
-Samp and beans — excellent. High protein and fibre. Traditional and effective. Always encourage.
-Kota — high calorie but real SA food. Coach the filling choice not the kota itself. Egg and polony kota is better than chips kota.
-Fat cakes and magwinya — firm but never shaming. Finish what you have and do not buy again. Never say throw them away.
-KFC — happens. Remove the skin. Skip the chips. Coleslaw over fries. Back on track next meal.
-Viennas and polony — already bought means already bought. Never say throw them away. Suggest chicken polony next shop. Have them with eggs not alone.
-Tinned pilchards — always encourage. Elite budget protein. Omega 3 rich. Intelligent choice.
-Baked beans — excellent. Protein and fibre. Traditional and affordable.
-Speckled Eggs and sweets — finish what you have. Do not buy again. Have them occasionally not daily.
-Green tea — does not significantly improve gut health. Rooibos is the better SA option. Correct this myth gently.
-Cremora — high calorie. Flag if multiple cups daily. Suggest black rooibos.
-Mageu — nutritious but caloric. Watch quantity.
-Cool drinks — liquid sugar. Flag firmly but once only. Do not repeat this every session.
-Month end eating — after the 20th of the month automatically reference budget options. Eggs R25. Pilchards R12. Sugar beans R20. Never make this feel like a crisis.
+LIFE SITUATIONS:
+- Student: simple meals, under 15 minutes, under 3 ingredients, budget always tight
+- Domestic worker: eats employer food, focus on choices within what is available
+- Retail worker: already active all day, higher calorie needs, recovery focus
+- Night shift: meal timing shifts, protein before shift, sleep is the challenge
+- Unemployed: time rich money limited, R57 plan, frame as eating like an athlete
+- Church weekend: enjoy the fellowship, protein first, smaller portions, no guilt
+- Ramadan: training after Iftar, suhoor is most important meal, light during fasting hours
+- Travelling: hotel or fast food strategy, protein first always, 30 minute room workout available
+- Diabetic: low GI carbs, consistent meal timing, train 1 to 2 hours after eating, no skipping meals
+- Period: normal for workouts to feel harder, lighter sessions are fine, hydration critical
 
-LIFE SITUATION COACHING RULES:
-Student: Acknowledge cooking limitations. Suggest meals under 15 minutes with under 3 ingredients. Acknowledge res and campus food reality. Budget is tight — never suggest expensive alternatives.
-Domestic worker: They eat employer food often. Focus on choices within what is available. Never suggest cooking separate meals during work. Protein first on any plate.
-Retail worker: Already on feet all day. Steps from work count. Do not add excessive training volume. Recovery is critical. Calorie needs are higher than they think.
-Night shift worker: Their morning is not 7am. Meal timing references must adjust. Protein before shift. Avoid heavy carbs mid-shift. Sleep is their biggest challenge.
-Unemployed: Time rich but money limited. Can train twice daily if motivated. R57 budget plan is their nutrition framework. Frame it as eating like a serious athlete.
-Long commuter: 2 plus hours on taxis daily. Sedentary during commute. Steps are low. Morning workout before commute or it does not happen. Meal prep is essential.
-Loadshedding: When mentioned acknowledge it is a real SA challenge. Suggest no-cook no-fridge meals. Do not pretend it does not affect food preparation.
+MINDSET RULES:
+- Overwhelmed: one sentence acknowledge, one single action only. Never a list.
+- Budget anxiety: immediately say "Your budget does not need to change. Smarter choices with the same money." Before any coaching.
+- Bad weekend: redirect to next meal not next Monday. Never say start fresh tomorrow.
+- Scale went up: check context first. Water retention, menstrual cycle, muscle gain, sodium.
+- Client frustrated or angry: do not be defensive. Acknowledge briefly. Give one action.
+- Reset requested: always honour it immediately.
+- Diabetic mentioned: acknowledge immediately with specific diabetic coaching.
+- Ramadan mentioned: immediately restructure advice around fasting hours.
 
-EMOTIONAL AND MINDSET RULES:
-When client is overwhelmed — one sentence acknowledging it, one single action only. Never a list.
-When client mentions price or budget anxiety — immediately de-escalate before coaching anything else. Your budget does not need to increase. We make smarter choices with the same money.
-When client has a bad weekend — redirect to next meal not next Monday. Never say start fresh tomorrow.
-When client compares themselves to others — shut it down immediately. Their journey. Their timeline. Their body.
-When client mentions scale going up — always check context first. Water retention, menstrual cycle, muscle gain, sodium. Never allow scale panic without investigating.
-When client goes quiet then returns — never guilt trip. Welcome them back. One action to restart.
-When crisis language detected — want to die, kill myself, not worth living, end it — stop all coaching immediately. Send Samaritans 0800 567 567 free 24 hours. Log as crisis.
+BANNED RESPONSES:
+Never respond with motivational quotes as standalone responses like "One meal at a time" or "The work is the answer" without context.
+Never call someone HI or USER. Use their name or say "Coach K here".
+Never ignore a direct request. If someone asks for a gym programme give them a gym programme.
+Never repeat the same message three times. If a response does not fit the question try a different approach.`;
 
-BODY TYPE AND GOAL SPECIFIC RULES:
-Body recomposition clients — scale may not move. This is not failure. Measurements and photos tell the real story. Be patient with these clients about the scale.
-Feminine physique clients — glutes and legs priority. Heavy lower body training. Do not put them on excessive deficit. Maintenance calories with high protein.
-Elderly clients 65 plus — safety first always. No exercises requiring floor unless modification shown first. Balance exercises critical. Any discomfort means stop.
-Teenage clients under 18 — no aggressive deficits. Habits over weight loss. Eating disorder detection mandatory. If restriction or purging signs appear refer to SADAG 0800 567 567.
-Morbidly obese clients — no floor exercises. Chair squats. Wall push ups. Food is 80 percent. Walking is the training. Never overwhelm.
+// ============================================================
+// SA FOOD CALORIE ESTIMATES
+// ============================================================
 
-AGE-SPECIFIC COACHING:
-Age 14-17: Never recommend aggressive calorie deficits. Focus on healthy eating habits, sport performance, building confidence. No extreme programmes. If they mention skipping meals or extreme restriction — respond with care and encourage them to speak to a parent or doctor immediately.
-Age 18-35: Standard fat loss and muscle building protocols apply.
-Age 36-50: Recovery takes longer. Sleep more important. Hormonal changes affect results. Be patient with the scale.
-Age 51-65: Joint health is priority. Low impact exercise. Strength training to prevent muscle loss.
-Age 66-80: Safety first always. Chair exercises, walking, light resistance only. Never push intensity. Any dizziness or chest discomfort — stop and call a doctor.
-
-CHRONIC CONDITIONS:
-Diabetes: low GI carbs, smaller portions, no sugary drinks, consistent meal timing.
-Hypertension: reduce sodium, no processed meats, increase potassium foods.
-Thyroid: weight loss will be slower, consistency is even more critical.
-Pregnancy: immediately recommend doctor consultation, switch to maintenance not deficit, light walking only.
-Menopause: weight loss is slower, strength training becomes more important, be patient with the scale.`;
-
-const SA_FOOD_DATABASE: Record<string, { calories: number; category: string; coachResponse: string; budgetFood: boolean; swapSuggestion: string }> = {
-  "pap": { calories: 180, category: "carb", coachResponse: "Pap is not the enemy — one fist with protein is the move.", budgetFood: true, swapSuggestion: "Keep pap but add pilchards or eggs on top" },
-  "samp": { calories: 200, category: "carb", coachResponse: "Samp and beans is elite SA food. High protein, high fibre. Keep eating it.", budgetFood: true, swapSuggestion: "Add extra beans for more protein" },
-  "samp and beans": { calories: 280, category: "balanced", coachResponse: "Samp and beans — traditional and effective. This is smart eating.", budgetFood: true, swapSuggestion: "Perfect as is" },
-  "umngqusho": { calories: 280, category: "balanced", coachResponse: "Umngqusho is one of the most complete SA meals. Protein and fibre in one bowl.", budgetFood: true, swapSuggestion: "Perfect as is" },
-  "bread": { calories: 140, category: "carb", coachResponse: "Bread is fine — but never alone. Add egg or peanut butter for protein.", budgetFood: true, swapSuggestion: "Bread with egg or peanut butter" },
-  "jungle oats": { calories: 160, category: "carb", coachResponse: "Jungle Oats is a solid breakfast choice. Add milk or an egg for protein.", budgetFood: true, swapSuggestion: "Add milk or egg to boost protein" },
-  "maltabella": { calories: 150, category: "carb", coachResponse: "Maltabella is good — add milk or a boiled egg on the side.", budgetFood: true, swapSuggestion: "Add milk for protein" },
-  "rice": { calories: 200, category: "carb", coachResponse: "Rice is fine — one fist portion. Always serve with protein.", budgetFood: true, swapSuggestion: "One fist rice with chicken or beans" },
-  "pasta": { calories: 220, category: "carb", coachResponse: "Pasta — one fist portion. Add mince or tuna to make it a meal.", budgetFood: true, swapSuggestion: "Smaller portion with added protein" },
-  "kota": { calories: 800, category: "junk", coachResponse: "Kota is real SA food. Choose egg and chicken filling over chips. Skip the atchar.", budgetFood: true, swapSuggestion: "Egg and chicken kota without chips" },
-  "vetkoek": { calories: 350, category: "junk", coachResponse: "Vetkoek — finish what you have. Next time choose bread instead. Fill with mince not jam.", budgetFood: true, swapSuggestion: "Bread with mince instead" },
-  "magwinya": { calories: 350, category: "junk", coachResponse: "Magwinya — same as vetkoek. Finish what you have. Do not buy again this week.", budgetFood: true, swapSuggestion: "Bread with protein filling" },
-  "fat cakes": { calories: 350, category: "junk", coachResponse: "Fat cakes are deep fried carbs. Finish what you have and do not buy again.", budgetFood: true, swapSuggestion: "Bread with peanut butter" },
-  "pilchards": { calories: 200, category: "protein", coachResponse: "Pilchards are elite. Omega 3, high protein, R12 a tin. This is intelligent eating.", budgetFood: true, swapSuggestion: "Already one of the best choices" },
-  "tinned fish": { calories: 200, category: "protein", coachResponse: "Tinned fish is one of the smartest budget protein sources in SA.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "eggs": { calories: 140, category: "protein", coachResponse: "Eggs are one of the most complete foods on earth. Keep eating them.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "chicken": { calories: 250, category: "protein", coachResponse: "Chicken is your foundation protein. Grilled or boiled — not fried.", budgetFood: true, swapSuggestion: "Remove skin, skip the frying" },
-  "beans": { calories: 200, category: "protein", coachResponse: "Beans are what serious athletes eat. Protein, fibre, and affordable.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "sugar beans": { calories: 200, category: "protein", coachResponse: "Sugar beans — R20 and feeds you for days. High protein, high fibre.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "lentils": { calories: 180, category: "protein", coachResponse: "Lentils are high protein and dirt cheap. Smart choice.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "baked beans": { calories: 180, category: "protein", coachResponse: "Baked beans — protein and fibre. Traditional and effective.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "polony": { calories: 280, category: "processed", coachResponse: "Polony — already bought means already bought. Have it with eggs not alone. Choose chicken polony next shop.", budgetFood: true, swapSuggestion: "Chicken polony or tinned fish" },
-  "russians": { calories: 300, category: "processed", coachResponse: "Russians are high fat processed meat. Finish what you have. Next shop choose chicken polony or eggs.", budgetFood: true, swapSuggestion: "Eggs or chicken polony" },
-  "viennas": { calories: 280, category: "processed", coachResponse: "Viennas — already bought means already bought. Have with eggs. Choose better next shop.", budgetFood: true, swapSuggestion: "Eggs or tinned fish" },
-  "kfc": { calories: 600, category: "junk", coachResponse: "KFC happens. Remove the skin. Skip the chips. Coleslaw over fries. Back on track next meal.", budgetFood: false, swapSuggestion: "Grilled chicken at home" },
-  "chips": { calories: 300, category: "junk", coachResponse: "Chips are empty calories. Finish what you have. Fruit or biltong next time.", budgetFood: false, swapSuggestion: "Fruit, biltong, or nuts" },
-  "simba": { calories: 250, category: "junk", coachResponse: "Simba chips — finish the packet. Do not buy again this week.", budgetFood: false, swapSuggestion: "Fruit or nuts" },
-  "niknaks": { calories: 250, category: "junk", coachResponse: "Niknaks — finish them. Do not buy again. Biltong is the better snack.", budgetFood: false, swapSuggestion: "Biltong or fruit" },
-  "chocolate": { calories: 250, category: "junk", coachResponse: "Chocolate — finish what you have. Do not buy again. Not daily.", budgetFood: false, swapSuggestion: "Dark chocolate 2 blocks only" },
-  "sweets": { calories: 200, category: "junk", coachResponse: "Sweets — finish what you have. Do not buy again. Have them occasionally not daily.", budgetFood: false, swapSuggestion: "Fruit" },
-  "cool drink": { calories: 200, category: "junk", coachResponse: "Cool drinks are liquid sugar. Water or rooibos instead.", budgetFood: false, swapSuggestion: "Water or rooibos" },
-  "coke": { calories: 200, category: "junk", coachResponse: "Coke is liquid sugar. Switch to water or rooibos.", budgetFood: false, swapSuggestion: "Water or rooibos" },
-  "cremora": { calories: 80, category: "caloric_drink", coachResponse: "Cremora adds up fast — multiple cups daily means hidden calories. Try black rooibos.", budgetFood: true, swapSuggestion: "Black rooibos tea" },
-  "mageu": { calories: 200, category: "caloric_drink", coachResponse: "Mageu is nutritious but caloric. One glass is fine. Watch the quantity.", budgetFood: true, swapSuggestion: "One glass max, then water" },
-  "rooibos": { calories: 0, category: "healthy", coachResponse: "Rooibos is excellent. Zero calories, full of antioxidants. Drink as much as you want.", budgetFood: true, swapSuggestion: "Already perfect" },
-  "green tea": { calories: 0, category: "healthy", coachResponse: "Green tea is fine but does not magically fix gut health. Rooibos is the better SA option.", budgetFood: false, swapSuggestion: "Rooibos tea" },
-  "morogo": { calories: 50, category: "healthy", coachResponse: "Morogo is excellent — nutritious traditional greens. Eat more of this.", budgetFood: true, swapSuggestion: "Already excellent" },
-  "mogodu": { calories: 250, category: "protein", coachResponse: "Mogodu is high protein. Traditional and effective. Good choice.", budgetFood: true, swapSuggestion: "Already good" },
-  "walkie talkies": { calories: 200, category: "protein", coachResponse: "Walkie talkies — affordable protein. Smart budget choice.", budgetFood: true, swapSuggestion: "Already good budget protein" },
-  "boerewors": { calories: 350, category: "protein", coachResponse: "Boerewors at braai is fine — one piece. Skip the extra bread rolls.", budgetFood: false, swapSuggestion: "One piece with salad" },
-  "biltong": { calories: 200, category: "protein", coachResponse: "Biltong is one of the best SA snacks. High protein, no carbs.", budgetFood: false, swapSuggestion: "Already excellent" },
-  "two minute noodles": { calories: 350, category: "junk", coachResponse: "Noodles are a reality. Add an egg and use half the seasoning packet.", budgetFood: true, swapSuggestion: "Add egg, half seasoning" },
-  "noodles": { calories: 350, category: "junk", coachResponse: "Noodles — add an egg. Use half the seasoning. Better than skipping the meal.", budgetFood: true, swapSuggestion: "Add egg, reduce seasoning" },
-  "pie": { calories: 400, category: "junk", coachResponse: "Pies are convenient but high calorie. If that is lunch, no chips with it. Protein at dinner.", budgetFood: false, swapSuggestion: "Wrap with chicken instead" },
-  "gatsby": { calories: 900, category: "junk", coachResponse: "Gatsby is a full day of calories in one roll. Share it or save half for later.", budgetFood: false, swapSuggestion: "Half gatsby, share the rest" },
+const SA_FOOD_CALORIES: Record<string, number> = {
+  pap: 350, samp: 300, rice: 200, bread: 80, "brown bread": 70,
+  oats: 150, "jungle oats": 150, maltabella: 160, "weet-bix": 130,
+  egg: 70, eggs: 140, pilchards: 180, "tinned tuna": 120,
+  chicken: 165, "chicken breast": 165, beef: 250, mince: 300,
+  "sugar beans": 200, "baked beans": 120, lentils: 180,
+  kota: 900, "fat cake": 400, magwinya: 400, vetkoek: 350,
+  "russian sausage": 290, polony: 280, viennas: 250,
+  "simba chips": 500, niknaks: 480, "bar one": 230,
+  "kfc streetwise 2": 800, kfc: 600, "steers burger": 700,
+  "peanut butter": 190, avocado: 160, banana: 90,
+  "cool drink": 140, coke: 140, fanta: 130,
+  beer: 150, "castle": 150, "black label": 160,
+  hennessy: 250, henny: 250, "henry and coke": 350, "henny and coke": 350,
+  "sweet potato": 130, butternut: 80, spinach: 20, cabbage: 25,
+  "mageu": 180, "mahewu": 180, cremora: 60,
+  "green tea": 2, rooibos: 2, "latte": 250, "giant latte": 400,
+  creatine: 0, "protein shake": 120,
+  "stew": 280, "fatty": 350, "pork": 300,
 };
 
-const COACHING_PATTERNS = {
-  groceryListTriggers: ["I BOUGHT", "I HAVE", "MY GROCERIES", "SHOPPING LIST", "GOT THESE", "JUST BOUGHT", "WENT SHOPPING"],
-  budgetAnxietyTriggers: ["AFFORD", "EXPENSIVE", "PRICE", "COST", "MONEY", "BROKE", "BUDGET", "CHEAP", "CANT BUY", "NO MONEY"],
-  overwhelmTriggers: ["OVERWHELMED", "TOO MUCH", "I CANNOT", "I CANT", "WHERE DO I START", "CONFUSING", "COMPLICATED", "SO MUCH", "DONT KNOW WHERE"],
-  crisisTriggers: ["WANT TO DIE", "KILL MYSELF", "NOT WORTH LIVING", "END IT", "SUICIDE", "WANT TO END"],
-};
-
-const PHASE_CONFIG: Record<number, { name: string; theme: string; weeks: number; intensityLevel: number; weeklyWorkouts: number; stepTarget: number; rest: string }> = {
-  1: { name: "Foundation", theme: "Build the habit, not the body", weeks: 4, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000, rest: "60s" },
-  2: { name: "Build", theme: "The habit is forming. Now we add load", weeks: 4, intensityLevel: 2, weeklyWorkouts: 4, stepTarget: 8000, rest: "60-90s" },
-  3: { name: "Push", theme: "No excuses. This is where results happen", weeks: 4, intensityLevel: 3, weeklyWorkouts: 4, stepTarget: 9000, rest: "90s" },
-  4: { name: "Peak", theme: "Highest intensity. Your body is ready", weeks: 4, intensityLevel: 4, weeklyWorkouts: 5, stepTarget: 10000, rest: "90-120s" },
-  5: { name: "Deload", theme: "Intentional recovery. Your body needs this", weeks: 2, intensityLevel: 1, weeklyWorkouts: 3, stepTarget: 7000, rest: "60s" },
-};
-
-const NUTRITION_BY_PHASE: Record<number, { name: string; focus: string; carbTiming: string; keyHabit: string; weeklyTarget: string }> = {
-  1: { name: "Foundation", focus: "Build 3 consistent meals daily. Protein at every meal. No skipping.", carbTiming: "Carbs around training only. Rest of day protein and vegetables.", keyHabit: "Log every meal this week — accuracy comes before perfection.", weeklyTarget: "Hit protein target 5 out of 7 days." },
-  2: { name: "Build", focus: "Increase protein by 10g daily. Add a fourth meal if training 4x per week.", carbTiming: "Carbs before and after training. Reduce carbs on rest days.", keyHabit: "Meal prep Sunday. Prepare 3 days of food in advance.", weeklyTarget: "Hit protein target 6 out of 7 days. Zero junk food days." },
-  3: { name: "Push", focus: "Precision eating. Every meal tracked. No guessing portions.", carbTiming: "High carb on training days. Low carb on rest days. Protein stays constant.", keyHabit: "Weigh or measure portions for one week to recalibrate your eye.", weeklyTarget: "Perfect logging 7 out of 7 days. This phase demands it." },
-  4: { name: "Peak", focus: "Maximum fuel for maximum output. Do not undereat during peak phase.", carbTiming: "Carbs at every meal on training days. Your body needs the fuel.", keyHabit: "Eat within 30 minutes of waking. Eat within 30 minutes of training.", weeklyTarget: "No missed meals. No junk. This is your peak — protect it." },
-  5: { name: "Deload", focus: "Reduce calories by 10 percent. Your training is lighter so fuel accordingly.", carbTiming: "Reduce carbs slightly. Keep protein identical to peak phase.", keyHabit: "Use this week to reset food habits. Cook from scratch at least 3 meals.", weeklyTarget: "Clean eating only this week. Deload is for full recovery." },
-};
-
-function getPostWorkoutNutrition(phase: number): string {
-  if (phase <= 2) return "Post workout: eat protein within 30 minutes. Chicken, eggs or tinned fish with rice or pap.";
-  if (phase <= 4) return "Post workout: eat protein within 30 minutes. Protein shake or chicken breast with sweet potato.";
-  return "Post workout: eat protein within 30 minutes. Light protein meal — eggs or yoghurt.";
-}
-
-async function checkFoodPatterns(userId: string): Promise<string> {
-  const chatLogs = await storage.getChatHistory(userId);
-  const foodLogs = chatLogs
-    .filter(l => l.intent === "LOG_FOOD" || l.intent === "LOG_FOOD_FOLLOWUP" || l.intent === "FOOD_PORTION")
-    .slice(0, 3);
-
-  if (foodLogs.length < 3) return "";
-
-  const junkWords = ["chips", "chocolate", "sweets", "cake", "biscuit", "cookie", "ice cream", "vetkoek", "fat cake", "magwinya", "russian", "polony", "kota", "gatsby", "pie", "sausage roll", "fizzy", "coke", "fanta", "sprite"];
-  const junkCounts: Record<string, number> = {};
-  for (const log of foodLogs) {
-    const msg = (log.messageIn || "").toLowerCase();
-    for (const junk of junkWords) {
-      if (msg.includes(junk)) {
-        junkCounts[junk] = (junkCounts[junk] || 0) + 1;
-      }
-    }
+function estimateCalories(message: string): number {
+  const lower = message.toLowerCase();
+  let total = 0;
+  for (const [food, cals] of Object.entries(SA_FOOD_CALORIES)) {
+    if (lower.includes(food)) total += cals;
   }
-  const repeatedJunk = Object.entries(junkCounts).find(([_, count]) => count >= 3);
-  if (repeatedJunk) {
-    return `\n\nThis is the third time this week I have seen ${repeatedJunk[0]}. That is a pattern not a slip. What is triggering this — stress, habit, or availability? Tell me and we fix it.`;
-  }
-
-  const proteinWords = ["chicken", "egg", "fish", "tuna", "pilchard", "beef", "steak", "mince", "protein", "yoghurt", "yogurt", "beans", "lentils", "milk", "cheese", "biltong", "wors", "boerewors", "tripe", "mogodu"];
-  const hasProtein = foodLogs.some(l => {
-    const msg = (l.messageIn || "").toLowerCase();
-    return proteinWords.some(p => msg.includes(p));
-  });
-  if (!hasProtein) {
-    return "\n\nThree meals in a row with no protein logged. Your body is losing muscle right now. Fix the next meal.";
-  }
-
-  return "";
+  return total || 400;
 }
 
-async function checkPerfectDay(user: any): Promise<string> {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+// ============================================================
+// EXERCISE LIBRARY — PUSH / PULL / LEGS / CORE
+// ============================================================
 
-  const workoutLogs = await storage.getWorkoutLogs(user.id);
-  const todayWorkout = workoutLogs.some(l => l.workoutCompleted && l.loggedAt && new Date(l.loggedAt) >= today);
-
-  const stepLogs = await storage.getStepLogs(user.id);
-  const todaySteps = stepLogs.find(l => l.loggedAt && new Date(l.loggedAt) >= today);
-  const stepsHit = todaySteps ? todaySteps.steps >= (user.stepsTarget || 8000) : false;
-
-  const chatLogs = await storage.getChatHistory(user.id);
-  const todayFoodLogs = chatLogs.filter(l =>
-    (l.intent === "LOG_FOOD" || l.intent === "LOG_FOOD_FOLLOWUP") &&
-    l.createdAt && new Date(l.createdAt) >= today
-  );
-  const cleanMeals = todayFoodLogs.length >= 2;
-
-  if (todayWorkout && stepsHit && cleanMeals) {
-    const name = getDisplayName(user);
-    return `\n\n${name} — perfect day. Workout done. Steps hit. Food clean. This is exactly what results are made of. Screenshot this day.`;
-  }
-  return "";
-}
-
-// Returns a safe display name — filters out greetings/commands stored as names (e.g. "HI", "YES")
-const INVALID_NAME_WORDS = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "RESET", "HELP", "DONE", "GO", "K", "KK", "YO", "SUP"]);
-function getDisplayName(user: any, fallback = "Coach"): string {
-  const name = (user.name || "").trim();
-  if (!name || name.length < 2 || INVALID_NAME_WORDS.has(name.toUpperCase())) return fallback;
-  return name;
-}
-
-async function buildSharecard(user: any): Promise<string> {
-  const phase = user.programmePhase || 1;
-  const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-  const phaseName = phaseConfig.name;
-  const startDate = user.programmeStartDate || user.createdAt;
-  const daysOnProgramme = startDate ? Math.floor((Date.now() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-  const weightLogs = await storage.getWeightLogs(user.id);
-  let weightLost = "0";
-  if (weightLogs.length >= 2) {
-    const sorted = [...weightLogs].sort((a, b) => new Date(a.loggedAt || 0).getTime() - new Date(b.loggedAt || 0).getTime());
-    const first = parseFloat(sorted[0].weight as string);
-    const latest = parseFloat(sorted[sorted.length - 1].weight as string);
-    const diff = first - latest;
-    weightLost = diff > 0 ? diff.toFixed(1) : "0";
-  }
-  const stepLogs = await storage.getStepLogs(user.id);
-  const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-  const thisWeekSteps = stepLogs.filter(l => l.loggedAt && new Date(l.loggedAt) >= weekAgo);
-  const avgSteps = thisWeekSteps.length > 0 ? Math.round(thisWeekSteps.reduce((sum, l) => sum + l.steps, 0) / thisWeekSteps.length) : 0;
-  const score = user.weeklyScore || 0;
-  const complianceLevel = user.complianceLevel || "BUILDING";
-
-  const sharecard = [
-    `╔══════════════════════════╗`,
-    `║   KAMLIFE COACH          ║`,
-    `║   PHASE ${phase}: ${phaseName.padEnd(16)}║`,
-    `╠══════════════════════════╣`,
-    `║ ${('Name: ' + (user.name || 'Coach')).padEnd(26)}║`,
-    `║ ${('Days: ' + daysOnProgramme).padEnd(26)}║`,
-    `║ ${('Lost: ' + weightLost + 'kg').padEnd(26)}║`,
-    `║ ${('Workouts: ' + (user.totalWorkoutsCompleted || 0)).padEnd(26)}║`,
-    `║ ${('Avg steps: ' + avgSteps.toLocaleString()).padEnd(26)}║`,
-    `║ ${('Compliance: ' + score + '%').padEnd(26)}║`,
-    `╠══════════════════════════╣`,
-    `║ ${('Level: ' + complianceLevel).padEnd(26)}║`,
-    `║ "Consistency over        ║`,
-    `║  perfection. Always."   ║`,
-    `╚══════════════════════════╝`,
-    ``,
-    `Join KamLife Coach — WhatsApp +1 415 523 8886`
-  ].join('\n');
-
-  return sharecard;
-}
-
-function buildOnboardingComplete(user: any, experience: string, calorieTarget: number, proteinTarget: number, phaseConfig: any, startingPhase: number): string {
-  const userName = getDisplayName(user, "Coach");
-  const goal = user.goalType || "General Fitness";
-  const mode = user.trainingMode || "home";
-  const stepTarget = phaseConfig.stepTarget || 7000;
-
-  const situationLines: string[] = [];
-  if (user.lifeSituation === "night shift") situationLines.push("Night shift life is tough on the body. We will time your meals and training around your shifts.");
-  else if (user.lifeSituation === "student in res") situationLines.push("Res life means limited kitchen access and budget. We work with what you have.");
-  else if (user.lifeSituation === "domestic worker") situationLines.push("Your job is already physical. We adjust training intensity so you are not burning out.");
-  else if (user.lifeSituation === "long commute") situationLines.push("Long commute means less time. Your workouts are short, focused, and effective.");
-  else if (user.lifeSituation === "unemployed") situationLines.push("Budget is tight. Every meal plan will be affordable. Eggs, pilchards, and beans are your weapons.");
-
-  const coachLine = situationLines.length > 0 ? situationLines[0] : "Consistency beats perfection. Show up every day and the results will come.";
-
-  return `Profile complete, ${userName}.\n\nHere is your setup:\nName: ${userName}\nGoal: ${goal}\nTraining: ${mode}\nPhase: ${startingPhase} — ${phaseConfig.name}\n\nYour daily targets:\nCalories: ${calorieTarget}kcal\nProtein: ${proteinTarget}g\nSteps: ${stepTarget.toLocaleString()}\n\n${coachLine}\n\nYour programme starts today — not tomorrow, not Monday. Today. Tell me what you ate today or type WORKOUT to begin.`;
-}
-
-async function advanceProgram(user: any): Promise<{ phaseTransitionMsg: string | null; newPhase: number; newWeek: number }> {
-  const phase = user.programmePhase || 1;
-  const week = user.programmeWeek || 1;
-  const dayInWeek = (user.programmeDayInWeek || 1) + 1;
-  const config = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-
-  let newPhase = phase;
-  let newWeek = week;
-  let newDay = dayInWeek;
-  let phaseTransitionMsg: string | null = null;
-  let phaseComplete = false;
-
-  if (newDay > 7) {
-    newDay = 1;
-    newWeek = week + 1;
-    if (newWeek > config.weeks) {
-      phaseComplete = true;
-      let nextPhase = phase;
-      if (phase === 4) nextPhase = 5;
-      else if (phase === 5) nextPhase = 2;
-      else if (phase < 4) nextPhase = phase + 1;
-
-      const nextConfig = PHASE_CONFIG[nextPhase] || PHASE_CONFIG[1];
-
-      const daysInPhase = config.weeks * 7;
-      const phaseStartDate = new Date(Date.now() - daysInPhase * 24 * 60 * 60 * 1000);
-      const allWorkoutLogs = await storage.getWorkoutLogs(user.id);
-      const phaseWorkouts = allWorkoutLogs.filter(l => l.workoutCompleted && l.loggedAt && new Date(l.loggedAt) >= phaseStartDate).length;
-      const allStepLogs = await storage.getStepLogs(user.id);
-      const phaseSteps = allStepLogs.filter(l => l.loggedAt && new Date(l.loggedAt) >= phaseStartDate);
-      const avgSteps = phaseSteps.length > 0 ? Math.round(phaseSteps.reduce((sum, l) => sum + l.steps, 0) / phaseSteps.length) : 0;
-      const complianceScore = Math.min(100, Math.round((phaseWorkouts / (config.weeklyWorkouts * config.weeks)) * 100));
-
-      const sharecard = await buildSharecard(user);
-
-      phaseTransitionMsg = `Phase ${phase}: ${config.name} — Complete. You have finished ${config.weeks} weeks of consistent work.\n\nPhase ${phase} Summary:\nWorkouts completed: ${phaseWorkouts}\nAverage steps: ${avgSteps.toLocaleString()}\nCompliance: ${complianceScore}%\n\n${sharecard}\n\nBefore we move to Phase ${nextPhase} — how are you feeling?\nReply READY to advance to Phase ${nextPhase}: ${nextConfig.theme}\nOr reply REPEAT to own this phase one more week and advance stronger.`;
-
-      newWeek = week;
-      newDay = dayInWeek - 1 || 7;
-
-      await storage.updateUser(user.id, {
-        phaseReadyToAdvance: true,
-        programmeDayInWeek: newDay,
-        programDayIndex: (user.programDayIndex || 1),
-        totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + 1,
-        lastWorkoutDate: new Date(),
-      });
-
-      await sendWhatsAppMessage(user.phoneNumber, phaseTransitionMsg);
-      return { phaseTransitionMsg, newPhase: phase, newWeek: week };
-    }
-  }
-
-  let nextProgramDay = (user.programDayIndex || 1) + 1;
-  if (nextProgramDay > 21) nextProgramDay = 1;
-
-  await storage.updateUser(user.id, {
-    programmePhase: newPhase,
-    programmeWeek: newWeek,
-    programmeDayInWeek: newDay,
-    programDayIndex: nextProgramDay,
-    totalWorkoutsCompleted: (user.totalWorkoutsCompleted || 0) + 1,
-    lastWorkoutDate: new Date(),
-  });
-
-  return { phaseTransitionMsg: null, newPhase, newWeek };
-}
-
-function getMilestoneMessage(user: any): string | null {
-  if (!user.programmeStartDate) return null;
-  const daysOnProgramme = Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / (1000 * 60 * 60 * 24));
-  if (daysOnProgramme === 30) return "30 days on KamLife. Most people quit in week 3. You are not most people.";
-  if (daysOnProgramme === 90) return "90 days. You have been consistent for 3 months. That is not a programme anymore — that is a lifestyle.";
-  if (daysOnProgramme === 180) return "6 months. You are no longer someone trying to get fit. You are fit. Keep going.";
-  if (daysOnProgramme === 365) return "One year on KamLife. Think about who you were 365 days ago. That is the distance you have covered.";
-  return null;
-}
-
-type Exercise = {
-  id: string;
-  name: string;
-  sets: string;
-  plainEnglish: string;
-  modification: string;
-  reason: string;
-  phase: number;
-  muscleGroup: string;
-  videoUrl?: string;
-};
-
-type ExerciseEntry = {
-  id: string;
-  name: string;
-  muscleGroup: string;
-  plainEnglish: string;
-  modification: string;
-  reason: string;
-  videoUrl: string;
-};
-
-const EXERCISE_LIBRARY = {
+const WORKOUTS: Record<string, Record<string, Array<{name: string, sets: string, description: string, mistake: string, modification: string}>>> = {
   gym: {
     push: [
-      { id: "bench_press", name: "Bench Press", muscleGroup: "chest", plainEnglish: "Lie on bench. Bar or dumbbells at chest level. Press up until arms extended. Lower slowly to chest. Keep feet flat on floor, back natural.", modification: "If shoulder pain, use dumbbells with neutral grip. If over 60, reduce range of motion.", reason: "The fundamental upper body push movement. Builds chest, shoulders and triceps.", videoUrl: "https://www.youtube.com/results?search_query=bench+press+proper+form+tutorial" },
-      { id: "overhead_press", name: "Overhead Press", muscleGroup: "shoulders", plainEnglish: "Stand or sit. Bar or dumbbells at shoulder height. Press straight overhead until arms locked out. Lower slowly back to shoulders. Keep core tight throughout.", modification: "If shoulder pain, press to eye level only. Seated version reduces lower back stress.", reason: "The fundamental shoulder movement. Builds overhead strength and shoulder size.", videoUrl: "https://www.youtube.com/results?search_query=overhead+press+proper+form+tutorial" },
+      { name: "Bench Press", sets: "3x10", description: "Lie on bench. Bar or dumbbells at chest. Press up until arms extended. Lower slowly. Feet flat.", mistake: "Bouncing bar off chest or flaring elbows 90 degrees.", modification: "Dumbbell press with neutral grip if shoulder pain." },
+      { name: "Overhead Press", sets: "3x10", description: "Bar or dumbbells at shoulder height. Press straight overhead. Lower slowly. Core tight throughout.", mistake: "Excessive lower back arch.", modification: "Seated press if lower back pain." },
     ],
     pull: [
-      { id: "barbell_row", name: "Barbell Row", muscleGroup: "back", plainEnglish: "Hinge forward at hips, back flat. Pull bar to lower chest. Squeeze shoulder blades together at top. Lower slowly. Do not round your back.", modification: "If lower back pain, use seated cable row instead. Keep weight light and focus on form.", reason: "The fundamental upper back movement. Builds thickness and posture.", videoUrl: "https://www.youtube.com/results?search_query=barbell+row+proper+form+tutorial" },
-      { id: "pull_up_or_lat", name: "Pull Up or Lat Pulldown", muscleGroup: "back", plainEnglish: "Pull Up: hang from bar, pull chest to bar, lower slowly. Lat Pulldown: sit at machine, pull bar to upper chest, return slowly. Both — squeeze your back at the top.", modification: "If pull ups too hard, use lat pulldown machine. If shoulder pain, use closer grip.", reason: "The fundamental vertical pull movement. Builds width and the V-shape.", videoUrl: "https://www.youtube.com/results?search_query=lat+pulldown+proper+form+tutorial" },
+      { name: "Barbell Row", sets: "3x10", description: "Hinge forward back flat. Pull bar to lower chest. Squeeze shoulder blades hard at top. Lower slowly.", mistake: "Rounding back or using momentum.", modification: "Single dumbbell row with knee on bench if lower back pain." },
+      { name: "Lat Pulldown", sets: "3x10", description: "Sit at machine. Pull bar to upper chest. Lean back slightly. Squeeze back. Return slowly.", mistake: "Pulling with arms not back.", modification: "Use lighter weight and focus on feeling the back." },
     ],
     legs: [
-      { id: "squat", name: "Squat", muscleGroup: "legs", plainEnglish: "Bar on upper back. Feet shoulder width. Lower until thighs parallel to floor. Drive through heels to stand. Keep chest up and knees tracking over toes throughout.", modification: "If knee pain, reduce depth. If back pain, use goblet squat with dumbbell. If new, use bodyweight first.", reason: "The king of all exercises. Builds the entire lower body and burns maximum calories.", videoUrl: "https://www.youtube.com/results?search_query=squat+proper+form+tutorial" },
-      { id: "deadlift", name: "Deadlift", muscleGroup: "posterior chain", plainEnglish: "Bar over mid-foot. Hinge down, grip just outside knees, back flat. Push floor away — do not pull with back. Stand tall, lock hips at top. Lower bar with control.", modification: "If lower back pain, do Romanian deadlift only — lighter weight, hinge at hips. If new, start with dumbbells.", reason: "The most complete strength movement. Works everything from neck to floor.", videoUrl: "https://www.youtube.com/results?search_query=deadlift+proper+form+tutorial" },
+      { name: "Barbell Back Squat", sets: "3x10", description: "Bar on upper back. Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.", mistake: "Heels rising or chest collapsing forward.", modification: "Goblet squat with dumbbell if back pain." },
+      { name: "Romanian Deadlift", sets: "3x10", description: "Hold dumbbells. Hinge at hips pushing bum back. Lower until hamstring stretch. Drive hips forward to stand.", mistake: "Rounding lower back.", modification: "Reduce range of motion if back pain." },
+      { name: "Leg Press", sets: "3x12", description: "Sit in machine. Feet shoulder width on platform. Lower until 90 degrees. Push through heels.", mistake: "Knees caving inward.", modification: "Wider foot position if knee pain." },
     ],
     core: [
-      { id: "plank", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body in straight line from head to heels. Squeeze stomach hard. Hold. Do not let hips drop or rise. Breathe steadily.", modification: "Drop knees if too difficult. Build time by 5 seconds each week.", reason: "Builds deep core stability that protects the spine and improves every other movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
+      { name: "Plank", sets: "3x30 seconds", description: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Hold and breathe.", mistake: "Hips sagging or rising too high.", modification: "Drop knees to floor." },
     ],
-    phases: {
-      1: { setsReps: "3x10", rest: "90 seconds", note: "Focus entirely on form. Weight is secondary. Learn the movement." },
-      2: { setsReps: "4x8", rest: "90 seconds", note: "Add weight only when form is perfect. Progressive overload starts here." },
-      3: { setsReps: "4x6", rest: "120 seconds", note: "Heavier weight. Controlled tempo. Feel every rep." },
-      4: { setsReps: "5x5", rest: "120 seconds", note: "Maximum strength phase. Heavy, controlled, deliberate." },
-      5: { setsReps: "3x10", rest: "60 seconds", note: "Deload. Half your normal weight. Perfect form only." },
-    }
+    conditioning: [
+      { name: "Incline Treadmill Walk", sets: "15 minutes", description: "Incline 8 to 12 percent. Brisk walking pace. Do not hold the rails. Burns fat without destroying recovery.", mistake: "Holding rails which reduces effectiveness.", modification: "Reduce incline if joint pain." },
+    ],
   },
   home: {
     push: [
-      { id: "pushup", name: "Push Up", muscleGroup: "chest", plainEnglish: "Hands slightly wider than shoulders. Body straight from head to heels. Lower chest to floor. Push back up. If too hard — knees on floor. If too easy — feet elevated.", modification: "Wall push ups for elderly or injury. Knees down for beginners. Decline for advanced.", reason: "The fundamental bodyweight push movement. Works chest, shoulders, triceps with zero equipment.", videoUrl: "https://www.youtube.com/results?search_query=push+up+proper+form+tutorial" },
+      { name: "Push Up", sets: "3x10", description: "Hands slightly wider than shoulders. Body straight. Lower chest to floor. Push back up.", mistake: "Hips rising or elbows flaring 90 degrees.", modification: "Knees on floor if too hard. Wall push up if knees also painful." },
     ],
     pull: [
-      { id: "row_towel", name: "Table Row or Resistance Band Row", muscleGroup: "back", plainEnglish: "Table row: lie under a sturdy table, grip edge, pull chest to table, lower slowly. Band row: anchor band, pull toward lower chest, squeeze shoulder blades, return slowly.", modification: "If no table or band, do Superman holds: lie face down, lift arms and chest off floor, hold 2 seconds.", reason: "The only way to train the back at home without equipment. Non-negotiable for posture.", videoUrl: "https://www.youtube.com/results?search_query=table+row+bodyweight+tutorial" },
+      { name: "Table Row", sets: "3x10", description: "Lie under sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.", mistake: "Hips dropping or only pulling with arms.", modification: "Bend knees to make easier." },
     ],
     legs: [
-      { id: "squat_bw", name: "Bodyweight Squat", muscleGroup: "legs", plainEnglish: "Feet shoulder width. Arms out front for balance. Lower like sitting on a chair. Push through heels to stand. Go as deep as comfortable. Chest stays up throughout.", modification: "Hold chair for balance if needed. Reduce depth if knee pain. Single leg if too easy.", reason: "Builds the entire lower body with zero equipment. Foundation of all movement.", videoUrl: "https://www.youtube.com/results?search_query=bodyweight+squat+proper+form+tutorial" },
-      { id: "glute_bridge", name: "Glute Bridge", muscleGroup: "posterior chain", plainEnglish: "Lie on back. Knees bent, feet flat. Push hips toward ceiling. Squeeze glutes hard at top. Hold 2 seconds. Lower slowly. Repeat.", modification: "Single leg version if too easy. Place weight on hips for more resistance.", reason: "Activates the glutes which most people underuse. Protects knees and lower back.", videoUrl: "https://www.youtube.com/results?search_query=glute+bridge+proper+form+tutorial" },
-      { id: "lunge", name: "Reverse Lunge", muscleGroup: "legs", plainEnglish: "Stand tall. Step one foot backward. Lower back knee toward floor. Push through front heel to return. Complete all reps one side then switch. Hold wall for balance if needed.", modification: "Reduce range of motion if knee pain. Hold chair for balance if elderly or unstable.", reason: "Builds each leg independently. Fixes imbalances. Easier on knees than forward lunge.", videoUrl: "https://www.youtube.com/results?search_query=reverse+lunge+proper+form+tutorial" },
+      { name: "Bodyweight Squat", sets: "3x15", description: "Feet shoulder width. Arms forward for balance. Lower like sitting on chair. Push through heels.", mistake: "Knees caving inward.", modification: "Hold chair for balance. Only lower halfway if knee pain." },
+      { name: "Glute Bridge", sets: "3x15", description: "Lie on back. Knees bent feet flat. Push hips up. Squeeze glutes hard at top. Lower slowly.", mistake: "Pushing through toes instead of heels.", modification: "Single leg version when this becomes easy." },
+      { name: "Reverse Lunge", sets: "3x10 each", description: "Step backward. Lower back knee toward floor. Push through front heel to return.", mistake: "Front knee caving inward.", modification: "Hold chair for balance. Reduce range if knee pain." },
     ],
     core: [
-      { id: "plank_home", name: "Plank", muscleGroup: "core", plainEnglish: "Forearms on floor. Body straight. Squeeze stomach. Hold. Do not let hips drop. Breathe.", modification: "Knees down if too difficult. Build 5 seconds per week.", reason: "Core stability foundation. Protects the spine and improves every movement.", videoUrl: "https://www.youtube.com/results?search_query=plank+proper+form+tutorial" },
+      { name: "Plank", sets: "3x20 seconds", description: "Forearms on floor. Body straight. Squeeze stomach. Hold and breathe.", mistake: "Hips sagging.", modification: "Knees on floor." },
     ],
-    phases: {
-      1: { setsReps: "3x10", rest: "60 seconds", note: "Learn the movement. Form first. Every time." },
-      2: { setsReps: "3x15", rest: "60 seconds", note: "More reps. Controlled tempo. Feel the muscle working." },
-      3: { setsReps: "4x12", rest: "45 seconds", note: "Less rest, more work. This is where home training gets hard." },
-      4: { setsReps: "4x15", rest: "30 seconds", note: "Maximum home phase. Minimum rest. Push through." },
-      5: { setsReps: "2x10", rest: "90 seconds", note: "Deload. Light and controlled. Recovery week." },
-    }
+    conditioning: [
+      { name: "Mountain Climbers", sets: "3x20 seconds", description: "Push up position. Drive knees to chest alternating quickly. Hips level.", mistake: "Hips bouncing up with each drive.", modification: "Slow the pace. Elevate hands on chair if wrists hurt." },
+    ],
   },
   walk: {
-    phases: {
-      1: { duration: "15 minutes", pace: "comfortable", note: "Build the habit. 15 minutes every day beats 60 minutes once a week." },
-      2: { duration: "25 minutes", pace: "brisk", note: "Slightly breathless but can still talk. This pace burns fat." },
-      3: { duration: "35 minutes", pace: "brisk with 5 minute fast intervals every 10 minutes", note: "Intervals accelerate fat loss significantly." },
-      4: { duration: "45 minutes", pace: "sustained brisk", note: "Your peak walk. 45 minutes of sustained movement." },
-      5: { duration: "20 minutes", pace: "comfortable", note: "Deload walk. Active recovery. Enjoy it." },
-    }
-  }
+    session: [
+      { name: "Brisk Walk", sets: "Phase 1: 15min | Phase 2: 25min | Phase 3: 35min | Phase 4: 45min", description: "Walk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall.", mistake: "Walking too slowly. Comfortable pace does not burn fat.", modification: "Reduce pace if breathless to discomfort. Start shorter if needed." },
+    ],
+  },
 };
 
-function getModeKey(trainingMode: string): string {
-  if (trainingMode === "walk_only") return "walk";
-  if (trainingMode === "gym" || trainingMode === "home") return trainingMode;
-  return "home";
+function getPhaseMultiplier(phase: number): { sets: string, reps: string, rest: string } {
+  switch(phase) {
+    case 1: return { sets: "3", reps: "10", rest: "60 seconds" };
+    case 2: return { sets: "4", reps: "8", rest: "90 seconds" };
+    case 3: return { sets: "4", reps: "6", rest: "120 seconds" };
+    case 4: return { sets: "5", reps: "5", rest: "120 seconds" };
+    case 5: return { sets: "3", reps: "10", rest: "60 seconds" };
+    default: return { sets: "3", reps: "10", rest: "60 seconds" };
+  }
 }
 
-const INJURY_FILTERS: Record<string, string[]> = {
-  knee: ["squat", "squat_bw", "lunge", "deadlift"],
-  back: ["deadlift", "barbell_row"],
-  shoulder: ["overhead_press", "bench_press", "pushup"],
-  wrist: [],
-};
-
-const PHASE_CONTEXT: Record<number, string> = {
-  1: "You are building the foundation. Show up consistently — results come later.",
-  2: "The habit is forming. This is where your body starts to change.",
-  3: "You have earned this phase. This is where serious results happen.",
-  4: "Peak phase. Your body is ready for this. Push beyond what feels comfortable.",
-  5: "Deload week. This is not weakness — this is intelligence. Recovery is part of the programme.",
-};
-
-const REST_DAY_MESSAGES: Record<number, string> = {
-  1: "10 minute walk and stretch your legs.",
-  2: "20 minute walk and foam roll if you have one.",
-  3: "30 minute walk — active recovery keeps fat burning.",
-  4: "20 minute walk and full body stretch.",
-  5: "20 minute gentle walk. Your body is recovering.",
-};
-
-function filterEntriesForInjuries(entries: ExerciseEntry[], user: any): ExerciseEntry[] {
-  const injuries = (user.injuries || "").toLowerCase();
-  if (!injuries || injuries === "none" || injuries === "no") return entries;
-
-  let filtered = [...entries];
-  for (const [injury, blockedIds] of Object.entries(INJURY_FILTERS)) {
-    if (injuries.includes(injury)) {
-      if (injury === "wrist") {
-        filtered = filtered.filter(ex => !ex.modification.toLowerCase().includes("wrist"));
-      } else {
-        filtered = filtered.filter(ex => !blockedIds.some(bid => ex.id.includes(bid)));
-      }
-    }
-  }
-  return filtered;
+function getPhaseNames(): Record<number, string> {
+  return { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
 }
 
-function filterExercisesForInjuries(exercises: Exercise[], user: any): Exercise[] {
-  const injuries = (user.injuries || "").toLowerCase();
-  if (!injuries || injuries === "none" || injuries === "no") return exercises;
-
-  let filtered = [...exercises];
-  for (const [injury, blockedIds] of Object.entries(INJURY_FILTERS)) {
-    if (injuries.includes(injury)) {
-      if (injury === "wrist") {
-        filtered = filtered.filter(ex => !ex.modification.toLowerCase().includes("wrist"));
-      } else {
-        filtered = filtered.filter(ex => !blockedIds.some(bid => ex.id.includes(bid)));
-      }
-    }
-  }
-  return filtered;
-}
-
-function getExercisesForDay(user: any): { exercises: Exercise[]; isRestDay: boolean } {
+function buildDayWorkout(user: any): string {
+  const mode = user.trainingMode || "home";
   const phase = user.programmePhase || 1;
-  const mode = getModeKey((user.trainingMode as string) || "home");
-  const dayIndex = (user.programDayIndex || 1) - 1;
-  const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-  const workoutsPerWeek = phaseConfig.weeklyWorkouts;
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const multiplier = getPhaseMultiplier(phase);
+  const week = user.programmeWeek || 1;
+  const day = user.programmeDayInWeek || 1;
 
-  const restPattern: Record<number, number[]> = {
-    3: [2, 4, 6],
-    4: [3, 6],
-    5: [5],
-  };
-  const restDays = restPattern[workoutsPerWeek] || [2, 4, 6];
-  const dayOfWeek = dayIndex % 7;
-
-  if (restDays.includes(dayOfWeek)) {
-    return { exercises: [], isRestDay: true };
+  if (mode === "walk_only" || mode === "walk") {
+    const duration = phase === 1 ? "15 minutes" : phase === 2 ? "25 minutes" : phase === 3 ? "35 minutes" : "45 minutes";
+    return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nReply DONE when finished.`;
   }
 
-  if (mode === "walk") {
-    const walkPhase = (EXERCISE_LIBRARY.walk.phases as any)[phase] || EXERCISE_LIBRARY.walk.phases[1];
-    const walkExercise: Exercise = {
-      id: `walk_phase${phase}`,
-      name: `${walkPhase.duration} Walk`,
-      sets: walkPhase.duration,
-      plainEnglish: `Pace: ${walkPhase.pace}. ${walkPhase.note}`,
-      modification: "Reduce pace if breathless or in pain.",
-      reason: walkPhase.note,
-      phase,
-      muscleGroup: "cardio",
-    };
-    return { exercises: [walkExercise], isRestDay: false };
-  }
+  const library = WORKOUTS[mode === "gym" ? "gym" : "home"];
+  const push = library.push[0];
+  const pull = library.pull[0];
+  const legs1 = library.legs[0];
+  const legs2 = library.legs[1] || library.legs[0];
+  const core = library.core[0];
 
-  const lib = mode === "gym" ? EXERCISE_LIBRARY.gym : EXERCISE_LIBRARY.home;
-  const phaseSettings = (lib.phases as any)[phase] || (lib.phases as any)[1];
-  const setsReps = phaseSettings.setsReps;
+  const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
 
-  const pushPool = filterEntriesForInjuries([...lib.push], user);
-  const pullPool = filterEntriesForInjuries([...lib.pull], user);
-  const legsPool = filterEntriesForInjuries([...lib.legs], user);
-  const corePool = filterEntriesForInjuries([...lib.core], user);
+  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day} | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
 
-  function pickRotating(pool: ExerciseEntry[], dayIdx: number): ExerciseEntry | null {
-    if (pool.length === 0) return null;
-    return pool[dayIdx % pool.length];
-  }
+  workout += `*${push.name} — ${multiplier.sets}x${multiplier.reps}*\n${push.description}\n⚠️ ${push.mistake}\n\n`;
+  workout += `*${pull.name} — ${multiplier.sets}x${multiplier.reps}*\n${pull.description}\n⚠️ ${pull.mistake}\n\n`;
+  workout += `*${legs1.name} — ${multiplier.sets}x${multiplier.reps}*\n${legs1.description}\n⚠️ ${legs1.mistake}\n\n`;
 
-  const selected: Exercise[] = [];
-
-  const pushEx = pickRotating(pushPool, dayIndex);
-  if (pushEx) {
-    selected.push({ ...pushEx, sets: setsReps, phase, videoUrl: pushEx.videoUrl });
-  }
-
-  const pullEx = pickRotating(pullPool, dayIndex);
-  if (pullEx) {
-    selected.push({ ...pullEx, sets: setsReps, phase, videoUrl: pullEx.videoUrl });
-  }
-
-  const leg1 = pickRotating(legsPool, dayIndex);
-  if (leg1) {
-    selected.push({ ...leg1, sets: setsReps, phase, videoUrl: leg1.videoUrl });
-  }
-  if (legsPool.length > 1) {
-    const leg2 = pickRotating(legsPool, dayIndex + 1);
-    if (leg2 && leg2.id !== leg1?.id) {
-      selected.push({ ...leg2, sets: setsReps, phase, videoUrl: leg2.videoUrl });
+  if (isFemaleGluteFocus) {
+    workout += `*${legs2.name} — ${multiplier.sets}x${multiplier.reps}*\n${legs2.description}\n⚠️ ${legs2.mistake}\n\n`;
+    if (library.legs[2]) {
+      workout += `*${library.legs[2].name} — ${multiplier.sets}x${multiplier.reps}*\n${library.legs[2].description}\n⚠️ ${library.legs[2].mistake}\n\n`;
     }
   }
 
-  const coreEx = pickRotating(corePool, dayIndex);
-  if (coreEx) {
-    selected.push({ ...coreEx, sets: setsReps, phase, videoUrl: coreEx.videoUrl });
-  }
+  workout += `*${core.name} — ${multiplier.sets}x${multiplier.reps}*\n${core.description}\n⚠️ ${core.mistake}\n\n`;
+  workout += `Reply DONE when finished.`;
 
-  return { exercises: selected, isRestDay: false };
+  return workout;
 }
 
-function adjustSetsForAge(sets: string, age: number): string {
-  if (age < 70) return sets;
-  const match = sets.match(/^(\d+)x(\d+)/);
-  if (match) {
-    const newSets = Math.max(1, parseInt(match[1]) - 1);
-    return sets.replace(/^\d+x/, `${newSets}x`);
-  }
-  return sets;
-}
+// ============================================================
+// BUILD USER CONTEXT FOR GPT
+// ============================================================
 
-function formatWorkoutMessage(user: any, exercises: Exercise[], isRestDay: boolean): string {
+function buildContext(user: any): string {
+  const name = user.name && user.name.length > 1 ? user.name : "Coach K here";
+  const goal = user.goalType || "general fitness";
   const phase = user.programmePhase || 1;
-  const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-  const day = user.programDayIndex || 1;
-  const age = user.age ? parseInt(user.age) : 30;
-  const goal = (user.goalType || "").toLowerCase();
-  const mode = getModeKey((user.trainingMode as string) || "home");
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const calories = user.calorieTarget || 1800;
+  const protein = user.proteinTarget || 120;
+  const steps = user.stepsTarget || 7000;
+  const mode = user.trainingMode || "home";
+  const equipment = user.homeEquipment || "none";
+  const situation = user.lifeSituation || "";
+  const job = user.jobType || "";
+  const activity = user.activityLevel || "";
+  const focus = user.primaryFocusArea || "";
+  const injuries = user.injuries || "none";
+  const age = user.age || 30;
+  const water = user.todayWater || 0;
+  const experience = user.trainingExperience || "beginner";
 
-  if (isRestDay) {
-    const restMsg = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
-    return `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n\nRest day — but not a lazy day. Today: ${restMsg} This is part of the programme — do it.\n\nReply DONE when finished.`;
-  }
-
-  const phaseContext = PHASE_CONTEXT[phase] || PHASE_CONTEXT[1];
-  const showMods = age >= 60 || (user.injuries && user.injuries.toLowerCase() !== "none" && user.injuries.toLowerCase() !== "no");
-  let msg = `Phase ${phase}: ${phaseConfig.name} — Week ${user.programmeWeek || 1}\nToday: Day ${day}\n${phaseContext}\n`;
-
-  for (const ex of exercises) {
-    const displaySets = adjustSetsForAge(ex.sets, age);
-    msg += `\n${ex.name} — ${displaySets}\n${ex.plainEnglish}\n`;
-    if (showMods && ex.modification && ex.modification !== "None needed." && ex.modification !== "None needed — weight is already very light.") {
-      msg += `Modify: ${ex.modification}\n`;
-    }
-    if (ex.videoUrl) {
-      msg += `Watch: ${ex.videoUrl}\n`;
-    }
-  }
-
-  const restBetween = phaseConfig.rest || "60s";
-  msg += `\nRest between sets: ${restBetween}`;
-
-  if (age >= 70) {
-    msg += `\nAt your level recovery is priority. Quality over quantity always.`;
-  }
-  if (age <= 17) {
-    msg += `\nFocus on form today — not weight. Building correct movement patterns now means less injury for life.`;
-  }
-
-  if ((goal.includes("fat") || goal.includes("loss")) && (mode === "gym" || mode === "home")) {
-    msg += `\nFinisher: 10 min continuous movement — jump rope, mountain climbers, or fast squats.`;
-  }
-  if (goal.includes("muscle")) {
-    msg += `\nEat protein within 30 min of finishing.`;
-  }
-
-  msg += `\n\nReply DONE when finished.`;
-  return msg;
+  return `CLIENT PROFILE:
+Name: ${name}
+Goal: ${goal}
+Age: ${age}
+Phase: ${phase} — ${phaseName}
+Calorie target: ${calories}
+Protein target: ${protein}g
+Step target: ${steps}
+Training mode: ${mode}
+Equipment: ${equipment}
+Life situation: ${situation}
+Job type: ${job}
+Activity level: ${activity}
+Primary focus: ${focus}
+Injuries: ${injuries}
+Experience: ${experience}
+Water today: ${water}L
+Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000)}`;
 }
 
-function formatDailyWorkoutSummary(user: any): string {
-  const { exercises, isRestDay } = getExercisesForDay(user);
-  const phase = user.programmePhase || 1;
-  const day = user.programDayIndex || 1;
+// ============================================================
+// GPT CALL — ALWAYS USES MASTER PROMPT + FULL CONTEXT
+// ============================================================
 
-  if (isRestDay) {
-    const restMsg = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
-    return `Rest day — but not a lazy day. ${restMsg}`;
-  }
+async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
+  const context = buildContext(user);
+  const instruction = extraInstruction || "Respond as Coach K to this client message.";
 
-  const names = exercises.map(e => `${e.name} ${e.sets}`).join(". ");
-  return `Day ${day}: ${names}. Reply DONE when finished.`;
-}
-
-function parseFoodMessage(text: string) {
-  const upper = text.toUpperCase();
-  const tokens = upper.split(/[\s,.;]+/).filter(t => t.length > 1);
-
-  const proteinKeywords = ["CHICKEN", "EGGS", "EGG", "FISH", "BEANS", "LENTILS", "LIVER", "PILCHARDS", "BEEF", "STEAK", "TUNA", "SARDINES", "YOGURT", "COTTAGE", "MINCE"];
-  const junkKeywords = ["PIZZA", "DONUT", "DOUGHNUT", "CHOCOLATE", "CHIPS", "FRIES", "MAGWINYA", "KOTA", "BURGER", "SWEETS", "CAKE", "BISCUITS", "MCDONALDS", "KFC", "STEERS", "NANDOS"];
-  const alcoholKeywords = ["BEER", "WINE", "WHISKY", "VODKA", "SAVANNA", "HUNTERS", "SPIRITS", "BRANDY", "GIN", "RUM", "CIDER"];
-  const carbKeywords = ["PAP", "RICE", "PASTA", "BREAD", "SAMP", "POTATO", "POTATOES", "DUMPLING", "DUMPLINGS", "OATS", "MEALIE"];
-  const drinkKeywords = ["WATER", "COKE", "PEPSI", "FANTA", "SPRITE", "JUICE", "SODA", "TEA", "COFFEE", "MILK", "SHAKE"];
-  const mealKeywords = ["BREAKFAST", "LUNCH", "DINNER", "SNACK", "SUPPER"];
-
-  const proteinItems: string[] = [];
-  const junkItems: string[] = [];
-  const alcoholItems: string[] = [];
-  const carbItems: string[] = [];
-  const drinks: string[] = [];
-  const mealHints: string[] = [];
-
-  tokens.forEach(t => {
-    if (proteinKeywords.includes(t)) proteinItems.push(t);
-    if (junkKeywords.includes(t)) junkItems.push(t);
-    if (alcoholKeywords.includes(t)) alcoholItems.push(t);
-    if (carbKeywords.includes(t)) carbItems.push(t);
-    if (drinkKeywords.includes(t)) drinks.push(t);
-    if (mealKeywords.includes(t)) mealHints.push(t);
-  });
-
-  const quantities = text.match(/\d+(\.\d+)?\s*(L|ML|KG|G|FISTS?|PLATES?|SLICES?|PIECES?|BEERS?|GLASSES?|CUPS?)/gi) || [];
-  const isDailyDump = mealHints.length >= 2 || tokens.length >= 8 || mealHints.some(m => ["BREAKFAST", "LUNCH", "DINNER", "SUPPER"].includes(m));
-
-  return {
-    foods: tokens.filter(t => ![...drinkKeywords, ...mealKeywords, ...alcoholKeywords].includes(t)),
-    drinks,
-    mealHints,
-    quantities,
-    carbItems: Array.from(new Set(carbItems)),
-    junkItems: Array.from(new Set(junkItems)),
-    alcoholItems: Array.from(new Set(alcoholItems)),
-    proteinItems: Array.from(new Set(proteinItems)),
-    isDailyDump,
-    tokenCount: tokens.length
-  };
-}
-
-async function buildUserContext(user: any): Promise<string> {
   try {
-    const now = new Date();
-    const joinedDaysAgo = user.createdAt ? Math.floor((now.getTime() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-    const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][now.getDay()];
-    const daysSinceActive = user.lastActiveAt ? Math.floor((now.getTime() - new Date(user.lastActiveAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-
-    const recentFood = await getRecentFoodContext(user.id);
-    const weightLogs = await storage.getWeightLogs(user.id);
-    const stepLogs = await storage.getStepLogs(user.id);
-
-    const recentWeights = weightLogs.slice(0, 3).map((w: any) => w.weight);
-    const weightTrend = recentWeights.length >= 2
-      ? (parseFloat(recentWeights[0]) < parseFloat(recentWeights[1]) ? 'losing' : parseFloat(recentWeights[0]) > parseFloat(recentWeights[1]) ? 'gaining' : 'plateauing')
-      : 'unknown';
-
-    const recentSteps = stepLogs.slice(0, 7).map((s: any) => s.steps);
-    const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((a: number, b: number) => a + b, 0) / recentSteps.length) : 0;
-    const stepTrend = recentSteps.length >= 2
-      ? (recentSteps[0] > recentSteps[1] ? 'improving' : 'declining')
-      : 'unknown';
-
-    const phase = user.programmePhase || 1;
-    const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-    const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
-
-    const isMonthEnd = new Date().getDate() >= 20;
-
-    return `
-CLIENT PROFILE:
-Name: ${user.name || 'unknown'}
-Age: ${user.age || 'unknown'}
-Goal: ${user.goalType || 'fat loss'}
-Training mode: ${user.trainingMode || 'home'}
-Training experience: ${user.trainingExperience || 'unknown'}
-Home equipment: ${user.homeEquipment || 'none specified'}
-Life situation: ${user.lifeSituation || 'not specified'}
-Job type: ${user.jobType || 'not specified'}
-Activity level: ${user.activityLevel || 'not specified'}
-Primary focus area: ${user.primaryFocusArea || 'full body'}
-Programme phase: Phase ${phase} — ${phaseConfig.name}
-Programme week: ${user.programmeWeek || 1} of ${phaseConfig.weeks}
-Baseline week active: ${user.baselineWeekActive ? 'yes — collecting data, do not push programme yet' : 'no'}
-Days on programme: ${joinedDaysAgo}
-Total workouts completed: ${user.totalWorkoutsCompleted || 0}
-Compliance level: ${user.complianceLevel || 'BUILDING'}
-Weekly score: ${user.weeklyScore || 0}/100
-Calorie target: ${user.calorieTarget || 2000}kcal
-Step target: ${phaseConfig.stepTarget}
-Current weight: ${user.currentWeight || 'unknown'}kg
-Weight trend: ${weightTrend}
-Average steps this week: ${avgSteps}
-Step trend: ${stepTrend}
-Days since last active: ${daysSinceActive}
-Day of week: ${dayOfWeek}
-Month end budget mode: ${isMonthEnd ? 'YES — reference affordable options' : 'no'}
-Health conditions noted: ${user.injuries || 'none'}
-Profile notes: ${user.profileNotes || 'none'}
-Recent food: ${recentFood || 'nothing logged recently'}
-
-PHASE ${phase} NUTRITION CONTEXT:
-Focus: ${nutrition.focus}
-Carb timing: ${nutrition.carbTiming}
-Key habit: ${nutrition.keyHabit}
-Weekly target: ${nutrition.weeklyTarget}
-Coach food responses according to this phase. Phase 1-2: encourage consistency. Phase 3-4: demand precision. Phase 5: emphasize clean recovery eating.
-    `.trim();
-  } catch (e) {
-    return `Client: ${user.name || 'unknown'}, Goal: ${user.goalType || 'fat loss'}`;
-  }
-}
-
-// ── Change 3: In-memory response cache ──
-const responseCache = new Map<string, { reply: string; timestamp: number }>();
-const CACHE_MAX_SIZE = 100;
-const CACHE_TTL_MS = 6 * 60 * 60 * 1000; // 6 hours
-
-function getCachedResponse(message: string, phase: number): string | null {
-  const key = message.toLowerCase().slice(0, 50) + "|phase:" + phase;
-  const entry = responseCache.get(key);
-  if (!entry) return null;
-  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
-    responseCache.delete(key);
-    return null;
-  }
-  return entry.reply;
-}
-
-function setCachedResponse(message: string, phase: number, reply: string): void {
-  if (responseCache.size >= CACHE_MAX_SIZE) {
-    const oldestKey = responseCache.keys().next().value;
-    if (oldestKey) responseCache.delete(oldestKey);
-  }
-  const key = message.toLowerCase().slice(0, 50) + "|phase:" + phase;
-  responseCache.set(key, { reply, timestamp: Date.now() });
-}
-
-// ── Change 2: Rule-based intercept — avoids GPT for simple messages ──
-function getRuleBasedResponse(message: string, menuText: string): string | null {
-  const upper = message.toUpperCase().trim();
-  const lower = message.toLowerCase();
-
-  if (upper === "MENU" || upper.includes("MENU")) return menuText;
-
-  // Steps: must contain steps/walked/step count AND a number
-  const hasStepKeyword = /\bsteps?\b|\bwalked?\b|\bstep count\b/i.test(lower);
-  if (hasStepKeyword) {
-    const numMatch = lower.match(/(\d[\d,]*)/);
-    if (numMatch) {
-      const steps = parseInt(numMatch[1].replace(/,/g, ""));
-      if (!isNaN(steps)) {
-        if (steps < 2000) return "Under 2000 steps. Get outside for 10 minutes right now.";
-        if (steps >= 10000) return `${steps.toLocaleString()} steps. Target hit. Repeat tomorrow.`;
-        return `${steps.toLocaleString()} steps logged. Keep building.`;
-      }
-    }
-  }
-
-  // Water: must contain (water OR drank OR rooibos) AND (ml OR litre OR l OR bottle OR glass)
-  const hasWaterKeyword = /\bwater\b|\bdrank?\b|\brooibos\b/i.test(lower);
-  const hasWaterUnit = /\bml\b|\blitre?\b|\blitres?\b|\bliter?\b|\bl\b|\bbottles?\b|\bglasses?\b/i.test(lower);
-  if ((hasWaterKeyword && hasWaterUnit) || /water done|finished water|drank water|had water/i.test(lower)) {
-    return "Water logged. Keep going — minimum 2L daily.";
-  }
-
-  // Sleep: must contain (slept OR sleep) AND (hour OR hrs)
-  const hasSleepKeyword = /\bslept?\b|\bsleep\b/i.test(lower);
-  const hasSleepUnit = /\bhours?\b|\bhrs?\b/i.test(lower);
-  if (hasSleepKeyword && hasSleepUnit) {
-    const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
-    if (numMatch) {
-      const hours = parseFloat(numMatch[1]);
-      if (!isNaN(hours)) {
-        if (hours < 5) return "Under 5 hours is not enough. Get to bed earlier tonight — this is non-negotiable.";
-        if (hours < 7) return "Not bad but not optimal. Aim for 7 to 8 hours tonight.";
-        return "Solid sleep. That is how you recover and keep cravings in check.";
-      }
-    }
-  }
-
-  // Weight: must contain (weigh OR weight OR kg) AND a number
-  const hasWeightKeyword = /\bweigh(?:ed|s)?\b|\bweight\b|\bkg\b/i.test(lower);
-  if (hasWeightKeyword) {
-    const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
-    if (numMatch) {
-      const val = numMatch[1];
-      return `${val}kg logged. The scale is just data — consistency is what matters.`;
-    }
-  }
-
-  return null;
-}
-
-// ── Full-GPT coaching reply — every coaching response goes through this ──
-async function coachReply(user: any, message: string, situationHint?: string): Promise<string> {
-  try {
-    const ctx = await buildUserContext(user);
-    const systemContent = [
-      KAMLIFE_MASTER_PROMPT,
-      situationHint ? `SITUATION: ${situationHint}` : "",
-      "RESPONSE LENGTH: Maximum 3 sentences. Never more than 60 words.",
-      ctx
-    ].filter(Boolean).join("\n\n");
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 150,
-      messages: [
-        { role: "system", content: systemContent },
-        { role: "user", content: message }
-      ]
-    });
-    return completion.choices[0].message.content?.trim() || getRotatingMotivation();
-  } catch {
-    return getRotatingMotivation();
-  }
-}
-
-async function getKamLifeFoodReply(
-  userMessage: string,
-  userCalories: number,
-  userContext: string,
-  userName: string
-): Promise<{reply: string, nextState: string}> {
-  try {
-    const phaseMatch = userContext.match(/Programme phase: Phase (\d+)/);
-    const phase = phaseMatch ? parseInt(phaseMatch[1]) : 1;
-
-    const cached = getCachedResponse(userMessage, phase);
-    if (cached) {
-      return { reply: cached, nextState: "drink" };
-    }
-
-    const completion = await openai.chat.completions.create({
+    const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 150,
       messages: [
         {
           role: "system",
-          content: `${KAMLIFE_MASTER_PROMPT}
-
-FOOD-SPECIFIC INSTRUCTIONS:
-You understand ALL South African foods including pap, samp, umngqusho, morogo, chakalaka, vetkoek, magwinya, kota, gatsbys, braai meat, wors, boerewors, tripe, mogodu, umleqwa, pilchards, tinned fish, Spar pies, Shoprite specials, amagwinya, umqombothi, Savanna, Hunters, Black Label, street food, township food, suburban food — everything.
-SPAZA SHOP FOODS: Russians and polony are high fat processed meat — coach firmly to limit these. Fat cakes and vetkoek are junk — coach firmly to avoid. Also recognise pap en vleis, chakalaka, umngqusho, samp, mogodu, mashonzha as SA staples.
-Respond to exactly what they ate — be specific. Junk food: call it out firmly. Alcohol: be strict. No protein: name what to add. Skipped meal: firm instruction to eat protein now.
-RESPONSE LENGTH: Maximum 3 sentences for WhatsApp. Never more than 60 words per response.
-
-RESPONSE FORMAT — return JSON only:
-{
-  "reply": "your coaching message here",
-  "isJunk": true/false,
-  "isAlcohol": true/false,
-  "hasProtein": true/false,
-  "hasCarbs": true/false,
-  "needsPortionCheck": true/false,
-  "carbName": "name of main carb if present, else null"
-}
-
-${userContext}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",
           content: userMessage
         }
-      ],
-      response_format: { type: "json_object" }
-    });
-
-    const result = JSON.parse(completion.choices[0].message.content || "{}");
-
-    let nextState = "drink";
-    if (result.needsPortionCheck && result.hasCarbs && !result.isJunk) {
-      nextState = "portion";
-    }
-
-    const replyText = result.reply || "Logged. Make your next meal count.";
-    setCachedResponse(userMessage, phase, replyText);
-
-    return {
-      reply: replyText,
-      nextState
-    };
-  } catch (e) {
-    return {
-      reply: "Logged. Protein at every meal — that's the standard.",
-      nextState: "drink"
-    };
-  }
-}
-
-async function getRecentFoodContext(userId: string): Promise<string> {
-  try {
-    const yesterday = new Date();
-    yesterday.setHours(yesterday.getHours() - 24);
-    const recent = await db.select().from(chatHistory)
-      .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, yesterday)));
-    const foodLogs = recent
-      .filter(c => c.intent && ["LOG_FOOD", "JUNK_LOGGED", "DAILY_DUMP_LOGGED", "PORTION_CHECK"].includes(c.intent))
-      .map(c => c.messageIn)
-      .filter(Boolean)
-      .slice(0, 3)
-      .join(", ");
-    return foodLogs ? `Last 24hrs they ate: ${foodLogs}` : "";
-  } catch (e) {
-    return "";
-  }
-}
-
-function classifyFood(text: string) {
-  const parsing = parseFoodMessage(text);
-  const categories: string[] = [];
-  
-  if (parsing.proteinItems.length > 0) categories.push("Protein source");
-  if (parsing.carbItems.length > 0) categories.push("Carb-heavy");
-  if (parsing.junkItems.length > 0) categories.push("Junk food");
-
-  const isJunk = parsing.junkItems.length > 0;
-  const isAlcohol = /BEER|WINE|WHISKY|VODKA|SAVANNA|HUNTERS/.test(text.toUpperCase());
-  const isCarbHeavy = parsing.carbItems.length > 0;
-  const isBalanced = parsing.proteinItems.length > 0 && isCarbHeavy && !isJunk;
-
-  return {
-    categories,
-    flags: { isJunk, isAlcohol, isCarbHeavy, isBalanced },
-    toneSeverity: (isJunk || isAlcohol) ? "high" : "normal",
-    recoveryEligibility: !isJunk && !isAlcohol && parsing.proteinItems.length > 0
-  };
-}
-
-async function parseIntent(message: string): Promise<{ intent: string; data?: any }> {
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 150,
-      messages: [
-        {
-          role: "system",
-          content: `${KAMLIFE_MASTER_PROMPT}
-
-You are also the intent parser. Classify the user message into one of these intents: onboarding_answer, log_steps, log_workout, log_weight, weekly_checkin_response, hungry, general_question.
-Return JSON only: { "intent": "...", "data": { ... } }`
-        },
-        { role: "user", content: message }
-      ],
-      response_format: { type: "json_object" }
-    });
-    return JSON.parse(completion.choices[0].message.content || "{}");
-  } catch (e) {
-    return { intent: "general_question" };
-  }
-}
-
-const ROTATING_MOTIVATIONS = [
-  "Stay consistent.",
-  "One meal at a time.",
-  "Show up tomorrow.",
-  "The work is the answer."
-];
-function getRotatingMotivation(): string {
-  return ROTATING_MOTIVATIONS[Math.floor(Math.random() * ROTATING_MOTIVATIONS.length)];
-}
-
-async function generateReply(message: string, intent: string, context: any): Promise<string> {
-  try {
-    const completion = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 150,
-      messages: [
-        {
-          role: "system",
-          content: `${KAMLIFE_MASTER_PROMPT}
-
-RESPONSE LENGTH: Maximum 3 sentences for WhatsApp. Never more than 60 words per response.
-
-Context: ${JSON.stringify(context)}`
-        },
-        { role: "user", content: message }
       ]
     });
-    return completion.choices[0].message.content || getRotatingMotivation();
-  } catch (e) {
-    return getRotatingMotivation();
+    return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
+  } catch (err) {
+    console.error("OpenAI error:", err);
+    return "Something went wrong on my end. Try again in a moment.";
   }
 }
 
-function runRulesEngine(user: any, logs: any, checkins: any) {
-  let updatedTargets = { ...user };
-  let adjustments = [];
-  let escalationFlag = false;
+// ============================================================
+// GET OR CREATE USER
+// ============================================================
 
-  // 1) Plateau
-  if (checkins.length >= 2) {
-    const w1 = Number(checkins[0].weight);
-    const w2 = Number(checkins[1].weight);
-    if (w1 >= w2) {
-      updatedTargets.calorieTarget = (user.calorieTarget || 2000) - 150;
-      adjustments.push("Plateau: reduced calories by 150.");
-    }
+async function getOrCreateUser(phone: string): Promise<any> {
+  const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+  if (existing.length > 0) {
+    await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
+    return existing[0];
   }
-
-  // 2) Steps low
-  if (checkins.length > 0 && Number(checkins[0].avgSteps) < 6000) {
-    updatedTargets.stepsTarget = 8000;
-    adjustments.push("This week we push steps. Target 8k/day. 30 min incline walk.");
-  }
-
-  // 3) Inactive
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  if (!user.lastActiveAt || new Date(user.lastActiveAt) < sevenDaysAgo) {
-    escalationFlag = true;
-  }
-
-  return { updatedTargets, adjustments, escalationFlag };
+  const newUsers = await db.insert(users).values({
+    phoneNumber: phone,
+    subscriptionStatus: "trial",
+    onboardingState: "START",
+    programmePhase: 1,
+    programmeWeek: 1,
+    programmeDayInWeek: 1,
+    trainingMode: "home",
+    stepsTarget: 7000,
+    createdAt: new Date(),
+    lastActiveAt: new Date(),
+  }).returning();
+  return newUsers[0];
 }
 
-import { registerAdminTestRoutes } from "./admin-test";
-
-export async function registerRoutes(
-  httpServer: Server,
-  app: Express
-): Promise<Server> {
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: false }));
-
-  registerAdminTestRoutes(app);
-
-  // ============================================================
-  // Health Check
-  // ============================================================
-  app.get("/health", (req, res) => {
-    res.status(200).json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
-  });
-
-  // ============================================================
-  // SINGLE Twilio WhatsApp Webhook (consolidated)
-  // ============================================================
-  app.post("/twilio/whatsapp", async (req, res) => {
-    const { From, Body } = req.body;
-    const phoneNumber = From;
-    const message = Body || "";
-    const cleanMsg = message.trim().toUpperCase();
-    const paymentLink = "https://payfast.co.za/mock-pay";
-
-    if (req.body.MediaContentType0 && req.body.MediaContentType0.includes("audio")) {
-      return res.type('text/xml').send(`<Response><Message>Please send a text message — type what you ate, your steps, or how your workout went.</Message></Response>`);
-    }
-
-    const redFlagWords = ["dizzy", "dizziness", "chest pain", "can't breathe", "faint", "fainting", "heart pain", "collapsed", "vomiting"];
-    const lowerMsg = message.toLowerCase();
-    if (redFlagWords.some(w => lowerMsg.includes(w))) {
-      const safetyReply = "Stop what you are doing. If you are experiencing chest pain, dizziness or difficulty breathing — stop exercising immediately and contact a medical professional or call 10177. Your safety comes first. We will be here when you are ready to continue.";
-      const safetyUser = await storage.getUserByPhone(phoneNumber);
-      if (safetyUser) await storage.logChat(safetyUser.id, message, safetyReply, "RED_FLAG_ESCALATION");
-      return res.type('text/xml').send(`<Response><Message>${safetyReply}</Message></Response>`);
-    }
-
-    // ── CRISIS LANGUAGE — highest priority after red flags ──
-    const crisisWords = ["want to die", "kill myself", "suicide", "end my life", "not worth living", "give up on life"];
-    if (crisisWords.some(w => lowerMsg.includes(w))) {
-      const crisisReply = "I hear you and I am concerned about you. Please call Samaritans South Africa right now: 0800 567 567 — it is free and available 24 hours. You matter more than any fitness goal.";
-      const crisisUser = await storage.getUserByPhone(phoneNumber);
-      if (crisisUser) await storage.logChat(crisisUser.id, message, crisisReply, "CRISIS");
-      return res.type('text/xml').send(`<Response><Message>${crisisReply}</Message></Response>`);
-    }
-
-    function getMenuText(u: any): string {
-      const created = u?.createdAt ? new Date(u.createdAt) : null;
-      const daysActive = created ? Math.floor((Date.now() - created.getTime()) / (1000 * 60 * 60 * 24)) : 0;
-      if (daysActive > 30) {
-        return `KamLife — go:\n1) Workout 2) Food 3) Steps 4-7 for more\nOr just type it.`;
-      }
-      if (daysActive > 7) {
-        return `KamLife Coach — what do you need?\n1) Workout 2) Food 3) Steps 4) Sleep 5) Weight\nOr just tell me what you ate, your steps, or how training went.`;
-      }
-      return `KamLife Coach — What do you want to do?\n1) Today's workout\n2) Log food\n3) Log steps\n4) Log sleep\n5) Log weight\n6) Show my targets\n7) Update my profile\nReply 1-7.`;
-    }
-    const menuText = getMenuText(null);
-
-    // ── Priority 1: GREETING GUARD ──
-    const rawMsg = message.trim().toLowerCase().replace(/[^\w\s]/g, "");
-    const greetings = ["hi", "hello", "hey", "howzit", "sup", "yo", "sawubona", "dumela", "molo", "molweni"];
-    const rawWords = rawMsg.split(/\s+/);
-    const isGreeting = greetings.includes(rawMsg) || (message.length <= 20 && rawWords.some((w: string) => greetings.includes(w)) && !/\d/.test(message));
-
-    if (isGreeting) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        const menu = getMenuText(user);
-        await storage.logChat(user.id, message, menu, "COACH_MENU");
-        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 1.5: INFORMAL SA LANGUAGE ──
-    const saAckWords = ["YEBO", "JA", "AWEH", "SHO", "LEKKER", "SHARP", "SHARP SHARP", "KE SHARP"];
-    if (saAckWords.includes(cleanMsg)) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        const menu = getMenuText(user);
-        await storage.logChat(user.id, message, menu, "SA_SLANG_ACK");
-        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
-      }
-    }
-    const saNoWords = ["NEE", "AIKONA"];
-    if (saNoWords.includes(cleanMsg)) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        const reply = "Noted. Just tell me what you need when you are ready.";
-        await storage.logChat(user.id, message, reply, "SA_SLANG_NO");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-    const saGreetWords = ["EITA", "AIGHT", "AITE"];
-    if (saGreetWords.includes(cleanMsg)) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        await storage.updateUser(user.id, { awaitingInputType: null, lastActiveAt: new Date() });
-        const menu = getMenuText(user);
-        await storage.logChat(user.id, message, menu, "SA_SLANG_GREET");
-        return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
-      }
-    }
-    const saCoachWords = ["YEBO COACH", "SHARP COACH", "LEKKER COACH"];
-    if (saCoachWords.includes(cleanMsg)) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        const motivation = getRotatingMotivation();
-        const menu = getMenuText(user);
-        const reply = `${motivation}\n\n${menu}`;
-        await storage.logChat(user.id, message, reply, "SA_SLANG_COACH");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-    if (cleanMsg === "HAIBO" || cleanMsg === "HAYIBO") {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        const reply = "Ha — tell me what happened. Type it out.";
-        await storage.logChat(user.id, message, reply, "SA_SLANG_HAIBO");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-    if (cleanMsg.includes("EISH")) {
-      let user = await storage.getUserByPhone(phoneNumber);
-      if (user) {
-        const reply = "Talk to me — what is going on? Type what you ate or how you are feeling and I will help you get back on track.";
-        await storage.logChat(user.id, message, reply, "SA_SLANG_EISH");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 2: CANARY (PING) ──
-    if (cleanMsg === "PING") {
-      return res.type('text/xml').send(`<Response><Message>PONG v2 ✅ Replit webhook live</Message></Response>`);
-    }
-
-    // ── Priority 3: New user check ──
-    let user = await storage.getUserByPhone(phoneNumber);
-    const betaTesters = (process.env.BETA_TESTERS || "").split(",").map(p => p.trim());
-    const isBetaTester = betaTesters.includes(phoneNumber);
-
-    if (!user) {
-      const referMatch = cleanMsg.match(/^REFER\s+(\w+)$/);
-      if (referMatch) {
-        const referCode = referMatch[1].toUpperCase();
-        const referrer = await storage.getUserByReferralCode(referCode);
-        if (referrer && referrer.phoneNumber !== phoneNumber) {
-          const trialExpiry = new Date();
-          trialExpiry.setDate(trialExpiry.getDate() + 7);
-          user = await storage.createUser({
-            phoneNumber,
-            subscriptionStatus: "active",
-            betaBypassUntil: trialExpiry,
-            referredBy: referCode,
-            onboardingState: "AWAITING_NAME"
-          });
-          const referrerExpiry = referrer.betaBypassUntil ? new Date(referrer.betaBypassUntil) : new Date();
-          referrerExpiry.setDate(referrerExpiry.getDate() + 7);
-          await storage.updateUser(referrer.id, { betaBypassUntil: referrerExpiry });
-          await storage.logChat(user.id, message, "Referral signup", "REFERRAL_NEW_USER");
-          await storage.logChat(referrer.id, `Referral used by ${phoneNumber}`, "7 days added to your account", "REFERRAL_REWARD");
-          return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nYou just made a decision that most people talk about and never act on. That already makes you different.\n\nNo keto. No detox teas. No shortcuts. Just structure, protein, and consistency — applied to your life, your food, your schedule.\n\nI have coached people aged 14 to 80. Domestic workers, executives, students, grandmothers. The ones who get results are not the most talented — they are the most consistent.\n\nLet us build your profile. What is your name?</Message></Response>`);
-        }
-      }
-      if (isBetaTester) {
-        const bypassExpiry = new Date();
-        bypassExpiry.setDate(bypassExpiry.getDate() + 14);
-        user = await storage.createUser({
-          phoneNumber,
-          subscriptionStatus: "active",
-          betaBypassUntil: bypassExpiry,
-          onboardingState: "AWAITING_NAME"
-        });
-        console.log(`[BETA BYPASS] Created new beta user: ${phoneNumber}, expires: ${bypassExpiry}`);
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nNo keto. No detox teas. No waist trainers. No shortcuts.\n\nJust real coaching built for real South Africans — by someone who has spent 20 years in the trenches with real people.\n\nThis is not an app. This is a coach in your pocket.\n\nWhat is your name?</Message></Response>`);
-      } else {
-        return res.type('text/xml').send(`<Response><Message>Welcome to KamLife Coach.\n\nYou just made a decision that most people talk about and never act on. That already makes you different.\n\nNo keto. No detox teas. No shortcuts. Just structure, protein, and consistency — applied to your life, your food, your schedule.\n\nI have coached people aged 14 to 80. Domestic workers, executives, students, grandmothers. The ones who get results are not the most talented — they are the most consistent.\n\nSubscribe here to begin: ${paymentLink}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 4: ADMIN BYPASS (BYPASS ON/OFF) ──
-    if (cleanMsg === "BYPASS ON") {
-      await storage.updateUser(user.id, { subscriptionStatus: "active" });
-      return res.type('text/xml').send(`<Response><Message>Admin Bypass: ON ✅ You are now an active user.</Message></Response>`);
-    }
-    if (cleanMsg === "BYPASS OFF") {
-      await storage.updateUser(user.id, { subscriptionStatus: "inactive" });
-      return res.type('text/xml').send(`<Response><Message>Admin Bypass: OFF ❌ Subscription required.</Message></Response>`);
-    }
-
-    // ── Priority 5: Subscription check ──
-    if (isBetaTester && user.subscriptionStatus !== "active") {
-      const bypassExpiry = new Date();
-      bypassExpiry.setDate(bypassExpiry.getDate() + 14);
-      await storage.updateUser(user.id, {
-        subscriptionStatus: "active",
-        betaBypassUntil: bypassExpiry,
-        onboardingState: user.onboardingState || "AWAITING_NAME"
-      });
-      user.subscriptionStatus = "active";
-    }
-    if (user.subscriptionStatus !== "active" && !isBetaTester) {
-      return res.type('text/xml').send(`<Response><Message>To continue, subscribe here: ${paymentLink}</Message></Response>`);
-    }
-
-    // ── Priority 6: TIMEOUT GUARD ──
-    if (user.awaitingInputType) {
-      const lastActive = user.lastActiveAt ? new Date(user.lastActiveAt).getTime() : 0;
-      if (Date.now() - lastActive > 10 * 60 * 1000) {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        user.awaitingInputType = null;
-      }
-    }
-
-    // ── Priority 7: Update lastActiveAt ──
-    await storage.updateUser(user.id, { lastActiveAt: new Date() });
-
-    // ── Priority 7.1: BASELINE WEEK COMPLETION CHECK ──
-    if (user.baselineWeekActive && !user.baselineWeekComplete && user.programmeStartDate) {
-      const daysSinceStart = Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / (1000 * 60 * 60 * 24));
-      if (daysSinceStart >= 7) {
-        const phaseNum = user.programmePhase || 1;
-        const phaseConfig = PHASE_CONFIG[phaseNum];
-        const calTarget = user.calorieTarget || 2000;
-        const protTarget = user.proteinTarget || 150;
-        await storage.updateUser(user.id, { baselineWeekActive: false, baselineWeekComplete: true });
-        const userName = getDisplayName(user, "Coach");
-        const baselineReply = `${userName} — your baseline week is done. I have seen your patterns. Your full personalised programme starts now.\n\nHere is your setup:\nGoal: ${user.goalType || "General Fitness"}\nTraining: ${user.trainingMode || "home"}\nPhase: ${phaseNum} — ${phaseConfig.name}\n\nYour daily targets:\nCalories: ${calTarget}kcal\nProtein: ${protTarget}g\nSteps: ${(phaseConfig.stepTarget || 7000).toLocaleString()}\n\nThe real work starts today. Type WORKOUT to get your first session.`;
-        await storage.logChat(user.id, message, baselineReply, "BASELINE_COMPLETE");
-        return res.type('text/xml').send(`<Response><Message>${baselineReply}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 7.5: AGE DETECTION ──
-    const ageMatch = lowerMsg.match(/(?:i am|im|i'm)\s*(\d{1,2})\s*(?:years?\s*old)?/) || lowerMsg.match(/(\d{1,2})\s*years?\s*old/);
-    if (ageMatch) {
-      const detectedAge = parseInt(ageMatch[1]);
-      if (detectedAge >= 14 && detectedAge <= 17) {
-        await storage.updateUser(user.id, { age: detectedAge });
-        const reply = `Got you — ${detectedAge} years old. At your age we focus on building healthy habits, not extreme diets. Eat enough protein, stay active, and get your sleep. No skipping meals. What did you eat today?`;
-        await storage.logChat(user.id, message, reply, "AGE_DETECTED_TEEN");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      } else if (detectedAge >= 1 && detectedAge <= 100) {
-        await storage.updateUser(user.id, { age: detectedAge });
-      }
-    }
-
-    // ── Priority 8: RESET command — including natural language variants ──
-    const naturalResetPhrases = ["RESET AND PROFILE", "RESET AND SCHEDULE", "START OVER", "START AGAIN", "BEGIN AGAIN"];
-    const isNaturalReset = naturalResetPhrases.some(p => cleanMsg.includes(p));
-    if (cleanMsg === "RESET" || isNaturalReset) {
-      await storage.updateUser(user.id, { awaitingInputType: null });
-      const menu = `Reset done. ${getMenuText(user)}`;
-      await storage.logChat(user.id, message, menu, "COACH_RESET");
-      return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
-    }
-
-    // ── Priority 8.5: HELP command ──
-    if (cleanMsg === "HELP") {
-      const helpReply = "Here to help.\n\n- Reply RESET if something seems off\n- Reply 7 to update your goal or training mode\n- Just type what you ate, your steps, or your workout — anytime\n\nReply SUPPORT and we will get back to you within 24 hours.";
-      await storage.logChat(user.id, message, helpReply, "HELP");
-      return res.type('text/xml').send(`<Response><Message>${helpReply}</Message></Response>`);
-    }
-
-    // ── Priority 8.51: SUPPORT command ──
-    if (cleanMsg === "SUPPORT") {
-      const supportReply = "Your support request has been noted. We will follow up with you within 24 hours. In the meantime reply MENU to continue or RESET if something seems stuck.";
-      await storage.logChat(user.id, message, supportReply, "SUPPORT_REQUEST");
-      return res.type('text/xml').send(`<Response><Message>${supportReply}</Message></Response>`);
-    }
-
-    // ── Priority 8.55: CANCEL command ──
-    if (cleanMsg === "CANCEL") {
-      const cancelReply = "Before you go — tell us why you want to cancel. Reply:\n1) Too expensive\n2) Not getting results\n3) Too busy\nOr reply CONFIRM to cancel.";
-      await storage.updateUser(user.id, { awaitingInputType: "awaiting_cancel" });
-      await storage.logChat(user.id, message, cancelReply, "CANCEL_INIT");
-      return res.type('text/xml').send(`<Response><Message>${cancelReply}</Message></Response>`);
-    }
-
-    // ── Priority 8.56: REFER command ──
-    if (cleanMsg === "REFER") {
-      if (user.referralCode) {
-        const code = user.referralCode;
-        const reply = `Your referral code is ${code}. Share this with a friend — they get 7 days free when they sign up. When they join you get one week free added to your account. Share this number and tell them to message: REFER ${code} when they sign up.`;
-        await storage.logChat(user.id, message, reply, "REFERRAL_CODE");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-      const namePart = getDisplayName(user, "KAM").replace(/\s+/g, "").toUpperCase().slice(0, 4);
-      const phonePart = phoneNumber.slice(-4);
-      let code = `${namePart}${phonePart}`;
-      const existing = await storage.getUserByReferralCode(code);
-      if (existing && existing.id !== user.id) {
-        code = `${namePart}${phonePart}${Math.floor(Math.random() * 90 + 10)}`;
-      }
-      await storage.updateUser(user.id, { referralCode: code });
-      const reply = `Your referral code is ${code}. Share this with a friend — they get 7 days free when they sign up. When they join you get one week free added to your account. Share this number and tell them to message: REFER ${code} when they sign up.`;
-      await storage.logChat(user.id, message, reply, "REFERRAL_CODE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 8.57: REJOIN command ──
-    if (cleanMsg === "REJOIN") {
-      await storage.updateUser(user.id, { subscriptionStatus: "active", cancelledAt: null });
-      const reply = "Welcome back. That took courage. Let us pick up where you left off. What do you need?";
-      await storage.logChat(user.id, message, reply, "REJOIN");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 8.6: MEAL SUGGESTIONS ──
-    const mealTriggers = ["WHAT SHOULD I EAT", "MEAL IDEAS", "FOOD SUGGESTIONS", "WHAT CAN I EAT"];
-    if (mealTriggers.some(t => cleanMsg.includes(t))) {
-      try {
-        const mealRes = await openai.chat.completions.create({
-          model: "gpt-4o-mini",
-          max_tokens: 150,
-          messages: [
-            {
-              role: "system",
-              content: `You are KamLife Coach. Generate a specific one day meal plan for a South African person. Use SA foods — pap, samp, pilchards, eggs, chicken, beans, vetkoek alternatives, oats. Give breakfast, lunch, dinner and one snack. Keep it affordable, practical and high protein. Calorie target: ${user.calorieTarget || 2000}. Goal: ${user.goalType || "general fitness"}. Max 150 words. Firm and specific, no fluff.`
-            },
-            { role: "user", content: message }
-          ]
-        });
-        const mealPlan = mealRes.choices[0]?.message?.content || "Eat eggs for breakfast, chicken and veg for lunch, pilchards with pap for dinner. Snack on biltong or fruit.";
-        await storage.logChat(user.id, message, mealPlan, "MEAL_SUGGESTION");
-        return res.type('text/xml').send(`<Response><Message>${mealPlan}</Message></Response>`);
-      } catch {
-        const fallback = "Eat eggs for breakfast, chicken and veg for lunch, pilchards with pap for dinner. Snack on biltong or fruit.";
-        await storage.logChat(user.id, message, fallback, "MEAL_SUGGESTION");
-        return res.type('text/xml').send(`<Response><Message>${fallback}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 8.7: PROGRESS command ──
-    if (cleanMsg === "PROGRESS") {
-      const weightLogs = await storage.getWeightLogs(user.id);
-      const stepLogs = await storage.getStepLogs(user.id);
-      const compliance = await calculateWeeklyCompliance(user.id);
-
-      const currentWeight = weightLogs.length > 0 ? weightLogs[0].weight : user.currentWeight || "unknown";
-      const fourWeeksAgoWeight = weightLogs.length >= 4 ? weightLogs[3].weight : (weightLogs.length > 0 ? weightLogs[weightLogs.length - 1].weight : "unknown");
-
-      const recentSteps = stepLogs.slice(0, 7);
-      const avgSteps = recentSteps.length > 0
-        ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length)
-        : 0;
-
-      const progressReply = `*Progress Report — ${getDisplayName(user)}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}`;
-      await storage.logChat(user.id, message, progressReply, "PROGRESS");
-      return res.type('text/xml').send(`<Response><Message>${progressReply}</Message></Response>`);
-    }
-
-    // ── Priority 9: STATE HANDLING (single-exit routing) ──
-    if (user.awaitingInputType) {
-      const inputType = user.awaitingInputType;
-
-      if (inputType === "awaiting_cancel") {
-        if (cleanMsg === "CONFIRM") {
-          await storage.updateUser(user.id, { awaitingInputType: null, subscriptionStatus: "inactive", cancelledAt: new Date() });
-          const reply = "Cancelled. You can rejoin anytime at kamlifecoach.co.za. Stay consistent — even without us.";
-          await storage.logChat(user.id, message, reply, "CANCEL_CONFIRMED");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg === "STAY") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          const reply = `Great decision. Let's get back to work.\n\n${getMenuText(user)}`;
-          await storage.logChat(user.id, message, reply, "CANCEL_STAYED");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg === "1") {
-          const reply = "We hear you. Reply STAY and we will sort something out. Or reply CONFIRM to cancel.";
-          await storage.logChat(user.id, message, reply, "CANCEL_REASON_PRICE");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg === "2") {
-          const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-          const reply = `Results come from consistency. You have been here ${daysSinceJoin} days. Give it 30 more — one month of full commitment. Reply STAY to continue or CONFIRM to cancel.`;
-          await storage.logChat(user.id, message, reply, "CANCEL_REASON_RESULTS");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg === "3") {
-          const reply = "KamLife Coach takes 5 minutes a day. Just log your food and steps. Reply STAY to continue or CONFIRM to cancel.";
-          await storage.logChat(user.id, message, reply, "CANCEL_REASON_BUSY");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else {
-          const reply = "Reply 1, 2, or 3 for your reason. Or reply CONFIRM to cancel, or STAY to keep going.";
-          await storage.logChat(user.id, message, reply, "CANCEL_REPROMPT");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-      }
-
-      if (inputType === "anything_else") {
-        const anythingParsing = parseFoodMessage(message);
-        if (anythingParsing.alcoholItems.length > 0) {
-          const ctx = await buildUserContext(user);
-          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, ctx, getDisplayName(user, "friend"));
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, reply, "ALCOHOL_FLAGGED");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-        if (cleanMsg.includes("YES")) {
-          await storage.updateUser(user.id, { awaitingInputType: "food" });
-          const reply = R.promptFood();
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        } else if (cleanMsg.includes("NO") || cleanMsg === "MENU") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          const menu = getMenuText(user);
-          await storage.logChat(user.id, message, menu, "COACH_MENU");
-          return res.type('text/xml').send(`<Response><Message>${menu}</Message></Response>`);
-        } else {
-          const ctx = await buildUserContext(user);
-          const { reply } = await getKamLifeFoodReply(
-            message,
-            user.calorieTarget || 2000,
-            ctx,
-            getDisplayName(user, "friend")
-          );
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          await storage.logChat(user.id, message, reply, "EXTRA_LOG");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-      }
-
-      if (inputType === "portion") {
-        const portionMatch = cleanMsg.match(/[1-3]/);
-        const level = portionMatch ? parseInt(portionMatch[0]) : 1;
-        await storage.updateUser(user.id, { carbPortionLevel: level, awaitingInputType: "drink" });
-
-        const cals = user.calorieTarget || 2000;
-        let targetFists = "1";
-        if (cals >= 1800 && cals <= 2400) targetFists = "1–2";
-        else if (cals > 2400) targetFists = "2";
-
-        let reaction = level === 1 ? R.portionGood() + " " : R.portionHigh(targetFists) + " ";
-        reaction += R.promptDrink();
-
-        await storage.logChat(user.id, message, reaction, "PORTION_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
-      }
-
-      if (inputType === "drink") {
-        if (cleanMsg === "MENU") {
-          await storage.updateUser(user.id, { awaitingInputType: null });
-          return res.type('text/xml').send(`<Response><Message>${getMenuText(user)}</Message></Response>`);
-        }
-
-        const ctx = await buildUserContext(user);
-        const { reply } = await getKamLifeFoodReply(
-          `They drank: ${message}`,
-          user.calorieTarget || 2000,
-          ctx,
-          getDisplayName(user, "friend")
-        );
-
-        await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
-        const full = `${reply} Anything else to log? (yes/no)`;
-        await storage.logChat(user.id, message, full, "DRINK_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
-      }
-
-      if (inputType === "measure_jeans") {
-        const fitOptions: Record<string, string> = { "1": "tight_uncomfortable", "2": "fitting_normal", "3": "loose_baggy" };
-        const fit = fitOptions[cleanMsg] || cleanMsg.toLowerCase();
-        if (!fitOptions[cleanMsg] && !["tight", "normal", "loose", "baggy", "uncomfortable"].some(w => fit.includes(w))) {
-          const reply = "Reply 1, 2, or 3:\n1) Tight and uncomfortable\n2) Fitting normal\n3) Loose and getting baggy";
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-        const normalizedFit = fitOptions[cleanMsg] || (fit.includes("tight") ? "tight_uncomfortable" : fit.includes("loose") || fit.includes("baggy") ? "loose_baggy" : "fitting_normal");
-        await storage.updateUser(user.id, { awaitingInputType: "measure_energy", profileNotes: `jeans_fit:${normalizedFit}` });
-        const reply = "2) How is your energy level this week?\n1) Low\n2) Okay\n3) High";
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      if (inputType === "measure_energy") {
-        const energyOptions: Record<string, string> = { "1": "low", "2": "okay", "3": "high" };
-        const energy = energyOptions[cleanMsg] || cleanMsg.toLowerCase();
-        const normalizedEnergy = energyOptions[cleanMsg] || (energy.includes("low") ? "low" : energy.includes("high") ? "high" : "okay");
-        const prevNotes = user.profileNotes || "";
-        await storage.updateUser(user.id, { awaitingInputType: "measure_stomach", profileNotes: `${prevNotes}|energy:${normalizedEnergy}` });
-        const reply = "3) Does your stomach feel flatter than when you started?\n1) Yes\n2) Same\n3) Not sure";
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      if (inputType === "measure_stomach") {
-        const stomachOptions: Record<string, string> = { "1": "yes", "2": "same", "3": "not_sure" };
-        const stomach = stomachOptions[cleanMsg] || cleanMsg.toLowerCase();
-        const normalizedStomach = stomachOptions[cleanMsg] || (stomach.includes("yes") ? "yes" : stomach.includes("not") ? "not_sure" : "same");
-        const prevNotes = user.profileNotes || "";
-        await storage.updateUser(user.id, { awaitingInputType: "measure_overall", profileNotes: `${prevNotes}|stomach:${normalizedStomach}` });
-        const reply = "4) Overall how do you feel in your body this week?\n1) Worse\n2) Same\n3) Better";
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      if (inputType === "measure_overall") {
-        const overallOptions: Record<string, string> = { "1": "worse", "2": "same", "3": "better" };
-        const overall = overallOptions[cleanMsg] || cleanMsg.toLowerCase();
-        const normalizedOverall = overallOptions[cleanMsg] || (overall.includes("worse") ? "worse" : overall.includes("better") ? "better" : "same");
-        const prevNotes = user.profileNotes || "";
-        const parts = prevNotes.split("|");
-        const jeansFit = parts.find(p => p.startsWith("jeans_fit:"))?.split(":")[1] || "unknown";
-        const energyLevel = parts.find(p => p.startsWith("energy:"))?.split(":")[1] || "unknown";
-        const stomachFeel = parts.find(p => p.startsWith("stomach:"))?.split(":")[1] || "unknown";
-
-        const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-        const weekNum = Math.ceil(daysSinceJoin / 7) || 1;
-
-        await storage.createClothingCheckin({
-          userId: user.id,
-          jeansFit,
-          energyLevel,
-          stomachFeel,
-          overallFeel: normalizedOverall,
-          weekNumber: weekNum,
-        });
-
-        let reply = "Check-in logged. ";
-        if (jeansFit === "loose_baggy") reply += "Clothes getting looser is the real progress — the scale does not tell this story. ";
-        else if (jeansFit === "tight_uncomfortable") reply += "Clothes still tight means we need to tighten the nutrition. Focus on portions this week. ";
-        if (energyLevel === "high") reply += "Energy is up — that means the programme is working. ";
-        else if (energyLevel === "low") reply += "Low energy usually means not enough protein or water. Fix those two first. ";
-        if (stomachFeel === "yes") reply += "Flatter stomach is fat loss your scale cannot see. ";
-        if (normalizedOverall === "better") reply += "Feeling better in your body is the goal. Keep going.";
-        else if (normalizedOverall === "worse") reply += "Feeling worse means something needs adjusting. Tell me what is bothering you.";
-        else reply += "Same is fine — changes take 4 to 6 weeks to feel. Stay consistent.";
-
-        const prevCheckins = await storage.getClothingCheckins(user.id);
-        if (prevCheckins.length >= 2) {
-          const prev = prevCheckins[1];
-          if (prev.jeansFit === "tight_uncomfortable" && jeansFit === "fitting_normal") {
-            reply += "\n\nJeans went from tight to normal. That is measurable progress the scale cannot show.";
-          } else if (prev.jeansFit === "fitting_normal" && jeansFit === "loose_baggy") {
-            reply += "\n\nJeans getting loose. Your body is changing. This is working.";
-          }
-        }
-
-        if (daysSinceJoin >= 30) {
-          reply += "\n\nIf you want precise measurements a tape measure costs R15 at Pep or Checkers. One purchase gives you data the scale never can. Optional but worth it.";
-        }
-
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        await storage.logChat(user.id, message, reply, "MEASURE_COMPLETE");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      if (inputType === "food") {
-        const ctx = await buildUserContext(user);
-        const { reply } = await getKamLifeFoodReply(
-          message,
-          user.calorieTarget || 2000,
-          ctx,
-          getDisplayName(user, "friend")
-        );
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        await storage.logChat(user.id, message, reply, "FOOD_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      if (inputType === "steps") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        const kMatch = cleanMsg.match(/(\d+(\.\d+)?)\s*K\b/);
-        let steps: number | null = null;
-        if (kMatch) {
-          steps = Math.round(parseFloat(kMatch[1]) * 1000);
-        } else {
-          const stepsMatch = cleanMsg.match(/\d+/);
-          steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
-        }
-        if (steps !== null) {
-          await storage.createStepLog(user.id, steps);
-          const prevLogs = await storage.getStepLogs(user.id);
-          const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
-
-          let reaction = "";
-          if (steps < 2000) reaction = R.stepsLow();
-          else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
-          else reaction = R.stepsGood();
-
-          const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
-          let winMoment = "";
-          const target = user.stepsTarget || 8000;
-          if (prevLogs.length >= 7) {
-            const now = new Date();
-            let streakValid = true;
-            for (let i = 0; i < 7; i++) {
-              const log = prevLogs[i];
-              if (!log.loggedAt || log.steps < target) { streakValid = false; break; }
-              const logDate = new Date(log.loggedAt);
-              const expectedDate = new Date(now);
-              expectedDate.setDate(expectedDate.getDate() - i);
-              if (logDate.toDateString() !== expectedDate.toDateString()) { streakValid = false; break; }
-            }
-            if (streakValid) {
-              winMoment = "\n\n7 days straight hitting your target. That is elite discipline. Screenshot this.";
-            }
-          }
-          const reply = `${reaction}${comparison}${winMoment}`;
-          await storage.logChat(user.id, message, reply, "LOG_STEPS_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-      }
-
-      if (inputType === "sleep") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        const sleepMatch = cleanMsg.match(/\d+/);
-        const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
-        if (hours !== null) {
-          let reaction = "";
-          if (hours < 5) reaction = R.sleepPoor();
-          else if (hours < 7) reaction = R.sleepOk();
-          else reaction = R.sleepGood();
-          await storage.logChat(user.id, message, reaction, "LOG_SLEEP_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
-        }
-      }
-
-      if (inputType === "weight") {
-        await storage.updateUser(user.id, { awaitingInputType: null });
-        const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
-        if (weightMatch) {
-          const val = weightMatch[0];
-          await storage.createWeightLog(user.id, val);
-          await storage.updateUser(user.id, { currentWeight: val });
-          let reply = R.weightLogged(val);
-          const allWeights = await storage.getWeightLogs(user.id);
-          const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-          const baseline = allWeights
-            .filter(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= fourteenDaysMs)
-            .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime())[0];
-          if (baseline && (parseFloat(baseline.weight) - parseFloat(val)) >= 2) {
-            reply += "\n\nDown 2kg+ in the last 2 weeks. That is the work paying off. Screenshot this and share it.";
-          }
-          await storage.logChat(user.id, message, reply, "LOG_WEIGHT_FOLLOWUP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-      }
-    }
-
-    // ── Priority 9.5: ONBOARDING GUARD ──
-    if (!user.onboardingState || user.onboardingState !== "COMPLETED") {
-      const currentState = user.onboardingState || "AWAITING_NAME";
-      let reply = "";
-
-      if (currentState === "AWAITING_NAME") {
-        const nameInput = message.trim();
-        if (/^\d+$/.test(nameInput) || nameInput.length < 2) {
-          reply = "Please enter your name so we can get started.";
-        } else {
-          const formattedName = nameInput.toLowerCase().replace(/\b\w/g, (c: string) => c.toUpperCase());
-          await storage.updateUser(user.id, { name: formattedName, onboardingState: "AWAITING_WEIGHT" });
-          reply = `Good to meet you, ${formattedName}. By continuing you agree to our coaching terms — KamLife Coach provides fitness guidance only, not medical advice. Consult a doctor before starting any programme.\n\nHow much do you weigh right now? Just the number in kg — no judgment here, just data.`;
-        }
-      } else if (currentState === "AWAITING_WEIGHT") {
-        const weightVal = parseFloat(message);
-        if (!weightVal || weightVal < 30 || weightVal > 300) {
-          reply = "Please enter a valid weight in kg (e.g. 85).";
-        } else {
-          await storage.updateUser(user.id, { currentWeight: String(weightVal), onboardingState: "AWAITING_TRAINING_MODE" });
-          reply = "Good. Where will you be training?\n1) Gym\n2) At home\n3) Walking only";
-        }
-      } else if (currentState === "AWAITING_TRAINING_MODE") {
-        let mode: string | null = null;
-        if (cleanMsg === "1" || cleanMsg.includes("GYM")) mode = "gym";
-        else if (cleanMsg === "2" || cleanMsg.includes("HOME")) mode = "home";
-        else if (cleanMsg === "3" || cleanMsg.includes("WALK")) mode = "walk_only";
-        if (mode) {
-          if (mode === "home") {
-            await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_EQUIPMENT" });
-            reply = "What equipment do you have at home? Reply with numbers —\n1) No equipment\n2) Resistance bands\n3) Dumbbells\n4) Kettlebell\n5) Pull up bar\n6) Skipping rope\n7) Mix — tell me what you have";
-          } else {
-            await storage.updateUser(user.id, { trainingMode: mode, onboardingState: "AWAITING_GOAL" });
-            reply = "What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
-          }
-        } else {
-          reply = "Please reply 1, 2, or 3.\n1) Gym\n2) At home\n3) Walking only";
-        }
-      } else if (currentState === "AWAITING_EQUIPMENT") {
-        let equipmentValue = message.trim();
-        if (cleanMsg === "1") equipmentValue = "none";
-        else if (cleanMsg === "2") equipmentValue = "resistance bands";
-        else if (cleanMsg === "3") equipmentValue = "dumbbells";
-        else if (cleanMsg === "4") equipmentValue = "kettlebell";
-        else if (cleanMsg === "5") equipmentValue = "pull up bar";
-        else if (cleanMsg === "6") equipmentValue = "skipping rope";
-        else if (cleanMsg === "7") equipmentValue = message.trim();
-        await storage.updateUser(user.id, { homeEquipment: equipmentValue, onboardingState: "AWAITING_GOAL" });
-        reply = "What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
-      } else if (currentState === "AWAITING_GOAL") {
-        let goalValue = message;
-        const weight = parseFloat(user.currentWeight as string) || 70;
-        let notes = user.profileNotes || "";
-        if (cleanMsg === "1") goalValue = "Fat Loss";
-        else if (cleanMsg === "2") goalValue = "Muscle Gain";
-        else if (cleanMsg === "3") {
-          goalValue = "Recomposition";
-          notes += "Recomposition client — scale may not move but body will transform. Measure progress with measurements and photos not weight. ";
-        }
-        else if (cleanMsg === "4") goalValue = "General Fitness";
-
-        await storage.updateUser(user.id, { goalType: goalValue, profileNotes: notes || null, onboardingState: "AWAITING_ACTIVITY" });
-
-        if ((goalValue === "Muscle Gain" || goalValue === "Recomposition")) {
-          await storage.updateUser(user.id, { onboardingState: "AWAITING_FOCUS" });
-          reply = "What is your priority focus area?\n1) Full body general\n2) Glutes and legs — bigger and stronger lower body\n3) Upper body strength\n4) Core and stomach";
-        } else {
-          reply = "How active are you during the day?\n1) Sedentary — desk job or mostly sitting\n2) Lightly active — some movement\n3) Moderately active\n4) Very active — on feet all day retail nursing teaching construction\n5) Extremely active — physical labour or train twice daily";
-        }
-      } else if (currentState === "AWAITING_FOCUS") {
-        let focusValue = message.trim();
-        if (cleanMsg === "1") focusValue = "full body";
-        else if (cleanMsg === "2") focusValue = "glutes and legs";
-        else if (cleanMsg === "3") focusValue = "upper body";
-        else if (cleanMsg === "4") focusValue = "core and stomach";
-        await storage.updateUser(user.id, { primaryFocusArea: focusValue, onboardingState: "AWAITING_ACTIVITY" });
-        reply = "How active are you during the day?\n1) Sedentary — desk job or mostly sitting\n2) Lightly active — some movement\n3) Moderately active\n4) Very active — on feet all day retail nursing teaching construction\n5) Extremely active — physical labour or train twice daily";
-      } else if (currentState === "AWAITING_ACTIVITY") {
-        let actLevel: string | null = null;
-        if (cleanMsg === "1") actLevel = "sedentary";
-        else if (cleanMsg === "2") actLevel = "lightly active";
-        else if (cleanMsg === "3") actLevel = "moderately active";
-        else if (cleanMsg === "4") actLevel = "very active";
-        else if (cleanMsg === "5") actLevel = "extremely active";
-        if (actLevel) {
-          await storage.updateUser(user.id, { activityLevel: actLevel, onboardingState: "AWAITING_JOB" });
-          reply = "What do you do for work or study? Examples: student, retail, office, construction, domestic work, unemployed, nursing, driving. Just tell me briefly.";
-        } else {
-          reply = "Please reply 1, 2, 3, 4, or 5.\n1) Sedentary\n2) Lightly active\n3) Moderately active\n4) Very active\n5) Extremely active";
-        }
-      } else if (currentState === "AWAITING_JOB") {
-        await storage.updateUser(user.id, { jobType: message.trim(), onboardingState: "AWAITING_LIFE_SITUATION" });
-        reply = "Any of these apply to you? Reply with numbers —\n1) Student in res or shared house\n2) Domestic worker\n3) Night shift worker\n4) Long commute 2 plus hours daily\n5) Unemployed\n6) None of these";
-      } else if (currentState === "AWAITING_LIFE_SITUATION") {
-        let sitValue = message.trim();
-        if (cleanMsg === "1") sitValue = "student in res";
-        else if (cleanMsg === "2") sitValue = "domestic worker";
-        else if (cleanMsg === "3") sitValue = "night shift";
-        else if (cleanMsg === "4") sitValue = "long commute";
-        else if (cleanMsg === "5") sitValue = "unemployed";
-        else if (cleanMsg === "6") sitValue = "none";
-        await storage.updateUser(user.id, { lifeSituation: sitValue, onboardingState: "AWAITING_AGE" });
-        reply = "How old are you? This helps us personalise your programme.";
-      } else if (currentState === "AWAITING_AGE") {
-        const ageVal = parseInt(message);
-        if (!ageVal || ageVal < 10 || ageVal > 100) {
-          reply = "Please enter your age as a number (e.g. 32).";
-        } else {
-          await storage.updateUser(user.id, { age: ageVal, onboardingState: "AWAITING_CONDITIONS" });
-          reply = "Any injuries, chronic conditions or health issues we should know about before we start? Examples: bad knee, diabetes, hypertension, pregnancy. Reply NONE if nothing to declare.";
-        }
-      } else if (currentState === "AWAITING_CONDITIONS") {
-        const conditionText = cleanMsg === "NONE" || cleanMsg === "NO" || cleanMsg === "NOTHING" ? null : message;
-        await storage.updateUser(user.id, { injuries: conditionText, onboardingState: "AWAITING_EXPERIENCE" });
-        reply = "Last question — how long have you been training consistently?\n1) Never or just starting\n2) A few months on and off\n3) More than 6 months consistently";
-      } else if (currentState === "AWAITING_EXPERIENCE") {
-        let experience = message;
-        let startingPhase = 1;
-        if (cleanMsg === "1" || cleanMsg.includes("NEVER") || cleanMsg.includes("JUST START")) {
-          experience = "beginner";
-          startingPhase = 1;
-        } else if (cleanMsg === "2" || cleanMsg.includes("FEW MONTHS") || cleanMsg.includes("ON AND OFF")) {
-          experience = "intermediate";
-          startingPhase = 2;
-        } else if (cleanMsg === "3" || cleanMsg.includes("6 MONTHS") || cleanMsg.includes("CONSISTENTLY")) {
-          experience = "advanced";
-          startingPhase = 3;
-        }
-
-        const updatedUser = await storage.getUser(user.id);
-        const weight = parseFloat((updatedUser?.currentWeight || user.currentWeight || "70") as string);
-        const goalStr = (updatedUser?.goalType || user.goalType || "").toLowerCase();
-        const actLevel = updatedUser?.activityLevel || user.activityLevel || "sedentary";
-
-        const actMultipliers: Record<string, number> = {
-          "sedentary": 1.2,
-          "lightly active": 1.375,
-          "moderately active": 1.55,
-          "very active": 1.725,
-          "extremely active": 1.9,
-        };
-        const multiplier = actMultipliers[actLevel] || 1.2;
-
-        let calorieTarget: number;
-        if (goalStr.includes("fat") || goalStr.includes("loss")) {
-          calorieTarget = Math.max(1500, Math.round((weight * 22 - 500) * multiplier));
-        } else if (goalStr.includes("recomp")) {
-          calorieTarget = Math.round(weight * 24 * multiplier);
-        } else if (goalStr.includes("muscle") || goalStr.includes("gain")) {
-          calorieTarget = Math.round((weight * 22 + 300) * multiplier);
-        } else {
-          calorieTarget = Math.round(weight * 22 * multiplier);
-        }
-        const proteinTarget = Math.round((calorieTarget * 0.3) / 4);
-        const phaseConfig = PHASE_CONFIG[startingPhase];
-
-        if (experience === "intermediate" || experience === "advanced") {
-          await storage.updateUser(user.id, {
-            trainingExperience: experience,
-            programmePhase: startingPhase,
-            programmeWeek: 1,
-            programmeDayInWeek: 1,
-            calorieTarget,
-            proteinTarget,
-            stepsTarget: phaseConfig.stepTarget,
-            onboardingState: "AWAITING_BASELINE",
-          });
-          reply = "Before I build your programme I want one week of real data. From today until Sunday send me your steps, food, water, and sleep daily. Do not change anything — just live normally. On Monday your full programme is ready.\n\nReply YES to do a baseline week or SKIP to start your programme today.";
-        } else {
-          await storage.updateUser(user.id, {
-            trainingExperience: experience,
-            programmePhase: startingPhase,
-            programmeWeek: 1,
-            programmeDayInWeek: 1,
-            programmeStartDate: new Date(),
-            calorieTarget,
-            proteinTarget,
-            stepsTarget: phaseConfig.stepTarget,
-            onboardingState: "COMPLETED",
-          });
-          reply = buildOnboardingComplete(updatedUser || user, experience, calorieTarget, proteinTarget, phaseConfig, startingPhase);
-        }
-      } else if (currentState === "AWAITING_BASELINE") {
-        if (cleanMsg === "YES" || cleanMsg === "Y") {
-          await storage.updateUser(user.id, {
-            baselineWeekActive: true,
-            programmeStartDate: new Date(),
-            onboardingState: "COMPLETED",
-          });
-          const userName = getDisplayName(user, "Coach");
-          reply = `Baseline week started, ${userName}. From today until Sunday just live your normal life and log everything:\n\n- What you eat\n- Your steps\n- Your water\n- Your sleep\n\nDo not try to be perfect. I need your real data. On Monday your full personalised programme drops. Start by telling me what you ate today.`;
-        } else if (cleanMsg === "SKIP" || cleanMsg === "NO" || cleanMsg === "N") {
-          const updatedUser = await storage.getUser(user.id);
-          const phaseNum = updatedUser?.programmePhase || user.programmePhase || 1;
-          const phaseConfig = PHASE_CONFIG[phaseNum];
-          await storage.updateUser(user.id, {
-            baselineWeekActive: false,
-            programmeStartDate: new Date(),
-            onboardingState: "COMPLETED",
-          });
-          const calTarget = updatedUser?.calorieTarget || user.calorieTarget || 2000;
-          const protTarget = updatedUser?.proteinTarget || user.proteinTarget || 150;
-          reply = buildOnboardingComplete(updatedUser || user, updatedUser?.trainingExperience || "beginner", calTarget, protTarget, phaseConfig, phaseNum);
-        } else {
-          reply = "Reply YES to do a baseline week or SKIP to start your programme today.";
-        }
-      }
-
-      if (reply) {
-        await storage.logChat(user.id, message, reply, "ONBOARDING");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 9.7: EMOTIONAL INTELLIGENCE ──
-    const giveUpWords = ["GIVE UP", "GIVING UP", "CANT DO THIS", "NOT WORKING", "NO RESULTS", "WASTE OF MONEY", "USELESS"];
-    if (giveUpWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is feeling like giving up or that the programme is not working. Acknowledge their frustration directly. Ask one specific diagnostic question about sleep, movement, or protein. End with a single concrete action.");
-      await storage.logChat(user.id, message, reply, "EMOTIONAL_GIVEUP");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    const stressWords = ["STRESSED", "STRESS", "ANXIETY", "DEPRESSED", "SAD", "CANT COPE", "OVERWHELMED"];
-    if (stressWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is stressed, anxious, sad, or overwhelmed. Acknowledge their emotional state briefly. Do not dismiss it. Give one compassionate but action-focused instruction for today only. Coach K voice — warm but direct.");
-      await storage.logChat(user.id, message, reply, "EMOTIONAL_STRESS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.8: SUPPLEMENT GUIDANCE ──
-    const suppWords = ["PROTEIN SHAKE", "PROTEIN POWDER", "CREATINE", "FAT BURNER", "PRE WORKOUT", "SUPPLEMENTS", "SUPPS"];
-    if (suppWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is asking about supplements. Food comes first always. Give specific, honest advice about the supplement mentioned. No hype, no sales language. Creatine is safe, fat burners are marketing, protein powder supplements a good diet.");
-      await storage.logChat(user.id, message, reply, "SUPPLEMENT_ADVICE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.9: SA LIFE SCENARIO HANDLERS ──
-    const funeralWords = ["FUNERAL", "UMNGCWABO", "BURIAL", "PASSED AWAY", "WE LOST", "MOURNING"];
-    if (funeralWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has lost someone or is attending a funeral. Lead with condolences. Give grace on the programme. Keep it brief, human, and warm. One gentle action only.");
-      await storage.logChat(user.id, message, reply, "FUNERAL_GRACE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    if (cleanMsg.includes("BRAAI")) {
-      const reply = await coachReply(user, message, "User is going to a braai. Give specific SA braai strategy: load plate with meat first, limit pap to one fist, one beer maximum. Enjoy it and get back on track tomorrow — not Monday.");
-      await storage.logChat(user.id, message, reply, "BRAAI_STRATEGY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    const brokeWords = ["NO MONEY", "BROKE", "MONTH END", "NO FOOD", "CANT AFFORD", "NO CASH"];
-    if (brokeWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has no money for food. Give the R57 budget plan: 6 eggs R25, tin pilchards R12, sugar beans R20. Specific, practical, affordable. SA context. This is not a charity response — it is a coaching response.");
-      await storage.logChat(user.id, message, reply, "MONTH_END_HUNGER");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    const tavernWords = ["TAVERN", "SHEBEEN"];
-    if (tavernWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is going to or has been at a tavern or shebeen. Give practical SA-specific strategy: eat protein first, limit drinks to 2, water between drinks, back on track tomorrow morning not Monday.");
-      await storage.logChat(user.id, message, reply, "TAVERN_CULTURE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    const churchWords = ["CHURCH", "SUNDAY LUNCH", "AFTER CHURCH"];
-    if (churchWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is dealing with church or Sunday lunch social eating. Practical strategy: protein first, smaller starchy portions, enjoy the fellowship. Log it after.");
-      await storage.logChat(user.id, message, reply, "CHURCH_SUNDAY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    const holidayWords = ["DECEMBER", "HOLIDAYS", "VACATION", "ON HOLIDAY"];
-    if (holidayWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is on holiday or mentioning December. Holiday mode does not mean stop. Walk daily, watch alcohol, protein at every meal. Specific and direct. No corporate wellness language.");
-      await storage.logChat(user.id, message, reply, "DECEMBER_HOLIDAY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.91: BINGE EATING DETECTION ──
-    const bingeWords = ["ATE EVERYTHING", "COULDNT STOP EATING", "ATE THE WHOLE", "LOST CONTROL", "ATE UNTIL SICK", "BINGED"];
-    if (bingeWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User describes a binge episode. Do not shame them. Explain this is not willpower failure — it is often restriction or stress. Tell them not to restrict tomorrow. Ask what triggered it. One forward action.");
-      await storage.logChat(user.id, message, reply, "BINGE_DETECTION");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.92: SCALE OBSESSION ──
-    const weightMention = /\b\d{2,3}\s*(kg|kilos?)\b/i.test(message) || /^[\d.]+\s*kg$/i.test(message.trim());
-    if (weightMention && user.awaitingInputType !== "weight") {
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
-      const weightLogs = await storage.getWeightLogs(user.id);
-      const loggedToday = weightLogs.some(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
-      if (loggedToday) {
-        const reply = await coachReply(user, message, "User has already logged their weight today and is weighing again. Tell them once per week same day same time is the standard. Weighing multiple times daily creates anxiety. Be direct — step away from the scale.");
-        await storage.logChat(user.id, message, reply, "SCALE_OBSESSION");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
-
-    // ── Priority 9.93: ALL OR NOTHING THINKING ──
-    const allOrNothingWords = ["RUINED IT", "MESSED UP", "FAILED", "STARTING OVER", "STARTING MONDAY", "START FRESH MONDAY"];
-    if (allOrNothingWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is showing all-or-nothing thinking — ruined it, starting Monday, failed. Challenge this directly. One bad meal does not ruin a week. Get back on track with the very next meal. Ask what they are eating in the next 2 hours.");
-      await storage.logChat(user.id, message, reply, "ALL_OR_NOTHING");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.94: COMPARISON CLIENT ──
-    const comparisonWords = ["MY FRIEND LOST", "EVERYONE ELSE", "WHY IS SHE LOSING", "LOSING FASTER THAN ME", "NOT LOSING AS FAST"];
-    if (comparisonWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is comparing their progress to someone else. Shut this down firmly but kindly. Different bodies, different hormones, different histories. Focus on beating last week's version of themselves. Ask one specific improvement question.");
-      await storage.logChat(user.id, message, reply, "COMPARISON_CLIENT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.95: CHRONIC CONDITIONS ──
-    if (cleanMsg.includes("PCOS") || cleanMsg.includes("POLYCYSTIC")) {
-      const reply = await coachReply(user, message, "User has PCOS. PCOS makes fat loss harder but not impossible. Key: reduce refined carbs, prioritise strength training over cardio, manage stress and sleep aggressively. Progress is slower — that is normal. Consistency over months.");
-      await storage.logChat(user.id, message, reply, "CHRONIC_PCOS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    if (cleanMsg.includes("THYROID") || cleanMsg.includes("HYPOTHYROID") || cleanMsg.includes("HYPERTHYROID")) {
-      const reply = await coachReply(user, message, "User has a thyroid condition. Medication must be sorted with their doctor first. From coaching side: protein, portion control, consistent training. Progress slower but it will come. Never compare their speed to others.");
-      await storage.logChat(user.id, message, reply, "CHRONIC_THYROID");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.96: NIGHT SHIFT ──
-    const nightShiftWords = ["NIGHT SHIFT", "NIGHTSHIFT", "WORK NIGHTS", "WORKING NIGHTS"];
-    if (nightShiftWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User works night shift. Meal timing is inverted — meal 1 is when they wake up. Avoid heavy carbs before the shift. Sleep is their biggest challenge — protect it aggressively. Walk 20 minutes after shift before sleeping.");
-      await storage.logChat(user.id, message, reply, "NIGHT_SHIFT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.97: MENSTRUAL CYCLE AWARENESS ──
-    const periodWords = ["PERIOD", "TIME OF MONTH", "PMS", "BLOATED", "WATER RETENTION"];
-    if (periodWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User mentions their period, PMS, or bloating. Water retention in cycle week 3-4 is normal — can be up to 2kg. Scale will go up — ignore it. Reduce sodium, increase water, stay on programme. It drops after the period.");
-      await storage.logChat(user.id, message, reply, "MENSTRUAL_CYCLE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.971: FAMILY SABOTAGE ──
-    const familySabotageWords = ["HUSBAND DOESNT SUPPORT", "HUSBAND DOESN'T SUPPORT", "FAMILY DOESNT SUPPORT", "FAMILY DOESN'T SUPPORT", "MY MOTHER COOKS", "MY WIFE COOKS", "THEY DONT UNDERSTAND", "THEY DON'T UNDERSTAND", "EATING ALONE", "NO ONE SUPPORTS ME"];
-    if (familySabotageWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is dealing with family who does not support their health journey. Acknowledge this is hard. You cannot control what others cook — you can control your portion. Protein first, smaller carb portions, never explain yourself to others. Results speak.");
-      await storage.logChat(user.id, message, reply, "FAMILY_SABOTAGE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.972: BODY IMAGE LANGUAGE ──
-    const bodyImageWords = ["I HATE MY BODY", "IM SO FAT", "I'M SO FAT", "IM DISGUSTING", "I'M DISGUSTING", "IM UGLY", "I'M UGLY", "HATE MYSELF", "HATE HOW I LOOK"];
-    if (bodyImageWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is using very negative body image language. Do not validate the self-hatred. Challenge it gently — would they say this to someone they love? Their body has carried them through everything. One kind action for their body today: protein and a 10 minute walk.");
-      await storage.logChat(user.id, message, reply, "BODY_IMAGE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+// ============================================================
+// MENU TEXT
+// ============================================================
+
+const MENU = `*KamLife Coach* 💪
+
+What do you need?
+1️⃣ Today's workout
+2️⃣ Food coaching
+3️⃣ Log steps
+4️⃣ Log sleep
+5️⃣ Log weight
+6️⃣ Weekly report
+7️⃣ Measurements check-in
+
+Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
+
+// ============================================================
+// ONBOARDING FLOW
+// ============================================================
+
+async function handleOnboarding(user: any, message: string, phone: string): Promise<string> {
+  const state = user.onboardingState || "START";
+  const msg = message.trim();
+
+  if (state === "START") {
+    await db.update(users).set({ onboardingState: "ASK_NAME" }).where(eq(users.phoneNumber, phone));
+    return `Welcome to *KamLife Coach* 👋\n\nNo keto. No detox teas. No shortcuts.\nReal coaching built for real South Africans.\n\nWhat is your name?`;
+  }
+
+  if (state === "ASK_NAME") {
+    const cleaned = msg.replace(/[^a-zA-Z\s]/g, "").trim();
+    const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE"]);
+    if (!cleaned || cleaned.length < 2 || INVALID.has(cleaned.toUpperCase())) {
+      return `What is your actual name? Just your first name is fine.`;
+    }
+    const name = cleaned.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+    await db.update(users).set({ name, onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
+    return `Sharp ${name} 👊\n\nWhat is your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Body recomposition — lose fat and gain muscle simultaneously\n4️⃣ General fitness and health`;
+  }
+
+  if (state === "ASK_GOAL") {
+    let goal = "fat_loss";
+    let calorieBase = 1500;
+    const lower = msg.toLowerCase();
+    if (msg.includes("2") || lower.includes("muscle")) { goal = "muscle_gain"; calorieBase = 2200; }
+    else if (msg.includes("3") || lower.includes("recomp")) { goal = "recomposition"; calorieBase = 1800; }
+    else if (msg.includes("4") || lower.includes("general") || lower.includes("fit")) { goal = "general"; calorieBase = 1800; }
+    await db.update(users).set({ goalType: goal, calorieTarget: calorieBase, onboardingState: "ASK_WEIGHT" }).where(eq(users.phoneNumber, phone));
+    return `Got it. How much do you weigh in kg?\n\nJust the number. For example: 72`;
+  }
+
+  if (state === "ASK_WEIGHT") {
+    const weight = parseFloat(msg.replace(/[^0-9.]/g, ""));
+    if (isNaN(weight) || weight < 30 || weight > 300) return "Just the number in kg please. For example: 72";
+    const protein = Math.round(weight * 2);
+    await db.update(users).set({ currentWeight: weight.toString(), proteinTarget: protein, onboardingState: "ASK_AGE" }).where(eq(users.phoneNumber, phone));
+    return `How old are you?`;
+  }
+
+  if (state === "ASK_AGE") {
+    const age = parseInt(msg.replace(/[^0-9]/g, ""));
+    if (isNaN(age) || age < 10 || age > 100) return "Just your age please. For example: 28";
+    await db.update(users).set({ age, onboardingState: "ASK_MODE" }).where(eq(users.phoneNumber, phone));
+    return `Where will you train?\n\n1️⃣ Gym\n2️⃣ At home\n3️⃣ Walking only`;
+  }
+
+  if (state === "ASK_MODE") {
+    let mode = "home";
+    const lower = msg.toLowerCase();
+    if (msg.includes("1") || lower.includes("gym")) mode = "gym";
+    else if (msg.includes("3") || lower.includes("walk")) mode = "walk_only";
+    await db.update(users).set({ trainingMode: mode, onboardingState: mode === "home" ? "ASK_EQUIPMENT" : "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
+    if (mode === "home") {
+      return `What equipment do you have at home?\n\nReply with numbers — you can pick more than one:\n1️⃣ No equipment\n2️⃣ Resistance bands\n3️⃣ Dumbbells\n4️⃣ Kettlebell\n5️⃣ Pull up bar\n6️⃣ Skipping rope`;
+    }
+    return `Training experience?\n\n1️⃣ Just starting — never trained consistently\n2️⃣ Some experience — on and off\n3️⃣ Consistent — 6 plus months of regular training`;
+  }
+
+  if (state === "ASK_EQUIPMENT") {
+    const selections = [];
+    if (msg.includes("1")) selections.push("none");
+    if (msg.includes("2")) selections.push("bands");
+    if (msg.includes("3")) selections.push("dumbbells");
+    if (msg.includes("4")) selections.push("kettlebell");
+    if (msg.includes("5")) selections.push("pullup_bar");
+    if (msg.includes("6")) selections.push("skipping_rope");
+    const equipment = selections.length > 0 ? selections.join(",") : "none";
+    await db.update(users).set({ homeEquipment: equipment, onboardingState: "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
+    return `Training experience?\n\n1️⃣ Just starting — never trained consistently\n2️⃣ Some experience — on and off\n3️⃣ Consistent — 6 plus months of regular training`;
+  }
+
+  if (state === "ASK_EXPERIENCE") {
+    let exp = "beginner";
+    const lower = msg.toLowerCase();
+    if (msg.includes("2") || lower.includes("some")) exp = "intermediate";
+    if (msg.includes("3") || lower.includes("consistent") || lower.includes("advanced")) exp = "advanced";
+    await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_SITUATION" }).where(eq(users.phoneNumber, phone));
+    return `Which best describes your situation?\n\n1️⃣ Student\n2️⃣ Domestic worker\n3️⃣ Retail or physical work — on feet all day\n4️⃣ Office or desk job\n5️⃣ Night shift worker\n6️⃣ Unemployed\n7️⃣ Long commute — 2 plus hours daily\n8️⃣ None of these`;
+  }
+
+  if (state === "ASK_SITUATION") {
+    const situations: Record<string, string> = {
+      "1": "student", "2": "domestic_worker", "3": "retail_physical",
+      "4": "office", "5": "night_shift", "6": "unemployed",
+      "7": "long_commute", "8": "none"
+    };
+    const situation = situations[msg.trim()] || "none";
+    await db.update(users).set({ lifeSituation: situation, onboardingState: "ASK_CONDITIONS" }).where(eq(users.phoneNumber, phone));
+    return `Any injuries, chronic conditions, or health issues I need to know about?\n\nFor example: bad knees, diabetes, hypertension, back pain, PCOS, on ARVs, Ramadan fasting\n\nOr reply NONE`;
+  }
 
-    // ── Priority 9.973: SHAME SPIRAL ──
-    const shameSpiralWords = ["ATE EVERYTHING THIS WEEKEND", "COMPLETELY FAILED", "SO ASHAMED", "DISGUSTED WITH MYSELF", "FELL OFF COMPLETELY", "RUINED EVERYTHING"];
-    if (shameSpiralWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is in a shame spiral after eating badly or missing the programme. Do not pile on. Shame does not burn calories. What happened stays in the past. Ask what their next meal is — one meal at a time forward.");
-      await storage.logChat(user.id, message, reply, "SHAME_SPIRAL");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.974: PLATEAU EMOTIONAL CRISIS ──
-    const plateauWords = ["NOTHING IS WORKING", "BEEN CONSISTENT AND NOTHING", "DOING EVERYTHING RIGHT", "SO FRUSTRATED", "WANT TO GIVE UP"];
-    if (plateauWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is frustrated by a plateau — consistent but no visible results. Acknowledge this is demoralising. Body changes even when the scale lies. Ask about non-scale victories: energy, clothes fit, measurements, strength. Make it personal to their specific goal.");
-      await storage.logChat(user.id, message, reply, "PLATEAU_CRISIS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.975: SCALE TRAUMA ──
-    const scaleTraumaWords = ["I HAVE ALWAYS BEEN FAT", "BEEN OVERWEIGHT MY WHOLE LIFE", "TRIED EVERYTHING MY WHOLE LIFE", "DIETED MY WHOLE LIFE"];
-    if (scaleTraumaWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has a lifetime of failed diets and scale trauma. This is not another diet. Sustainable eating — no restriction, no punishment. Structure, protein, consistency. Different approach, different results. Make it specific to their profile.");
-      await storage.logChat(user.id, message, reply, "SCALE_TRAUMA");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.976: COMMON COACHING QUESTIONS ──
-    if (cleanMsg.includes("HOW LONG TO LOSE 10KG") || cleanMsg.includes("HOW LONG WILL IT TAKE")) {
-      const reply = await coachReply(user, message, "User is asking how long fat loss will take. Sustainable rate is 0.5 to 1kg per week. 10kg takes 10-20 weeks. Anyone promising faster is selling something. Slow and consistent stays off. Make it specific to their current weight and goal.");
-      await storage.logChat(user.id, message, reply, "FAQ_WEIGHT_LOSS_TIME");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    if (cleanMsg.includes("LOSE WEIGHT WITHOUT EXERCISE") || cleanMsg.includes("WITHOUT EXERCISING")) {
-      const reply = await coachReply(user, message, "User asks about losing weight without exercise. Yes but harder — muscle loss accompanies fat loss without training. Exercise preserves muscle. Start with 20 min walking daily. Give specific action step.");
-      await storage.logChat(user.id, message, reply, "FAQ_NO_EXERCISE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    if (cleanMsg.includes("EATING AFTER 6PM") || cleanMsg.includes("EATING AT NIGHT") || cleanMsg.includes("EAT AFTER 6")) {
-      const reply = await coachReply(user, message, "User asks about eating after 6pm. The 6pm rule is a myth. Total daily calories is what matters — not timing. If daily target is met, eating at 9pm changes nothing. Do not skip meals to avoid eating late.");
-      await storage.logChat(user.id, message, reply, "FAQ_EATING_LATE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    if (cleanMsg.includes("LOSE BELLY FAT") || cleanMsg.includes("SPOT REDUCE") || cleanMsg.includes("STOMACH FAT")) {
-      const reply = await coachReply(user, message, "User asks about losing belly fat or spot reduction. Spot reduction is a myth — cannot choose where to lose fat. Overall calorie deficit reduces belly fat over time. Core exercises build muscle under the fat — they do not burn the fat. Deficit plus consistency is the only answer.");
-      await storage.logChat(user.id, message, reply, "FAQ_BELLY_FAT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    if (cleanMsg.includes("CARDIO OR WEIGHTS FIRST") || cleanMsg.includes("WEIGHTS OR CARDIO")) {
-      const reply = await coachReply(user, message, "User asks about cardio vs weights order. Weights first — always. Full energy needed for resistance training. Cardio after. For fat loss, walking is the cardio of choice. Intense cardio comes after building some muscle.");
-      await storage.logChat(user.id, message, reply, "FAQ_CARDIO_WEIGHTS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-    if (cleanMsg.includes("IS FASTING BETTER") || cleanMsg.includes("INTERMITTENT FASTING")) {
-      const reply = await coachReply(user, message, "User asks about intermittent fasting. Fasting works only if it helps maintain calorie deficit. No magical metabolic benefits beyond that. If it causes bingeing at lunch — not for them. If it helps control portions — use it. Best diet is the one they can sustain. Make it personal to their life situation.");
-      await storage.logChat(user.id, message, reply, "FAQ_FASTING");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.977: RELIGIOUS FASTING ──
-    const religiousFastWords = ["RAMADAN", "FASTING FOR RELIGION", "RELIGIOUS FAST", "LENT FASTING"];
-    if (religiousFastWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is doing Ramadan or religious fasting. Break fast with protein and water first. Avoid bingeing at iftar. Keep training light during fasting hours — walking only. Suhoor must include protein and slow carbs. This is manageable.");
-      await storage.logChat(user.id, message, reply, "RELIGIOUS_FASTING");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
-
-    // ── Priority 9.978: VEGETARIAN AND VEGAN ──
-    const veganWords = ["VEGETARIAN", "VEGAN", "NO MEAT", "PLANT BASED", "DONT EAT MEAT", "DON'T EAT MEAT"];
-    if (veganWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is vegetarian or vegan. Fat loss is absolutely possible. Protein sources: eggs and dairy for vegetarian, tofu, tempeh, lentils, chickpeas, beans, edamame, soy for vegan. Must be deliberate about hitting protein targets. Ask about their typical day of eating.");
-      await storage.logChat(user.id, message, reply, "VEGETARIAN_VEGAN");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (state === "ASK_CONDITIONS") {
+    const conditions = msg.toLowerCase() === "none" ? "" : msg;
+    const exp = user.trainingExperience || "beginner";
+    let startPhase = 1;
+    if (exp === "intermediate") startPhase = 2;
+    if (exp === "advanced") startPhase = 2;
 
-    // ── Priority 9.979: HALAAL ──
-    const halaalWords = ["HALAAL", "HALAL", "NO PORK", "MUSLIM", "HALAAL ONLY"];
-    if (halaalWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User follows halaal dietary requirements. Confirm all recommendations are halaal: chicken, beef, lamb, fish, eggs. Never recommend pork. Programme works fully within halaal requirements.");
-      await storage.logChat(user.id, message, reply, "HALAAL");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+    const stepsTarget = startPhase === 1 ? 7000 : 8000;
 
-    // ── Priority 9.980: WHEELCHAIR AND SEVERE MOBILITY ──
-    const wheelchairWords = ["WHEELCHAIR", "CANT WALK", "CANNOT WALK", "DISABLED", "PARALYSED", "PARALYZED"];
-    if (wheelchairWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is in a wheelchair or has severe mobility limitations. Programme is fully adaptable. Upper body resistance training highly effective. Seated exercises: chair push ups, seated dumbbell press, seated rows with resistance band, wheelchair push intervals. Food and calorie control becomes primary. Build around what they can do.");
-      await storage.logChat(user.id, message, reply, "WHEELCHAIR_MOBILITY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+    await db.update(users).set({
+      injuries: conditions,
+      programmePhase: startPhase,
+      stepsTarget,
+      onboardingState: "COMPLETE",
+      programmeStartDate: new Date(),
+      subscriptionStatus: "trial",
+    }).where(eq(users.phoneNumber, phone));
 
-    // ── Priority 9.981: MORBIDLY OBESE MODIFICATIONS ──
-    const obeseWords = ["VERY OVERWEIGHT", "MORBIDLY OBESE", "OVER 150KG", "OVER 130KG", "CANT GET OFF FLOOR", "KNEES CANT HANDLE"];
-    if (obeseWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is very overweight or morbidly obese. Start where they are — not where they think they should be. No floor exercises, no jumping, no high impact. Programme: seated exercises, wall push ups, chair squats, walking even 5 minutes to start. Food is 80% of results at this stage.");
-      await storage.logChat(user.id, message, reply, "MORBID_OBESITY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+    const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const u = updatedUser[0];
 
-    // ── Priority 9.982: CULTURAL FOOD IDENTITY ──
-    const culturalFoodWords = ["PAP IS OUR CULTURE", "CANT STOP EATING PAP", "ITS OUR TRADITION", "MY CULTURE", "TRADITIONAL FOOD", "GRANDMOTHER COOKS"];
-    if (culturalFoodWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is expressing cultural food identity or defending traditional eating. Pap is not the enemy — portions are. One fist of pap per meal fits any fat loss plan. Do not abandon culture — eat cultural foods in controlled portions with a strong protein source alongside. Sustainable and real.");
-      await storage.logChat(user.id, message, reply, "CULTURAL_FOOD");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+    return `*Profile complete* ✅\n\n*${u.name}* — Phase ${startPhase}: ${getPhaseNames()[startPhase]}\n\n🎯 Goal: ${u.goalType?.replace("_", " ")}\n🍽️ Calorie target: ${u.calorieTarget} kcal\n💪 Protein target: ${u.proteinTarget}g\n👟 Step target: ${stepsTarget.toLocaleString()} steps\n\nYour programme starts today. Not tomorrow. Not Monday. *Today.*\n\nReply MENU to begin.`;
+  }
 
-    // ── Priority 9.983: STROKE AND LIMITED MOBILITY ──
-    const strokeWords = ["HAD A STROKE", "STROKE", "ONE SIDE WEAK", "HEMIPLEGIA"];
-    if (strokeWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has had a stroke or has hemiplegia. Training requires care and patience. Focus on what the stronger side can do while gently working the affected side. Walking with support, seated exercises, resistance bands. Doctor clearance required. Adapt everything to where they are today.");
-      await storage.logChat(user.id, message, reply, "STROKE_MOBILITY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  return MENU;
+}
 
-    // ── Priority 9.984: FLAT WITH NO OUTDOOR ACCESS ──
-    const noSpaceWords = ["NO SPACE", "LIVE IN A FLAT", "NO GARDEN", "CANT GO OUTSIDE", "NO OUTDOOR ACCESS", "LOAD SHEDDING CANT TRAIN"];
-    if (noSpaceWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has no workout space or outdoor access. Entire workout fits in 2 square metres: squats, push ups, lunges, plank, wall sit, mountain climbers. No equipment needed. 20 minutes in a flat is enough. No space is a challenge — not an excuse.");
-      await storage.logChat(user.id, message, reply, "NO_SPACE_FLAT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+// ============================================================
+// DETECT INTENT — WHAT IS THE CLIENT ASKING
+// ============================================================
 
-    // ── Priority 9.985: STEROID AND MEDICATION WEIGHT GAIN ──
-    const medWeightWords = ["ON STEROIDS", "MEDICATION WEIGHT", "PILL WEIGHT", "ANTIDEPRESSANTS WEIGHT", "CORTISONE WEIGHT GAIN"];
-    if (medWeightWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has medication-induced weight gain. This is real and frustrating — not their fault. Fat loss is still possible but requires more consistency and patience. Never stop medication for weight loss. Work with doctor and coach simultaneously.");
-      await storage.logChat(user.id, message, reply, "MEDICATION_WEIGHT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+function detectIntent(message: string): string {
+  const m = message.toLowerCase().trim();
 
-    // ── Priority 9.986: LOADSHEDDING GRACE MODE ──
-    const loadsheddingWords = ["LOAD SHEDDING", "LOADSHEDDING", "NO ELECTRICITY", "ESKOM"];
-    if (loadsheddingWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is mentioning load shedding as reason for disruption. Acknowledge it — this is SA life. Cold food still counts. Walking outside during load shedding counts. Do not use it as a reason to skip entirely. Adapt and keep moving.");
-      await storage.logChat(user.id, message, reply, "LOADSHEDDING_GRACE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("reset") || m.includes("start over") || m.includes("start again") || m.includes("profile reset") || m.includes("begin again")) return "RESET";
 
-    // ── Priority 9.987: POSTPARTUM ──
-    const postpartumWords = ["JUST HAD A BABY", "POSTPARTUM", "POST NATAL", "AFTER BIRTH", "C SECTION", "CAESAREAN"];
-    if (postpartumWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User just had a baby or is postpartum. No crunches, sit ups, or heavy lifting without doctor clearance — especially after C-section. Start with walking, pelvic floor exercises, deep breathing. High protein food is priority — no restriction. Build slowly and safely.");
-      await storage.logChat(user.id, message, reply, "POSTPARTUM");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m === "menu" || m === "help") return "MENU";
 
-    // ── Priority 9.988: DOMESTIC WORKER FOOD SITUATION ──
-    const domesticWorkerWords = ["DOMESTIC WORKER", "WORK IN A HOUSE", "EMPLOYERS FOOD", "MADAM FOOD", "EAT THEIR LEFTOVERS", "EAT WHAT THEY GIVE ME"];
-    if (domesticWorkerWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is a domestic worker eating their employer's food. This is a real challenge. Prioritise protein from whatever is available. Do not finish everything out of obligation. Eat slowly, stop at 80% full. Bringing own food — tinned pilchards and eggs — is affordable and powerful.");
-      await storage.logChat(user.id, message, reply, "DOMESTIC_WORKER");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("i need a programme") || m.includes("i need a program") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule")) return "WORKOUT";
+  if (m === "1") return "WORKOUT_TODAY";
 
-    // ── Priority 9.989: CANCER TREATMENT ──
-    const cancerWords = ["CHEMOTHERAPY", "CHEMO", "CANCER TREATMENT", "RADIATION TREATMENT", "ONCOLOGY"];
-    if (cancerWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is undergoing cancer treatment. Health and treatment come first — always. No fat loss focus during active treatment. Eat enough protein to maintain muscle, stay hydrated, gentle walking when energy allows. Work closely with their oncologist. We support gently.");
-      await storage.logChat(user.id, message, reply, "CANCER_TREATMENT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if ((m.includes("step") || m.includes("walked") || m.includes("steps")) && /\d/.test(m)) return "LOG_STEPS";
+  if (m === "3") return "LOG_STEPS_PROMPT";
 
-    // ── Priority 9.990: ARV MEDICATION ──
-    const arvWords = ["ARVS", "ANTIRETROVIRAL", "HIV MEDICATION", "ON TREATMENT"];
-    if (arvWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is on ARV medication. ARVs affect appetite and metabolism — this is manageable. Protein at every meal, stay hydrated, consistent movement. Programme works alongside treatment. No judgment — only support.");
-      await storage.logChat(user.id, message, reply, "ARV_MEDICATION");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if ((m.includes("slept") || m.includes("sleep") || m.includes("hours sleep") || m.includes("hours of sleep")) && /\d/.test(m)) return "LOG_SLEEP";
+  if (m === "4") return "LOG_SLEEP_PROMPT";
 
-    // ── Priority 9.991: PRISON RELEASE ──
-    const prisonWords = ["JUST GOT OUT", "RELEASED FROM PRISON", "OUT OF JAIL", "EX CONVICT", "FRESH OUT"];
-    if (prisonWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User has recently been released from prison. Welcome them. Structure, discipline, and physical health will anchor everything they are rebuilding. Start simple: walking daily, protein at every meal, consistent sleep. They have already done hard things. This is the good kind.");
-      await storage.logChat(user.id, message, reply, "PRISON_RELEASE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if ((m.includes("weigh") || m.includes("weight") || m.includes("kg")) && /\d/.test(m) && !m.includes("lost") && !m.includes("gained")) return "LOG_WEIGHT";
+  if (m === "5") return "LOG_WEIGHT_PROMPT";
 
-    // ── Priority 9.992: TEENAGER EATING DISORDER SIGNS ──
-    const edWords = ["NOT EATING AT ALL", "EATING NOTHING", "ONLY EATING 500", "ONLY EATING 300", "SCARED TO EAT", "AFRAID OF FOOD", "CANNOT EAT", "PURGING", "MAKING MYSELF SICK"];
-    if (edWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User is showing signs of an eating disorder — restriction, purging, fear of food. This is not willpower or discipline — it needs proper support. Direct them to speak to a trusted adult, school counsellor, or call SADAG on 0800 567 567. They deserve real help, not a fitness programme right now.");
-      await storage.logChat(user.id, message, reply, "EATING_DISORDER_FLAG");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if ((m.includes("water") || m.includes("drank") || m.includes("litre") || m.includes("liter") || m.includes("ml")) && (/\d/.test(m) || m.includes("bottle") || m.includes("glass"))) return "LOG_WATER";
 
-    // ── Priority 9.993: 12 HOUR SHIFT WORKERS ──
-    const shiftWords = ["12 HOUR SHIFT", "TWELVE HOUR SHIFT", "LONG SHIFT", "DOUBLE SHIFT"];
-    if (shiftWords.some(w => cleanMsg.includes(w))) {
-      const reply = await coachReply(user, message, "User works 12-hour or long shifts. Pack food before the shift: boiled eggs, tinned fish, an apple, nuts if affordable. Eat every 4-5 hours even if a small protein snack. Do not arrive home starving — that is when bad choices happen. Prep the night before.");
-      await storage.logChat(user.id, message, reply, "LONG_SHIFT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m === "6" || m.includes("weekly report") || m.includes("weekly progress") || m.includes("full report") || m.includes("show progress")) return "WEEKLY_REPORT";
 
-    // ── Priority 10: INTENT ROUTING ──
-    let detectedIntent: string | null = null;
+  if (m === "7" || m.includes("measure") || m.includes("clothing") || m.includes("jeans") || m.includes("check in")) return "MEASUREMENTS";
 
-    if (cleanMsg === "1") detectedIntent = "GET_WORKOUT";
-    if (cleanMsg === "2") {
-      await storage.updateUser(user.id, { awaitingInputType: "food" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptFood()}</Message></Response>`);
-    }
-    if (cleanMsg === "3") {
-      await storage.updateUser(user.id, { awaitingInputType: "steps" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptSteps()}</Message></Response>`);
-    }
-    if (cleanMsg === "4") {
-      await storage.updateUser(user.id, { awaitingInputType: "sleep" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptSleep()}</Message></Response>`);
-    }
-    if (cleanMsg === "5") {
-      await storage.updateUser(user.id, { awaitingInputType: "weight" });
-      return res.type('text/xml').send(`<Response><Message>${R.promptWeight()}</Message></Response>`);
-    }
-    if (cleanMsg === "6") detectedIntent = "SHOW_TARGETS";
-    if (cleanMsg === "7") {
-      await storage.updateUser(user.id, { onboardingState: "AWAITING_GOAL", awaitingInputType: null, primaryFocusArea: null });
-      const reply = "Let's update your profile. What is your main goal?\n1) Lose fat\n2) Build muscle\n3) Body recomposition — lose fat and gain muscle simultaneously\n4) General fitness and health";
-      await storage.logChat(user.id, message, reply, "PROFILE_UPDATE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m === "done" || m === "workout done" || m === "finished" || m === "completed") return "WORKOUT_DONE";
 
-    if (!detectedIntent) {
-      const parsing = parseFoodMessage(message);
-      const foodEvidence = parsing.proteinItems.length > 0 ||
-                          parsing.carbItems.length > 0 ||
-                          parsing.junkItems.length > 0 ||
-                          parsing.drinks.length > 0 ||
-                          parsing.mealHints.length > 0 ||
-                          parsing.quantities.length > 0;
-
-      if (/^(GYM DONE|WORKOUT DONE|DONE GYM|TRAINING DONE|SESSION DONE)$/.test(cleanMsg) || cleanMsg === "DONE") detectedIntent = "WORKOUT_DONE";
-      else if (cleanMsg.startsWith("SWAP") || /SWAP THIS|DIFFERENT EXERCISE|CANT DO THIS EXERCISE|ALTERNATIVE EXERCISE|SUBSTITUTE/.test(cleanMsg)) detectedIntent = "EXERCISE_SWAP";
-      else if (/NO EQUIPMENT|NO GYM TODAY|AT HOME TODAY|CANT MAKE GYM|SKIPPING GYM/.test(cleanMsg)) detectedIntent = "NO_EQUIPMENT";
-      else if (cleanMsg === "HISTORY") detectedIntent = "WORKOUT_HISTORY";
-      else if (cleanMsg === "PHASE") detectedIntent = "PHASE_PROGRESS";
-      else if (cleanMsg === "REPEAT WEEK") detectedIntent = "REPEAT_WEEK";
-      else if (cleanMsg === "READY") detectedIntent = "PHASE_READY";
-      else if (cleanMsg === "REPEAT") detectedIntent = "PHASE_REPEAT";
-      else if (cleanMsg === "SHARECARD" || /SHARE MY PROGRESS|SHARE CARD|PROGRESS CARD/.test(cleanMsg)) detectedIntent = "SHARECARD";
-      else if (/^NUTRITION$|^FOOD PLAN$|^MEAL PLAN$|^DIET$|^EATING PLAN$/.test(cleanMsg)) detectedIntent = "NUTRITION_PLAN";
-      else if (/GYM|WORKOUT|PROGRAM|TRAINING/.test(cleanMsg)) detectedIntent = "GET_WORKOUT";
-      else if (/STEPS|WALK|NO STEPS/.test(cleanMsg)) detectedIntent = "LOG_STEPS";
-      else if (/FOOD|MEAL|ATE|PAP|CHICKEN|OATS|BREAD/.test(cleanMsg) && foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
-      else if (/SLEEP|SLEPT/.test(cleanMsg)) detectedIntent = "LOG_SLEEP";
-      else if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
-      else if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
-      else if (/^MEASURE$|^MEASUREMENTS$|^CHECK IN$|^CHECKIN$|^BODY CHECK$/.test(cleanMsg)) detectedIntent = "MEASURE";
-      else if (/DRANK WATER|WATER DONE|FINISHED WATER|HAD WATER|GLASS OF WATER|BOTTLE OF WATER|LITRES|LITERS|(\d+)\s*ML\b.*WATER|WATER\s*\d|^\d+\s*(L|ML|GLASS|GLASSES|BOTTLE|BOTTLES)\b/.test(cleanMsg) || /^WATER$/.test(cleanMsg) || (/ROOIBOS/.test(cleanMsg) && !/ATE|FOOD|MEAL/.test(cleanMsg))) detectedIntent = "LOG_WATER";
-      else if (/^(ATE |HAD |JUST ATE|EATING NOW|EATING |I ATE )/.test(cleanMsg)) detectedIntent = "LOG_FOOD_INFORMAL";
-      else if (foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
-
-      if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
-        const advice = await coachReply(user, message, "User is asking for food ideas or what they can eat. Ask them what their last meal was or what they have available right now. Do not give a generic list. Make it personal to their goal, calorie target, and life situation.");
-        await storage.logChat(user.id, message, advice, "FOOD_ADVICE");
-        return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
-      }
-
-      // "Food" alone — no specific item mentioned → ask what they ate
-      if (/^FOOD$|^FOOD\?$|^ABOUT FOOD$|^FOOD HELP$/.test(cleanMsg) || (cleanMsg === "FOOD")) {
-        const askReply = await coachReply(user, message, "User sent the word 'food' with no specific item. Ask them what they actually ate. Do not give generic advice. Ask a direct question: what did you eat, and when?");
-        await storage.logChat(user.id, message, askReply, "FOOD_GENERIC_PROMPT");
-        return res.type('text/xml').send(`<Response><Message>${askReply}</Message></Response>`);
-      }
-    }
+  if ((m.includes("i bought") || m.includes("i have") || m.includes("shopping") || m.includes("groceries")) && message.split(",").length >= 3) return "GROCERY_LIST";
 
-    console.log("INTENT:", detectedIntent);
-
-    // ── Priority 11: INTENT HANDLERS ──
-
-    if (detectedIntent === "LOG_FOOD" || detectedIntent === "LOG_FOOD_INFORMAL") {
-      const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
-      if (nothingWords.some(w => cleanMsg.includes(w))) {
-        const reply = await coachReply(user, message, "User skipped a meal or ate nothing. Do not shame them. Tell them skipping slows fat loss and triggers cravings. Give one specific thing to eat right now — practical and affordable.");
-        await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      const parsing = parseFoodMessage(message);
-      const isGroceryList = (parsing.tokenCount >= 5 || COACHING_PATTERNS.groceryListTriggers.some(t => cleanMsg.includes(t)));
-      const hasBudgetAnxiety = COACHING_PATTERNS.budgetAnxietyTriggers.some(t => cleanMsg.includes(t));
-      const isOverwhelmed = COACHING_PATTERNS.overwhelmTriggers.some(t => cleanMsg.includes(t));
-
-      // Alcohol detection — firm SA coaching, never corporate wellness language
-      const alcoholKeywords = /\bbeer\b|\bwine\b|\bshots?\b|\bbrandy\b|\brum\b|\bvodka\b|\bwhiskey\b|\bgin\b|\bcider\b|\bsmirnoff\b|\bbitters\b|\bshots\b|\bdrinks\b|\balcohol\b|\bbooze\b|\btavern\b|\bshebeen\b|\bwild africa\b|\bjack daniels\b|\bcastle\b|\bblack label\b|\bstella\b/i;
-      if (alcoholKeywords.test(lower)) {
-        const alcoholReply = await coachReply(user, message, "User logged alcohol. Respond with firm, forward-focused SA coaching. Not corporate wellness language. Acknowledge that this happens. Tell them the damage is done — do not add more. Drink water now. Eat protein at the next meal. Back on track today, not Monday. Specific and direct.");
-        await storage.logChat(user.id, message, alcoholReply, "ALCOHOL_LOGGED");
-        return res.type('text/xml').send(`<Response><Message>${alcoholReply}</Message></Response>`);
-      }
-
-      const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 999;
-      const isNewClient = daysSinceJoin <= 14;
-      const todayFoodLogs = (await storage.getChatHistory(user.id)).filter(l => {
-        if (!l.createdAt) return false;
-        const logDate = new Date(l.createdAt);
-        const today = new Date();
-        return logDate.toDateString() === today.toDateString() && (l.intent === "LOG_FOOD" || l.intent === "LOG_FOOD_FOLLOWUP");
-      });
-      const isFirstFoodToday = todayFoodLogs.length === 0;
-
-      let extraInstruction = "";
-      if (isGroceryList) {
-        extraInstruction = "\nGROCERY LIST MODE: This is a grocery list not a meal log. Analyse holistically. Lead with what is good. Suggest maximum 2 swaps for next shop only. Acknowledge budget. End with one action using what they already have.";
-      }
-      if (hasBudgetAnxiety) {
-        extraInstruction += "\nBUDGET ANXIETY DETECTED: Start your response with — Your budget does not need to change. Smarter choices with the same money. Then coach.";
-      }
-      if (isOverwhelmed) {
-        extraInstruction += "\nOVERWHELM DETECTED: One sentence acknowledging it. One single action only. No lists.";
-      }
-      if (isNewClient && isFirstFoodToday) {
-        extraInstruction += "\nNEW CLIENT FIRST LOG: Ask one contextual question before coaching. If tea mentioned ask what was in it. If fast food mentioned ask if this was planned or impulse. If sweets mentioned ask if this is daily or occasional.";
-      }
-      // Pap / starch logged — never say "good choice" alone, always ask about protein
-      if (/\bpap\b|\bsamp\b|\brice\b|\bbread\b|\bpotato\b|\bnoodles\b|\bpasta\b/i.test(lower)) {
-        extraInstruction += "\nSTARCH DETECTED: Never say 'good choice' as a standalone response. Always ask about the protein that was eaten alongside. If no protein mentioned, ask what protein they had with it — eggs, chicken, pilchards, beans.";
-      }
-
-      const fullCtx = await buildUserContext(user);
-      const contextWithExtra = extraInstruction ? `${fullCtx}\n${extraInstruction}` : fullCtx;
-      const { reply: foodReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, contextWithExtra, getDisplayName(user, "friend"));
-
-      if (detectedIntent === "LOG_FOOD_INFORMAL") {
-        const foodPattern = await checkFoodPatterns(user.id);
-        const perfectDay = await checkPerfectDay(user);
-        const budgetPrefix = hasBudgetAnxiety ? "Your budget does not need to change. Smarter choices with the same money.\n\n" : "";
-        const full = `${budgetPrefix}${foodReply}${foodPattern}${perfectDay}`;
-        await storage.logChat(user.id, message, full, "LOG_FOOD");
-        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
-      }
-
-      if (nextState === "portion") {
-        await storage.updateUser(user.id, { awaitingInputType: "portion" });
-        const full = `${foodReply}\nPortion check: 1 / 2 / 3+ fists?`;
-        await storage.logChat(user.id, message, full, "PORTION_CHECK");
-        return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
-      }
-
-      await storage.updateUser(user.id, { awaitingInputType: "drink" });
-      const full = `${foodReply} What did you drink?`;
-      await storage.logChat(user.id, message, full, "LOG_FOOD");
-      return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
-    }
+  if (m.includes("creatine") || m.includes("supplement") || m.includes("protein powder") || m.includes("pre-workout") || m.includes("pre workout")) return "SUPPLEMENTS";
 
-    if (detectedIntent === "GET_WORKOUT") {
-      const { exercises, isRestDay } = getExercisesForDay(user);
-
-      // Only send the rest day message when the user is asking for today's scheduled session.
-      // Explicit triggers: menu option "1", or single-keyword messages (WORKOUT / GYM / PROGRAM / TRAINING
-      // / WHAT IS MY WORKOUT TODAY / WHATS MY WORKOUT).
-      // Anything else — travel, hotel, short on time, 30 minutes, joined the gym, etc. —
-      // goes to full GPT so Coach K can answer the actual question.
-      const isExplicitTodayRequest =
-        cleanMsg === "1" ||
-        /^(WORKOUT|GYM|PROGRAM|TRAINING|MY WORKOUT|MY WORKOUT TODAY|WHAT IS MY WORKOUT|WHAT'S MY WORKOUT|WHATS MY WORKOUT|WHAT IS MY TRAINING TODAY|TODAY'S WORKOUT|TODAYS WORKOUT)$/.test(cleanMsg);
-
-      if (isRestDay && !isExplicitTodayRequest) {
-        const ctx = await buildUserContext(user);
-        const situationHint = `The client's scheduled programme has today as a rest day, but they are asking about workout options or training modifications. Answer their specific question with practical advice. Do NOT just say "today is a rest day". Give them real guidance.`;
-        const gptReply = await coachReply(message, user, ctx, situationHint);
-        await storage.logChat(user.id, message, gptReply, "GET_WORKOUT_FLEXIBLE");
-        return res.type('text/xml').send(`<Response><Message>${gptReply}</Message></Response>`);
-      }
-
-      let stalePrefix = "";
-      if (user.lastWorkoutDate) {
-        const daysSinceWorkout = Math.floor((Date.now() - new Date(user.lastWorkoutDate).getTime()) / (1000 * 60 * 60 * 24));
-        if (daysSinceWorkout > 7) {
-          const phase = user.programmePhase || 1;
-          const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-          const day = user.programDayIndex || 1;
-          stalePrefix = `Welcome back. You have been away for ${daysSinceWorkout} days. We are not going backwards — pick up exactly where you left off. Day ${day} of Phase ${phase}: ${phaseConfig.name}. Here is today's session:\n\n`;
-        }
-      }
-
-      const workoutMsg = stalePrefix + formatWorkoutMessage(user, exercises, isRestDay);
-
-      if (!isRestDay && exercises.length > 0) {
-        try {
-          const ctx = await buildUserContext(user);
-          const motivationCompletion = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            max_tokens: 60,
-            messages: [
-              { role: "system", content: `${KAMLIFE_MASTER_PROMPT}\n\nCONTEXT:\n${ctx}\n\nWrite ONE short motivational sentence (max 15 words) specific to this user — their age, goal, phase, and conditions. No generic motivation. Be direct and personal.` },
-              { role: "user", content: "Give me one motivational line for today's workout." },
-            ],
-          });
-          const motivation = motivationCompletion.choices[0]?.message?.content?.trim();
-          if (motivation) {
-            const reply = workoutMsg.replace("Reply DONE when finished.", `${motivation}\n\nReply DONE when finished.`);
-            await storage.logChat(user.id, message, reply, "GET_WORKOUT");
-            return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-          }
-        } catch (e) {
-          console.error("[GET_WORKOUT] GPT motivation failed:", e);
-        }
-      }
-
-      await storage.logChat(user.id, message, workoutMsg, "GET_WORKOUT");
-      return res.type('text/xml').send(`<Response><Message>${workoutMsg}</Message></Response>`);
-    }
+  if (m.includes("before workout") || m.includes("after workout") || m.includes("pre workout meal") || m.includes("post workout meal")) return "MEAL_TIMING";
 
-    // ── EXERCISE SWAP ──
-    if (detectedIntent === "EXERCISE_SWAP") {
-      const swapChoice = cleanMsg.match(/^SWAP\s*(\d)$/);
-      if (swapChoice) {
-        const choiceNum = parseInt(swapChoice[1]);
-        if (choiceNum >= 1 && choiceNum <= 3) {
-          const reply = `Swap ${choiceNum} selected. Use that exercise for today's session. Reply DONE when finished.`;
-          await storage.logChat(user.id, message, reply, "EXERCISE_SWAP");
-          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-        }
-      }
-
-      const mode = getModeKey((user.trainingMode as string) || "home");
-      const { exercises: currentExercises } = getExercisesForDay(user);
-      const currentIds = new Set(currentExercises.map(e => e.id));
-      const currentMuscleGroups = new Set(currentExercises.map(e => e.muscleGroup));
-
-      const lib = mode === "gym" ? EXERCISE_LIBRARY.gym : EXERCISE_LIBRARY.home;
-      const allEntries: ExerciseEntry[] = [...lib.push, ...lib.pull, ...lib.legs, ...lib.core];
-      const filtered = filterEntriesForInjuries(allEntries, user);
-      const sameGroupAlts = filtered.filter(e => !currentIds.has(e.id) && currentMuscleGroups.has(e.muscleGroup));
-      let pool = [...sameGroupAlts];
-      if (pool.length < 3) {
-        const others = filtered.filter(e => !currentIds.has(e.id) && !pool.some(p => p.id === e.id));
-        pool.push(...others);
-      }
-      const picked = pool.slice(0, 3);
-
-      if (picked.length === 0) {
-        const reply = "No alternative exercises available for your current setup. Try a different training mode or speak to Coach.";
-        await storage.logChat(user.id, message, reply, "EXERCISE_SWAP");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-
-      let reply = "Here are alternatives for today:\n";
-      picked.forEach((ex: ExerciseEntry, i: number) => {
-        reply += `${i + 1}) ${ex.name} — ${ex.plainEnglish}\n`;
-      });
-      reply += "\nReply SWAP 1, SWAP 2, or SWAP 3 to choose.";
-      await storage.logChat(user.id, message, reply, "EXERCISE_SWAP");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if ((m.includes("budget") || m.includes("broke") || m.includes("month end") || m.includes("no money")) && (m.includes("meal") || m.includes("eat") || m.includes("food") || m.includes("groceries"))) return "BUDGET_MEAL";
 
-    // ── NO EQUIPMENT FALLBACK ──
-    if (detectedIntent === "NO_EQUIPMENT") {
-      const userMode = getModeKey((user.trainingMode as string) || "home");
-      if (userMode !== "gym") {
-        const reply = "You are already training at home. Reply WORKOUT to get today's session.";
-        await storage.logChat(user.id, message, reply, "NO_EQUIPMENT");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-      const tempUser = { ...user, trainingMode: "home" };
-      const { exercises: homeExercises } = getExercisesForDay(tempUser);
-      const phase = user.programmePhase || 1;
-      const workoutMsg = formatWorkoutMessage(tempUser, homeExercises, false);
-      const reply = `No gym today — no problem. Here is your home session for Phase ${phase}:\n\n${workoutMsg}`;
-      await storage.logChat(user.id, message, reply, "NO_EQUIPMENT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("ramadan") || m.includes("fasting") || m.includes("iftar") || m.includes("suhoor")) return "RAMADAN";
 
-    // ── WORKOUT HISTORY ──
-    if (detectedIntent === "WORKOUT_HISTORY") {
-      const logs = await storage.getWorkoutLogs(user.id);
-      const last7 = logs.slice(0, 7);
-      const completedCount = last7.filter(l => l.workoutCompleted).length;
-      const phase = user.programmePhase || 1;
-      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-      let reply = `${getDisplayName(user)} — Last 7 workouts:\n`;
-      if (last7.length === 0) {
-        reply += "No workouts logged yet. Reply WORKOUT to get started.\n";
-      } else {
-        for (let idx = 0; idx < last7.length; idx++) {
-          const log = last7[idx];
-          const dateStr = log.loggedAt ? format(new Date(log.loggedAt), "dd MMM") : "Unknown";
-          const status = log.workoutCompleted ? "DONE" : "SKIPPED";
-          const dayNum = (user.programDayIndex || 1) - idx;
-          const desc = `Phase ${phase}: ${phaseConfig.name} Day ${Math.max(1, dayNum)}`;
-          reply += `${dateStr}: ${desc} — ${status}\n`;
-        }
-        reply += `\nCompleted ${completedCount} of last ${last7.length} days. `;
-        if (completedCount >= 6) reply += "Elite consistency. You are in the top 5% of clients.";
-        else if (completedCount >= 4) reply += "Solid effort. Push for 5+ next week.";
-        else if (completedCount >= 2) reply += "Room to improve. Consistency is what separates results from excuses.";
-        else reply += "We need more from you. Show up. The programme only works if you do.";
-      }
-      await storage.logChat(user.id, message, reply, "WORKOUT_HISTORY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("period") || m.includes("menstrual") || m.includes("time of the month") || m.includes("on my period")) return "PERIOD";
 
-    // ── PHASE PROGRESS ──
-    if (detectedIntent === "PHASE_PROGRESS") {
-      const phase = user.programmePhase || 1;
-      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-      const week = user.programmeWeek || 1;
-      const totalWeeks = phaseConfig.weeks;
-      const daysRemaining = (totalWeeks - week) * 7 + (7 - (user.programmeDayInWeek || 1));
-      const nextPhase = phase === 4 ? 5 : phase === 5 ? 2 : phase + 1;
-      const nextPhaseConfig = PHASE_CONFIG[nextPhase] || PHASE_CONFIG[1];
-
-      const daysIntoPhase = ((week - 1) * 7) + (user.programmeDayInWeek || 1);
-      const phaseStartDate = new Date(Date.now() - daysIntoPhase * 24 * 60 * 60 * 1000);
-
-      const allWorkoutLogs = await storage.getWorkoutLogs(user.id);
-      const workoutsThisPhase = allWorkoutLogs.filter(l => l.workoutCompleted && l.loggedAt && new Date(l.loggedAt) >= phaseStartDate).length;
-
-      const allStepLogs = await storage.getStepLogs(user.id);
-      const phaseSteps = allStepLogs.filter(l => l.loggedAt && new Date(l.loggedAt) >= phaseStartDate);
-      const avgSteps = phaseSteps.length > 0 ? Math.round(phaseSteps.reduce((sum, l) => sum + l.steps, 0) / phaseSteps.length) : 0;
-
-      let motiveLine = "";
-      if (week <= 1) motiveLine = "You are just getting started. Build momentum this week.";
-      else if (week >= totalWeeks) motiveLine = "Final week of this phase. Finish strong and earn the next one.";
-      else motiveLine = "You are in the middle of the work. This is where results are built.";
-
-      const reply = `Phase ${phase}: ${phaseConfig.name}\nWeek ${week} of ${totalWeeks}\n${daysRemaining} days until Phase ${nextPhase}: ${nextPhaseConfig.name}\nWorkouts this phase: ${workoutsThisPhase}\nStep average this phase: ${avgSteps.toLocaleString()}\n\n${motiveLine}`;
-      await storage.logChat(user.id, message, reply, "PHASE_PROGRESS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("diabetic") || m.includes("diabetes") || m.includes("blood sugar")) return "DIABETIC";
 
-    // ── REPEAT WEEK ──
-    if (detectedIntent === "REPEAT_WEEK") {
-      const week = user.programmeWeek || 1;
-      const phase = user.programmePhase || 1;
-      const nextPhase = phase === 4 ? 5 : phase === 5 ? 2 : phase + 1;
-      const newProgramDayIndex = Math.max(1, (user.programDayIndex || 1) - 7);
-      await storage.updateUser(user.id, {
-        programmeDayInWeek: 1,
-        programDayIndex: newProgramDayIndex,
-      });
-      const reply = `Week ${week} reset. Sometimes you need to own a week before moving forward. Show up every day this week and earn Phase ${nextPhase} properly.`;
-      await storage.logChat(user.id, message, reply, "REPEAT_WEEK");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("travelling") || m.includes("traveling") || m.includes("hotel") || m.includes("on the road")) return "TRAVELLING";
 
-    // ── PHASE READY (advance) ──
-    if (detectedIntent === "PHASE_READY") {
-      if (!user.phaseReadyToAdvance) {
-        const reply = "You are not at a phase transition point. Keep going with your current phase. Reply WORKOUT to get today's session.";
-        await storage.logChat(user.id, message, reply, "PHASE_READY");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-      const phase = user.programmePhase || 1;
-      let nextPhase = phase;
-      if (phase === 4) nextPhase = 5;
-      else if (phase === 5) nextPhase = 2;
-      else if (phase < 4) nextPhase = phase + 1;
-      const nextConfig = PHASE_CONFIG[nextPhase] || PHASE_CONFIG[1];
-      await storage.updateUser(user.id, {
-        programmePhase: nextPhase,
-        programmeWeek: 1,
-        programmeDayInWeek: 1,
-        phaseReadyToAdvance: false,
-      });
-      const reply = `Phase ${nextPhase}: ${nextConfig.name} starts now. ${nextConfig.theme}. New step target: ${nextConfig.stepTarget.toLocaleString()} per day. New workout frequency: ${nextConfig.weeklyWorkouts} per week. You earned this. Show up.`;
-      await storage.logChat(user.id, message, reply, "PHASE_READY");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("church") || m.includes("funeral") || m.includes("lobola") || m.includes("umemulo") || m.includes("ceremony")) return "CULTURAL_EVENT";
 
-    // ── PHASE REPEAT (stay same phase) ──
-    if (detectedIntent === "PHASE_REPEAT") {
-      if (!user.phaseReadyToAdvance) {
-        const reply = "You are not at a phase transition point. Reply REPEAT WEEK if you want to redo this week.";
-        await storage.logChat(user.id, message, reply, "PHASE_REPEAT");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-      const phase = user.programmePhase || 1;
-      const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-      await storage.updateUser(user.id, {
-        programmeWeek: 1,
-        programmeDayInWeek: 1,
-        phaseReadyToAdvance: false,
-      });
-      const reply = `Phase ${phase} reset. Smart decision. Owning a phase before advancing is what separates serious people from everyone else. Start Week 1 again — this time leave nothing on the table.`;
-      await storage.logChat(user.id, message, reply, "PHASE_REPEAT");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  if (m.includes("beer") || m.includes("wine") || (m.includes("drank") && (m.includes("hennessy") || m.includes("henny") || m.includes("henry") || m.includes("alcohol") || m.includes("castle") || m.includes("black label") || m.includes("savanna")))) return "ALCOHOL";
 
-    // ── SHARECARD ──
-    if (detectedIntent === "SHARECARD") {
-      const sharecard = await buildSharecard(user);
-      const reply = `${sharecard}\n\nScreenshot this and share it. Every person you inspire is proof the work is real.`;
-      await storage.logChat(user.id, message, reply, "SHARECARD");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  const foodWords = ["ate", "eat", "eating", "had", "breakfast", "lunch", "dinner", "snack", "meal", "food", "pap", "rice", "chicken", "eggs", "kota", "bread", "oats", "pilchards", "beans", "stew", "braai", "kfc", "nandos", "steers", "burger", "chips", "chocolate", "sweet potato", "vegetables", "spinach", "cabbage", "fruit", "banana", "apple", "latte", "tea", "coffee", "milo", "cremora", "mageu", "cool drink", "coke", "fanta"];
+  if (foodWords.some(word => m.includes(word))) return "FOOD_LOG";
 
-    // ── NUTRITION PLAN ──
-    if (detectedIntent === "NUTRITION_PLAN") {
-      const phase = user.programmePhase || 1;
-      const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
-      const calories = user.calorieTarget || 2000;
-      const protein = Math.round(calories / 8);
-      const trainingDayCarbs = phase <= 2 ? "moderate — rice, pap or bread with meals around training" : phase <= 4 ? "high — carbs at every training-day meal for fuel" : "reduced — lighter carbs this week";
-      const reply = `Phase ${phase} Nutrition — ${nutrition.name}\n\nFocus: ${nutrition.focus}\nCarb timing: ${nutrition.carbTiming}\nThis week's habit: ${nutrition.keyHabit}\nWeekly target: ${nutrition.weeklyTarget}\n\nYour daily targets:\nCalories: ${calories}kcal\nProtein: ${protein}g\nCarbs: ${trainingDayCarbs}`;
-      await storage.logChat(user.id, message, reply, "NUTRITION_PLAN");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  return "GENERAL";
+}
 
-    if (detectedIntent === "LOG_STEPS") {
-      const kMatchIntent = cleanMsg.match(/(\d+(\.\d+)?)\s*K\b/);
-      let steps: number | null = null;
-      if (kMatchIntent) {
-        steps = Math.round(parseFloat(kMatchIntent[1]) * 1000);
-      } else {
-        const stepsMatch = cleanMsg.match(/\d+/);
-        steps = stepsMatch ? parseInt(stepsMatch[0]) : (cleanMsg.includes("NO STEPS") ? 0 : null);
-      }
-
-      if (steps !== null) {
-        await storage.createStepLog(user.id, steps);
-        const prevLogs = await storage.getStepLogs(user.id);
-        const yesterdaySteps = prevLogs.length > 1 ? prevLogs[1].steps : null;
-
-        let reaction = "";
-        if (steps < 2000) reaction = R.stepsLow();
-        else if (steps >= (user.stepsTarget || 8000)) reaction = R.stepsTarget();
-        else reaction = R.stepsGood();
-
-        const comparison = yesterdaySteps !== null ? `\nYesterday: ${yesterdaySteps} steps. Today: ${steps}.` : "";
-        let winMoment = "";
-        const target = user.stepsTarget || 8000;
-        if (prevLogs.length >= 7) {
-          const now = new Date();
-          let streakValid = true;
-          for (let i = 0; i < 7; i++) {
-            const log = prevLogs[i];
-            if (!log.loggedAt || log.steps < target) { streakValid = false; break; }
-            const logDate = new Date(log.loggedAt);
-            const expectedDate = new Date(now);
-            expectedDate.setDate(expectedDate.getDate() - i);
-            if (logDate.toDateString() !== expectedDate.toDateString()) { streakValid = false; break; }
-          }
-          if (streakValid) {
-            winMoment = "\n\n7 days straight hitting your target. That is elite discipline. Screenshot this.";
-          }
-        }
-        const streak = await getConsistencyStreak(user.id);
-        const streakMsg = getStreakMessage(streak);
-        const perfectDay = await checkPerfectDay(user);
-        const reply = `${reaction}${comparison}${winMoment}${streakMsg}${perfectDay}`;
-        await storage.logChat(user.id, message, reply, "LOG_STEPS");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
+// ============================================================
+// MAIN MESSAGE HANDLER
+// ============================================================
 
-    if (detectedIntent === "LOG_SLEEP") {
-      const sleepMatch = cleanMsg.match(/\d+/);
-      const hours = sleepMatch ? parseInt(sleepMatch[0]) : null;
-      if (hours !== null) {
-        let reaction = "";
-        if (hours < 5) reaction = R.sleepPoor();
-        else if (hours < 7) reaction = R.sleepOk();
-        else reaction = R.sleepGood();
-        await storage.logChat(user.id, message, reaction, "LOG_SLEEP");
-        return res.type('text/xml').send(`<Response><Message>${reaction}</Message></Response>`);
-      }
-    }
+async function handleMessage(phone: string, message: string, mediaUrl?: string): Promise<string> {
+  const user = await getOrCreateUser(phone);
 
-    if (detectedIntent === "LOG_WEIGHT") {
-      const weightMatch = cleanMsg.match(/\d+(\.\d+)?/);
-      if (weightMatch) {
-        const val = weightMatch[0];
-        await storage.createWeightLog(user.id, val);
-        await storage.updateUser(user.id, { currentWeight: val });
-        let reply = R.weightLogged(val);
-        const allWeights = await storage.getWeightLogs(user.id);
-        const fourteenDaysMs = 14 * 24 * 60 * 60 * 1000;
-        const baseline = allWeights
-          .filter(w => w.loggedAt && (Date.now() - new Date(w.loggedAt).getTime()) >= fourteenDaysMs)
-          .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime())[0];
-        if (baseline && (parseFloat(baseline.weight) - parseFloat(val)) >= 2) {
-          reply += "\n\nDown 2kg+ in the last 2 weeks. That is the work paying off. Screenshot this and share it.";
-        }
-        const wStreak = await getConsistencyStreak(user.id);
-        reply += getStreakMessage(wStreak);
-        await storage.logChat(user.id, message, reply, "LOG_WEIGHT");
-        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-      }
-    }
+  if (user.onboardingState && user.onboardingState !== "COMPLETE") {
+    return handleOnboarding(user, message, phone);
+  }
 
-    if (detectedIntent === "SHOW_TARGETS") {
-      const reply = R.targets(user.calorieTarget || 2000, user.proteinTarget || 150, user.stepsTarget || 8000);
-      await storage.logChat(user.id, message, reply, "SHOW_TARGETS");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  const intent = detectIntent(message);
+  const m = message.toLowerCase().trim();
 
-    if (detectedIntent === "WORKOUT_DONE") {
-      await storage.createWorkoutLog(user.id, true);
-      const { phaseTransitionMsg, newPhase, newWeek } = await advanceProgram(user);
-      const woStreak = await getConsistencyStreak(user.id);
-      const phaseConfig = PHASE_CONFIG[newPhase] || PHASE_CONFIG[1];
-      let reply = `${R.workoutDone()} Phase ${newPhase}: ${phaseConfig.name}, Week ${newWeek}.${getStreakMessage(woStreak)}`;
-      reply += `\n\n${getPostWorkoutNutrition(newPhase)}`;
-      if (phaseTransitionMsg) {
-        reply += `\n\n${phaseTransitionMsg}`;
-      }
-      const milestone = getMilestoneMessage(user);
-      if (milestone) {
-        reply += `\n\n${milestone}`;
-      }
-      const perfectDay = await checkPerfectDay(user);
-      reply += perfectDay;
-      await storage.logChat(user.id, message, reply, "WORKOUT_DONE");
-      return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
-    }
+  // ---- RESET ----
+  if (intent === "RESET") {
+    await db.update(users).set({
+      onboardingState: "START",
+      programmePhase: 1,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
+      goalType: null,
+      currentWeight: null,
+      trainingMode: "home",
+      homeEquipment: null,
+      lifeSituation: null,
+      injuries: null,
+      trainingExperience: null,
+      subscriptionStatus: "trial",
+      totalWorkoutsCompleted: 0,
+    }).where(eq(users.phoneNumber, phone));
+    return `Profile reset. Let us start fresh.\n\nWhat is your name?`;
+  }
 
-    // ── Priority 11.9: NATURAL LANGUAGE WORKOUT HELP ──
-    const workoutHelpPhrases = [
-      "DON'T KNOW WHAT TO DO", "DONT KNOW WHAT TO DO",
-      "WHAT SHOULD I DO", "WHAT IS MY WORKOUT", "WHAT'S MY WORKOUT",
-      "HELP ME TODAY", "CONFUSED ABOUT TRAINING", "WHAT DO I DO TODAY",
-      "WHAT MUST I DO TODAY", "WHAT SHOULD I TRAIN", "SHOW ME MY WORKOUT"
-    ];
-    if (workoutHelpPhrases.some(p => cleanMsg.includes(p))) {
-      const { exercises: helpExercises, isRestDay: helpIsRestDay } = getExercisesForDay(user);
-      let workoutHelpReply: string;
-      if (helpIsRestDay) {
-        const phase = user.programmePhase || 1;
-        const restActivity = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
-        workoutHelpReply = `Today is your rest day — but that does not mean do nothing.\n\nActive recovery: ${restActivity}\n\nActive recovery keeps blood flowing to muscles, reduces soreness, and keeps fat burning. It is a deliberate part of your programme.\n\nReply DONE when finished.`;
-      } else {
-        workoutHelpReply = formatWorkoutMessage(user, helpExercises, false);
-      }
-      await storage.logChat(user.id, message, workoutHelpReply, "WORKOUT_HELP_REQUEST");
-      return res.type('text/xml').send(`<Response><Message>${workoutHelpReply}</Message></Response>`);
-    }
+  // ---- MENU ----
+  if (intent === "MENU") return MENU;
 
-    // ── Priority 12: INTELLIGENT FALLBACK — full GPT with complete master prompt ──
-    const fallbackCtx = await buildUserContext(user);
-    let fallbackReply = getRotatingMotivation();
+  // ---- PHOTO / FOOD VISION ----
+  if (mediaUrl) {
     try {
-      const fallbackCompletion = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+      const imageResponse = await fetch(mediaUrl);
+      const buffer = await imageResponse.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+
+      const visionResponse = await openai.chat.completions.create({
+        model: "gpt-4o",
         max_tokens: 150,
         messages: [
           {
             role: "system",
-            content: `${KAMLIFE_MASTER_PROMPT}\n\nRESPONSE LENGTH: Maximum 3 sentences. Never more than 60 words.\n\n${fallbackCtx}`
+            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 3 sentences. End with one action.`
           },
-          { role: "user", content: message }
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Here is my meal." },
+              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
+            ]
+          }
         ]
       });
-      fallbackReply = fallbackCompletion.choices[0].message.content || fallbackReply;
-    } catch (e) {
-      // use rotating motivation as fallback
+      return visionResponse.choices[0]?.message?.content?.trim() || "Eish, could not identify that. Tell me what you ate in text.";
+    } catch (err) {
+      console.error("Vision error:", err);
+      return "Could not process the photo. Tell me what you ate and I will coach you on it.";
     }
-    await storage.logChat(user.id, message, fallbackReply, "INTELLIGENT_FALLBACK");
-    return res.type('text/xml').send(`<Response><Message>${fallbackReply}</Message></Response>`);
-  });
+  }
 
-  // ============================================================
-  // API Routes
-  // ============================================================
-  app.get(api.users.list.path, async (req, res) => {
-    const users = await storage.getAllUsers();
-    res.json(users);
-  });
+  // ---- WORKOUT TODAY (explicit menu option 1) ----
+  if (intent === "WORKOUT_TODAY") {
+    const workout = buildDayWorkout(user);
+    const coaching = await askCoachK("What is my workout today?", user, "Give one motivating sentence before their workout specific to their phase and goal. Short and SA.");
+    return `${coaching}\n\n${workout}`;
+  }
 
-  app.get(api.users.flagged.path, async (req, res) => {
-    const flagged = await storage.getFlaggedUsers();
-    res.json(flagged);
-  });
-
-  app.get(api.users.betaTesters.path, async (req, res) => {
-    const allUsers = await storage.getAllUsers();
-    const betaTesters = allUsers.filter(u => u.betaBypassUntil !== null);
-    res.json(betaTesters);
-  });
-
-  app.post("/functions/v1/admin-actions", async (req, res) => {
-    const { action } = req.query;
-    
-    if (action === "trigger_daily") {
-      const globalOutboundPaused = process.env.GLOBAL_OUTBOUND_PAUSED === "true";
-      if (globalOutboundPaused) {
-        return res.status(403).json({ success: false, message: "Outbound messages are globally paused." });
-      }
-
-      const users = await storage.getAllUsers();
-      let count = 0;
-      for (const user of users) {
-        if (user.subscriptionStatus === "active") {
-          let msg = "";
-          if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
-            msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
-          } else {
-            const phase = user.programmePhase || 1;
-            const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-            const summary = formatDailyWorkoutSummary(user);
-            msg = `Morning ${getDisplayName(user, "friend")}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
-            const triggerNow = new Date();
-            if (triggerNow.getDay() === 1) {
-              msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
-            }
-            const milestone = getMilestoneMessage(user);
-            if (milestone) {
-              msg += `\n\n${milestone}`;
-            }
-          }
-          await storage.logChat(user.id, "", msg, "DAILY_TRIGGER");
-          count++;
-        }
-      }
-      return res.json({ success: true, count });
+  // ---- WORKOUT (contextual — travel, time, questions, joining gym) ----
+  if (intent === "WORKOUT") {
+    if (m.includes("joined the gym") || m.includes("join the gym")) {
+      await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
+      const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      const workout = buildDayWorkout(updatedUser[0]);
+      const coaching = await askCoachK(message, updatedUser[0], "The client just joined a gym. Welcome this milestone in one sentence, then give them their programme.");
+      return `${coaching}\n\n${workout}`;
     }
-    
-    res.status(400).json({ success: false, message: "Unknown action" });
+
+    if (m.includes("travelling") || m.includes("traveling") || m.includes("hotel") || m.includes("30 min") || m.includes("short on time")) {
+      return await askCoachK(message, user, `The client is travelling or short on time and needs a workout. Give them a 20 to 30 minute hotel room or bodyweight workout they can do right now. Include 4 exercises with sets and reps. Be specific. No equipment assumed.`);
+    }
+
+    const workout = buildDayWorkout(user);
+    const coaching = await askCoachK(message, user, "Give one motivating sentence before their workout specific to their phase and goal. Short and SA.");
+    return `${coaching}\n\n${workout}`;
+  }
+
+  // ---- WORKOUT DONE ----
+  if (intent === "WORKOUT_DONE") {
+    const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+    let newDay = (user.programmeDayInWeek || 1) + 1;
+    let newWeek = user.programmeWeek || 1;
+    const daysPerWeek = user.trainingDaysPerWeek || 3;
+
+    if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
+    if (newWeek > 4) { newWeek = 4; }
+
+    await db.update(users).set({
+      totalWorkoutsCompleted: newTotal,
+      lastWorkoutDate: new Date(),
+      programmeDayInWeek: newDay,
+      programmeWeek: newWeek,
+    }).where(eq(users.phoneNumber, phone));
+
+    await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+
+    const coaching = await askCoachK("I just completed my workout", user, `Client just finished workout number ${newTotal}. Celebrate specifically. Reference their phase and total workouts. One sentence. SA voice.`);
+    return `${coaching}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}`;
+  }
+
+  // ---- STEPS ----
+  if (intent === "LOG_STEPS") {
+    const match = m.match(/(\d[\d,]*)/);
+    if (!match) return "How many steps did you do today? Just the number.";
+    const steps = parseInt(match[1].replace(/,/g, ""));
+    const target = user.stepsTarget || 7000;
+    await db.insert(stepLogs).values({ userId: user.id, steps });
+
+    if (steps >= target) {
+      return await askCoachK(`I did ${steps} steps today`, user, `Client hit their step target of ${target}. They did ${steps} steps. Celebrate this. One sentence. SA and specific.`);
+    } else {
+      const remaining = target - steps;
+      return await askCoachK(`I did ${steps} steps today`, user, `Client logged ${steps} steps. Target is ${target}. They are ${remaining} short. Coach them to close the gap or challenge them for tomorrow.`);
+    }
+  }
+
+  if (intent === "LOG_STEPS_PROMPT") return "How many steps did you do today? Just the number.";
+
+  // ---- SLEEP ----
+  if (intent === "LOG_SLEEP") {
+    const match = m.match(/(\d+\.?\d*)/);
+    if (!match) return "How many hours did you sleep? Just the number.";
+    const hours = parseFloat(match[1]);
+
+    if (hours < 6) {
+      return await askCoachK(`I slept ${hours} hours`, user, `Client only got ${hours} hours of sleep. This is a problem for fat loss and muscle gain. Coach them on why sleep matters and one practical action to get more tonight. SA voice. Firm but caring.`);
+    } else if (hours >= 7 && hours <= 9) {
+      return await askCoachK(`I slept ${hours} hours`, user, `Client got ${hours} hours of sleep which is solid. Acknowledge this briefly. Connect good sleep to their results. One sentence.`);
+    } else {
+      return await askCoachK(`I slept ${hours} hours`, user, `Client slept ${hours} hours. Acknowledge it and move forward with one coaching tip for today.`);
+    }
+  }
+
+  if (intent === "LOG_SLEEP_PROMPT") return "How many hours did you sleep last night? Just the number.";
+
+  // ---- WEIGHT ----
+  if (intent === "LOG_WEIGHT") {
+    const match = m.match(/(\d+\.?\d*)/);
+    if (!match) return "What is your weight in kg? Just the number.";
+    const weight = parseFloat(match[1]);
+    if (isNaN(weight) || weight < 30 || weight > 300) return "Just the number in kg please. For example: 72";
+
+    await db.insert(weightLogs).values({ userId: user.id, weight: weight.toString() });
+    await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
+
+    const previousLogs = await db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2);
+
+    if (previousLogs.length >= 2) {
+      const previous = parseFloat(previousLogs[1].weight);
+      const diff = weight - previous;
+      const instruction = diff > 0.5
+        ? `Client weight went up by ${diff.toFixed(1)}kg. Do not panic them. Explain water retention, sodium, menstrual cycle as likely causes. Coach them to stay on programme.`
+        : diff < -0.5
+        ? `Client lost ${Math.abs(diff).toFixed(1)}kg since last log. Celebrate specifically. Connect it to their consistency.`
+        : `Client weight is similar to last log. Reassure them that consistency produces results over weeks not days.`;
+      return await askCoachK(`My weight is ${weight}kg`, user, instruction);
+    }
+
+    return await askCoachK(`My weight is ${weight}kg`, user, `Client logged their weight as ${weight}kg. This is an early log. Acknowledge it and give context about what to expect from the scale in the first weeks.`);
+  }
+
+  if (intent === "LOG_WEIGHT_PROMPT") return "What is your weight in kg? Just the number.";
+
+  // ---- WATER ----
+  if (intent === "LOG_WATER") {
+    let litres = 0;
+    const mlMatch = m.match(/(\d+)\s*ml/);
+    const litreMatch = m.match(/(\d+\.?\d*)\s*(litre|liter|l\b)/);
+    if (mlMatch) litres = parseInt(mlMatch[1]) / 1000;
+    else if (litreMatch) litres = parseFloat(litreMatch[1]);
+    else if (m.includes("bottle")) litres = 0.75;
+    else if (m.includes("glass")) litres = 0.25;
+    else { const match = m.match(/(\d+\.?\d*)/); litres = match ? parseFloat(match[1]) : 0.5; }
+
+    const currentWater = parseFloat(user.todayWater?.toString() || "0");
+    const newTotal = currentWater + litres;
+    await db.update(users).set({ todayWater: newTotal.toString() }).where(eq(users.phoneNumber, phone));
+
+    const target = 2;
+    if (newTotal >= target) return `Water target hit ✅ ${newTotal.toFixed(1)}L done. This alone improves your fat loss, energy, and skin. Do it again tomorrow.`;
+    const remaining = (target - newTotal).toFixed(1);
+    if (newTotal < 0.5) return `Badly dehydrated. ${newTotal.toFixed(1)}L so far. Drink 500ml right now before anything else. ${remaining}L to go.`;
+    if (newTotal < 1) return `Good start. ${newTotal.toFixed(1)}L done. ${remaining}L to go today.`;
+    if (newTotal < 1.5) return `Halfway there. ${newTotal.toFixed(1)}L done. ${remaining}L to go. Keep going.`;
+    return `Almost there. ${newTotal.toFixed(1)}L done. One more glass finishes it.`;
+  }
+
+  // ---- WEEKLY REPORT ----
+  if (intent === "WEEKLY_REPORT") {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentWorkouts = await db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
+    const recentSteps = await db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
+    const recentWeight = await db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1);
+
+    const workoutCount = recentWorkouts.length;
+    const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length) : 0;
+    const currentWeight = recentWeight.length > 0 ? parseFloat(recentWeight[0].weight) : null;
+    const phase = user.programmePhase || 1;
+    const phaseNames = getPhaseNames();
+
+    const score = Math.min(100, Math.round((workoutCount / 3) * 40 + Math.min(avgSteps / (user.stepsTarget || 7000), 1) * 40 + 20));
+    const level = score >= 90 ? "Elite" : score >= 70 ? "Strong" : score >= 50 ? "Building" : "Needs work";
+
+    const report = `*Weekly Report — ${user.name || "Coach"}*\n\n📊 Phase ${phase}: ${phaseNames[phase]} — Week ${user.programmeWeek}\n\n💪 Workouts this week: ${workoutCount}/3\n👟 Average steps: ${avgSteps.toLocaleString()}\n⚖️ Current weight: ${currentWeight ? `${currentWeight}kg` : "Not logged"}\n💧 Water today: ${user.todayWater || 0}L\n\n🏆 Score: ${score}/100 — ${level}`;
+
+    const coaching = await askCoachK("Give me my weekly report", user, `Client's weekly score is ${score}/100. Level: ${level}. Workouts: ${workoutCount}/3. Steps avg: ${avgSteps}. Give one specific coaching message for next week based on their weakest area. SA voice.`);
+
+    return `${report}\n\n${coaching}`;
+  }
+
+  // ---- MEASUREMENTS ----
+  if (intent === "MEASUREMENTS") {
+    return await askCoachK(message, user, `Client wants to do a measurements check-in. Ask them for 3 key measurements: waist, hips, and chest (or arms for muscle gain clients). One question only. SA voice.`);
+  }
+
+  // ---- FOOD LOG ----
+  if (intent === "FOOD_LOG") {
+    const estimatedCals = estimateCalories(message);
+    const target = user.calorieTarget || 1800;
+    const instruction = estimatedCals > target * 0.5
+      ? `Client logged a meal. Estimated calories: ${estimatedCals}. Daily target: ${target}. Coach them specifically on what they ate — what to adjust, what was good. SA voice. Specific food coaching.`
+      : `Client logged a meal. Estimated calories: ${estimatedCals}. Coach them briefly and encourage them to hit their protein target of ${user.proteinTarget || 120}g.`;
+    return await askCoachK(message, user, instruction);
+  }
+
+  // ---- GROCERY LIST ----
+  if (intent === "GROCERY_LIST") {
+    return await askCoachK(message, user, `Client shared their grocery list or what they have at home. Coach them on how to build meals from this. Focus on protein sources first. Budget-aware. SA voice.`);
+  }
+
+  // ---- SUPPLEMENTS ----
+  if (intent === "SUPPLEMENTS") {
+    return await askCoachK(message, user, `Client is asking about supplements. Be practical and honest. Creatine is worth it. Protein powder is food not magic. Everything else is optional. Food first always. SA voice.`);
+  }
+
+  // ---- MEAL TIMING ----
+  if (intent === "MEAL_TIMING") {
+    return await askCoachK(message, user, `Client is asking about meal timing around workouts. Give specific practical advice based on their training mode and goal. SA voice.`);
+  }
+
+  // ---- BUDGET MEAL ----
+  if (intent === "BUDGET_MEAL") {
+    return await askCoachK(message, user, `Client is on a tight budget. Lead with: "Your budget does not need to change. Smarter choices with the same money." Then give the R57 budget plan: eggs R25, pilchards R12, sugar beans R20. Practical and specific.`);
+  }
+
+  // ---- RAMADAN ----
+  if (intent === "RAMADAN") {
+    return await askCoachK(message, user, `Client is fasting for Ramadan. Restructure all advice around fasting hours. Training after Iftar. Suhoor is most important meal. Light sessions if fasting. Protein priority at Iftar.`);
+  }
+
+  // ---- PERIOD ----
+  if (intent === "PERIOD") {
+    return await askCoachK(message, user, `Client is on their period. Normalise harder workouts feeling during this time. Lighter sessions are fine. Hydration is critical. No guilt. SA voice. Warm but direct.`);
+  }
+
+  // ---- DIABETIC ----
+  if (intent === "DIABETIC") {
+    return await askCoachK(message, user, `Client has diabetes or is asking about blood sugar. Low GI carbs. Consistent meal timing. Train 1 to 2 hours after eating. Never skip meals. Specific and practical.`);
+  }
+
+  // ---- TRAVELLING ----
+  if (intent === "TRAVELLING") {
+    return await askCoachK(message, user, `Client is travelling. Give hotel room workout or fast food survival strategy. Protein first always. 30 minute bodyweight session available. No excuses but real options.`);
+  }
+
+  // ---- CULTURAL EVENT ----
+  if (intent === "CULTURAL_EVENT") {
+    return await askCoachK(message, user, `Client has a cultural event — church, funeral, lobola, umemulo. Acknowledge the importance of these. Enjoy it. Protein first. Smaller portions. No guilt. Back on programme next meal.`);
+  }
+
+  // ---- ALCOHOL ----
+  if (intent === "ALCOHOL") {
+    return await askCoachK(message, user, `Client drank alcohol. Coach forward not backward. Acknowledge it happened. One practical next step. SA voice. Firm but not preachy. Never shame them.`);
+  }
+
+  // ---- GENERAL (catch-all GPT) ----
+  return await askCoachK(message, user);
+}
+
+// ============================================================
+// LOG CHAT HELPER
+// ============================================================
+
+async function logChat(userId: string, phone: string, message: string, reply: string, intent: string): Promise<void> {
+  try {
+    await db.insert(chatHistory).values({
+      userId,
+      phoneNumber: phone,
+      message,
+      reply,
+      intent,
+    });
+  } catch (err) {
+    console.error("Chat log error:", err);
+  }
+}
+
+// ============================================================
+// REGISTER EXPRESS ROUTES
+// ============================================================
+
+export async function registerRoutes(server: Server, app: Express): Promise<void> {
+
+  // ── REST API for admin dashboard ──────────────────────────
+
+  app.get("/api/users", async (_req, res) => {
+    try {
+      const all = await db.select().from(users).orderBy(desc(users.createdAt));
+      res.json(all);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch users" });
+    }
   });
 
-  // ============================================================
-  // Schedulers
-  // ============================================================
+  app.get("/api/users/:id", async (req, res) => {
+    try {
+      const user = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
+      if (!user.length) return res.status(404).json({ message: "User not found" });
 
-  // Daily scheduler
-  setInterval(async () => {
-    const now = new Date();
-    // Daily 07:00
-    if (now.getHours() === 7 && now.getMinutes() === 0) {
-      const users = await storage.getAllUsers();
-      for (const user of users) {
-        if (user.subscriptionStatus === "active") {
-          let msg = "";
-          if (user.onboardingState === "COMPLETED" && !user.trainingMode) {
-            msg = "Where will you train?\n1) Gym\n2) Home\n3) I can only walk";
-          } else {
-            const phase = user.programmePhase || 1;
-            const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-            const summary = formatDailyWorkoutSummary(user);
-            msg = `Morning ${getDisplayName(user, "friend")}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
-            if (now.getDay() === 1) {
-              const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
-              msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
-              msg += `\n\nThis week nutrition focus: ${nutrition.keyHabit}`;
-            }
-            const milestone = getMilestoneMessage(user);
-            if (milestone) {
-              msg += `\n\n${milestone}`;
-            }
-          }
-          console.log(`[SCHEDULE] Sending daily check-in to ${user.phoneNumber}`);
-          await sendWhatsAppMessage(user.phoneNumber, msg);
-          await storage.logChat(user.id, "", msg, "DAILY_MORNING");
-        }
-      }
+      const weights = await db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30);
+      const steps = await db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30);
+      const workouts = await db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30);
+      const chats = await db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50);
+
+      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch user" });
     }
-    // Daily 10:00 — Re-engagement (once per 3 days max)
-    if (now.getHours() === 10 && now.getMinutes() === 0) {
-      const users = await storage.getAllUsers();
+  });
+
+  app.get("/api/admin/flagged", async (_req, res) => {
+    try {
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-      for (const user of users) {
-        if (user.subscriptionStatus === "active" && user.lastActiveAt && new Date(user.lastActiveAt) < threeDaysAgo) {
-          const recentChats = await storage.getChatHistory(user.id, 10);
-          const lastReengagement = recentChats.find(c => c.intent === "RE_ENGAGEMENT");
-          if (lastReengagement && lastReengagement.createdAt && (Date.now() - new Date(lastReengagement.createdAt).getTime()) < 3 * 24 * 60 * 60 * 1000) {
-            continue;
-          }
-          const msg = "You've gone quiet. Your body doesn't take days off — and neither should your mindset. Log one thing today: food, steps, or a workout. One thing. That's all it takes.";
-          console.log(`[SCHEDULE] Re-engagement nudge to ${user.phoneNumber}`);
-          await sendWhatsAppMessage(user.phoneNumber, msg);
-          await storage.logChat(user.id, "", msg, "RE_ENGAGEMENT");
-        }
-      }
+      const inactive = await db.select().from(users).where(
+        and(
+          eq(users.onboardingState, "COMPLETE"),
+        )
+      );
+      const flagged = inactive.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < threeDaysAgo);
+      res.json(flagged);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch flagged users" });
     }
-    // Daily 11:00 — Win-back sequence for cancelled users
-    if (now.getHours() === 11 && now.getMinutes() === 0) {
-      const allUsers = await storage.getAllUsers();
-      for (const u of allUsers) {
-        if (u.subscriptionStatus === "inactive" && u.cancelledAt) {
-          const daysSinceCancel = Math.floor((Date.now() - new Date(u.cancelledAt).getTime()) / (1000 * 60 * 60 * 24));
-          const recentChats = await storage.getChatHistory(u.id, 20);
-          const sentIntents = recentChats.filter(c => c.intent && c.intent.startsWith("WINBACK_DAY_")).map(c => c.intent);
-          let winBackMsg = "";
-          let winBackIntent = "";
-          if (daysSinceCancel >= 3 && daysSinceCancel < 7 && !sentIntents.includes("WINBACK_DAY_3")) {
-            winBackMsg = "You have been gone 3 days. Your body has not forgotten the progress you made. Come back — reply REJOIN to reactivate.";
-            winBackIntent = "WINBACK_DAY_3";
-          } else if (daysSinceCancel >= 7 && daysSinceCancel < 14 && !sentIntents.includes("WINBACK_DAY_7")) {
-            winBackMsg = "One week since you left. Most people who quit wish they had stayed consistent. Reply REJOIN to come back at the same rate.";
-            winBackIntent = "WINBACK_DAY_7";
-          } else if (daysSinceCancel >= 14 && !sentIntents.includes("WINBACK_DAY_14")) {
-            winBackMsg = "Two weeks gone. This is your last nudge from us. Reply REJOIN to restart your journey. After this we will not message again.";
-            winBackIntent = "WINBACK_DAY_14";
-          }
-          if (winBackMsg) {
-            console.log(`[SCHEDULE] Win-back ${winBackIntent} to ${u.phoneNumber}`);
-            await sendWhatsAppMessage(u.phoneNumber, winBackMsg);
-            await storage.logChat(u.id, "", winBackMsg, winBackIntent);
-          }
-        }
-      }
+  });
+
+  app.get("/api/admin/beta-testers", async (_req, res) => {
+    try {
+      const all = await db.select().from(users).where(eq(users.subscriptionStatus, "trial")).orderBy(desc(users.createdAt));
+      res.json(all);
+    } catch (err) {
+      res.status(500).json({ message: "Failed to fetch beta testers" });
     }
-    // Daily 16:00
-    if (now.getHours() === 16 && now.getMinutes() === 0) {
-      const users = await storage.getAllUsers();
-      for (const user of users) {
-        if (user.subscriptionStatus === "active") {
-          if (now.getDay() === 5) {
-            const msg = "Weekend is coming. This is where most people lose their progress. Plan your Saturday meal right now — what will you eat? Reply and I will tell you if it works.";
-            console.log(`[SCHEDULE] Friday weekend warning to ${user.phoneNumber}`);
-            await sendWhatsAppMessage(user.phoneNumber, msg);
-            await storage.logChat(user.id, "", msg, "FRIDAY_WARNING");
-          } else {
-            const msg = "Gym reminder: even 20 minutes counts. Reply DONE when finished.";
-            console.log(`[SCHEDULE] Sending gym reminder to ${user.phoneNumber}`);
-            await sendWhatsAppMessage(user.phoneNumber, msg);
-            await storage.logChat(user.id, "", msg, "DAILY_GYM");
-          }
-        }
-      }
+  });
+
+  app.post("/api/admin/run-test", async (req, res) => {
+    const { testId, liveMode } = req.body;
+    const logs: string[] = [];
+    try {
+      logs.push(`Running test ${testId}...`);
+      const testPhone = "+27000000000";
+      const testMessages: Record<string, string> = {
+        A: "Hi, I want to join",
+        B: "I ate pap and chicken for lunch",
+        C: "I did 8500 steps today",
+        D: "I weigh 75kg",
+        E: "I am travelling and need a workout",
+        F: "weekly report",
+      };
+      const msg = testMessages[testId] || "Hello";
+      logs.push(`Sending: "${msg}"`);
+      const reply = await handleMessage(testPhone, msg);
+      logs.push(`Reply: ${reply}`);
+      res.json({ success: true, logs, whatsappSent: reply });
+    } catch (err: any) {
+      logs.push(`Error: ${err.message}`);
+      res.json({ success: false, logs });
     }
-  }, 60000);
+  });
 
-  async function calculateWeeklyCompliance(userId: string) {
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  // ── WhatsApp webhook ──────────────────────────────────────
 
-    const [steps, workouts, chat] = await Promise.all([
-      storage.getStepLogs(userId),
-      storage.getWorkoutLogs(userId),
-      db.select().from(chatHistory).where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, sevenDaysAgo)))
-    ]);
+  app.post("/api/webhooks/whatsapp", async (req, res) => {
+    try {
+      const phone = (req.body.From || "").replace("whatsapp:", "");
+      const message = (req.body.Body || "").trim();
+      const mediaUrl = req.body.MediaUrl0 || undefined;
 
-    const user = await storage.getUser(userId);
-    if (!user) return { score: 0, level: "RESET" };
-
-    // 1) Steps (25%)
-    const stepsTarget = user.stepsTarget || 8000;
-    const daysStepsMet = steps.filter(s => s.loggedAt && new Date(s.loggedAt) >= sevenDaysAgo && s.steps >= stepsTarget).length;
-    const stepsScore = Math.min(25, (daysStepsMet / 7) * 25);
-
-    // 2) Workouts (25%)
-    const workoutsDone = workouts.filter(w => w.loggedAt && new Date(w.loggedAt) >= sevenDaysAgo && w.workoutCompleted).length;
-    const workoutScore = Math.min(25, (workoutsDone / 3) * 25);
-
-    // 3) Food (25%) - Days without junk/alcohol mentions in logs
-    const foodLogs = chat.filter(c => c.intent === "LOG_FOOD_FOLLOWUP" || c.intent === "log_food");
-    const badFoodDays = new Set(foodLogs.filter(c => /JUNK|ALCOHOL|SWEETS|CAKE|BEER|WINE/.test(c.messageIn?.toUpperCase() || "")).map(c => new Date(c.createdAt!).toDateString())).size;
-    const foodScore = Math.max(0, 25 - (badFoodDays * 5));
-
-    // 4) Logging consistency (25%)
-    const activeDays = new Set(chat.map(c => new Date(c.createdAt!).toDateString())).size;
-    const loggingScore = Math.min(25, (activeDays / 7) * 25);
-
-    const totalScore = Math.round(stepsScore + workoutScore + foodScore + loggingScore);
-    
-    let level = "RESET";
-    if (totalScore >= 90) level = "LOCKED IN";
-    else if (totalScore >= 70) level = "CONSISTENT";
-    else if (totalScore >= 40) level = "BUILDING";
-
-    const weekSteps = steps.filter(s => s.loggedAt && new Date(s.loggedAt) >= sevenDaysAgo);
-    const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((sum, s) => sum + s.steps, 0) / weekSteps.length) : 0;
-    const foodLogDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
-
-    return { score: totalScore, level, workoutsDone, avgSteps, foodLogDays, activeDays };
-  }
-
-  async function getConsistencyStreak(userId: string): Promise<number> {
-    const chats = await storage.getChatHistory(userId, 100);
-    const logIntents = ["LOG_FOOD", "LOG_FOOD_FOLLOWUP", "LOG_STEPS", "LOG_STEPS_FOLLOWUP", "LOG_WEIGHT", "LOG_WEIGHT_FOLLOWUP", "WORKOUT_DONE", "FOOD_PORTION", "LOG_SLEEP"];
-    const loggedDates = new Set(
-      chats.filter(c => c.intent && logIntents.includes(c.intent) && c.createdAt)
-        .map(c => new Date(c.createdAt!).toDateString())
-    );
-    let streak = 0;
-    const today = new Date();
-    for (let i = 0; i < 60; i++) {
-      const d = new Date(today);
-      d.setDate(d.getDate() - i);
-      if (loggedDates.has(d.toDateString())) {
-        streak++;
-      } else {
-        break;
+      if (!phone || !message) {
+        return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
-    }
-    return streak;
-  }
 
-  function getStreakMessage(streak: number): string {
-    if (streak === 7) return "\n\nDay 7 streak. You have logged every single day this week. That is the 1% habit. Keep it going.";
-    if (streak === 30) return "\n\n30 day streak. You are no longer trying to build a habit — you have one. Screenshot this.";
-    return "";
-  }
+      const reply = await handleMessage(phone, message, mediaUrl);
 
-  // Weekly scheduler
-  setInterval(async () => {
-    const now = new Date();
-    // Sunday 18:00
-    if (now.getDay() === 0 && now.getHours() === 18 && now.getMinutes() === 0) {
-      const users = await storage.getAllUsers();
-      for (const user of users) {
-        if (user.subscriptionStatus === "active") {
-          const { score, level, workoutsDone, avgSteps, foodLogDays, activeDays } = await calculateWeeklyCompliance(user.id);
-          await storage.updateUser(user.id, { weeklyScore: score, complianceLevel: level });
-
-          const levelMsg = level === "LOCKED IN" ? R.weeklyLockedIn() :
-            level === "CONSISTENT" ? R.weeklyConsistent() :
-            level === "BUILDING" ? R.weeklyBuilding() :
-            R.weeklyReset();
-          const fDays = foodLogDays || 0;
-          const aSteps = avgSteps || 0;
-          const aDays = activeDays || 0;
-          const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
-          let report = `*Weekly Report — ${getDisplayName(user)}*\n\n${getDisplayName(user)}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}`;
-
-          const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
-          if (daysSinceJoin >= 14 && daysSinceJoin <= 21) {
-            report += "\n\nYou are in week 3 — the hardest week of any programme. Motivation is low, results feel slow, life is getting in the way. This is exactly where most people quit. The ones who push through week 3 are the ones who get results. You are not most people. Show up this week.";
-          }
-          if (daysSinceJoin >= 28) {
-            const prevChats = await storage.getChatHistory(user.id, 50);
-            const alreadyPrompted = prevChats.some(c => c.intent === "PHOTO_PROMPT");
-            if (!alreadyPrompted) {
-              report += "\n\nYou have been on this programme for 4 weeks. Take a front and side photo today — same time, same lighting. This is your progress marker. You will thank yourself in 4 more weeks.";
-              await storage.logChat(user.id, "", "Photo prompt sent", "PHOTO_PROMPT");
-            }
-          }
-
-          console.log(`[SCHEDULE] Sending weekly report to ${user.phoneNumber}`);
-          await sendWhatsAppMessage(user.phoneNumber, report);
-          await storage.logChat(user.id, "", report, "WEEKLY_REPORT");
-        }
+      const user = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      if (user.length > 0) {
+        await logChat(user[0].id, phone, message, reply, detectIntent(message));
       }
-    }
-  }, 60000);
 
-  return httpServer;
+      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${reply}</Message></Response>`);
+    } catch (err) {
+      console.error("Webhook error:", err);
+      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
+    }
+  });
+
+  // ── Admin test harness webhook ────────────────────────────
+
+  app.post("/api/admin/test-webhook", async (req, res) => {
+    try {
+      const { phone, message } = req.body;
+      if (!phone || !message) return res.status(400).json({ message: "phone and message required" });
+      const reply = await handleMessage(phone, message);
+      res.json({ reply });
+    } catch (err: any) {
+      res.status(500).json({ message: err.message });
+    }
+  });
+
+  // ── Health check ──────────────────────────────────────────
+
+  app.get("/health", (_req, res) => {
+    res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+  });
 }
