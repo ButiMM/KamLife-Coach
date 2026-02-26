@@ -842,35 +842,50 @@ function getRuleBasedResponse(message: string, menuText: string): string | null 
 
   if (upper === "MENU" || upper.includes("MENU")) return menuText;
 
-  const stepMatch = lower.match(/(?:steps?|walked?|walk)[^\d]*(\d[\d,]+)|(\d[\d,]+)[^\d]*(?:steps?|walked?)/i);
-  if (stepMatch) {
-    const steps = parseInt((stepMatch[1] || stepMatch[2]).replace(/,/g, ""));
-    if (!isNaN(steps)) {
-      if (steps < 2000) return "Under 2000 steps. Get outside for 10 minutes right now.";
-      if (steps >= 10000) return `${steps.toLocaleString()} steps. Target hit. Repeat tomorrow.`;
-      return `${steps.toLocaleString()} steps logged. Keep building.`;
+  // Steps: must contain steps/walked/step count AND a number
+  const hasStepKeyword = /\bsteps?\b|\bwalked?\b|\bstep count\b/i.test(lower);
+  if (hasStepKeyword) {
+    const numMatch = lower.match(/(\d[\d,]*)/);
+    if (numMatch) {
+      const steps = parseInt(numMatch[1].replace(/,/g, ""));
+      if (!isNaN(steps)) {
+        if (steps < 2000) return "Under 2000 steps. Get outside for 10 minutes right now.";
+        if (steps >= 10000) return `${steps.toLocaleString()} steps. Target hit. Repeat tomorrow.`;
+        return `${steps.toLocaleString()} steps logged. Keep building.`;
+      }
     }
   }
 
-  const waterMatch = lower.match(/(?:drank?|had|finished|done)[^\d]*(\d+(?:\.\d+)?)\s*(?:l(?:itre)?s?|litres?|liters?)|(\d+(?:\.\d+)?)\s*(?:l(?:itre)?s?|litres?|liters?)[^\d]*(?:water|rooibos)?|(\d+)\s*(?:ml)\b|(\d+)\s*(?:glass(?:es)?|bottle(?:s)?)\b/i);
-  if (waterMatch || /water done|finished water|drank water|had water/.test(lower)) {
+  // Water: must contain (water OR drank OR rooibos) AND (ml OR litre OR l OR bottle OR glass)
+  const hasWaterKeyword = /\bwater\b|\bdrank?\b|\brooibos\b/i.test(lower);
+  const hasWaterUnit = /\bml\b|\blitre?\b|\blitres?\b|\bliter?\b|\bl\b|\bbottles?\b|\bglasses?\b/i.test(lower);
+  if ((hasWaterKeyword && hasWaterUnit) || /water done|finished water|drank water|had water/i.test(lower)) {
     return "Water logged. Keep going — minimum 2L daily.";
   }
 
-  const sleepMatch = lower.match(/(?:slept?|sleep)[^\d]*(\d+)|(\d+)\s*(?:hours?)[^\d]*(?:sleep|slept)/i);
-  if (sleepMatch) {
-    const hours = parseInt(sleepMatch[1] || sleepMatch[2]);
-    if (!isNaN(hours)) {
-      if (hours < 5) return "Under 5 hours is not enough. Get to bed earlier tonight — this is non-negotiable.";
-      if (hours < 7) return "Not bad but not optimal. Aim for 7 to 8 hours tonight.";
-      return "Solid sleep. That is how you recover and keep cravings in check.";
+  // Sleep: must contain (slept OR sleep) AND (hour OR hrs)
+  const hasSleepKeyword = /\bslept?\b|\bsleep\b/i.test(lower);
+  const hasSleepUnit = /\bhours?\b|\bhrs?\b/i.test(lower);
+  if (hasSleepKeyword && hasSleepUnit) {
+    const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
+    if (numMatch) {
+      const hours = parseFloat(numMatch[1]);
+      if (!isNaN(hours)) {
+        if (hours < 5) return "Under 5 hours is not enough. Get to bed earlier tonight — this is non-negotiable.";
+        if (hours < 7) return "Not bad but not optimal. Aim for 7 to 8 hours tonight.";
+        return "Solid sleep. That is how you recover and keep cravings in check.";
+      }
     }
   }
 
-  const weightMatch = lower.match(/(?:weight|weigh(?:ed)?)[^\d]*(\d+(?:\.\d+)?)\s*kg|(\d+(?:\.\d+)?)\s*kg[^\d]*(?:weight|weigh)/i);
-  if (weightMatch) {
-    const val = weightMatch[1] || weightMatch[2];
-    return `${val}kg logged. The scale is just data — consistency is what matters.`;
+  // Weight: must contain (weigh OR weight OR kg) AND a number
+  const hasWeightKeyword = /\bweigh(?:ed|s)?\b|\bweight\b|\bkg\b/i.test(lower);
+  if (hasWeightKeyword) {
+    const numMatch = lower.match(/(\d+(?:\.\d+)?)/);
+    if (numMatch) {
+      const val = numMatch[1];
+      return `${val}kg logged. The scale is just data — consistency is what matters.`;
+    }
   }
 
   return null;
@@ -1327,8 +1342,10 @@ export async function registerRoutes(
       }
     }
 
-    // ── Priority 8: RESET command ──
-    if (cleanMsg === "RESET") {
+    // ── Priority 8: RESET command — including natural language variants ──
+    const naturalResetPhrases = ["RESET AND PROFILE", "RESET AND SCHEDULE", "START OVER", "START AGAIN", "BEGIN AGAIN"];
+    const isNaturalReset = naturalResetPhrases.some(p => cleanMsg.includes(p));
+    if (cleanMsg === "RESET" || isNaturalReset) {
       await storage.updateUser(user.id, { awaitingInputType: null });
       const menu = `Reset done. ${getMenuText(user)}`;
       await storage.logChat(user.id, message, menu, "COACH_RESET");
@@ -2748,16 +2765,48 @@ export async function registerRoutes(
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
-    // ── Priority 12: INTELLIGENT FALLBACK ──
+    // ── Priority 11.9: NATURAL LANGUAGE WORKOUT HELP ──
+    const workoutHelpPhrases = [
+      "DON'T KNOW WHAT TO DO", "DONT KNOW WHAT TO DO",
+      "WHAT SHOULD I DO", "WHAT IS MY WORKOUT", "WHAT'S MY WORKOUT",
+      "HELP ME TODAY", "CONFUSED ABOUT TRAINING", "WHAT DO I DO TODAY",
+      "WHAT MUST I DO TODAY", "WHAT SHOULD I TRAIN", "SHOW ME MY WORKOUT"
+    ];
+    if (workoutHelpPhrases.some(p => cleanMsg.includes(p))) {
+      const { exercises: helpExercises, isRestDay: helpIsRestDay } = getExercisesForDay(user);
+      let workoutHelpReply: string;
+      if (helpIsRestDay) {
+        const phase = user.programmePhase || 1;
+        const restActivity = REST_DAY_MESSAGES[phase] || REST_DAY_MESSAGES[1];
+        workoutHelpReply = `Today is your rest day — but that does not mean do nothing.\n\nActive recovery: ${restActivity}\n\nActive recovery keeps blood flowing to muscles, reduces soreness, and keeps fat burning. It is a deliberate part of your programme.\n\nReply DONE when finished.`;
+      } else {
+        workoutHelpReply = formatWorkoutMessage(user, helpExercises, false);
+      }
+      await storage.logChat(user.id, message, workoutHelpReply, "WORKOUT_HELP_REQUEST");
+      return res.type('text/xml').send(`<Response><Message>${workoutHelpReply}</Message></Response>`);
+    }
+
+    // ── Priority 12: INTELLIGENT FALLBACK — full GPT with complete master prompt ──
     const fallbackCtx = await buildUserContext(user);
-    const { reply } = await getKamLifeFoodReply(
-      message,
-      user.calorieTarget || 2000,
-      fallbackCtx,
-      user.name || "there"
-    );
-    await storage.logChat(user.id, message, reply, "INTELLIGENT_FALLBACK");
-    return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+    let fallbackReply = getRotatingMotivation();
+    try {
+      const fallbackCompletion = await openai.chat.completions.create({
+        model: "gpt-4o-mini",
+        max_tokens: 150,
+        messages: [
+          {
+            role: "system",
+            content: `${KAMLIFE_MASTER_PROMPT}\n\nRESPONSE LENGTH: Maximum 3 sentences. Never more than 60 words.\n\n${fallbackCtx}`
+          },
+          { role: "user", content: message }
+        ]
+      });
+      fallbackReply = fallbackCompletion.choices[0].message.content || fallbackReply;
+    } catch (e) {
+      // use rotating motivation as fallback
+    }
+    await storage.logChat(user.id, message, fallbackReply, "INTELLIGENT_FALLBACK");
+    return res.type('text/xml').send(`<Response><Message>${fallbackReply}</Message></Response>`);
   });
 
   // ============================================================
