@@ -130,11 +130,11 @@ export default function UsersList() {
                     <TableCell>
                       <div className="text-sm">
                         <span className="font-medium">{user.currentWeight || "-"}</span>
-                        <span className="text-muted-foreground"> / {user.weightGoal || "-"} kg</span>
+                        <span className="text-muted-foreground"> kg</span>
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {user.joinedAt ? new Date(user.joinedAt).toLocaleDateString() : "-"}
+                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>

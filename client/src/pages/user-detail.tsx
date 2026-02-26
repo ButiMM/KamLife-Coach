@@ -1,4 +1,4 @@
-import { useUser, useUserLogs } from "@/hooks/use-users";
+import { useUser } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { StatusBadge } from "@/components/status-badge";
 import { useRoute } from "wouter";
@@ -12,9 +12,8 @@ export default function UserDetail() {
   const userId = params?.id ? parseInt(params.id) : 0;
   
   const { data: user, isLoading: userLoading } = useUser(userId);
-  const { data: logs, isLoading: logsLoading } = useUserLogs(userId);
 
-  if (userLoading || logsLoading) {
+  if (userLoading) {
     return (
         <DashboardLayout>
             <div className="animate-pulse space-y-8">
@@ -30,14 +29,7 @@ export default function UserDetail() {
 
   if (!user) return <DashboardLayout>User not found</DashboardLayout>;
 
-  // Prepare chart data - filter logs with weight
-  const weightData = logs
-    ?.filter(log => log.weight)
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-    .map(log => ({
-      date: format(new Date(log.date), 'MMM d'),
-      weight: parseFloat(log.weight as string),
-    })) || [];
+  const weightData: { date: string; weight: number }[] = [];
 
   return (
     <DashboardLayout>
@@ -53,7 +45,7 @@ export default function UserDetail() {
                     <div className="flex items-center gap-3 text-sm text-muted-foreground">
                         <span className="flex items-center gap-1">
                             <Calendar className="w-4 h-4" />
-                            Joined {user.joinedAt ? format(new Date(user.joinedAt), 'MMM d, yyyy') : '-'}
+                            Joined {user.createdAt ? format(new Date(user.createdAt), 'MMM d, yyyy') : '-'}
                         </span>
                         <span>•</span>
                         <span>{user.phoneNumber}</span>
@@ -71,7 +63,7 @@ export default function UserDetail() {
                 </div>
                 <p className="text-muted-foreground text-sm font-medium">Current Weight</p>
                 <h3 className="text-3xl font-bold font-display">{user.currentWeight || "-"} <span className="text-base font-normal text-muted-foreground">kg</span></h3>
-                <p className="text-xs text-muted-foreground">Goal: {user.weightGoal} kg</p>
+                <p className="text-xs text-muted-foreground">Goal: {user.goalType || "-"}</p>
             </Card>
 
             <Card className="p-6 border-border/50 flex flex-col items-center justify-center text-center space-y-2">
@@ -79,8 +71,8 @@ export default function UserDetail() {
                     <Footprints className="w-6 h-6" />
                 </div>
                 <p className="text-muted-foreground text-sm font-medium">Avg Steps</p>
-                <h3 className="text-3xl font-bold font-display">
-                    {logs?.length ? Math.round(logs.reduce((acc, log) => acc + (log.steps || 0), 0) / logs.length) : 0}
+                <h3 className="text-3xl font-bold font-display" data-testid="text-avg-steps">
+                    {user.dailyStepGoal || "-"}
                 </h3>
                 <p className="text-xs text-muted-foreground">Per day logged</p>
             </Card>
@@ -90,10 +82,10 @@ export default function UserDetail() {
                     <Dumbbell className="w-6 h-6" />
                 </div>
                 <p className="text-muted-foreground text-sm font-medium">Workouts</p>
-                <h3 className="text-3xl font-bold font-display">
-                    {logs?.filter(l => l.workoutCompleted).length || 0}
+                <h3 className="text-3xl font-bold font-display" data-testid="text-workouts">
+                    {user.trainingDaysPerWeek || "-"}
                 </h3>
-                <p className="text-xs text-muted-foreground">Total sessions</p>
+                <p className="text-xs text-muted-foreground">Days per week</p>
             </Card>
         </div>
 
@@ -148,25 +140,28 @@ export default function UserDetail() {
 
             {/* Recent Logs List */}
             <Card className="p-6 border-border/50 h-[400px] flex flex-col">
-                <h3 className="text-lg font-bold font-display mb-4">Recent Logs</h3>
-                <div className="flex-1 overflow-y-auto pr-2 space-y-4 custom-scrollbar">
-                    {logs?.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()).map(log => (
-                        <div key={log.id} className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
-                            <div className="flex justify-between items-center mb-2">
-                                <span className="font-semibold">{format(new Date(log.date), 'EEE, MMM d')}</span>
-                                {log.workoutCompleted && (
-                                    <span className="text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full">Workout Done</span>
-                                )}
-                            </div>
-                            <div className="grid grid-cols-2 gap-2 text-muted-foreground">
-                                <div>Step: {log.steps || '-'}</div>
-                                <div>Weight: {log.weight ? `${log.weight}kg` : '-'}</div>
-                            </div>
-                        </div>
-                    ))}
-                    {(!logs || logs.length === 0) && (
-                        <p className="text-center text-muted-foreground py-8">No logs yet.</p>
-                    )}
+                <h3 className="text-lg font-bold font-display mb-4">User Info</h3>
+                <div className="flex-1 overflow-y-auto pr-2 space-y-3 custom-scrollbar" data-testid="panel-user-info">
+                    <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
+                        <span className="text-muted-foreground">Training Mode:</span>
+                        <span className="ml-2 font-medium capitalize">{user.trainingMode || "home"}</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
+                        <span className="text-muted-foreground">Phase:</span>
+                        <span className="ml-2 font-medium">{user.currentPhase || 1}</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
+                        <span className="text-muted-foreground">Goal:</span>
+                        <span className="ml-2 font-medium capitalize">{user.goalType || "-"}</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
+                        <span className="text-muted-foreground">Step Goal:</span>
+                        <span className="ml-2 font-medium">{user.dailyStepGoal || "-"}</span>
+                    </div>
+                    <div className="p-3 rounded-xl bg-secondary/50 border border-border/50 text-sm">
+                        <span className="text-muted-foreground">Calorie Target:</span>
+                        <span className="ml-2 font-medium">{user.dailyCalorieTarget || "-"}</span>
+                    </div>
                 </div>
             </Card>
         </div>
