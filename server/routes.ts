@@ -891,6 +891,30 @@ function getRuleBasedResponse(message: string, menuText: string): string | null 
   return null;
 }
 
+// ── Full-GPT coaching reply — every coaching response goes through this ──
+async function coachReply(user: any, message: string, situationHint?: string): Promise<string> {
+  try {
+    const ctx = await buildUserContext(user);
+    const systemContent = [
+      KAMLIFE_MASTER_PROMPT,
+      situationHint ? `SITUATION: ${situationHint}` : "",
+      "RESPONSE LENGTH: Maximum 3 sentences. Never more than 60 words.",
+      ctx
+    ].filter(Boolean).join("\n\n");
+    const completion = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 150,
+      messages: [
+        { role: "system", content: systemContent },
+        { role: "user", content: message }
+      ]
+    });
+    return completion.choices[0].message.content?.trim() || getRotatingMotivation();
+  } catch {
+    return getRotatingMotivation();
+  }
+}
+
 async function getKamLifeFoodReply(
   userMessage: string,
   userCalories: number,
@@ -1945,13 +1969,13 @@ export async function registerRoutes(
     // ── Priority 9.7: EMOTIONAL INTELLIGENCE ──
     const giveUpWords = ["GIVE UP", "GIVING UP", "CANT DO THIS", "NOT WORKING", "NO RESULTS", "WASTE OF MONEY", "USELESS"];
     if (giveUpWords.some(w => cleanMsg.includes(w))) {
-      const reply = "I hear you. Results are not always visible on the scale — but they are happening. Tell me: are you sleeping? Are you moving? Are you eating protein? Answer those three and we fix this together.";
+      const reply = await coachReply(user, message, "User is feeling like giving up or that the programme is not working. Acknowledge their frustration directly. Ask one specific diagnostic question about sleep, movement, or protein. End with a single concrete action.");
       await storage.logChat(user.id, message, reply, "EMOTIONAL_GIVEUP");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     const stressWords = ["STRESSED", "STRESS", "ANXIETY", "DEPRESSED", "SAD", "CANT COPE", "OVERWHELMED"];
     if (stressWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Your mental health matters more than any workout. Take today off if you need to — but do not disappear. Check in tomorrow. Even just a walk and water counts. I am here.";
+      const reply = await coachReply(user, message, "User is stressed, anxious, sad, or overwhelmed. Acknowledge their emotional state briefly. Do not dismiss it. Give one compassionate but action-focused instruction for today only. Coach K voice — warm but direct.");
       await storage.logChat(user.id, message, reply, "EMOTIONAL_STRESS");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1959,7 +1983,7 @@ export async function registerRoutes(
     // ── Priority 9.8: SUPPLEMENT GUIDANCE ──
     const suppWords = ["PROTEIN SHAKE", "PROTEIN POWDER", "CREATINE", "FAT BURNER", "PRE WORKOUT", "SUPPLEMENTS", "SUPPS"];
     if (suppWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Supplements are optional — food comes first. If your diet is clean and consistent, protein powder can help hit your daily target. Creatine is safe and effective for strength. Fat burners are mostly marketing — avoid them. Sort your food first, then we talk supplements.";
+      const reply = await coachReply(user, message, "User is asking about supplements. Food comes first always. Give specific, honest advice about the supplement mentioned. No hype, no sales language. Creatine is safe, fat burners are marketing, protein powder supplements a good diet.");
       await storage.logChat(user.id, message, reply, "SUPPLEMENT_ADVICE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -1967,41 +1991,41 @@ export async function registerRoutes(
     // ── Priority 9.9: SA LIFE SCENARIO HANDLERS ──
     const funeralWords = ["FUNERAL", "UMNGCWABO", "BURIAL", "PASSED AWAY", "WE LOST", "MOURNING"];
     if (funeralWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Condolences on your loss. During this time do not stress about your programme. Eat what is available, stay hydrated, and come back when you are ready. We will be here.";
+      const reply = await coachReply(user, message, "User has lost someone or is attending a funeral. Lead with condolences. Give grace on the programme. Keep it brief, human, and warm. One gentle action only.");
       await storage.logChat(user.id, message, reply, "FUNERAL_GRACE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     if (cleanMsg.includes("BRAAI")) {
-      const reply = "Braai is life — here is how to navigate it. Load your plate with meat first — boerewors, chicken, chops. Skip the rolls. Limit pap to one fist. One beer maximum. Enjoy it and get back on track tomorrow morning.";
+      const reply = await coachReply(user, message, "User is going to a braai. Give specific SA braai strategy: load plate with meat first, limit pap to one fist, one beer maximum. Enjoy it and get back on track tomorrow — not Monday.");
       await storage.logChat(user.id, message, reply, "BRAAI_STRATEGY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     const brokeWords = ["NO MONEY", "BROKE", "MONTH END", "NO FOOD", "CANT AFFORD", "NO CASH"];
     if (brokeWords.some(w => cleanMsg.includes(w))) {
-      const reply = "This is what you buy right now: 6 eggs R25, tin pilchards R12, sugar beans R20. That is R57 for 3 days of protein. Eggs for breakfast, beans for lunch, pilchards for dinner. Simple and effective.";
+      const reply = await coachReply(user, message, "User has no money for food. Give the R57 budget plan: 6 eggs R25, tin pilchards R12, sugar beans R20. Specific, practical, affordable. SA context. This is not a charity response — it is a coaching response.");
       await storage.logChat(user.id, message, reply, "MONTH_END_HUNGER");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     const tavernWords = ["TAVERN", "SHEBEEN"];
     if (tavernWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Tavern nights happen. If you are going — eat a full protein meal before you go. Limit to 2 drinks. Drink water between drinks. Get back on track tomorrow morning — not Monday.";
+      const reply = await coachReply(user, message, "User is going to or has been at a tavern or shebeen. Give practical SA-specific strategy: eat protein first, limit drinks to 2, water between drinks, back on track tomorrow morning not Monday.");
       await storage.logChat(user.id, message, reply, "TAVERN_CULTURE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     const churchWords = ["CHURCH", "SUNDAY LUNCH", "AFTER CHURCH"];
     if (churchWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Church lunch is a social reality. Fill half your plate with protein — chicken, meat. Take one small scoop of starchy sides. Enjoy the fellowship and log what you ate after.";
+      const reply = await coachReply(user, message, "User is dealing with church or Sunday lunch social eating. Practical strategy: protein first, smaller starchy portions, enjoy the fellowship. Log it after.");
       await storage.logChat(user.id, message, reply, "CHURCH_SUNDAY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     const holidayWords = ["DECEMBER", "HOLIDAYS", "VACATION", "ON HOLIDAY"];
     if (holidayWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Holiday mode does not mean stop. Walk every morning — 20 minutes minimum. Watch the alcohol. Eat protein at every meal. You will come back in January ahead of everyone else.";
+      const reply = await coachReply(user, message, "User is on holiday or mentioning December. Holiday mode does not mean stop. Walk daily, watch alcohol, protein at every meal. Specific and direct. No corporate wellness language.");
       await storage.logChat(user.id, message, reply, "DECEMBER_HOLIDAY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2009,7 +2033,7 @@ export async function registerRoutes(
     // ── Priority 9.91: BINGE EATING DETECTION ──
     const bingeWords = ["ATE EVERYTHING", "COULDNT STOP EATING", "ATE THE WHOLE", "LOST CONTROL", "ATE UNTIL SICK", "BINGED"];
     if (bingeWords.some(w => cleanMsg.includes(w))) {
-      const reply = "What you are describing sounds like a binge episode. This is not about willpower — it is often triggered by restriction or stress. Do not punish yourself with less food tomorrow. Eat normally, add protein, and tell me what triggered it today.";
+      const reply = await coachReply(user, message, "User describes a binge episode. Do not shame them. Explain this is not willpower failure — it is often restriction or stress. Tell them not to restrict tomorrow. Ask what triggered it. One forward action.");
       await storage.logChat(user.id, message, reply, "BINGE_DETECTION");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2022,7 +2046,7 @@ export async function registerRoutes(
       const weightLogs = await storage.getWeightLogs(user.id);
       const loggedToday = weightLogs.some(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
       if (loggedToday) {
-        const reply = "You already logged your weight today. Weighing multiple times daily creates anxiety and gives false readings. Once per week same day same time is the standard. Step away from the scale.";
+        const reply = await coachReply(user, message, "User has already logged their weight today and is weighing again. Tell them once per week same day same time is the standard. Weighing multiple times daily creates anxiety. Be direct — step away from the scale.");
         await storage.logChat(user.id, message, reply, "SCALE_OBSESSION");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -2031,7 +2055,7 @@ export async function registerRoutes(
     // ── Priority 9.93: ALL OR NOTHING THINKING ──
     const allOrNothingWords = ["RUINED IT", "MESSED UP", "FAILED", "STARTING OVER", "STARTING MONDAY", "START FRESH MONDAY"];
     if (allOrNothingWords.some(w => cleanMsg.includes(w))) {
-      const reply = "One bad meal does not ruin a week. One bad week does not ruin a month. Get back on track with your very next meal — not Monday. What are you eating in the next 2 hours?";
+      const reply = await coachReply(user, message, "User is showing all-or-nothing thinking — ruined it, starting Monday, failed. Challenge this directly. One bad meal does not ruin a week. Get back on track with the very next meal. Ask what they are eating in the next 2 hours.");
       await storage.logChat(user.id, message, reply, "ALL_OR_NOTHING");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2039,20 +2063,20 @@ export async function registerRoutes(
     // ── Priority 9.94: COMPARISON CLIENT ──
     const comparisonWords = ["MY FRIEND LOST", "EVERYONE ELSE", "WHY IS SHE LOSING", "LOSING FASTER THAN ME", "NOT LOSING AS FAST"];
     if (comparisonWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Stop comparing. Different bodies, different hormones, different histories. Your job is to beat last week's version of you — nobody else. What did you do better this week than last week?";
+      const reply = await coachReply(user, message, "User is comparing their progress to someone else. Shut this down firmly but kindly. Different bodies, different hormones, different histories. Focus on beating last week's version of themselves. Ask one specific improvement question.");
       await storage.logChat(user.id, message, reply, "COMPARISON_CLIENT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     // ── Priority 9.95: CHRONIC CONDITIONS ──
     if (cleanMsg.includes("PCOS") || cleanMsg.includes("POLYCYSTIC")) {
-      const reply = "PCOS makes fat loss harder but not impossible. Key focus: reduce refined carbs significantly, prioritise strength training over cardio, manage stress and sleep aggressively. Weight loss will be slower — that is normal. Consistency over months is what works.";
+      const reply = await coachReply(user, message, "User has PCOS. PCOS makes fat loss harder but not impossible. Key: reduce refined carbs, prioritise strength training over cardio, manage stress and sleep aggressively. Progress is slower — that is normal. Consistency over months.");
       await storage.logChat(user.id, message, reply, "CHRONIC_PCOS");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     if (cleanMsg.includes("THYROID") || cleanMsg.includes("HYPOTHYROID") || cleanMsg.includes("HYPERTHYROID")) {
-      const reply = "Thyroid conditions affect metabolism significantly. Get your medication sorted with your doctor first. From our side — focus on protein, manage portions strictly, and keep training consistently. Progress will be slower but it will come. Do not compare your speed to anyone else.";
+      const reply = await coachReply(user, message, "User has a thyroid condition. Medication must be sorted with their doctor first. From coaching side: protein, portion control, consistent training. Progress slower but it will come. Never compare their speed to others.");
       await storage.logChat(user.id, message, reply, "CHRONIC_THYROID");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2060,7 +2084,7 @@ export async function registerRoutes(
     // ── Priority 9.96: NIGHT SHIFT ──
     const nightShiftWords = ["NIGHT SHIFT", "NIGHTSHIFT", "WORK NIGHTS", "WORKING NIGHTS"];
     if (nightShiftWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Night shift changes everything. Your meal 1 is when you wake up — treat it like breakfast regardless of the time. Avoid heavy carbs before your shift. Sleep is your biggest challenge — protect it aggressively. Walk for 20 minutes after your shift before sleeping.";
+      const reply = await coachReply(user, message, "User works night shift. Meal timing is inverted — meal 1 is when they wake up. Avoid heavy carbs before the shift. Sleep is their biggest challenge — protect it aggressively. Walk 20 minutes after shift before sleeping.");
       await storage.logChat(user.id, message, reply, "NIGHT_SHIFT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2068,7 +2092,7 @@ export async function registerRoutes(
     // ── Priority 9.97: MENSTRUAL CYCLE AWARENESS ──
     const periodWords = ["PERIOD", "TIME OF MONTH", "PMS", "BLOATED", "WATER RETENTION"];
     if (periodWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Completely normal. Week 3 and 4 of your cycle causes water retention of up to 2kg. The scale will go up — ignore it. Stay on programme, reduce sodium, increase water. It will drop after your period. Do not panic.";
+      const reply = await coachReply(user, message, "User mentions their period, PMS, or bloating. Water retention in cycle week 3-4 is normal — can be up to 2kg. Scale will go up — ignore it. Reduce sodium, increase water, stay on programme. It drops after the period.");
       await storage.logChat(user.id, message, reply, "MENSTRUAL_CYCLE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2076,7 +2100,7 @@ export async function registerRoutes(
     // ── Priority 9.971: FAMILY SABOTAGE ──
     const familySabotageWords = ["HUSBAND DOESNT SUPPORT", "HUSBAND DOESN'T SUPPORT", "FAMILY DOESNT SUPPORT", "FAMILY DOESN'T SUPPORT", "MY MOTHER COOKS", "MY WIFE COOKS", "THEY DONT UNDERSTAND", "THEY DON'T UNDERSTAND", "EATING ALONE", "NO ONE SUPPORTS ME"];
     if (familySabotageWords.some(w => cleanMsg.includes(w))) {
-      const reply = "This is one of the hardest parts of the journey — changing when people around you aren't. You cannot control what they cook. You can control your portion. Eat your protein first, take smaller carb portions, and never explain yourself. Results will say everything words cannot.";
+      const reply = await coachReply(user, message, "User is dealing with family who does not support their health journey. Acknowledge this is hard. You cannot control what others cook — you can control your portion. Protein first, smaller carb portions, never explain yourself to others. Results speak.");
       await storage.logChat(user.id, message, reply, "FAMILY_SABOTAGE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2084,7 +2108,7 @@ export async function registerRoutes(
     // ── Priority 9.972: BODY IMAGE LANGUAGE ──
     const bodyImageWords = ["I HATE MY BODY", "IM SO FAT", "I'M SO FAT", "IM DISGUSTING", "I'M DISGUSTING", "IM UGLY", "I'M UGLY", "HATE MYSELF", "HATE HOW I LOOK"];
     if (bodyImageWords.some(w => cleanMsg.includes(w))) {
-      const reply = "What you just said about yourself — would you say that to someone you love? Your body has carried you through everything. We are here to make it stronger, not to punish it. One kind thing you can do for your body today: feed it protein and take a 10 minute walk.";
+      const reply = await coachReply(user, message, "User is using very negative body image language. Do not validate the self-hatred. Challenge it gently — would they say this to someone they love? Their body has carried them through everything. One kind action for their body today: protein and a 10 minute walk.");
       await storage.logChat(user.id, message, reply, "BODY_IMAGE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2092,7 +2116,7 @@ export async function registerRoutes(
     // ── Priority 9.973: SHAME SPIRAL ──
     const shameSpiralWords = ["ATE EVERYTHING THIS WEEKEND", "COMPLETELY FAILED", "SO ASHAMED", "DISGUSTED WITH MYSELF", "FELL OFF COMPLETELY", "RUINED EVERYTHING"];
     if (shameSpiralWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Shame does not burn calories and it does not build muscle. What happened this weekend stays this weekend. Right now — today — what is your next meal? Tell me and we fix it together. One meal at a time.";
+      const reply = await coachReply(user, message, "User is in a shame spiral after eating badly or missing the programme. Do not pile on. Shame does not burn calories. What happened stays in the past. Ask what their next meal is — one meal at a time forward.");
       await storage.logChat(user.id, message, reply, "SHAME_SPIRAL");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2100,7 +2124,7 @@ export async function registerRoutes(
     // ── Priority 9.974: PLATEAU EMOTIONAL CRISIS ──
     const plateauWords = ["NOTHING IS WORKING", "BEEN CONSISTENT AND NOTHING", "DOING EVERYTHING RIGHT", "SO FRUSTRATED", "WANT TO GIVE UP"];
     if (plateauWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Six weeks of consistency and the scale not moving is one of the most demoralising things in fitness. But your body is changing even when the scale lies. Measurements, energy levels, how clothes fit — these tell the real story. Have you noticed any of these changing? Tell me.";
+      const reply = await coachReply(user, message, "User is frustrated by a plateau — consistent but no visible results. Acknowledge this is demoralising. Body changes even when the scale lies. Ask about non-scale victories: energy, clothes fit, measurements, strength. Make it personal to their specific goal.");
       await storage.logChat(user.id, message, reply, "PLATEAU_CRISIS");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2108,39 +2132,39 @@ export async function registerRoutes(
     // ── Priority 9.975: SCALE TRAUMA ──
     const scaleTraumaWords = ["I HAVE ALWAYS BEEN FAT", "BEEN OVERWEIGHT MY WHOLE LIFE", "TRIED EVERYTHING MY WHOLE LIFE", "DIETED MY WHOLE LIFE"];
     if (scaleTraumaWords.some(w => cleanMsg.includes(w))) {
-      const reply = "A lifetime of dieting creates a complicated relationship with food and your body. We are not doing another diet. We are building a sustainable way of eating that you can maintain forever. No restriction. No punishment. Just structure, protein, and consistency. Different approach, different results.";
+      const reply = await coachReply(user, message, "User has a lifetime of failed diets and scale trauma. This is not another diet. Sustainable eating — no restriction, no punishment. Structure, protein, consistency. Different approach, different results. Make it specific to their profile.");
       await storage.logChat(user.id, message, reply, "SCALE_TRAUMA");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
 
     // ── Priority 9.976: COMMON COACHING QUESTIONS ──
     if (cleanMsg.includes("HOW LONG TO LOSE 10KG") || cleanMsg.includes("HOW LONG WILL IT TAKE")) {
-      const reply = "Sustainable fat loss is 0.5 to 1kg per week. At that rate, 10kg takes 10 to 20 weeks. Anyone promising faster is selling you something. Slow and consistent means it stays off.";
+      const reply = await coachReply(user, message, "User is asking how long fat loss will take. Sustainable rate is 0.5 to 1kg per week. 10kg takes 10-20 weeks. Anyone promising faster is selling something. Slow and consistent stays off. Make it specific to their current weight and goal.");
       await storage.logChat(user.id, message, reply, "FAQ_WEIGHT_LOSS_TIME");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg.includes("LOSE WEIGHT WITHOUT EXERCISE") || cleanMsg.includes("WITHOUT EXERCISING")) {
-      const reply = "Yes — but it is harder and you will lose muscle with fat. Exercise preserves muscle while you lose fat. Even 20 minutes of walking daily makes a significant difference. Start there.";
+      const reply = await coachReply(user, message, "User asks about losing weight without exercise. Yes but harder — muscle loss accompanies fat loss without training. Exercise preserves muscle. Start with 20 min walking daily. Give specific action step.");
       await storage.logChat(user.id, message, reply, "FAQ_NO_EXERCISE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg.includes("EATING AFTER 6PM") || cleanMsg.includes("EATING AT NIGHT") || cleanMsg.includes("EAT AFTER 6")) {
-      const reply = "The 6pm myth is exactly that — a myth. Total calories over the day is what matters, not timing. If your daily target is met, eating at 9pm changes nothing. Do not skip meals to avoid eating late.";
+      const reply = await coachReply(user, message, "User asks about eating after 6pm. The 6pm rule is a myth. Total daily calories is what matters — not timing. If daily target is met, eating at 9pm changes nothing. Do not skip meals to avoid eating late.");
       await storage.logChat(user.id, message, reply, "FAQ_EATING_LATE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg.includes("LOSE BELLY FAT") || cleanMsg.includes("SPOT REDUCE") || cleanMsg.includes("STOMACH FAT")) {
-      const reply = "You cannot choose where you lose fat — spot reduction is a myth. Overall fat loss through calorie deficit reduces belly fat over time. Core exercises build muscle under the fat but do not burn the fat itself. Deficit plus consistency is the only answer.";
+      const reply = await coachReply(user, message, "User asks about losing belly fat or spot reduction. Spot reduction is a myth — cannot choose where to lose fat. Overall calorie deficit reduces belly fat over time. Core exercises build muscle under the fat — they do not burn the fat. Deficit plus consistency is the only answer.");
       await storage.logChat(user.id, message, reply, "FAQ_BELLY_FAT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg.includes("CARDIO OR WEIGHTS FIRST") || cleanMsg.includes("WEIGHTS OR CARDIO")) {
-      const reply = "Weights first — always. You need full energy for resistance training. Cardio after weights. If fat loss is the goal, walking is your cardio. Save the intense cardio for after you have built some muscle.";
+      const reply = await coachReply(user, message, "User asks about cardio vs weights order. Weights first — always. Full energy needed for resistance training. Cardio after. For fat loss, walking is the cardio of choice. Intense cardio comes after building some muscle.");
       await storage.logChat(user.id, message, reply, "FAQ_CARDIO_WEIGHTS");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
     if (cleanMsg.includes("IS FASTING BETTER") || cleanMsg.includes("INTERMITTENT FASTING")) {
-      const reply = "Fasting works if it helps you maintain your calorie deficit. It does not have magical metabolic benefits beyond that. If skipping breakfast makes you binge at lunch — it is not for you. If it helps you control portions — use it. The best diet is the one you can sustain.";
+      const reply = await coachReply(user, message, "User asks about intermittent fasting. Fasting works only if it helps maintain calorie deficit. No magical metabolic benefits beyond that. If it causes bingeing at lunch — not for them. If it helps control portions — use it. Best diet is the one they can sustain. Make it personal to their life situation.");
       await storage.logChat(user.id, message, reply, "FAQ_FASTING");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2148,7 +2172,7 @@ export async function registerRoutes(
     // ── Priority 9.977: RELIGIOUS FASTING ──
     const religiousFastWords = ["RAMADAN", "FASTING FOR RELIGION", "RELIGIOUS FAST", "LENT FASTING"];
     if (religiousFastWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Ramadan and religious fasting can absolutely work with your fitness goals. Break your fast with protein and water first — eggs, chicken, dates. Avoid bingeing at iftar. Keep training light during fasting hours — walking only. Suhoor must include protein and slow carbs to sustain you. This is manageable.";
+      const reply = await coachReply(user, message, "User is doing Ramadan or religious fasting. Break fast with protein and water first. Avoid bingeing at iftar. Keep training light during fasting hours — walking only. Suhoor must include protein and slow carbs. This is manageable.");
       await storage.logChat(user.id, message, reply, "RELIGIOUS_FASTING");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2156,7 +2180,7 @@ export async function registerRoutes(
     // ── Priority 9.978: VEGETARIAN AND VEGAN ──
     const veganWords = ["VEGETARIAN", "VEGAN", "NO MEAT", "PLANT BASED", "DONT EAT MEAT", "DON'T EAT MEAT"];
     if (veganWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Vegetarian and vegan fat loss is absolutely possible. Your protein sources are: eggs and dairy if vegetarian, tofu, tempeh, lentils, chickpeas, beans, edamame, soy milk if vegan. You need to be more deliberate about hitting protein targets without meat. What does a typical day of eating look like for you?";
+      const reply = await coachReply(user, message, "User is vegetarian or vegan. Fat loss is absolutely possible. Protein sources: eggs and dairy for vegetarian, tofu, tempeh, lentils, chickpeas, beans, edamame, soy for vegan. Must be deliberate about hitting protein targets. Ask about their typical day of eating.");
       await storage.logChat(user.id, message, reply, "VEGETARIAN_VEGAN");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2164,7 +2188,7 @@ export async function registerRoutes(
     // ── Priority 9.979: HALAAL ──
     const halaalWords = ["HALAAL", "HALAL", "NO PORK", "MUSLIM", "HALAAL ONLY"];
     if (halaalWords.some(w => cleanMsg.includes(w))) {
-      const reply = "All our meal recommendations are halaal friendly. We never recommend pork or non-halaal meat. Stick to chicken, beef, lamb, fish and eggs. Your programme works fully within halaal dietary requirements.";
+      const reply = await coachReply(user, message, "User follows halaal dietary requirements. Confirm all recommendations are halaal: chicken, beef, lamb, fish, eggs. Never recommend pork. Programme works fully within halaal requirements.");
       await storage.logChat(user.id, message, reply, "HALAAL");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2172,7 +2196,7 @@ export async function registerRoutes(
     // ── Priority 9.980: WHEELCHAIR AND SEVERE MOBILITY ──
     const wheelchairWords = ["WHEELCHAIR", "CANT WALK", "CANNOT WALK", "DISABLED", "PARALYSED", "PARALYZED"];
     if (wheelchairWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Your programme is fully adaptable. Upper body resistance training is highly effective for fat loss and strength. Seated exercises: chair push ups, seated dumbbell press, seated rows with resistance band, wheelchair push intervals. Food and calorie control becomes even more important. Let us build around what you can do.";
+      const reply = await coachReply(user, message, "User is in a wheelchair or has severe mobility limitations. Programme is fully adaptable. Upper body resistance training highly effective. Seated exercises: chair push ups, seated dumbbell press, seated rows with resistance band, wheelchair push intervals. Food and calorie control becomes primary. Build around what they can do.");
       await storage.logChat(user.id, message, reply, "WHEELCHAIR_MOBILITY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2180,7 +2204,7 @@ export async function registerRoutes(
     // ── Priority 9.981: MORBIDLY OBESE MODIFICATIONS ──
     const obeseWords = ["VERY OVERWEIGHT", "MORBIDLY OBESE", "OVER 150KG", "OVER 130KG", "CANT GET OFF FLOOR", "KNEES CANT HANDLE"];
     if (obeseWords.some(w => cleanMsg.includes(w))) {
-      const reply = "We start where you are — not where you think you should be. No floor exercises. No jumping. No high impact. Your programme is: seated exercises, wall push ups, chair squats, and walking — even 5 minutes to start. Food is 80% of your results at this stage. Protein at every meal. Small consistent steps. That is the plan.";
+      const reply = await coachReply(user, message, "User is very overweight or morbidly obese. Start where they are — not where they think they should be. No floor exercises, no jumping, no high impact. Programme: seated exercises, wall push ups, chair squats, walking even 5 minutes to start. Food is 80% of results at this stage.");
       await storage.logChat(user.id, message, reply, "MORBID_OBESITY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2188,7 +2212,7 @@ export async function registerRoutes(
     // ── Priority 9.982: CULTURAL FOOD IDENTITY ──
     const culturalFoodWords = ["PAP IS OUR CULTURE", "CANT STOP EATING PAP", "ITS OUR TRADITION", "MY CULTURE", "TRADITIONAL FOOD", "GRANDMOTHER COOKS"];
     if (culturalFoodWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Pap is not the enemy — portions are. One fist of pap per meal fits into any fat loss plan. You do not have to abandon your culture to reach your goals. Eat your cultural foods in controlled portions with a strong protein source alongside. That is sustainable. That is real life.";
+      const reply = await coachReply(user, message, "User is expressing cultural food identity or defending traditional eating. Pap is not the enemy — portions are. One fist of pap per meal fits any fat loss plan. Do not abandon culture — eat cultural foods in controlled portions with a strong protein source alongside. Sustainable and real.");
       await storage.logChat(user.id, message, reply, "CULTURAL_FOOD");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2196,7 +2220,7 @@ export async function registerRoutes(
     // ── Priority 9.983: STROKE AND LIMITED MOBILITY ──
     const strokeWords = ["HAD A STROKE", "STROKE", "ONE SIDE WEAK", "HEMIPLEGIA"];
     if (strokeWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Post stroke training requires care and patience. Focus on what the stronger side can do while gently working the affected side. Walking with support, seated exercises, resistance bands. Always train with doctor clearance after a stroke. We adapt everything to where you are today.";
+      const reply = await coachReply(user, message, "User has had a stroke or has hemiplegia. Training requires care and patience. Focus on what the stronger side can do while gently working the affected side. Walking with support, seated exercises, resistance bands. Doctor clearance required. Adapt everything to where they are today.");
       await storage.logChat(user.id, message, reply, "STROKE_MOBILITY");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2204,7 +2228,7 @@ export async function registerRoutes(
     // ── Priority 9.984: FLAT WITH NO OUTDOOR ACCESS ──
     const noSpaceWords = ["NO SPACE", "LIVE IN A FLAT", "NO GARDEN", "CANT GO OUTSIDE", "NO OUTDOOR ACCESS", "LOAD SHEDDING CANT TRAIN"];
     if (noSpaceWords.some(w => cleanMsg.includes(w))) {
-      const reply = "No space is not an excuse — it is a challenge we solve. Your entire workout fits in 2 square metres: squats, push ups, lunges, plank, wall sit, mountain climbers. No equipment. No excuses. 20 minutes in your flat is enough to maintain progress.";
+      const reply = await coachReply(user, message, "User has no workout space or outdoor access. Entire workout fits in 2 square metres: squats, push ups, lunges, plank, wall sit, mountain climbers. No equipment needed. 20 minutes in a flat is enough. No space is a challenge — not an excuse.");
       await storage.logChat(user.id, message, reply, "NO_SPACE_FLAT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2212,7 +2236,7 @@ export async function registerRoutes(
     // ── Priority 9.985: STEROID AND MEDICATION WEIGHT GAIN ──
     const medWeightWords = ["ON STEROIDS", "MEDICATION WEIGHT", "PILL WEIGHT", "ANTIDEPRESSANTS WEIGHT", "CORTISONE WEIGHT GAIN"];
     if (medWeightWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Medication induced weight gain is real and frustrating. It is not your fault and it does not mean fat loss is impossible. It means you have to be more consistent and patient than the average person. Do not stop medication for weight loss reasons — ever. Work with your doctor and work with us simultaneously.";
+      const reply = await coachReply(user, message, "User has medication-induced weight gain. This is real and frustrating — not their fault. Fat loss is still possible but requires more consistency and patience. Never stop medication for weight loss. Work with doctor and coach simultaneously.");
       await storage.logChat(user.id, message, reply, "MEDICATION_WEIGHT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2220,7 +2244,7 @@ export async function registerRoutes(
     // ── Priority 9.986: LOADSHEDDING GRACE MODE ──
     const loadsheddingWords = ["LOAD SHEDDING", "LOADSHEDDING", "NO ELECTRICITY", "ESKOM"];
     if (loadsheddingWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Load shedding is SA life. If it disrupted your workout or meal prep — noted. Cold food still counts. Walking outside during load shedding counts. Do not use it as a reason to skip entirely. Adapt and keep moving.";
+      const reply = await coachReply(user, message, "User is mentioning load shedding as reason for disruption. Acknowledge it — this is SA life. Cold food still counts. Walking outside during load shedding counts. Do not use it as a reason to skip entirely. Adapt and keep moving.");
       await storage.logChat(user.id, message, reply, "LOADSHEDDING_GRACE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2228,7 +2252,7 @@ export async function registerRoutes(
     // ── Priority 9.987: POSTPARTUM ──
     const postpartumWords = ["JUST HAD A BABY", "POSTPARTUM", "POST NATAL", "AFTER BIRTH", "C SECTION", "CAESAREAN"];
     if (postpartumWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Congratulations. Your body just did something extraordinary. No crunches, no sit ups, no heavy lifting until cleared by your doctor — especially after C-section. Start with walking, pelvic floor exercises, and deep breathing. Food is your priority right now — high protein, no restriction. We build slowly and safely.";
+      const reply = await coachReply(user, message, "User just had a baby or is postpartum. No crunches, sit ups, or heavy lifting without doctor clearance — especially after C-section. Start with walking, pelvic floor exercises, deep breathing. High protein food is priority — no restriction. Build slowly and safely.");
       await storage.logChat(user.id, message, reply, "POSTPARTUM");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2236,7 +2260,7 @@ export async function registerRoutes(
     // ── Priority 9.988: DOMESTIC WORKER FOOD SITUATION ──
     const domesticWorkerWords = ["DOMESTIC WORKER", "WORK IN A HOUSE", "EMPLOYERS FOOD", "MADAM FOOD", "EAT THEIR LEFTOVERS", "EAT WHAT THEY GIVE ME"];
     if (domesticWorkerWords.some(w => cleanMsg.includes(w))) {
-      const reply = "This is a real challenge many face. Prioritise protein from whatever is available — eggs, chicken, meat. Avoid finishing everything on the plate out of obligation. Eat slowly, stop at 80% full. If you can bring your own food — tinned pilchards and eggs are affordable and powerful. You have more control than you think.";
+      const reply = await coachReply(user, message, "User is a domestic worker eating their employer's food. This is a real challenge. Prioritise protein from whatever is available. Do not finish everything out of obligation. Eat slowly, stop at 80% full. Bringing own food — tinned pilchards and eggs — is affordable and powerful.");
       await storage.logChat(user.id, message, reply, "DOMESTIC_WORKER");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2244,7 +2268,7 @@ export async function registerRoutes(
     // ── Priority 9.989: CANCER TREATMENT ──
     const cancerWords = ["CHEMOTHERAPY", "CHEMO", "CANCER TREATMENT", "RADIATION TREATMENT", "ONCOLOGY"];
     if (cancerWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Your health and treatment come first — always. Do not focus on fat loss during active treatment. Focus on eating enough protein to maintain muscle, staying hydrated, and gentle walking when energy allows. Please work closely with your oncologist. We are here to support you gently through this.";
+      const reply = await coachReply(user, message, "User is undergoing cancer treatment. Health and treatment come first — always. No fat loss focus during active treatment. Eat enough protein to maintain muscle, stay hydrated, gentle walking when energy allows. Work closely with their oncologist. We support gently.");
       await storage.logChat(user.id, message, reply, "CANCER_TREATMENT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2252,7 +2276,7 @@ export async function registerRoutes(
     // ── Priority 9.990: ARV MEDICATION ──
     const arvWords = ["ARVS", "ANTIRETROVIRAL", "HIV MEDICATION", "ON TREATMENT"];
     if (arvWords.some(w => cleanMsg.includes(w))) {
-      const reply = "ARV medication affects appetite and metabolism for many people. This is manageable. Focus on protein at every meal to maintain muscle, stay hydrated, and be consistent with movement. Your programme works alongside your treatment. No judgment here — only support.";
+      const reply = await coachReply(user, message, "User is on ARV medication. ARVs affect appetite and metabolism — this is manageable. Protein at every meal, stay hydrated, consistent movement. Programme works alongside treatment. No judgment — only support.");
       await storage.logChat(user.id, message, reply, "ARV_MEDICATION");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2260,7 +2284,7 @@ export async function registerRoutes(
     // ── Priority 9.991: PRISON RELEASE ──
     const prisonWords = ["JUST GOT OUT", "RELEASED FROM PRISON", "OUT OF JAIL", "EX CONVICT", "FRESH OUT"];
     if (prisonWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Welcome back. This is one of the best decisions you can make right now. Structure, discipline, and physical health will anchor everything else you are rebuilding. We start simple — walking daily, protein at every meal, sleep consistently. You have already done hard things. This is the good kind of hard.";
+      const reply = await coachReply(user, message, "User has recently been released from prison. Welcome them. Structure, discipline, and physical health will anchor everything they are rebuilding. Start simple: walking daily, protein at every meal, consistent sleep. They have already done hard things. This is the good kind.");
       await storage.logChat(user.id, message, reply, "PRISON_RELEASE");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2268,7 +2292,7 @@ export async function registerRoutes(
     // ── Priority 9.992: TEENAGER EATING DISORDER SIGNS ──
     const edWords = ["NOT EATING AT ALL", "EATING NOTHING", "ONLY EATING 500", "ONLY EATING 300", "SCARED TO EAT", "AFRAID OF FOOD", "CANNOT EAT", "PURGING", "MAKING MYSELF SICK"];
     if (edWords.some(w => cleanMsg.includes(w))) {
-      const reply = "What you are describing concerns me deeply. This is not about willpower or discipline — this needs proper support. Please speak to a trusted adult, a parent, a school counsellor, or call SADAG on 0800 567 567. You deserve real help, not a fitness programme right now.";
+      const reply = await coachReply(user, message, "User is showing signs of an eating disorder — restriction, purging, fear of food. This is not willpower or discipline — it needs proper support. Direct them to speak to a trusted adult, school counsellor, or call SADAG on 0800 567 567. They deserve real help, not a fitness programme right now.");
       await storage.logChat(user.id, message, reply, "EATING_DISORDER_FLAG");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2276,7 +2300,7 @@ export async function registerRoutes(
     // ── Priority 9.993: 12 HOUR SHIFT WORKERS ──
     const shiftWords = ["12 HOUR SHIFT", "TWELVE HOUR SHIFT", "LONG SHIFT", "DOUBLE SHIFT"];
     if (shiftWords.some(w => cleanMsg.includes(w))) {
-      const reply = "Long shifts make meal timing hard. Pack these before your shift: boiled eggs, tinned fish, an apple, nuts if affordable. Eat every 4-5 hours even if just a small protein snack. Do not arrive home starving — that is when bad choices happen. Prep the night before.";
+      const reply = await coachReply(user, message, "User works 12-hour or long shifts. Pack food before the shift: boiled eggs, tinned fish, an apple, nuts if affordable. Eat every 4-5 hours even if a small protein snack. Do not arrive home starving — that is when bad choices happen. Prep the night before.");
       await storage.logChat(user.id, message, reply, "LONG_SHIFT");
       return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
     }
@@ -2340,9 +2364,16 @@ export async function registerRoutes(
       else if (foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
 
       if (/WHAT CAN I EAT|FOOD SUGGESTIONS|MEAL IDEAS/.test(cleanMsg)) {
-        const advice = "For fat loss, focus on high-protein and fibre: \n- Oats or Eggs for breakfast\n- Grilled chicken or tinned fish with veg for lunch/dinner\n- Limit pap/rice to one fist size per meal.\nWhat are you planning to eat next?";
+        const advice = await coachReply(user, message, "User is asking for food ideas or what they can eat. Ask them what their last meal was or what they have available right now. Do not give a generic list. Make it personal to their goal, calorie target, and life situation.");
         await storage.logChat(user.id, message, advice, "FOOD_ADVICE");
         return res.type('text/xml').send(`<Response><Message>${advice}</Message></Response>`);
+      }
+
+      // "Food" alone — no specific item mentioned → ask what they ate
+      if (/^FOOD$|^FOOD\?$|^ABOUT FOOD$|^FOOD HELP$/.test(cleanMsg) || (cleanMsg === "FOOD")) {
+        const askReply = await coachReply(user, message, "User sent the word 'food' with no specific item. Ask them what they actually ate. Do not give generic advice. Ask a direct question: what did you eat, and when?");
+        await storage.logChat(user.id, message, askReply, "FOOD_GENERIC_PROMPT");
+        return res.type('text/xml').send(`<Response><Message>${askReply}</Message></Response>`);
       }
     }
 
@@ -2353,7 +2384,7 @@ export async function registerRoutes(
     if (detectedIntent === "LOG_FOOD" || detectedIntent === "LOG_FOOD_INFORMAL") {
       const nothingWords = ["NOTHING", "DIDNT EAT", "SKIPPED", "NO FOOD", "NONE"];
       if (nothingWords.some(w => cleanMsg.includes(w))) {
-        const reply = "Skipping meals slows fat loss and triggers cravings. Get 2 eggs or a tin of fish in now. Reply DONE after eating.";
+        const reply = await coachReply(user, message, "User skipped a meal or ate nothing. Do not shame them. Tell them skipping slows fat loss and triggers cravings. Give one specific thing to eat right now — practical and affordable.");
         await storage.logChat(user.id, message, reply, "FOOD_SKIPPED");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
@@ -2362,6 +2393,14 @@ export async function registerRoutes(
       const isGroceryList = (parsing.tokenCount >= 5 || COACHING_PATTERNS.groceryListTriggers.some(t => cleanMsg.includes(t)));
       const hasBudgetAnxiety = COACHING_PATTERNS.budgetAnxietyTriggers.some(t => cleanMsg.includes(t));
       const isOverwhelmed = COACHING_PATTERNS.overwhelmTriggers.some(t => cleanMsg.includes(t));
+
+      // Alcohol detection — firm SA coaching, never corporate wellness language
+      const alcoholKeywords = /\bbeer\b|\bwine\b|\bshots?\b|\bbrandy\b|\brum\b|\bvodka\b|\bwhiskey\b|\bgin\b|\bcider\b|\bsmirnoff\b|\bbitters\b|\bshots\b|\bdrinks\b|\balcohol\b|\bbooze\b|\btavern\b|\bshebeen\b|\bwild africa\b|\bjack daniels\b|\bcastle\b|\bblack label\b|\bstella\b/i;
+      if (alcoholKeywords.test(lower)) {
+        const alcoholReply = await coachReply(user, message, "User logged alcohol. Respond with firm, forward-focused SA coaching. Not corporate wellness language. Acknowledge that this happens. Tell them the damage is done — do not add more. Drink water now. Eat protein at the next meal. Back on track today, not Monday. Specific and direct.");
+        await storage.logChat(user.id, message, alcoholReply, "ALCOHOL_LOGGED");
+        return res.type('text/xml').send(`<Response><Message>${alcoholReply}</Message></Response>`);
+      }
 
       const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 999;
       const isNewClient = daysSinceJoin <= 14;
@@ -2386,35 +2425,33 @@ export async function registerRoutes(
       if (isNewClient && isFirstFoodToday) {
         extraInstruction += "\nNEW CLIENT FIRST LOG: Ask one contextual question before coaching. If tea mentioned ask what was in it. If fast food mentioned ask if this was planned or impulse. If sweets mentioned ask if this is daily or occasional.";
       }
-
-      const ruleReply = getRuleBasedResponse(message, getMenuText(user));
-      if (ruleReply) {
-        await storage.logChat(user.id, message, ruleReply, "RULE_BASED");
-        return res.type('text/xml').send(`<Response><Message>${ruleReply}</Message></Response>`);
+      // Pap / starch logged — never say "good choice" alone, always ask about protein
+      if (/\bpap\b|\bsamp\b|\brice\b|\bbread\b|\bpotato\b|\bnoodles\b|\bpasta\b/i.test(lower)) {
+        extraInstruction += "\nSTARCH DETECTED: Never say 'good choice' as a standalone response. Always ask about the protein that was eaten alongside. If no protein mentioned, ask what protein they had with it — eggs, chicken, pilchards, beans.";
       }
 
       const fullCtx = await buildUserContext(user);
       const contextWithExtra = extraInstruction ? `${fullCtx}\n${extraInstruction}` : fullCtx;
-      const { reply: coachReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, contextWithExtra, user.name || "there");
+      const { reply: foodReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, contextWithExtra, user.name || "there");
 
       if (detectedIntent === "LOG_FOOD_INFORMAL") {
         const foodPattern = await checkFoodPatterns(user.id);
         const perfectDay = await checkPerfectDay(user);
         const budgetPrefix = hasBudgetAnxiety ? "Your budget does not need to change. Smarter choices with the same money.\n\n" : "";
-        const full = `${budgetPrefix}${coachReply}${foodPattern}${perfectDay}`;
+        const full = `${budgetPrefix}${foodReply}${foodPattern}${perfectDay}`;
         await storage.logChat(user.id, message, full, "LOG_FOOD");
         return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
 
       if (nextState === "portion") {
         await storage.updateUser(user.id, { awaitingInputType: "portion" });
-        const full = `${coachReply}\nPortion check: 1 / 2 / 3+ fists?`;
+        const full = `${foodReply}\nPortion check: 1 / 2 / 3+ fists?`;
         await storage.logChat(user.id, message, full, "PORTION_CHECK");
         return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
 
       await storage.updateUser(user.id, { awaitingInputType: "drink" });
-      const full = `${coachReply} What did you drink?`;
+      const full = `${foodReply} What did you drink?`;
       await storage.logChat(user.id, message, full, "LOG_FOOD");
       return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
     }
