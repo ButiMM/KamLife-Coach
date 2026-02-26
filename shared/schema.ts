@@ -47,6 +47,9 @@ export const users = pgTable("users", {
   baselineWeekActive: boolean("baseline_week_active").default(false),
   baselineWeekComplete: boolean("baseline_week_complete").default(false),
   profileNotes: text("profile_notes"),
+  todayWater: numeric("today_water").default("0"),
+  waterStreak: integer("water_streak").default(0),
+  waterLastResetDate: text("water_last_reset_date"),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
 }, (table) => {
@@ -115,6 +118,33 @@ export const chatHistory = pgTable("chat_history", {
   createdAt: timestamp("created_at").defaultNow(),
 });
 
+export const clothingCheckins = pgTable("clothing_checkins", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  jeansFit: text("jeans_fit"),
+  energyLevel: text("energy_level"),
+  stomachFeel: text("stomach_feel"),
+  overallFeel: text("overall_feel"),
+  weekNumber: integer("week_number"),
+  loggedAt: timestamp("logged_at").defaultNow(),
+}, (table) => {
+  return {
+    userClothingIdx: index("clothing_checkins_user_idx").on(table.userId),
+  };
+});
+
+export const bodyMeasurements = pgTable("body_measurements", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  measurementType: text("measurement_type").notNull(),
+  value: text("value").notNull(),
+  loggedAt: timestamp("logged_at").defaultNow(),
+}, (table) => {
+  return {
+    userMeasurementIdx: index("body_measurements_user_idx").on(table.userId),
+  };
+});
+
 // For Replit AI Integrations compatibility
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
@@ -138,6 +168,8 @@ export const usersRelations = relations(users, ({ many }) => ({
   stepLogs: many(stepLogs),
   weeklyCheckins: many(weeklyCheckins),
   chatHistory: many(chatHistory),
+  clothingCheckins: many(clothingCheckins),
+  bodyMeasurements: many(bodyMeasurements),
 }));
 
 export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({
@@ -160,6 +192,14 @@ export const weeklyCheckinsRelations = relations(weeklyCheckins, ({ one }) => ({
   user: one(users, { fields: [weeklyCheckins.userId], references: [users.id] }),
 }));
 
+export const clothingCheckinsRelations = relations(clothingCheckins, ({ one }) => ({
+  user: one(users, { fields: [clothingCheckins.userId], references: [users.id] }),
+}));
+
+export const bodyMeasurementsRelations = relations(bodyMeasurements, ({ one }) => ({
+  user: one(users, { fields: [bodyMeasurements.userId], references: [users.id] }),
+}));
+
 // === BASE SCHEMAS ===
 export const insertUserSchema = createInsertSchema(users).omit({ id: true, createdAt: true });
 export const insertWeightLogSchema = createInsertSchema(weightLogs).omit({ id: true, loggedAt: true });
@@ -167,6 +207,8 @@ export const insertWorkoutLogSchema = createInsertSchema(workoutLogs).omit({ id:
 export const insertStepLogSchema = createInsertSchema(stepLogs).omit({ id: true, loggedAt: true });
 export const insertWeeklyCheckinSchema = createInsertSchema(weeklyCheckins).omit({ id: true, createdAt: true });
 export const insertChatLogSchema = createInsertSchema(chatHistory).omit({ id: true, createdAt: true });
+export const insertClothingCheckinSchema = createInsertSchema(clothingCheckins).omit({ id: true, loggedAt: true });
+export const insertBodyMeasurementSchema = createInsertSchema(bodyMeasurements).omit({ id: true, loggedAt: true });
 
 // === EXPLICIT API CONTRACT TYPES ===
 
@@ -178,6 +220,10 @@ export type StepLog = typeof stepLogs.$inferSelect;
 export type WeeklyCheckin = typeof weeklyCheckins.$inferSelect;
 export type InsertWeeklyCheckin = z.infer<typeof insertWeeklyCheckinSchema>;
 export type ChatLog = typeof chatHistory.$inferSelect;
+export type ClothingCheckin = typeof clothingCheckins.$inferSelect;
+export type InsertClothingCheckin = z.infer<typeof insertClothingCheckinSchema>;
+export type BodyMeasurement = typeof bodyMeasurements.$inferSelect;
+export type InsertBodyMeasurement = z.infer<typeof insertBodyMeasurementSchema>;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UserResponse = User;

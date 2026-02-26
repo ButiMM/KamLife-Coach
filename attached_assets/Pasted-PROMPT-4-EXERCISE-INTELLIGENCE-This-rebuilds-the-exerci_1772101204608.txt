@@ -1,0 +1,16 @@
+PROMPT 4 — EXERCISE INTELLIGENCE
+This rebuilds the exercise library around fundamentals plus equipment-based selection plus the feminine physique programme.
+Paste this:
+Replace EXERCISE_LIBRARY in server/routes.ts with a structured equipment-based library. Create separate exercise arrays for: gym, home_none, home_bands, home_dumbbells, home_kettlebell, home_pullupbar, walking. Each exercise has: id, name, muscleGroup, phase1 through phase5 setsReps, plainEnglish description in simple SA English, commonMistake, modification for elderly or injured, youtubeSearch string.
+GYM EXERCISES — fundamentals only: barbell back squat legs, conventional deadlift posterior chain, bench press chest, overhead press shoulders, barbell row back, pull up or lat pulldown back, plank core, incline treadmill walk conditioning for fat loss goal only.
+HOME NONE: bodyweight squat, glute bridge, push up, table row, reverse lunge, plank, mountain climbers.
+HOME BANDS: banded squat, banded Romanian deadlift, banded row, banded chest press, banded hip thrust, banded lateral walk, plank.
+HOME DUMBBELLS: goblet squat, Romanian deadlift, dumbbell press, dumbbell row, overhead press, lateral raise, plank.
+HOME KETTLEBELL: kettlebell swing, goblet squat, single arm press, single arm row, turkish get up, plank.
+HOME PULLUPBAR: pull up, chin up, australian row, hanging knee raise, dead hang, push up, plank.
+WALKING: phase-based timed walks — phase 1 fifteen minutes comfortable, phase 2 twenty five minutes brisk, phase 3 thirty five minutes with five minute fast intervals every ten minutes, phase 4 forty five minutes sustained brisk, phase 5 twenty minutes gentle recovery.
+Update getExercisesForDay to: select library based on trainingMode and homeEquipment fields. For home users with multiple equipment types combine libraries removing duplicates prioritising the most equipment-appropriate option. Build each session as push plus pull plus legs plus core — one exercise from each category rotating across programme days. Apply phase-based setsReps. For clients with primaryFocusArea of glutes and legs — double the leg exercises, add hip thrust or glute bridge to every session, reduce push exercises to one set less than normal.
+For elderly clients age 65 plus: always show modification line for every exercise. Reduce all sets by one. Add safety note: Any discomfort means stop. Quality over everything.
+For teenage clients under 18: add form emphasis note to every exercise. No maximum weight encouragement. Focus on movement patterns.
+Include YouTube search link for every exercise formatted as: https://www.youtube.com/results?search_query= plus the youtubeSearch string with spaces replaced by plus signs.
+Restart the server.

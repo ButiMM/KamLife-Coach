@@ -1,10 +1,13 @@
 import { db } from "./db";
 import {
   users, weightLogs, workoutLogs, stepLogs, weeklyCheckins, chatHistory,
+  clothingCheckins, bodyMeasurements,
   type User, type InsertUser, type UpdateUserRequest,
   type WeightLog, type WorkoutLog, type StepLog,
   type WeeklyCheckin, type InsertWeeklyCheckin,
   type ChatLog,
+  type ClothingCheckin, type InsertClothingCheckin,
+  type BodyMeasurement, type InsertBodyMeasurement,
   type FlaggedUser
 } from "@shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
@@ -36,6 +39,14 @@ export interface IStorage {
 
   // Referral
   getUserByReferralCode(code: string): Promise<User | undefined>;
+
+  // Clothing Check-ins
+  createClothingCheckin(checkin: InsertClothingCheckin): Promise<ClothingCheckin>;
+  getClothingCheckins(userId: string): Promise<ClothingCheckin[]>;
+
+  // Body Measurements
+  createBodyMeasurement(measurement: InsertBodyMeasurement): Promise<BodyMeasurement>;
+  getBodyMeasurements(userId: string): Promise<BodyMeasurement[]>;
 
   // Admin / Flagged
   getFlaggedUsers(): Promise<FlaggedUser[]>;
@@ -122,6 +133,24 @@ export class DatabaseStorage implements IStorage {
   async getUserByReferralCode(code: string): Promise<User | undefined> {
     const [user] = await db.select().from(users).where(eq(users.referralCode, code));
     return user;
+  }
+
+  async createClothingCheckin(checkin: InsertClothingCheckin): Promise<ClothingCheckin> {
+    const [result] = await db.insert(clothingCheckins).values(checkin).returning();
+    return result;
+  }
+
+  async getClothingCheckins(userId: string): Promise<ClothingCheckin[]> {
+    return await db.select().from(clothingCheckins).where(eq(clothingCheckins.userId, userId)).orderBy(desc(clothingCheckins.loggedAt));
+  }
+
+  async createBodyMeasurement(measurement: InsertBodyMeasurement): Promise<BodyMeasurement> {
+    const [result] = await db.insert(bodyMeasurements).values(measurement).returning();
+    return result;
+  }
+
+  async getBodyMeasurements(userId: string): Promise<BodyMeasurement[]> {
+    return await db.select().from(bodyMeasurements).where(eq(bodyMeasurements.userId, userId)).orderBy(desc(bodyMeasurements.loggedAt));
   }
 
   async getFlaggedUsers(): Promise<FlaggedUser[]> {

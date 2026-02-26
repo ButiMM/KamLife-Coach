@@ -1455,6 +1455,90 @@ export async function registerRoutes(
         return res.type('text/xml').send(`<Response><Message>${full}</Message></Response>`);
       }
 
+      if (inputType === "measure_jeans") {
+        const fitOptions: Record<string, string> = { "1": "tight_uncomfortable", "2": "fitting_normal", "3": "loose_baggy" };
+        const fit = fitOptions[cleanMsg] || cleanMsg.toLowerCase();
+        if (!fitOptions[cleanMsg] && !["tight", "normal", "loose", "baggy", "uncomfortable"].some(w => fit.includes(w))) {
+          const reply = "Reply 1, 2, or 3:\n1) Tight and uncomfortable\n2) Fitting normal\n3) Loose and getting baggy";
+          return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+        }
+        const normalizedFit = fitOptions[cleanMsg] || (fit.includes("tight") ? "tight_uncomfortable" : fit.includes("loose") || fit.includes("baggy") ? "loose_baggy" : "fitting_normal");
+        await storage.updateUser(user.id, { awaitingInputType: "measure_energy", profileNotes: `jeans_fit:${normalizedFit}` });
+        const reply = "2) How is your energy level this week?\n1) Low\n2) Okay\n3) High";
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+
+      if (inputType === "measure_energy") {
+        const energyOptions: Record<string, string> = { "1": "low", "2": "okay", "3": "high" };
+        const energy = energyOptions[cleanMsg] || cleanMsg.toLowerCase();
+        const normalizedEnergy = energyOptions[cleanMsg] || (energy.includes("low") ? "low" : energy.includes("high") ? "high" : "okay");
+        const prevNotes = user.profileNotes || "";
+        await storage.updateUser(user.id, { awaitingInputType: "measure_stomach", profileNotes: `${prevNotes}|energy:${normalizedEnergy}` });
+        const reply = "3) Does your stomach feel flatter than when you started?\n1) Yes\n2) Same\n3) Not sure";
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+
+      if (inputType === "measure_stomach") {
+        const stomachOptions: Record<string, string> = { "1": "yes", "2": "same", "3": "not_sure" };
+        const stomach = stomachOptions[cleanMsg] || cleanMsg.toLowerCase();
+        const normalizedStomach = stomachOptions[cleanMsg] || (stomach.includes("yes") ? "yes" : stomach.includes("not") ? "not_sure" : "same");
+        const prevNotes = user.profileNotes || "";
+        await storage.updateUser(user.id, { awaitingInputType: "measure_overall", profileNotes: `${prevNotes}|stomach:${normalizedStomach}` });
+        const reply = "4) Overall how do you feel in your body this week?\n1) Worse\n2) Same\n3) Better";
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+
+      if (inputType === "measure_overall") {
+        const overallOptions: Record<string, string> = { "1": "worse", "2": "same", "3": "better" };
+        const overall = overallOptions[cleanMsg] || cleanMsg.toLowerCase();
+        const normalizedOverall = overallOptions[cleanMsg] || (overall.includes("worse") ? "worse" : overall.includes("better") ? "better" : "same");
+        const prevNotes = user.profileNotes || "";
+        const parts = prevNotes.split("|");
+        const jeansFit = parts.find(p => p.startsWith("jeans_fit:"))?.split(":")[1] || "unknown";
+        const energyLevel = parts.find(p => p.startsWith("energy:"))?.split(":")[1] || "unknown";
+        const stomachFeel = parts.find(p => p.startsWith("stomach:"))?.split(":")[1] || "unknown";
+
+        const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
+        const weekNum = Math.ceil(daysSinceJoin / 7) || 1;
+
+        await storage.createClothingCheckin({
+          userId: user.id,
+          jeansFit,
+          energyLevel,
+          stomachFeel,
+          overallFeel: normalizedOverall,
+          weekNumber: weekNum,
+        });
+
+        let reply = "Check-in logged. ";
+        if (jeansFit === "loose_baggy") reply += "Clothes getting looser is the real progress — the scale does not tell this story. ";
+        else if (jeansFit === "tight_uncomfortable") reply += "Clothes still tight means we need to tighten the nutrition. Focus on portions this week. ";
+        if (energyLevel === "high") reply += "Energy is up — that means the programme is working. ";
+        else if (energyLevel === "low") reply += "Low energy usually means not enough protein or water. Fix those two first. ";
+        if (stomachFeel === "yes") reply += "Flatter stomach is fat loss your scale cannot see. ";
+        if (normalizedOverall === "better") reply += "Feeling better in your body is the goal. Keep going.";
+        else if (normalizedOverall === "worse") reply += "Feeling worse means something needs adjusting. Tell me what is bothering you.";
+        else reply += "Same is fine — changes take 4 to 6 weeks to feel. Stay consistent.";
+
+        const prevCheckins = await storage.getClothingCheckins(user.id);
+        if (prevCheckins.length >= 2) {
+          const prev = prevCheckins[1];
+          if (prev.jeansFit === "tight_uncomfortable" && jeansFit === "fitting_normal") {
+            reply += "\n\nJeans went from tight to normal. That is measurable progress the scale cannot show.";
+          } else if (prev.jeansFit === "fitting_normal" && jeansFit === "loose_baggy") {
+            reply += "\n\nJeans getting loose. Your body is changing. This is working.";
+          }
+        }
+
+        if (daysSinceJoin >= 30) {
+          reply += "\n\nIf you want precise measurements a tape measure costs R15 at Pep or Checkers. One purchase gives you data the scale never can. Optional but worth it.";
+        }
+
+        await storage.updateUser(user.id, { awaitingInputType: null });
+        await storage.logChat(user.id, message, reply, "MEASURE_COMPLETE");
+        return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
+      }
+
       if (inputType === "food") {
         const ctx = await buildUserContext(user);
         const { reply } = await getKamLifeFoodReply(
@@ -2154,6 +2238,8 @@ export async function registerRoutes(
       else if (/SLEEP|SLEPT/.test(cleanMsg)) detectedIntent = "LOG_SLEEP";
       else if (/WEIGHT|KG/.test(cleanMsg)) detectedIntent = "LOG_WEIGHT";
       else if (/TARGETS|MACROS|CALORIES/.test(cleanMsg)) detectedIntent = "SHOW_TARGETS";
+      else if (/^MEASURE$|^MEASUREMENTS$|^CHECK IN$|^CHECKIN$|^BODY CHECK$/.test(cleanMsg)) detectedIntent = "MEASURE";
+      else if (/DRANK WATER|WATER DONE|FINISHED WATER|HAD WATER|GLASS OF WATER|BOTTLE OF WATER|LITRES|LITERS|(\d+)\s*ML\b.*WATER|WATER\s*\d|^\d+\s*(L|ML|GLASS|GLASSES|BOTTLE|BOTTLES)\b/.test(cleanMsg) || /^WATER$/.test(cleanMsg) || (/ROOIBOS/.test(cleanMsg) && !/ATE|FOOD|MEAL/.test(cleanMsg))) detectedIntent = "LOG_WATER";
       else if (/^(ATE |HAD |JUST ATE|EATING NOW|EATING |I ATE )/.test(cleanMsg)) detectedIntent = "LOG_FOOD_INFORMAL";
       else if (foodEvidence) detectedIntent = "LOG_FOOD_INFORMAL";
 
