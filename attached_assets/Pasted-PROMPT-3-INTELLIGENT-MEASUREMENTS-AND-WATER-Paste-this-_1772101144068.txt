@@ -1,0 +1,21 @@
+PROMPT 3 — INTELLIGENT MEASUREMENTS AND WATER
+Paste this when Prompt 2 finishes and tests successfully:
+Add two intelligent tracking features to server/routes.ts and shared/schema.ts:
+FEATURE 1 — CLOTHING FIT MEASUREMENTS SYSTEM:
+Add a measurements table to shared/schema.ts with columns: phoneNumber, measurementType text, value text, loggedAt timestamp. Add a weeklyCheckIn table with columns: phoneNumber, jeansFit text, energyLevel text, stomachFeel text, overallFeel text, weekNumber integer, loggedAt timestamp.
+Add a MEASURE command handler. When client sends MEASURE respond with: No tape measure needed. Answer these 4 questions honestly — reply with the numbers: 1 How do your tightest jeans or pants fit right now — tight uncomfortable, fitting normal, or loose getting baggy 2 How is your energy level this week — low, okay, or high 3 Does your stomach feel flatter than when you started — yes, same, or not sure 4 Overall how do you feel in your body this week — worse, same, better, or much better. When they reply with numbers parse their answers and store in weeklyCheckIn table. Generate a Coach K response that: acknowledges where they are, connects their answers to their programme phase, gives one specific action. If this is their second or later check-in compare to previous answers and note any positive changes explicitly. If jeans went from tight to fitting say: Your jeans fitting better is more meaningful than any scale reading. Your body is changing. If energy improved say: Energy improvement in week X means your nutrition is working. If stomach feels flatter say: A flatter stomach is real progress. The scale does not show this.
+For clients who have been on programme 30 or more days add to the MEASURE response: If you want precise measurements a tape measure costs R15 at Pep or Checkers. One purchase gives you data the scale never can. Optional but worth it. If they later log actual measurements in format Waist 80cm Hips 95cm etc parse and store those too with comparison to previous entries.
+Add MEASURE to weekly Sunday report as a prompt: Coach K asks the 4 check-in questions automatically every Sunday as part of the weekly report flow.
+FEATURE 2 — INTELLIGENT WATER COACHING:
+Add todayWater numeric default 0 and waterStreak integer default 0 to users table. Reset todayWater at midnight. Increment waterStreak when daily target of 2L is hit, reset to 0 when missed.
+Detect water logs — drank water, litres, ml, bottle of water, glass of water, water done, finished water, had water, rooibos counts partial. Extract amount — ml divide by 1000, glasses multiply by 0.25, standard bottles multiply by 0.75, rooibos tea cup multiply by 0.25 partial credit.
+Base response on total but also connect water to other recent logs:
+If client logged poor sleep in last 24 hours and water is under 1L: Dehydration worsens sleep quality. Drink 500ml now and another 500ml before bed tonight.
+If client logged low energy or tired in last 24 hours: Low energy at this time is usually dehydration not hunger. Water before food.
+If client logged a headache: SA afternoon headaches are almost always dehydration. 500ml right now.
+If client logged a braai or salty food in last 24 hours: High sodium from last night means you need an extra 500ml today to flush it and stop the scale lying tomorrow.
+If client logged a cool drink or Coke: That does not count as water. Your body needs actual water. Start with one glass before every meal today.
+If it is between October and March add heat context: SA summer heat increases your water needs. Aim for 2.5L today not 2L.
+If waterStreak hits 7 days send celebration: 7 days hitting your water target. This alone is improving your fat loss, your energy, and your skin. Keep going.
+Standard responses when no special context: Under 0.5L: Badly dehydrated. 500ml right now before anything else. 0.5 to 1L: Good start. X litres to go. 1 to 1.5L: Halfway. Keep going. 1.5 to 2L: Almost there. One more glass finishes it. 2L plus: Water target hit. Streak is X days. Do it again tomorrow.
+Include water status and waterStreak in buildUserContext. Restart the server.
