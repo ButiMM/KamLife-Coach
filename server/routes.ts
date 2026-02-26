@@ -251,10 +251,18 @@ async function checkPerfectDay(user: any): Promise<string> {
   const cleanMeals = todayFoodLogs.length >= 2;
 
   if (todayWorkout && stepsHit && cleanMeals) {
-    const name = user.name || "Coach";
+    const name = getDisplayName(user);
     return `\n\n${name} — perfect day. Workout done. Steps hit. Food clean. This is exactly what results are made of. Screenshot this day.`;
   }
   return "";
+}
+
+// Returns a safe display name — filters out greetings/commands stored as names (e.g. "HI", "YES")
+const INVALID_NAME_WORDS = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "RESET", "HELP", "DONE", "GO", "K", "KK", "YO", "SUP"]);
+function getDisplayName(user: any, fallback = "Coach"): string {
+  const name = (user.name || "").trim();
+  if (!name || name.length < 2 || INVALID_NAME_WORDS.has(name.toUpperCase())) return fallback;
+  return name;
 }
 
 async function buildSharecard(user: any): Promise<string> {
@@ -303,7 +311,7 @@ async function buildSharecard(user: any): Promise<string> {
 }
 
 function buildOnboardingComplete(user: any, experience: string, calorieTarget: number, proteinTarget: number, phaseConfig: any, startingPhase: number): string {
-  const userName = user.name || "coach";
+  const userName = getDisplayName(user, "Coach");
   const goal = user.goalType || "General Fitness";
   const mode = user.trainingMode || "home";
   const stepTarget = phaseConfig.stepTarget || 7000;
@@ -1345,7 +1353,7 @@ export async function registerRoutes(
         const calTarget = user.calorieTarget || 2000;
         const protTarget = user.proteinTarget || 150;
         await storage.updateUser(user.id, { baselineWeekActive: false, baselineWeekComplete: true });
-        const userName = user.name || "coach";
+        const userName = getDisplayName(user, "Coach");
         const baselineReply = `${userName} — your baseline week is done. I have seen your patterns. Your full personalised programme starts now.\n\nHere is your setup:\nGoal: ${user.goalType || "General Fitness"}\nTraining: ${user.trainingMode || "home"}\nPhase: ${phaseNum} — ${phaseConfig.name}\n\nYour daily targets:\nCalories: ${calTarget}kcal\nProtein: ${protTarget}g\nSteps: ${(phaseConfig.stepTarget || 7000).toLocaleString()}\n\nThe real work starts today. Type WORKOUT to get your first session.`;
         await storage.logChat(user.id, message, baselineReply, "BASELINE_COMPLETE");
         return res.type('text/xml').send(`<Response><Message>${baselineReply}</Message></Response>`);
@@ -1406,7 +1414,7 @@ export async function registerRoutes(
         await storage.logChat(user.id, message, reply, "REFERRAL_CODE");
         return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
       }
-      const namePart = (user.name || "KAM").replace(/\s+/g, "").toUpperCase().slice(0, 4);
+      const namePart = getDisplayName(user, "KAM").replace(/\s+/g, "").toUpperCase().slice(0, 4);
       const phonePart = phoneNumber.slice(-4);
       let code = `${namePart}${phonePart}`;
       const existing = await storage.getUserByReferralCode(code);
@@ -1466,7 +1474,7 @@ export async function registerRoutes(
         ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length)
         : 0;
 
-      const progressReply = `*Progress Report — ${user.name || "Hey"}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}`;
+      const progressReply = `*Progress Report — ${getDisplayName(user)}*\n\nWeight: ${currentWeight}kg (was ${fourWeeksAgoWeight}kg 4 weeks ago)\nAvg Steps This Week: ${avgSteps.toLocaleString()}/day\nCompliance: ${compliance.score}/100 — ${compliance.level}\n\n${compliance.score >= 90 ? "You are locked in. Keep this standard." : compliance.score >= 70 ? "Solid progress. Tighten up the weak spots this week." : compliance.score >= 50 ? "Room to improve. Pick one area and fix it this week." : "We need to reset. Commit to showing up every day this week."}`;
       await storage.logChat(user.id, message, progressReply, "PROGRESS");
       return res.type('text/xml').send(`<Response><Message>${progressReply}</Message></Response>`);
     }
@@ -1510,7 +1518,7 @@ export async function registerRoutes(
         const anythingParsing = parseFoodMessage(message);
         if (anythingParsing.alcoholItems.length > 0) {
           const ctx = await buildUserContext(user);
-          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, ctx, user.name || "there");
+          const { reply } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, ctx, getDisplayName(user, "friend"));
           await storage.updateUser(user.id, { awaitingInputType: null });
           await storage.logChat(user.id, message, reply, "ALCOHOL_FLAGGED");
           return res.type('text/xml').send(`<Response><Message>${reply}</Message></Response>`);
@@ -1530,7 +1538,7 @@ export async function registerRoutes(
             message,
             user.calorieTarget || 2000,
             ctx,
-            user.name || "there"
+            getDisplayName(user, "friend")
           );
           await storage.updateUser(user.id, { awaitingInputType: null });
           await storage.logChat(user.id, message, reply, "EXTRA_LOG");
@@ -1566,7 +1574,7 @@ export async function registerRoutes(
           `They drank: ${message}`,
           user.calorieTarget || 2000,
           ctx,
-          user.name || "there"
+          getDisplayName(user, "friend")
         );
 
         await storage.updateUser(user.id, { awaitingInputType: "anything_else" });
@@ -1665,7 +1673,7 @@ export async function registerRoutes(
           message,
           user.calorieTarget || 2000,
           ctx,
-          user.name || "there"
+          getDisplayName(user, "friend")
         );
         await storage.updateUser(user.id, { awaitingInputType: null });
         await storage.logChat(user.id, message, reply, "FOOD_LOGGED");
@@ -1941,7 +1949,7 @@ export async function registerRoutes(
             programmeStartDate: new Date(),
             onboardingState: "COMPLETED",
           });
-          const userName = user.name || "coach";
+          const userName = getDisplayName(user, "Coach");
           reply = `Baseline week started, ${userName}. From today until Sunday just live your normal life and log everything:\n\n- What you eat\n- Your steps\n- Your water\n- Your sleep\n\nDo not try to be perfect. I need your real data. On Monday your full personalised programme drops. Start by telling me what you ate today.`;
         } else if (cleanMsg === "SKIP" || cleanMsg === "NO" || cleanMsg === "N") {
           const updatedUser = await storage.getUser(user.id);
@@ -2432,7 +2440,7 @@ export async function registerRoutes(
 
       const fullCtx = await buildUserContext(user);
       const contextWithExtra = extraInstruction ? `${fullCtx}\n${extraInstruction}` : fullCtx;
-      const { reply: foodReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, contextWithExtra, user.name || "there");
+      const { reply: foodReply, nextState } = await getKamLifeFoodReply(message, user.calorieTarget || 2000, contextWithExtra, getDisplayName(user, "friend"));
 
       if (detectedIntent === "LOG_FOOD_INFORMAL") {
         const foodPattern = await checkFoodPatterns(user.id);
@@ -2457,6 +2465,25 @@ export async function registerRoutes(
     }
 
     if (detectedIntent === "GET_WORKOUT") {
+      const { exercises, isRestDay } = getExercisesForDay(user);
+
+      // Only send the rest day message when the user is asking for today's scheduled session.
+      // Explicit triggers: menu option "1", or single-keyword messages (WORKOUT / GYM / PROGRAM / TRAINING
+      // / WHAT IS MY WORKOUT TODAY / WHATS MY WORKOUT).
+      // Anything else — travel, hotel, short on time, 30 minutes, joined the gym, etc. —
+      // goes to full GPT so Coach K can answer the actual question.
+      const isExplicitTodayRequest =
+        cleanMsg === "1" ||
+        /^(WORKOUT|GYM|PROGRAM|TRAINING|MY WORKOUT|MY WORKOUT TODAY|WHAT IS MY WORKOUT|WHAT'S MY WORKOUT|WHATS MY WORKOUT|WHAT IS MY TRAINING TODAY|TODAY'S WORKOUT|TODAYS WORKOUT)$/.test(cleanMsg);
+
+      if (isRestDay && !isExplicitTodayRequest) {
+        const ctx = await buildUserContext(user);
+        const situationHint = `The client's scheduled programme has today as a rest day, but they are asking about workout options or training modifications. Answer their specific question with practical advice. Do NOT just say "today is a rest day". Give them real guidance.`;
+        const gptReply = await coachReply(message, user, ctx, situationHint);
+        await storage.logChat(user.id, message, gptReply, "GET_WORKOUT_FLEXIBLE");
+        return res.type('text/xml').send(`<Response><Message>${gptReply}</Message></Response>`);
+      }
+
       let stalePrefix = "";
       if (user.lastWorkoutDate) {
         const daysSinceWorkout = Math.floor((Date.now() - new Date(user.lastWorkoutDate).getTime()) / (1000 * 60 * 60 * 24));
@@ -2468,7 +2495,6 @@ export async function registerRoutes(
         }
       }
 
-      const { exercises, isRestDay } = getExercisesForDay(user);
       const workoutMsg = stalePrefix + formatWorkoutMessage(user, exercises, isRestDay);
 
       if (!isRestDay && exercises.length > 0) {
@@ -2564,7 +2590,7 @@ export async function registerRoutes(
       const completedCount = last7.filter(l => l.workoutCompleted).length;
       const phase = user.programmePhase || 1;
       const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
-      let reply = `${user.name || "Coach"} — Last 7 workouts:\n`;
+      let reply = `${getDisplayName(user)} — Last 7 workouts:\n`;
       if (last7.length === 0) {
         reply += "No workouts logged yet. Reply WORKOUT to get started.\n";
       } else {
@@ -2885,7 +2911,7 @@ export async function registerRoutes(
             const phase = user.programmePhase || 1;
             const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
             const summary = formatDailyWorkoutSummary(user);
-            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
+            msg = `Morning ${getDisplayName(user, "friend")}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
             const triggerNow = new Date();
             if (triggerNow.getDay() === 1) {
               msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
@@ -2924,7 +2950,7 @@ export async function registerRoutes(
             const phase = user.programmePhase || 1;
             const phaseConfig = PHASE_CONFIG[phase] || PHASE_CONFIG[1];
             const summary = formatDailyWorkoutSummary(user);
-            msg = `Morning ${user.name || "there"}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
+            msg = `Morning ${getDisplayName(user, "friend")}. Phase ${phase}: ${phaseConfig.name}, Week ${user.programmeWeek || 1}. ${summary}`;
             if (now.getDay() === 1) {
               const nutrition = NUTRITION_BY_PHASE[phase] || NUTRITION_BY_PHASE[1];
               msg += `\n\nWeek ${user.programmeWeek || 1} of Phase ${phaseConfig.name}. This week: ${phaseConfig.theme}. Show up every day this week — consistency compounds.`;
@@ -3099,7 +3125,7 @@ export async function registerRoutes(
           const aSteps = avgSteps || 0;
           const aDays = activeDays || 0;
           const foodConsistency = fDays >= 5 ? "Yes — solid tracking" : fDays >= 3 ? "Partial — log every meal" : "No — you need to track daily";
-          let report = `*Weekly Report — ${user.name || "Hey"}*\n\n${user.name || "Hey"}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}`;
+          let report = `*Weekly Report — ${getDisplayName(user)}*\n\n${getDisplayName(user)}, here's your week:\n\nScore: ${score}/100\nLevel: ${level}\n\nWorkouts: ${workoutsDone}/3 completed\nAvg Steps: ${aSteps.toLocaleString()}/day\nFood Logged Consistently: ${foodConsistency}\nDays Active: ${aDays}/7\n\n${levelMsg}`;
 
           const daysSinceJoin = user.createdAt ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / (1000 * 60 * 60 * 24)) : 0;
           if (daysSinceJoin >= 14 && daysSinceJoin <= 21) {
