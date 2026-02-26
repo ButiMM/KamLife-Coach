@@ -512,7 +512,8 @@ function detectIntent(message: string): string {
 async function handleMessage(phone: string, message: string, mediaUrl?: string): Promise<string> {
   const user = await getOrCreateUser(phone);
 
-  if (user.onboardingState && user.onboardingState !== "COMPLETE") {
+  const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
+  if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
     return handleOnboarding(user, message, phone);
   }
 
@@ -906,7 +907,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   app.post("/api/webhooks/whatsapp", async (req, res) => {
     try {
-      const phone = (req.body.From || "").replace("whatsapp:", "");
+      const phone = req.body.From || "";
       const message = (req.body.Body || "").trim();
       const mediaUrl = req.body.MediaUrl0 || undefined;
 
