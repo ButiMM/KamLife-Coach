@@ -1076,7 +1076,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       .replace(/'/g, "&apos;");
   }
 
-  app.post("/api/webhooks/whatsapp", async (req, res) => {
+  app.post("/twilio/whatsapp", async (req, res) => {
     try {
       // Twilio sometimes sends '+' as a literal '+' in form data; URL decoders
       // convert that to a space. Normalise 'whatsapp: 27...' → 'whatsapp:+27...'
