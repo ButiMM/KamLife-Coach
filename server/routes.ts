@@ -294,15 +294,16 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
   const context = buildContext(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
+  const hardLimit = "HARD RULE: Maximum 3 sentences. Maximum 60 words total. End with exactly one specific action. Never start with 'Coach K here'. Never say 'Reply MENU'.";
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 150,
+      max_tokens: 120,
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}\n\n${hardLimit}`
         },
         {
           role: "user",
@@ -343,10 +344,24 @@ async function getOrCreateUser(phone: string): Promise<any> {
 }
 
 // ============================================================
-// MENU TEXT
+// MENU TEXT — context-aware
 // ============================================================
 
-const MENU = `*KamLife Coach* 💪
+function getMenuText(user: any): string {
+  const name = getDisplayName(user);
+  const phase = user.programmePhase || 1;
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const day = user.programmeDayInWeek || 1;
+  const dayType = getDayType(day);
+  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
+  const mode = user.trainingMode || "home";
+
+  const headerLine = name
+    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${mode !== "walk_only" ? ` | Today: ${dayLabel}` : ""}`
+    : `*KamLife Coach* 💪`;
+
+  return `${headerLine}
 
 What do you need?
 1️⃣ Today's workout
@@ -358,6 +373,115 @@ What do you need?
 7️⃣ Measurements check-in
 
 Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
+}
+
+// ============================================================
+// ROTATING STEP RESPONSES (no GPT cost for simple logs)
+// ============================================================
+
+const STEP_RESPONSES_LOW = [
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. Walk to the shop, take the stairs, park further. Close that gap before bed.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps today. ${remaining.toLocaleString()} more will hit your target. A 15-minute walk is about 1,500 steps — go.`,
+  (steps: number, remaining: number, target: number) =>
+    `Short day — ${steps.toLocaleString()} steps. Your target is ${target.toLocaleString()}. Set a reminder for an evening walk and hit it before you sleep.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps is a start, not a finish. ${remaining.toLocaleString()} to go. Walk while you talk on the phone. Use every gap.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps logged. Target: ${target.toLocaleString()}. You are ${Math.round((steps / target) * 100)}% there — finish the job tonight.`,
+];
+
+const STEP_RESPONSES_GOOD = [
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — almost there. ${(target - steps).toLocaleString()} more to hit target. You are close, do not let it go.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps is solid progress. ${(target - steps).toLocaleString()} away from your ${target.toLocaleString()} target — one more walk and you have it.`,
+  (steps: number, target: number) =>
+    `Nearly at target — ${steps.toLocaleString()} steps done. Finish line is ${(target - steps).toLocaleString()} steps away. You have come too far not to finish.`,
+];
+
+const STEP_RESPONSES_TARGET = [
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — target hit. ✅ This daily discipline is what separates results from excuses. Same again tomorrow.`,
+  (steps: number, target: number) =>
+    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your fat loss. Do not skip tomorrow.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps done. ✅ Above target and earning it. Your body is changing because you are consistent — keep it up.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — you smashed the ${target.toLocaleString()} target. ✅ Lekker. Same energy tomorrow.`,
+  (steps: number, target: number) =>
+    `Target done — ${steps.toLocaleString()} steps. ✅ This is what consistency looks like. Log tomorrow and keep the streak going.`,
+];
+
+function getStepResponse(steps: number, target: number): string {
+  const idx = Math.floor(Date.now() / 86400000) % 5;
+  if (steps >= target) {
+    return STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
+  } else if (steps >= target * 0.75) {
+    return STEP_RESPONSES_GOOD[idx % STEP_RESPONSES_GOOD.length](steps, target);
+  }
+  const remaining = target - steps;
+  return STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
+}
+
+// ============================================================
+// FOOD PATTERN DETECTION
+// ============================================================
+
+const JUNK_WORDS = ["kfc", "kota", "fat cake", "magwinya", "vetkoek", "chips", "niknaks", "cool drink", "coke", "fanta", "hennessy", "henny", "alcohol", "beer", "wine", "chocolate", "sweets", "biscuit", "polony", "viennas", "russian", "steers", "burger", "pizza"];
+const PROTEIN_WORDS = ["egg", "chicken", "beef", "fish", "pilchards", "tuna", "beans", "lentils", "mince", "pork", "protein", "samp and beans", "sugar beans", "baked beans", "yogurt", "cheese", "milk", "cottage cheese"];
+
+async function checkFoodPatterns(userId: string): Promise<string | null> {
+  try {
+    const recent = await db.select().from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG")))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(5);
+
+    if (recent.length < 3) return null;
+
+    const last3 = recent.slice(0, 3).map(r => (r.message || "").toLowerCase());
+
+    const junkStreak = last3.filter(msg => JUNK_WORDS.some(w => msg.includes(w))).length;
+    if (junkStreak >= 3) {
+      return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
+    }
+
+    const noProteinStreak = last3.filter(msg => !PROTEIN_WORDS.some(w => msg.includes(w))).length;
+    if (noProteinStreak >= 3) {
+      return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting ${" "}your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+// ============================================================
+// PERFECT DAY DETECTION
+// ============================================================
+
+async function checkPerfectDay(userId: string): Promise<string | null> {
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+
+    const [todayWorkouts, todaySteps, todayFood] = await Promise.all([
+      db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, todayStart))).limit(1),
+      db.select().from(stepLogs).where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, todayStart))).limit(1),
+      db.select().from(chatHistory).where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).limit(1),
+    ]);
+
+    if (todayWorkouts.length > 0 && todaySteps.length > 0 && todayFood.length > 0) {
+      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Food tracked. This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 // ============================================================
 // ONBOARDING FLOW
@@ -475,10 +599,10 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const u = updatedUser[0];
 
-    return `*Profile complete* ✅\n\n*${u.name}* — Phase ${startPhase}: ${getPhaseNames()[startPhase]}\n\n🎯 Goal: ${u.goalType?.replace("_", " ")}\n🍽️ Calorie target: ${u.calorieTarget} kcal\n💪 Protein target: ${u.proteinTarget}g\n👟 Step target: ${stepsTarget.toLocaleString()} steps\n\nYour programme starts today. Not tomorrow. Not Monday. *Today.*\n\nReply MENU to begin.`;
+    return `*Profile complete* ✅\n\n*${u.name}* — Phase ${startPhase}: ${getPhaseNames()[startPhase]}\n\n🎯 Goal: ${u.goalType?.replace("_", " ")}\n🍽️ Calorie target: ${u.calorieTarget} kcal\n💪 Protein target: ${u.proteinTarget}g\n👟 Step target: ${stepsTarget.toLocaleString()} steps\n\nYour programme starts today. Not tomorrow. Not Monday. *Today.*\n\nSend *1* for your first workout.`;
   }
 
-  return MENU;
+  return getMenuText(user);
 }
 
 // ============================================================
@@ -574,7 +698,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   }
 
   // ---- MENU ----
-  if (intent === "MENU") return MENU;
+  if (intent === "MENU") return getMenuText(user);
 
   // ---- PHOTO / FOOD VISION ----
   if (mediaUrl) {
@@ -654,7 +778,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
 
     const coaching = await askCoachK("I just completed my workout", user, `Client just finished workout number ${newTotal}. Celebrate specifically. Reference their phase and total workouts. One sentence. SA voice.`);
-    return `${coaching}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}`;
+    const perfectDay = await checkPerfectDay(user.id);
+    return `${coaching}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
   }
 
   // ---- STEPS ----
@@ -665,12 +790,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     const target = user.stepsTarget || 7000;
     await db.insert(stepLogs).values({ userId: user.id, steps });
 
-    if (steps >= target) {
-      return await askCoachK(`I did ${steps} steps today`, user, `Client hit their step target of ${target}. They did ${steps} steps. Celebrate this. One sentence. SA and specific.`);
-    } else {
-      const remaining = target - steps;
-      return await askCoachK(`I did ${steps} steps today`, user, `Client logged ${steps} steps. Target is ${target}. They are ${remaining} short. Coach them to close the gap or challenge them for tomorrow.`);
-    }
+    const stepMsg = getStepResponse(steps, target);
+    const perfectDay = await checkPerfectDay(user.id);
+    return stepMsg + (perfectDay || "");
   }
 
   if (intent === "LOG_STEPS_PROMPT") return "How many steps did you do today? Just the number.";
@@ -779,7 +901,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     const instruction = estimatedCals > target * 0.5
       ? `Client logged a meal. Estimated calories: ${estimatedCals}. Daily target: ${target}. Coach them specifically on what they ate — what to adjust, what was good. SA voice. Specific food coaching.`
       : `Client logged a meal. Estimated calories: ${estimatedCals}. Coach them briefly and encourage them to hit their protein target of ${user.proteinTarget || 120}g.`;
-    return await askCoachK(message, user, instruction);
+
+    const [coachingReply, patternWarning, perfectDay] = await Promise.all([
+      askCoachK(message, user, instruction),
+      checkFoodPatterns(user.id),
+      checkPerfectDay(user.id),
+    ]);
+
+    return coachingReply + (patternWarning ? `\n\n${patternWarning}` : "") + (perfectDay || "");
   }
 
   // ---- GROCERY LIST ----
