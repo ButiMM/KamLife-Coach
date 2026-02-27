@@ -1067,6 +1067,15 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   // ── WhatsApp webhook ──────────────────────────────────────
 
+  function escapeXml(text: string): string {
+    return text
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;");
+  }
+
   app.post("/api/webhooks/whatsapp", async (req, res) => {
     try {
       // Twilio sometimes sends '+' as a literal '+' in form data; URL decoders
@@ -1087,7 +1096,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         await logChat(user[0].id, phone, message, reply, detectIntent(message));
       }
 
-      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${reply}</Message></Response>`);
+      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);
     } catch (err) {
       console.error("Webhook error:", err);
       return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
