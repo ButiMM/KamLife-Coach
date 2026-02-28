@@ -42,9 +42,9 @@ export const R = {
   ]),
 
   drinkLogged: () => pick([
-    "Logged. Stay on top of water — minimum 2L daily.",
-    "Hydration tracked. Keep water as your primary drink.",
-    "Logged. Water first, always.",
+    "Hydration tracked. Keep it consistent.",
+    "Logged. Keep going.",
+    "Noted. Stay consistent with it.",
   ]),
 
   stepsLow: () => pick([

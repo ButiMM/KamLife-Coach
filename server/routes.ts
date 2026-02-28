@@ -708,10 +708,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return handleOnboarding(user, message, phone);
   }
 
-  // ---- GREETINGS — strip emoji/punctuation before matching ----
-  const greetingWords = new Set(["hello", "hi", "hey", "howzit", "hola", "sawubona", "heita", "eita", "yo", "sup", "hie"]);
-  const cleanedGreeting = message.toLowerCase().replace(/[^a-z]/g, "").trim();
-  if (greetingWords.has(cleanedGreeting)) {
+  // ---- GREETINGS ----
+  const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
+  if (greetings.some(g => message.toLowerCase().trim() === g || message.toLowerCase().trim() === g + " 👋")) {
+    if (user.onboardingState && user.onboardingState !== "COMPLETE") {
+      return handleOnboarding(user, message, phone);
+    }
     return getMenuText(user);
   }
 
@@ -902,12 +904,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     const newTotal = currentWater + litres;
     await db.update(users).set({ todayWater: newTotal.toString() }).where(eq(users.phoneNumber, phone));
 
-    const target = 2;
-    const remaining = Math.max(0, target - newTotal).toFixed(1);
-    const waterContext = newTotal >= target
-      ? `Client hit their water target. Total today: ${newTotal.toFixed(1)}L.`
-      : `Client logged water. Total today: ${newTotal.toFixed(1)}L. Still needs ${remaining}L to hit the 2L target.`;
-    return await askCoachK(message, user, waterContext + " Coach them on this in one short SA sentence.");
+    const loggedLitres = litres.toFixed(2);
+    return await askCoachK(message, user, `Client just logged ${loggedLitres}L of water. Acknowledge it and coach them forward. One short SA sentence. Never give generic hydration tips.`);
   }
 
   // ---- WEEKLY REPORT ----
@@ -1006,7 +1004,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   }
 
   // ---- GENERAL (catch-all GPT) ----
-  return await askCoachK(message, user, "Respond as Coach K to this client message. Use your full SA coaching knowledge.");
+  return await askCoachK(message, user, "Respond as Coach K to this client message. Be specific. Be SA. Never mention water unless they asked about water.");
 }
 
 // ============================================================
