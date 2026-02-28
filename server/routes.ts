@@ -236,13 +236,45 @@ function buildDayWorkout(user: any): string {
     const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
       ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
       : `${multiplier.sets}x${multiplier.reps}`;
-    const ytQuery = ex.name.replace(/\s+/g, "+") + "+how+to+exercise";
+    const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
     const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
     workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
   }
 
   workout += `Send DONE when finished.`;
   return workout;
+}
+
+function buildFullProgramme(user: any): string {
+  const mode = user.trainingMode || "home";
+  const phase = user.programmePhase || 1;
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const multiplier = getPhaseMultiplier(phase);
+  const week = user.programmeWeek || 1;
+  const library = WORKOUTS[mode === "gym" ? "gym" : "home"];
+
+  const days: Array<{ label: string; type: "push" | "pull" | "legs" }> = [
+    { label: "Day 1 — Push 💪", type: "push" },
+    { label: "Day 2 — Pull 🏋️", type: "pull" },
+    { label: "Day 3 — Legs 🦵", type: "legs" },
+  ];
+
+  let out = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+
+  for (const { label, type } of days) {
+    const exercises = library[type].slice(0, 3);
+    out += `*${label}*\n`;
+    for (const ex of exercises) {
+      const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
+      const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
+      out += `• *${ex.name}* — ${multiplier.sets}x${multiplier.reps}\n  ${ex.description}\n  🎥 ${ytLink}\n`;
+    }
+    out += `\n`;
+  }
+
+  out += `Send *1* for today's full session with cues.`;
+  return out;
 }
 
 // ============================================================
@@ -305,7 +337,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}\n\n${hardLimit}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",
@@ -618,7 +650,7 @@ function detectIntent(message: string): string {
 
   if (m === "menu" || m === "help") return "MENU";
 
-  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("i need a programme") || m.includes("i need a program") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule")) return "WORKOUT";
+  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("programme") || m.includes("program") || m.includes("training plan") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule") || m.includes("show me my") || m.includes("all days") || m.includes("full week")) return "WORKOUT";
   if (m === "1") return "WORKOUT_TODAY";
 
   if ((m.includes("step") || m.includes("walked") || m.includes("steps")) && /\d/.test(m)) return "LOG_STEPS";
@@ -747,18 +779,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `${coaching}\n\n${workout}`;
   }
 
-  // ---- WORKOUT (contextual — travel, time, questions, joining gym) ----
+  // ---- WORKOUT (contextual — travel, time, questions, joining gym, full programme) ----
   if (intent === "WORKOUT") {
     if (m.includes("joined the gym") || m.includes("join the gym")) {
       await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
       const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      const workout = buildDayWorkout(updatedUser[0]);
-      const coaching = await askCoachK(message, updatedUser[0], "The client just joined a gym. Welcome this milestone in one sentence, then give them their programme.");
-      return `${coaching}\n\n${workout}`;
+      const coaching = await askCoachK(message, updatedUser[0], "The client just joined a gym. Welcome this in one sentence.");
+      return `${coaching}\n\n${buildFullProgramme(updatedUser[0])}`;
     }
 
     if (m.includes("travelling") || m.includes("traveling") || m.includes("hotel") || m.includes("30 min") || m.includes("short on time")) {
       return await askCoachK(message, user, `The client is travelling or short on time and needs a workout. Give them a 20 to 30 minute hotel room or bodyweight workout they can do right now. Include 4 exercises with sets and reps. Be specific. No equipment assumed.`);
+    }
+
+    const wantsProgramme = m.includes("programme") || m.includes("program") || m.includes("schedule") || m.includes("all days") || m.includes("full week") || m.includes("what do i do") || m.includes("what should i do") || m.includes("show me") || m.includes("training plan");
+    if (wantsProgramme) {
+      return buildFullProgramme(user);
     }
 
     const workout = buildDayWorkout(user);
