@@ -708,9 +708,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return handleOnboarding(user, message, phone);
   }
 
-  // ---- GREETINGS — always show menu for completed users ----
-  const greetings = new Set(["hello", "hi", "hey", "howzit", "hola", "sawubona", "heita", "eita", "yo", "sup", "hie"]);
-  if (greetings.has(message.toLowerCase().trim())) {
+  // ---- GREETINGS — strip emoji/punctuation before matching ----
+  const greetingWords = new Set(["hello", "hi", "hey", "howzit", "hola", "sawubona", "heita", "eita", "yo", "sup", "hie"]);
+  const cleanedGreeting = message.toLowerCase().replace(/[^a-z]/g, "").trim();
+  if (greetingWords.has(cleanedGreeting)) {
     return getMenuText(user);
   }
 
@@ -902,12 +903,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     await db.update(users).set({ todayWater: newTotal.toString() }).where(eq(users.phoneNumber, phone));
 
     const target = 2;
-    if (newTotal >= target) return `Water target hit ✅ ${newTotal.toFixed(1)}L done. This alone improves your fat loss, energy, and skin. Do it again tomorrow.`;
-    const remaining = (target - newTotal).toFixed(1);
-    if (newTotal < 0.5) return `Badly dehydrated. ${newTotal.toFixed(1)}L so far. Drink 500ml right now before anything else. ${remaining}L to go.`;
-    if (newTotal < 1) return `Good start. ${newTotal.toFixed(1)}L done. ${remaining}L to go today.`;
-    if (newTotal < 1.5) return `Halfway there. ${newTotal.toFixed(1)}L done. ${remaining}L to go. Keep going.`;
-    return `Almost there. ${newTotal.toFixed(1)}L done. One more glass finishes it.`;
+    const remaining = Math.max(0, target - newTotal).toFixed(1);
+    const waterContext = newTotal >= target
+      ? `Client hit their water target. Total today: ${newTotal.toFixed(1)}L.`
+      : `Client logged water. Total today: ${newTotal.toFixed(1)}L. Still needs ${remaining}L to hit the 2L target.`;
+    return await askCoachK(message, user, waterContext + " Coach them on this in one short SA sentence.");
   }
 
   // ---- WEEKLY REPORT ----
@@ -1006,7 +1006,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   }
 
   // ---- GENERAL (catch-all GPT) ----
-  return await askCoachK(message, user);
+  return await askCoachK(message, user, "Respond as Coach K to this client message. Use your full SA coaching knowledge.");
 }
 
 // ============================================================
