@@ -236,7 +236,9 @@ function buildDayWorkout(user: any): string {
     const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
       ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
       : `${multiplier.sets}x${multiplier.reps}`;
-    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n\n`;
+    const ytQuery = ex.name.replace(/\s+/g, "+") + "+how+to+exercise";
+    const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
+    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
   }
 
   workout += `Send DONE when finished.`;
@@ -672,6 +674,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
   if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
     return handleOnboarding(user, message, phone);
+  }
+
+  // ---- GREETINGS — always show menu for completed users ----
+  const greetings = new Set(["hello", "hi", "hey", "howzit", "hola", "sawubona", "heita", "eita", "yo", "sup", "hie"]);
+  if (greetings.has(message.toLowerCase().trim())) {
+    return getMenuText(user);
   }
 
   const intent = detectIntent(message);
