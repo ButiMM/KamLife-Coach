@@ -651,7 +651,7 @@ function detectIntent(message: string): string {
 
   if (m === "menu" || m === "help") return "MENU";
 
-  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("programme") || m.includes("program") || m.includes("training plan") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule") || m.includes("show me my") || m.includes("all days") || m.includes("full week")) return "WORKOUT";
+  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("programme") || m.includes("program") || m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule") || m.includes("show me my") || m.includes("all days") || m.includes("full week") || m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") || m.includes("i need a program") || m.includes("i need a programme") || m.includes("give me a program") || m.includes("give me a programme") || m.includes("lose weight program") || m.includes("weight loss program")) return "WORKOUT";
   if (m === "1") return "WORKOUT_TODAY";
 
   if ((m.includes("step") || m.includes("walked") || m.includes("steps")) && /\d/.test(m)) return "LOG_STEPS";
@@ -785,6 +785,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
 
   // ---- WORKOUT (contextual — travel, time, questions, joining gym, full programme) ----
   if (intent === "WORKOUT") {
+    const ONBOARDING_DONE_W = ["COMPLETE", "COMPLETED"];
+    if (!user.onboardingState || !ONBOARDING_DONE_W.includes(user.onboardingState)) {
+      return await askCoachK(message, user, "The client wants a gym programme. They have not completed onboarding so we do not have their full profile. Build them a 3 day full body gym programme for fat loss. Include Day 1 Day 2 Day 3 each with 4 exercises. Each exercise must have exact sets and reps and a real YouTube link formatted as https://www.youtube.com/results?search_query=Exercise+Name+form+tutorial with plus signs between words. After giving the programme add one line: To get a fully personalised programme reply START.");
+    }
+
     if (m.includes("joined the gym") || m.includes("join the gym")) {
       await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
       const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -796,7 +801,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
       return await askCoachK(message, user, `The client is travelling or short on time and needs a workout. Give them a 20 to 30 minute hotel room or bodyweight workout they can do right now. Include 4 exercises with sets and reps. Be specific. No equipment assumed.`);
     }
 
-    const wantsProgramme = m.includes("programme") || m.includes("program") || m.includes("schedule") || m.includes("all days") || m.includes("full week") || m.includes("what do i do") || m.includes("what should i do") || m.includes("show me") || m.includes("training plan");
+    const wantsProgramme = m.includes("programme") || m.includes("program") || m.includes("schedule") || m.includes("all days") || m.includes("full week") || m.includes("what do i do") || m.includes("what should i do") || m.includes("show me") || m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") || m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") || m.includes("lose weight") || m.includes("weight loss");
     if (wantsProgramme) {
       return buildFullProgramme(user);
     }
