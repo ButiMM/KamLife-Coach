@@ -4,6 +4,7 @@ import { db } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins } from "../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import OpenAI from "openai";
+import twilio from "twilio";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1026,6 +1027,31 @@ async function logChat(userId: string, phone: string, message: string, reply: st
 }
 
 // ============================================================
+// RATE LIMITER — 15 messages per phone per 60 seconds
+// ============================================================
+
+const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of rateLimitMap.entries()) {
+    if (now > val.resetAt) rateLimitMap.delete(key);
+  }
+}, 5 * 60 * 1000);
+
+function checkRateLimit(phone: string): boolean {
+  const now = Date.now();
+  const window = 60 * 1000;
+  const entry = rateLimitMap.get(phone);
+  if (!entry || now > entry.resetAt) {
+    rateLimitMap.set(phone, { count: 1, resetAt: now + window });
+    return true;
+  }
+  if (entry.count >= 15) return false;
+  entry.count++;
+  return true;
+}
+
+// ============================================================
 // REGISTER EXPRESS ROUTES
 // ============================================================
 
@@ -1120,9 +1146,28 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   app.post("/twilio/whatsapp", async (req, res) => {
     try {
+      // ---- Twilio signature verification (skip in development) ----
+      if (process.env.NODE_ENV !== "development") {
+        const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+        const signature = (req.headers["x-twilio-signature"] as string) || "";
+        const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+        const valid = twilio.validateRequest(authToken, signature, fullUrl, req.body);
+        if (!valid) {
+          console.warn(`Twilio signature validation failed from ${req.ip}`);
+          return res.status(403).end();
+        }
+      }
+
+      // ---- Rate limiter ----
+      const rawPhoneEarly = (req.body.From || "") as string;
+      const phoneKey = rawPhoneEarly.replace(/^(whatsapp:)\s+/, "$1+");
+      if (!checkRateLimit(phoneKey)) {
+        return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Too many messages. Wait 60 seconds.</Message></Response>`);
+      }
+
       // Twilio sometimes sends '+' as a literal '+' in form data; URL decoders
       // convert that to a space. Normalise 'whatsapp: 27...' → 'whatsapp:+27...'
-      const rawPhone = (req.body.From || "") as string;
+      const rawPhone = rawPhoneEarly;
       const phone = rawPhone.replace(/^(whatsapp:)\s+/, "$1+");
       const message = (req.body.Body || "").trim();
       const mediaUrl = req.body.MediaUrl0 || undefined;
