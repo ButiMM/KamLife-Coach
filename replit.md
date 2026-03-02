@@ -44,7 +44,7 @@ The project uses a single-repo structure with three main directories:
 - **Database**: PostgreSQL (required, referenced via `DATABASE_URL` environment variable)
 - **ORM**: Drizzle ORM with `drizzle-zod` for schema-to-validation integration
 - **Schema** (`shared/schema.ts`):
-  - `users` — Core user table with phone number, fitness goals, subscription status, onboarding state, calorie/protein/step targets, homeEquipment, lifeSituation, jobType, activityLevel, primaryFocusArea, baselineWeekActive/Complete, profileNotes
+  - `users` — Core user table with phone number, fitness goals, subscription status, onboarding state, calorie/protein/step targets, homeEquipment, lifeSituation, jobType, activityLevel, primaryFocusArea, baselineWeekActive/Complete, profileNotes; plus new fields: bmi, medicalConditions, nutritionProtocol, mealTimingStrict, doctorClearanceRequired, trainingLocation, gymName, weeklyFoodBudget, workSchedule, elderlyClient
   - `weight_logs` — Weight tracking entries per user
   - `workout_logs` — Workout completion tracking per user
   - `step_logs` — Daily step count logs per user
@@ -67,7 +67,8 @@ The project uses a single-repo structure with three main directories:
 8. **Contextual Food Detection**: Food handler detects grocery lists (5+ tokens), budget anxiety, overwhelm, and new client first logs. Injects extra AI instructions for each detected pattern. Month-end budget mode auto-activates after 20th of month.
 9. **Response Templates** (`server/responses.ts`): Rotating response arrays for steps (low/good/target), food (good/junk/alcohol/no protein), sleep, weight, workouts, portions, and weekly scores. Prevents repetitive coaching.
 10. **Pattern Recognition**: `checkFoodPatterns` detects repeat junk food (3+ times) and protein-free meals (3 in a row). `checkPerfectDay` detects workout+steps+food all hit in one day.
-5. **Extended Onboarding Flow**: Name → Weight → Training Mode → Equipment (home only) → Goal (4 options: fat loss, muscle gain, recomposition, general fitness) → Focus Area (muscle gain/recomp only) → Activity Level (5 levels with calorie multipliers) → Job Type → Life Situation → Age → Conditions → Experience → Baseline Week (intermediate/advanced only) → COMPLETED. Calorie target uses activity level multipliers (sedentary 1.2x to extremely active 1.9x).
+5. **13-State Onboarding Flow** (`handleOnboarding` in `server/routes.ts`): START → ASK_NAME → ASK_AGE (under-16 guard, 65+ elderly flag) → ASK_WEIGHT_HEIGHT (BMI calculated) → ASK_GOAL (5 options incl. health condition) → ASK_SITUATION (6 life situations) → ASK_MEDICAL (7 conditions; diabetes→LOW_GI protocol, heart→doctor clearance) → ASK_INJURIES → ASK_EQUIPMENT (gym selection triggers ASK_GYM_NAME) → ASK_TRAINING_DAYS → ASK_EXPERIENCE → ASK_BUDGET → ASK_WORK_SCHEDULE → COMPLETE (calorie/protein targets calculated, programme + budget meal plan delivered).
+11. **Proactive Scheduler** (`server/scheduler.ts`): node-cron jobs for: morning check-in (6am SAST), evening accountability (7pm SAST), week 3 danger zone intervention (Monday 6am), month-end budget mode (20th), day 7/30/60/90 milestone messages, silence detection (48h and 7 days), Friday weekend strategy (4pm). Ramadan auto-detection switches morning messages to Suhoor coaching for Feb–Mar window. All jobs try-catch per client, all sends logged.
 3. **No Authentication (MVP)**: The admin dashboard currently has no auth — noted as a future concern in requirements. The landing page "Coach Login" link goes directly to the dashboard.
 4. **UUID Primary Keys**: All main tables use UUID primary keys with `gen_random_uuid()`.
 
@@ -89,6 +90,7 @@ The project includes several Replit AI integration modules in `server/replit_int
 - **Batch**: Batch processing utilities with rate limiting and retries
 
 ### Key NPM Packages
+- `node-cron` — Scheduled background jobs for proactive coaching messages
 - `drizzle-orm` / `drizzle-kit` — Database ORM and migration tooling
 - `express` v5 — HTTP server
 - `openai` — OpenAI API client
