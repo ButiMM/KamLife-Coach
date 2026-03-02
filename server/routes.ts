@@ -1151,9 +1151,9 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_NAME ----
   if (state === "ASK_NAME") {
     const cleaned = msg.replace(/[^a-zA-Z\s'-]/g, "").trim();
-    const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
+    const INVALID = new Set(["HI", "HEY", "HELLO", "HOWZIT", "HOLA", "YO", "SUP", "EITA", "SAWUBONA", "YEBO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
     if (!cleaned || cleaned.length < 2 || INVALID.has(cleaned.toUpperCase())) {
-      return `What is your actual name? Just your first name is fine.`;
+      return `I want to make sure I have your real name. What do you actually go by?`;
     }
     const name = cleaned.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
     await db.update(users).set({ name, onboardingState: "ASK_AGE" }).where(eq(users.phoneNumber, phone));
@@ -1421,6 +1421,32 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return handleOnboarding(user, message, phone);
   }
 
+  // ---- AWAITING PROGRAMME ANSWERS — parse directly, no GPT ----
+  if (user.awaitingProgrammeAnswers) {
+    const lower = message.toLowerCase();
+
+    const daysMatch = message.match(/\b([2-6])\b/);
+    const trainingDays = daysMatch ? parseInt(daysMatch[1]) : 3;
+
+    let experience = "beginner";
+    if (lower.includes("advanced") || lower.includes("2 plus") || lower.includes("2+") || lower.includes("seriously")) experience = "advanced";
+    else if (lower.includes("intermediate") || lower.includes("inter") || lower.includes("on and off") || lower.includes("some experience")) experience = "intermediate";
+
+    let goalType = "fat_loss";
+    if ((lower.includes("muscle") && lower.includes("fat")) || lower.includes("both") || lower.includes("recomp")) goalType = "recomposition";
+    else if (lower.includes("muscle") || lower.includes("build") || lower.includes("gain") || lower.includes("bulk")) goalType = "muscle_gain";
+
+    await db.update(users)
+      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, awaitingProgrammeAnswers: false })
+      .where(eq(users.phoneNumber, phone));
+
+    const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType };
+    const programme = buildFullProgramme(updatedUser);
+    const reply = `Sharp. Here is your programme — ${trainingDays} days per week, ${experience} level, ${goalType.replace("_", " ")} focus.\n\n${programme}`;
+    await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
+    return reply;
+  }
+
   // ---- GREETINGS / MENU (direct — no GPT) ----
   const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
   if (greetings.some(g => m === g || m === g + " 👋") || m === "menu" || m === "help") {
@@ -1590,7 +1616,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   }
 
   if (isWorkoutRelated && (!user.trainingExperience || !user.trainingDaysPerWeek)) {
-    return `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply with a number — 3, 4, or 5.\n\n2️⃣ What is your experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ What is your main goal?\nLose fat\nBuild muscle\nBoth — body recomposition\n\nReply with your three answers and I build your programme immediately.`;
+    await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
+    const questions = `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply 2, 3, 4, 5, or 6.\n\n2️⃣ Experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ Main goal?\nLose fat\nBuild muscle\nBoth\n\nReply with your three answers and I build your programme immediately.`;
+    await logChat(user.id, message, questions, "PROGRAMME_QUESTIONS");
+    return questions;
   }
 
   // ---- STEP LOG DETECTION (direct — no GPT cost) ----

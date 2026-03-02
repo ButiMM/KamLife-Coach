@@ -62,6 +62,7 @@ export const users = pgTable("users", {
   weeklyFoodBudget: text("weekly_food_budget"),
   workSchedule: text("work_schedule"),
   elderlyClient: boolean("elderly_client").default(false),
+  awaitingProgrammeAnswers: boolean("awaiting_programme_answers").default(false),
 }, (table) => {
   return {
     phoneIdx: index("users_phone_idx").on(table.phoneNumber),
