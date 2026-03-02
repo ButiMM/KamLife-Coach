@@ -697,15 +697,51 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 // GPT CALL — ALWAYS USES MASTER PROMPT + FULL CONTEXT
 // ============================================================
 
+function selectModel(instruction: string, userMessage: string): { model: string; maxTokens: number; reason: string } {
+  const GPT4O_SIGNALS = [
+    "programme", "workout plan", "training plan", "beginner", "intermediate", "advanced",
+    "diabetes", "diabetic", "hypertension", "blood pressure", "pcos", "hiv", "arv", "tb ",
+    "ramadan", "fasting", "pregnancy", "pregnant", "elderly", "injury", "bad knee",
+    "bad back", "bad shoulder", "hip problem", "knee replacement",
+    "calories", "calorie target", "how much should i eat", "muscle gain", "fat loss",
+    "goal change", "want to gain", "want to lose", "supplement stack", "creatine",
+    "protein powder", "week 3", "crisis", "suicidal", "self harm",
+    "calculate", "formula", "how many calories", "what should i eat for my goal",
+  ];
+
+  // Check user message first — this is the primary routing signal
+  const msgLower = userMessage.toLowerCase();
+  const matchedMsg = GPT4O_SIGNALS.find(signal => msgLower.includes(signal));
+  if (matchedMsg) {
+    console.log(`[MODEL] gpt-4o selected — user message matched: "${matchedMsg}" | msg: "${userMessage.slice(0, 60)}"`);
+    return { model: "gpt-4o", maxTokens: 600, reason: matchedMsg };
+  }
+
+  // Check the extra instruction only when it is short (utility calls like celebrations)
+  // Skip scanning the full handleMessage instruction template — it always contains signals
+  if (instruction.length < 200) {
+    const instrLower = instruction.toLowerCase();
+    const matchedInstr = GPT4O_SIGNALS.find(signal => instrLower.includes(signal));
+    if (matchedInstr) {
+      console.log(`[MODEL] gpt-4o selected — instruction matched: "${matchedInstr}"`);
+      return { model: "gpt-4o", maxTokens: 600, reason: matchedInstr };
+    }
+  }
+
+  console.log(`[MODEL] gpt-4o-mini selected | msg: "${userMessage.slice(0, 60)}"`);
+  return { model: "gpt-4o-mini", maxTokens: 250, reason: "simple response" };
+}
+
 async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
   const context = buildContext(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name — never say 'a client' or 'Hi client'. End with exactly one specific action.";
+  const { model, maxTokens } = selectModel(instruction, userMessage);
 
   try {
     const response = await openai.chat.completions.create({
-      model: "gpt-4o",
-      max_tokens: 500,
+      model,
+      max_tokens: maxTokens,
       messages: [
         {
           role: "system",
