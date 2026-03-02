@@ -1142,20 +1142,22 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
-  // ---- START ----
+  // ---- START (new users only — sends welcome, moves to WELCOME state) ----
   if (state === "START") {
-    await db.update(users).set({ onboardingState: "ASK_NAME" }).where(eq(users.phoneNumber, phone));
-    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7.\n\nI'm going to ask you a few quick questions so I can coach you properly — not generically. This takes 3 minutes and changes everything.\n\nWhat's your name?`;
+    await db.update(users).set({ onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
+    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7. What's your name?`;
   }
 
-  // ---- ASK_NAME ----
-  if (state === "ASK_NAME") {
-    const cleaned = msg.replace(/[^a-zA-Z\s'-]/g, "").trim();
-    const INVALID = new Set(["HI", "HEY", "HELLO", "HOWZIT", "HOLA", "YO", "SUP", "EITA", "SAWUBONA", "YEBO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-    if (!cleaned || cleaned.length < 2 || INVALID.has(cleaned.toUpperCase())) {
-      return `I want to make sure I have your real name. What do you actually go by?`;
+  // ---- WELCOME — waiting for name reply ----
+  if (state === "WELCOME") {
+    const raw = msg.trim();
+    const words = raw.split(/\s+/);
+    const hasBadPunctuation = /[^a-zA-Z\s''-]/.test(raw);
+    const COMMANDS = new Set(["RESET", "START", "RESTART", "MENU", "HELP", "DONE", "YES", "NO", "OK", "OKAY", "HI", "HEY", "HELLO", "HOWZIT", "HOLA", "YO", "SUP", "EITA", "SAWUBONA", "YEBO", "STOP", "CANCEL"]);
+    if (!raw || raw.length < 2 || raw.length > 20 || words.length > 3 || hasBadPunctuation || COMMANDS.has(raw.toUpperCase())) {
+      return `Just your first name — what do people call you?`;
     }
-    const name = cleaned.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
+    const name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
     await db.update(users).set({ name, onboardingState: "ASK_AGE" }).where(eq(users.phoneNumber, phone));
     return `Sharp ${name}. How old are you?`;
   }
@@ -1488,21 +1490,39 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   // ---- RESET (direct) ----
   if (m.includes("reset") || m.includes("start over") || m.includes("start again") || m.includes("profile reset") || m.includes("begin again")) {
     await db.update(users).set({
-      onboardingState: "START",
+      onboardingState: "WELCOME",
+      name: null,
+      age: null,
+      currentWeight: null,
+      height: null,
+      bmi: null,
+      goalType: null,
+      lifeSituation: null,
+      medicalConditions: null,
+      nutritionProtocol: null,
+      mealTimingStrict: false,
+      doctorClearanceRequired: false,
+      injuries: null,
+      trainingLocation: null,
+      trainingMode: "home",
+      gymName: null,
+      homeEquipment: null,
+      trainingDaysPerWeek: null,
+      trainingExperience: null,
+      weeklyFoodBudget: null,
+      budgetLevel: null,
+      workSchedule: null,
+      elderlyClient: false,
       programmePhase: 1,
       programmeWeek: 1,
       programmeDayInWeek: 1,
-      goalType: null,
-      currentWeight: null,
-      trainingMode: "home",
-      homeEquipment: null,
-      lifeSituation: null,
-      injuries: null,
-      trainingExperience: null,
-      subscriptionStatus: "trial",
+      calorieTarget: null,
+      proteinTarget: null,
       totalWorkoutsCompleted: 0,
+      awaitingProgrammeAnswers: false,
+      subscriptionStatus: "trial",
     }).where(eq(users.phoneNumber, phone));
-    return `Profile reset. Let us start fresh.\n\nWhat is your name?`;
+    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7. What's your name?`;
   }
 
   // ---- DONE — workout complete (direct) ----
