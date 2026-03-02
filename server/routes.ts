@@ -26,7 +26,7 @@ SA LANGUAGE — understand and respond naturally to:
 eish, sharp, yebo, ja, aweh, lekker, mara, haibo, aikona, sho, eita, howzit, shame man, bru, sis, babe, china, laaitie, township, spaza, shebeen, tavern, braai, kota, vetkoek, magwinya, morogo, mogodu, walkie talkies, smileys, umngqusho, mabele, Jungle Oats, Maltabella, pilchards, Russians, polony, fat cakes, Simba, Niknaks, Cremora, Mageu, cool drink, tuck shop, res, campus, rank, taxi.
 
 RESPONSE RULES — NON NEGOTIABLE:
-Maximum 4 sentences for conversational responses. Always end with exactly one specific action. Never use bullet points in conversational responses. Never append warning messages after already giving a coaching response. Never respond with a generic water tip unless client specifically asked about water. Always use the client's actual name. Never say Good choice, Well done, Amazing, Great job as standalone praise. Never shame a food choice. Coach the next meal not the last one. One bad meal is nothing. One bad week needs attention. One bad month needs a programme adjustment.
+Maximum 3 sentences and 60 words for conversational responses. Always end with exactly one specific action. Never use bullet points in conversational responses. Never append warning messages after already giving a coaching response. Never respond with a generic water tip unless client specifically asked about water. Always use the client's actual name. Never say Good choice, Well done, Amazing, Great job as standalone praise. Never shame a food choice. Coach the next meal not the last one. One bad meal is nothing. One bad week needs attention. One bad month needs a programme adjustment.
 
 PROGRAMME PHILOSOPHY — THIS IS NON NEGOTIABLE:
 Foundation training is machine and cable based compound movements. Machines teach movement patterns safely, allow progressive overload, and build real strength without injury risk. Free weights come after 3 months minimum.
@@ -694,6 +694,57 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 }
 
 // ============================================================
+// SA CULTURAL & SEASONAL CONTEXT FLAGS
+// ============================================================
+
+function getSAContextFlags(): string {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const year = now.getFullYear();
+  const flags: string[] = [];
+
+  if (day >= 20) {
+    flags.push("BUDGET MODE ACTIVE: Date is after the 20th. Client may be tight on money. Prioritise cheap high-protein SA foods — eggs, pilchards, sugar beans, pap. Do not suggest expensive supplements or premium foods.");
+  }
+
+  const RAMADAN: Record<number, [string, string]> = {
+    2025: ["2025-03-01", "2025-03-30"],
+    2026: ["2026-02-17", "2026-03-18"],
+    2027: ["2027-02-06", "2027-03-07"],
+    2028: ["2028-01-26", "2028-02-24"],
+    2029: ["2029-01-14", "2029-02-12"],
+  };
+  const ramRange = RAMADAN[year];
+  if (ramRange && now >= new Date(ramRange[0]) && now <= new Date(ramRange[1])) {
+    flags.push("RAMADAN ACTIVE: Complete programme restructure required. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs, water before Fajr. No training during fasting hours. Adjust all calorie and meal timing advice to the eating window only.");
+  }
+
+  const MONTHLY: Record<number, string> = {
+    1:  "January — New year motivation is high but gyms are overcrowded. Set realistic first-month expectations. Focus on building sustainable habits not chasing rapid results. Beware over-commitment.",
+    2:  "February — Valentine's Day body image pressure is real. Do not amplify comparison or appearance anxiety. Celebrate progress and strength. Acknowledge emotional eating triggers around this time.",
+    3:  "March — Back to school means back to routine. Excellent month to restart lapsed clients. Routines are re-establishing — capitalise on the structure.",
+    4:  "April — Easter weekend and braai season. Social eating is high risk. Protein-first strategy at any braai or family gathering. One training session over the long weekend minimum.",
+    5:  "May — Workers Day. Autumn. Post-January-rush motivation slump common around now. Focus on consistency over intensity. Celebrate progress made since January.",
+    6:  "June — Youth Day. Mid-year check-in. January starters are at programme halfway point — review what has changed and what needs adjustment.",
+    7:  "July — School holidays. Routine disruption is real. Kids at home affects training time. Adapt to shorter sessions, home workouts, early mornings, or post-bedtime sessions.",
+    8:  "August — Women's Month. Celebrate female clients specifically. Body positivity and strength messaging. No weight-focused language unless client initiates. Celebrate what the body can DO.",
+    9:  "September — Spring in SA. Outdoor training season begins. Encourage park runs, outdoor sessions, Parkrun, walking with friends. Energy and motivation naturally higher.",
+    10: "October — Walking and transport awareness month. Step count focus. Encourage getting off the taxi one stop early, taking the stairs, lunch walks.",
+    11: "November — Year-end party season begins. Alcohol and social eating management. Help clients navigate office parties and year-end functions without derailing progress.",
+    12: "December — Festive season. Maintenance mode only — do NOT set aggressive fat loss targets. Two rules: keep protein up and stay moving. Family time is not failure time. January is for reset.",
+  };
+  if (MONTHLY[month]) flags.push(MONTHLY[month]);
+
+  if (month >= 5 && month <= 9) {
+    flags.push("Load shedding risk: Winter months have historically high Eskom load shedding stages 4–6. Gyms may be without power. Always have a home workout alternative ready for every session.");
+  }
+
+  if (flags.length === 0) return "";
+  return `SA CONTEXT FLAGS:\n${flags.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
+}
+
+// ============================================================
 // PATTERN SUMMARY — 7-DAY BEHAVIOUR ANALYSIS SENT WITH EVERY GPT CALL
 // ============================================================
 
@@ -872,7 +923,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
   const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
-  const hardLimit = "HARD RULE: Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name — never say 'a client' or 'Hi client'. End with exactly one specific action.";
+  const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
   try {
@@ -1390,7 +1441,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
         messages: [
           {
             role: "system",
-            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 4 sentences. End with one action.`
+            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 3 sentences and 60 words. End with one action.`
           },
           {
             role: "user",
@@ -1571,11 +1622,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
   const hour = now.getHours();
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const monthEnd = now.getDate() >= 20;
   const clientName = user.name || "champ";
   const trainingMode = user.trainingMode || "home";
+  const saContext = getSAContextFlags();
 
-  const instruction = `Today is ${dayOfWeek} ${timeOfDay}. Month-end budget mode: ${monthEnd}.
+  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}
 
 RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 
