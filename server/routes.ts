@@ -883,7 +883,7 @@ async function checkFoodPatterns(userId: string): Promise<string | null> {
 
     if (recent.length < 3) return null;
 
-    const last3 = recent.slice(0, 3).map(r => (r.message || "").toLowerCase());
+    const last3 = recent.slice(0, 3).map(r => (r.messageIn || "").toLowerCase());
 
     const junkStreak = last3.filter(msg => JUNK_WORDS.some(w => msg.includes(w))).length;
     if (junkStreak >= 3) {
@@ -926,122 +926,294 @@ async function checkPerfectDay(userId: string): Promise<string | null> {
 }
 
 // ============================================================
-// ONBOARDING FLOW
+// ONBOARDING MEAL PLAN HELPER
+// ============================================================
+
+function getOnboardingMealPlan(user: any): string {
+  const budget = user.weeklyFoodBudget || "100_300";
+  const isNightShift = user.workSchedule === "night_shift";
+  const meal1 = isNightShift ? "Pre-shift meal" : "Breakfast";
+
+  if (budget === "under_100") {
+    return `*🍽️ Your Week 1 Meal Plan — Under R100/week*\n${meal1}: 2 eggs + 1 cup oats with black tea (oats R15, eggs R25 for 12)\nLunch: 1 tin pilchards + pap or brown bread (R12/tin)\nDinner: Eggs or pilchards + cabbage or spinach (R8 cabbage)\nWeekly cost: Under R60. Protein every meal — eggs 12g each, pilchards 25g/tin.`;
+  }
+  if (budget === "100_300") {
+    return `*🍽️ Your Week 1 Meal Plan — R100–R300/week*\n${meal1}: Jungle Oats + 2 boiled eggs\nLunch: Pilchards or chicken thigh + brown rice + cabbage\nDinner: Eggs or chicken + sweet potato + spinach\nSnack: Peanut butter on brown bread\nWeekly shop: Eggs R45 · Pilchards ×3 R36 · Oats R15 · Bread R14 · Veg R30 = ±R140.`;
+  }
+  if (budget === "300_600") {
+    return `*🍽️ Your Week 1 Meal Plan — R300–R600/week*\n${meal1}: Greek yogurt + oats + banana OR 3 eggs + toast\nLunch: Chicken thigh + brown rice + spinach (frozen chicken 1kg ≈ R40)\nDinner: Beef mince stew + sweet potato + broccoli\nSnack: Baked beans on toast or cottage cheese\nThis budget lets you eat like a professional athlete.`;
+  }
+  return `*🍽️ Your Week 1 Meal Plan — Flexible budget*\n${meal1}: Greek yogurt + oats + berries OR 3-egg omelette with spinach\nLunch: Grilled chicken breast + brown rice + salad\nDinner: Lean beef or fish + sweet potato + vegetables\nSnack: Cottage cheese + rice cakes OR protein shake (USN/Biogen) + fruit\nFull nutritional flexibility — spend wisely, not expensively.`;
+}
+
+// ============================================================
+// ONBOARDING FLOW — 13-STATE SEQUENCE
 // ============================================================
 
 async function handleOnboarding(user: any, message: string, phone: string): Promise<string> {
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
+  // ---- START ----
   if (state === "START") {
     await db.update(users).set({ onboardingState: "ASK_NAME" }).where(eq(users.phoneNumber, phone));
-    return `Welcome to *KamLife Coach* 👋\n\nNo keto. No detox teas. No shortcuts.\nReal coaching built for real South Africans.\n\nWhat is your name?`;
+    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7.\n\nI'm going to ask you a few quick questions so I can coach you properly — not generically. This takes 3 minutes and changes everything.\n\nWhat's your name?`;
   }
 
+  // ---- ASK_NAME ----
   if (state === "ASK_NAME") {
-    const cleaned = msg.replace(/[^a-zA-Z\s]/g, "").trim();
-    const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE"]);
+    const cleaned = msg.replace(/[^a-zA-Z\s'-]/g, "").trim();
+    const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
     if (!cleaned || cleaned.length < 2 || INVALID.has(cleaned.toUpperCase())) {
       return `What is your actual name? Just your first name is fine.`;
     }
     const name = cleaned.split(" ").map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-    await db.update(users).set({ name, onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `Sharp ${name} 👊\n\nWhat is your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Body recomposition — lose fat and gain muscle simultaneously\n4️⃣ General fitness and health`;
+    await db.update(users).set({ name, onboardingState: "ASK_AGE" }).where(eq(users.phoneNumber, phone));
+    return `Sharp ${name}. How old are you?`;
   }
 
-  if (state === "ASK_GOAL") {
-    let goal = "fat_loss";
-    let calorieBase = 1500;
-    const lower = msg.toLowerCase();
-    if (msg.includes("2") || lower.includes("muscle")) { goal = "muscle_gain"; calorieBase = 2200; }
-    else if (msg.includes("3") || lower.includes("recomp")) { goal = "recomposition"; calorieBase = 1800; }
-    else if (msg.includes("4") || lower.includes("general") || lower.includes("fit")) { goal = "general"; calorieBase = 1800; }
-    await db.update(users).set({ goalType: goal, calorieTarget: calorieBase, onboardingState: "ASK_WEIGHT" }).where(eq(users.phoneNumber, phone));
-    return `Got it. How much do you weigh in kg?\n\nJust the number. For example: 72`;
-  }
-
-  if (state === "ASK_WEIGHT") {
-    const weight = parseFloat(msg.replace(/[^0-9.]/g, ""));
-    if (isNaN(weight) || weight < 30 || weight > 300) return "Just the number in kg please. For example: 72";
-    const protein = Math.round(weight * 2);
-    await db.update(users).set({ currentWeight: weight.toString(), proteinTarget: protein, onboardingState: "ASK_AGE" }).where(eq(users.phoneNumber, phone));
-    return `How old are you?`;
-  }
-
+  // ---- ASK_AGE ----
   if (state === "ASK_AGE") {
     const age = parseInt(msg.replace(/[^0-9]/g, ""));
-    if (isNaN(age) || age < 10 || age > 100) return "Just your age please. For example: 28";
-    await db.update(users).set({ age, onboardingState: "ASK_MODE" }).where(eq(users.phoneNumber, phone));
-    return `Where will you train?\n\n1️⃣ Gym\n2️⃣ At home\n3️⃣ Walking only`;
+    if (isNaN(age) || age < 10 || age > 110) return `Just your age please. For example: 28`;
+    if (age < 16) return `I coach from age 16 upward. Get a parent or guardian to sign up with you.`;
+    const isElderly = age >= 65;
+    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
+    return `What's your current weight in kg and your height?\n\nExample: 78kg, 1.72m`;
   }
 
-  if (state === "ASK_MODE") {
-    let mode = "home";
-    const lower = msg.toLowerCase();
-    if (msg.includes("1") || lower.includes("gym")) mode = "gym";
-    else if (msg.includes("3") || lower.includes("walk")) mode = "walk_only";
-    await db.update(users).set({ trainingMode: mode, onboardingState: mode === "home" ? "ASK_EQUIPMENT" : "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
-    if (mode === "home") {
-      return `What equipment do you have at home?\n\nReply with numbers — you can pick more than one:\n1️⃣ No equipment\n2️⃣ Resistance bands\n3️⃣ Dumbbells\n4️⃣ Kettlebell\n5️⃣ Pull up bar\n6️⃣ Skipping rope`;
+  // ---- ASK_WEIGHT_HEIGHT ----
+  if (state === "ASK_WEIGHT_HEIGHT") {
+    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    if (!weightMatch) return `Please give me your weight and height. Example: 78kg, 1.72m`;
+    const weight = parseFloat(weightMatch[1]);
+    if (weight < 30 || weight > 350) return `That weight doesn't look right. Example: 78kg, 1.72m`;
+
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g)/i);
+    const heightCmMatch = msg.match(/(\d{3})\s*cm/i);
+    let heightM = 1.7;
+    let heightCmVal = 170;
+    if (heightMMatch) {
+      heightM = parseFloat(heightMMatch[1]);
+      heightCmVal = Math.round(heightM * 100);
+    } else if (heightCmMatch) {
+      heightCmVal = parseInt(heightCmMatch[1]);
+      heightM = heightCmVal / 100;
     }
-    return `Training experience?\n\n1️⃣ Just starting — never trained consistently\n2️⃣ Some experience — on and off\n3️⃣ Consistent — 6 plus months of regular training`;
+
+    const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
+    const protein = Math.round(weight * 2);
+    await db.update(users).set({
+      currentWeight: weight.toString(),
+      heightCm: heightCmVal,
+      bmi: bmi.toString(),
+      proteinTarget: protein,
+      onboardingState: "ASK_GOAL",
+    }).where(eq(users.phoneNumber, phone));
+    return `What's your main goal right now?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both — body recomposition\n4️⃣ Get fit and healthy generally\n5️⃣ Manage a health condition`;
   }
 
-  if (state === "ASK_EQUIPMENT") {
-    const selections = [];
-    if (msg.includes("1")) selections.push("none");
-    if (msg.includes("2")) selections.push("bands");
-    if (msg.includes("3")) selections.push("dumbbells");
-    if (msg.includes("4")) selections.push("kettlebell");
-    if (msg.includes("5")) selections.push("pullup_bar");
-    if (msg.includes("6")) selections.push("skipping_rope");
-    const equipment = selections.length > 0 ? selections.join(",") : "none";
-    await db.update(users).set({ homeEquipment: equipment, onboardingState: "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
-    return `Training experience?\n\n1️⃣ Just starting — never trained consistently\n2️⃣ Some experience — on and off\n3️⃣ Consistent — 6 plus months of regular training`;
-  }
-
-  if (state === "ASK_EXPERIENCE") {
-    let exp = "beginner";
+  // ---- ASK_GOAL ----
+  if (state === "ASK_GOAL") {
     const lower = msg.toLowerCase();
-    if (msg.includes("2") || lower.includes("some")) exp = "intermediate";
-    if (msg.includes("3") || lower.includes("consistent") || lower.includes("advanced")) exp = "advanced";
-    await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_SITUATION" }).where(eq(users.phoneNumber, phone));
-    return `Which best describes your situation?\n\n1️⃣ Student\n2️⃣ Domestic worker\n3️⃣ Retail or physical work — on feet all day\n4️⃣ Office or desk job\n5️⃣ Night shift worker\n6️⃣ Unemployed\n7️⃣ Long commute — 2 plus hours daily\n8️⃣ None of these`;
+    let goal = "fat_loss";
+    if (msg.includes("2") || lower.includes("build") || lower.includes("muscle")) goal = "muscle_gain";
+    else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
+    else if (msg.includes("4") || lower.includes("general") || lower.includes("fit") || lower.includes("health")) goal = "general";
+    else if (msg.includes("5") || lower.includes("condition") || lower.includes("manage")) goal = "health_condition";
+    await db.update(users).set({ goalType: goal, onboardingState: "ASK_SITUATION" }).where(eq(users.phoneNumber, phone));
+    return `Which best describes your situation?\n\n1️⃣ Student\n2️⃣ Working — office or desk job\n3️⃣ Working — physically active job (retail, security, domestic work, construction)\n4️⃣ Unemployed or between jobs\n5️⃣ Stay at home parent\n6️⃣ Retired`;
   }
 
+  // ---- ASK_SITUATION ----
   if (state === "ASK_SITUATION") {
-    const situations: Record<string, string> = {
-      "1": "student", "2": "domestic_worker", "3": "retail_physical",
-      "4": "office", "5": "night_shift", "6": "unemployed",
-      "7": "long_commute", "8": "none"
+    const lower = msg.toLowerCase();
+    const situationMap: Record<string, string> = {
+      "1": "student", "2": "office", "3": "retail_physical",
+      "4": "unemployed", "5": "stay_home_parent", "6": "retired",
     };
-    const situation = situations[msg.trim()] || "none";
-    await db.update(users).set({ lifeSituation: situation, onboardingState: "ASK_CONDITIONS" }).where(eq(users.phoneNumber, phone));
-    return `Any injuries, chronic conditions, or health issues I need to know about?\n\nFor example: bad knees, diabetes, hypertension, back pain, PCOS, on ARVs, Ramadan fasting\n\nOr reply NONE`;
+    let situation = situationMap[msg.trim()] || "none";
+    if (!situationMap[msg.trim()]) {
+      if (lower.includes("student")) situation = "student";
+      else if (lower.includes("office") || lower.includes("desk")) situation = "office";
+      else if (lower.includes("retail") || lower.includes("domestic") || lower.includes("physical") || lower.includes("construction") || lower.includes("security")) situation = "retail_physical";
+      else if (lower.includes("unemployed")) situation = "unemployed";
+      else if (lower.includes("parent") || lower.includes("home")) situation = "stay_home_parent";
+      else if (lower.includes("retire")) situation = "retired";
+    }
+    await db.update(users).set({ lifeSituation: situation, onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
+    return `Do you have any of the following? Reply with the number or numbers, or say None.\n\n1️⃣ Diabetes or pre-diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ TB or TB treatment\n6️⃣ PCOS\n7️⃣ Asthma\n8️⃣ None of the above`;
   }
 
-  if (state === "ASK_CONDITIONS") {
-    const conditions = msg.toLowerCase() === "none" ? "" : msg;
-    const exp = user.trainingExperience || "beginner";
-    let startPhase = 1;
-    if (exp === "intermediate") startPhase = 2;
-    if (exp === "advanced") startPhase = 2;
+  // ---- ASK_MEDICAL ----
+  if (state === "ASK_MEDICAL") {
+    const lower = msg.toLowerCase();
+    const conditions: string[] = [];
+    if (msg.includes("1") || lower.includes("diab")) conditions.push("diabetes");
+    if (msg.includes("2") || lower.includes("blood pressure") || lower.includes("hypert")) conditions.push("hypertension");
+    if (msg.includes("3") || lower.includes("heart")) conditions.push("heart_condition");
+    if (msg.includes("4") || lower.includes("hiv") || lower.includes("arv")) conditions.push("hiv_arvs");
+    if (msg.includes("5") || (lower.includes("tb") && !lower.includes("stb"))) conditions.push("tb");
+    if (msg.includes("6") || lower.includes("pcos")) conditions.push("pcos");
+    if (msg.includes("7") || lower.includes("asthma")) conditions.push("asthma");
+    const hasDiabetes = conditions.includes("diabetes");
+    const hasHeart = conditions.includes("heart_condition");
+    await db.update(users).set({
+      medicalConditions: conditions.length > 0 ? conditions.join(",") : "none",
+      nutritionProtocol: hasDiabetes ? "LOW_GI" : null,
+      mealTimingStrict: hasDiabetes,
+      doctorClearanceRequired: hasHeart,
+      onboardingState: "ASK_INJURIES",
+    }).where(eq(users.phoneNumber, phone));
+    return `Any injuries or physical limitations I must know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
+  }
 
-    const stepsTarget = startPhase === 1 ? 7000 : 8000;
+  // ---- ASK_INJURIES ----
+  if (state === "ASK_INJURIES") {
+    const lower = msg.toLowerCase();
+    const injuries = (lower === "none" || lower === "no" || lower === "n/a" || lower === "nil") ? "" : msg;
+    await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
+    return `Where will you be training?\n\n1️⃣ Gym with full equipment\n2️⃣ Gym with basic equipment\n3️⃣ Home — no equipment\n4️⃣ Home — have some equipment (dumbbells or bands)\n5️⃣ Outside — park, field, stairs`;
+  }
+
+  // ---- ASK_EQUIPMENT ----
+  if (state === "ASK_EQUIPMENT") {
+    const lower = msg.toLowerCase();
+    let location = "home_none";
+    let mode = "home";
+    let isGym = false;
+    if (msg.includes("1") || (lower.includes("gym") && lower.includes("full"))) { location = "gym_full"; mode = "gym"; isGym = true; }
+    else if (msg.includes("2") || (lower.includes("gym") && lower.includes("basic"))) { location = "gym_basic"; mode = "gym"; isGym = true; }
+    else if (msg.includes("3") || (lower.includes("home") && (lower.includes("no") || lower.includes("none")))) { location = "home_none"; }
+    else if (msg.includes("4") || lower.includes("dumbbell") || lower.includes("band")) { location = "home_equipment"; }
+    else if (msg.includes("5") || lower.includes("outside") || lower.includes("park") || lower.includes("stairs")) { location = "outside"; }
+    else if (lower.includes("gym")) { location = "gym_full"; mode = "gym"; isGym = true; }
+    await db.update(users).set({ trainingLocation: location, trainingMode: mode, onboardingState: isGym ? "ASK_GYM_NAME" : "ASK_TRAINING_DAYS" }).where(eq(users.phoneNumber, phone));
+    if (isGym) {
+      return `Which gym are you a member of?\n\n1️⃣ Virgin Active\n2️⃣ Planet Fitness\n3️⃣ Curves\n4️⃣ Local or community gym\n5️⃣ Other`;
+    }
+    return `How many days per week can you realistically train? Be honest — not what you wish, what you will actually do.\n\n1️⃣ 2 days\n2️⃣ 3 days\n3️⃣ 4 days\n4️⃣ 5 days\n5️⃣ 6 days`;
+  }
+
+  // ---- ASK_GYM_NAME ----
+  if (state === "ASK_GYM_NAME") {
+    const gymMap: Record<string, string> = {
+      "1": "Virgin Active", "2": "Planet Fitness", "3": "Curves", "4": "Local gym", "5": "Other",
+    };
+    const lower = msg.toLowerCase();
+    let gymName = gymMap[msg.trim()] || msg.trim();
+    if (!gymMap[msg.trim()]) {
+      if (lower.includes("virgin")) gymName = "Virgin Active";
+      else if (lower.includes("planet")) gymName = "Planet Fitness";
+      else if (lower.includes("curves")) gymName = "Curves";
+      else if (lower.includes("local") || lower.includes("community")) gymName = "Local gym";
+    }
+    await db.update(users).set({ gymName, onboardingState: "ASK_TRAINING_DAYS" }).where(eq(users.phoneNumber, phone));
+    return `How many days per week can you realistically train? Be honest — not what you wish, what you will actually do.\n\n1️⃣ 2 days\n2️⃣ 3 days\n3️⃣ 4 days\n4️⃣ 5 days\n5️⃣ 6 days`;
+  }
+
+  // ---- ASK_TRAINING_DAYS ----
+  if (state === "ASK_TRAINING_DAYS") {
+    const dayMap: Record<string, number> = { "1": 2, "2": 3, "3": 4, "4": 5, "5": 6 };
+    let days = dayMap[msg.trim()] || 3;
+    if (!dayMap[msg.trim()]) {
+      const numMatch = msg.match(/\b([2-6])\b/);
+      if (numMatch) days = parseInt(numMatch[1]);
+    }
+    await db.update(users).set({ trainingDaysPerWeek: days, onboardingState: "ASK_EXPERIENCE" }).where(eq(users.phoneNumber, phone));
+    return `Training experience?\n\n1️⃣ Complete beginner — never trained consistently\n2️⃣ Some experience — trained on and off\n3️⃣ Intermediate — trained consistently for 1 to 2 years\n4️⃣ Advanced — training seriously for 2 plus years`;
+  }
+
+  // ---- ASK_EXPERIENCE ----
+  if (state === "ASK_EXPERIENCE") {
+    const lower = msg.toLowerCase();
+    let exp = "beginner";
+    if (msg.includes("3") || lower.includes("intermediate") || lower.includes("1 to 2") || lower.includes("1-2")) exp = "intermediate";
+    else if (msg.includes("4") || lower.includes("advanced") || lower.includes("serious") || lower.includes("2 plus") || lower.includes("2+")) exp = "advanced";
+    await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+    return `Roughly how much do you spend on food per week?\n\n1️⃣ Under R100 — very tight\n2️⃣ R100 to R300 — tight but manageable\n3️⃣ R300 to R600 — average\n4️⃣ Over R600 — flexible`;
+  }
+
+  // ---- ASK_BUDGET ----
+  if (state === "ASK_BUDGET") {
+    const budgetMap: Record<string, string> = { "1": "under_100", "2": "100_300", "3": "300_600", "4": "over_600" };
+    const lower = msg.toLowerCase();
+    let budget = budgetMap[msg.trim()] || "100_300";
+    if (!budgetMap[msg.trim()]) {
+      if (lower.includes("under") || lower.includes("very tight")) budget = "under_100";
+      else if (lower.includes("600") || lower.includes("flexible")) budget = "over_600";
+      else if (lower.includes("300") || lower.includes("average")) budget = "300_600";
+    }
+    const budgetLevel = budget === "under_100" ? "low" : budget === "over_600" ? "high" : "medium";
+    await db.update(users).set({ weeklyFoodBudget: budget, budgetLevel, onboardingState: "ASK_WORK_SCHEDULE" }).where(eq(users.phoneNumber, phone));
+    return `Last one. What does your typical day look like?\n\n1️⃣ Standard hours — 8am to 5pm\n2️⃣ Early shift — start before 7am\n3️⃣ Night shift — work through the night\n4️⃣ Irregular — changes week to week\n5️⃣ Work from home or no fixed schedule`;
+  }
+
+  // ---- ASK_WORK_SCHEDULE → COMPLETE ----
+  if (state === "ASK_WORK_SCHEDULE") {
+    const scheduleMap: Record<string, string> = {
+      "1": "standard", "2": "early_shift", "3": "night_shift", "4": "irregular", "5": "work_from_home",
+    };
+    const lower = msg.toLowerCase();
+    let schedule = scheduleMap[msg.trim()] || "standard";
+    if (!scheduleMap[msg.trim()]) {
+      if (lower.includes("night")) schedule = "night_shift";
+      else if (lower.includes("early")) schedule = "early_shift";
+      else if (lower.includes("irregular") || lower.includes("changes")) schedule = "irregular";
+      else if (lower.includes("home") || lower.includes("wfh")) schedule = "work_from_home";
+    }
+
+    const freshUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const u = freshUser[0];
+    const weight = parseFloat(u.currentWeight || "75");
+    const goal = u.goalType || "fat_loss";
+    const exp = u.trainingExperience || "beginner";
+
+    let calorieTarget: number;
+    let proteinTarget: number;
+    if (goal === "muscle_gain") {
+      calorieTarget = Math.round(weight * 33 + 500);
+      proteinTarget = Math.round(weight * 2.2);
+    } else if (goal === "recomposition" || goal === "general" || goal === "health_condition") {
+      calorieTarget = Math.round(weight * 30);
+      proteinTarget = Math.round(weight * 2);
+    } else {
+      calorieTarget = Math.round(weight * 27);
+      proteinTarget = Math.round(weight * 2);
+    }
+
+    const stepsTarget = exp === "beginner" ? 7000 : 8000;
+    const startPhase = exp === "beginner" ? 1 : 2;
 
     await db.update(users).set({
-      injuries: conditions,
-      programmePhase: startPhase,
+      workSchedule: schedule,
+      calorieTarget,
+      proteinTarget,
       stepsTarget,
-      onboardingState: "COMPLETE",
+      programmePhase: startPhase,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
       programmeStartDate: new Date(),
       subscriptionStatus: "trial",
+      onboardingState: "COMPLETE",
     }).where(eq(users.phoneNumber, phone));
 
-    const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const u = updatedUser[0];
+    const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const f = finalUser[0];
+    const programme = getKamlifeProgramme(f);
+    const mealPlan = getOnboardingMealPlan(f);
+    const goalLabel: Record<string, string> = {
+      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
+      general: "General fitness", health_condition: "Health management",
+    };
+    const nightNote = schedule === "night_shift"
+      ? `\n\n⚠️ *Night shift note:* Your meal timing and training windows are adjusted for your schedule. Pre-shift = breakfast. Post-shift = dinner.`
+      : "";
+    const heartNote = u.doctorClearanceRequired
+      ? `\n\n⚠️ *Heart condition noted:* Please get doctor clearance before starting the strength programme. Walking and light activity are safe to begin now.`
+      : "";
 
-    return `*Profile complete* ✅\n\n*${u.name}* — Phase ${startPhase}: ${getPhaseNames()[startPhase]}\n\n🎯 Goal: ${u.goalType?.replace("_", " ")}\n🍽️ Calorie target: ${u.calorieTarget} kcal\n💪 Protein target: ${u.proteinTarget}g\n👟 Step target: ${stepsTarget.toLocaleString()} steps\n\nYour programme starts today. Not tomorrow. Not Monday. *Today.*\n\nSend *1* for your first workout.`;
+    return `*${f.name}, your profile is set.* Here is what Coach K has built for you.\n\n🎯 *Goal:* ${goalLabel[goal] || goal}\n⚖️ *Weight:* ${weight}kg\n🍽️ *Calories:* ${calorieTarget} kcal/day\n💪 *Protein:* ${proteinTarget}g/day\n👟 *Steps:* ${stepsTarget.toLocaleString()}/day\n\n${programme}\n\n${mealPlan}${nightNote}${heartNote}\n\n*Your action today:* Do your first session. Reply DONE when you finish and I log it.`;
   }
 
   return getMenuText(user);
@@ -1233,6 +1405,30 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply with a number — 3, 4, or 5.\n\n2️⃣ What is your experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ What is your main goal?\nLose fat\nBuild muscle\nBoth — body recomposition\n\nReply with your three answers and I build your programme immediately.`;
   }
 
+  // ---- STEP LOG DETECTION (direct — no GPT cost) ----
+  const stepNumMatch = m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
+    || m.match(/(?:walked|done|did|logged)\s+([\d,]+)\s*(?:steps?|staps?)/i);
+  const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
+  if (stepNumMatch || hasKmWalk) {
+    let steps = 0;
+    if (stepNumMatch) {
+      steps = parseInt(stepNumMatch[1].replace(/,/g, ""));
+    } else if (hasKmWalk) {
+      const km = parseFloat(hasKmWalk[1]);
+      steps = Math.round(km * 1300);
+    }
+    if (!isNaN(steps) && steps > 100 && steps < 100000) {
+      const target = user.stepsTarget || 7000;
+      await db.insert(stepLogs).values({ userId: user.id, steps });
+      await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
+      const stepReply = getStepResponse(steps, target);
+      const perfectDay = await checkPerfectDay(user.id);
+      const fullReply = stepReply + (perfectDay || "");
+      await logChat(user.id, message, fullReply, "STEP_LOG");
+      return fullReply;
+    }
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
@@ -1319,22 +1515,29 @@ CRITICAL RULES — these are non-negotiable:
 - Always end with exactly one specific action the client must take right now.
 - SA voice throughout: real, warm, firm, direct.`;
 
-  return await askCoachK(message, user, instruction);
+  const gptReply = await askCoachK(message, user, instruction);
+
+  // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
+  const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
+  const isFoodLog = FOOD_KEYWORDS.some(k => m.includes(k));
+  if (isFoodLog) {
+    const pattern = await checkFoodPatterns(user.id);
+    const perfectDay = await checkPerfectDay(user.id);
+    const fullReply = gptReply + (pattern ? "\n\n" + pattern : "") + (perfectDay || "");
+    await logChat(user.id, message, fullReply, "FOOD_LOG");
+    return fullReply;
+  }
+
+  return gptReply;
 }
 
 // ============================================================
 // LOG CHAT HELPER
 // ============================================================
 
-async function logChat(userId: string, phone: string, message: string, reply: string, intent: string): Promise<void> {
+async function logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<void> {
   try {
-    await db.insert(chatHistory).values({
-      userId,
-      phoneNumber: phone,
-      message,
-      reply,
-      intent,
-    });
+    await db.insert(chatHistory).values({ userId, messageIn, messageOut, intent });
   } catch (err) {
     console.error("Chat log error:", err);
   }
@@ -1494,7 +1697,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       const user = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
       if (user.length > 0) {
-        await logChat(user[0].id, phone, message, reply, "GPT");
+        await logChat(user[0].id, message, reply, "GPT");
       }
 
       return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);

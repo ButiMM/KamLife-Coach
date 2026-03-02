@@ -1,0 +1,101 @@
+In server/routes.ts find the handleOnboarding function and the onboarding state machine. Replace the entire onboarding flow with this new comprehensive sequence. Each state asks one question only. Never two questions in one message. Store every answer to the database immediately.
+State 1 — WELCOME:
+Message: Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7. I'm going to ask you a few quick questions so I can coach you properly — not generically. This takes 3 minutes and changes everything. What's your name?
+Store: firstName
+State 2 — AGE:
+Message: Sharp [name]. How old are you?
+Store: age
+If under 16 respond: I coach from age 16 upward. Get a parent or guardian to sign up with you.
+If over 65 set flag: elderlyClient = true
+State 3 — WEIGHT AND HEIGHT:
+Message: What's your current weight in kg and your height? Example: 78kg, 1.72m
+Store: currentWeight, height
+Calculate and store: BMI
+State 4 — GOAL:
+Message: What's your main goal right now?
+1️⃣ Lose fat
+2️⃣ Build muscle
+3️⃣ Both — body recomposition
+4️⃣ Get fit and healthy generally
+5️⃣ Manage a health condition
+Store: goalType
+State 5 — LIFE SITUATION:
+Message: Which best describes your situation?
+1️⃣ Student
+2️⃣ Working — office or desk job
+3️⃣ Working — physically active job (retail, security, domestic work, construction)
+4️⃣ Unemployed or between jobs
+5️⃣ Stay at home parent
+6️⃣ Retired
+Store: lifeSituation
+This single answer changes everything about how Coach K coaches this person.
+State 6 — MEDICAL:
+Message: Do you have any of the following? Reply with the number or say None.
+1️⃣ Diabetes or pre-diabetes
+2️⃣ High blood pressure
+3️⃣ Heart condition
+4️⃣ HIV on ARVs
+5️⃣ TB or TB treatment
+6️⃣ PCOS
+7️⃣ Asthma
+8️⃣ None of the above
+Store: medicalConditions as array
+If diabetes selected: immediately set nutritionProtocol = LOW_GI and mealTimingStrict = true
+If heart condition selected: flag for doctor clearance before exercise programming
+State 7 — INJURIES:
+Message: Any injuries or physical limitations I must know about? Bad knees, bad back, bad shoulder, hip problem, recent surgery — anything. Or say None.
+Store: injuries
+If none: injuries = []
+State 8 — EQUIPMENT:
+Message: Where will you be training?
+1️⃣ Gym with full equipment
+2️⃣ Gym with basic equipment
+3️⃣ Home — no equipment
+4️⃣ Home — have some equipment like dumbbells or bands
+5️⃣ Outside — park, field, stairs
+Store: trainingLocation
+If gym selected: ask which gym — this tells us equipment available. Virgin Active, Planet Fitness, Curves, local gym, community gym.
+State 9 — TRAINING DAYS:
+Message: How many days per week can you realistically train? Be honest. Not what you wish. What you will actually do.
+1️⃣ 2 days
+2️⃣ 3 days
+3️⃣ 4 days
+4️⃣ 5 days
+5️⃣ 6 days
+Store: trainingDaysPerWeek
+State 10 — EXPERIENCE:
+Message: Training experience?
+1️⃣ Complete beginner — never trained consistently
+2️⃣ Some experience — trained on and off
+3️⃣ Intermediate — trained consistently for 1 to 2 years
+4️⃣ Advanced — training seriously for 2 plus years
+Store: trainingExperience
+State 11 — BUDGET:
+Message: Roughly how much do you spend on food per week?
+1️⃣ Under R100 — very tight
+2️⃣ R100 to R300 — tight but manageable
+3️⃣ R300 to R600 — average
+4️⃣ Over R600 — flexible
+Store: weeklyFoodBudget
+This single answer determines every nutrition recommendation.
+State 12 — WORK SCHEDULE:
+Message: What does your typical day look like?
+1️⃣ Standard hours — 8am to 5pm
+2️⃣ Early shift — start before 7am
+3️⃣ Night shift — work through the night
+4️⃣ Irregular — changes week to week
+5️⃣ Work from home or no fixed schedule
+Store: workSchedule
+Night shift clients get completely different meal timing and training window advice.
+State 13 — COMPLETE:
+Calculate and store immediately:
+calorieTarget based on weight, goal, activity level from lifeSituation and trainingDays
+proteinTarget based on weight and goal
+Build and send their complete first programme immediately based on everything captured.
+Message: [Name], your profile is set. Here's what Coach K has built for you based on everything you just told me.
+Then immediately deliver:
+Their calorie and protein targets with explanation.
+Their first week programme based on experience, equipment, days available, injuries.
+Their first meal plan based on budget and life situation.
+One specific action to take today.
+This onboarding transforms every coaching decision from generic to personal. Do not touch any other code. Restart the server.

@@ -1,0 +1,26 @@
+PROMPT 3 — PROACTIVE SCHEDULED MESSAGING
+Paste this into Agent after Prompt 2:
+Create a new file server/scheduler.ts. This file runs proactive coaching jobs on a schedule using node-cron. Import it and initialise it in server/index.ts.
+Jobs to create:
+MORNING CHECK-IN — runs 6am daily:
+For every active client check: did they log anything yesterday. If not send: Morning [name]. Yesterday was a blank slate. Today we fix that. One thing — log your first meal after you eat it. That is it.
+If they did log yesterday send a personalised morning message referencing what they logged. If they hit protein target say so. If they missed it say so with one fix.
+EVENING ACCOUNTABILITY — runs 7pm daily:
+For every active client who has not logged anything today send: [Name], it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.
+WEEK 3 INTERVENTION — runs Monday mornings, checks programme day:
+For every client in week 3 of their programme send: [Name], you are in week 3. This is where 70 percent of people quit. Not because it is too hard. Because results are not visible yet. They are happening inside. Show up this week. It is the most important week of the programme.
+MONTH END BUDGET MODE — runs on the 20th of every month:
+For every client send: Month end is coming. Before the money gets tight — here is your R100 week meal plan that keeps your nutrition on track: Eggs 12 pack R45. Pilchards 3 tins R36. Cabbage R8. Onions R8. Pap 2kg R15. Shop this weekend at Shoprite or Boxer.
+MILESTONE CELEBRATIONS — runs daily, checks programme day count:
+Day 7: [Name], one week in. Most people do not make it here. You did. Keep going.
+Day 30: [Name], 30 days. This is real now. Your body has changed even if you cannot see it yet. Measurements today — chest, waist, hips. Message them to me.
+Day 60: [Name], 60 days of consistent work. That is rare. Genuinely rare.
+Day 90: [Name], 90 days. You have built a habit. That is worth more than any weight loss number.
+SILENCE DETECTION — runs every 48 hours:
+For every client who has not sent a message in 48 hours send: [Name], two days quiet. Everything okay? No pressure. Just checking.
+For every client who has not sent a message in 7 days send: [Name], a week without checking in. Life gets busy — I get it. When you are ready just say Hello and we pick up exactly where we left off. No guilt.
+FRIDAY WEEKEND STRATEGY — runs Friday 4pm:
+For every active client send: [Name], weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.
+RAMADAN MODE — detects when Ramadan starts based on Islamic calendar:
+Switch all affected clients to Ramadan messaging automatically. Morning message changes to Suhoor reminder. Evening message changes to Iftar coaching. Training advice changes to post-Iftar only.
+All messages must be sent via the existing Twilio WhatsApp sending function. All jobs must be wrapped in try-catch so one failing client never crashes the entire job. Log every message sent. Do not touch any other existing code. Restart the server.

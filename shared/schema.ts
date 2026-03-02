@@ -52,6 +52,16 @@ export const users = pgTable("users", {
   waterLastResetDate: text("water_last_reset_date"),
   cancelledAt: timestamp("cancelled_at"),
   createdAt: timestamp("created_at").defaultNow(),
+  bmi: numeric("bmi"),
+  medicalConditions: text("medical_conditions"),
+  nutritionProtocol: text("nutrition_protocol"),
+  mealTimingStrict: boolean("meal_timing_strict").default(false),
+  doctorClearanceRequired: boolean("doctor_clearance_required").default(false),
+  trainingLocation: text("training_location"),
+  gymName: text("gym_name"),
+  weeklyFoodBudget: text("weekly_food_budget"),
+  workSchedule: text("work_schedule"),
+  elderlyClient: boolean("elderly_client").default(false),
 }, (table) => {
   return {
     phoneIdx: index("users_phone_idx").on(table.phoneNumber),
