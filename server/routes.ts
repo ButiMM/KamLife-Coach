@@ -2,7 +2,7 @@ import { type Express } from "express";
 import { type Server } from "http";
 import { db } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins } from "../shared/schema";
-import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
 
@@ -694,6 +694,141 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 }
 
 // ============================================================
+// PATTERN SUMMARY — 7-DAY BEHAVIOUR ANALYSIS SENT WITH EVERY GPT CALL
+// ============================================================
+
+async function buildPatternSummary(user: any): Promise<string> {
+  const name = getDisplayName(user) || "client";
+  const proteinTarget = user.proteinTarget || 120;
+  const programmeWeek = user.programmeWeek || 1;
+  const today = new Date();
+  const sevenDaysAgo = new Date(today.getTime() - 7 * 86_400_000);
+  sevenDaysAgo.setHours(0, 0, 0, 0);
+  const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
+
+  try {
+    // ---- Parallel DB queries ----
+    const [recentChats, recentWeights, olderWeights] = await Promise.all([
+      db.select().from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(100),
+      db.select().from(weightLogs)
+        .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo)))
+        .orderBy(desc(weightLogs.loggedAt))
+        .limit(5),
+      db.select().from(weightLogs)
+        .where(and(
+          eq(weightLogs.userId, user.id),
+          gte(weightLogs.loggedAt, fourteenDaysAgo),
+          lt(weightLogs.loggedAt, sevenDaysAgo)
+        ))
+        .orderBy(desc(weightLogs.loggedAt))
+        .limit(1),
+    ]);
+
+    // ---- Days logged vs silent ----
+    const daysWithLogs = new Set(
+      recentChats.map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
+    ).size;
+    const daysSilent = 7 - daysWithLogs;
+
+    // ---- Protein estimate from food log GPT responses ----
+    const foodLogs = recentChats.filter(c => c.intent === "FOOD_LOG");
+    const proteinNums: number[] = [];
+    for (const log of foodLogs) {
+      const m = (log.messageOut || "").match(/(\d{2,3})g?\s*(?:of\s+)?protein/i);
+      if (m) proteinNums.push(parseInt(m[1]));
+    }
+    const avgProtein = proteinNums.length >= 2
+      ? Math.round(proteinNums.reduce((a, b) => a + b, 0) / proteinNums.length)
+      : null;
+
+    // ---- Scan message text for signals ----
+    const allIn = recentChats.map(c => (c.messageIn || "").toLowerCase()).join(" ");
+
+    const BUDGET_WORDS = ["broke", "no money", "can't afford", "cannot afford", "no cash", "eina the money", "month end", "no food money", "tight on", "struggling financially"];
+    const HARD_WORDS = ["too hard", "too difficult", "can't do it", "cannot do it", "killing me", "giving up", "want to quit", "want to stop", "too tough", "it's too much"];
+    const EASY_WORDS = ["too easy", "not challenging", "too light", "too simple", "boring"];
+    const PAIN_WORDS = ["pain", " hurts", "so sore", "soreness", "injured", "bad knee", "bad back", "bad shoulder", "hip pain", "knee pain", "back pain", "aching", "inflamed"];
+    const STRESS_WORDS = ["stressed", "anxious", "anxiety", "depressed", "depression", "overwhelmed", "so tired", "exhausted", "family problem", "relationship problem", "work pressure", "difficult time", "struggling emotionally", "not okay", "hard time"];
+
+    const mentionedBudget = BUDGET_WORDS.some(w => allIn.includes(w));
+    const mentionedTooHard = HARD_WORDS.some(w => allIn.includes(w));
+    const mentionedTooEasy = EASY_WORDS.some(w => allIn.includes(w));
+    const mentionedPain = PAIN_WORDS.some(w => allIn.includes(w));
+    const mentionedStress = STRESS_WORDS.some(w => allIn.includes(w));
+
+    // ---- Training sessions ----
+    const DONE_PATTERN = /^(done|workout done|finished|completed)$/;
+    const trainingLogs = recentChats.filter(c =>
+      DONE_PATTERN.test((c.messageIn || "").toLowerCase().trim()) || c.intent === "WORKOUT_LOG"
+    );
+    const lastTraining = trainingLogs[0];
+    const daysSinceTraining = lastTraining?.createdAt
+      ? Math.floor((Date.now() - new Date(lastTraining.createdAt).getTime()) / 86_400_000)
+      : null;
+
+    // ---- Weight trend ----
+    let weightTrend = "No weight data this week.";
+    if (recentWeights.length > 0 && olderWeights.length > 0) {
+      const recent = parseFloat(String(recentWeights[0].weight));
+      const older = parseFloat(String(olderWeights[0].weight));
+      const diff = recent - older;
+      if (Math.abs(diff) < 0.3) weightTrend = "Weight unchanged week-on-week.";
+      else if (diff > 0) weightTrend = `Weight up ${diff.toFixed(1)}kg this week.`;
+      else weightTrend = `Weight down ${Math.abs(diff).toFixed(1)}kg this week.`;
+    } else if (recentWeights.length > 0) {
+      const daysAgo = Math.floor((Date.now() - new Date(recentWeights[0].loggedAt || "").getTime()) / 86_400_000);
+      weightTrend = daysAgo <= 1
+        ? `Weight logged: ${recentWeights[0].weight}kg.`
+        : `Weight unchanged for ${daysAgo} days.`;
+    }
+
+    // ---- Assemble paragraph ----
+    const parts: string[] = [
+      `PATTERN CONTEXT: ${name} has logged ${daysWithLogs} of the last 7 days${daysSilent > 0 ? ` (${daysSilent} day${daysSilent > 1 ? "s" : ""} silent)` : ""}.`,
+    ];
+
+    if (avgProtein !== null) {
+      const status = avgProtein >= proteinTarget
+        ? `at or above target (avg ${avgProtein}g vs ${proteinTarget}g)`
+        : `consistently under (avg ${avgProtein}g vs ${proteinTarget}g target)`;
+      parts.push(`Average protein logged is ${status}.`);
+    } else {
+      parts.push(`Protein target is ${proteinTarget}g/day — tracking data limited this week.`);
+    }
+
+    if (mentionedBudget) parts.push("They mentioned being broke or tight on budget this week.");
+    if (mentionedTooHard) parts.push("They mentioned the programme being too hard or wanting to quit.");
+    if (mentionedTooEasy) parts.push("They mentioned the programme being too easy.");
+    if (mentionedPain) parts.push("They mentioned pain or injury in the last 7 days.");
+    if (mentionedStress) parts.push("They mentioned stress, work pressure, or emotional difficulty this week.");
+
+    if (trainingLogs.length === 0) {
+      parts.push("No training sessions logged this week.");
+    } else {
+      parts.push(`${trainingLogs.length} training session${trainingLogs.length > 1 ? "s" : ""} logged this week.`);
+      if (daysSinceTraining !== null && daysSinceTraining >= 3) {
+        parts.push(`Last training was ${daysSinceTraining} days ago.`);
+      }
+    }
+
+    parts.push(weightTrend);
+    if (programmeWeek === 3) parts.push("Currently in week 3 of the programme — the danger zone.");
+    if (today.getDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
+
+    return parts.join(" ");
+  } catch (err) {
+    console.error("[PATTERN] buildPatternSummary error:", err);
+    const fallback = [`PATTERN CONTEXT: ${name}.`];
+    if (programmeWeek === 3) fallback.push("Week 3 — danger zone.");
+    if (today.getDate() >= 20) fallback.push("Budget mode active.");
+    return fallback.join(" ");
+  }
+}
+
+// ============================================================
 // GPT CALL — ALWAYS USES MASTER PROMPT + FULL CONTEXT
 // ============================================================
 
@@ -734,6 +869,8 @@ function selectModel(instruction: string, userMessage: string): { model: string;
 
 async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
   const context = buildContext(user);
+  const patternSummary = await buildPatternSummary(user);
+  console.log(`[PATTERN] ${patternSummary}`);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name — never say 'a client' or 'Hi client'. End with exactly one specific action.";
   const { model, maxTokens } = selectModel(instruction, userMessage);
@@ -745,7 +882,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",
