@@ -329,12 +329,12 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
   const context = buildContext(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
-  const hardLimit = "HARD RULE: Maximum 3 sentences. Maximum 60 words total. End with exactly one specific action. Never start with 'Coach K here'. Never say 'Reply MENU'.";
+  const hardLimit = "HARD RULE: Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name — never say 'a client' or 'Hi client'. End with exactly one specific action.";
 
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 120,
+      max_tokens: 300,
       messages: [
         {
           role: "system",
@@ -641,88 +641,59 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 }
 
 // ============================================================
-// DETECT INTENT — WHAT IS THE CLIENT ASKING
-// ============================================================
-
-function detectIntent(message: string): string {
-  const m = message.toLowerCase().trim();
-
-  if (m.includes("reset") || m.includes("start over") || m.includes("start again") || m.includes("profile reset") || m.includes("begin again")) return "RESET";
-
-  if (m === "menu" || m === "help") return "MENU";
-
-  if (m === "2" || m === "workout" || m === "gym" || m.includes("joined the gym") || m.includes("join the gym") || m.includes("programme") || m.includes("program") || m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") || m.includes("training today") || m.includes("what do i do today") || m.includes("what should i do") || m.includes("exercise today") || m.includes("what can i do") || m.includes("30 min") || m.includes("travelling") || m.includes("traveling") || m.includes("workout today") || m.includes("schedule") || m.includes("show me my") || m.includes("all days") || m.includes("full week") || m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") || m.includes("i need a program") || m.includes("i need a programme") || m.includes("give me a program") || m.includes("give me a programme") || m.includes("lose weight program") || m.includes("weight loss program")) return "WORKOUT";
-  if (m === "1") return "WORKOUT_TODAY";
-
-  if ((m.includes("step") || m.includes("walked") || m.includes("steps")) && /\d/.test(m)) return "LOG_STEPS";
-  if (m === "3") return "LOG_STEPS_PROMPT";
-
-  if ((m.includes("slept") || m.includes("sleep") || m.includes("hours sleep") || m.includes("hours of sleep")) && /\d/.test(m)) return "LOG_SLEEP";
-  if (m === "4") return "LOG_SLEEP_PROMPT";
-
-  if ((m.includes("weigh") || m.includes("weight") || m.includes("kg")) && /\d/.test(m) && !m.includes("lost") && !m.includes("gained")) return "LOG_WEIGHT";
-  if (m === "5") return "LOG_WEIGHT_PROMPT";
-
-  if ((m.includes("water") || m.includes("drank") || m.includes("litre") || m.includes("liter") || m.includes("ml")) && (/\d/.test(m) || m.includes("bottle") || m.includes("glass"))) return "LOG_WATER";
-
-  if (m === "6" || m.includes("weekly report") || m.includes("weekly progress") || m.includes("full report") || m.includes("show progress")) return "WEEKLY_REPORT";
-
-  if (m === "7" || m.includes("measure") || m.includes("clothing") || m.includes("jeans") || m.includes("check in")) return "MEASUREMENTS";
-
-  if (m === "done" || m === "workout done" || m === "finished" || m === "completed") return "WORKOUT_DONE";
-
-  if ((m.includes("i bought") || m.includes("i have") || m.includes("shopping") || m.includes("groceries")) && message.split(",").length >= 3) return "GROCERY_LIST";
-
-  if (m.includes("creatine") || m.includes("supplement") || m.includes("protein powder") || m.includes("pre-workout") || m.includes("pre workout")) return "SUPPLEMENTS";
-
-  if (m.includes("before workout") || m.includes("after workout") || m.includes("pre workout meal") || m.includes("post workout meal")) return "MEAL_TIMING";
-
-  if ((m.includes("budget") || m.includes("broke") || m.includes("month end") || m.includes("no money")) && (m.includes("meal") || m.includes("eat") || m.includes("food") || m.includes("groceries"))) return "BUDGET_MEAL";
-
-  if (m.includes("ramadan") || m.includes("fasting") || m.includes("iftar") || m.includes("suhoor")) return "RAMADAN";
-
-  if (m.includes("period") || m.includes("menstrual") || m.includes("time of the month") || m.includes("on my period")) return "PERIOD";
-
-  if (m.includes("diabetic") || m.includes("diabetes") || m.includes("blood sugar")) return "DIABETIC";
-
-  if (m.includes("travelling") || m.includes("traveling") || m.includes("hotel") || m.includes("on the road")) return "TRAVELLING";
-
-  if (m.includes("church") || m.includes("funeral") || m.includes("lobola") || m.includes("umemulo") || m.includes("ceremony")) return "CULTURAL_EVENT";
-
-  if (m.includes("beer") || m.includes("wine") || (m.includes("drank") && (m.includes("hennessy") || m.includes("henny") || m.includes("henry") || m.includes("alcohol") || m.includes("castle") || m.includes("black label") || m.includes("savanna")))) return "ALCOHOL";
-
-  const foodWords = ["ate", "eat", "eating", "had", "breakfast", "lunch", "dinner", "snack", "meal", "food", "pap", "rice", "chicken", "eggs", "kota", "bread", "oats", "pilchards", "beans", "stew", "braai", "kfc", "nandos", "steers", "burger", "chips", "chocolate", "sweet potato", "vegetables", "spinach", "cabbage", "fruit", "banana", "apple", "latte", "tea", "coffee", "milo", "cremora", "mageu", "cool drink", "coke", "fanta"];
-  if (foodWords.some(word => m.includes(word))) return "FOOD_LOG";
-
-  return "GENERAL";
-}
-
-// ============================================================
 // MAIN MESSAGE HANDLER
 // ============================================================
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string): Promise<string> {
   const user = await getOrCreateUser(phone);
+  const m = message.toLowerCase().trim();
 
+  // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
   if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
     return handleOnboarding(user, message, phone);
   }
 
-  // ---- GREETINGS ----
+  // ---- GREETINGS / MENU (direct — no GPT) ----
   const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
-  if (greetings.some(g => message.toLowerCase().trim() === g || message.toLowerCase().trim() === g + " 👋")) {
-    if (user.onboardingState && user.onboardingState !== "COMPLETE") {
-      return handleOnboarding(user, message, phone);
-    }
+  if (greetings.some(g => m === g || m === g + " 👋") || m === "menu" || m === "help") {
     return getMenuText(user);
   }
 
-  const intent = detectIntent(message);
-  const m = message.toLowerCase().trim();
+  // ---- PHOTO / VISION ----
+  if (mediaUrl) {
+    try {
+      const imageResponse = await fetch(mediaUrl);
+      const buffer = await imageResponse.arrayBuffer();
+      const base64 = Buffer.from(buffer).toString("base64");
+      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
 
-  // ---- RESET ----
-  if (intent === "RESET") {
+      const visionResponse = await openai.chat.completions.create({
+        model: "gpt-4o",
+        max_tokens: 300,
+        messages: [
+          {
+            role: "system",
+            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 4 sentences. End with one action.`
+          },
+          {
+            role: "user",
+            content: [
+              { type: "text", text: "Here is my meal." },
+              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
+            ]
+          }
+        ]
+      });
+      return visionResponse.choices[0]?.message?.content?.trim() || "Eish, could not identify that. Tell me what you ate in text.";
+    } catch (err) {
+      console.error("Vision error:", err);
+      return "Could not process the photo. Tell me what you ate and I will coach you on it.";
+    }
+  }
+
+  // ---- RESET (direct) ----
+  if (m.includes("reset") || m.includes("start over") || m.includes("start again") || m.includes("profile reset") || m.includes("begin again")) {
     await db.update(users).set({
       onboardingState: "START",
       programmePhase: 1,
@@ -741,78 +712,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `Profile reset. Let us start fresh.\n\nWhat is your name?`;
   }
 
-  // ---- MENU ----
-  if (intent === "MENU") return getMenuText(user);
-
-  // ---- PHOTO / FOOD VISION ----
-  if (mediaUrl) {
-    try {
-      const imageResponse = await fetch(mediaUrl);
-      const buffer = await imageResponse.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString("base64");
-      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
-
-      const visionResponse = await openai.chat.completions.create({
-        model: "gpt-4o",
-        max_tokens: 150,
-        messages: [
-          {
-            role: "system",
-            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 3 sentences. End with one action.`
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Here is my meal." },
-              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
-            ]
-          }
-        ]
-      });
-      return visionResponse.choices[0]?.message?.content?.trim() || "Eish, could not identify that. Tell me what you ate in text.";
-    } catch (err) {
-      console.error("Vision error:", err);
-      return "Could not process the photo. Tell me what you ate and I will coach you on it.";
-    }
-  }
-
-  // ---- WORKOUT TODAY (explicit menu option 1) ----
-  if (intent === "WORKOUT_TODAY") {
-    const workout = buildDayWorkout(user);
-    const coaching = await askCoachK("What is my workout today?", user, "Give one motivating sentence before their workout specific to their phase and goal. Short and SA.");
-    return `${coaching}\n\n${workout}`;
-  }
-
-  // ---- WORKOUT (contextual — travel, time, questions, joining gym, full programme) ----
-  if (intent === "WORKOUT") {
-    const ONBOARDING_DONE_W = ["COMPLETE", "COMPLETED"];
-    if (!user.onboardingState || !ONBOARDING_DONE_W.includes(user.onboardingState)) {
-      return await askCoachK(message, user, "The client wants a gym programme. They have not completed onboarding so we do not have their full profile. Build them a 3 day full body gym programme for fat loss. Include Day 1 Day 2 Day 3 each with 4 exercises. Each exercise must have exact sets and reps and a real YouTube link formatted as https://www.youtube.com/results?search_query=Exercise+Name+form+tutorial with plus signs between words. After giving the programme add one line: To get a fully personalised programme reply START.");
-    }
-
-    if (m.includes("joined the gym") || m.includes("join the gym")) {
-      await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
-      const updatedUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      const coaching = await askCoachK(message, updatedUser[0], "The client just joined a gym. Welcome this in one sentence.");
-      return `${coaching}\n\n${buildFullProgramme(updatedUser[0])}`;
-    }
-
-    if (m.includes("travelling") || m.includes("traveling") || m.includes("hotel") || m.includes("30 min") || m.includes("short on time")) {
-      return await askCoachK(message, user, `The client is travelling or short on time and needs a workout. Give them a 20 to 30 minute hotel room or bodyweight workout they can do right now. Include 4 exercises with sets and reps. Be specific. No equipment assumed.`);
-    }
-
-    const wantsProgramme = m.includes("programme") || m.includes("program") || m.includes("schedule") || m.includes("all days") || m.includes("full week") || m.includes("what do i do") || m.includes("what should i do") || m.includes("show me") || m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") || m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") || m.includes("lose weight") || m.includes("weight loss");
-    if (wantsProgramme) {
-      return buildFullProgramme(user);
-    }
-
-    const workout = buildDayWorkout(user);
-    const coaching = await askCoachK(message, user, "Give one motivating sentence before their workout specific to their phase and goal. Short and SA.");
-    return `${coaching}\n\n${workout}`;
-  }
-
-  // ---- WORKOUT DONE ----
-  if (intent === "WORKOUT_DONE") {
+  // ---- DONE — workout complete (direct) ----
+  if (m === "done" || m === "workout done" || m === "finished" || m === "completed") {
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     let newDay = (user.programmeDayInWeek || 1) + 1;
     let newWeek = user.programmeWeek || 1;
@@ -830,187 +731,92 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
 
-    const coaching = await askCoachK("I just completed my workout", user, `Client just finished workout number ${newTotal}. Celebrate specifically. Reference their phase and total workouts. One sentence. SA voice.`);
+    const celebration = await askCoachK("I just completed my workout", user, `Client just finished workout number ${newTotal}. Celebrate specifically. Reference their phase and total workouts. One sentence. SA voice.`);
     const perfectDay = await checkPerfectDay(user.id);
-    return `${coaching}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
+    return `${celebration}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
   }
 
-  // ---- STEPS ----
-  if (intent === "LOG_STEPS") {
-    const match = m.match(/(\d[\d,]*)/);
-    if (!match) return "How many steps did you do today? Just the number.";
-    const steps = parseInt(match[1].replace(/,/g, ""));
-    const target = user.stepsTarget || 7000;
-    await db.insert(stepLogs).values({ userId: user.id, steps });
+  // ---- EVERYTHING ELSE → GPT decides ----
+  const now = new Date();
+  const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
+  const hour = now.getHours();
+  const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const monthEnd = now.getDate() >= 20;
+  const clientName = user.name || "champ";
+  const trainingMode = user.trainingMode || "home";
 
-    const stepMsg = getStepResponse(steps, target);
-    const perfectDay = await checkPerfectDay(user.id);
-    return stepMsg + (perfectDay || "");
-  }
+  const instruction = `Today is ${dayOfWeek} ${timeOfDay}. Month-end budget mode: ${monthEnd}.
 
-  if (intent === "LOG_STEPS_PROMPT") return "How many steps did you do today? Just the number.";
+RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 
-  // ---- SLEEP ----
-  if (intent === "LOG_SLEEP") {
-    const match = m.match(/(\d+\.?\d*)/);
-    if (!match) return "How many hours did you sleep? Just the number.";
-    const hours = parseFloat(match[1]);
+SCENARIO GUIDE — read the message and decide which applies:
 
-    if (hours < 6) {
-      return await askCoachK(`I slept ${hours} hours`, user, `Client only got ${hours} hours of sleep. This is a problem for fat loss and muscle gain. Coach them on why sleep matters and one practical action to get more tonight. SA voice. Firm but caring.`);
-    } else if (hours >= 7 && hours <= 9) {
-      return await askCoachK(`I slept ${hours} hours`, user, `Client got ${hours} hours of sleep which is solid. Acknowledge this briefly. Connect good sleep to their results. One sentence.`);
-    } else {
-      return await askCoachK(`I slept ${hours} hours`, user, `Client slept ${hours} hours. Acknowledge it and move forward with one coaching tip for today.`);
-    }
-  }
+WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "training plan", "what do I do today", "1", etc.):
+  Give a full structured ${trainingMode === "gym" ? "gym" : "home"} programme. Format: Day 1 / Day 2 / Day 3, each with 4 exercises. Per exercise: name — sets x reps — YouTube: https://www.youtube.com/results?search_query=Exercise+Name+form+tutorial (use + between words). Use their actual phase and goal from the profile. If they said "today's workout" or sent "1", give only Day 1.
 
-  if (intent === "LOG_SLEEP_PROMPT") return "How many hours did you sleep last night? Just the number.";
+STEPS LOGGED (number + "steps" / "walked" / "km"):
+  Respond based on their step target of ${user.stepsTarget || 7000}. If below — push them. If at or above — celebrate and give next action.
 
-  // ---- WEIGHT ----
-  if (intent === "LOG_WEIGHT") {
-    const match = m.match(/(\d+\.?\d*)/);
-    if (!match) return "What is your weight in kg? Just the number.";
-    const weight = parseFloat(match[1]);
-    if (isNaN(weight) || weight < 30 || weight > 300) return "Just the number in kg please. For example: 72";
+FOOD / MEAL LOGGED (any food item or meal described):
+  Coach specifically on THAT exact food. Use the SA food database. Estimate SA portion calories and protein. If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
 
-    await db.insert(weightLogs).values({ userId: user.id, weight: weight.toString() });
-    await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
+BROKE / BUDGET / MONTH-END / NO MONEY:
+  Full affordable plan: Oats R15 (500g, lasts 1 week) — one cup oats + peanut butter = 400 kcal 20g protein. Eggs R25 (12 eggs) — 2 eggs = 160 kcal 12g protein. Pilchards R12 (1 tin) — full tin = 200 kcal 24g protein. Sugar beans R20 (dry 500g) — cooked cup = 220 kcal 15g protein. Peanut butter R25 (lasts 2 weeks). Brown bread R14. Total under R110. Explain how to use each one practically.
 
-    const previousLogs = await db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2);
+WEIGHT LOGGED (number + "kg"):
+  Acknowledge. If weight went up — explain water retention, sodium, hormones. Do NOT panic them. Stay on programme. If weight went down — celebrate specifically. If same — consistency wins over weeks.
 
-    if (previousLogs.length >= 2) {
-      const previous = parseFloat(previousLogs[1].weight);
-      const diff = weight - previous;
-      const instruction = diff > 0.5
-        ? `Client weight went up by ${diff.toFixed(1)}kg. Do not panic them. Explain water retention, sodium, menstrual cycle as likely causes. Coach them to stay on programme.`
-        : diff < -0.5
-        ? `Client lost ${Math.abs(diff).toFixed(1)}kg since last log. Celebrate specifically. Connect it to their consistency.`
-        : `Client weight is similar to last log. Reassure them that consistency produces results over weeks not days.`;
-      return await askCoachK(`My weight is ${weight}kg`, user, instruction);
-    }
+WATER LOGGED ("drank", "litre", "ml", "bottle", "glass"):
+  One sentence acknowledgment. Reference how much they logged. No generic tips.
 
-    return await askCoachK(`My weight is ${weight}kg`, user, `Client logged their weight as ${weight}kg. This is an early log. Acknowledge it and give context about what to expect from the scale in the first weeks.`);
-  }
+SLEEP LOGGED (number + "hours" / "slept"):
+  Under 6 hours — coach firmly on sleep and fat loss link. Give one practical fix for tonight. 7-9 hours — solid, connect to results. Over 9 — check if they are ill or stressed.
 
-  if (intent === "LOG_WEIGHT_PROMPT") return "What is your weight in kg? Just the number.";
+PERIOD / MENSTRUAL:
+  Normalise. Lighter sessions are fine. No guilt. Hydration and iron-rich foods.
 
-  // ---- WATER ----
-  if (intent === "LOG_WATER") {
-    let litres = 0;
-    const mlMatch = m.match(/(\d+)\s*ml/);
-    const litreMatch = m.match(/(\d+\.?\d*)\s*(litre|liter|l\b)/);
-    if (mlMatch) litres = parseInt(mlMatch[1]) / 1000;
-    else if (litreMatch) litres = parseFloat(litreMatch[1]);
-    else if (m.includes("bottle")) litres = 0.75;
-    else if (m.includes("glass")) litres = 0.25;
-    else { const match = m.match(/(\d+\.?\d*)/); litres = match ? parseFloat(match[1]) : 0.5; }
+SUPPLEMENTS ("creatine", "protein powder", "pre-workout"):
+  Creatine — worth it, 5g daily, no cycling. Protein powder — food not magic, use if struggling to hit ${user.proteinTarget || 120}g from whole foods. Everything else optional. Food first always.
 
-    const currentWater = parseFloat(user.todayWater?.toString() || "0");
-    const newTotal = currentWater + litres;
-    await db.update(users).set({ todayWater: newTotal.toString() }).where(eq(users.phoneNumber, phone));
+RAMADAN / FASTING:
+  Train after Iftar. Suhoor = most important meal of the day. Protein priority at Iftar. Light cardio only if fasting during day.
 
-    const loggedLitres = litres.toFixed(2);
-    return await askCoachK(message, user, `Client just logged ${loggedLitres}L of water. Acknowledge it and coach them forward. One short SA sentence. Never give generic hydration tips.`);
-  }
+TRAVELLING / HOTEL:
+  4 exercises, hotel room, bodyweight only, sets x reps. No equipment assumed.
 
-  // ---- WEEKLY REPORT ----
-  if (intent === "WEEKLY_REPORT") {
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    const recentWorkouts = await db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
-    const recentSteps = await db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
-    const recentWeight = await db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1);
+ALCOHOL:
+  Coach forward. Acknowledge it happened. One practical next step. Never shame.
 
-    const workoutCount = recentWorkouts.length;
-    const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length) : 0;
-    const currentWeight = recentWeight.length > 0 ? parseFloat(recentWeight[0].weight) : null;
-    const phase = user.programmePhase || 1;
-    const phaseNames = getPhaseNames();
+DIABETES / BLOOD SUGAR:
+  Low GI carbs. Consistent meal timing. Train 1-2 hours after eating. Never skip meals.
 
-    const score = Math.min(100, Math.round((workoutCount / 3) * 40 + Math.min(avgSteps / (user.stepsTarget || 7000), 1) * 40 + 20));
-    const level = score >= 90 ? "Elite" : score >= 70 ? "Strong" : score >= 50 ? "Building" : "Needs work";
+CULTURAL EVENT (church, funeral, lobola, umemulo):
+  Acknowledge its importance. Enjoy it fully. Protein first on the plate. No guilt. Back on programme next meal.
 
-    const report = `*Weekly Report — ${user.name || "Coach"}*\n\n📊 Phase ${phase}: ${phaseNames[phase]} — Week ${user.programmeWeek}\n\n💪 Workouts this week: ${workoutCount}/3\n👟 Average steps: ${avgSteps.toLocaleString()}\n⚖️ Current weight: ${currentWeight ? `${currentWeight}kg` : "Not logged"}\n💧 Water today: ${user.todayWater || 0}L\n\n🏆 Score: ${score}/100 — ${level}`;
+JOINED THE GYM:
+  Welcome it with one sentence. Update training to gym. Give full gym programme.
 
-    const coaching = await askCoachK("Give me my weekly report", user, `Client's weekly score is ${score}/100. Level: ${level}. Workouts: ${workoutCount}/3. Steps avg: ${avgSteps}. Give one specific coaching message for next week based on their weakest area. SA voice.`);
+TIRED / LOW ENERGY:
+  DO NOT mention water. Ask about sleep first, then food timing, then stress.
 
-    return `${report}\n\n${coaching}`;
-  }
+INJURY MENTIONED:
+  Give specific alternative exercises that route around the injury.
 
-  // ---- MEASUREMENTS ----
-  if (intent === "MEASUREMENTS") {
-    return await askCoachK(message, user, `Client wants to do a measurements check-in. Ask them for 3 key measurements: waist, hips, and chest (or arms for muscle gain clients). One question only. SA voice.`);
-  }
+GENERAL QUESTION:
+  Answer with SA coaching knowledge. Specific. Practical.
 
-  // ---- FOOD LOG ----
-  if (intent === "FOOD_LOG") {
-    const estimatedCals = estimateCalories(message);
-    const target = user.calorieTarget || 1800;
-    const instruction = estimatedCals > target * 0.5
-      ? `Client logged a meal. Estimated calories: ${estimatedCals}. Daily target: ${target}. Coach them specifically on what they ate — what to adjust, what was good. SA voice. Specific food coaching.`
-      : `Client logged a meal. Estimated calories: ${estimatedCals}. Coach them briefly and encourage them to hit their protein target of ${user.proteinTarget || 120}g.`;
+CRITICAL RULES — these are non-negotiable:
+- Client's name is ${clientName}. Never call them "a client", "Hi client", or "champ" if you have a real name.
+- NEVER say "drink 2 litres of water" as a response to anything except a water question.
+- Pilchards ARE an excellent protein source — never say otherwise.
+- Never append a protein warning at the end of a food coaching response.
+- Never mention AI, bot, system, or technology.
+- Never use a motivational quote as a standalone response.
+- Maximum 4 sentences per response. Exception: full programme requests may be longer.
+- Always end with exactly one specific action the client must take right now.
+- SA voice throughout: real, warm, firm, direct.`;
 
-    const [coachingReply, patternWarning, perfectDay] = await Promise.all([
-      askCoachK(message, user, instruction),
-      checkFoodPatterns(user.id),
-      checkPerfectDay(user.id),
-    ]);
-
-    return coachingReply + (patternWarning ? `\n\n${patternWarning}` : "") + (perfectDay || "");
-  }
-
-  // ---- GROCERY LIST ----
-  if (intent === "GROCERY_LIST") {
-    return await askCoachK(message, user, `Client shared their grocery list or what they have at home. Coach them on how to build meals from this. Focus on protein sources first. Budget-aware. SA voice.`);
-  }
-
-  // ---- SUPPLEMENTS ----
-  if (intent === "SUPPLEMENTS") {
-    return await askCoachK(message, user, `Client is asking about supplements. Be practical and honest. Creatine is worth it. Protein powder is food not magic. Everything else is optional. Food first always. SA voice.`);
-  }
-
-  // ---- MEAL TIMING ----
-  if (intent === "MEAL_TIMING") {
-    return await askCoachK(message, user, `Client is asking about meal timing around workouts. Give specific practical advice based on their training mode and goal. SA voice.`);
-  }
-
-  // ---- BUDGET MEAL ----
-  if (intent === "BUDGET_MEAL") {
-    return await askCoachK(message, user, `Client is on a tight budget. Lead with: "Your budget does not need to change. Smarter choices with the same money." Then give the R57 budget plan: eggs R25, pilchards R12, sugar beans R20. Practical and specific.`);
-  }
-
-  // ---- RAMADAN ----
-  if (intent === "RAMADAN") {
-    return await askCoachK(message, user, `Client is fasting for Ramadan. Restructure all advice around fasting hours. Training after Iftar. Suhoor is most important meal. Light sessions if fasting. Protein priority at Iftar.`);
-  }
-
-  // ---- PERIOD ----
-  if (intent === "PERIOD") {
-    return await askCoachK(message, user, `Client is on their period. Normalise harder workouts feeling during this time. Lighter sessions are fine. Hydration is critical. No guilt. SA voice. Warm but direct.`);
-  }
-
-  // ---- DIABETIC ----
-  if (intent === "DIABETIC") {
-    return await askCoachK(message, user, `Client has diabetes or is asking about blood sugar. Low GI carbs. Consistent meal timing. Train 1 to 2 hours after eating. Never skip meals. Specific and practical.`);
-  }
-
-  // ---- TRAVELLING ----
-  if (intent === "TRAVELLING") {
-    return await askCoachK(message, user, `Client is travelling. Give hotel room workout or fast food survival strategy. Protein first always. 30 minute bodyweight session available. No excuses but real options.`);
-  }
-
-  // ---- CULTURAL EVENT ----
-  if (intent === "CULTURAL_EVENT") {
-    return await askCoachK(message, user, `Client has a cultural event — church, funeral, lobola, umemulo. Acknowledge the importance of these. Enjoy it. Protein first. Smaller portions. No guilt. Back on programme next meal.`);
-  }
-
-  // ---- ALCOHOL ----
-  if (intent === "ALCOHOL") {
-    return await askCoachK(message, user, `Client drank alcohol. Coach forward not backward. Acknowledge it happened. One practical next step. SA voice. Firm but not preachy. Never shame them.`);
-  }
-
-  // ---- GENERAL (catch-all GPT) ----
-  return await askCoachK(message, user, "Respond as Coach K to this client message. Be specific. Be SA. Never mention water unless they asked about water.");
+  return await askCoachK(message, user, instruction);
 }
 
 // ============================================================
@@ -1185,7 +991,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       const user = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
       if (user.length > 0) {
-        await logChat(user[0].id, phone, message, reply, detectIntent(message));
+        await logChat(user[0].id, phone, message, reply, "GPT");
       }
 
       return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);
