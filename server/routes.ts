@@ -1107,6 +1107,36 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `${celebration}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
   }
 
+  // ---- GOAL CHANGE: wants muscle but profile says fat loss / low calories ----
+  const wantsMuscle = m.includes("gain weight") || m.includes("build muscle") || m.includes("gain muscle") || m.includes("i want to bulk") || m.includes("want to bulk") ||
+    (m.includes("muscle") && (m.includes("want") || m.includes("focus on") || m.includes("goal is")));
+  if (wantsMuscle && (user.goalType === "fat_loss" || (user.calorieTarget || 0) < 1800)) {
+    const bw = parseFloat(user.currentWeight || "75");
+    const newCals = Math.round(bw * 33 + 500);
+    const newProtein = Math.round(bw * 2.2);
+    await db.update(users).set({ goalType: "muscle_gain", calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
+    user.goalType = "muscle_gain";
+    user.calorieTarget = newCals;
+    user.proteinTarget = newProtein;
+  }
+
+  // ---- WEIGHT MENTION: update stored weight if client states a different one ----
+  const weightInMsg = m.match(/\b(\d{2,3}(?:\.\d)?)\s*kg\b/);
+  if (weightInMsg) {
+    const mentionedKg = parseFloat(weightInMsg[1]);
+    const storedKg = parseFloat(user.currentWeight || "0");
+    if (mentionedKg >= 35 && mentionedKg <= 250 && Math.abs(mentionedKg - storedKg) > 0.4) {
+      const newProtein = Math.round(mentionedKg * 2);
+      const newCals = user.goalType === "muscle_gain"
+        ? Math.round(mentionedKg * 33 + 500)
+        : Math.round(mentionedKg * 27);
+      await db.update(users).set({ currentWeight: mentionedKg.toString(), proteinTarget: newProtein, calorieTarget: newCals }).where(eq(users.phoneNumber, phone));
+      user.currentWeight = mentionedKg.toString();
+      user.proteinTarget = newProtein;
+      user.calorieTarget = newCals;
+    }
+  }
+
   // ---- PROGRAMME SETUP REPLY — detect "3 intermediate lose fat" style answers ----
   const hasDayCount = /\b[3-5]\b/.test(m);
   const hasExpWord = m.includes("beginner") || m.includes("intermediate") || m.includes("advanced");
@@ -1137,13 +1167,31 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Programme built.\n\n${programme}`;
   }
 
-  // ---- PROGRAMME REQUEST WITHOUT PROFILE — ask the 3 setup questions first ----
+  // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
   const isWorkoutRelated =
     m === "1" || m === "2" || m === "gym" || m === "workout" ||
     m.includes("program") || m.includes("programme") ||
     m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
     m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
+    m.includes("exercise") || m.includes("train") ||
     (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")));
+
+  // ---- ELDERLY / SERIOUS INJURY — skip questions, give immediate safety programme ----
+  const elderlyAge = m.match(/\bi'?m\s+(6[0-9]|7[0-9]|8[0-9]|9[0-9])\b/i) ||
+    m.match(/\b(6[0-9]|7[0-9]|8[0-9]|9[0-9])\s*(year|yr|yo)\b/i) ||
+    m.match(/\bage\s+(6[0-9]|7[0-9]|8[0-9]|9[0-9])\b/i);
+  const isElderly = !!(elderlyAge || m.includes("elderly") || m.includes("old age") || m.includes("pensioner") || m.includes("senior citizen"));
+  const hasSeriousInjury = m.includes("hip replacement") || m.includes("knee replacement") ||
+    m.includes("hip surgery") || m.includes("hip problem") || m.includes("bad hip") ||
+    m.includes("serious injury") || m.includes("cannot walk") || m.includes("can't walk");
+
+  if ((isElderly || hasSeriousInjury) && isWorkoutRelated) {
+    const ageStr = elderlyAge ? elderlyAge[1] : "";
+    const prefix = hasSeriousInjury && !isElderly
+      ? `With a serious injury, safety is everything.`
+      : `At ${ageStr || "your age"} with${hasSeriousInjury ? " a hip problem" : " your history"}, safety is everything.`;
+    return `${prefix} This programme builds real strength without risk. Any pain or discomfort — stop immediately and consult your doctor.\n\n*Safety-First Strength Programme — Seated and Machine Only*\nRest 90 seconds between sets. 3 sets of 15 reps. Light weight.\n\n1️⃣ *Seated Leg Press — light weight*\nhttps://www.youtube.com/results?search_query=seated+leg+press+light+weight+elderly\nFeet flat on platform. Push slowly. Never lock the knees.\n\n2️⃣ *Seated Leg Curl Machine*\nhttps://www.youtube.com/results?search_query=seated+leg+curl+machine+tutorial\nSlow and controlled. Only move through pain-free range.\n\n3️⃣ *Chest Press Machine — seated*\nhttps://www.youtube.com/results?search_query=chest+press+machine+tutorial+seniors\nBack flat against pad. Press gently. No locking at the top.\n\n4️⃣ *Seated Cable Row*\nhttps://www.youtube.com/results?search_query=seated+cable+row+elderly+tutorial\nSit tall. Pull elbows back slowly. Keep shoulders down.\n\n5️⃣ *Seated Shoulder Press Machine*\nhttps://www.youtube.com/results?search_query=seated+shoulder+press+machine+seniors\nPress overhead slowly. Stop if any shoulder pain.\n\n6️⃣ *Seated Calf Raise*\nhttps://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial\nHeel up slowly, lower slowly. Excellent for circulation.\n\n7️⃣ *Balance Work — standing at fixed support*\nHold a wall or fixed bar. Rise slowly onto toes and lower. 3 × 10. Builds ankle stability.\n\nTrain 2 to 3 times per week with at least one rest day between sessions. Reply DONE after each session and I track your progress.`;
+  }
 
   if (isWorkoutRelated && (!user.trainingExperience || !user.trainingDaysPerWeek)) {
     return `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply with a number — 3, 4, or 5.\n\n2️⃣ What is your experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ What is your main goal?\nLose fat\nBuild muscle\nBoth — body recomposition\n\nReply with your three answers and I build your programme immediately.`;
@@ -1181,6 +1229,14 @@ BROKE / BUDGET / MONTH-END / NO MONEY:
 
 WEIGHT LOGGED (number + "kg"):
   Acknowledge. If weight went up — explain water retention, sodium, hormones. Do NOT panic them. Stay on programme. If weight went down — celebrate specifically. If same — consistency wins over weeks.
+  IMPORTANT: If the weight mentioned (${user.currentWeight || "unknown"}kg stored) is different from their stored weight — confirm it has been updated and recalculate their protein target (body weight × 2g).
+
+GOAL CHANGE — CLIENT WANTS MUSCLE GAIN OR TO BUILD MUSCLE:
+  Their stored goal is ${user.goalType || "not set"} and their stored calorie target is ${user.calorieTarget || "not set"}.
+  If they now want muscle gain — their current target is WRONG. The correct muscle gain calorie target for ${user.currentWeight || 75}kg is: ${Math.round(parseFloat(user.currentWeight || "75") * 33 + 500)} calories (body weight × 33 + 500). State this number clearly. Tell them exactly how much more food that means per day. Their profile has already been updated. Give one practical action for increasing calories with SA foods.
+
+CALORIE TARGET CONTEXT (always available):
+  Current goal: ${user.goalType || "not set"}. Current calorie target: ${user.calorieTarget || "not set"} kcal. Protein target: ${user.proteinTarget || "not set"}g.
 
 WATER LOGGED ("drank", "litre", "ml", "bottle", "glass"):
   One sentence acknowledgment. Reference how much they logged. No generic tips.
