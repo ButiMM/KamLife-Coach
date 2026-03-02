@@ -66,7 +66,167 @@ BANNED RESPONSES:
 Never respond with motivational quotes as standalone responses like "One meal at a time" or "The work is the answer" without context.
 Never call someone HI or USER. Use their name or say "Coach K here".
 Never ignore a direct request. If someone asks for a gym programme give them a gym programme.
-Never repeat the same message three times. If a response does not fit the question try a different approach.`;
+Never repeat the same message three times. If a response does not fit the question try a different approach.
+
+PROGRAMME PHILOSOPHY — NON-NEGOTIABLE:
+Every client regardless of experience starts with machine and cable based compound movements. Machines teach movement patterns safely and build real strength without injury risk. Free weights come later. Never give bicycle kicks, bosu ball exercises, burpees for strength, or any stability gimmick. Never give 100 rep sets or circuit training for strength goals. Never mix cardio into the strength session.
+Full body training: every session hits every major muscle group — not chest day, not leg day. Full body every session.
+The five movement patterns every full body session must include IN THIS ORDER: 1. Quad dominant (leg press / hack squat), 2. Hip dominant (leg curl / RDL), 3. Push (chest press machine / cable), 4. Pull (lat pulldown / cable row), 5. Shoulder (machine shoulder press / cable lateral raise). Legs always first — biggest muscle group, needs most energy.
+Progressive overload is the only rule that matters: more reps or more weight every single session. Add one rep per session. When hitting 15 reps on all sets increase weight by smallest increment and drop back to 12 reps.
+Always give YouTube links for every exercise. Always give the common mistake. Always give starting weight guidance.`;
+
+// ============================================================
+// KAMLIFE PROGRAMME LIBRARY
+// ============================================================
+
+const BEGINNER_GYM_PROGRAMME = `*Full Body Strength — Beginner (3 days/week: Mon/Wed/Fri)*
+3 sets of 12 reps each. Rest 60 seconds between sets. Total time 45–55 minutes.
+
+1️⃣ *Leg Press Machine — 3×12*
+https://www.youtube.com/results?search_query=leg+press+machine+tutorial+beginners
+Sit in machine. Feet shoulder-width on platform. Lower until knees at 90°. Push through heels. Do not lock knees at top.
+Common mistake: Knees caving inward or lowering too deep.
+Start weight: Whatever allows 12 clean reps with difficulty on last 2.
+
+2️⃣ *Leg Curl Machine — 3×12*
+https://www.youtube.com/results?search_query=lying+leg+curl+machine+tutorial
+Lie face down. Pad just above heels. Curl heels toward glutes. Squeeze hamstrings hard at top. Lower slowly over 3 seconds.
+Common mistake: Hips rising off pad to assist the movement.
+Start weight: Light — hamstrings are often underdeveloped in beginners.
+
+3️⃣ *Chest Press Machine — 3×12*
+https://www.youtube.com/results?search_query=chest+press+machine+tutorial+beginners
+Adjust seat so handles are at chest height. Press forward until arms nearly extended. Return slowly. Keep back against pad.
+Common mistake: Shrugging shoulders up during the press.
+Start weight: Whatever allows 12 clean reps.
+
+4️⃣ *Lat Pulldown — 3×12*
+https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form+beginners
+Thighs under pad. Grip bar wider than shoulders. Pull to upper chest. Lean back slightly. Squeeze back hard. Return slowly.
+Common mistake: Pulling with arms instead of driving elbows down.
+Start weight: Light enough to feel the back working, not just arms.
+
+5️⃣ *Machine Shoulder Press — 3×12*
+https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial
+Adjust seat so handles are at shoulder height. Press overhead until arms nearly extended. Lower slowly. No arching lower back.
+Common mistake: Using momentum or arching back excessively.
+Start weight: Lighter than you think — shoulders are a small muscle group.
+
+Progressive overload: Add one rep per session. When you hit 15 reps on all sets, increase weight by smallest increment and drop back to 12.`;
+
+const INTERMEDIATE_GYM_UPPER = `*Upper Body Day — Intermediate (4 days/week: Mon/Tue/Thu/Fri)*
+4 sets of 10 reps. Rest 75 seconds. Total time 55–65 minutes.
+
+1️⃣ *Chest Press Machine / Smith Machine Bench Press — 4×10*
+https://www.youtube.com/results?search_query=smith+machine+bench+press+tutorial
+Focus on feeling the chest, not just moving the weight. 2-second lowering phase.
+Common mistake: Flaring elbows out too wide. Keep at 45°.
+
+2️⃣ *Seated Cable Row — 4×10*
+https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form
+Sit upright. Pull handle to belly button. Squeeze shoulder blades hard. Hold 1 second at peak. Return slowly.
+Common mistake: Rounding the back to pull more weight.
+
+3️⃣ *Lat Pulldown — 4×10*
+https://www.youtube.com/results?search_query=lat+pulldown+tutorial+intermediate
+Full stretch at top, full contraction at bottom. Heavier than beginner.
+Common mistake: Pulling with biceps instead of lats.
+
+4️⃣ *Machine Shoulder Press — 4×10*
+https://www.youtube.com/results?search_query=shoulder+press+machine+form
+Controlled throughout. No bouncing at bottom.
+Common mistake: Leaning back excessively to press more.
+
+5️⃣ *Cable Lateral Raise — 3×15*
+https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
+Stand side-on to cable. Raise to shoulder height. Lower slowly. Creates shoulder width.
+
+6️⃣ *Tricep Cable Pushdown — 3×15*
+https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial
+Elbows fixed at sides. Push until arms straight. Squeeze triceps. Return slowly.
+
+7️⃣ *Cable Bicep Curl — 3×15*
+https://www.youtube.com/results?search_query=cable+bicep+curl+tutorial
+Elbows fixed. Curl squeezing biceps. Lower slowly. Full range.`;
+
+const INTERMEDIATE_GYM_LOWER = `*Lower Body Day — Intermediate*
+4 sets. Rest 75 seconds. Total time 55–65 minutes.
+
+1️⃣ *Hack Squat / Leg Press — 4×10*
+https://www.youtube.com/results?search_query=hack+squat+machine+tutorial
+Deeper range than beginner. Feet closer together for quad focus. Control the descent.
+
+2️⃣ *Leg Extension Machine — 4×12*
+https://www.youtube.com/results?search_query=leg+extension+machine+tutorial+form
+Extend until legs nearly straight. Squeeze quads hard at top. Lower slowly. No momentum.
+
+3️⃣ *Leg Curl Machine — 4×12*
+https://www.youtube.com/results?search_query=leg+curl+machine+seated+or+lying
+Full range of motion. Slow lowering phase. Heavier than beginner.
+
+4️⃣ *Hip Thrust Machine / Cable Pull Through — 4×12*
+https://www.youtube.com/results?search_query=hip+thrust+machine+tutorial
+Drive hips forward powerfully. Squeeze glutes hard at top. Non-negotiable for glute development.
+
+5️⃣ *Seated Calf Raise — 4×15*
+https://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial
+Full range — all the way down for stretch, all the way up for contraction. Calves respond to high reps.
+
+6️⃣ *Cable Crunch — 3×15*
+https://www.youtube.com/results?search_query=cable+crunch+tutorial+form
+Kneel facing cable. Rope behind head. Crunch down contracting abs. Beats planks for direct ab development.`;
+
+const HOME_PROGRAMME_GUIDE = `*Home Training Programme — No Gym Needed*
+These are the only movements. Nothing else. No bicycle kicks. No nonsense.
+
+1️⃣ *Bodyweight Squat → Jump Squat (progression)*
+https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial
+3×15. Feet shoulder-width. Lower until thighs parallel. Drive through heels. Keep chest up.
+Common mistake: Knees caving in. Push knees out over toes.
+
+2️⃣ *Push-Up → Decline Push-Up → Archer Push-Up (progression)*
+https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners
+3×10. Hands shoulder-width. Body in straight line. Lower chest to floor. Push up explosively.
+Common mistake: Sagging hips or flaring elbows. Keep core tight.
+
+3️⃣ *Glute Bridge → Single Leg Glute Bridge → Hip Thrust with Backpack (progression)*
+https://www.youtube.com/results?search_query=glute+bridge+tutorial+form
+3×15. Lie on back. Drive hips up. Squeeze glutes hard at top. Hold 2 seconds.
+Common mistake: Using lower back instead of glutes to lift.
+
+4️⃣ *Reverse Lunge → Bulgarian Split Squat (progression)*
+https://www.youtube.com/results?search_query=reverse+lunge+form+tutorial
+3×10 each leg. Step back, lower back knee toward floor. Front knee stays over ankle.
+Common mistake: Front knee going too far forward. Drive through heel.
+
+5️⃣ *Table Row / Door Frame Row → Resistance Band Row (progression)*
+https://www.youtube.com/results?search_query=table+row+home+workout+tutorial
+3×10. Lie under table. Grip edge. Pull chest to table. Squeeze back at top.
+Common mistake: Using arms instead of back. Think elbows driving back.
+
+6️⃣ *Plank → Plank with Shoulder Tap (progression)*
+https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial
+3×30 seconds. Forearms or hands. Body straight. Core braced. Breathe steadily.
+Common mistake: Hips too high or sagging. Keep hips level.
+
+Progressive overload: Add reps each session. When movements become easy, move to next progression.`;
+
+function getKamlifeProgramme(user: any, todayOnly = false): string {
+  const mode = user.trainingMode || "home";
+  const exp = (user.trainingExperience || "beginner").toLowerCase();
+
+  if (mode !== "gym") return HOME_PROGRAMME_GUIDE;
+
+  if (exp === "intermediate" || exp === "advanced") {
+    if (todayOnly) {
+      const day = (user.programmeDayInWeek || 1);
+      return day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
+    }
+    return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
+  }
+
+  return BEGINNER_GYM_PROGRAMME;
+}
 
 // ============================================================
 // SA FOOD CALORIE ESTIMATES
@@ -334,7 +494,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
   try {
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 300,
+      max_tokens: 500,
       messages: [
         {
           role: "system",
@@ -751,8 +911,11 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 
 SCENARIO GUIDE — read the message and decide which applies:
 
-WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "training plan", "what do I do today", "1", etc.):
-  Give a full structured ${trainingMode === "gym" ? "gym" : "home"} programme. Format: Day 1 / Day 2 / Day 3, each with 4 exercises. Per exercise: name — sets x reps — YouTube: https://www.youtube.com/results?search_query=Exercise+Name+form+tutorial (use + between words). Use their actual phase and goal from the profile. If they said "today's workout" or sent "1", give only Day 1.
+WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "training plan", "what do I do today", "1", "2", "workout", etc.):
+  Use the EXACT programme below. Do not invent exercises. Do not use bodyweight unless the client is on home training. Add one short SA motivating sentence before the programme. If they asked for "today's workout" or sent "1", output only the first day/session. If they want the full programme, output all sessions.
+
+  THEIR PROGRAMME (${trainingMode === "gym" ? "GYM" : "HOME"}, ${(user.trainingExperience || "beginner").toUpperCase()}):
+${getKamlifeProgramme(user)}
 
 STEPS LOGGED (number + "steps" / "walked" / "km"):
   Respond based on their step target of ${user.stepsTarget || 7000}. If below — push them. If at or above — celebrate and give next action.
