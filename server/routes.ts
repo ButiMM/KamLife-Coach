@@ -896,6 +896,48 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return `${celebration}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
   }
 
+  // ---- PROGRAMME SETUP REPLY — detect "3 intermediate lose fat" style answers ----
+  const hasDayCount = /\b[3-5]\b/.test(m);
+  const hasExpWord = m.includes("beginner") || m.includes("intermediate") || m.includes("advanced");
+  const hasGoalWord = m.includes("lose") || m.includes("fat") || m.includes("muscle") || m.includes("both") || m.includes("recomp");
+
+  if (hasDayCount && (hasExpWord || hasGoalWord)) {
+    const dayMatch = m.match(/\b([3-5])\b/);
+    const days = dayMatch ? parseInt(dayMatch[1]) : 3;
+
+    let exp = "beginner";
+    if (m.includes("intermediate")) exp = "intermediate";
+    if (m.includes("advanced")) exp = "advanced";
+
+    let goal = "fat_loss";
+    if ((m.includes("muscle") || m.includes("build")) && !m.includes("lose") && !m.includes("fat")) goal = "muscle_gain";
+    if (m.includes("both") || m.includes("recomp")) goal = "recomposition";
+
+    await db.update(users).set({
+      trainingDaysPerWeek: days,
+      trainingExperience: exp,
+      goalType: goal,
+    }).where(eq(users.phoneNumber, phone));
+
+    const updatedUser = { ...user, trainingDaysPerWeek: days, trainingExperience: exp, goalType: goal };
+    const programme = getKamlifeProgramme(updatedUser);
+    const goalLabel = goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Body recomposition";
+
+    return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Programme built.\n\n${programme}`;
+  }
+
+  // ---- PROGRAMME REQUEST WITHOUT PROFILE — ask the 3 setup questions first ----
+  const isWorkoutRelated =
+    m === "1" || m === "2" || m === "gym" || m === "workout" ||
+    m.includes("program") || m.includes("programme") ||
+    m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
+    m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
+    (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")));
+
+  if (isWorkoutRelated && (!user.trainingExperience || !user.trainingDaysPerWeek)) {
+    return `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply with a number — 3, 4, or 5.\n\n2️⃣ What is your experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ What is your main goal?\nLose fat\nBuild muscle\nBoth — body recomposition\n\nReply with your three answers and I build your programme immediately.`;
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
