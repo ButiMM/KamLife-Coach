@@ -977,7 +977,7 @@ async function getOrCreateUser(phone: string): Promise<any> {
 // MENU TEXT — context-aware
 // ============================================================
 
-function getMenuText(user: any): string {
+async function getMenuText(user: any): Promise<string> {
   const name = getDisplayName(user);
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
@@ -986,9 +986,38 @@ function getMenuText(user: any): string {
   const dayType = getDayType(day);
   const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
   const mode = user.trainingMode || "home";
+  const stepsTarget = user.stepsTarget || 8000;
+
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  let workoutDone = false;
+  let todayStepCount: number | null = null;
+
+  try {
+    const [todayWorkout, todaySteps] = await Promise.all([
+      db.select().from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
+        .limit(1),
+      db.select().from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStart)))
+        .limit(1),
+    ]);
+    workoutDone = todayWorkout.length > 0;
+    todayStepCount = todaySteps.length > 0 ? todaySteps[0].steps : null;
+  } catch { }
+
+  const workoutStatus = mode !== "walk_only"
+    ? (workoutDone ? `Workout ✅` : `Today: ${dayLabel}`)
+    : null;
+  const stepStatus = todayStepCount !== null
+    ? `Steps: ${todayStepCount.toLocaleString()}/${stepsTarget.toLocaleString()}${todayStepCount >= stepsTarget ? " ✅" : ""}`
+    : null;
+
+  const statusParts = [workoutStatus, stepStatus].filter(Boolean).join(" · ");
 
   const headerLine = name
-    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${mode !== "walk_only" ? ` | Today: ${dayLabel}` : ""}`
+    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}`
     : `*KamLife Coach* 💪`;
 
   return `${headerLine}
@@ -1406,7 +1435,7 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     return `*${f.name}, your profile is set.* Here is what Coach K has built for you.\n\n🎯 *Goal:* ${goalLabel[goal] || goal}\n⚖️ *Weight:* ${weight}kg\n🍽️ *Calories:* ${calorieTarget} kcal/day\n💪 *Protein:* ${proteinTarget}g/day\n👟 *Steps:* ${stepsTarget.toLocaleString()}/day\n\n${programme}\n\n${mealPlan}${nightNote}${heartNote}\n\n*Your action today:* Do your first session. Reply DONE when you finish and I log it.`;
   }
 
-  return getMenuText(user);
+  return await getMenuText(user);
 }
 
 // ============================================================
@@ -1452,7 +1481,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
   // ---- GREETINGS / MENU (direct — no GPT) ----
   const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
   if (greetings.some(g => m === g || m === g + " 👋") || m === "menu" || m === "help") {
-    return getMenuText(user);
+    return await getMenuText(user);
   }
 
   // ---- PHOTO / VISION ----
