@@ -2,7 +2,7 @@ import { type Express } from "express";
 import { type Server } from "http";
 import { db } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins } from "../shared/schema";
-import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
 
@@ -659,9 +659,12 @@ function buildContext(user: any): string {
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
   const phaseName = phaseNames[phase] || "Foundation";
-  const calories = user.calorieTarget || 1800;
-  const protein = user.proteinTarget || 120;
   const steps = user.stepsTarget || 7000;
+  // Fix 2 — always use live-calculated targets so GPT sees correct numbers even if DB is stale
+  const weight = parseFloat(user.currentWeight || "75");
+  const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+  const calories = liveTargets.calorieTarget;
+  const protein = liveTargets.proteinTarget;
   const mode = user.trainingMode || "home";
   const equipment = user.homeEquipment || "none";
   const situation = user.lifeSituation || "";
@@ -933,7 +936,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",
@@ -1449,6 +1452,44 @@ function getOnboardingMealPlan(user: any): string {
 }
 
 // ============================================================
+// CALORIE / PROTEIN TARGET CALCULATOR — single source of truth
+// ============================================================
+
+function calculateTargets(
+  weight: number,
+  goalType: string,
+  lifeSituation: string,
+  trainingDaysPerWeek: number,
+): { calorieTarget: number; proteinTarget: number } {
+  const bmr = weight * 22;
+
+  const activityMult: Record<string, number> = {
+    office: 1.3, student: 1.35, unemployed: 1.25, retired: 1.2,
+    stay_home_parent: 1.3, retail_physical: 1.5,
+  };
+  const mult = activityMult[lifeSituation] || 1.3;
+
+  const trainingAdj = Math.round((200 * Math.min(trainingDaysPerWeek, 7)) / 7);
+
+  const goalAdj: Record<string, number> = {
+    fat_loss: -400, muscle_gain: 400, recomposition: 0,
+    general: 100, health_condition: 0,
+  };
+  const adj = goalAdj[goalType] ?? 0;
+
+  let calorieTarget = Math.round(bmr * mult + trainingAdj + adj);
+  calorieTarget = Math.max(1500, Math.min(4500, calorieTarget));
+
+  const proteinMult: Record<string, number> = {
+    fat_loss: 2.0, muscle_gain: 2.4, recomposition: 2.2,
+    general: 1.8, health_condition: 2.0,
+  };
+  const proteinTarget = Math.round(weight * (proteinMult[goalType] || 2.0));
+
+  return { calorieTarget, proteinTarget };
+}
+
+// ============================================================
 // ONBOARDING FLOW — 13-STATE SEQUENCE
 // ============================================================
 
@@ -1736,18 +1777,9 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     const goal = u.goalType || "fat_loss";
     const exp = u.trainingExperience || "beginner";
 
-    let calorieTarget: number;
-    let proteinTarget: number;
-    if (goal === "muscle_gain") {
-      calorieTarget = Math.round(weight * 33 + 500);
-      proteinTarget = Math.round(weight * 2.2);
-    } else if (goal === "recomposition" || goal === "general" || goal === "health_condition") {
-      calorieTarget = Math.round(weight * 30);
-      proteinTarget = Math.round(weight * 2);
-    } else {
-      calorieTarget = Math.round(weight * 27);
-      proteinTarget = Math.round(weight * 2);
-    }
+    const { calorieTarget, proteinTarget } = calculateTargets(
+      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3
+    );
 
     const stepsTarget = exp === "beginner" ? 7000 : 8000;
     const startPhase = exp === "beginner" ? 1 : 2;
@@ -2095,8 +2127,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     (m.includes("muscle") && (m.includes("want") || m.includes("focus on") || m.includes("goal is")));
   if (wantsMuscle && (user.goalType === "fat_loss" || (user.calorieTarget || 0) < 1800)) {
     const bw = parseFloat(user.currentWeight || "75");
-    const newCals = Math.round(bw * 33 + 500);
-    const newProtein = Math.round(bw * 2.2);
+    const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(bw, "muscle_gain", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
     await db.update(users).set({ goalType: "muscle_gain", calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
     user.goalType = "muscle_gain";
     user.calorieTarget = newCals;
@@ -2109,10 +2140,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const mentionedKg = parseFloat(weightInMsg[1]);
     const storedKg = parseFloat(user.currentWeight || "0");
     if (mentionedKg >= 35 && mentionedKg <= 250 && Math.abs(mentionedKg - storedKg) > 0.4) {
-      const newProtein = Math.round(mentionedKg * 2);
-      const newCals = user.goalType === "muscle_gain"
-        ? Math.round(mentionedKg * 33 + 500)
-        : Math.round(mentionedKg * 27);
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
       await db.update(users).set({ currentWeight: mentionedKg.toString(), proteinTarget: newProtein, calorieTarget: newCals }).where(eq(users.phoneNumber, phone));
       user.currentWeight = mentionedKg.toString();
       user.proteinTarget = newProtein;
@@ -2205,6 +2233,92 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       await logChat(user.id, message, fullReply, "STEP_LOG");
       return fullReply;
     }
+  }
+
+  // ---- FIX 3: HANDLER 1 — Progress check ----
+  if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress")) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
+      const [recentSteps, recentWorkouts, recentWeights] = await Promise.all([
+        db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))).orderBy(desc(stepLogs.loggedAt)),
+        db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select().from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+      ]);
+      const liveT = calculateTargets(parseFloat(user.currentWeight || "75"), user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      const plannedSessions = user.trainingDaysPerWeek || 3;
+      const completedSessions = recentWorkouts.length;
+      const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((s, r) => s + r.steps, 0) / recentSteps.length) : 0;
+      const stepsTarget = user.stepsTarget || 7000;
+      const weightChange = recentWeights.length >= 2
+        ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
+        : null;
+      const sessionSentence = `Training: ${completedSessions} of ${plannedSessions} planned sessions done this week.`;
+      const stepSentence = avgSteps > 0 ? `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.` : `Steps: no step logs this week — start logging daily.`;
+      const weightSentence = weightChange !== null ? (parseFloat(weightChange) < 0 ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.` : parseFloat(weightChange) > 0 ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.` : `Weight: holding steady this week.`) : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
+      const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
+      const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Champ"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
+      const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${verdictSentence}`;
+      await logChat(user.id, message, progressReply, "PROGRESS_CHECK");
+      return progressReply;
+    } catch (e) {
+      console.error("[PROGRESS CHECK]", e);
+    }
+  }
+
+  // ---- FIX 3: HANDLER 2 — Supplement questions ----
+  if (m.includes("creatine") || m.includes("protein powder") || m.includes("pre workout") || m.includes("pre-workout") || m.includes("supplement") || m.includes("what should i take") || m.includes("fat burner") || m.includes("whey")) {
+    const suppContext = `Client asked about supplements. Their goal is ${user.goalType || "fat_loss"}. Their protein target is ${calculateTargets(parseFloat(user.currentWeight || "75"), user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3).proteinTarget}g/day. Give honest SA supplement advice. RULES: 1. Creatine — recommend for everyone, 5g daily, R150–R200 per month at Dischem, no cycling needed. 2. Protein powder — ONLY if they consistently cannot hit protein target from food. Whey isolate is cheapest per gram. USN or Biogen are SA brands that are honest. 3. Pre-workout — tell them black coffee 30 minutes before training is free and works as well as any pre-workout. 4. Fat burners — never. All stimulants and fat burners are marketing. 5. Everything else — food first, always. One supplement at a time. Never a stack. Be specific about SA prices and brands.`;
+    const suppReply = await askCoachK(message, user, suppContext);
+    await logChat(user.id, message, suppReply, "SUPPLEMENT");
+    return suppReply;
+  }
+
+  // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
+  if (m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me")) {
+    try {
+      const [recentW, recentS] = await Promise.all([
+        db.select().from(workoutLogs).where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(10),
+        db.select().from(stepLogs).where(eq(stepLogs.userId, user.id)).orderBy(desc(stepLogs.loggedAt)).limit(7),
+      ]);
+      const totalWorkouts = user.totalWorkoutsCompleted || recentW.length;
+      const avgStepsStruggle = recentS.length > 0 ? Math.round(recentS.reduce((s, r) => s + r.steps, 0) / recentS.length) : 0;
+      let dataPoint = "";
+      if (totalWorkouts > 0) dataPoint = `You have completed ${totalWorkouts} training session${totalWorkouts > 1 ? "s" : ""}.`;
+      else if (avgStepsStruggle > 4000) dataPoint = `You are averaging ${avgStepsStruggle.toLocaleString()} steps per day this week.`;
+      const struggleContext = `Client is struggling and said: "${message}". RULES — empathy first in one sentence, no generic motivation speech. Then state this real data point: "${dataPoint || "You showed up and sent this message — that means you have not quit."}". Then give ONE single specific action for today only. Never a list. Never "you've got this" or "believe in yourself". Be real and direct like a coach, not a cheerleader. SA voice.`;
+      const struggleReply = await askCoachK(message, user, struggleContext);
+      await logChat(user.id, message, struggleReply, "MOTIVATION");
+      return struggleReply;
+    } catch (e) {
+      console.error("[MOTIVATION]", e);
+    }
+  }
+
+  // ---- FIX 3: HANDLER 4 — Injury during training ----
+  if (m.includes("i hurt") || m.includes("something hurts") || m.includes("i pulled") || m.includes("i strained") || m.includes("i injured") || m.includes("got injured") || (m.includes("pain") && (m.includes("training") || m.includes("gym") || m.includes("workout") || m.includes("lifting") || m.includes("running"))) || m.includes("pulled a muscle") || m.includes("strained my")) {
+    const injuredArea = m.includes("knee") ? "knee" : m.includes("shoulder") ? "shoulder" : m.includes("back") ? "back" : m.includes("ankle") ? "ankle" : m.includes("wrist") ? "wrist" : m.includes("hip") ? "hip" : m.includes("neck") ? "neck" : m.includes("elbow") ? "elbow" : "the affected area";
+    const safeAlternative: Record<string, string> = {
+      knee: "upper body — chest press, rows, shoulder press, and arm work are all safe",
+      shoulder: "lower body and core — squats, leg press, lunges, planks",
+      back: "upper body machines seated — chest press, lat pulldown, cable rows with a straight back",
+      ankle: "seated upper body — anything you can do sitting down",
+      wrist: "legs and core — squats, leg press, lunges, walking",
+      hip: "upper body — everything from the waist up",
+      neck: "lower body and light machines — avoid anything overhead",
+      elbow: "lower body and shoulder press — avoid any pulling or curling movements",
+    };
+    const safe = safeAlternative[injuredArea] || "anything that does not load that area";
+    const injuryReply = `Stop loading ${injuredArea} immediately. Rest it today. Ice for 15 minutes if swollen.\n\nIf the pain is severe, sharp, or does not settle within 48 hours — see a doctor or physio. Do not train through sharp pain.\n\nYou CAN still train ${safe}. One body part stops, the rest keeps going.\n\nRest ${injuredArea} for 72 hours minimum then reassess. Update me when you are back.`;
+    await logChat(user.id, message, injuryReply, "INJURY");
+    return injuryReply;
+  }
+
+  // ---- FIX 3: HANDLER 5 — Period and cycle tracking ----
+  if (m.includes("my period") || m.includes("time of the month") || m.includes(" pms") || m.includes("that time") || m.includes("menstrual") || m.includes("on my period") || m.includes("period started") || m.includes("period week")) {
+    const cycleContext = `Client mentioned their menstrual cycle or period. Ask which phase they are in using EXACTLY these options: "Just started (Day 1–5)", "Middle of cycle (Day 6–14)", "PMS week (Day 15–21)", or "Period week (Day 22–28)". Then based on their reply: Phase 1 (period) — lighter training is fine, walking counts, iron-rich foods essential (red meat, spinach, pilchards), no guilt for lower energy. Phase 2 (follicular) — best training week, peak strength, push harder, carbs support performance. Phase 3 (PMS) — reduce intensity slightly, higher protein reduces cravings, magnesium from dark leafy greens helps mood. Phase 4 (period) — same as Phase 1. Normalise all of it. Weight fluctuates 1–3kg from water retention before period — not fat. Do not panic. Coach the next meal or session, not the feelings. SA voice. Max 3 sentences unless giving phase-specific advice.`;
+    const cycleReply = await askCoachK(message, user, cycleContext);
+    await logChat(user.id, message, cycleReply, "CYCLE");
+    return cycleReply;
   }
 
   // ---- EVERYTHING ELSE → GPT decides ----

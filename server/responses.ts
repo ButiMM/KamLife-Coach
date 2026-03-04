@@ -104,7 +104,7 @@ export const R = {
   weeklyReset: () => pick([
     "Rough week. We reset today. No looking back — what's the plan for tomorrow?",
     "Below 60%. That means we start again. Commit to just 3 things this week: protein every meal, 6k steps daily, 3 workouts.",
-    "We reset. No excuses — just action. Reply MENU to start fresh.",
+    "We reset. No excuses — just action. What do you want to work on first?",
   ]),
 
   weightLogged: (val: string) => pick([
@@ -132,7 +132,7 @@ export const R = {
   ]),
 
   onboardingComplete: () => pick([
-    "The work starts now. Reply MENU to begin.",
+    "The work starts now. Tell me what you ate this morning or send WORKOUT to begin.",
   ]),
 
   promptFood: () => "What did you eat?",
