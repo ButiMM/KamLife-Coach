@@ -1505,7 +1505,7 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-async function handleMessage(phone: string, message: string, mediaUrl?: string): Promise<string> {
+async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string): Promise<string> {
   const user = await getOrCreateUser(phone);
   const m = message.toLowerCase().trim();
 
@@ -1574,35 +1574,79 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string):
     return await getMenuText(user);
   }
 
-  // ---- PHOTO / VISION ----
+  // ---- MEDIA: IMAGE or AUDIO ----
   if (mediaUrl) {
-    try {
-      const imageResponse = await fetch(mediaUrl);
-      const buffer = await imageResponse.arrayBuffer();
-      const base64 = Buffer.from(buffer).toString("base64");
-      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+    const ctype = mediaContentType || "";
 
-      const visionResponse = await openai.chat.completions.create({
-        model: "gpt-4o",
-        max_tokens: 300,
-        messages: [
-          {
-            role: "system",
-            content: `${COACH_K_SYSTEM}\n\n${buildContext(user)}\n\nINSTRUCTION: The client sent a photo of their food. Identify what food is in the photo. Estimate approximate calories and protein for a South African portion size. Give a specific coaching response in your Coach K voice. Maximum 3 sentences and 60 words. End with one action.`
-          },
-          {
-            role: "user",
-            content: [
-              { type: "text", text: "Here is my meal." },
-              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
-            ]
-          }
-        ]
-      });
-      return visionResponse.choices[0]?.message?.content?.trim() || "Eish, could not identify that. Tell me what you ate in text.";
-    } catch (err) {
-      console.error("Vision error:", err);
-      return "Could not process the photo. Tell me what you ate and I will coach you on it.";
+    // ---- FOOD PHOTO ----
+    if (ctype.startsWith("image/")) {
+      try {
+        const imageResponse = await fetch(mediaUrl);
+        const buffer = await imageResponse.arrayBuffer();
+        const base64 = Buffer.from(buffer).toString("base64");
+        const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+        const clientName = user.name || "there";
+        const goal = user.goalType || "fat_loss";
+        const calorieTarget = user.calorieTarget || 1800;
+        const proteinTarget = user.proteinTarget || 140;
+
+        const visionResponse = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 300,
+          messages: [
+            {
+              role: "system",
+              content: `You are Coach K, a South African fitness coach. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${calorieTarget} kcal, ${proteinTarget}g protein. SA voice — firm, warm, direct. Max 3 sentences, 60 words. End with one specific action.`
+            },
+            {
+              role: "user",
+              content: [
+                {
+                  type: "text",
+                  text: `Analyse this food photo. Identify every food item visible. For each item state the SA name if applicable — pap not polenta, pilchards not sardines, vetkoek not fried dough. Estimate the calories and protein for the full plate as served. Then give a single coaching response in Coach K voice. If this meal is good — celebrate it and connect to their goal. If it needs improvement — give one specific swap, not a lecture. If you cannot clearly identify any food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`
+                },
+                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
+              ]
+            }
+          ]
+        });
+
+        const visionReply = visionResponse.choices[0]?.message?.content?.trim();
+        if (!visionReply || visionReply.length < 10) {
+          return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
+        }
+        await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
+        return visionReply;
+      } catch (err) {
+        console.error("Vision error:", err);
+        return "Could not process the photo. Tell me what you ate and I will coach you on it.";
+      }
+    }
+
+    // ---- VOICE NOTE ----
+    if (ctype.startsWith("audio/")) {
+      try {
+        const audioResponse = await fetch(mediaUrl);
+        const audioBuffer = await audioResponse.arrayBuffer();
+        const audioFile = new File([audioBuffer], "voice.ogg", { type: ctype });
+
+        const transcription = await openai.audio.transcriptions.create({
+          file: audioFile,
+          model: "whisper-1",
+        });
+
+        const transcribedText = transcription.text?.trim();
+        if (!transcribedText) {
+          return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
+        }
+
+        console.log(`[VOICE] Transcribed: "${transcribedText}"`);
+        const voiceReply = await handleMessage(phone, transcribedText);
+        return `🎙️ I heard: "${transcribedText}"\n\n${voiceReply}`;
+      } catch (err) {
+        console.error("Audio transcription error:", err);
+        return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
+      }
     }
   }
 
@@ -2071,12 +2115,13 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const phone = rawPhone.replace(/^(whatsapp:)\s+/, "$1+");
       const message = (req.body.Body || "").trim();
       const mediaUrl = req.body.MediaUrl0 || undefined;
+      const mediaContentType = req.body.MediaContentType0 || undefined;
 
-      if (!phone || !message) {
+      if (!phone || (!message && !mediaUrl)) {
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
 
-      const reply = await handleMessage(phone, message, mediaUrl);
+      const reply = await handleMessage(phone, message, mediaUrl, mediaContentType);
 
       const user = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
       if (user.length > 0) {
