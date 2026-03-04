@@ -1615,13 +1615,15 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     if (msg.includes("6") || lower.includes("pcos")) conditions.push("pcos");
     if (msg.includes("7") || lower.includes("asthma")) conditions.push("asthma");
 
-    // Free-text unlisted condition — store and ask follow-up, then re-ask medical question
+    // Free-text unlisted condition — store note, stay on ASK_MEDICAL, re-ask the list
     if (!isNone && conditions.length === 0) {
+      const existingNotes = user.otherMedicalNotes || "";
+      const updatedNotes = existingNotes ? `${existingNotes} | ${msg}` : msg;
       await db.update(users).set({
-        otherMedicalNotes: msg,
-        onboardingState: "AWAITING_MEDICAL_NOTES",
+        otherMedicalNotes: updatedNotes,
+        // state stays ASK_MEDICAL so next number or "None" advances normally
       }).where(eq(users.phoneNumber, phone));
-      return `Got it, noted. What type of allergy — food, medication, or environmental?`;
+      return `Got it, I have noted that. Do you have any of the listed conditions as well? Reply with a number or None.\n\n1️⃣ Diabetes or pre-diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ TB or TB treatment\n6️⃣ PCOS\n7️⃣ Asthma\n8️⃣ None of the above`;
     }
 
     const hasDiabetes = conditions.includes("diabetes");
