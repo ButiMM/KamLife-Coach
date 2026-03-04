@@ -1235,6 +1235,11 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_GOAL ----
   if (state === "ASK_GOAL") {
     const lower = msg.toLowerCase();
+    const hasGoalNumber = /[1-5]/.test(msg);
+    const hasGoalKeyword = lower.includes("lose") || lower.includes("fat") || lower.includes("muscle") || lower.includes("build") || lower.includes("recomp") || lower.includes("both") || lower.includes("general") || lower.includes("fit") || lower.includes("health") || lower.includes("condition") || lower.includes("manage") || lower.includes("weight");
+    if (!hasGoalNumber && !hasGoalKeyword) {
+      return `What's your main goal right now?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both — body recomposition\n4️⃣ Get fit and healthy generally\n5️⃣ Manage a health condition`;
+    }
     let goal = "fat_loss";
     if (msg.includes("2") || lower.includes("build") || lower.includes("muscle")) goal = "muscle_gain";
     else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
@@ -1247,6 +1252,11 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_SITUATION ----
   if (state === "ASK_SITUATION") {
     const lower = msg.toLowerCase();
+    const hasSitNumber = /[1-6]/.test(msg);
+    const hasSitKeyword = lower.includes("student") || lower.includes("office") || lower.includes("desk") || lower.includes("retail") || lower.includes("physical") || lower.includes("domestic") || lower.includes("construction") || lower.includes("security") || lower.includes("unemployed") || lower.includes("parent") || lower.includes("home") || lower.includes("retire");
+    if (!hasSitNumber && !hasSitKeyword) {
+      return `Which best describes your situation?\n\n1️⃣ Student\n2️⃣ Working — office or desk job\n3️⃣ Working — physically active job\n4️⃣ Unemployed or between jobs\n5️⃣ Stay at home parent\n6️⃣ Retired`;
+    }
     const situationMap: Record<string, string> = {
       "1": "student", "2": "office", "3": "retail_physical",
       "4": "unemployed", "5": "stay_home_parent", "6": "retired",
@@ -1267,6 +1277,7 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_MEDICAL ----
   if (state === "ASK_MEDICAL") {
     const lower = msg.toLowerCase();
+    const isNone = lower.includes("none") || lower.includes("nothing") || lower.includes("n/a") || msg.includes("8");
     const conditions: string[] = [];
     if (msg.includes("1") || lower.includes("diab")) conditions.push("diabetes");
     if (msg.includes("2") || lower.includes("blood pressure") || lower.includes("hypert")) conditions.push("hypertension");
@@ -1275,6 +1286,16 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     if (msg.includes("5") || (lower.includes("tb") && !lower.includes("stb"))) conditions.push("tb");
     if (msg.includes("6") || lower.includes("pcos")) conditions.push("pcos");
     if (msg.includes("7") || lower.includes("asthma")) conditions.push("asthma");
+
+    // Free-text unlisted condition — store and ask follow-up
+    if (!isNone && conditions.length === 0) {
+      await db.update(users).set({
+        otherMedicalNotes: msg,
+        onboardingState: "AWAITING_MEDICAL_NOTES",
+      }).where(eq(users.phoneNumber, phone));
+      return `Got it, I have noted that. Tell me more about it so I can coach around it properly.`;
+    }
+
     const hasDiabetes = conditions.includes("diabetes");
     const hasHeart = conditions.includes("heart_condition");
     await db.update(users).set({
@@ -1287,10 +1308,27 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     return `Any injuries or physical limitations I must know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
   }
 
+  // ---- AWAITING_MEDICAL_NOTES ----
+  if (state === "AWAITING_MEDICAL_NOTES") {
+    const existing = user.otherMedicalNotes || "";
+    const combined = existing + " | " + msg;
+    await db.update(users).set({
+      otherMedicalNotes: combined,
+      onboardingState: "ASK_INJURIES",
+    }).where(eq(users.phoneNumber, phone));
+    return `Any injuries or physical limitations I must know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
+  }
+
   // ---- ASK_INJURIES ----
   if (state === "ASK_INJURIES") {
-    const lower = msg.toLowerCase();
-    const injuries = (lower === "none" || lower === "no" || lower === "n/a" || lower === "nil") ? "" : msg;
+    const lower = msg.toLowerCase().trim();
+    const isClearNone = lower === "none" || lower === "no" || lower === "n/a" || lower === "nil" || lower === "nope" || lower === "nothing";
+    const hasInjuryWord = lower.includes("knee") || lower.includes("back") || lower.includes("shoulder") || lower.includes("hip") || lower.includes("ankle") || lower.includes("wrist") || lower.includes("elbow") || lower.includes("neck") || lower.includes("surgery") || lower.includes("injury") || lower.includes("pain") || lower.includes("torn") || lower.includes("sprain") || lower.includes("fracture") || lower.includes("disc") || lower.includes("hernia") || lower.includes("arthritis") || lower.includes("condition") || lower.includes("limited") || lower.includes("weak") || lower.includes("problem");
+    const isNonAnswer = /^(good lord|lol|haha|ha|wow|what|huh|ok|okay|sure|cool|nice|great|thanks|yep|yeah|nah|oh|ah|hmm|um|erm|eh|interesting|really|seriously|fine|alright|right|gotcha|understood|noted)$/i.test(lower);
+    if (!isClearNone && !hasInjuryWord && isNonAnswer) {
+      return `Ha, fair enough. Any physical injuries or limitations I should know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
+    }
+    const injuries = isClearNone ? "" : msg;
     await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
     return `Where will you be training?\n\n1️⃣ Gym with full equipment\n2️⃣ Gym with basic equipment\n3️⃣ Home — no equipment\n4️⃣ Home — have some equipment (dumbbells or bands)\n5️⃣ Outside — park, field, stairs`;
   }
@@ -1298,6 +1336,11 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_EQUIPMENT ----
   if (state === "ASK_EQUIPMENT") {
     const lower = msg.toLowerCase();
+    const hasEquipNumber = /[1-5]/.test(msg);
+    const hasEquipKeyword = lower.includes("gym") || lower.includes("home") || lower.includes("dumbbell") || lower.includes("band") || lower.includes("outside") || lower.includes("park") || lower.includes("stairs") || lower.includes("no equipment") || lower.includes("nothing");
+    if (!hasEquipNumber && !hasEquipKeyword) {
+      return `Where will you be training?\n\n1️⃣ Gym with full equipment\n2️⃣ Gym with basic equipment\n3️⃣ Home — no equipment\n4️⃣ Home — have some equipment (dumbbells or bands)\n5️⃣ Outside — park, field, stairs`;
+    }
     let location = "home_none";
     let mode = "home";
     let isGym = false;
@@ -1333,6 +1376,11 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 
   // ---- ASK_TRAINING_DAYS ----
   if (state === "ASK_TRAINING_DAYS") {
+    const hasDayOption = /[1-5]/.test(msg);
+    const hasDayNumber = /\b[2-6]\b/.test(msg);
+    if (!hasDayOption && !hasDayNumber) {
+      return `How many days per week can you realistically train?\n\n1️⃣ 2 days\n2️⃣ 3 days\n3️⃣ 4 days\n4️⃣ 5 days\n5️⃣ 6 days`;
+    }
     const dayMap: Record<string, number> = { "1": 2, "2": 3, "3": 4, "4": 5, "5": 6 };
     let days = dayMap[msg.trim()] || 3;
     if (!dayMap[msg.trim()]) {
@@ -1346,6 +1394,11 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_EXPERIENCE ----
   if (state === "ASK_EXPERIENCE") {
     const lower = msg.toLowerCase();
+    const hasExpNumber = /[1-4]/.test(msg);
+    const hasExpKeyword = lower.includes("beginner") || lower.includes("never") || lower.includes("intermediate") || lower.includes("advanced") || lower.includes("some") || lower.includes("serious") || lower.includes("on and off") || lower.includes("years");
+    if (!hasExpNumber && !hasExpKeyword) {
+      return `Training experience?\n\n1️⃣ Complete beginner — never trained consistently\n2️⃣ Some experience — trained on and off\n3️⃣ Intermediate — trained consistently for 1 to 2 years\n4️⃣ Advanced — training seriously for 2 plus years`;
+    }
     let exp = "beginner";
     if (msg.includes("3") || lower.includes("intermediate") || lower.includes("1 to 2") || lower.includes("1-2")) exp = "intermediate";
     else if (msg.includes("4") || lower.includes("advanced") || lower.includes("serious") || lower.includes("2 plus") || lower.includes("2+")) exp = "advanced";
@@ -1355,8 +1408,13 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 
   // ---- ASK_BUDGET ----
   if (state === "ASK_BUDGET") {
-    const budgetMap: Record<string, string> = { "1": "under_100", "2": "100_300", "3": "300_600", "4": "over_600" };
     const lower = msg.toLowerCase();
+    const hasBudgetNumber = /[1-4]/.test(msg);
+    const hasBudgetKeyword = lower.includes("under") || lower.includes("100") || lower.includes("200") || lower.includes("300") || lower.includes("600") || lower.includes("tight") || lower.includes("flexible") || lower.includes("average") || lower.includes("r1") || lower.includes("rand");
+    if (!hasBudgetNumber && !hasBudgetKeyword) {
+      return `Roughly how much do you spend on food per week?\n\n1️⃣ Under R100 — very tight\n2️⃣ R100 to R300 — tight but manageable\n3️⃣ R300 to R600 — average\n4️⃣ Over R600 — flexible`;
+    }
+    const budgetMap: Record<string, string> = { "1": "under_100", "2": "100_300", "3": "300_600", "4": "over_600" };
     let budget = budgetMap[msg.trim()] || "100_300";
     if (!budgetMap[msg.trim()]) {
       if (lower.includes("under") || lower.includes("very tight")) budget = "under_100";
@@ -1370,10 +1428,15 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 
   // ---- ASK_WORK_SCHEDULE → COMPLETE ----
   if (state === "ASK_WORK_SCHEDULE") {
+    const lower = msg.toLowerCase();
+    const hasSchedNumber = /[1-5]/.test(msg);
+    const hasSchedKeyword = lower.includes("standard") || lower.includes("8am") || lower.includes("8 am") || lower.includes("early") || lower.includes("night") || lower.includes("irregular") || lower.includes("change") || lower.includes("home") || lower.includes("wfh") || lower.includes("shift");
+    if (!hasSchedNumber && !hasSchedKeyword) {
+      return `Last one. What does your typical day look like?\n\n1️⃣ Standard hours — 8am to 5pm\n2️⃣ Early shift — start before 7am\n3️⃣ Night shift — work through the night\n4️⃣ Irregular — changes week to week\n5️⃣ Work from home or no fixed schedule`;
+    }
     const scheduleMap: Record<string, string> = {
       "1": "standard", "2": "early_shift", "3": "night_shift", "4": "irregular", "5": "work_from_home",
     };
-    const lower = msg.toLowerCase();
     let schedule = scheduleMap[msg.trim()] || "standard";
     if (!scheduleMap[msg.trim()]) {
       if (lower.includes("night")) schedule = "night_shift";
@@ -1445,6 +1508,33 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 async function handleMessage(phone: string, message: string, mediaUrl?: string): Promise<string> {
   const user = await getOrCreateUser(phone);
   const m = message.toLowerCase().trim();
+
+  // ---- RESET — highest priority, runs before everything ----
+  if (m === "reset") {
+    if (user?.id) {
+      await db.delete(chatHistory).where(eq(chatHistory.userId, user.id));
+      await db.delete(stepLogs).where(eq(stepLogs.userId, user.id));
+      await db.delete(workoutLogs).where(eq(workoutLogs.userId, user.id));
+      await db.delete(weightLogs).where(eq(weightLogs.userId, user.id));
+      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, user.id));
+      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, user.id));
+      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, user.id));
+      await db.delete(users).where(eq(users.id, user.id));
+    }
+    await db.insert(users).values({
+      phoneNumber: phone,
+      subscriptionStatus: "trial",
+      onboardingState: "WELCOME",
+      programmePhase: 1,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
+      trainingMode: "home",
+      stepsTarget: 7000,
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    });
+    return "Fresh start. What's your name?";
+  }
 
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
