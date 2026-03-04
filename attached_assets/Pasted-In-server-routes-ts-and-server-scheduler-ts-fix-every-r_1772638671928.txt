@@ -1,0 +1,38 @@
+In server/routes.ts and server/scheduler.ts fix every remaining problem in one pass. No partial fixes. Everything.
+Fix 1 — WhatsApp message length. WhatsApp cuts off messages over 1600 characters. Find the sendMessage or TwiML response builder. Add a function called splitMessage that takes any string and splits it into chunks of maximum 1500 characters. Split only at newline boundaries never mid-word mid-sentence or mid-URL. Return an array of chunks. When sending any response check the length first. If over 1500 characters send as multiple sequential TwiML messages using Twilio REST API client to send additional messages after the first. The first message goes in the TwiML response. Every subsequent chunk gets sent via twilio.messages.create to the client's phone number. This fixes programme and meal plan cutoffs permanently.
+Fix 2 — Voice note Twilio authenticated download. Replace the entire voice note download section with this exact implementation. Fetch the MediaUrl0 using node-fetch or axios with Authorization header set to Basic plus base64 encoded TWILIO_ACCOUNT_SID colon TWILIO_AUTH_TOKEN. Get the response as an ArrayBuffer. Convert to Buffer. Create a File object with name audio.ogg and type audio/ogg. Pass to Whisper. Wrap entire block in try catch. On any error send exactly one message — Eish could not process that voice note. Try again or just type your message. Return immediately after error. Never fall through to text handler.
+Fix 3 — Programme delivery uses onboarding data. Find every place that asks the three programme questions — training days, experience, goal. Before asking those questions check if user.trainingDaysPerWeek and user.trainingExperience and user.goalType are already stored from onboarding. If all three exist build and deliver the programme immediately without asking anything. Only ask the questions if the data is missing.
+Fix 4 — Home programme always 6 exercises. Find the home programme builder or wherever the home programme string is constructed. Replace it entirely with this guaranteed 6 exercise structure. Never fewer than 6. Format each exercise with name, sets and reps, YouTube link, one form cue, one common mistake.
+Day 1:
+Bodyweight Squat — 3 sets of 15 reps
+https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial
+Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.
+Common mistake: Knees caving inward. Push knees out over toes throughout.
+Push Up — 3 sets of 10 reps
+https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners
+Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.
+Common mistake: Hips sagging or rising. Keep body in one straight line.
+Glute Bridge — 3 sets of 15 reps
+https://www.youtube.com/results?search_query=glute+bridge+tutorial+beginners
+Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.
+Common mistake: Pushing through the lower back instead of the glutes. Think about driving hips not arching back.
+Reverse Lunge — 3 sets of 12 each leg
+https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form
+Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright throughout.
+Common mistake: Front knee travelling past toes. Keep shin vertical.
+Table Row — 3 sets of 12 reps
+https://www.youtube.com/results?search_query=table+row+exercise+tutorial
+Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.
+Common mistake: Hips dropping. Keep body rigid like a plank throughout.
+Plank — 3 sets of 30 seconds
+https://www.youtube.com/results?search_query=plank+exercise+tutorial+beginners
+Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.
+Common mistake: Hips rising or sagging. Keep everything in one line.
+Rest 60 seconds between sets. Total session 40 to 50 minutes. Train on non-consecutive days.
+Day 2 and Day 3 rotate with Jump Squat, Decline Push Up, Single Leg Glute Bridge, Walking Lunge, Door Frame Row, Plank Shoulder Tap as progressions.
+Fix 5 — Ramadan never assumed. Find getSAContextFlags. Delete the calendar date based Ramadan detection entirely. Replace with: Ramadan is only active if user.otherMedicalNotes includes the word Ramadan or Muslim or fasting or if the client has mentioned any of these words in their last 10 chat messages. Check chatHistory for these keywords. If not found Ramadan flag is false regardless of date.
+Fix 6 — Onboarding completion fires every time. Find the final onboarding state handler. Add this exact code after storing the work schedule answer. Set onboardingState to COMPLETE. Call calculateTargets and store results. Then build the completion message in three parts. Part one is their targets. Part two is their first week programme based on trainingLocation and trainingExperience and trainingDaysPerWeek. Part three is their first 3 days of meals based on weeklyFoodBudget and goalType and medicalConditions. Send all three parts using the splitMessage function so nothing gets cut off. Log ONBOARDING COMPLETE to console. This must fire without exception.
+Fix 7 — Budget question smart detection. In the BUDGET onboarding state add this before the number validation. Check if the message contains any number. If it does extract the number. If the number is over 600 and the message contains month treat it as monthly and divide by 4.3 to get weekly amount. Under R70 per week is tier 1. R70 to R300 per week is tier 2. R300 to R600 per week is tier 3. Over R600 per week is tier 4. Confirm with client in one line before advancing. If message contains no number at all re-ask the question simply.
+Fix 8 — Never generic never robotic. In the main GPT instruction add these absolute rules at the very top in capitals so GPT treats them as non-negotiable. NEVER say Howzit a client. NEVER say What can I assist you with today. NEVER say Let us channel that energy. NEVER say I hear your frustration. NEVER say I am here to support you as a standalone sentence. NEVER give a bulleted list in a conversational response. NEVER ask multiple questions in one message. ALWAYS use the client's actual first name from their profile. ALWAYS sound like a real person not a wellness app. ALWAYS end with one specific action not a question unless you genuinely need information.
+Fix 9 — Message continuity. Find where conversation history is built for the GPT call. Increase from last 5 messages to last 10 messages. Format them clearly as alternating Client and Coach K lines so GPT understands the full recent context of the conversation.
+Do not touch schema or database structure. Do not break any working feature.

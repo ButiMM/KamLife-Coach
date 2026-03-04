@@ -2057,21 +2057,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? `3 eggs scrambled + 1 cup oats + banana` : `${isLowGI ? "samp and beans ½ cup" : "½ cup oats"} + 2 boiled eggs`} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${noFish ? "2 eggs + cabbage" : "½ tin pilchards + cabbage"} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
   }
 
-  // ---- MEDIA: IMAGE or AUDIO ----
+  // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
     const ctype = mediaContentType || "";
 
     // ---- FOOD PHOTO ----
     if (ctype.startsWith("image/")) {
       try {
+        // Image endpoint on Twilio is public (no auth needed), but use same pattern for consistency
         const imageResponse = await fetch(mediaUrl);
         const buffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
         const clientName = user.name || "there";
         const goal = user.goalType || "fat_loss";
-        const calorieTarget = user.calorieTarget || 1800;
-        const proteinTarget = user.proteinTarget || 140;
 
         const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
@@ -2118,11 +2117,27 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     }
 
     // ---- VOICE NOTE ----
+    // Exclusive: if audio, always return — never falls through to text handler
     if (ctype.startsWith("audio/")) {
       try {
-        const audioResponse = await fetch(mediaUrl);
+        // Part 1 — Twilio media requires basic auth (ACCOUNT_SID:AUTH_TOKEN)
+        const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
+        const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
+        const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+
+        const audioResponse = await fetch(mediaUrl, {
+          headers: { Authorization: authHeader },
+        });
+
+        if (!audioResponse.ok) {
+          console.error(`[VOICE] Twilio download failed: ${audioResponse.status} ${audioResponse.statusText}`);
+          return "Eish, I could not process that voice note. Try again or just type your message.";
+        }
+
         const audioBuffer = await audioResponse.arrayBuffer();
-        const audioFile = new File([audioBuffer], "voice.ogg", { type: ctype });
+
+        // Part 2 — WhatsApp voice notes are always ogg/opus; use fixed mime type for Whisper
+        const audioFile = new File([audioBuffer], "audio.ogg", { type: "audio/ogg" });
 
         const transcription = await openai.audio.transcriptions.create({
           file: audioFile,
@@ -2130,17 +2145,18 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
         });
 
         const transcribedText = transcription.text?.trim();
+
+        // Part 3 — Handle result
         if (!transcribedText) {
           return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
         }
 
-        // Addition 2 — confidence check: very short transcriptions are usually noise
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
         if (wordCount < 3) {
-          return `I caught "${transcribedText}" — but that was too short to coach on. Try again a bit louder or type it out.`;
+          return `I only caught a few words — ${transcribedText}. Send again or type your message.`;
         }
 
-        // Addition 2 — language detection (Zulu, Sotho, Xhosa, Afrikaans keywords)
+        // Language detection (Zulu, Sotho, Xhosa, Afrikaans keywords)
         const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies"];
         const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme"];
         const XHOSA_WORDS = ["molo", "enkosi", "unjani", "ewe", "hayi", "camagu", "ndiyabona"];
@@ -2153,13 +2169,21 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
         else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans if it fits.";
 
         console.log(`[VOICE] Transcribed: "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
+
         const voiceReply = await handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""));
-        return `🎙️ I heard: "${transcribedText}"\n\n${voiceReply}`;
+        // Part 4 — explicit return, no fall-through
+        return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
+
       } catch (err) {
-        console.error("Audio transcription error:", err);
-        return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
+        console.error("[VOICE] Transcription error:", err);
+        // Part 4 — always return, never fall through to text handler
+        return "Eish, I could not process that voice note. Try again or just type your message.";
       }
     }
+
+    // If mediaUrl present but content type is neither image nor audio — return without processing text
+    console.log(`[MEDIA] Unhandled content type: ${ctype} — ignoring`);
+    return "I received your file but I can only process voice notes and food photos. Send those or type your message.";
   }
 
   // ---- RESET (direct) ----
