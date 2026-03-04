@@ -1148,19 +1148,304 @@ async function checkPerfectDay(userId: string): Promise<string | null> {
 
 function getOnboardingMealPlan(user: any): string {
   const budget = user.weeklyFoodBudget || "100_300";
-  const isNightShift = user.workSchedule === "night_shift";
-  const meal1 = isNightShift ? "Pre-shift meal" : "Breakfast";
+  const goal = user.goalType || "fat_loss";
+  const medicals = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
+  const situation = user.lifeSituation || "office";
+  const schedule = user.workSchedule || "standard";
+  const daysPerWeek = user.trainingDaysPerWeek || 3;
+  const name = user.name || "there";
+  const cal = user.calorieTarget || 1800;
+  const prot = user.proteinTarget || 140;
+  const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
+
+  // Medical flags
+  const isDiabetic = medicals.includes("diabetes");
+  const isHypertension = medicals.includes("hypertension");
+  const isPCOS = medicals.includes("pcos");
+  const isHIV = medicals.includes("hiv_arvs");
+  const isLowGI = isDiabetic || isPCOS;
+  const isNightShift = schedule === "night_shift";
+  const isStudent = situation === "student";
+  const isUnemployed = situation === "unemployed";
+  const isPhysicalJob = situation === "retail_physical";
+
+  // Allergy detection from free-text notes
+  const noPeanuts = otherNotes.includes("peanut");
+  const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("sardine") || otherNotes.includes("tuna");
+  const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
+  const noGluten = otherNotes.includes("gluten") || otherNotes.includes("coeliac") || otherNotes.includes("wheat") || otherNotes.includes("celiac");
+
+  // Calorie/protein adjustments
+  const adjustedCal = isPhysicalJob ? cal + 300 : isHIV ? cal + 200 : cal;
+  const adjustedProt = isHIV ? Math.round(prot * 1.2) : prot;
+
+  const goalLabels: Record<string, string> = {
+    fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
+    general: "General fitness", health_condition: "Health management",
+  };
+  const budgetLabels: Record<string, string> = {
+    under_100: "Under R100", "100_300": "R100–R300", "300_600": "R300–R600", over_600: "Over R600",
+  };
+
+  // Medical flags for header
+  const medFlags: string[] = [];
+  if (isDiabetic) medFlags.push("Diabetic protocol — low GI carbs, strict meal timing");
+  if (isHypertension) medFlags.push("Hypertension — low sodium, no Aromat, no processed meats");
+  if (isPCOS) medFlags.push("PCOS — low GI, anti-inflammatory");
+  if (isHIV) medFlags.push("HIV/ARVs — take with breakfast, +20% protein");
+  if (noPeanuts) medFlags.push("Peanut allergy — PB removed");
+  if (noFish) medFlags.push("Fish allergy — pilchards/tuna replaced with eggs/chicken");
+  if (noDairy) medFlags.push("Dairy free");
+  if (noGluten) medFlags.push("Gluten free");
+
+  // Training day layout
+  const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+  let trainingSet: Set<string>;
+  if (daysPerWeek >= 6) trainingSet = new Set(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]);
+  else if (daysPerWeek === 5) trainingSet = new Set(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]);
+  else if (daysPerWeek === 4) trainingSet = new Set(["Monday", "Tuesday", "Thursday", "Friday"]);
+  else if (daysPerWeek === 3) trainingSet = new Set(["Monday", "Wednesday", "Friday"]);
+  else if (daysPerWeek === 2) trainingSet = new Set(["Monday", "Thursday"]);
+  else trainingSet = new Set(["Wednesday"]);
+
+  const meal1Label = isNightShift ? "Pre-shift meal" : "Breakfast";
+  const meal3Label = isNightShift ? "Post-shift meal" : "Dinner";
+  const maxPrep = isStudent ? "8 min" : "20 min";
+
+  // ---- BREAKFAST proteins (egg-based, always appropriate for morning) ----
+  const bfProteins = goal === "muscle_gain"
+    ? ["3 whole eggs", "3 whole eggs + banana", "3 whole eggs", "3 whole eggs + banana", "3 whole eggs", "3 whole eggs", "3 whole eggs + banana"]
+    : ["2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs"];
+
+  // ---- LUNCH/DINNER proteins — varied, no repeats more than twice ----
+  let lunchProteins: string[];
+  let dinnerProteins: string[];
+  if (budget === "under_100") {
+    lunchProteins = noFish
+      ? ["3 boiled eggs", "sugar beans (200g cooked)", "3 boiled eggs + sugar beans", "2 boiled eggs", "sugar beans (200g)", "3 boiled eggs", "2 boiled eggs"]
+      : ["1 tin pilchards", "2 boiled eggs", "1 tin pilchards", "sugar beans (200g)", "1 tin pilchards", "2 boiled eggs + sugar beans", "1 tin pilchards"];
+    dinnerProteins = noFish
+      ? ["2 boiled eggs", "3 boiled eggs", "2 boiled eggs", "sugar beans (200g)", "2 boiled eggs", "3 boiled eggs", "2 boiled eggs"]
+      : ["½ tin pilchards", "2 boiled eggs", "½ tin pilchards", "2 boiled eggs", "sugar beans (200g)", "½ tin pilchards", "2 boiled eggs"];
+  } else if (budget === "100_300") {
+    lunchProteins = noFish
+      ? ["150g chicken thigh", "3 boiled eggs", "150g chicken thigh", "2 boiled eggs + baked beans", "150g chicken thigh", "3 boiled eggs", "150g chicken thigh"]
+      : ["1 tin pilchards", "150g chicken thigh", "1 tin pilchards", "150g chicken thigh", "2 boiled eggs + baked beans", "1 tin pilchards", "150g chicken thigh"];
+    dinnerProteins = noFish
+      ? ["2 boiled eggs", "150g chicken thigh", "2 boiled eggs", "150g chicken thigh", "2 boiled eggs", "150g chicken thigh", "3 boiled eggs"]
+      : ["150g chicken thigh", "2 boiled eggs", "½ tin pilchards", "150g chicken thigh", "2 boiled eggs", "½ tin pilchards", "150g chicken thigh"];
+  } else if (budget === "300_600") {
+    lunchProteins = noFish
+      ? ["150g chicken thigh", "100g beef mince", "150g chicken breast", "100g beef mince", "150g chicken thigh", "2 eggs + cottage cheese", "100g beef mince"]
+      : ["150g chicken thigh", "1 tin pilchards", "100g beef mince", "150g chicken breast", "1 tin pilchards", "150g chicken thigh", "100g beef mince"];
+    dinnerProteins = noFish
+      ? ["100g beef mince", "150g chicken breast", "2 eggs + cottage cheese", "150g chicken thigh", "100g beef mince", "150g chicken breast", "150g chicken thigh"]
+      : ["100g beef mince", "150g chicken thigh", "1 tin pilchards", "100g beef mince", "150g chicken breast", "2 eggs", "100g beef mince"];
+  } else {
+    lunchProteins = noFish
+      ? ["150g chicken breast", "150g beef mince", "150g chicken breast", "3 eggs + cottage cheese", "150g chicken thigh", "150g beef mince", "150g chicken breast"]
+      : ["150g chicken breast", "200g salmon", "150g beef mince", "150g chicken breast", "1 tin pilchards", "150g chicken thigh", "200g salmon"];
+    dinnerProteins = noFish
+      ? ["150g beef mince", "150g chicken breast", "150g chicken thigh", "150g beef mince", "3 eggs + cottage cheese", "150g chicken thigh", "150g beef mince"]
+      : ["150g beef mince", "150g chicken breast", "200g salmon", "150g chicken thigh", "150g beef mince", "1 tin pilchards", "150g chicken thigh"];
+  }
+
+  // ---- BREAKFAST carbs (oats, bread, sweet potato — morning foods only) ----
+  let bfCarbs: string[];
+  if (isLowGI) {
+    bfCarbs = noGluten
+      ? ["½ cup oats", "½ cup samp and beans", "½ cup oats", "½ cup samp and beans", "½ cup oats", "½ cup brown rice", "½ cup oats"]
+      : ["½ cup oats", "½ cup samp and beans", "½ cup oats", "½ cup samp and beans", "½ cup oats", "½ cup samp and beans", "½ cup oats"];
+  } else if (goal === "muscle_gain") {
+    bfCarbs = noGluten
+      ? ["1 cup oats", "2 sweet potatoes", "1 cup oats", "2 sweet potatoes", "1 cup oats", "2 sweet potatoes", "1 cup oats"]
+      : ["1 cup oats", "2 slices brown bread", "1 cup oats", "2 slices brown bread", "1 cup oats", "2 slices brown bread", "1 cup oats"];
+  } else {
+    bfCarbs = noGluten
+      ? ["1 medium sweet potato", "½ cup oats", "1 medium sweet potato", "½ cup oats", "1 medium sweet potato", "½ cup oats", "1 medium sweet potato"]
+      : ["½ cup oats", "2 slices brown bread", "½ cup oats", "2 slices brown bread", "½ cup oats", "2 slices brown bread", "½ cup oats"];
+  }
+
+  // ---- LUNCH carbs (no oats — meal-appropriate starches) ----
+  let lunchCarbs: string[];
+  if (isLowGI) {
+    lunchCarbs = noGluten
+      ? ["1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato"]
+      : ["1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato"];
+  } else if (goal === "muscle_gain") {
+    lunchCarbs = ["1 cup brown rice", "2 sweet potatoes", "1 cup brown rice", "2 sweet potatoes", "1 cup brown rice", "2 sweet potatoes", "1 cup brown rice"];
+  } else if (goal === "fat_loss") {
+    lunchCarbs = noGluten
+      ? ["1 medium sweet potato", "½ cup brown rice", "1 medium sweet potato", "½ cup brown rice", "1 medium sweet potato", "½ cup brown rice", "1 medium sweet potato"]
+      : ["½ cup brown rice", "1 medium sweet potato", "2 slices brown bread", "½ cup brown rice", "1 medium sweet potato", "2 slices brown bread", "½ cup brown rice"];
+  } else {
+    lunchCarbs = noGluten
+      ? ["1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato", "½ cup samp and beans", "½ cup brown rice", "1 medium sweet potato"]
+      : ["½ cup brown rice", "1 medium sweet potato", "2 slices brown bread", "½ cup brown rice", "1 medium sweet potato", "½ cup brown rice", "2 slices brown bread"];
+  }
+
+  // ---- DINNER carbs — lighter for fat loss, same as lunch for others ----
+  let dinnerCarbs: string[];
+  if (goal === "fat_loss") {
+    dinnerCarbs = noGluten
+      ? ["½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato"]
+      : ["½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans"];
+  } else if (goal === "recomposition") {
+    dinnerCarbs = ["½ medium sweet potato", "½ cup brown rice", "extra veg only (rest day)", "½ medium sweet potato", "½ cup brown rice", "extra veg only (rest day)", "½ medium sweet potato"];
+  } else {
+    dinnerCarbs = lunchCarbs;
+  }
+
+  // Vegetables rotation
+  const vegOptions = ["cabbage (boiled)", "spinach (wilted)", "cabbage + tomato", "spinach + onion",
+    budget !== "under_100" ? "frozen mixed veg" : "cabbage", "spinach + tomato", "cabbage + onion"];
+
+  // Dairy/milk based on goal
+  const milkType = (goal === "muscle_gain" && !noDairy && budget !== "under_100") ? "full cream milk" : (!noDairy ? "low fat milk" : "water");
+  const pbServing = noPeanuts ? (budget !== "under_100" ? "1 extra egg" : "extra sugar beans") : (goal === "muscle_gain" ? "2 tbsp peanut butter" : "1 tbsp peanut butter");
+
+  // Pre-workout options (training days)
+  const preOptions = [
+    noGluten ? `banana + 2 egg whites — 180 cal, 14g protein, 5 min` : `2 brown bread + ${noPeanuts ? "1 boiled egg" : "1 tbsp peanut butter"} — 220 cal, 12g protein, 3 min`,
+    `½ cup oats + 1 egg white + banana — 200 cal, 10g protein, 5 min`,
+    noFish ? `banana + 1 boiled egg — 180 cal, 10g protein, 2 min` : `banana + ¼ tin pilchards — 180 cal, 14g protein, 2 min`,
+    `½ cup oats + ${milkType} — 190 cal, 8g protein, 5 min`,
+  ];
+
+  // Post-workout options (training days)
+  const postOptions = [
+    noFish ? `3 boiled eggs + 1 medium sweet potato — 340 cal, 24g protein` : `½ tin pilchards + ½ cup pap — 280 cal, 22g protein`,
+    `2 eggs + 1 medium sweet potato — 290 cal, 18g protein`,
+    noFish ? `150g chicken + ½ cup rice — 320 cal, 30g protein` : `1 tin pilchards + 2 brown bread slices — 300 cal, 25g protein`,
+    `2 eggs + banana — 250 cal, 16g protein`,
+  ];
+
+  // Calorie split per meal
+  const bfCal = Math.round(adjustedCal * 0.25);
+  const lunchCal = Math.round(adjustedCal * 0.35);
+  const dinnerCal = Math.round(adjustedCal * 0.28);
+
+  // Build 7-day plan
+  let plan = "";
+  allDays.forEach((day, i) => {
+    const isTraining = trainingSet.has(day);
+    const bfProt = bfProteins[i];
+    const bfCarb = bfCarbs[i];
+    const lp = lunchProteins[i];
+    const lc = lunchCarbs[i];
+    const dp = dinnerProteins[i];
+    const dc = dinnerCarbs[i];
+    const v = vegOptions[i % vegOptions.length];
+    const v2 = vegOptions[(i + 3) % vegOptions.length];
+    const pre = preOptions[i % preOptions.length];
+    const post = postOptions[i % postOptions.length];
+
+    // ---- BREAKFAST ----
+    let bf: string;
+    if (isStudent) {
+      bf = i % 2 === 0
+        ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 1 boiled egg — ${bfCal} cal, 14g protein, 8 min`
+        : noGluten ? `2 boiled eggs + banana — ${bfCal} cal, 15g protein, 5 min` : `2 boiled eggs + 2 brown bread — ${bfCal} cal, 16g protein, 8 min`;
+    } else if (isLowGI) {
+      bf = i % 2 === 0
+        ? `${bfCarb} + ${noDairy ? "" : `${milkType} + `}2 boiled eggs — ${bfCal} cal, 18g protein, ${maxPrep}`
+        : `${bfCarb} + 1 boiled egg — ${bfCal} cal, 16g protein, 20 min (batch cook Sunday)`;
+    } else if (goal === "muscle_gain") {
+      bf = i % 3 === 0
+        ? `${bfProt} + ${bfCarb} + ${milkType} — ${bfCal} cal, 26g protein, ${maxPrep}`
+        : i % 3 === 1 ? `${bfProt} + banana + ${pbServing} — ${bfCal} cal, 24g protein, ${maxPrep}`
+        : `${bfProt} + ${bfCarb} + banana — ${bfCal} cal, 24g protein, ${maxPrep}`;
+    } else {
+      bf = i % 2 === 0
+        ? `${bfCarb} + ${bfProt} — ${bfCal} cal, 18g protein, ${maxPrep}`
+        : noGluten ? `${bfProt} + 1 medium sweet potato — ${bfCal} cal, 16g protein, ${maxPrep}` : `${bfProt} + 2 brown bread — ${bfCal} cal, 16g protein, ${maxPrep}`;
+    }
+
+    // ---- LUNCH ----
+    const seasonNote = isHypertension ? " (season: lemon + garlic, no Aromat)" : "";
+    let lunch: string;
+    if (isStudent) {
+      lunch = noFish
+        ? `${lp} + ${lc} + ${v} — ${lunchCal} cal, 22g protein, 10 min`
+        : i % 2 === 0 ? `1 tin pilchards + ${noGluten ? "1 sweet potato" : "2 brown bread"} — ${lunchCal} cal, 25g protein, 3 min` : `${lp} + ${lc} — ${lunchCal} cal, 20g protein, 10 min`;
+    } else {
+      lunch = `${lp} + ${lc} + ${v}${seasonNote} — ${lunchCal} cal, 25g protein, ${maxPrep}`;
+    }
+
+    // ---- DINNER ----
+    let dinner: string;
+    if (isStudent) {
+      dinner = i % 2 === 0
+        ? noFish ? `2 eggs + cabbage — ${dinnerCal} cal, 14g protein, 8 min` : `½ tin pilchards + cabbage — ${dinnerCal} cal, 18g protein, 5 min`
+        : `2 eggs + spinach — ${dinnerCal} cal, 14g protein, 8 min`;
+    } else {
+      dinner = `${dp} + ${dc} + ${v2}${seasonNote} — ${dinnerCal} cal, 25g protein, ${maxPrep}`;
+    }
+
+    // Snack
+    let snack = "";
+    if (budget !== "under_100") {
+      if (goal === "muscle_gain") snack = noPeanuts ? `baked beans ½ tin — 110 cal, 7g protein` : `${pbServing} + banana — 260 cal, 9g protein`;
+      else if (!noDairy && budget !== "100_300") snack = `low fat yoghurt 150g — 100 cal, 10g protein`;
+      else snack = `baked beans ½ tin — 110 cal, 7g protein`;
+    }
+
+    const dayLabel = isTraining ? `${day} — Training Day 🏋️` : `${day} — Rest Day`;
+    let dayPlan = `\n*${dayLabel}*\n`;
+    if (isTraining) dayPlan += `Pre-workout (60–90 min before): ${pre}\n`;
+    dayPlan += `${meal1Label}: ${bf}\n`;
+    if (isLowGI) dayPlan += `Snack 10am: 1 apple or banana + 1 boiled egg — 120 cal, 8g protein\n`;
+    dayPlan += `Lunch: ${lunch}\n`;
+    if (isLowGI) dayPlan += `Snack 3pm: ${noDairy ? "1 boiled egg" : "125g low fat yoghurt or 1 boiled egg"} — 80 cal, 8g protein\n`;
+    if (isTraining) dayPlan += `Post-workout (within 30 min): ${post}\n`;
+    if (snack && !isLowGI) dayPlan += `Snack: ${snack}\n`;
+    dayPlan += `${meal3Label}: ${dinner}\n`;
+    dayPlan += `Daily total: ≈${adjustedCal} cal, ${adjustedProt}g protein`;
+    plan += dayPlan;
+  });
+
+  // Shopping list + total + tip by budget
+  let shopList: string;
+  let shopTotal: number;
+  let proTip: string;
 
   if (budget === "under_100") {
-    return `*🍽️ Your Week 1 Meal Plan — Under R100/week*\n${meal1}: 2 eggs + 1 cup oats with black tea (oats R15, eggs R25 for 12)\nLunch: 1 tin pilchards + pap or brown bread (R12/tin)\nDinner: Eggs or pilchards + cabbage or spinach (R8 cabbage)\nWeekly cost: Under R60. Protein every meal — eggs 12g each, pilchards 25g/tin.`;
+    shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\n${noFish ? "Extra eggs (6 pack) — R25" : "Pilchards 3 tins — R36"}\nSugar beans 500g — R20\nCabbage 1 head — R8\n${isLowGI ? "Oats 500g — R15 (replaces pap)" : "Pap/maize meal 2kg — R15"}\nSpinach 1 bunch — R10\nOnions — R8\nSunflower oil 500ml — R10`;
+    shopTotal = 152;
+    proTip = "Cook a big pot of sugar beans on Sunday — it feeds you 3 days at under R7 per serving. Add one egg per bowl for complete protein.";
+  } else if (budget === "100_300") {
+    shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\n${noFish ? "Chicken portions extra 500g — R20" : "Pilchards 3 tins — R36"}\nFrozen chicken portions 1kg — R40\nOats 500g — R15\n${noGluten ? "" : "Brown bread 1 loaf — R14\n"}Sweet potato 1kg — R12\nCabbage — R8\nSpinach — R10\nOnions + tomatoes — R23\nGarlic — R8\nSunflower oil — R10`;
+    shopTotal = 221;
+    proTip = "Buy a whole frozen chicken instead of portions — cut it yourself and save R15–R20 per kg. Shoprite often runs chicken specials on Tuesdays.";
+  } else if (budget === "300_600") {
+    shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nFrozen chicken 1.5kg — R60\nBeef mince 500g — R60\n${noFish ? "" : "Pilchards 2 tins — R24\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 1.5kg — R18\nBanana bunch — R15\n${noDairy ? "" : `${goal === "muscle_gain" ? "Full cream milk 1L — R22" : "Low fat milk 1L — R20"}\n`}${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Spinach — R10\nCabbage — R8\nTomatoes 500g — R15\n${noDairy ? "" : "Cottage cheese 250g — R20\n"}Garlic + lemon — R13`;
+    shopTotal = 378;
+    proTip = "Brown 500g mince on Sunday and split into 3 portions — that's 3 dinners sorted in one 20-minute cook. Mince gives you the most protein per rand of any red meat.";
+  } else {
+    shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nChicken breast 1kg — R80\n${noFish ? "" : "Salmon 400g (×2) — R160\n"}Beef mince 500g — R60\n${noDairy ? "" : "Low fat Greek yoghurt 500g — R35\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 2kg — R24\nBanana bunch — R15\n${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Broccoli — R20\nSpinach — R10\n${noDairy ? "" : "Low fat milk 1L — R20\n"}Almonds 100g — R40\nOlive oil 250ml — R40`;
+    shopTotal = 619;
+    proTip = "Salmon goes on special at Shoprite most Fridays — buy two packs and freeze immediately. Frozen salmon has identical nutrition to fresh and costs R30 less.";
   }
-  if (budget === "100_300") {
-    return `*🍽️ Your Week 1 Meal Plan — R100–R300/week*\n${meal1}: Jungle Oats + 2 boiled eggs\nLunch: Pilchards or chicken thigh + brown rice + cabbage\nDinner: Eggs or chicken + sweet potato + spinach\nSnack: Peanut butter on brown bread\nWeekly shop: Eggs R45 · Pilchards ×3 R36 · Oats R15 · Bread R14 · Veg R30 = ±R140.`;
-  }
-  if (budget === "300_600") {
-    return `*🍽️ Your Week 1 Meal Plan — R300–R600/week*\n${meal1}: Greek yogurt + oats + banana OR 3 eggs + toast\nLunch: Chicken thigh + brown rice + spinach (frozen chicken 1kg ≈ R40)\nDinner: Beef mince stew + sweet potato + broccoli\nSnack: Baked beans on toast or cottage cheese\nThis budget lets you eat like a professional athlete.`;
-  }
-  return `*🍽️ Your Week 1 Meal Plan — Flexible budget*\n${meal1}: Greek yogurt + oats + berries OR 3-egg omelette with spinach\nLunch: Grilled chicken breast + brown rice + salad\nDinner: Lean beef or fish + sweet potato + vegetables\nSnack: Cottage cheese + rice cakes OR protein shake (USN/Biogen) + fruit\nFull nutritional flexibility — spend wisely, not expensively.`;
+
+  // Special situation notes
+  const goalNote = goal === "fat_loss"
+    ? `\n\n⚠️ *Fat loss rules:* Sweet potato over white pap always. High-volume veg fills the plate first — protein second, carbs last. ${noDairy ? "" : "Low fat dairy only."} ${noPeanuts ? "" : "Max 1 tbsp peanut butter — not a staple."}`
+    : goal === "muscle_gain"
+    ? `\n\n💪 *Muscle gain rules:* Whole eggs every time — the yolk has the nutrients. ${noDairy ? "" : `${milkType} for extra calories.`} ${noPeanuts ? "" : "Peanut butter is your friend — calorie dense and protein rich."} Pre and post-workout meals are non-negotiable.`
+    : goal === "recomposition"
+    ? `\n\n🔄 *Recomp rules:* Carbs before and after training. Lower carbs on rest day evenings. Protein stays the same every day — no exceptions. Zero empty calories.`
+    : "";
+  const nightNote = isNightShift ? `\n\n🌙 *Night shift:* All timings are relative to your shift. Pre-shift = your breakfast. Post-shift = your dinner.` : "";
+  const hivNote = isHIV ? `\n\n💊 *ARV reminder:* Take your medication with breakfast every day — never on an empty stomach.` : "";
+  const domesticNote = (situation === "retail_physical" && !isUnemployed) ? `\n\n🧹 *Active job note:* Your job already burns 300+ extra calories. Plan adjusted. Batch cook Sunday so you have food ready without cooking after long shifts.` : "";
+  const studentNote = isStudent ? `\n\n📚 *Student note:* Every meal in this plan is under 10 minutes and under 3 ingredients. Res tuck shop strategy — pilchards + brown bread is one of the best budget meals in SA. Maggi noodles + 1 egg is acceptable when budget is critical.` : "";
+  const unemployedNote = isUnemployed ? `\n\n💰 *Budget note:* Every meal here costs under R15. Batch cook beans on Sunday for the week — one 500g bag of sugar beans feeds you protein for 4 days at R5 per serving.` : "";
+
+  const trainingDaysStr = Array.from(trainingSet).join(", ");
+  const header = `*Your Personalised 7 Day Meal Plan*\n${name} | Goal: ${goalLabels[goal] || goal} | ${adjustedCal} cal/day | ${adjustedProt}g protein/day\nBudget: ${budgetLabels[budget]} per week | Shop at Shoprite or Boxer${medFlags.length > 0 ? `\n⚠️ Medical: ${medFlags.join(" · ")}` : ""}`;
+  const trainingLine = `\n*Training Days:* ${trainingDaysStr} (${daysPerWeek} day${daysPerWeek > 1 ? "s" : ""}/week)`;
+
+  return `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}\n${plan}\n\n${shopList}\nEstimated total: R${shopTotal}\n🛒 Pro tip: ${proTip}\n\n_Reply SWAP [day] to swap any day. Reply SHOPPING LIST for just the shopping list. Reply WHY to understand why I chose these specific foods for your goal._`;
 }
 
 // ============================================================
@@ -1572,6 +1857,95 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
   if (greetings.some(g => m === g || m === g + " 👋") || m === "menu" || m === "help") {
     return await getMenuText(user);
+  }
+
+  // ---- SHOPPING LIST command ----
+  if (m === "shopping list" || m === "shoppinglist" || m === "shopping") {
+    const budget = user.weeklyFoodBudget || "100_300";
+    const goal = user.goalType || "fat_loss";
+    const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
+    const noPeanuts = otherNotes.includes("peanut");
+    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("tuna");
+    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
+    const noGluten = otherNotes.includes("gluten") || otherNotes.includes("coeliac") || otherNotes.includes("wheat");
+    const milkItem = goal === "muscle_gain" && !noDairy ? "Full cream milk 1L — R22" : !noDairy ? "Low fat milk 1L — R20" : null;
+
+    if (budget === "under_100") {
+      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\n${noFish ? "Eggs extra 6 pack — R25" : "Pilchards 3 tins — R36"}\nSugar beans 500g — R20\nCabbage 1 head — R8\nSpinach 1 bunch — R10\nOnions bag — R8\nPap/maize meal 2kg — R15\nSunflower oil 500ml — R10\n\nEstimated total: ≈R152\n\n🛒 Pro tip: Cook a big pot of beans Sunday — feeds you 3 days at under R7 per serving. Add 1 egg per bowl for complete protein.`;
+    }
+    if (budget === "100_300") {
+      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nFrozen chicken portions 1kg — R40\n${noFish ? "" : "Pilchards 3 tins — R36\n"}Oats 500g — R15\n${noGluten ? "" : "Brown bread 1 loaf — R14\n"}Sweet potato 1kg — R12\nCabbage — R8\nSpinach — R10\nOnions + tomatoes — R23\nGarlic — R8\nSunflower oil — R10\n\nEstimated total: ≈R221\n\n🛒 Pro tip: Buy a whole frozen chicken, cut it yourself — saves R15–R20 per kg vs portions.`;
+    }
+    if (budget === "300_600") {
+      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nFrozen chicken 1.5kg — R60\nBeef mince 500g — R60\n${noFish ? "" : "Pilchards 2 tins — R24\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 1.5kg — R18\nBanana bunch — R15\n${milkItem ? milkItem + "\n" : ""}${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Spinach — R10\nCabbage — R8\nTomatoes 500g — R15\n${noDairy ? "" : "Cottage cheese 250g — R20\n"}Garlic + lemon — R13\n\nEstimated total: ≈R378\n\n🛒 Pro tip: Brown 500g mince Sunday, split into 3 — that's 3 dinners sorted in one 20-min cook.`;
+    }
+    return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nChicken breast 1kg — R80\n${noFish ? "" : "Salmon 400g ×2 — R160\n"}Beef mince 500g — R60\n${noDairy ? "" : "Low fat Greek yoghurt 500g — R35\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 2kg — R24\nBanana bunch — R15\n${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Broccoli — R20\nSpinach — R10\n${noDairy ? "" : "Low fat milk 1L — R20\n"}Almonds 100g — R40\nOlive oil 250ml — R40\n\nEstimated total: ≈R619\n\n🛒 Pro tip: Salmon goes on special at Shoprite most Fridays — buy two packs and freeze immediately.`;
+  }
+
+  // ---- WHY command ----
+  if (m === "why") {
+    const goal = user.goalType || "fat_loss";
+    const budget = user.weeklyFoodBudget || "100_300";
+    const medicals = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
+    const isDiabetic = medicals.includes("diabetes");
+    const isPCOS = medicals.includes("pcos");
+    const isHypertension = medicals.includes("hypertension");
+    const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
+    const noPeanuts = otherNotes.includes("peanut");
+    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard");
+
+    const goalReasons: Record<string, string> = {
+      fat_loss: `High protein keeps your muscle while you lose fat — your body wants to eat muscle first when in a deficit, protein stops that. Sweet potato over white pap because the lower glycaemic index means slower energy release and less insulin spike — less fat storage. High-volume vegetables fill your stomach without filling your calorie budget.`,
+      muscle_gain: `Whole eggs because the yolk contains cholesterol your body uses to make testosterone — the hormone that builds muscle. Higher calorie density means your muscles have surplus energy to grow. Pre and post-workout meals are non-negotiable — carbs fuel the session, protein rebuilds what you broke.`,
+      recomposition: `Carb timing is everything in recomp — carbs before training fuel performance, carbs after training go straight into muscle recovery. Evening low-carb means lower insulin at night when you are least active. Consistent high protein means your body always has amino acids available for repair.`,
+      general: `Balanced whole food eating — real protein, real carbs, real vegetables. No extreme restrictions means you can eat like this for life. Educate portions rather than eliminate foods.`,
+      health_condition: `Every food choice supports your specific health condition. Lower GI foods mean more stable blood sugar. Higher fibre keeps cholesterol and blood pressure in range. Consistent meal timing is as important as the food itself.`,
+    };
+    let why = goalReasons[goal] || goalReasons.general;
+
+    const extras: string[] = [];
+    if (isDiabetic || isPCOS) extras.push(`Low GI carbs (samp, oats, sweet potato, brown rice) mean slower glucose release — more stable blood sugar across the day. This is non-negotiable for your condition.`);
+    if (isHypertension) extras.push(`No Aromat, no stock cubes, no processed meats because sodium directly raises blood pressure. Potassium from sweet potato, spinach, and banana actively counteracts sodium's effect on your vessels.`);
+    if (noPeanuts) extras.push(`Peanut butter replaced with extra eggs or baked beans — same protein, safe for your allergy.`);
+    if (noFish) extras.push(`Pilchards replaced with chicken and eggs — chicken thigh especially is a high protein-to-cost protein for your budget.`);
+
+    const budgetReasons: Record<string, string> = {
+      under_100: `Every item was chosen for maximum nutrition per rand — eggs and pilchards are the highest protein-per-rand foods in South Africa. Sugar beans give cheap fibre and protein that stretch across multiple meals.`,
+      "100_300": `Frozen chicken and eggs are your protein anchors at this budget. Oats and sweet potato give you slow-burning carbs that cost very little. The whole week's food costs under R250 and covers all your nutritional needs.`,
+      "300_600": `This budget lets you rotate proteins — chicken, mince, eggs, pilchards — so you never get bored and never get gaps in your nutrition. Mince is the best value red meat in SA.`,
+      over_600: `Salmon twice a week gives you omega-3 fatty acids that reduce inflammation — critical for recovery and long-term health. Greek yoghurt is one of the highest protein dairy foods per gram.`,
+    };
+    const budgetWhy = budgetReasons[budget] || budgetReasons["100_300"];
+
+    return `*Why these specific foods for you:*\n\n${why}\n\n${budgetWhy}${extras.length > 0 ? "\n\n" + extras.join("\n\n") : ""}`;
+  }
+
+  // ---- MEAL PLAN re-delivery ----
+  if (m === "meal plan" || m === "mealplan" || m === "food plan" || m === "my meal plan" || m === "my food plan") {
+    return getOnboardingMealPlan(user);
+  }
+
+  // ---- SWAP [day] command ----
+  const swapMatch = m.match(/^swap\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)$/i);
+  if (swapMatch) {
+    const swapDay = swapMatch[1].charAt(0).toUpperCase() + swapMatch[1].slice(1).toLowerCase();
+    const budget = user.weeklyFoodBudget || "100_300";
+    const goal = user.goalType || "fat_loss";
+    const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
+    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("tuna");
+    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
+    const noPeanuts = otherNotes.includes("peanut");
+    const medicals = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
+    const isLowGI = medicals.includes("diabetes") || medicals.includes("pcos");
+    const bfCal = Math.round((user.calorieTarget || 1800) * 0.25);
+    const lunchCal = Math.round((user.calorieTarget || 1800) * 0.35);
+    const dinnerCal = Math.round((user.calorieTarget || 1800) * 0.28);
+    const carbAlt = isLowGI ? "½ cup samp and beans" : goal === "muscle_gain" ? "1 cup brown rice" : "1 medium sweet potato";
+    const protAlt = noFish ? (budget === "under_100" ? "3 boiled eggs" : "150g chicken thigh") : (budget === "under_100" ? "1 tin pilchards" : "2 eggs + baked beans");
+    const dairySnack = noDairy ? "baked beans ½ tin — 110 cal, 7g protein" : "low fat yoghurt 150g — 100 cal, 10g protein";
+    const pbItem = noPeanuts ? "1 extra boiled egg" : "1 tbsp peanut butter";
+
+    return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? `3 eggs scrambled + 1 cup oats + banana` : `${isLowGI ? "samp and beans ½ cup" : "½ cup oats"} + 2 boiled eggs`} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${noFish ? "2 eggs + cabbage" : "½ tin pilchards + cabbage"} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
   }
 
   // ---- MEDIA: IMAGE or AUDIO ----

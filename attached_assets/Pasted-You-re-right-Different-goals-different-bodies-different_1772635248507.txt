@@ -1,0 +1,49 @@
+You're right. Different goals, different bodies, different situations require completely different food choices. Not just budget tiers. Every variable matters. Let me redo this properly.
+Paste this into Agent:
+In server/routes.ts replace the entire buildMealPlan function with this improved version.
+The meal plan must be built from five variables simultaneously — budget, goal, medical conditions, life situation, and training schedule. Every single one of these changes what goes on the plate.
+GOAL RULES — these override everything else:
+Fat loss goal: Low calorie density foods that fill the stomach. High protein to preserve muscle. No full cream milk — use low fat or skim. No peanut butter as a staple — maximum one tablespoon if budget allows. No avocado unless flexible budget. Egg whites over whole eggs where possible but whole eggs acceptable for budget clients. Sweet potato over white pap always. High volume vegetables at every meal — cabbage, spinach, morogo, broccoli when affordable. Lean proteins only — pilchards, egg whites, chicken breast not thigh, tuna, low fat cottage cheese. No added oils where possible — grill, boil, steam.
+Muscle gain goal: Higher calorie density. Whole eggs always — the yolk has the nutrients. Full cream milk if budget allows — the extra calories and fat support muscle growth. Peanut butter is encouraged — calorie dense and protein rich. Sweet potato and oats as primary carbs for sustained energy. Red meat twice a week if budget allows for iron and creatine. Larger portions. Pre and post workout meals are mandatory — carb and protein before, protein and carb after.
+Recomposition goal: Moderate calories. Carb timing matters — carbs before and after training, lower carbs in evening meals. High protein at every meal without exception. Lean proteins as primary source. Healthy fats in moderation — one tablespoon peanut butter, one egg yolk, small amount of olive oil if budget allows. No empty calories at all — no cool drinks, no sweets, no processed foods.
+General fitness goal: Balanced. No extreme restrictions. Educate on portions rather than eliminate foods. Sustainable eating that can be maintained for life.
+LIFE SITUATION RULES — these change the entire structure:
+Student: Maximum 15 minutes prep time per meal. Maximum 3 ingredients per meal. Res and tuck shop acknowledged — give strategies for eating in res not just home cooking. Maggi noodles with an egg is a legitimate student meal. Microwave meals must be included as options.
+Domestic worker: Eats in employer's home often. Give strategy — protein first on any plate, skip extra starch, choose fruit over biscuits if available. Home meals must be under 20 minutes and under 5 ingredients. Batch cooking on Sunday for the week.
+Night shift worker: Meal timing completely restructured. Pre-shift meal replaces breakfast regardless of clock time. Post-shift meal replaces dinner. One meal during shift if allowed. Sleep quality meals — low sugar, no caffeine after mid-shift.
+Unemployed: Maximum value per rand. Every meal must cost under R15. Bulk cooking — big pot of beans or stew that feeds 3 days. No waste meals — use everything. Pap is acceptable in correct portions because it is cheap and filling.
+Physically active job: Higher calorie needs than sedentary clients at same weight. Add 300 calories to the target. More carbohydrates to fuel physical work. Recovery foods in the evening — protein plus anti-inflammatory foods like spinach and sweet potato.
+MEDICAL CONDITION RULES:
+Diabetic: Every carb must be low GI. White pap replaced with samp and beans or oats or sweet potato or brown rice. Meal timing is medication — breakfast 7am, snack 10am, lunch 12pm, snack 3pm, dinner 6pm. Never skip. Never merge meals. Portion sizes consistent day to day — blood sugar management requires consistency. High fibre at every meal — beans, vegetables, oats. No fruit juice — whole fruit only and maximum one serving per meal. No white bread — low GI bread or whole wheat only. Flag: if on Metformin take with food always.
+Hypertension: Sodium is the enemy. No Aromat, no stock cubes, no instant noodles, no processed meats — polony, Russians, viennas all removed from the plan entirely. Season with fresh herbs, lemon juice, garlic, pepper. Potassium rich foods actively included — banana, sweet potato, spinach, beans — these actively lower blood pressure. Magnesium rich foods — oats, nuts if budget allows, dark leafy greens. Limit red meat to once per week.
+PCOS: Low GI identical to diabetic protocol. Anti-inflammatory foods prioritised — fatty fish like pilchards and tuna, leafy greens, berries when budget allows. Reduce processed foods entirely. Consistent meal timing. Higher protein to manage insulin resistance. Avoid seed oils — cook in small amount of coconut oil or dry cook where possible.
+HIV on ARVs: Higher protein needs — add 20 percent to protein target. Higher calorie needs — add 200 calories to target. ARVs must be taken with food — flag which meal to take them with. Immune supporting foods — vitamin C rich foods like tomato, spinach, orange when affordable. No raw foods that could cause infection risk — cook everything thoroughly.
+Allergies from otherMedicalNotes: Parse the stored allergy text. If peanut — remove all peanut butter, replace with sunflower seed butter if budget flexible or extra eggs if budget tight. If tree nuts — remove all nuts. If fish — remove pilchards and tuna, replace with eggs and chicken as primary proteins. If dairy — remove all milk and yoghurt, replace with oat milk if budget allows or just remove dairy entirely. If gluten — remove all bread, oats, and pap, replace with sweet potato, rice, and samp and beans.
+TRAINING SCHEDULE RULES:
+Training days get different meals from rest days. On training days add one pre-workout meal and one post-workout meal to the plan. Pre-workout — carb plus small protein, easy to digest, 60 to 90 minutes before training. Oats with egg whites. Brown bread with peanut butter. Banana with pilchards. Post-workout — protein plus carb within 30 minutes of finishing. Eggs and sweet potato. Pilchards and pap. Protein shake and banana if budget allows.
+Rest days reduce carbohydrates by 20 percent. Protein stays identical. Fats can increase slightly to compensate for lower carbs.
+COMPREHENSIVE SA FOOD LIST BY BUDGET TIER:
+Emergency under R100 per week — build every meal from only these: Eggs R45 per 12, Pilchards R12 per tin, Sugar beans R20 per 500g, Cabbage R8 per head, Pap R15 per 2kg, Onions R8 per bag, Salt pepper R5, Sunflower oil R10 per 500ml. Total R123 — acknowledge this is tight and give the most nutrition per rand possible from these items only. For fat loss clients reduce pap portions. For muscle gain clients increase eggs and pilchards.
+Tight R100 to R300 per week — add to emergency list: Oats R15 per 500g, Frozen chicken portions R40 per kg, Spinach R10 per bunch, Sweet potato R12 per kg, Brown bread R14 per loaf, Tomatoes R15 per 500g, Garlic R8, Lemon R5. Total adds R119 to emergency list. Now meals become genuinely varied and nutritious.
+Standard R300 to R600 per week — add to tight list: Beef mince R60 per 500g, Low fat milk R20 per litre, Banana R15 per bunch, Peanut butter R25 per jar, Brown rice R20 per kg, Butternut R15, Frozen mixed vegetables R25, Cottage cheese low fat R35, Tinned tomatoes R12. For fat loss clients use low fat milk. For muscle gain clients use full cream milk. For recomposition use low fat.
+Flexible over R600 per week — add to standard list: Salmon R80 per 200g twice weekly, Low fat Greek yoghurt R35 per 500g, Whey protein R150 per week portion, Avocado R15 each twice weekly, Broccoli R20, Almonds R40 per 100g maximum once weekly for fat loss, Olive oil R40 per 250ml, Blueberries R35 when on special. For fat loss clients — Greek yoghurt over full cream dairy, no avocado more than twice weekly, almonds only as a small portion snack not a meal component, salmon actively encouraged for omega 3 and lean protein. For muscle gain clients — full cream Greek yoghurt, avocado freely, larger salmon portions, add whole eggs alongside egg whites.
+FORMAT — build the plan exactly like this:
+Your Personalised 7 Day Meal Plan
+[Name] | Goal: [goal] | [calories] cal/day | [protein]g protein/day
+Budget: R[amount] per week | Shop at Shoprite or Boxer
+Medical notes: [any flags like diabetic protocol active or hypertension low sodium]
+TRAINING DAYS — [list which days based on their schedule]
+Monday — [Training or Rest]
+Pre-workout (if training day): [meal] — [cal], [protein]g, prep [time]
+Breakfast: [meal] — [cal], [protein]g, prep [time]
+Lunch: [meal] — [cal], [protein]g, prep [time]
+Post-workout (if training day): [meal] — [cal], [protein]g
+Dinner: [meal] — [cal], [protein]g, prep [time]
+Daily total: [cal] cal, [protein]g protein
+Repeat for all 7 days. Never repeat the same meal more than twice in the week. Rotate proteins — not pilchards every single day. Rotate carbs — not pap every single day.
+End with:
+Your Weekly Shopping List — Shoprite or Boxer
+[Every item needed, quantity, price]
+Estimated total: R[amount]
+Pro tip: [one specific shopping tip — buy chicken in bulk and freeze, buy oats not instant oats, check the reduced to clear section]
+After the plan add: Reply SWAP [day] if you want to swap out any day. Reply SHOPPING LIST for just the list. Reply WHY to understand why I chose these specific foods for your goal.
