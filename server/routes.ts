@@ -584,26 +584,65 @@ function buildDayWorkout(user: any): string {
   const multiplier = getPhaseMultiplier(phase);
   const week = user.programmeWeek || 1;
   const day = user.programmeDayInWeek || 1;
+  const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
 
   if (mode === "walk_only" || mode === "walk") {
     const duration = phase === 1 ? "15 minutes" : phase === 2 ? "25 minutes" : phase === 3 ? "35 minutes" : "45 minutes";
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  const library = WORKOUTS[mode === "gym" ? "gym" : "home"];
+  // Fix 3 — Home: always 6 mandatory movement patterns (full body every session)
+  if (mode !== "gym") {
+    const h = WORKOUTS.home;
+    const rot = (arr: Exercise[], offset = 0) => arr[(day - 1 + offset) % arr.length];
+
+    // 6 mandatory patterns — rotate within each across days
+    const squatOptions: Exercise[] = [
+      h.legs[0], // Bodyweight Squat
+      { name: "Jump Squat", sets: "3x12", description: "Feet shoulder width. Squat down. Explode upward, land softly with bent knees. Reset between reps.", mistake: "Landing stiff-legged — absorb through hips and knees.", modification: "Bodyweight Squat if knee pain or joint sensitivity." },
+    ];
+    const pushOptions = h.push;          // Push Up, Pike Push Up, Diamond Push Up, Chair Dip
+    const gluOptions: Exercise[]  = [
+      h.legs[1], // Glute Bridge
+      { name: "Single Leg Glute Bridge", sets: "3x10 each", description: "Lie on back. One knee bent. Extend opposite leg. Push hips up through the planted heel. Squeeze glutes hard at top.", mistake: "Hips dropping to one side.", modification: "Regular glute bridge if balance is difficult." },
+    ];
+    const lungeOptions = [h.legs[2], h.legs[3]]; // Reverse Lunge, Bulgarian Split Squat
+    const rowOptions   = [h.pull[0], h.pull[2]]; // Table Row, Resistance Band Row
+    const coreOptions  = [h.core[0], h.core[1]]; // Plank, Mountain Climbers
+
+    const sessionExercises: Exercise[] = [
+      rot(squatOptions),
+      rot(pushOptions),
+      rot(gluOptions),
+      rot(lungeOptions),
+      rot(rowOptions),
+      rot(coreOptions),
+    ];
+
+    // Glute-focus clients get an extra glute exercise
+    if (isFemaleGluteFocus) sessionExercises.push(h.legs[3]);
+
+    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+    for (const ex of sessionExercises) {
+      const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
+        ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
+        : `${multiplier.sets}x${multiplier.reps}`;
+      const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
+      const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
+      workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
+    }
+    workout += `Send DONE when finished.`;
+    return workout;
+  }
+
+  // Gym: keep push-pull-legs-core daily split
+  const library = WORKOUTS.gym;
   const dayType = getDayType(day);
   const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
-
   const exercises = library[dayType];
-
-  // For legs: glute-focus clients get all legs exercises; others get first 3
-  const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
-  const sessionExercises = dayType === "legs" && isFemaleGluteFocus
-    ? exercises
-    : exercises.slice(0, dayType === "core" ? 4 : 4);
+  const sessionExercises = dayType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
 
   let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel} Day | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
-
   for (const ex of sessionExercises) {
     const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
       ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
@@ -612,7 +651,6 @@ function buildDayWorkout(user: any): string {
     const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
     workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
   }
-
   workout += `Send DONE when finished.`;
   return workout;
 }
@@ -700,27 +738,22 @@ Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.no
 // SA CULTURAL & SEASONAL CONTEXT FLAGS
 // ============================================================
 
-function getSAContextFlags(): string {
+function getSAContextFlags(user?: any): string {
   const now = new Date();
   const month = now.getMonth() + 1;
   const day = now.getDate();
-  const year = now.getFullYear();
   const flags: string[] = [];
 
   if (day >= 20) {
     flags.push("BUDGET MODE ACTIVE: Date is after the 20th. Client may be tight on money. Prioritise cheap high-protein SA foods — eggs, pilchards, sugar beans, pap. Do not suggest expensive supplements or premium foods.");
   }
 
-  const RAMADAN: Record<number, [string, string]> = {
-    2025: ["2025-03-01", "2025-03-30"],
-    2026: ["2026-02-17", "2026-03-18"],
-    2027: ["2027-02-06", "2027-03-07"],
-    2028: ["2028-01-26", "2028-02-24"],
-    2029: ["2029-01-14", "2029-02-12"],
-  };
-  const ramRange = RAMADAN[year];
-  if (ramRange && now >= new Date(ramRange[0]) && now <= new Date(ramRange[1])) {
-    flags.push("RAMADAN ACTIVE: Complete programme restructure required. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs, water before Fajr. No training during fasting hours. Adjust all calorie and meal timing advice to the eating window only.");
+  // Fix 2 — Ramadan only activates on explicit user mention, never on calendar date alone
+  const RAMADAN_KEYWORDS = ["ramadan", "ramadhan", "fasting", "iftar", "suhoor", "sehri", "muslim", "islam", "halaal", "halal"];
+  const userNotes = ((user?.otherMedicalNotes || "") + " " + (user?.workSchedule || "")).toLowerCase();
+  const userMentionsRamadan = RAMADAN_KEYWORDS.some(kw => userNotes.includes(kw));
+  if (userMentionsRamadan) {
+    flags.push("RAMADAN / FASTING ACTIVE: Client has indicated they are Muslim or fasting. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs, water before Fajr. No training during fasting hours. Adjust all calorie and meal timing advice to the eating window only.");
   }
 
   const MONTHLY: Record<number, string> = {
@@ -925,8 +958,8 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
   const context = buildContext(user);
   const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
-  // Addition 5 — SA seasonal/cultural flags injected into every GPT call
-  const saFlags = getSAContextFlags();
+  // Addition 5 — SA seasonal/cultural flags injected into every GPT call (user-aware)
+  const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const { model, maxTokens } = selectModel(instruction, userMessage);
@@ -1739,17 +1772,39 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
   // ---- ASK_BUDGET ----
   if (state === "ASK_BUDGET") {
     const lower = msg.toLowerCase();
-    const hasBudgetNumber = /[1-4]/.test(msg);
-    const hasBudgetKeyword = lower.includes("under") || lower.includes("100") || lower.includes("200") || lower.includes("300") || lower.includes("600") || lower.includes("tight") || lower.includes("flexible") || lower.includes("average") || lower.includes("r1") || lower.includes("rand");
-    if (!hasBudgetNumber && !hasBudgetKeyword) {
-      return `Roughly how much do you spend on food per week?\n\n1️⃣ Under R100 — very tight\n2️⃣ R100 to R300 — tight but manageable\n3️⃣ R300 to R600 — average\n4️⃣ Over R600 — flexible`;
+    const BUDGET_REJECT = `Reply with a number only — 1 for under R100, 2 for R100 to R300, 3 for R300 to R600, 4 for over R600`;
+
+    // Smart rand-amount detection — extract any number with R prefix or "monthly"/"week"/"pm"
+    let detectedWeeklyRand: number | null = null;
+    const randMatch = msg.match(/R\s*(\d[\d\s,]*)/i) || msg.match(/(\d[\d,]+)\s*(rand|pm|monthly|per month|p\/m)/i);
+    if (randMatch) {
+      const rawNum = parseInt(randMatch[1].replace(/[\s,]/g, ""));
+      const isMonthly = /monthly|per month|pm|p\/m/i.test(msg);
+      detectedWeeklyRand = isMonthly ? Math.round(rawNum / 4.33) : rawNum;
     }
-    const budgetMap: Record<string, string> = { "1": "under_100", "2": "100_300", "3": "300_600", "4": "over_600" };
-    let budget = budgetMap[msg.trim()] || "100_300";
-    if (!budgetMap[msg.trim()]) {
-      if (lower.includes("under") || lower.includes("very tight")) budget = "under_100";
-      else if (lower.includes("600") || lower.includes("flexible")) budget = "over_600";
-      else if (lower.includes("300") || lower.includes("average")) budget = "300_600";
+
+    let budget: string | null = null;
+
+    // Strict: standalone digit 1–4
+    if (/^\s*[1-4]\s*$/.test(msg)) {
+      const budgetMap: Record<string, string> = { "1": "under_100", "2": "100_300", "3": "300_600", "4": "over_600" };
+      budget = budgetMap[msg.trim()];
+    } else if (detectedWeeklyRand !== null) {
+      // Auto-classify based on weekly rand amount
+      if (detectedWeeklyRand < 100) budget = "under_100";
+      else if (detectedWeeklyRand <= 300) budget = "100_300";
+      else if (detectedWeeklyRand <= 600) budget = "300_600";
+      else budget = "over_600";
+    } else if (lower.includes("very tight") || lower.includes("under") || lower === "tight") {
+      budget = "under_100";
+    } else if (lower.includes("flexible") || lower.includes("over")) {
+      budget = "over_600";
+    } else if (lower.includes("average")) {
+      budget = "300_600";
+    }
+
+    if (!budget) {
+      return BUDGET_REJECT;
     }
     const budgetLevel = budget === "under_100" ? "low" : budget === "over_600" ? "high" : "medium";
     await db.update(users).set({ weeklyFoodBudget: budget, budgetLevel, onboardingState: "ASK_WORK_SCHEDULE" }).where(eq(users.phoneNumber, phone));
@@ -2375,7 +2430,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   const clientName = user.name || "champ";
   const trainingMode = user.trainingMode || "home";
-  const saContext = getSAContextFlags();
+  const saContext = getSAContextFlags(user);
 
   // Addition 4 — Conversation context memory: last 5 exchanges so GPT knows what was just discussed
   let recentConvBlock = "";
