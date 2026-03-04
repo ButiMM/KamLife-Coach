@@ -1,8 +1,8 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
-import { users, chatHistory, stepLogs } from "../shared/schema";
-import { eq, gte, lte, and, lt } from "drizzle-orm";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
+import { eq, gte, lte, and, lt, desc, asc } from "drizzle-orm";
 
 // ============================================================
 // TWILIO SENDING
@@ -187,9 +187,17 @@ cron.schedule("0 8 20 * *", async () => {
   for (const client of clients) {
     try {
       const name = client.name || "champ";
-      await sendWhatsApp(client.phoneNumber,
-        `${name}, month end is coming. Before the money gets tight — here is your R100 week meal plan that keeps your nutrition on track: Eggs 12 pack R45. Pilchards 3 tins R36. Cabbage R8. Onions R8. Pap 2kg R15. Shop this weekend at Shoprite or Boxer.`
-      );
+      const budget = client.weeklyFoodBudget || "100_300";
+
+      let budgetMsg: string;
+      if (budget === "under_50" || budget === "50_100") {
+        budgetMsg = `${name}, month end is coming. Your R57 emergency plan — eggs R25, pilchards R12, sugar beans R20. This covers your protein for 4 days. Shop this weekend before the money is gone.`;
+      } else if (budget === "100_300") {
+        budgetMsg = `${name}, month end approaching. Your R100 week plan — eggs 12 pack R45, pilchards 3 tins R36, cabbage R8, onions R8, pap 2kg R15. Enough for the full week. Shop at Shoprite or Boxer this weekend.`;
+      } else {
+        budgetMsg = `${name}, month end coming. You have more budget flexibility than most clients — still prioritise protein. Pre-cook chicken, buy oats in bulk, and prep your meals Sunday. Consistency over the month end is what separates people who get results.`;
+      }
+      await sendWhatsApp(client.phoneNumber, budgetMsg);
     } catch (err) {
       console.error(`[SCHEDULER] Month-end budget error — ${client.phoneNumber}:`, err);
     }
@@ -279,6 +287,97 @@ cron.schedule("0 14 * * 5", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 8 — SUNDAY WEEKLY REPORT
+// Runs Sunday 8am SAST (6am UTC)
+// ============================================================
+
+cron.schedule("0 6 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Sunday weekly report");
+  const clients = await getActiveClients();
+  const weekAgo = new Date(Date.now() - 7 * 86400000);
+
+  for (const client of clients) {
+    try {
+      const name = client.name || "champ";
+
+      // Query all logs for the past 7 days in parallel
+      const [chats, workoutEntries, weightEntries] = await Promise.all([
+        db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, weekAgo))),
+        db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
+        db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, weekAgo))).orderBy(asc(weightLogs.loggedAt)),
+      ]);
+
+      // No logs at all — send a nudge, not a report
+      if (chats.length === 0) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, no logs this week means no data to coach from. This week log at least one meal per day — that is the only focus. Nothing else.`
+        );
+        continue;
+      }
+
+      // Only generate full report if they logged at least 3 times
+      const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
+      if (daysWithLogs < 3) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. That is not enough for me to coach you properly. Aim for at least 5 this week — just log one meal a day minimum.`
+        );
+        continue;
+      }
+
+      // Calculate metrics
+      const foodLogs = chats.filter(c => c.intent === "FOOD_LOG");
+      const foodDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
+      const plannedSessions = client.trainingDaysPerWeek || 3;
+      const completedSessions = workoutEntries.length;
+      const weekNum = client.programmeWeek || 1;
+
+      // Weight change
+      let weightLine = "Weight: no weigh-ins this week";
+      if (weightEntries.length >= 2) {
+        const diff = parseFloat(String(weightEntries[weightEntries.length - 1].weight)) - parseFloat(String(weightEntries[0].weight));
+        if (diff < -0.1) weightLine = `Weight: down ${Math.abs(diff).toFixed(1)}kg this week`;
+        else if (diff > 0.1) weightLine = `Weight: up ${diff.toFixed(1)}kg this week`;
+        else weightLine = `Weight: unchanged this week`;
+      } else if (weightEntries.length === 1) {
+        weightLine = `Weight: ${weightEntries[0].weight}kg logged once — log at start and end of week for accurate tracking`;
+      }
+
+      // Best protein meal and worst pattern
+      let bestMeal = "";
+      let worstPattern = "";
+      const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey"];
+      const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "vetkoek", "kotas", "polony", "vetkoek", "chocolate", "cool drink", "alcohol", "beer", "wine"];
+      const proteinMeals = foodLogs.filter(l => PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w)));
+      if (proteinMeals.length > 0) bestMeal = (proteinMeals[0].messageIn || "").slice(0, 60);
+      const junkCount = foodLogs.filter(l => JUNK.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
+      const noProteinCount = foodLogs.filter(l => !PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
+      if (junkCount >= 3) worstPattern = `junk food appeared ${junkCount} times this week`;
+      else if (noProteinCount >= 3) worstPattern = `${noProteinCount} meals with no protein logged`;
+      else if (completedSessions < Math.floor(plannedSessions * 0.5)) worstPattern = `only ${completedSessions} of ${plannedSessions} planned sessions completed`;
+      else worstPattern = "no major pattern this week — keep the consistency going";
+
+      // This week focus
+      let weekFocus = "";
+      if (completedSessions < plannedSessions) weekFocus = `Get ${plannedSessions - completedSessions} missed session${plannedSessions - completedSessions !== 1 ? "s" : ""} done this week — training is non-negotiable`;
+      else if (noProteinCount >= 3) weekFocus = "Protein at every single meal this week — eggs, pilchards, chicken, beans";
+      else weekFocus = "Maintain what you built — consistency beats intensity every time";
+
+      // Encouragement
+      const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
+      const encouragement = onTrack
+        ? `${name}, ${completedSessions} sessions done this week. That kind of consistency is exactly what builds real results. Same energy this week.`
+        : `${name}, this week was below your best — but you are still here and that counts for something. Reset and go again.`;
+
+      const report = `${name} — Week ${weekNum} Report 💪\n\nLogged: ${daysWithLogs} of 7 days\nTraining: ${completedSessions} of ${plannedSessions} sessions completed\n${weightLine}\nBest meal: ${bestMeal || "no high-protein meal logged — fix this week"}\nPattern spotted: ${worstPattern}\n\nThis week focus: ${weekFocus}\n\n${encouragement}`;
+
+      await sendWhatsApp(client.phoneNumber, report);
+    } catch (err) {
+      console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 
@@ -288,9 +387,10 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
   console.log("[SCHEDULER]   Evening accountability — daily 7pm SAST");
   console.log("[SCHEDULER]   Week 3 intervention — Monday 6am SAST");
-  console.log("[SCHEDULER]   Month-end budget     — 20th each month");
+  console.log("[SCHEDULER]   Month-end budget     — 20th each month (budget-tier aware)");
   console.log("[SCHEDULER]   Milestone check      — daily 8am SAST");
   console.log("[SCHEDULER]   Silence detection    — every 12 hours");
   console.log("[SCHEDULER]   Friday strategy      — Friday 4pm SAST");
+  console.log("[SCHEDULER]   Sunday weekly report — Sunday 8am SAST");
   console.log(`[SCHEDULER]   Ramadan mode         — ${ramadanActive ? "ACTIVE ☪️" : "inactive"}`);
 }

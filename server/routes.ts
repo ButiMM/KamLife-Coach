@@ -925,6 +925,8 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
   const context = buildContext(user);
   const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
+  // Addition 5 — SA seasonal/cultural flags injected into every GPT call
+  const saFlags = getSAContextFlags();
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const { model, maxTokens } = selectModel(instruction, userMessage);
@@ -936,7 +938,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",
@@ -1826,6 +1828,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   try {
   const m = message.toLowerCase().trim();
 
+  // ---- ADDITION 6: EMERGENCY / CRISIS DETECTION — before everything ----
+  const CRISIS_PHRASES = [
+    "want to die", "kill myself", "end it all", "cannot go on", "can't go on",
+    "suicidal", "self harm", "self-harm", "cutting myself", "hurting myself",
+    "not worth living", "end my life", "no reason to live", "give up on life",
+  ];
+  if (CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
+    const crisisUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const crisisName = crisisUser[0]?.name || "friend";
+    const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
+    try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch { }
+    return crisisReply;
+  }
+
   // ---- FIX 1: RESET — absolute first, before getOrCreateUser, before everything ----
   if (m === "reset") {
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -2000,20 +2016,31 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const calorieTarget = user.calorieTarget || 1800;
         const proteinTarget = user.proteinTarget || 140;
 
+        const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
+          parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
+        );
         const visionResponse = await openai.chat.completions.create({
           model: "gpt-4o",
-          max_tokens: 300,
+          max_tokens: 350,
           messages: [
             {
               role: "system",
-              content: `You are Coach K, a South African fitness coach. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${calorieTarget} kcal, ${proteinTarget}g protein. SA voice — firm, warm, direct. Max 3 sentences, 60 words. End with one specific action.`
+              content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${liveCal} kcal, ${liveProt}g protein. SA voice — firm, warm, direct. Max 4 sentences, 80 words. End with one specific action.`
             },
             {
               role: "user",
               content: [
                 {
                   type: "text",
-                  text: `Analyse this food photo. Identify every food item visible. For each item state the SA name if applicable — pap not polenta, pilchards not sardines, vetkoek not fried dough. Estimate the calories and protein for the full plate as served. Then give a single coaching response in Coach K voice. If this meal is good — celebrate it and connect to their goal. If it needs improvement — give one specific swap, not a lecture. If you cannot clearly identify any food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`
+                  text: `You are Coach K with deep knowledge of South African food culture. Analyse this food photo carefully.
+
+IDENTIFICATION: Use SA names always — pap not polenta, pilchards not sardines, vetkoek not fried dough, morogo not wild spinach, umngqusho not samp-and-beans, kota not bunny chow, magwinya not fat cake, smileys not sheep head, walkie talkies not chicken feet, mogodu not tripe, chakalaka not relish, boerewors not sausage, biltong not dried meat, droewors not dry sausage, melktert not milk tart.
+
+ESTIMATION: Estimate calories and protein for the FULL plate as served — not just one component. State the estimate clearly. Example: "This plate is roughly 650 kcal and 35g protein."
+
+COACHING: If the meal is solid for their ${goal} goal — celebrate it specifically and connect the nutrients to their result. If it needs improvement — give ONE specific swap with SA alternative. Never lecture. Never list 3 things to fix.
+
+UNKNOWN FOOD: If you cannot identify any food in the image with confidence — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`
                 },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
               ]
@@ -2050,8 +2077,26 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
         }
 
-        console.log(`[VOICE] Transcribed: "${transcribedText}"`);
-        const voiceReply = await handleMessage(phone, transcribedText);
+        // Addition 2 — confidence check: very short transcriptions are usually noise
+        const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
+        if (wordCount < 3) {
+          return `I caught "${transcribedText}" — but that was too short to coach on. Try again a bit louder or type it out.`;
+        }
+
+        // Addition 2 — language detection (Zulu, Sotho, Xhosa, Afrikaans keywords)
+        const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies"];
+        const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme"];
+        const XHOSA_WORDS = ["molo", "enkosi", "unjani", "ewe", "hayi", "camagu", "ndiyabona"];
+        const AFRIKAANS_WORDS = ["dankie", "asseblief", "môre", "more", "lekker", "braai", "howzit", "baie", "nee", "ja nee", "ag nee", "eina", "ek is", "ek het", "ons het"];
+        const lowerTranscribed = transcribedText.toLowerCase();
+        let languageNote = "";
+        if (ZULU_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Zulu. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Zulu if it fits.";
+        else if (SOTHO_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Sesotho. Respond in simple SA English but acknowledge their language naturally.";
+        else if (XHOSA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xhosa. Respond in simple SA English but acknowledge their language naturally.";
+        else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans if it fits.";
+
+        console.log(`[VOICE] Transcribed: "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
+        const voiceReply = await handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""));
         return `🎙️ I heard: "${transcribedText}"\n\n${voiceReply}`;
       } catch (err) {
         console.error("Audio transcription error:", err);
@@ -2330,7 +2375,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   const trainingMode = user.trainingMode || "home";
   const saContext = getSAContextFlags();
 
-  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}
+  // Addition 4 — Conversation context memory: last 5 exchanges so GPT knows what was just discussed
+  let recentConvBlock = "";
+  try {
+    const recentChats = await db.select().from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(5);
+    if (recentChats.length > 0) {
+      const thread = recentChats.reverse().map(c =>
+        `Client said: "${(c.messageIn || "").slice(0, 120)}" — Coach K responded: "${(c.messageOut || "").slice(0, 120)}"`
+      ).join(". ");
+      recentConvBlock = `\n\nRECENT CONVERSATION: ${thread}. Use this context to maintain continuity — do not repeat what was already said, build on it.`;
+    }
+  } catch { }
+
+  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${recentConvBlock}
 
 RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 
@@ -2649,5 +2709,128 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+  });
+
+  // ── Addition 7: Coach Dashboard API — protected by DASHBOARD_API_KEY ─────
+
+  function requireDashboardKey(req: any, res: any, next: any) {
+    const key = process.env.DASHBOARD_API_KEY;
+    const provided = req.headers["x-dashboard-key"] || req.query.key;
+    if (key && provided !== key) return res.status(403).json({ error: "Forbidden" });
+    next();
+  }
+
+  app.get("/api/dashboard/clients", requireDashboardKey, async (_req, res) => {
+    try {
+      const all = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE")).orderBy(desc(users.lastActiveAt));
+      const now = Date.now();
+      const weekAgo = new Date(now - 7 * 86400000);
+
+      const result = await Promise.all(all.map(async (u) => {
+        const thisWeekLogs = await db.select().from(chatHistory)
+          .where(and(eq(chatHistory.userId, u.id), gte(chatHistory.createdAt, weekAgo)))
+          .limit(50);
+        const lastActive = u.lastActiveAt ? new Date(u.lastActiveAt).getTime() : 0;
+        const sinceLastMsg = now - lastActive;
+        const status = sinceLastMsg < 24 * 3600000 ? "green" : sinceLastMsg < 48 * 3600000 ? "yellow" : "red";
+        const programmeDays = u.programmeStartDate
+          ? Math.floor((now - new Date(u.programmeStartDate).getTime()) / 86400000) : 0;
+        return {
+          id: u.id,
+          name: u.name,
+          phone: u.phoneNumber,
+          onboardingState: u.onboardingState,
+          lastMessageAt: u.lastActiveAt,
+          programmeDays,
+          thisWeekLogCount: thisWeekLogs.length,
+          status,
+        };
+      }));
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch clients" });
+    }
+  });
+
+  app.get("/api/dashboard/client/:phone", requireDashboardKey, async (req, res) => {
+    try {
+      const phoneParam = decodeURIComponent(req.params.phone);
+      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
+      const [weights, steps, workouts, chats] = await Promise.all([
+        db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select().from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
+        db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(workoutLogs.loggedAt)),
+        db.select().from(chatHistory).where(eq(chatHistory.userId, client.id)).orderBy(desc(chatHistory.createdAt)).limit(100),
+      ]);
+      const liveTargets = calculateTargets(parseFloat(client.currentWeight || "75"), client.goalType || "fat_loss", client.lifeSituation || "office", client.trainingDaysPerWeek || 3);
+      const programmeDays = client.programmeStartDate ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86400000) : 0;
+
+      res.json({ client, weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, liveTargets, programmeDays });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch client" });
+    }
+  });
+
+  app.get("/api/dashboard/metrics", requireDashboardKey, async (_req, res) => {
+    try {
+      const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+      const now = Date.now();
+      const weekAgo = new Date(now - 7 * 86400000);
+      const twoWeeksAgo = new Date(now - 14 * 86400000);
+
+      const activeClients = allComplete.length;
+      const newThisWeek = allComplete.filter(u => u.createdAt && new Date(u.createdAt) >= weekAgo).length;
+      const churnedThisWeek = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) < twoWeeksAgo).length;
+
+      const allChats = await db.select().from(chatHistory).where(gte(chatHistory.createdAt, weekAgo));
+      const avgMessagesPerDay = activeClients > 0 ? Math.round(allChats.length / 7 / activeClients * 10) / 10 : 0;
+
+      res.json({
+        activeClients,
+        newThisWeek,
+        churnedThisWeek,
+        avgMessagesPerClientPerDay: avgMessagesPerDay,
+        totalRevenuePlaceholder: activeClients * 99,
+        currency: "ZAR",
+        note: "Revenue figure is a placeholder — integrate PayFast webhooks to get real payment data",
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch metrics" });
+    }
+  });
+
+  app.post("/api/dashboard/broadcast", requireDashboardKey, async (req, res) => {
+    try {
+      const { message: broadcastMsg, filter = "all" } = req.body;
+      if (!broadcastMsg) return res.status(400).json({ error: "message is required" });
+
+      const twilioClient2 = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
+      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
+
+      const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+      const now = Date.now();
+      const twoWeeksAgo = new Date(now - 14 * 86400000);
+      const twoDaysAgo = new Date(now - 48 * 3600000);
+
+      let targets = allComplete;
+      if (filter === "active") targets = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= twoDaysAgo);
+      if (filter === "atrisk") targets = allComplete.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < twoWeeksAgo);
+
+      let sent = 0;
+      let failed = 0;
+      for (const u of targets) {
+        try {
+          await twilioClient2.messages.create({ from: fromNum, to: u.phoneNumber, body: broadcastMsg });
+          sent++;
+        } catch { failed++; }
+      }
+      res.json({ sent, failed, total: targets.length });
+    } catch (err) {
+      res.status(500).json({ error: "Broadcast failed" });
+    }
   });
 }
