@@ -25,8 +25,20 @@ Firm but warm. Direct but never harsh. Honest but never cruel. SA but never forc
 SA LANGUAGE — understand and respond naturally to:
 eish, sharp, yebo, ja, aweh, lekker, mara, haibo, aikona, sho, eita, howzit, shame man, bru, sis, babe, china, laaitie, township, spaza, shebeen, tavern, braai, kota, vetkoek, magwinya, morogo, mogodu, walkie talkies, smileys, umngqusho, mabele, Jungle Oats, Maltabella, pilchards, Russians, polony, fat cakes, Simba, Niknaks, Cremora, Mageu, cool drink, tuck shop, res, campus, rank, taxi.
 
+ABSOLUTE PROHIBITIONS — THESE ARE HARD RULES. NEVER BREAK THEM:
+NEVER say "Howzit [name]" as a greeting. Never greet with Howzit at all.
+NEVER say "What can I assist you with today" or any variation of that phrase.
+NEVER say "Let us channel that energy" or anything like it.
+NEVER say "I hear your frustration" as a standalone phrase.
+NEVER say "I am here to support you" as a standalone sentence.
+NEVER give a bulleted list in a conversational response. Bullets are only allowed in programme and meal plan delivery.
+NEVER ask multiple questions in one message. One question maximum per response.
+NEVER use "champ", "bro", "bra", "buddy", "pal", or "friend" as default names. Always use the client's actual name from their profile.
+NEVER start a response with the client's name as the first word. Start with the substance.
+NEVER say "Great question", "Good choice", "Well done", "Amazing", "That is fantastic", "Awesome" as standalone praise.
+
 RESPONSE RULES — NON NEGOTIABLE:
-Maximum 3 sentences and 60 words for conversational responses. Always end with exactly one specific action. Never use bullet points in conversational responses. Never append warning messages after already giving a coaching response. Never respond with a generic water tip unless client specifically asked about water. Always use the client's actual name. Never say Good choice, Well done, Amazing, Great job as standalone praise. Never shame a food choice. Coach the next meal not the last one. One bad meal is nothing. One bad week needs attention. One bad month needs a programme adjustment.
+Maximum 3 sentences and 60 words for conversational responses. Always end with exactly one specific action. Never use bullet points in conversational responses. Never append warning messages after already giving a coaching response. Never respond with a generic water tip unless client specifically asked about water. Always use the client's actual name from their profile. Never shame a food choice. Coach the next meal not the last one. One bad meal is nothing. One bad week needs attention. One bad month needs a programme adjustment.
 
 PROGRAMME PHILOSOPHY — THIS IS NON NEGOTIABLE:
 Foundation training is machine and cable based compound movements. Machines teach movement patterns safely, allow progressive overload, and build real strength without injury risk. Free weights come after 3 months minimum.
@@ -591,47 +603,156 @@ function buildDayWorkout(user: any): string {
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  // Fix 3 — Home: always 6 mandatory movement patterns (full body every session)
+  // Fix 4 — Home: exact 3-day rotating full-body programme, always 6 exercises minimum
   if (mode !== "gym") {
-    const h = WORKOUTS.home;
-    const rot = (arr: Exercise[], offset = 0) => arr[(day - 1 + offset) % arr.length];
+    const daySlot = ((day - 1) % 3) + 1; // cycles 1→2→3→1→2→3...
 
-    // 6 mandatory patterns — rotate within each across days
-    const squatOptions: Exercise[] = [
-      h.legs[0], // Bodyweight Squat
-      { name: "Jump Squat", sets: "3x12", description: "Feet shoulder width. Squat down. Explode upward, land softly with bent knees. Reset between reps.", mistake: "Landing stiff-legged — absorb through hips and knees.", modification: "Bodyweight Squat if knee pain or joint sensitivity." },
-    ];
-    const pushOptions = h.push;          // Push Up, Pike Push Up, Diamond Push Up, Chair Dip
-    const gluOptions: Exercise[]  = [
-      h.legs[1], // Glute Bridge
-      { name: "Single Leg Glute Bridge", sets: "3x10 each", description: "Lie on back. One knee bent. Extend opposite leg. Push hips up through the planted heel. Squeeze glutes hard at top.", mistake: "Hips dropping to one side.", modification: "Regular glute bridge if balance is difficult." },
-    ];
-    const lungeOptions = [h.legs[2], h.legs[3]]; // Reverse Lunge, Bulgarian Split Squat
-    const rowOptions   = [h.pull[0], h.pull[2]]; // Table Row, Resistance Band Row
-    const coreOptions  = [h.core[0], h.core[1]]; // Plank, Mountain Climbers
+    type HomeEx = { name: string; setsReps: string; cue: string; mistake: string; yt: string };
+    const HOME_DAYS: Record<number, HomeEx[]> = {
+      1: [
+        {
+          name: "Bodyweight Squat",
+          setsReps: "3 sets of 15 reps",
+          cue: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.",
+          mistake: "Knees caving inward. Push knees out over toes throughout.",
+          yt: "https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial",
+        },
+        {
+          name: "Push Up",
+          setsReps: "3 sets of 10 reps",
+          cue: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.",
+          mistake: "Hips sagging or rising. Keep body in one straight line.",
+          yt: "https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners",
+        },
+        {
+          name: "Glute Bridge",
+          setsReps: "3 sets of 15 reps",
+          cue: "Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.",
+          mistake: "Pushing through the lower back instead of the glutes. Drive hips, do not arch back.",
+          yt: "https://www.youtube.com/results?search_query=glute+bridge+tutorial+beginners",
+        },
+        {
+          name: "Reverse Lunge",
+          setsReps: "3 sets of 12 each leg",
+          cue: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.",
+          mistake: "Front knee travelling past toes. Keep shin vertical.",
+          yt: "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
+        },
+        {
+          name: "Table Row",
+          setsReps: "3 sets of 12 reps",
+          cue: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.",
+          mistake: "Hips dropping. Keep body rigid like a plank throughout.",
+          yt: "https://www.youtube.com/results?search_query=table+row+exercise+tutorial",
+        },
+        {
+          name: "Plank",
+          setsReps: "3 sets of 30 seconds",
+          cue: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.",
+          mistake: "Hips rising or sagging. Keep everything in one line.",
+          yt: "https://www.youtube.com/results?search_query=plank+exercise+tutorial+beginners",
+        },
+      ],
+      2: [
+        {
+          name: "Jump Squat",
+          setsReps: "3 sets of 12 reps",
+          cue: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset.",
+          mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.",
+          yt: "https://www.youtube.com/results?search_query=jump+squat+tutorial+form",
+        },
+        {
+          name: "Decline Push Up",
+          setsReps: "3 sets of 10 reps",
+          cue: "Feet on chair or couch. Hands on floor. Lower chest toward floor. Press back up. Body straight.",
+          mistake: "Hips rising to compensate. Keep core tight so body stays in a straight line.",
+          yt: "https://www.youtube.com/results?search_query=decline+push+up+tutorial+beginners",
+        },
+        {
+          name: "Single Leg Glute Bridge",
+          setsReps: "3 sets of 10 reps each leg",
+          cue: "Lie on back. One knee bent foot flat. Extend opposite leg. Drive hips up through planted heel. Squeeze hard at top.",
+          mistake: "Hips dropping to one side. Keep hips level throughout the movement.",
+          yt: "https://www.youtube.com/results?search_query=single+leg+glute+bridge+tutorial",
+        },
+        {
+          name: "Walking Lunge",
+          setsReps: "3 sets of 12 each leg",
+          cue: "Step forward into a lunge. Back knee almost touches floor. Drive front foot into ground and step through. Keep torso upright.",
+          mistake: "Leaning forward. Keep chest up and shoulders back throughout.",
+          yt: "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
+        },
+        {
+          name: "Door Frame Row",
+          setsReps: "3 sets of 12 reps",
+          cue: "Stand in door frame. Grip sides at chest height. Lean back. Pull chest to door frame. Squeeze shoulder blades.",
+          mistake: "Using momentum to swing forward. Control the movement in both directions.",
+          yt: "https://www.youtube.com/results?search_query=doorframe+row+exercise+bodyweight",
+        },
+        {
+          name: "Plank Shoulder Tap",
+          setsReps: "3 sets of 20 taps (10 each side)",
+          cue: "High plank position. Tap opposite shoulder with one hand. Replace hand. Repeat other side. Hips still.",
+          mistake: "Hips rocking side to side with each tap. Brace core hard to keep hips square.",
+          yt: "https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial",
+        },
+      ],
+      3: [
+        {
+          name: "Bulgarian Split Squat",
+          setsReps: "3 sets of 10 reps each leg",
+          cue: "Back foot on chair behind you. Front foot forward. Lower back knee toward floor. Drive through front heel to rise.",
+          mistake: "Front knee caving in. Keep it tracking over your middle toe throughout.",
+          yt: "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
+        },
+        {
+          name: "Diamond Push Up",
+          setsReps: "3 sets of 8 reps",
+          cue: "Hands form a diamond shape under chest. Lower chest to hands. Press up. Elbows stay close to body.",
+          mistake: "Elbows flaring out. Keep them tucked tight to target triceps correctly.",
+          yt: "https://www.youtube.com/results?search_query=diamond+push+up+tutorial+form",
+        },
+        {
+          name: "Hip Thrust",
+          setsReps: "3 sets of 15 reps",
+          cue: "Upper back on couch or chair. Feet flat on floor. Drive hips to ceiling. Squeeze hard at top. Lower slowly.",
+          mistake: "Not getting full hip extension at the top. Push all the way up until body is flat.",
+          yt: "https://www.youtube.com/results?search_query=hip+thrust+bodyweight+tutorial+beginners",
+        },
+        {
+          name: "Deficit Lunge",
+          setsReps: "3 sets of 10 reps each leg",
+          cue: "Stand on a step or book stack. Step one foot forward to the floor. Lower into deep lunge. Rise and repeat.",
+          mistake: "Front knee collapsing inward. Keep knee tracking over toe at all times.",
+          yt: "https://www.youtube.com/results?search_query=deficit+lunge+tutorial+form",
+        },
+        {
+          name: "Resistance Band Row",
+          setsReps: "3 sets of 12 reps",
+          cue: "Anchor band at chest height. Hold handles. Step back. Pull elbows back past your sides. Squeeze shoulder blades together.",
+          mistake: "Shrugging shoulders up during the pull. Keep shoulders down and back.",
+          yt: "https://www.youtube.com/results?search_query=resistance+band+row+tutorial+form",
+        },
+        {
+          name: "Plank with Leg Raise",
+          setsReps: "3 sets of 10 reps each leg",
+          cue: "Forearm plank. Lift one leg 6 inches off floor. Hold 2 seconds. Lower. Switch legs. Core braced throughout.",
+          mistake: "Hips rotating with each leg raise. Keep hips perfectly level.",
+          yt: "https://www.youtube.com/results?search_query=plank+leg+raise+tutorial+form",
+        },
+      ],
+    };
 
-    const sessionExercises: Exercise[] = [
-      rot(squatOptions),
-      rot(pushOptions),
-      rot(gluOptions),
-      rot(lungeOptions),
-      rot(rowOptions),
-      rot(coreOptions),
-    ];
-
-    // Glute-focus clients get an extra glute exercise
-    if (isFemaleGluteFocus) sessionExercises.push(h.legs[3]);
-
-    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
-    for (const ex of sessionExercises) {
-      const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
-        ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
-        : `${multiplier.sets}x${multiplier.reps}`;
-      const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
-      const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-      workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
+    const exercises = HOME_DAYS[daySlot];
+    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body Day ${daySlot} | Rest 60 seconds between sets | Total 40–50 minutes\n\n`;
+    for (const ex of exercises) {
+      workout += `*${ex.name} — ${ex.setsReps}*\n${ex.yt}\n${ex.cue}\nCommon mistake: ${ex.mistake}\n\n`;
     }
-    workout += `Send DONE when finished.`;
+    // Glute-focus clients get an extra note
+    if (isFemaleGluteFocus) {
+      workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
+    }
+    workout += `Train on non-consecutive days. Send DONE when finished.`;
     return workout;
   }
 
@@ -1807,8 +1928,20 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
       return BUDGET_REJECT;
     }
     const budgetLevel = budget === "under_100" ? "low" : budget === "over_600" ? "high" : "medium";
+
+    // Fix 7 — Confirm auto-classification so client knows what was detected
+    const budgetLabel: Record<string, string> = {
+      under_100: "under R100 per week",
+      "100_300": "R100 to R300 per week",
+      "300_600": "R300 to R600 per week",
+      over_600: "over R600 per week",
+    };
+    const detectedNote = detectedWeeklyRand !== null
+      ? `Got it — that works out to about R${detectedWeeklyRand} per week, so I have set your food budget as ${budgetLabel[budget]}.\n\n`
+      : "";
+
     await db.update(users).set({ weeklyFoodBudget: budget, budgetLevel, onboardingState: "ASK_WORK_SCHEDULE" }).where(eq(users.phoneNumber, phone));
-    return `Last one. What does your typical day look like?\n\n1️⃣ Standard hours — 8am to 5pm\n2️⃣ Early shift — start before 7am\n3️⃣ Night shift — work through the night\n4️⃣ Irregular — changes week to week\n5️⃣ Work from home or no fixed schedule`;
+    return `${detectedNote}Last one. What does your typical day look like?\n\n1️⃣ Standard hours — 8am to 5pm\n2️⃣ Early shift — start before 7am\n3️⃣ Night shift — work through the night\n4️⃣ Irregular — changes week to week\n5️⃣ Work from home or no fixed schedule`;
   }
 
   // ---- ASK_WORK_SCHEDULE → COMPLETE ----
@@ -2330,6 +2463,15 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     return `${prefix} This programme builds real strength without risk. Any pain or discomfort — stop immediately and consult your doctor.\n\n*Safety-First Strength Programme — Seated and Machine Only*\nRest 90 seconds between sets. 3 sets of 15 reps. Light weight.\n\n1️⃣ *Seated Leg Press — light weight*\nhttps://www.youtube.com/results?search_query=seated+leg+press+light+weight+elderly\nFeet flat on platform. Push slowly. Never lock the knees.\n\n2️⃣ *Seated Leg Curl Machine*\nhttps://www.youtube.com/results?search_query=seated+leg+curl+machine+tutorial\nSlow and controlled. Only move through pain-free range.\n\n3️⃣ *Chest Press Machine — seated*\nhttps://www.youtube.com/results?search_query=chest+press+machine+tutorial+seniors\nBack flat against pad. Press gently. No locking at the top.\n\n4️⃣ *Seated Cable Row*\nhttps://www.youtube.com/results?search_query=seated+cable+row+elderly+tutorial\nSit tall. Pull elbows back slowly. Keep shoulders down.\n\n5️⃣ *Seated Shoulder Press Machine*\nhttps://www.youtube.com/results?search_query=seated+shoulder+press+machine+seniors\nPress overhead slowly. Stop if any shoulder pain.\n\n6️⃣ *Seated Calf Raise*\nhttps://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial\nHeel up slowly, lower slowly. Excellent for circulation.\n\n7️⃣ *Balance Work — standing at fixed support*\nHold a wall or fixed bar. Rise slowly onto toes and lower. 3 × 10. Builds ankle stability.\n\nTrain 2 to 3 times per week with at least one rest day between sessions. Reply DONE after each session and I track your progress.`;
   }
 
+  // Fix 3 — If all programme data exists from onboarding, deliver immediately — no questions
+  if (isWorkoutRelated && user.trainingDaysPerWeek && user.trainingExperience && user.goalType) {
+    const programme = buildFullProgramme(user);
+    const modeLabel = user.trainingMode === "gym" ? "Gym" : "Home";
+    const reply = `${modeLabel} programme — ${user.trainingDaysPerWeek} days per week, ${user.trainingExperience} level, ${(user.goalType || "").replace(/_/g, " ")} focus.\n\n${programme}`;
+    await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
+    return reply;
+  }
+
   if (isWorkoutRelated && (!user.trainingExperience || !user.trainingDaysPerWeek)) {
     await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
     const questions = `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply 2, 3, 4, 5, or 6.\n\n2️⃣ Experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ Main goal?\nLose fat\nBuild muscle\nBoth\n\nReply with your three answers and I build your programme immediately.`;
@@ -2456,20 +2598,35 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   const trainingMode = user.trainingMode || "home";
   const saContext = getSAContextFlags(user);
 
-  // Addition 4 — Conversation context memory: last 5 exchanges so GPT knows what was just discussed
+  // Fix 9 — Conversation context memory: last 10 exchanges, alternating Client/Coach K format
   let recentConvBlock = "";
+  let recentChatText = "";
   try {
     const recentChats = await db.select().from(chatHistory)
       .where(eq(chatHistory.userId, user.id))
       .orderBy(desc(chatHistory.createdAt))
-      .limit(5);
+      .limit(10);
     if (recentChats.length > 0) {
-      const thread = recentChats.reverse().map(c =>
-        `Client said: "${(c.messageIn || "").slice(0, 120)}" — Coach K responded: "${(c.messageOut || "").slice(0, 120)}"`
-      ).join(". ");
-      recentConvBlock = `\n\nRECENT CONVERSATION: ${thread}. Use this context to maintain continuity — do not repeat what was already said, build on it.`;
+      const ordered = recentChats.reverse();
+      const thread = ordered.map(c => {
+        const clientLine = c.messageIn ? `Client: "${(c.messageIn).slice(0, 150)}"` : "";
+        const coachLine = c.messageOut ? `Coach K: "${(c.messageOut).slice(0, 150)}"` : "";
+        return [clientLine, coachLine].filter(Boolean).join("\n");
+      }).join("\n");
+      recentChatText = thread;
+      recentConvBlock = `\n\nRECENT CONVERSATION (last 10 exchanges — build on this, do not repeat):\n${thread}`;
     }
   } catch { }
+
+  // Fix 5 — Ramadan check against recent chat history (in addition to profile notes)
+  const RAMADAN_KW = ["ramadan", "ramadhan", "fasting", "iftar", "suhoor", "sehri", "muslim", "islam", "halaal", "halal"];
+  if (recentChatText && RAMADAN_KW.some(kw => recentChatText.toLowerCase().includes(kw))) {
+    const existingFlags = getSAContextFlags(user);
+    if (!existingFlags.includes("RAMADAN")) {
+      // User mentioned Ramadan in recent chat — inject flag into instruction
+      recentConvBlock += `\n\nRAMADAN / FASTING ACTIVE: Client has mentioned Ramadan or fasting in recent messages. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs. Adjust all meal timing advice to the eating window only.`;
+    }
+  }
 
   const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${recentConvBlock}
 
@@ -2726,6 +2883,37 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       .replace(/'/g, "&apos;");
   }
 
+  // Fix 1 — splitMessage: split long replies at newline boundaries, max 1500 chars per chunk
+  function splitMessage(text: string, maxLen = 1500): string[] {
+    if (text.length <= maxLen) return [text];
+    const lines = text.split("\n");
+    const chunks: string[] = [];
+    let current = "";
+    for (const line of lines) {
+      const candidate = current ? current + "\n" + line : line;
+      if (candidate.length > maxLen) {
+        if (current) chunks.push(current.trim());
+        // If single line itself is over maxLen, split at last space before limit
+        if (line.length > maxLen) {
+          let remaining = line;
+          while (remaining.length > maxLen) {
+            const cutAt = remaining.lastIndexOf(" ", maxLen);
+            const breakAt = cutAt > 0 ? cutAt : maxLen;
+            chunks.push(remaining.slice(0, breakAt).trim());
+            remaining = remaining.slice(breakAt).trim();
+          }
+          current = remaining;
+        } else {
+          current = line;
+        }
+      } else {
+        current = candidate;
+      }
+    }
+    if (current.trim()) chunks.push(current.trim());
+    return chunks.filter(Boolean);
+  }
+
   app.post("/twilio/whatsapp", async (req, res) => {
     try {
       // ---- Twilio signature verification (skip in development) ----
@@ -2766,7 +2954,10 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         await logChat(user[0].id, message, reply, "GPT");
       }
 
-      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${escapeXml(reply)}</Message></Response>`);
+      // Fix 1 — split long replies into multiple TwiML messages (WhatsApp cap ~1600 chars)
+      const chunks = splitMessage(reply);
+      const messageXml = chunks.map(c => `<Message>${escapeXml(c)}</Message>`).join("");
+      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response>${messageXml}</Response>`);
     } catch (err) {
       console.error("Webhook error:", err);
       return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
