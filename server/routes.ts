@@ -1572,13 +1572,13 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     if (msg.includes("6") || lower.includes("pcos")) conditions.push("pcos");
     if (msg.includes("7") || lower.includes("asthma")) conditions.push("asthma");
 
-    // Free-text unlisted condition — store and ask follow-up
+    // Free-text unlisted condition — store and ask follow-up, then re-ask medical question
     if (!isNone && conditions.length === 0) {
       await db.update(users).set({
         otherMedicalNotes: msg,
         onboardingState: "AWAITING_MEDICAL_NOTES",
       }).where(eq(users.phoneNumber, phone));
-      return `Got it, I have noted that. Tell me more about it so I can coach around it properly.`;
+      return `Got it, noted. What type of allergy — food, medication, or environmental?`;
     }
 
     const hasDiabetes = conditions.includes("diabetes");
@@ -1599,9 +1599,9 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     const combined = existing + " | " + msg;
     await db.update(users).set({
       otherMedicalNotes: combined,
-      onboardingState: "ASK_INJURIES",
+      onboardingState: "ASK_MEDICAL",
     }).where(eq(users.phoneNumber, phone));
-    return `Any injuries or physical limitations I must know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
+    return `Got it, I have that noted.\n\nNow — do any of these apply to you?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure / Hypertension\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ TB\n6️⃣ PCOS\n7️⃣ Asthma\n8️⃣ None of these\n\nReply with the number or numbers that apply. Example: 1 and 2.`;
   }
 
   // ---- ASK_INJURIES ----
@@ -1611,7 +1611,7 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
     const hasInjuryWord = lower.includes("knee") || lower.includes("back") || lower.includes("shoulder") || lower.includes("hip") || lower.includes("ankle") || lower.includes("wrist") || lower.includes("elbow") || lower.includes("neck") || lower.includes("surgery") || lower.includes("injury") || lower.includes("pain") || lower.includes("torn") || lower.includes("sprain") || lower.includes("fracture") || lower.includes("disc") || lower.includes("hernia") || lower.includes("arthritis") || lower.includes("condition") || lower.includes("limited") || lower.includes("weak") || lower.includes("problem");
     const isNonAnswer = /^(good lord|lol|haha|ha|wow|what|huh|ok|okay|sure|cool|nice|great|thanks|yep|yeah|nah|oh|ah|hmm|um|erm|eh|interesting|really|seriously|fine|alright|right|gotcha|understood|noted)$/i.test(lower);
     if (!isClearNone && !hasInjuryWord && isNonAnswer) {
-      return `Ha, fair enough. Any physical injuries or limitations I should know about?\n\nBad knees, bad back, bad shoulder, hip problem, recent surgery — anything.\n\nOr say None.`;
+      return `Ha fair enough. Any actual injuries or physical limitations I should know about? Or just say None.`;
     }
     const injuries = isClearNone ? "" : msg;
     await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
@@ -1791,20 +1791,22 @@ async function handleOnboarding(user: any, message: string, phone: string): Prom
 // ============================================================
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string): Promise<string> {
-  const user = await getOrCreateUser(phone);
+  try {
   const m = message.toLowerCase().trim();
 
-  // ---- RESET — highest priority, runs before everything ----
+  // ---- FIX 1: RESET — absolute first, before getOrCreateUser, before everything ----
   if (m === "reset") {
-    if (user?.id) {
-      await db.delete(chatHistory).where(eq(chatHistory.userId, user.id));
-      await db.delete(stepLogs).where(eq(stepLogs.userId, user.id));
-      await db.delete(workoutLogs).where(eq(workoutLogs.userId, user.id));
-      await db.delete(weightLogs).where(eq(weightLogs.userId, user.id));
-      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, user.id));
-      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, user.id));
-      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, user.id));
-      await db.delete(users).where(eq(users.id, user.id));
+    const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (existing.length > 0) {
+      const uid = existing[0].id;
+      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
+      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
+      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(users).where(eq(users.id, uid));
     }
     await db.insert(users).values({
       phoneNumber: phone,
@@ -1820,6 +1822,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     });
     return "Fresh start. What's your name?";
   }
+
+  const user = await getOrCreateUser(phone);
 
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
@@ -2330,6 +2334,11 @@ CRITICAL RULES — these are non-negotiable:
   }
 
   return gptReply;
+
+  } catch (err) {
+    console.error("[handleMessage FATAL]", phone, message, err);
+    return "Eish, something went wrong on my side. Give me a second and try again.";
+  }
 }
 
 // ============================================================

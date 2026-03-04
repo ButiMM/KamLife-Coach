@@ -1,0 +1,24 @@
+In server/routes.ts and server/scheduler.ts make these final additions. These are the last things needed before real clients can use this product.
+Fix 1 — Calorie calculation audit. Find every place in the codebase where calorieTarget or proteinTarget is calculated or set. Replace all of them with this single consistent formula function called calculateTargets that takes weight, goalType, lifeSituation, and trainingDaysPerWeek as inputs and returns calorieTarget and proteinTarget.
+The formula:
+Base metabolic rate is weight multiplied by 22.
+Activity multiplier: sedentary desk job is 1.3. Physically active job is 1.5. Student is 1.35. Unemployed is 1.25. Retired is 1.2. Stay at home parent is 1.3.
+Training adjustment: add 200 calories per training day divided across the week. Three training days adds 86 calories. Four days adds 114. Five days adds 143.
+Goal adjustment: fat loss subtracts 400 from total. Muscle gain adds 400. Recomposition adds 0. General fitness adds 100.
+Final calorie target is BMR multiplied by activity multiplier plus training adjustment plus goal adjustment. Never below 1200 for women. Never below 1500 for men. Never above 4500 for anyone.
+Protein target: fat loss is weight multiplied by 2. Muscle gain is weight multiplied by 2.4. Recomposition is weight multiplied by 2.2. General fitness is weight multiplied by 1.8.
+Call this function during onboarding completion and store results. Also call it whenever the client states a new weight or new goal in conversation and update the stored values immediately.
+Fix 2 — Coach K must always know the correct targets. In the instruction string built inside handleMessage replace any reference to stored calorieTarget and proteinTarget with a live recalculation using calculateTargets every single time. This means even if the database has a wrong value stored GPT always receives the correctly calculated number.
+Fix 3 — Add these five missing conversation handlers that real clients will definitely use. Add them inside handleMessage before the GPT call.
+Handler 1 — Progress check. If message contains how am i doing or my progress or am i on track — query the last 7 days of logs, calculate percentage of protein target hit on average, calculate training sessions completed versus planned, calculate weight change, and respond with a specific 4 sentence summary. No GPT call needed.
+Handler 2 — Supplement questions. If message contains creatine or protein powder or pre workout or supplements or what should i take — route to GPT with specific instruction to give honest SA priced supplement advice based on their goal. Creatine for everyone. Protein powder only if food protein is consistently under target. Pre workout is black coffee. No fat burners ever.
+Handler 3 — Motivation and struggle. If message contains i want to quit or this is too hard or i cant do this or not seeing results or nothing is working — route to GPT with instruction to respond with empathy first then one specific data point from their logs that shows real progress even if small then one single action. Never a list. Never generic motivation.
+Handler 4 — Injury during training. If message contains i hurt or something hurts or pain or pulled or strained or injured — respond immediately with stop training that body part, rest today, if severe see a doctor, then suggest what they CAN train safely around the injury. No GPT needed for the stop and rest part — that is hardcoded for speed.
+Handler 5 — Period and cycle tracking. If message contains my period or time of the month or pms or that time — respond with specific coaching for their cycle phase. Ask which phase they are in — just started, middle of cycle, PMS week, or period week. Then give specific training and nutrition advice for that phase based on COACH_K_SYSTEM knowledge.
+Fix 4 — Final onboarding message must deliver everything immediately. When onboarding reaches COMPLETE state calculate targets using calculateTargets, build their first week programme using the existing programme builder, generate their first 3 day meal plan using buildMealPlan, and send all three in one comprehensive message formatted like this:
+[Name], your Coach K profile is set. Here is everything you need to start today.
+Your targets: [calories] calories per day. [protein]g protein per day.
+Your programme: [full first week programme based on their experience, equipment, days, injuries]
+Your first 3 days of meals: [Monday Tuesday Wednesday from buildMealPlan]
+Your first action today: [one specific thing based on their goal and life situation — not generic]
+Reply MEAL PLAN for your full 7 day plan. Reply MENU anytime to see all options.
