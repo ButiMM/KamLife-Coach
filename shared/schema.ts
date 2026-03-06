@@ -64,6 +64,7 @@ export const users = pgTable("users", {
   elderlyClient: boolean("elderly_client").default(false),
   awaitingProgrammeAnswers: boolean("awaiting_programme_answers").default(false),
   otherMedicalNotes: text("other_medical_notes"),
+  sex: text("sex"),
 }, (table) => {
   return {
     phoneIdx: index("users_phone_idx").on(table.phoneNumber),
