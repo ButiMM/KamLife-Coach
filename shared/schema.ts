@@ -85,7 +85,6 @@ export const users = pgTable(
       false,
     ),
     otherMedicalNotes: text("other_medical_notes"),
-    sex: text("sex"),
   },
   (table) => {
     return {
