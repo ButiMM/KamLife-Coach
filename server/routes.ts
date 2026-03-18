@@ -2058,7 +2058,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       createdAt: new Date(),
       lastActiveAt: new Date(),
     });
-    return "Fresh start. What's your name?";
+   
   }
 
   const user = await getOrCreateUser(phone);
