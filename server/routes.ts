@@ -1622,6 +1622,7 @@ function calculateTargets(
   const activityMult: Record<string, number> = {
     office: 1.3, student: 1.35, unemployed: 1.25, retired: 1.2,
     stay_home_parent: 1.3, retail_physical: 1.5,
+    "1": 1.35, "2": 1.3, "3": 1.5, "4": 1.25, "5": 1.3, "6": 1.2,
   };
   const mult = activityMult[lifeSituation] || 1.3;
 
@@ -2058,7 +2059,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       createdAt: new Date(),
       lastActiveAt: new Date(),
     });
-   
+    return "Fresh start. What's your name?";
   }
 
   const user = await getOrCreateUser(phone);
@@ -2319,43 +2320,6 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     return "I received your file but I can only process voice notes and food photos. Send those or type your message.";
   }
 
-  // ---- RESET (direct) ----
-  if (m.includes("reset") || m.includes("start over") || m.includes("start again") || m.includes("profile reset") || m.includes("begin again")) {
-    await db.update(users).set({
-      onboardingState: "WELCOME",
-      name: null,
-      age: null,
-      currentWeight: null,
-      height: null,
-      bmi: null,
-      goalType: null,
-      lifeSituation: null,
-      medicalConditions: null,
-      nutritionProtocol: null,
-      mealTimingStrict: false,
-      doctorClearanceRequired: false,
-      injuries: null,
-      trainingLocation: null,
-      trainingMode: "home",
-      gymName: null,
-      homeEquipment: null,
-      trainingDaysPerWeek: null,
-      trainingExperience: null,
-      weeklyFoodBudget: null,
-      budgetLevel: null,
-      workSchedule: null,
-      elderlyClient: false,
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      calorieTarget: null,
-      proteinTarget: null,
-      totalWorkoutsCompleted: 0,
-      awaitingProgrammeAnswers: false,
-      subscriptionStatus: "trial",
-    }).where(eq(users.phoneNumber, phone));
-    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7. What's your name?`;
-  }
 
   // ---- DONE — workout complete (direct) ----
   if (m === "done" || m === "workout done" || m === "finished" || m === "completed") {
