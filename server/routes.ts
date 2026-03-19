@@ -2106,7 +2106,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- SHOPPING LIST command ----
-  if (m === "shopping list" || m === "shoppinglist" || m === "shopping") {
+  if (m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
     const budget = user.weeklyFoodBudget || "100_300";
     const goal = user.goalType || "fat_loss";
     const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
@@ -2360,6 +2360,19 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     user.proteinTarget = newProtein;
   }
 
+  // ---- WEIGHT UPDATE (explicit) — "I weigh 83kg", "my weight is 83kg", bare "83kg" ----
+  const isExplicitWeight = /\b(weigh|weight is|weight now|i am|i'm)\b/.test(m) || /^\d{2,3}(\.\d)?\s*kg$/.test(m.trim());
+  const explicitKgMatch = m.match(/\b(\d{2,3}(?:\.\d)?)\s*kg\b/);
+  if (isExplicitWeight && explicitKgMatch) {
+    const newKg = parseFloat(explicitKgMatch[1]);
+    if (newKg >= 35 && newKg <= 250) {
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(newKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
+      await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+      return `Weight updated to ${newKg}kg. New targets — calories: ${newCals}, protein: ${newProtein}g. On track.`;
+    }
+  }
+
   // ---- WEIGHT MENTION: update stored weight if client states a different one ----
   const weightInMsg = m.match(/\b(\d{2,3}(?:\.\d)?)\s*kg\b/);
   if (weightInMsg) {
@@ -2565,6 +2578,30 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     return `Your daily protein target is ${user.proteinTarget}g. Spread across 3 to 4 meals.`;
+  }
+  if (["weight", "my weight", "current weight"].includes(m)) {
+    const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";
+    return `Your last logged weight is ${w}. To update it just send your weight like this: 84kg`;
+  }
+  if (["programme", "program", "my programme", "my program"].includes(m)) {
+    return getKamlifeProgramme(user);
+  }
+  if (["meal plan", "meals", "my meals", "food plan"].includes(m)) {
+    return getOnboardingMealPlan(user);
+  }
+  if (["progress", "my progress", "how am i doing"].includes(m)) {
+    const daysOn = user.programmeStartDate
+      ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
+      : 0;
+    const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
+    return `Here is your progress so far.\nWorkouts completed: ${user.totalWorkoutsCompleted || 0}.\nProgramme week: ${user.programmeWeek || 1}.\nDays on programme: ${daysOn}.\nWeight: ${w}.\nKeep going.`;
+  }
+  if (["targets", "my targets", "goals"].includes(m)) {
+    const goalLabel: Record<string, string> = {
+      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
+      general: "General fitness", health_condition: "Health management",
+    };
+    return `Your daily targets.\nCalories: ${user.calorieTarget || "not set"}.\nProtein: ${user.proteinTarget || "not set"}g.\nSteps: ${user.stepsTarget || "not set"}.\nWeight goal: ${goalLabel[user.goalType || ""] || user.goalType || "not set"}.`;
   }
 
   // ---- EVERYTHING ELSE → GPT decides ----
