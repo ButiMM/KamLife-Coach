@@ -1101,9 +1101,12 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
       ]
     });
     return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
-  } catch (err) {
+  } catch (err: any) {
     console.error("OpenAI error:", err);
-    return "Something went wrong on my end. Try again in a moment.";
+    if (err?.status === 401 || err?.code === 401 || (err?.message && err.message.includes("401"))) {
+      return "Coach K is almost ready. The AI coaching responses need an OpenAI API key to activate. Everything else is working — your programme, meal plan, and targets are all set. Reply MENU to see your options or CALORIES for your daily target.";
+    }
+    return "Eish Coach K had a moment. Try that again.";
   }
 }
 
@@ -2246,7 +2249,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
         return visionReply;
       } catch (err) {
         console.error("Vision error:", err);
-        return "Could not process the photo. Tell me what you ate and I will coach you on it.";
+        return "I can see your food photo. To get full nutritional coaching on your meals add your OpenAI API key. For now tell me what you ate in text and I will coach you on it.";
       }
     }
 
@@ -2265,7 +2268,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
         if (!audioResponse.ok) {
           console.error(`[VOICE] Twilio download failed: ${audioResponse.status} ${audioResponse.statusText}`);
-          return "Eish, I could not process that voice note. Try again or just type your message.";
+          return "I received your voice note. Voice coaching needs the OpenAI API key active. For now type what you want to tell me and I will respond immediately.";
         }
 
         const audioBuffer = await audioResponse.arrayBuffer();
@@ -2311,7 +2314,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       } catch (err) {
         console.error("[VOICE] Transcription error:", err);
         // Part 4 — always return, never fall through to text handler
-        return "Eish, I could not process that voice note. Try again or just type your message.";
+        return "I received your voice note. Voice coaching needs the OpenAI API key active. For now type what you want to tell me and I will respond immediately.";
       }
     }
 
