@@ -5,6 +5,7 @@ import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
+import { SA_FOODS_SEED, type SAFood } from "./foods";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1241,6 +1242,39 @@ async function getStepStreak(userId: string): Promise<number> {
     return streak;
   } catch { return 0; }
 }
+
+// ============================================================
+// SA FOOD SCANNER — in-memory match against 40 SA foods
+// ============================================================
+
+function scanForSAFoods(msg: string): SAFood[] {
+  const lower = msg.toLowerCase();
+  const matched: SAFood[] = [];
+  for (const food of SA_FOODS_SEED) {
+    const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
+    if (allAliases.some(alias => lower.includes(alias))) {
+      if (!matched.find(f => f.name === food.name)) matched.push(food);
+    }
+  }
+  return matched;
+}
+
+// ============================================================
+// SLEEP RESPONSES — rotating hardcoded, no GPT
+// ============================================================
+
+const SLEEP_RESPONSES_LOW = [
+  (h: number) => `${h} hours is not enough. Sleep is when your body burns fat and repairs muscle. Under 7 hours and cortisol spikes — that blocks fat loss directly. Tonight: phone off 30 minutes before bed. Lights off by 9:30pm.`,
+  (h: number) => `${h} hours of sleep is below what your body needs to recover. When you undersleep, the next day's training suffers and fat loss slows. One action: set a bedtime alarm for tonight.`,
+  (h: number) => `${h} hours is affecting your results more than your diet. Poor sleep raises hunger hormones and tanks motivation. Fix tonight first: no screen 30 minutes before bed.`,
+];
+const SLEEP_RESPONSES_GOOD = [
+  (h: number) => `${h} hours — solid. Your body does its best work between 7 and 9 hours. Recovery is happening. Keep this up and your results will reflect it.`,
+  (h: number) => `${h} hours of quality sleep. That is where the fat loss and muscle repair actually happen. Good work — rest is training.`,
+];
+const SLEEP_RESPONSES_HIGH = [
+  (h: number) => `${h} hours is more than enough for recovery. If you are regularly sleeping this much, check your stress levels or iron intake — oversleeping can signal burnout or anaemia. How is your energy when you wake up?`,
+];
 
 const STEP_RESPONSES_LOW = [
   (steps: number, remaining: number, target: number) =>
@@ -2528,8 +2562,41 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     }
   }
 
+  // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
+  const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
+  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
+  const isShortFoodMsg = !isQuestion && m.split(/\s+/).length <= 7;
+  if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
+    const foundFoods = scanForSAFoods(m);
+    if (foundFoods.length > 0) {
+      const totalCals = foundFoods.reduce((s, f) => s + f.typicalPortionCalories, 0);
+      const totalProtein = foundFoods.reduce((s, f) => s + f.typicalPortionProtein, 0);
+      const calorieTarget = user.calorieTarget || 2000;
+      const proteinTarget = user.proteinTarget || 120;
+      const junkFoods = foundFoods.filter(f => f.category === "junk");
+      const goodProteins = foundFoods.filter(f => f.category === "protein");
+      const foodLines = foundFoods.map(f =>
+        `• ${f.name}: ~${f.typicalPortionCalories} kcal, ${f.typicalPortionProtein}g protein (${f.typicalPortionDescription})`
+      ).join("\n");
+      const calRemaining = calorieTarget - totalCals;
+      const proteinRemaining = proteinTarget - totalProtein;
+      let coachNote = "";
+      if (junkFoods.length > 0 && goodProteins.length === 0) {
+        coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken. Coach the next meal, not the last one.`;
+      } else if (goodProteins.length > 0 && totalProtein >= 20) {
+        coachNote = `\n\nSolid protein choice. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for this meal. ✅"}`;
+      } else if (foundFoods.some(f => f.category === "carb") && goodProteins.length === 0) {
+        coachNote = `\n\nCarbs without protein — add a protein source to this meal. Eggs, pilchards, or beans work.`;
+      }
+      const junkNote = junkFoods.length > 0 ? `\n\n${junkFoods[0].notes}` : "";
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\nRemaining today: ~${Math.max(0, calRemaining)} kcal${coachNote}${junkNote}`;
+      await logChat(user.id, message, reply, "FOOD_LOG");
+      return reply;
+    }
+  }
+
   // ---- FIX 3: HANDLER 1 — Progress check ----
-  if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress") || m === "this week" || m === "week" || m === "week summary" || m === "my week" || m === "weekly summary" || m.includes("how was my week") || m.includes("this weeks progress")) {
+  if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress") || m === "this week" || m === "week" || m === "week summary" || m === "my week" || m === "weekly summary" || m === "6" || m === "weekly report" || m === "report" || m.includes("how was my week") || m.includes("this weeks progress")) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
       const [recentSteps, recentWorkouts, recentWeights] = await Promise.all([
@@ -2707,6 +2774,55 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
         ? `🔥 ${streak}-day step streak. You are building something real. Keep it going.`
         : `${streak} days in a row. Keep adding days — streaks build habits.`;
     return `${streakMsg}\n\nTotal workouts completed: ${workoutCount}.`;
+  }
+
+  // ---- MENU NUMBER SHORTCUTS ----
+  if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
+    return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
+  }
+  if (m === "3" || m === "log steps" || m === "step log") {
+    return `Send me your step count and I will log it.\n\nExamples:\n• "8500 steps"\n• "I walked 5km"\n• "10,000 steps done"\n\nYour daily target: ${user.stepsTarget?.toLocaleString() || "7,000"} steps.`;
+  }
+  if (m === "4" || m === "log sleep" || m === "sleep log") {
+    return `Send me how many hours you slept.\n\nExamples:\n• "I slept 6 hours"\n• "7 hours sleep"\n• "bad sleep, maybe 5 hours"\n\nTarget: 7–9 hours for full recovery and fat loss.`;
+  }
+  if (m === "5" || m === "log weight" || m === "weight log") {
+    return `Send me your weight and I will log it.\n\nExamples:\n• "84.5kg"\n• "I weigh 91kg"\n• "weighed in at 78kg this morning"\n\nWeigh in first thing in the morning, after toilet, before food. Same conditions every time.`;
+  }
+  if (m === "7" || m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
+    return `*Measurements Check-In*\n\nSend me your current measurements in this format:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nMeasure first thing in morning, relaxed (not flexed). Same spot every time. The tape does not lie even when the scale does.`;
+  }
+
+  // ---- SLEEP LOGGING — hardcoded, no GPT ----
+  const sleepMatch = m.match(/\b(slept|sleep|sleeping)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)/i)
+    || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
+    || m.match(/\b(bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia)\b/i);
+
+  if (sleepMatch) {
+    const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+    const hours = hoursStr ? parseFloat(hoursStr[1]) : null;
+    const isBadSleep = /bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia/i.test(m);
+
+    let sleepReply = "";
+    if (isBadSleep && !hours) {
+      sleepReply = `Poor sleep affects fat loss more than a bad meal. Cortisol rises, hunger hormones spike, motivation drops. One fix tonight: no phone in the bedroom. Dark, cool, quiet. Your body will do the rest.`;
+    } else if (hours !== null) {
+      if (hours < 5) {
+        sleepReply = `${hours} hours — that is not enough for recovery. Today's training will suffer and fat storage increases with this little sleep. Rest today if you can. Tonight: hard stop on screens by 9pm.`;
+      } else if (hours < 7) {
+        const idx = Math.floor(Date.now() / 86400000) % SLEEP_RESPONSES_LOW.length;
+        sleepReply = SLEEP_RESPONSES_LOW[idx](hours);
+      } else if (hours <= 9) {
+        const idx = Math.floor(Date.now() / 86400000) % SLEEP_RESPONSES_GOOD.length;
+        sleepReply = SLEEP_RESPONSES_GOOD[idx](hours);
+      } else {
+        sleepReply = SLEEP_RESPONSES_HIGH[0](hours);
+      }
+    } else {
+      sleepReply = `Log your sleep hours so I can track your recovery — just say something like "I slept 7 hours".`;
+    }
+    await logChat(user.id, message, sleepReply, "SLEEP_LOG");
+    return sleepReply;
   }
 
   // ---- EVERYTHING ELSE → GPT decides ----
