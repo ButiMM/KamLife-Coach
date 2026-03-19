@@ -2553,6 +2553,17 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     return cycleReply;
   }
 
+  // ---- QUICK STAT LOOKUPS — never touch GPT ----
+  if (["calories", "what are my calories", "my calories", "calorie target"].includes(m)) {
+    return `Your daily target is ${user.calorieTarget} calories and ${user.proteinTarget}g protein. Based on your weight, goal, and activity level.`;
+  }
+  if (["steps", "my steps", "step target"].includes(m)) {
+    return `Your daily steps target is ${user.stepsTarget} steps.`;
+  }
+  if (["protein", "my protein", "protein target"].includes(m)) {
+    return `Your daily protein target is ${user.proteinTarget}g. Spread across 3 to 4 meals.`;
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
