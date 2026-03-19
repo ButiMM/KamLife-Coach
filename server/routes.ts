@@ -2554,13 +2554,13 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   }
 
   // ---- QUICK STAT LOOKUPS — never touch GPT ----
-  if (["calories", "what are my calories", "my calories", "calorie target"].includes(m)) {
+  if (["calories", "calorie", "what are my calories", "what are my calories for the day", "how many calories", "my calories", "calorie target", "my calorie target"].includes(m)) {
     return `Your daily target is ${user.calorieTarget} calories and ${user.proteinTarget}g protein. Based on your weight, goal, and activity level.`;
   }
-  if (["steps", "my steps", "step target"].includes(m)) {
+  if (["steps", "my steps", "step target", "daily steps", "steps daily", "how many steps", "my steps target", "steps target"].includes(m)) {
     return `Your daily steps target is ${user.stepsTarget} steps.`;
   }
-  if (["protein", "my protein", "protein target"].includes(m)) {
+  if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     return `Your daily protein target is ${user.proteinTarget}g. Spread across 3 to 4 meals.`;
   }
 
