@@ -102,6 +102,8 @@ app.use((req, res, next) => {
     () => {
       log(`serving on port ${port}`);
       initScheduler();
+      initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
+      initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
     },
   );
 })();

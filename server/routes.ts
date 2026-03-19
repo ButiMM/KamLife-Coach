@@ -1200,6 +1200,48 @@ Or just tell me what you ate, how training went, your steps, or anything on your
 // ROTATING STEP RESPONSES (no GPT cost for simple logs)
 // ============================================================
 
+// ============================================================
+// WORKOUT DONE — rotating hardcoded celebrations (no GPT)
+// ============================================================
+
+const WORKOUT_DONE_RESPONSES = [
+  (total: number, day: number) => `Workout ${total} done. Day ${day} logged and banked. Rest, eat your protein, come back stronger.`,
+  (total: number, day: number) => `Session ${total} complete. Day ${day} in the books. Consistency over intensity — every single time.`,
+  (total: number, day: number) => `${total} workouts done. You showed up when it was hard. That is the difference between clients who change and clients who talk about it.`,
+  (total: number, day: number) => `Done. ${total} sessions logged. Your body is adapting right now, even if you cannot see it yet. Trust the process.`,
+  (total: number, day: number) => `Workout ${total} complete. Day ${day} ticked off. No shortcuts, no excuses. That is how Coach K clients do it.`,
+  (total: number, _day: number) => `${total} sessions and counting. You did not feel like it and you did it anyway. That is the whole game.`,
+];
+
+// ============================================================
+// STREAK HELPER — counts consecutive days with step logs
+// ============================================================
+
+async function getStepStreak(userId: string): Promise<number> {
+  try {
+    const logs = await db.select({ loggedAt: stepLogs.loggedAt })
+      .from(stepLogs).where(eq(stepLogs.userId, userId))
+      .orderBy(desc(stepLogs.loggedAt)).limit(90);
+    if (logs.length === 0) return 0;
+    const days = new Set<string>();
+    for (const log of logs) {
+      const d = new Date(log.loggedAt!);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    }
+    let streak = 0;
+    const checkDate = new Date();
+    const todayKey = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
+    if (!days.has(todayKey)) checkDate.setDate(checkDate.getDate() - 1);
+    while (true) {
+      const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    return streak;
+  } catch { return 0; }
+}
+
 const STEP_RESPONSES_LOW = [
   (steps: number, remaining: number, target: number) =>
     `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. Walk to the shop, take the stairs, park further. Close that gap before bed.`,
@@ -2343,9 +2385,11 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
 
-    const celebration = await askCoachK("I just completed my workout", user, `Client just finished workout number ${newTotal}. Celebrate specifically. Reference their phase and total workouts. One sentence. SA voice.`);
+    const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
+    const celebration = celebrationFn(newTotal, newDay);
     const perfectDay = await checkPerfectDay(user.id);
-    return `${celebration}\n\n✅ Workout ${newTotal} logged.${newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : ""}${perfectDay || ""}`;
+    const milestoneNote = newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : newTotal === 10 ? "\n\n🔥 10 sessions. You are no longer a beginner." : newTotal === 25 ? "\n\n💥 25 workouts logged. This is becoming a lifestyle." : newTotal === 50 ? "\n\n🏆 50 sessions. Halfway to a hundred. Incredible." : "";
+    return `${celebration}${milestoneNote}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
   }
 
   // ---- GOAL CHANGE: wants muscle but profile says fat loss / low calories ----
@@ -2476,15 +2520,16 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       await db.insert(stepLogs).values({ userId: user.id, steps });
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       const stepReply = getStepResponse(steps, target);
-      const perfectDay = await checkPerfectDay(user.id);
-      const fullReply = stepReply + (perfectDay || "");
+      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+      const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
+      const fullReply = stepReply + streakNote + (perfectDay || "");
       await logChat(user.id, message, fullReply, "STEP_LOG");
       return fullReply;
     }
   }
 
   // ---- FIX 3: HANDLER 1 — Progress check ----
-  if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress")) {
+  if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress") || m === "this week" || m === "week" || m === "week summary" || m === "my week" || m === "weekly summary" || m.includes("how was my week") || m.includes("this weeks progress")) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
       const [recentSteps, recentWorkouts, recentWeights] = await Promise.all([
@@ -2602,6 +2647,66 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       general: "General fitness", health_condition: "Health management",
     };
     return `Your daily targets.\nCalories: ${user.calorieTarget || "not set"}.\nProtein: ${user.proteinTarget || "not set"}g.\nSteps: ${user.stepsTarget || "not set"}.\nWeight goal: ${goalLabel[user.goalType || ""] || user.goalType || "not set"}.`;
+  }
+
+  // ---- NEW: BMI ----
+  if (["bmi", "my bmi", "what is my bmi", "what's my bmi", "check bmi"].includes(m)) {
+    if (!user.bmi) {
+      return `Your BMI has not been calculated yet. Send me your weight and height — for example: "I am 75kg and 1.72m tall" — and I will calculate it.`;
+    }
+    const bmiVal = parseFloat(String(user.bmi));
+    const cat = bmiVal < 18.5 ? "underweight" : bmiVal < 25 ? "healthy weight range" : bmiVal < 30 ? "overweight range" : "obese range";
+    const bmiNote = bmiVal < 18.5
+      ? "Focus on eating enough — caloric surplus, high protein, strength training."
+      : bmiVal < 25
+        ? "Solid baseline. Build on this with consistency."
+        : bmiVal < 30
+          ? "Room to improve. Your programme and targets are calibrated for this."
+          : "Meaningful progress is possible. Stay on the programme.";
+    return `Your BMI is ${bmiVal.toFixed(1)} — ${cat}.\n\n${bmiNote}\n\nBMI is one number, not the full picture. Strength, energy, and consistency matter more.`;
+  }
+
+  // ---- NEW: TODAY'S WORKOUT ----
+  if (["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
+    "1", "day 1", "day 2", "day 3", "day 4", "day 5", "day 6"].includes(m)) {
+    const dayMatch = m.match(/^day\s*([1-6])$/);
+    if (dayMatch) {
+      const requestedDay = parseInt(dayMatch[1]);
+      const dayUser = { ...user, programmeDayInWeek: requestedDay };
+      const workout = buildDayWorkout(dayUser);
+      return `*Day ${requestedDay} Workout*\n\n${workout}`;
+    }
+    const workout = buildDayWorkout(user);
+    const dayNum = user.programmeDayInWeek || 1;
+    return `*Day ${dayNum} — Your Workout Today*\n\n${workout}`;
+  }
+
+  // ---- NEW: NEXT WORKOUT ----
+  if (["next", "next workout", "tomorrow", "what's next", "whats next", "next session", "next day"].includes(m)) {
+    const currentDay = user.programmeDayInWeek || 1;
+    const daysPerWeek = user.trainingDaysPerWeek || 3;
+    let nextDay = currentDay + 1;
+    let nextWeek = user.programmeWeek || 1;
+    if (nextDay > daysPerWeek) { nextDay = 1; nextWeek++; }
+    if (nextWeek > 4) nextWeek = 4;
+    const nextDayUser = { ...user, programmeDayInWeek: nextDay, programmeWeek: nextWeek };
+    const nextWorkout = buildDayWorkout(nextDayUser);
+    return `*Next Up — Day ${nextDay}*\n\nComplete today's session first, then this is what's waiting for you.\n\n${nextWorkout}`;
+  }
+
+  // ---- NEW: STREAK ----
+  if (["streak", "my streak", "step streak", "current streak"].includes(m)) {
+    const streak = await getStepStreak(user.id);
+    const workoutCount = user.totalWorkoutsCompleted || 0;
+    if (streak === 0) {
+      return `No step streak yet. Log today's steps to start one. Every streak starts at 1.`;
+    }
+    const streakMsg = streak >= 7
+      ? `🔥 ${streak}-day step streak. That is serious consistency — do not stop now.`
+      : streak >= 3
+        ? `🔥 ${streak}-day step streak. You are building something real. Keep it going.`
+        : `${streak} days in a row. Keep adding days — streaks build habits.`;
+    return `${streakMsg}\n\nTotal workouts completed: ${workoutCount}.`;
   }
 
   // ---- EVERYTHING ELSE → GPT decides ----
