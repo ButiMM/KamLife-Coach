@@ -378,6 +378,106 @@ cron.schedule("0 6 * * 0", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 9 — EARLY ONBOARDING (Days 1, 2, 3)
+// Runs 10am SAST (8am UTC) daily
+// ============================================================
+
+cron.schedule("0 8 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Early onboarding check");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    try {
+      const days = programmeDaysSince(client.programmeStartDate);
+      const name = client.name || "champ";
+      if (days === 1) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• "2" to log food\n• "3" to log your steps\n\nOne small action today is better than a perfect week planned and not started.`
+        );
+      } else if (days === 2) {
+        await sendWhatsApp(client.phoneNumber,
+          `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`
+        );
+      } else if (days === 3) {
+        await sendWhatsApp(client.phoneNumber,
+          `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead. Send me today's food and keep the momentum going.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Early onboarding error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 10 — MONTHLY MEASUREMENTS
+// Runs 1st of each month, 9am SAST (7am UTC)
+// ============================================================
+
+cron.schedule("0 7 1 * *", async () => {
+  console.log("[SCHEDULER] JOB: Monthly measurements");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    try {
+      const name = client.name || "champ";
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, it is the 1st. Measurement day.\n\nGet a tape measure and send me:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nWeigh in as well. Same conditions — morning, after bathroom, before food. The tape does not lie when the scale does.`
+      );
+    } catch (err) {
+      console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 11 — SA CULTURAL CALENDAR
+// Runs 7am SAST (5am UTC) daily — only fires on specific dates
+// ============================================================
+
+function getSACulturalEvent(month: number, day: number): ((name: string) => string) | null {
+  if (month === 1 && day === 1) return (n) =>
+    `Happy New Year, ${n}. Everyone starts January motivated. Most are done by the 15th. You will not be most people. Today — one training session and one good meal. That is how the year starts. Not with a resolution. With an action.`;
+
+  if (month === 6 && day === 16) return (n) =>
+    `Youth Day, ${n}. Today honours those who stood up when it was hard. Your fitness journey is not political — but the principle is the same. Do the hard thing today. Send me your workout when you're done.`;
+
+  if (month === 8 && day === 9) return (n) =>
+    `Women's Day, ${n}. To every woman on this programme — the strength you are building in the gym is the same strength that carries everything else. Today's session is for you. Do it for you. Reply "today" for your workout.`;
+
+  if (month === 9 && day === 24) return (n) =>
+    `Heritage Day, ${n}. National Braai Day. Here is your braai coaching: boerewors — 36g protein per coil, high fat. Chicken — always remove skin. Corn on the braai — fine as a carb. Potato salad — skip the mayo or go small. Beer — 150 calories each, zero protein. Enjoy the braai and log your food tonight.`;
+
+  if (month === 12 && day === 1) return (n) =>
+    `${n}, December starts today. This is the month most programmes fall apart. Two rules for the whole month: protein at every meal and at least one training session per week. Everything else is negotiable. Festive season is not an excuse. It is a test.`;
+
+  if (month === 12 && day === 16) return (n) =>
+    `Day of Reconciliation, ${n}. Festive season is in full swing. Your body does not take public holidays. Keep the protein up and do not let December undo what you built all year. You are too far in to stop now.`;
+
+  return null;
+}
+
+cron.schedule("0 5 * * *", async () => {
+  const now = new Date();
+  const month = now.getMonth() + 1;
+  const day = now.getDate();
+  const eventFn = getSACulturalEvent(month, day);
+  if (!eventFn) return;
+
+  console.log(`[SCHEDULER] JOB: Cultural event — ${month}/${day}`);
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    try {
+      const name = client.name || "champ";
+      await sendWhatsApp(client.phoneNumber, eventFn(name));
+    } catch (err) {
+      console.error(`[SCHEDULER] Cultural event error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 
@@ -392,5 +492,8 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Silence detection    — every 12 hours");
   console.log("[SCHEDULER]   Friday strategy      — Friday 4pm SAST");
   console.log("[SCHEDULER]   Sunday weekly report — Sunday 8am SAST");
+  console.log("[SCHEDULER]   Days 1-3 onboarding  — daily 10am SAST");
+  console.log("[SCHEDULER]   Monthly measurements  — 1st of each month 9am SAST");
+  console.log("[SCHEDULER]   SA cultural calendar  — Heritage Day, Women's Day, New Year, etc.");
   console.log(`[SCHEDULER]   Ramadan mode         — ${ramadanActive ? "ACTIVE ☪️" : "inactive"}`);
 }

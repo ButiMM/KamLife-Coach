@@ -2109,6 +2109,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const crisisName = crisisUser[0]?.name || "friend";
     const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
     try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch { }
+    // Alert the coach immediately if COACH_ALERT_PHONE is set
+    const coachAlertPhone = process.env.COACH_ALERT_PHONE;
+    if (coachAlertPhone && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+      try {
+        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+        await alertClient.messages.create({
+          from: fromNum,
+          to: `whatsapp:${coachAlertPhone}`,
+          body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
+        });
+        console.log(`[CRISIS] Coach alert sent to ${coachAlertPhone}`);
+      } catch (e) { console.error("[CRISIS] Coach alert failed:", e); }
+    }
     return crisisReply;
   }
 
@@ -2422,7 +2436,17 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
     const celebration = celebrationFn(newTotal, newDay);
     const perfectDay = await checkPerfectDay(user.id);
-    const milestoneNote = newTotal === 1 ? "\n\n🏆 First workout done. Most people never start." : newTotal === 10 ? "\n\n🔥 10 sessions. You are no longer a beginner." : newTotal === 25 ? "\n\n💥 25 workouts logged. This is becoming a lifestyle." : newTotal === 50 ? "\n\n🏆 50 sessions. Halfway to a hundred. Incredible." : "";
+    const milestoneNote = newTotal === 1
+      ? "\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this."
+      : newTotal === 10
+        ? "\n\n🔥 *10 sessions with Coach K.* You are past the hardest part. Send this to someone who said you would quit."
+        : newTotal === 25
+          ? "\n\n💪 *25 sessions completed.* A month of real work. This is a lifestyle now. Share your progress — you earned it."
+          : newTotal === 50
+            ? "\n\n🏆 *50 workouts done.* Half a century of sessions. Put this in your family WhatsApp group. Genuinely rare."
+            : newTotal === 100
+              ? "\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this."
+              : "";
     return `${celebration}${milestoneNote}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
   }
 
@@ -2714,6 +2738,50 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       general: "General fitness", health_condition: "Health management",
     };
     return `Your daily targets.\nCalories: ${user.calorieTarget || "not set"}.\nProtein: ${user.proteinTarget || "not set"}g.\nSteps: ${user.stepsTarget || "not set"}.\nWeight goal: ${goalLabel[user.goalType || ""] || user.goalType || "not set"}.`;
+  }
+
+  // ---- NEW: CUMULATIVE STATS ----
+  if (["stats", "my stats", "all time", "my journey", "total", "overall", "my results", "how far"].includes(m)) {
+    try {
+      const [stepsTotal, firstWeight, lastWeight] = await Promise.all([
+        db.select({ total: sql<string>`COALESCE(SUM(steps), 0)` }).from(stepLogs).where(eq(stepLogs.userId, user.id)),
+        db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1),
+        db.select().from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1),
+      ]);
+      const totalSteps = Number(stepsTotal[0]?.total || 0);
+      const totalWorkouts = user.totalWorkoutsCompleted || 0;
+      const daysOn = user.programmeStartDate
+        ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000) : 0;
+      const streak = await getStepStreak(user.id);
+      let weightLine = "";
+      if (firstWeight.length > 0 && lastWeight.length > 0 && firstWeight[0].id !== lastWeight[0].id) {
+        const diff = parseFloat(String(lastWeight[0].weight)) - parseFloat(String(firstWeight[0].weight));
+        weightLine = diff < 0
+          ? `\n⬇️ Weight: down ${Math.abs(diff).toFixed(1)}kg since you started`
+          : diff > 0 ? `\n⬆️ Weight: up ${diff.toFixed(1)}kg since you started`
+          : `\n⚖️ Weight: unchanged since you started`;
+      } else if (user.currentWeight) {
+        weightLine = `\n⚖️ Current weight: ${user.currentWeight}kg`;
+      }
+      const name = user.name || "Champ";
+      const statsReply = `*${name}'s Journey with Coach K* 💪\n\n✅ Workouts completed: ${totalWorkouts}\n👟 Total steps logged: ${totalSteps.toLocaleString()}\n📅 Days on programme: ${daysOn}\n🔥 Current streak: ${streak} day${streak !== 1 ? "s" : ""}${weightLine}\n\nThis is what you have built. Keep going.`;
+      await logChat(user.id, message, statsReply, "STATS_LOOKUP");
+      return statsReply;
+    } catch (e) { console.error("[STATS]", e); }
+  }
+
+  // ---- NEW: REFERRAL ----
+  if (["refer", "referral", "my referral", "my code", "referral code", "refer a friend", "invite"].includes(m)) {
+    let code = user.referralCode;
+    if (!code) {
+      const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+      const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();
+      code = `${namePrefix}${randomSuffix}`;
+      await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
+    }
+    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with someone ready to change:\n\n_"I am working with a WhatsApp fitness coach — real SA food advice, full workout programmes, daily accountability. R99/month, no app, just WhatsApp. Use my code ${code} when you sign up and get your first month at R50."_\n\nEvery person who stays for a full month earns you R20 off your next payment. No limit on referrals.`;
+    await logChat(user.id, message, referralReply, "REFERRAL");
+    return referralReply;
   }
 
   // ---- NEW: BMI ----
@@ -3080,6 +3148,30 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       res.json(all);
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch beta testers" });
+    }
+  });
+
+  // ---- ADMIN: Send message to a client directly ----
+  app.post("/api/admin/send-message", async (req, res) => {
+    const { userId, message: adminMessage } = req.body;
+    if (!userId || !adminMessage?.trim()) {
+      return res.status(400).json({ error: "userId and message are required" });
+    }
+    try {
+      const [targetUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!targetUser) return res.status(404).json({ error: "User not found" });
+      if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_WHATSAPP_NUMBER) {
+        return res.status(503).json({ error: "Twilio not configured — message not sent" });
+      }
+      const adminTwilio = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+      const toNum = targetUser.phoneNumber.startsWith("whatsapp:") ? targetUser.phoneNumber : `whatsapp:${targetUser.phoneNumber}`;
+      await adminTwilio.messages.create({ from: fromNum, to: toNum, body: adminMessage.trim() });
+      await db.insert(chatHistory).values({ userId: targetUser.id, messageIn: null, messageOut: adminMessage.trim(), intent: "ADMIN_MANUAL" });
+      return res.json({ success: true, sentTo: targetUser.name || targetUser.phoneNumber });
+    } catch (err: any) {
+      console.error("[ADMIN] Send message failed:", err);
+      return res.status(500).json({ error: err.message || "Failed to send message" });
     }
   });
 
