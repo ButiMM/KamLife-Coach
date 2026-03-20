@@ -584,9 +584,12 @@ function getPhaseNames(): Record<number, string> {
   return { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
 }
 
-function getDayType(day: number): "push" | "pull" | "legs" | "core" {
-  const types: Array<"push" | "pull" | "legs" | "core"> = ["push", "pull", "legs", "core"];
-  return types[(day - 1) % 4];
+function getDayType(_day?: number): "push" | "pull" | "legs" | "core" | "rest" {
+  // Fixed weekly schedule: Mon=push, Tue=pull, Wed=legs, Thu=core, Fri=push, Sat=pull, Sun=rest
+  const dow = new Date().getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const map: Array<"push" | "pull" | "legs" | "core" | "rest"> =
+    ["rest", "push", "pull", "legs", "core", "push", "pull"];
+  return map[dow];
 }
 
 function buildDayWorkout(user: any): string {
@@ -757,9 +760,14 @@ function buildDayWorkout(user: any): string {
     return workout;
   }
 
-  // Gym: keep push-pull-legs-core daily split
+  // Gym: fixed weekly push-pull-legs-core split
   const library = WORKOUTS.gym;
   const dayType = getDayType(day);
+
+  if (dayType === "rest") {
+    return `*Phase ${phase}: ${phaseName} — Week ${week}*\n\n🛌 *Rest Day — Sunday*\n\nYour body builds muscle when you rest, not when you train. Today: stretch, walk lightly, eat your protein, sleep well.\n\nEat your protein target (${user.proteinTarget || 140}g) and get to bed early. Monday is Push day.`;
+  }
+
   const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
   const exercises = library[dayType];
   const sessionExercises = dayType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
@@ -1105,7 +1113,7 @@ async function askCoachK(userMessage: string, user: any, extraInstruction?: stri
   } catch (err: any) {
     console.error("OpenAI error:", err);
     if (err?.status === 401 || err?.code === 401 || (err?.message && err.message.includes("401"))) {
-      return "Coach K is almost ready. The AI coaching responses need an OpenAI API key to activate. Everything else is working — your programme, meal plan, and targets are all set. Reply MENU to see your options or CALORIES for your daily target.";
+      return "Coach K is almost ready. Type *menu* to see your options or *calories* for your daily target. Your programme, meal plan, and targets are all set.";
     }
     return "Eish Coach K had a moment. Try that again.";
   }
@@ -1147,7 +1155,7 @@ async function getMenuText(user: any): Promise<string> {
   const phaseName = phaseNames[phase] || "Foundation";
   const day = user.programmeDayInWeek || 1;
   const dayType = getDayType(day);
-  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
+  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥", rest: "Rest 🛌" }[dayType] || "Today's session";
   const mode = user.trainingMode || "home";
   const stepsTarget = user.stepsTarget || 8000;
 
@@ -1296,6 +1304,10 @@ const STEP_RESPONSES_GOOD = [
     `${steps.toLocaleString()} steps is solid progress. ${(target - steps).toLocaleString()} away from your ${target.toLocaleString()} target — one more walk and you have it.`,
   (steps: number, target: number) =>
     `Nearly at target — ${steps.toLocaleString()} steps done. Finish line is ${(target - steps).toLocaleString()} steps away. You have come too far not to finish.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — ${Math.round((steps / target) * 100)}% of your target. ${(target - steps).toLocaleString()} steps left. A 10-minute walk finishes this off.`,
+  (steps: number, target: number) =>
+    `Good movement today — ${steps.toLocaleString()} steps. ${(target - steps).toLocaleString()} more to reach ${target.toLocaleString()}. Walk around the block before bed and it is yours.`,
 ];
 
 const STEP_RESPONSES_TARGET = [
@@ -2308,7 +2320,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           messages: [
             {
               role: "system",
-              content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${liveCal} kcal, ${liveProt}g protein. SA voice — firm, warm, direct. Max 4 sentences, 80 words. End with one specific action.`
+              content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${liveCal} kcal, ${liveProt}g protein. SA voice — firm, warm, direct. HARD LIMIT: Max 3 sentences, 60 words. Never say 'Reply MENU'. End with exactly one specific action.`
             },
             {
               role: "user",
@@ -2336,7 +2348,8 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
-        return visionReply;
+        const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
+        return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}`;
       } catch (err) {
         console.error("Vision error:", err);
         return "I can see your food photo. To get full nutritional coaching on your meals add your OpenAI API key. For now tell me what you ate in text and I will coach you on it.";
@@ -2615,7 +2628,8 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       const junkNote = junkFoods.length > 0 ? `\n\n${junkFoods[0].notes}` : "";
       const reply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\nRemaining today: ~${Math.max(0, calRemaining)} kcal${coachNote}${junkNote}`;
       await logChat(user.id, message, reply, "FOOD_LOG");
-      return reply;
+      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
+      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}`;
     }
   }
 
@@ -2707,17 +2721,21 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
   // ---- QUICK STAT LOOKUPS — never touch GPT ----
   if (["calories", "calorie", "what are my calories", "what are my calories for the day", "how many calories", "my calories", "calorie target", "my calorie target"].includes(m)) {
-    return `Your daily target is ${user.calorieTarget} calories and ${user.proteinTarget}g protein. Based on your weight, goal, and activity level.`;
+    const name = user.name || "Champ";
+    return `*${name}'s Daily Calorie Target*\n\n🔥 Calories: *${user.calorieTarget || "not set"} kcal*\n💪 Protein: *${user.proteinTarget || "not set"}g*\n\nHit protein first — it fills you up, preserves muscle, and drives fat loss. Calories are a guide. Protein is non-negotiable.`;
   }
   if (["steps", "my steps", "step target", "daily steps", "steps daily", "how many steps", "my steps target", "steps target"].includes(m)) {
-    return `Your daily steps target is ${user.stepsTarget} steps.`;
+    return `*Your Daily Step Target*\n\n👟 ${(user.stepsTarget || 8000).toLocaleString()} steps per day.\n\nSteps are your baseline activity. Training burns calories for an hour. Steps burn them all day. Log your steps tonight with "X steps".`;
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
-    return `Your daily protein target is ${user.proteinTarget}g. Spread across 3 to 4 meals.`;
+    const p = user.proteinTarget || 140;
+    const perMeal = Math.round(p / 4);
+    return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each. Best SA sources: eggs (6g each), pilchards (20g per tin), chicken breast (30g per 100g), sugar beans (8g per half cup). This drives everything — muscle, fat loss, fullness.`;
   }
   if (["weight", "my weight", "current weight"].includes(m)) {
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";
-    return `Your last logged weight is ${w}. To update it just send your weight like this: 84kg`;
+    const bmiText = user.bmi ? ` BMI: ${parseFloat(String(user.bmi)).toFixed(1)}.` : "";
+    return `*Your Weight*\n\n⚖️ Last logged: *${w}*${bmiText}\n\nWeigh yourself every morning — same time, same conditions, after bathroom, before food. Send me the number like this: *84kg*. Weekly trends matter more than daily changes.`;
   }
   if (["programme", "program", "my programme", "my program"].includes(m)) {
     return getKamlifeProgramme(user);
@@ -2730,14 +2748,15 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
       : 0;
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
-    return `Here is your progress so far.\nWorkouts completed: ${user.totalWorkoutsCompleted || 0}.\nProgramme week: ${user.programmeWeek || 1}.\nDays on programme: ${daysOn}.\nWeight: ${w}.\nKeep going.`;
+    const name = user.name || "Champ";
+    return `*${name}'s Progress*\n\n✅ Workouts completed: *${user.totalWorkoutsCompleted || 0}*\n📅 Days on programme: *${daysOn}*\n📊 Programme week: *${user.programmeWeek || 1}*\n⚖️ Current weight: *${w}*\n\nFor your full 7-day breakdown send *this week*.`;
   }
   if (["targets", "my targets", "goals"].includes(m)) {
     const goalLabel: Record<string, string> = {
       fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
       general: "General fitness", health_condition: "Health management",
     };
-    return `Your daily targets.\nCalories: ${user.calorieTarget || "not set"}.\nProtein: ${user.proteinTarget || "not set"}g.\nSteps: ${user.stepsTarget || "not set"}.\nWeight goal: ${goalLabel[user.goalType || ""] || user.goalType || "not set"}.`;
+    return `*Your Daily Targets*\n\n🔥 Calories: *${user.calorieTarget || "not set"} kcal*\n💪 Protein: *${user.proteinTarget || "not set"}g*\n👟 Steps: *${(user.stepsTarget || 0).toLocaleString()}*\n🎯 Goal: *${goalLabel[user.goalType || ""] || user.goalType || "not set"}*\n\nHit all three every day. That is the whole programme.`;
   }
 
   // ---- NEW: CUMULATIVE STATS ----
