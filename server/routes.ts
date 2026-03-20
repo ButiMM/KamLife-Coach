@@ -584,9 +584,9 @@ function getPhaseNames(): Record<number, string> {
   return { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
 }
 
-function getDayType(_day?: number): "push" | "pull" | "legs" | "core" | "rest" {
+function getDayType(dowOverride?: number): "push" | "pull" | "legs" | "core" | "rest" {
   // Fixed weekly schedule: Mon=push, Tue=pull, Wed=legs, Thu=core, Fri=push, Sat=pull, Sun=rest
-  const dow = new Date().getDay(); // 0=Sun, 1=Mon, ..., 6=Sat
+  const dow = dowOverride !== undefined ? dowOverride : new Date().getDay();
   const map: Array<"push" | "pull" | "legs" | "core" | "rest"> =
     ["rest", "push", "pull", "legs", "core", "push", "pull"];
   return map[dow];
@@ -771,6 +771,38 @@ function buildDayWorkout(user: any): string {
   const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
   const exercises = library[dayType];
   const sessionExercises = dayType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
+
+  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel} Day | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+  for (const ex of sessionExercises) {
+    const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
+      ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
+      : `${multiplier.sets}x${multiplier.reps}`;
+    const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
+    const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
+    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
+  }
+  workout += `Send DONE when finished.`;
+  return workout;
+}
+
+function buildDayWorkoutForType(user: any, forcedType: "push" | "pull" | "legs" | "core"): string {
+  const mode = user.trainingMode || "home";
+  const phase = user.programmePhase || 1;
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const multiplier = getPhaseMultiplier(phase);
+  const week = user.programmeWeek || 1;
+  const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
+
+  if (mode !== "gym") {
+    // For home, just return today's home workout since home is full-body
+    return buildDayWorkout(user);
+  }
+
+  const library = WORKOUTS.gym;
+  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[forcedType];
+  const exercises = library[forcedType];
+  const sessionExercises = forcedType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
 
   let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel} Day | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
   for (const ex of sessionExercises) {
@@ -2837,15 +2869,17 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
   // ---- NEW: NEXT WORKOUT ----
   if (["next", "next workout", "tomorrow", "what's next", "whats next", "next session", "next day"].includes(m)) {
-    const currentDay = user.programmeDayInWeek || 1;
-    const daysPerWeek = user.trainingDaysPerWeek || 3;
-    let nextDay = currentDay + 1;
-    let nextWeek = user.programmeWeek || 1;
-    if (nextDay > daysPerWeek) { nextDay = 1; nextWeek++; }
-    if (nextWeek > 4) nextWeek = 4;
-    const nextDayUser = { ...user, programmeDayInWeek: nextDay, programmeWeek: nextWeek };
-    const nextWorkout = buildDayWorkout(nextDayUser);
-    return `*Next Up — Day ${nextDay}*\n\nComplete today's session first, then this is what's waiting for you.\n\n${nextWorkout}`;
+    const tomorrowDow = (new Date().getDay() + 1) % 7;
+    const tomorrowType = getDayType(tomorrowDow);
+    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const dayLabels: Record<string, string> = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥", rest: "Rest 🛌" };
+    const tomorrowName = dayNames[tomorrowDow];
+    if (tomorrowType === "rest") {
+      return `*Tomorrow — ${tomorrowName}: Rest Day 🛌*\n\nYour body builds during rest. Stretch, walk lightly, hit your protein target, and sleep well. Monday is Push day — come in fresh.`;
+    }
+    const nextDayUser = { ...user };
+    const nextWorkout = buildDayWorkoutForType(nextDayUser, tomorrowType);
+    return `*Tomorrow — ${tomorrowName}: ${dayLabels[tomorrowType]}*\n\nComplete today's session first, then this is waiting for you.\n\n${nextWorkout}`;
   }
 
   // ---- NEW: STREAK ----
