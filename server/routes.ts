@@ -973,10 +973,9 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
   const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
-  const isShortFoodMsg = !isQuestion && m.split(/\s+/).length <= 7;
-  // Exclude pure water messages from food scanner
-  const isWaterOnlyLog = /^(water|water intake|drinking water|my water)$/i.test(m.trim());
-  if (!isQuestion && !isWaterOnlyLog && (hasLogTrigger || isShortFoodMsg)) {
+  // Only scan short messages if they contain an explicit food log trigger — not every short message
+  const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 12;
+  if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
     const foundFoods = scanForSAFoods(m);
     if (foundFoods.length > 0) {
       const totalCals = foundFoods.reduce((s, f) => s + f.typicalPortionCalories, 0);
