@@ -88,6 +88,27 @@ app.use((req, res, next) => {
     await setupVite(httpServer, app);
   }
 
+  // ---- STARTUP ENV VALIDATION ----
+  const REQUIRED_ENV: Array<{ key: string; warn: boolean; hint: string }> = [
+    { key: "DATABASE_URL", warn: false, hint: "PostgreSQL connection required — app will crash without this" },
+    { key: "TWILIO_ACCOUNT_SID", warn: true, hint: "WhatsApp messages will not send" },
+    { key: "TWILIO_AUTH_TOKEN", warn: true, hint: "WhatsApp messages will not send" },
+    { key: "TWILIO_WHATSAPP_NUMBER", warn: true, hint: "WhatsApp messages will not send" },
+    { key: "AI_INTEGRATIONS_OPENAI_API_KEY", warn: true, hint: "GPT coaching responses will fail" },
+    { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard using insecure default key 'kamlife2024' — set this env var immediately" },
+  ];
+
+  const missing = REQUIRED_ENV.filter(e => !process.env[e.key]);
+  if (missing.length > 0) {
+    for (const e of missing) {
+      if (e.warn) {
+        console.warn(`[STARTUP] ⚠️  Missing env var: ${e.key} — ${e.hint}`);
+      } else {
+        console.error(`[STARTUP] ❌  CRITICAL: Missing env var: ${e.key} — ${e.hint}`);
+      }
+    }
+  }
+
   // ALWAYS serve the app on the port specified in the environment variable PORT
   // Other ports are firewalled. Default to 5000 if not specified.
   // this serves both the API and the client.

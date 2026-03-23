@@ -3,6 +3,45 @@ import twilio from "twilio";
 import { db } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc } from "drizzle-orm";
+import { readFileSync, writeFileSync, existsSync } from "fs";
+import { join } from "path";
+
+// ============================================================
+// SCHEDULER STATE — persists last-run dates across restarts
+// ============================================================
+
+const STATE_FILE = join(process.cwd(), "server", ".scheduler-state.json");
+
+function loadState(): Record<string, string> {
+  try {
+    if (existsSync(STATE_FILE)) {
+      return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
+    }
+  } catch { /* ignore */ }
+  return {};
+}
+
+function saveState(key: string, dateStr: string): void {
+  try {
+    const state = loadState();
+    state[key] = dateStr;
+    writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
+  } catch (e) {
+    console.error("[SCHEDULER] State save error:", e);
+  }
+}
+
+function todayUTC(): string {
+  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
+function thisWeekUTC(): string {
+  const d = new Date();
+  const day = d.getUTCDay(); // 0=Sun, 1=Mon...
+  const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday of current week
+  const monday = new Date(d.setUTCDate(diff));
+  return monday.toISOString().slice(0, 10);
+}
 
 // ============================================================
 // TWILIO SENDING
@@ -31,6 +70,14 @@ async function sendWhatsApp(to: string, body: string): Promise<void> {
 
 async function getActiveClients() {
   return db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+}
+
+// Returns true if client has set a pause until a future date
+function isPaused(client: any): boolean {
+  const notes = client.profileNotes || "";
+  const match = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
+  if (!match) return false;
+  return new Date(match[1]) >= new Date(todayUTC());
 }
 
 function dayStart(offsetDays = 0): Date {
@@ -86,11 +133,12 @@ function programmeDaysSince(startDate: Date | null | undefined): number {
 // Runs 6am SAST (4am UTC) daily
 // ============================================================
 
-cron.schedule("0 4 * * *", async () => {
+async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       const phone = client.phoneNumber;
@@ -126,6 +174,11 @@ cron.schedule("0 4 * * *", async () => {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);
     }
   }
+  saveState("morning_checkin", todayUTC());
+}
+
+cron.schedule("0 4 * * *", async () => {
+  await runMorningCheckin();
 }, { timezone: "UTC" });
 
 // ============================================================
@@ -133,11 +186,12 @@ cron.schedule("0 4 * * *", async () => {
 // Runs 7pm SAST (5pm UTC) daily
 // ============================================================
 
-cron.schedule("0 17 * * *", async () => {
+async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       const todayLogs = await getTodayLogs(client.id);
@@ -151,6 +205,11 @@ cron.schedule("0 17 * * *", async () => {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }
   }
+  saveState("evening_accountability", todayUTC());
+}
+
+cron.schedule("0 17 * * *", async () => {
+  await runEveningAccountability();
 }, { timezone: "UTC" });
 
 // ============================================================
@@ -163,6 +222,7 @@ cron.schedule("0 4 * * 1", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       if (client.programmeWeek !== 3) continue;
       const name = client.name || "champ";
@@ -185,6 +245,7 @@ cron.schedule("0 8 20 * *", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       const budget = client.weeklyFoodBudget || "100_300";
@@ -221,6 +282,7 @@ cron.schedule("0 6 * * *", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       const message = MILESTONES[days];
@@ -245,6 +307,7 @@ cron.schedule("0 4,16 * * *", async () => {
   const HOUR = 3_600_000;
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       if (!client.lastActiveAt) continue;
       const name = client.name || "champ";
@@ -275,6 +338,7 @@ cron.schedule("0 14 * * 5", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       await sendWhatsApp(client.phoneNumber,
@@ -297,6 +361,7 @@ cron.schedule("0 6 * * 0", async () => {
   const weekAgo = new Date(Date.now() - 7 * 86400000);
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
 
@@ -387,6 +452,7 @@ cron.schedule("0 8 * * *", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       const name = client.name || "champ";
@@ -419,6 +485,7 @@ cron.schedule("0 7 1 * *", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       await sendWhatsApp(client.phoneNumber,
@@ -468,6 +535,7 @@ cron.schedule("0 5 * * *", async () => {
   const clients = await getActiveClients();
 
   for (const client of clients) {
+    if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
       await sendWhatsApp(client.phoneNumber, eventFn(name));
@@ -478,10 +546,448 @@ cron.schedule("0 5 * * *", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 12 — 14-DAY AND 30-DAY SILENCE ESCALATION
+// Runs every 12 hours alongside silence detection
+// ============================================================
+
+cron.schedule("0 5,17 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Deep silence escalation");
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const HOUR = 3_600_000;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (!client.lastActiveAt) continue;
+      const name = client.name || "champ";
+      const silenceMs = now - new Date(client.lastActiveAt).getTime();
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const week = client.programmeWeek || 1;
+
+      // 14-day silence — more personal, reference their history
+      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
+        const historyNote = workouts > 0
+          ? `You have ${workouts} session${workouts !== 1 ? "s" : ""} logged. That work does not disappear.`
+          : `Your programme is still here waiting.`;
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, two weeks since I heard from you. ${historyNote} Life is not always linear — I know that. When you are ready, just reply with one word: "back". We go from exactly where you left off, week ${week}, no questions asked.`
+        );
+
+      // 30-day silence — pause message, not cancellation
+      } else if (silenceMs >= 30 * 24 * HOUR && silenceMs < 30 * 24 * HOUR + 12 * HOUR) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, a month of silence. I am not going to keep messaging you after this. Your profile is saved, your programme is saved, everything is exactly as you left it. When life settles and you are ready — just say "back" and we go again. No judgment.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Deep silence error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 13 — REFERRAL NUDGE AFTER MILESTONES
+// Runs daily at 9am SAST (7am UTC) — fires only on day 7, 30, 60, 90
+// ============================================================
+
+cron.schedule("0 7 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Referral nudge");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const days = programmeDaysSince(client.programmeStartDate);
+      if (![7, 30, 60, 90].includes(days)) continue;
+      if (!client.referralCode) continue; // Only nudge if they have a code
+
+      const name = client.name || "champ";
+      const code = client.referralCode;
+
+      const msgs: Record<number, string> = {
+        7: `${name}, one week in and you are still here — most people are not. If you know someone who needs this, your referral code is *${code}*. They get their first month for R50. You get R20 off yours. Share it with one person today.`,
+        30: `${name}, 30 days with Coach K. You are proof this works. Someone in your contacts needs to hear about this — share your code *${code}* and let them start where you did. One message, one person.`,
+        60: `${name}, 60 days in. Two months of real work. People around you have noticed. When they ask what you are doing, tell them — and share code *${code}*. Every referral earns you R20 off. No limit.`,
+        90: `${name}, 90 days. A quarter year of consistency. That is rare and worth talking about. Your code is *${code}* — share it with someone who has been talking about getting fit. They get a cheaper start. You get rewarded.`,
+      };
+
+      await sendWhatsApp(client.phoneNumber, msgs[days]);
+    } catch (err) {
+      console.error(`[SCHEDULER] Referral nudge error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 14 — GOAL REASSESSMENT AT 30 / 60 / 90 DAYS
+// Runs daily at 11am SAST (9am UTC)
+// ============================================================
+
+cron.schedule("0 9 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Goal reassessment check");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const days = programmeDaysSince(client.programmeStartDate);
+      const name = client.name || "champ";
+      const goal = client.goalType || "fat_loss";
+      const goalLabel: Record<string, string> = {
+        fat_loss: "fat loss", muscle_gain: "muscle gain",
+        recomposition: "body recomposition", general: "general fitness",
+      };
+
+      if (days === 30) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, 30 days in. Time to check in properly.\n\nWeigh yourself this morning and send me the number. Also — is your goal still ${goalLabel[goal] || goal}? Or has something shifted? One reply: your weight in kg, and yes or no if the goal is the same.`
+        );
+      } else if (days === 60) {
+        const weight = client.currentWeight ? `You started at ${client.currentWeight}kg.` : "";
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, 60 days. ${weight} Two months of work deserves a proper check-in. Send me your current weight and I will tell you exactly how you are tracking against your ${goalLabel[goal] || goal} goal. One number, right now.`
+        );
+      } else if (days === 90) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, 90 days — a full quarter. This is the reset point. Send me your weight, and tell me if your goal needs to change. People often start on fat loss and find they want to shift toward building muscle once they have lost the first round. Where are you now?`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Goal reassessment error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 15 — STREAK AT RISK ALERT
+// Runs 8pm SAST (6pm UTC) daily — warns if 3+ streak but no log today
+// ============================================================
+
+cron.schedule("0 18 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Streak-at-risk alert");
+  const clients = await getActiveClients();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      // Only alert clients with a meaningful step streak
+      const streak = client.waterStreak || 0; // reuse step streak concept
+      // Check if they have logged steps today
+      const todaySteps = await db.select().from(stepLogs)
+        .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
+        .limit(1);
+
+      if (todaySteps.length > 0) continue; // Already logged — no alert needed
+
+      // Get their step streak from recent logs
+      const recentStepLogs = await db.select({ loggedAt: stepLogs.loggedAt })
+        .from(stepLogs)
+        .where(eq(stepLogs.userId, client.id))
+        .orderBy(desc(stepLogs.loggedAt))
+        .limit(14);
+
+      if (recentStepLogs.length < 3) continue; // No streak to protect
+
+      // Check consecutive days
+      const days = new Set<string>();
+      for (const log of recentStepLogs) {
+        const d = new Date(log.loggedAt!);
+        days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      }
+      let streakCount = 0;
+      const checkDate = new Date();
+      checkDate.setDate(checkDate.getDate() - 1); // Start from yesterday
+      while (true) {
+        const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
+        if (!days.has(key)) break;
+        streakCount++;
+        checkDate.setDate(checkDate.getDate() - 1);
+      }
+
+      if (streakCount >= 3) {
+        const name = client.name || "champ";
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 16 — WOMEN'S MONTH (August — every Monday)
+// Runs Monday 7am SAST (5am UTC), August only
+// ============================================================
+
+cron.schedule("0 5 * 8 1", async () => {
+  console.log("[SCHEDULER] JOB: Women's Month Monday message");
+  const clients = await getActiveClients();
+
+  // Target female-presenting clients: glutes/legs focus or female name heuristics
+  const femaleIndicators = (client: any): boolean => {
+    return client.primaryFocusArea === "glutes_legs" ||
+      ["she", "her", "woman", "female"].some(w => (client.profileNotes || "").toLowerCase().includes(w));
+  };
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const name = client.name || "champ";
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const isFemale = femaleIndicators(client);
+
+      if (isFemale) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, Women's Month. The strength you are building is not just physical — it is the discipline that carries into every part of your life. ${workouts > 0 ? `${workouts} sessions completed and counting.` : "Your programme is ready."} Train today — for you, no one else.`
+        );
+      } else {
+        // General empowerment for all clients in August
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, August — Women's Month in SA. The women in your life are watching what you build. Be the example. Train this week, eat well, stay consistent. That is the best thing you can do.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Women's Month error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 17 — PHASE ADVANCEMENT CHECK
+// Runs every Monday at 7am SAST (5am UTC)
+// Auto-advances phase when client completes 4 weeks with 75%+ compliance
+// ============================================================
+
+cron.schedule("0 5 * * 1", async () => {
+  console.log("[SCHEDULER] JOB: Phase advancement check");
+  const clients = await getActiveClients();
+  const fourWeeksAgo = new Date(Date.now() - 28 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if ((client.programmeWeek || 1) < 4) continue; // Not yet at 4 weeks
+      if (client.phaseReadyToAdvance) continue; // Already flagged
+
+      const plannedSessions = (client.trainingDaysPerWeek || 3) * 4; // 4 weeks worth
+      const completedSessions = await db.select().from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourWeeksAgo)));
+
+      const compliance = completedSessions.length / plannedSessions;
+      if (compliance < 0.75) continue; // Below 75% — not ready
+
+      const currentPhase = client.programmePhase || 1;
+      if (currentPhase >= 5) continue; // Already at max phase
+
+      const newPhase = currentPhase + 1;
+      const phaseNames: Record<number, string> = { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
+
+      await db.update(users)
+        .set({ programmePhase: newPhase, programmeWeek: 1, programmeDayInWeek: 1, phaseReadyToAdvance: false })
+        .where(eq(users.id, client.id));
+
+      const name = client.name || "champ";
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, you have completed Phase ${currentPhase} (${phaseNames[currentPhase]}). ${completedSessions.length} of ${plannedSessions} planned sessions done — ${Math.round(compliance * 100)}% compliance. You have earned Phase ${newPhase}: ${phaseNames[newPhase]}. Your programme has been updated. Reply "today" for your first Phase ${newPhase} session.`
+      );
+    } catch (err) {
+      console.error(`[SCHEDULER] Phase advancement error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 18 — INJURY FOLLOW-UP
+// Runs every Wednesday at 10am SAST (8am UTC)
+// ============================================================
+
+cron.schedule("0 8 * * 3", async () => {
+  console.log("[SCHEDULER] JOB: Injury follow-up");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (!client.injuries || client.injuries === "" || client.injuries === "none") continue;
+
+      const name = client.name || "champ";
+      const injuryNote = client.injuries.slice(0, 60);
+
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, quick check — how is the ${injuryNote} doing? If it has improved, reply "injury better" and I will update your programme. If it is still affecting you, tell me what you can and cannot do and I will adjust.`
+      );
+    } catch (err) {
+      console.error(`[SCHEDULER] Injury follow-up error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 19 — NEW YEAR RESET (January 2nd)
+// Fires once on January 2nd at 7am SAST (5am UTC)
+// ============================================================
+
+cron.schedule("0 5 2 1 *", async () => {
+  console.log("[SCHEDULER] JOB: New Year reset");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const name = client.name || "champ";
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const days = programmeDaysSince(client.programmeStartDate);
+
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, January 2nd. The gym is full of people who will be gone by February. You have ${workouts > 0 ? `${workouts} sessions and ${days} days` : "your programme"} already built. You are not starting. You are continuing. That is the difference. Log your first food of 2025 today.`
+      );
+    } catch (err) {
+      console.error(`[SCHEDULER] New Year reset error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 20 — PLATEAU DETECTION
+// Runs Sunday 7am UTC (9am SAST)
+// Fires if weight unchanged >0.5kg in 21 days + client is active
+// ============================================================
+
+cron.schedule("0 7 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Plateau detection");
+  const clients = await getActiveClients();
+  const twentyOneDaysAgo = new Date(Date.now() - 21 * 86_400_000);
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const name = client.name || "there";
+      // Only fire for fat loss clients who have been active recently
+      if (client.goalType !== "fat_loss" && client.goalType !== "recomposition") continue;
+
+      // Check recent activity
+      const recentActivity = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, fourteenDaysAgo)))
+        .limit(1);
+      if (recentActivity.length === 0) continue; // Not active, skip
+
+      // Get weight logs from last 21 days
+      const recentWeights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+        .from(weightLogs)
+        .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, twentyOneDaysAgo)))
+        .orderBy(asc(weightLogs.loggedAt));
+
+      if (recentWeights.length < 2) continue; // Not enough data
+
+      const oldest = parseFloat(String(recentWeights[0].weight));
+      const newest = parseFloat(String(recentWeights[recentWeights.length - 1].weight));
+      const change = Math.abs(newest - oldest);
+
+      if (change > 0.5) continue; // Weight IS moving — no plateau
+
+      // Plateau confirmed — send protocol
+      const plateauMsg = `${name}, your weight has been stable for 3 weeks. This is a plateau and it is normal — your body adapts. Here is the fix: this week, cut your carb portions by one third. Keep protein the same. Add a 20-minute walk on top of your normal routine. Weigh in again in 7 days. Plateaus break when you change one variable at a time.`;
+      await sendWhatsApp(client.phoneNumber, plateauMsg);
+      saveState(`plateau_sent_${client.id}`, todayUTC());
+    } catch (err) {
+      console.error(`[SCHEDULER] Plateau detection error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 21 — PRE-TRAINING NUTRITION REMINDER
+// Runs 12pm SAST (10am UTC) daily
+// Sends pre-training nutrition reminder on workout days
+// ============================================================
+
+cron.schedule("0 10 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
+  const clients = await getActiveClients();
+  const todayStart = dayStart(0);
+  const todayDow = new Date().getDay(); // 0=Sun, 1=Mon...
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      // Determine if today is a training day
+      const trainingDays = client.trainingDaysPerWeek || 3;
+      // Training schedules by days/week (days of week: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)
+      const TRAINING_SCHEDULES: Record<number, number[]> = {
+        2: [1, 4],       // Mon, Thu
+        3: [1, 3, 5],    // Mon, Wed, Fri
+        4: [1, 2, 4, 6], // Mon, Tue, Thu, Sat
+        5: [1, 2, 3, 4, 6], // Mon-Thu, Sat
+        6: [1, 2, 3, 4, 5, 6], // Mon-Sat
+      };
+      const schedule = TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3];
+      if (!schedule.includes(todayDow)) continue; // Not a training day
+
+      // Check if already trained today
+      const todayWorkout = await db.select({ id: workoutLogs.id })
+        .from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+        .limit(1);
+      if (todayWorkout.length > 0) continue; // Already done
+
+      const name = client.name || "there";
+      const budget = client.weeklyFoodBudget || "100_300";
+      const goal = client.goalType || "fat_loss";
+
+      let preMeal = "";
+      if (budget === "under_50" || budget === "50_100") {
+        preMeal = "2 eggs + slice of bread 90 minutes before. Or a banana if you have one. Never train completely fasted.";
+      } else if (goal === "muscle_gain") {
+        preMeal = "Oats with milk + banana 90 minutes before, or rice and chicken 2 hours before. Carbs fuel the session, protein builds after it.";
+      } else {
+        preMeal = "Chicken or eggs + small portion of carbs (pap, oats, or sweet potato) 90 minutes before. This fuels the session without spiking fat storage.";
+      }
+
+      const mode = client.trainingMode || "home";
+      const modeWord = mode === "gym" ? "gym session" : "training session";
+      const reminderMsg = `${name}, training day. Eat before you train — ${preMeal}\n\nReply DONE after your session and I log it.`;
+      await sendWhatsApp(client.phoneNumber, reminderMsg);
+    } catch (err) {
+      console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 
 export function initScheduler(): void {
+  // ---- Catch up any daily jobs missed due to server restart ----
+  (async () => {
+    try {
+      const state = loadState();
+      const today = todayUTC();
+      const nowUTC = new Date().getUTCHours();
+
+      // Morning job runs at 4am UTC — catch up if past 4am and not run today
+      if (nowUTC >= 4 && state["morning_checkin"] !== today) {
+        console.log("[SCHEDULER] ⚡ Catch-up: running missed morning check-in");
+        await runMorningCheckin();
+      }
+
+      // Evening job runs at 5pm UTC — catch up if past 5pm and not run today
+      if (nowUTC >= 17 && state["evening_accountability"] !== today) {
+        console.log("[SCHEDULER] ⚡ Catch-up: running missed evening accountability");
+        await runEveningAccountability();
+      }
+    } catch (e) {
+      console.error("[SCHEDULER] Catch-up error:", e);
+    }
+  })();
+
   const ramadanActive = isRamadan();
   console.log("[SCHEDULER] Proactive coaching jobs active:");
   console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
@@ -495,5 +1001,15 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Days 1-3 onboarding  — daily 10am SAST");
   console.log("[SCHEDULER]   Monthly measurements  — 1st of each month 9am SAST");
   console.log("[SCHEDULER]   SA cultural calendar  — Heritage Day, Women's Day, New Year, etc.");
+  console.log("[SCHEDULER]   14/30-day silence    — escalating re-engagement");
+  console.log("[SCHEDULER]   Referral nudge        — day 7/30/60/90 milestones");
+  console.log("[SCHEDULER]   Goal reassessment     — day 30/60/90 weight + goal check");
+  console.log("[SCHEDULER]   Streak-at-risk        — 8pm alert if streak endangered");
+  console.log("[SCHEDULER]   Women's Month         — August Mondays");
+  console.log("[SCHEDULER]   Phase advancement     — auto-advance on 75% compliance");
+  console.log("[SCHEDULER]   Injury follow-up      — Wednesday check on injured clients");
+  console.log("[SCHEDULER]   New Year reset        — January 2nd continuation message");
+  console.log("[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)");
+  console.log("[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)");
   console.log(`[SCHEDULER]   Ramadan mode         — ${ramadanActive ? "ACTIVE ☪️" : "inactive"}`);
 }
