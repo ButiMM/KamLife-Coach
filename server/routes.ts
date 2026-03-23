@@ -851,8 +851,8 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
   // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
   const isWorkoutRelated =
-    m === "1" || m === "2" || m === "gym" || m === "workout" ||
-    m.includes("program") || m.includes("programme") ||
+    m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
+    m.includes("workout") || m.includes("program") || m.includes("programme") ||
     m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
     m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
     m.includes("exercise") || m.includes("train") ||
@@ -1727,10 +1727,7 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 SCENARIO GUIDE — read the message and decide which applies:
 
 WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "training plan", "what do I do today", "1", "2", "workout", etc.):
-  Use the EXACT programme below. Do not invent exercises. Do not use bodyweight unless the client is on home training. Add one short SA motivating sentence before the programme. If they asked for "today's workout" or sent "1", output only the first day/session. If they want the full programme, output all sessions.
-
-  THEIR PROGRAMME (${trainingMode === "gym" ? "GYM" : "HOME"}, ${(user.trainingExperience || "beginner").toUpperCase()}):
-${getKamlifeProgramme(user)}
+  Tell the client their programme is ready and to reply with the word "programme" to see the full plan. Do not list exercises here.
 
 STEPS LOGGED (number + "steps" / "walked" / "km"):
   Respond based on their step target of ${user.stepsTarget || 7000}. If below — push them. If at or above — celebrate and give next action.
