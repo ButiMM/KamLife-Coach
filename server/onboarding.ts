@@ -714,6 +714,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeStartDate: new Date(),
       subscriptionStatus: "trial",
       onboardingState: "COMPLETE",
+      popiConsent: true,
+      popiConsentAt: new Date(),
     }).where(eq(users.phoneNumber, phone));
 
     const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
