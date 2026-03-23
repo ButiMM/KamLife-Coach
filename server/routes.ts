@@ -959,11 +959,24 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     return waterReply;
   }
 
+  // ---- WATER QUESTION HANDLER — before food scanner and portion guide ----
+  const isWaterQuestion = /\b(how much water|water target|water goal|how many litres|how many liters|water should i drink|daily water|water recommendation|water intake|water per day)\b/i.test(m);
+  const isWaterOnlyMsg = /^water\s*$/i.test(m.trim());
+  if (isWaterQuestion || isWaterOnlyMsg) {
+    const todayW = parseFloat(user.todayWater as string || "0");
+    const remaining = Math.max(0, Math.round((2.0 - todayW) * 10) / 10);
+    const waterQReply = `Daily water target: *2 litres*.\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
+    await logChat(user.id, message, waterQReply, "WATER_QUESTION");
+    return waterQReply;
+  }
+
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
   const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
   const isShortFoodMsg = !isQuestion && m.split(/\s+/).length <= 7;
-  if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
+  // Exclude pure water messages from food scanner
+  const isWaterOnlyLog = /^(water|water intake|drinking water|my water)$/i.test(m.trim());
+  if (!isQuestion && !isWaterOnlyLog && (hasLogTrigger || isShortFoodMsg)) {
     const foundFoods = scanForSAFoods(m);
     if (foundFoods.length > 0) {
       const totalCals = foundFoods.reduce((s, f) => s + f.typicalPortionCalories, 0);
@@ -1326,7 +1339,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   }
 
   // ---- PORTION SIZE GUIDE (Item 7) — no GPT ----
-  if (/\b(portion|how much|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m)) {
+  if (/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m) || (/\bhow much\b/i.test(m) && !/water/i.test(m))) {
     await logChat(user.id, message, PORTION_GUIDE, "PORTION_GUIDE");
     return PORTION_GUIDE;
   }
