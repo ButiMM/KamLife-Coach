@@ -5,6 +5,56 @@ import { createServer } from "http";
 import { initScheduler } from "./scheduler";
 import { initMemoryTable } from "./memory";
 import { initFoodsTable } from "./foods";
+import { pool } from "./db";
+
+async function runMigrations(): Promise<void> {
+  const migrations = [
+    // POPIA consent columns
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent_at TIMESTAMP`,
+    // Water tracking columns
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_water NUMERIC DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS water_streak INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS water_last_reset_date TEXT`,
+    // Cancellation
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS cancelled_at TIMESTAMP`,
+    // Medical / nutrition columns
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS medical_conditions TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS nutrition_protocol TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS meal_timing_strict BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS doctor_clearance_required BOOLEAN DEFAULT false`,
+    // Profile extras
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS training_location TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS gym_name TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS weekly_food_budget TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS work_schedule TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS elderly_client BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS awaiting_programme_answers BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS other_medical_notes TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS last_goal_check_week INTEGER DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS bmi NUMERIC`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS phase_ready_to_advance BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS home_equipment TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS life_situation TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS job_type TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS activity_level TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS primary_focus_area TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_week_active BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS baseline_week_complete BOOLEAN DEFAULT false`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_notes TEXT`,
+  ];
+
+  let applied = 0;
+  for (const sql of migrations) {
+    try {
+      await pool.query(sql);
+      applied++;
+    } catch (e: any) {
+      console.error(`[MIGRATION] Failed: ${sql.slice(0, 60)}... — ${e.message}`);
+    }
+  }
+  console.log(`[MIGRATION] Done — ${applied}/${migrations.length} columns ensured`);
+}
 
 const app = express();
 const httpServer = createServer(app);
@@ -63,6 +113,7 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  await runMigrations();
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
