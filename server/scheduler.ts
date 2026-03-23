@@ -972,14 +972,14 @@ export function initScheduler(): void {
       const today = todayUTC();
       const nowUTC = new Date().getUTCHours();
 
-      // Morning job runs at 4am UTC — catch up if past 4am and not run today
-      if (nowUTC >= 4 && state["morning_checkin"] !== today) {
+      // Morning job runs at 4am UTC (6am SAST) — only catch up within a 3-hour window (4am-7am UTC)
+      if (nowUTC >= 4 && nowUTC <= 7 && state["morning_checkin"] !== today) {
         console.log("[SCHEDULER] ⚡ Catch-up: running missed morning check-in");
         await runMorningCheckin();
       }
 
-      // Evening job runs at 5pm UTC — catch up if past 5pm and not run today
-      if (nowUTC >= 17 && state["evening_accountability"] !== today) {
+      // Evening job runs at 5pm UTC (7pm SAST) — only catch up within a 2-hour window (5pm-7pm UTC)
+      if (nowUTC >= 17 && nowUTC <= 19 && state["evening_accountability"] !== today) {
         console.log("[SCHEDULER] ⚡ Catch-up: running missed evening accountability");
         await runEveningAccountability();
       }
