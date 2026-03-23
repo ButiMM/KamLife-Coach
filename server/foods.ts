@@ -574,16 +574,21 @@ export async function initFoodsTable(): Promise<void> {
     `);
 
     const count = await pool.query(`SELECT COUNT(*) FROM sa_foods;`);
-    if (parseInt(count.rows[0].count) === 0) {
-      for (const food of SA_FOODS_SEED) {
+    const existing = parseInt(count.rows[0].count);
+    if (existing < SA_FOODS_SEED.length) {
+      // Get existing names to avoid duplicates
+      const existingNames = await pool.query(`SELECT LOWER(name) as name FROM sa_foods`);
+      const nameSet = new Set(existingNames.rows.map((r: any) => r.name as string));
+      const toInsert = SA_FOODS_SEED.filter(f => !nameSet.has(f.name.toLowerCase()));
+      for (const food of toInsert) {
         await pool.query(
           `INSERT INTO sa_foods (name, aliases, calories_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, typical_portion_description, typical_portion_grams, typical_portion_calories, typical_portion_protein, category, budget_tier, notes) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
           [food.name, food.aliases, food.caloriesPer100g, food.proteinPer100g, food.carbsPer100g, food.fatPer100g, food.typicalPortionDescription, food.typicalPortionGrams, food.typicalPortionCalories, food.typicalPortionProtein, food.category, food.budgetTier, food.notes]
         );
       }
-      console.log(`[FOODS] Seeded ${SA_FOODS_SEED.length} SA foods`);
+      console.log(`[FOODS] Seeded ${toInsert.length} new foods — total now ${existing + toInsert.length}`);
     } else {
-      console.log(`[FOODS] Table ready (${count.rows[0].count} foods)`);
+      console.log(`[FOODS] Table ready (${existing} foods)`);
     }
   } catch (err) {
     console.error("[FOODS] Init failed:", err);
