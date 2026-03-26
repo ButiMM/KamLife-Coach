@@ -527,7 +527,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- MEAL PLAN re-delivery ----
-  if (m === "meal plan" || m === "mealplan" || m === "food plan" || m === "my meal plan" || m === "my food plan") {
+  if (["meal plan", "mealplan", "food plan", "my meal plan", "my food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "weekly meal plan", "my nutrition plan", "my eating plan", "what should i eat", "what do i eat"].includes(m) || /\b(diet plan|eating plan|nutrition plan|weekly meal|food plan)\b/i.test(m)) {
     return getOnboardingMealPlan(user);
   }
 
@@ -1337,7 +1337,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   if (["programme", "program", "my programme", "my program"].includes(m)) {
     return getKamlifeProgramme(user);
   }
-  if (["meal plan", "meals", "my meals", "food plan"].includes(m)) {
+  if (["meal plan", "meals", "my meals", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
   if (["progress", "my progress", "how am i doing"].includes(m)) {
@@ -2128,23 +2128,31 @@ CRITICAL RULES — these are non-negotiable:
     if (memories.length > 0) memoryContext = memories.join("\n");
   } catch { }
 
-  // ---- AGENT ROUTER: send to the right specialist ----
+  // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----
   const agentType = routeToAgent(message);
   let gptReply: string;
+  const AGENT_ERROR = "Eish Coach K had a moment. Try that again.";
 
-  if (agentType === "nutrition") {
-    gptReply = await nutritionAgent(user, message, memoryContext, saContext);
-  } else if (agentType === "programming") {
-    const prog = getKamlifeProgramme(user);
-    gptReply = await programmingAgent(user, message, memoryContext, prog, saContext);
-  } else if (agentType === "mindset") {
-    const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
-    gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext);
-  } else if (agentType === "admin") {
-    const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 7000}`;
-    gptReply = await adminAgent(user, message, "log", message, targetValue);
-  } else {
-    // General fallback — full Coach K with all context injected
+  try {
+    if (agentType === "nutrition") {
+      gptReply = await nutritionAgent(user, message, memoryContext, saContext);
+    } else if (agentType === "programming") {
+      const prog = getKamlifeProgramme(user);
+      gptReply = await programmingAgent(user, message, memoryContext, prog, saContext);
+    } else if (agentType === "mindset") {
+      const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
+      gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext);
+    } else if (agentType === "admin") {
+      const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 7000}`;
+      gptReply = await adminAgent(user, message, "log", message, targetValue);
+    } else {
+      gptReply = await askCoachK(message, user, finalInstruction);
+    }
+    // If specialist agent returned its own error string, fall back to full Coach K
+    if (gptReply === AGENT_ERROR) {
+      gptReply = await askCoachK(message, user, finalInstruction);
+    }
+  } catch {
     gptReply = await askCoachK(message, user, finalInstruction);
   }
 
