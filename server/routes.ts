@@ -1,7 +1,7 @@
 import { type Express } from "express";
 import { type Server } from "http";
 import { db } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins } from "../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
@@ -766,6 +766,121 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       : newStreak >= 3 ? `\n\n🔥 Streak: ${newStreak}. Keep it going.`
       : "";
     return `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
+  }
+
+  // ---- MY LIFTS — show all personal bests ----
+  if (["my lifts", "my weights", "lifts", "personal best", "pb", "my pbs", "my records", "exercise log"].includes(m)) {
+    try {
+      const allLifts = await db.select().from(exerciseLogs)
+        .where(eq(exerciseLogs.userId, user.id))
+        .orderBy(desc(exerciseLogs.loggedAt));
+      if (allLifts.length === 0) {
+        return `No lifts logged yet. After a gym session send something like "bench 60kg 3x10" and I track your progress week to week.`;
+      }
+      // Group by exercise, keep most recent + all-time best
+      const byExercise: Record<string, { recent: any; best: any }> = {};
+      for (const lift of allLifts) {
+        const ex = lift.exerciseName;
+        if (!byExercise[ex]) byExercise[ex] = { recent: lift, best: lift };
+        const liftWeight = parseFloat(String(lift.weightKg || 0));
+        const bestWeight = parseFloat(String(byExercise[ex].best.weightKg || 0));
+        if (liftWeight > bestWeight) byExercise[ex].best = lift;
+      }
+      const lines = Object.entries(byExercise).map(([ex, { recent, best }]) => {
+        const recentW = parseFloat(String(recent.weightKg || 0));
+        const bestW = parseFloat(String(best.weightKg || 0));
+        const repsStr = recent.reps ? ` × ${recent.sets || 3}×${recent.reps}` : "";
+        const pbStr = bestW > recentW ? ` (PB: ${bestW}kg)` : " 🏆 PB";
+        return `• ${ex}: ${recentW}kg${repsStr}${pbStr}`;
+      });
+      const liftsReply = `*Your Lifts — Most Recent*\n\n${lines.join("\n")}\n\nTo log a lift: "bench 80kg 3x8", "squat 100kg x5", "deadlift 120kg"`;
+      await logChat(user.id, message, liftsReply, "LIFTS_VIEW");
+      return liftsReply;
+    } catch (e) {
+      console.error("[MY_LIFTS]", e);
+      return `Log your lifts like this: "bench 60kg 3x10" and I track your progress.`;
+    }
+  }
+
+  // ---- EXERCISE WEIGHT LOG — "bench 60kg 3x10", "squatted 80kg", "deadlift 120kg x5" ----
+  const EXERCISE_DETECT = /\b(bench|chest press|squat|deadlift|dead lift|rdl|romanian|leg press|shoulder press|overhead press|ohp|military press|lat pulldown|pulldown|seated row|cable row|barbell row|bent over row|pull.?up|chin.?up|dip|hip thrust|glute bridge|leg curl|hamstring curl|leg extension|bicep curl|barbell curl|dumbbell curl|tricep|chest fly|cable fly|face pull|goblet squat|bulgarian|split squat|lunge|row)\b/i;
+  const WEIGHT_KG = /\b(\d+(?:\.\d+)?)\s*kg\b/i;
+  const isExerciseLog = EXERCISE_DETECT.test(m) && WEIGHT_KG.test(m) && user.trainingMode !== "walk_only";
+
+  if (isExerciseLog) {
+    // Normalise exercise name
+    const EXERCISE_MAP: Record<string, string> = {
+      bench: "Bench Press", "chest press": "Bench Press",
+      squat: "Squat", squatted: "Squat", squats: "Squat", "barbell squat": "Squat", "goblet squat": "Goblet Squat",
+      deadlift: "Deadlift", "dead lift": "Deadlift",
+      rdl: "Romanian Deadlift", romanian: "Romanian Deadlift",
+      "leg press": "Leg Press",
+      "shoulder press": "Shoulder Press", "overhead press": "Shoulder Press", ohp: "Shoulder Press", "military press": "Shoulder Press",
+      "lat pulldown": "Lat Pulldown", pulldown: "Lat Pulldown",
+      "seated row": "Seated Row", "cable row": "Seated Row",
+      "barbell row": "Barbell Row", "bent over row": "Barbell Row",
+      "pull up": "Pull Up", pullup: "Pull Up", "pull-up": "Pull Up",
+      "chin up": "Chin Up", chinup: "Chin Up", "chin-up": "Chin Up",
+      dip: "Weighted Dip",
+      "hip thrust": "Hip Thrust", "glute bridge": "Glute Bridge",
+      "leg curl": "Leg Curl", "hamstring curl": "Leg Curl",
+      "leg extension": "Leg Extension",
+      "bicep curl": "Bicep Curl", "barbell curl": "Bicep Curl", "dumbbell curl": "Bicep Curl", curl: "Bicep Curl",
+      tricep: "Tricep Pushdown", "tricep pushdown": "Tricep Pushdown", "tricep extension": "Tricep Pushdown",
+      "chest fly": "Chest Fly", "cable fly": "Chest Fly",
+      "face pull": "Face Pull",
+      bulgarian: "Bulgarian Split Squat", "split squat": "Bulgarian Split Squat",
+      lunge: "Lunge", row: "Seated Row",
+    };
+    let exerciseName = "Exercise";
+    for (const [key, val] of Object.entries(EXERCISE_MAP)) {
+      if (m.includes(key)) { exerciseName = val; break; }
+    }
+
+    const weightMatch = m.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
+    const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 0;
+    if (!weightKg) { /* fall through to GPT */ } else {
+
+    // Parse optional reps and sets: "3x10", "3 sets 10 reps", "x10", "10 reps"
+    const setsRepsMatch = m.match(/\b(\d+)\s*[x×]\s*(\d+)\b/i) || m.match(/(\d+)\s*sets?\s*(?:of\s*)?(\d+)\s*reps?/i);
+    const repsOnlyMatch = m.match(/\b[x×]\s*(\d+)\b/i) || m.match(/\b(\d+)\s*reps?\b/i);
+    let sets: number | null = null;
+    let reps: number | null = null;
+    if (setsRepsMatch) { sets = parseInt(setsRepsMatch[1]); reps = parseInt(setsRepsMatch[2]); }
+    else if (repsOnlyMatch) { reps = parseInt(repsOnlyMatch[1]); }
+
+    // Fetch previous log for this exercise
+    const prevLogs = await db.select().from(exerciseLogs)
+      .where(and(eq(exerciseLogs.userId, user.id), eq(exerciseLogs.exerciseName, exerciseName)))
+      .orderBy(desc(exerciseLogs.loggedAt))
+      .limit(5);
+
+    // Save new log
+    try {
+      await db.insert(exerciseLogs).values({ userId: user.id, exerciseName, weightKg: weightKg.toString(), reps: reps ?? undefined, sets: sets ?? undefined });
+    } catch (e) { console.error("[EXERCISE_LOG]", e); }
+
+    // Build response
+    const repsStr = sets && reps ? ` ${sets}×${reps}` : reps ? ` ×${reps}` : "";
+    let liftReply = "";
+    if (prevLogs.length === 0) {
+      liftReply = `${exerciseName} ${weightKg}kg${repsStr} logged. Baseline set — every session from here we track against this number. Add reps before adding weight. When you hit ${sets || 3}×${(reps || 10) + 2}, bump the weight by 2.5kg.`;
+    } else {
+      const prevWeight = parseFloat(String(prevLogs[0].weightKg || 0));
+      const allTimeBest = Math.max(...prevLogs.map(l => parseFloat(String(l.weightKg || 0))));
+      if (weightKg > allTimeBest) {
+        liftReply = `🏆 *New PB — ${exerciseName} ${weightKg}kg${repsStr}.* Previous best was ${allTimeBest}kg. That is progressive overload working exactly as it should. Next session: hit the same weight for more reps before going heavier.`;
+      } else if (weightKg > prevWeight) {
+        liftReply = `${exerciseName} ${weightKg}kg${repsStr} — up ${(weightKg - prevWeight).toFixed(1)}kg from last time (${prevWeight}kg). Progressive overload on track. Keep adding reps at this weight until you can do ${(reps || 10) + 2} clean, then go heavier.`;
+      } else if (weightKg === prevWeight) {
+        liftReply = `${exerciseName} ${weightKg}kg${repsStr} logged. Same weight as last session — good. Focus on adding 1–2 reps today. When you hit ${sets || 3}×${(reps || 10) + 2} clean, add 2.5kg next session.`;
+      } else {
+        liftReply = `${exerciseName} ${weightKg}kg${repsStr} logged — ${(prevWeight - weightKg).toFixed(1)}kg under last time (${prevWeight}kg). Not every session is a PR. Focus on perfect form today and come back stronger next session.`;
+      }
+    }
+    await logChat(user.id, message, liftReply, "EXERCISE_LOG");
+    return liftReply;
+    } // end weightKg else block
   }
 
   // ---- GOAL CHANGE: wants muscle but profile says fat loss / low calories ----

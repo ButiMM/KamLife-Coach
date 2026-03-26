@@ -234,6 +234,20 @@ export const bodyMeasurements = pgTable(
   },
 );
 
+export const exerciseLogs = pgTable(
+  "exercise_logs",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    exerciseName: text("exercise_name").notNull(),
+    weightKg: numeric("weight_kg"),
+    reps: integer("reps"),
+    sets: integer("sets"),
+    loggedAt: timestamp("logged_at").defaultNow(),
+  },
+  (table) => ({ userExerciseIdx: index("exercise_logs_user_idx").on(table.userId) }),
+);
+
 // For Replit AI Integrations compatibility
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
