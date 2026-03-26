@@ -88,6 +88,7 @@ export const users = pgTable(
     popiConsent: boolean("popi_consent").default(false),
     popiConsentAt: timestamp("popi_consent_at"),
     lastGoalCheckWeek: integer("last_goal_check_week").default(0),
+    workoutStreak: integer("workout_streak").default(0),
   },
   (table) => {
     return {

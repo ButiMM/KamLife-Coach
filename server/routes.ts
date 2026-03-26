@@ -715,11 +715,22 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
     if (newWeek > 4) { newWeek = 4; }
 
+    // Workout streak — continues if last session was within 2 days
+    const lastW = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
+    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    let newStreak = 1;
+    if (lastW) {
+      const lastDay = new Date(lastW); lastDay.setHours(0, 0, 0, 0);
+      const daysDiff = Math.floor((todayMidnight.getTime() - lastDay.getTime()) / 86400000);
+      if (daysDiff <= 2) newStreak = (user.workoutStreak || 0) + 1;
+    }
+
     await db.update(users).set({
       totalWorkoutsCompleted: newTotal,
       lastWorkoutDate: new Date(),
       programmeDayInWeek: newDay,
       programmeWeek: newWeek,
+      workoutStreak: newStreak,
     }).where(eq(users.phoneNumber, phone));
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
@@ -749,7 +760,12 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
             : newTotal === 100
               ? "\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this."
               : "";
-    return `${celebration}${milestoneNote}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
+    const streakLine = newStreak >= 30 ? `\n\n🔥 *${newStreak}-session streak. This is who you are now.*`
+      : newStreak >= 14 ? `\n\n🔥 *${newStreak} sessions straight. Don't stop.*`
+      : newStreak >= 7 ? `\n\n🔥 *7-session streak.* You are building a habit.`
+      : newStreak >= 3 ? `\n\n🔥 Streak: ${newStreak}. Keep it going.`
+      : "";
+    return `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
   }
 
   // ---- GOAL CHANGE: wants muscle but profile says fat loss / low calories ----
@@ -1346,6 +1362,53 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
   }
   if (m === "7" || m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
     return `*Measurements Check-In*\n\nSend me your current measurements in this format:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nMeasure first thing in morning, relaxed (not flexed). Same spot every time. The tape does not lie even when the scale does.`;
+  }
+
+  // ---- CLOTHING CHECK-IN (Non-Scale Victory) — option 8 ----
+  const isClothingTrigger = m === "8" || m === "non scale" || m === "nsc" || m === "non-scale" || m === "clothing" || m === "clothing check" || m === "clothing check in" || m === "non scale victory";
+  if (isClothingTrigger) {
+    await db.update(users).set({ awaitingInputType: "clothing_checkin" }).where(eq(users.phoneNumber, phone));
+    return `*Non-Scale Victory Check-In 👗*\n\nThe scale lies. Your clothes never do. Answer these 4 in one message:\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall feel* — Great / Good / Okay / Bad\n\nExample: "Looser, High, Flatter, Great"`;
+  }
+
+  // ---- CLOTHING CHECK-IN RESPONSE — parse when awaiting ----
+  if (user.awaitingInputType === "clothing_checkin") {
+    const JEANS = ["looser", "same", "tighter", "fitting better", "too tight", "baggy", "big", "small"];
+    const ENERGY = ["high", "medium", "low", "great", "good", "okay", "tired", "energetic"];
+    const STOMACH = ["flatter", "same", "bloated", "better", "flat", "bigger", "smaller"];
+    const OVERALL = ["great", "good", "okay", "bad", "amazing", "terrible", "fine", "average"];
+    const hasAnyAnswer = [...JEANS, ...ENERGY, ...STOMACH, ...OVERALL].some(k => m.includes(k));
+    if (hasAnyAnswer) {
+      const jeansFit = JEANS.find(k => m.includes(k)) || "not specified";
+      const energyLevel = ENERGY.find(k => m.includes(k)) || "not specified";
+      const stomachFeel = STOMACH.find(k => m.includes(k)) || "not specified";
+      const overallFeel = OVERALL.find(k => m.includes(k)) || "not specified";
+      const weekNum = user.programmeWeek || 1;
+      try {
+        await db.insert(clothingCheckins).values({ userId: user.id, jeansFit, energyLevel, stomachFeel, overallFeel, weekNumber: weekNum });
+        await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+        await storeMemory(phone, `Week ${weekNum} non-scale check-in: jeans ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel}, overall ${overallFeel}`, "milestone");
+      } catch { /* non-fatal */ }
+      const isPositive = ["looser", "fitting better", "baggy", "flatter", "better", "flat", "great", "amazing", "high", "energetic"].some(k => m.includes(k));
+      const clothingReply = isPositive
+        ? `Week ${weekNum} check-in saved. Jeans: ${jeansFit}. Energy: ${energyLevel}. Stomach: ${stomachFeel}. That is real progress — the scale might not show it yet but your body is changing. Keep the food and training consistent.`
+        : `Week ${weekNum} check-in saved. This data matters more than the scale. If jeans are tighter it is usually water and hormones, not fat — look at your sodium and sleep this week. Stay on the programme.`;
+      await logChat(user.id, message, clothingReply, "CLOTHING_CHECKIN");
+      return clothingReply;
+    }
+    // Didn't recognise the answer — clear state and let GPT handle
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+  }
+
+  // ---- INJURY BETTER — close the follow-up loop ----
+  const injuryBetter = /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
+  if (injuryBetter && user.injuries && user.injuries !== "none") {
+    const oldInjury = user.injuries;
+    await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
+    try { await storeMemory(phone, `Injury resolved: "${oldInjury}" — client reported recovery`, "medical"); } catch { }
+    const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back. Build up gradually this week — don't jump straight to max weight. Reply "today" for your session.`;
+    await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
+    return injuryReply;
   }
 
   // ---- SLEEP LOGGING — hardcoded, no GPT ----

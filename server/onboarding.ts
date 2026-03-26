@@ -62,6 +62,7 @@ What do you need?
 5️⃣ Log weight
 6️⃣ Weekly report
 7️⃣ Measurements check-in
+8️⃣ Non-scale victory check-in
 
 Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
 }
