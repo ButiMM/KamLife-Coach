@@ -380,10 +380,21 @@ export async function handleOnboarding(user: any, message: string, phone: string
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
-  // ---- START (new users only — sends welcome, moves to WELCOME state) ----
+  // ---- FIX 6: START — show POPIA consent FIRST, before name question ----
   if (state === "START") {
-    await db.update(users).set({ onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
-    return `Sawubona! I'm Coach K. 20 years of real SA coaching, now in your pocket 24/7. What's your name?`;
+    await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
+    return `Sawubona! I'm Coach K — 20 years of real SA coaching, now in your pocket.\n\nBefore we start, I need your consent to store your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\n✅ Used only for your coaching\n✅ Never sold to anyone\n✅ Deleted on request — reply "delete my data" at any time\n\nReply *yes* to continue.`;
+  }
+
+  // ---- ASK_POPIA — waiting for consent before name question ----
+  if (state === "ASK_POPIA") {
+    const consentWords = ["yes", "agree", "consent", "ok", "okay", "yebo", "ja", "sure", "accept", "i agree", "i consent", "yes coach", "i do"];
+    if (consentWords.some(k => msg === k || msg.startsWith(k) || msg.includes(k))) {
+      await db.update(users).set({ popiConsent: true, popiConsentAt: new Date(), onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
+      return `Sharp. What's your name?`;
+    }
+    // Re-show condensed POPIA if they didn't consent clearly
+    return `I need your consent before I can coach you.\n\nYour data is only used for your coaching — never sold. You can delete it at any time.\n\nReply *yes* to continue, or "delete my data" to remove your information.`;
   }
 
   // ---- WELCOME — waiting for name reply ----

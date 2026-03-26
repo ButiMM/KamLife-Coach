@@ -480,7 +480,17 @@ export function buildFullProgramme(user: any): string {
   const phaseName = phaseNames[phase] || "Foundation";
   const multiplier = getPhaseMultiplier(phase);
   const week = user.programmeWeek || 1;
-  const library = WORKOUTS[mode === "gym" ? "gym" : "home"];
+
+  // FIX 7: Home users get 3 full-body sessions (squat+push+hinge+pull+core every session)
+  // NOT a push/pull/legs split — beginners need full-body every session
+  if (mode !== "gym") {
+    const day1 = buildDayWorkout({ ...user, programmeDayInWeek: 1 });
+    const day2 = buildDayWorkout({ ...user, programmeDayInWeek: 2 });
+    const day3 = buildDayWorkout({ ...user, programmeDayInWeek: 3 });
+    return `*Phase ${phase}: ${phaseName} — Week ${week} | Full Body Home Programme*\nTrain on non-consecutive days. Each session hits squat, push, hinge, pull, and core.\n\n${day1}\n\n---\n\n${day2}\n\n---\n\n${day3}`;
+  }
+
+  const library = WORKOUTS["gym"];
 
   const days: Array<{ label: string; type: "push" | "pull" | "legs" }> = [
     { label: "Day 1 — Push 💪", type: "push" },

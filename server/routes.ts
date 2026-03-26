@@ -8,8 +8,8 @@ import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
-import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary } from "./gpt";
+import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType } from "./programme";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 
@@ -28,7 +28,7 @@ const openai = new OpenAI({
 
 const SA_FOOD_CALORIES: Record<string, number> = {
   pap: 350, samp: 300, rice: 200, bread: 80, "brown bread": 70,
-  oats: 150, "jungle oats": 150, maltabella: 160, "weet-bix": 130,
+  oats: 150, "jungle oats": 150, maltabella: 160, "weet-bix": 130, "all bran": 175, "all-bran": 175, "all bran flakes": 175, "corn flakes": 155, "special k": 155, "coco pops": 165, "froot loops": 165, "pronutro chocolate": 195,
   egg: 70, eggs: 140, pilchards: 180, "tinned tuna": 120,
   chicken: 165, "chicken breast": 165, beef: 250, mince: 300,
   "sugar beans": 200, "baked beans": 120, lentils: 180,
@@ -849,6 +849,34 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Programme built.\n\n${programme}`;
   }
 
+  // ---- FIX 4: EXPLICIT WORKOUT COMMANDS — hardcoded, never touch GPT ----
+  // "Today's workout" and "Workouts" must always return directly. No GPT, no errors.
+  const todayWorkoutPhrases = ["today", "today's workout", "todays workout", "workout today", "my workout", "show workout", "give me workout"];
+  const fullProgrammePhrases = ["workouts", "my workouts"];
+  if (todayWorkoutPhrases.includes(m)) {
+    try {
+      const workout = buildDayWorkout(user);
+      const dayNum = user.programmeDayInWeek || 1;
+      const r = `*Day ${dayNum} — Your Workout Today*\n\n${workout}`;
+      await logChat(user.id, message, r, "WORKOUT_VIEW");
+      return r;
+    } catch (e) {
+      console.error("[TODAY_WORKOUT]", e);
+      return getKamlifeProgramme(user);
+    }
+  }
+  if (fullProgrammePhrases.includes(m)) {
+    try {
+      const prog = getKamlifeProgramme(user);
+      const r = `Your programme:\n\n${prog}`;
+      await logChat(user.id, message, r, "PROGRAMME_VIEW");
+      return r;
+    } catch (e) {
+      console.error("[WORKOUTS_VIEW]", e);
+      return "Send *programme* to see your full workout plan.";
+    }
+  }
+
   // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
   const isWorkoutRelated =
     m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
@@ -968,6 +996,46 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     const waterQReply = `Daily water target: *2 litres*.\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
     await logChat(user.id, message, waterQReply, "WATER_QUESTION");
     return waterQReply;
+  }
+
+  // ---- FIX 2: CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
+  // Must run BEFORE food scanner. Strips correction prefix and re-processes the corrected food.
+  const CORRECTION_PREFIX = /^(no[,\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
+  const isFoodCorrection = CORRECTION_PREFIX.test(m) &&
+    /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had)\b/i.test(m);
+  if (isFoodCorrection) {
+    // Mark the previous food log as corrected so it is excluded from today's totals
+    const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
+    try {
+      const lastFoodLog = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      if (lastFoodLog.length > 0) {
+        await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+      }
+    } catch { /* non-fatal */ }
+    // Strip the correction prefix and process the remaining message as the actual food
+    const correctedMsg = m.replace(CORRECTION_PREFIX, "").trim();
+    if (correctedMsg && correctedMsg.length > 2 && correctedMsg !== m) {
+      return await handleMessage(phone, correctedMsg);
+    }
+  }
+
+  // ---- FIX 3: WATER GUARD — messages about water/hydration never reach food scanner ----
+  // Water handlers above (lines ~919-971) catch most cases. This catches the remainder.
+  const hasWaterWord = /\b(water|h2o|hydrat(e|ion|ing))\b/i.test(m);
+  if (hasWaterWord && /\b(had|drank|drinking|intake|drink|logged|consumed)\b/i.test(m)) {
+    // Only route here if no actual food found in the message
+    const waterFoodCheck = scanForSAFoods(m);
+    if (waterFoodCheck.length === 0) {
+      const todayWg = parseFloat(user.todayWater as string || "0");
+      const remainingWg = Math.max(0, Math.round((2.0 - todayWg) * 10) / 10);
+      const wGuardReply = `Water logged. You have had ${todayWg}L today — ${remainingWg > 0 ? `${remainingWg}L still to go.` : `daily target hit. ✅`}\n\nTo log an exact amount: "drank 500ml", "had 1 litre", "2 glasses of water".`;
+      await logChat(user.id, message, wGuardReply, "WATER_LOG");
+      return wGuardReply;
+    }
   }
 
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
@@ -1473,13 +1541,15 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     // Not paused — fall through to GPT which handles "I'm back" motivationally
   }
 
-  // ---- PROFILE UPDATE COMMANDS ----
+  // ---- FIX 5: PROFILE UPDATE COMMANDS — expanded to catch training mode/days changes ----
   const isProfileUpdate =
     /\b(change my goal|my goal is now|switch to|switch my goal|new goal|update my goal)\b/i.test(m) ||
     /\b(change.*budget|budget.*changed|my budget is now|budget is now|new budget)\b/i.test(m) ||
     /\b(joined.*gym|got.*gym|have.*gym|going to.*gym|now.*gym|gym.*membership)\b/i.test(m) ||
     /\b(change.*training days|training.*(\d)\s*days|now training.*(\d)|(\d)\s*days.*week.*train)\b/i.test(m) ||
-    /\b(training at home|working out at home|no.*gym.*more|quit.*gym|left.*gym|home.*workout.*now)\b/i.test(m);
+    /\b(training at home|working out at home|no.*gym.*more|quit.*gym|left.*gym|home.*workout.*now)\b/i.test(m) ||
+    // FIX 5: catch "I want to gym X days a week", "train X days a week", "gym X days"
+    /\b(want to gym|going to gym|start gym|gym.*\d+.*day|train.*\d+.*day|workout.*\d+.*day|\d+.*day.*gym|\d+.*day.*train|\d+.*day.*week)\b/i.test(m);
 
   if (isProfileUpdate) {
     const updates: Record<string, any> = {};
@@ -1508,7 +1578,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     }
 
     // Training mode
-    if (/joined.*gym|got.*gym|have.*gym|going to.*gym|gym.*membership|now.*gym/i.test(m)) {
+    if (/joined.*gym|got.*gym|have.*gym|going to.*gym|gym.*membership|now.*gym|want to gym|start.*gym|going to gym/i.test(m)) {
       updates.trainingMode = "gym";
       updateSummary += " Training mode updated to gym.";
     } else if (/home|no.*gym|quit.*gym|left.*gym/i.test(m)) {
@@ -1516,8 +1586,10 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       updateSummary += " Training mode updated to home.";
     }
 
-    // Training days
-    const trainingDaysMatch = m.match(/(\d)\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i);
+    // Training days — catch "4 days a week", "gym 4 days", "train 4 days", etc.
+    const trainingDaysMatch = m.match(/\b([2-6])\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i)
+      || m.match(/(?:gym|train|workout)\s+([2-6])\s*days?/i)
+      || m.match(/([2-6])\s*days?\s*(?:a\s*week|per\s*week|at\s*the\s*gym)/i);
     if (trainingDaysMatch) {
       const days = parseInt(trainingDaysMatch[1]);
       if (days >= 2 && days <= 6) {
@@ -1538,7 +1610,15 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
         updateSummary += ` New targets: ${calorieTarget} kcal/day, ${proteinTarget}g protein.`;
       }
       await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
-      const profileReply = `Profile updated. ${updateSummary.trim()}\n\nReply *menu* to see your updated programme.`;
+      // If training mode or days changed, rebuild and show the programme immediately
+      let profileReply = `Profile updated. ${updateSummary.trim()}`;
+      if (updates.trainingMode || updates.trainingDaysPerWeek) {
+        const updatedUser = { ...user, ...updates };
+        const newProgramme = getKamlifeProgramme(updatedUser);
+        profileReply += `\n\nHere is your updated programme:\n\n${newProgramme}`;
+      } else {
+        profileReply += `\n\nReply *menu* to see your updated programme.`;
+      }
       await logChat(user.id, message, profileReply, "PROFILE_UPDATE");
       return profileReply;
     }
