@@ -12,6 +12,8 @@ import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlife
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
+import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
+import { storeMemory, retrieveMemories } from "./memory";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -1941,8 +1943,51 @@ CRITICAL RULES — these are non-negotiable:
     if (cycleContext) finalInstruction = `${cycleContext}\n\n${finalInstruction}`;
   }
 
-  const gptReply = await askCoachK(message, user, finalInstruction);
+  // ---- MEMORY: retrieve relevant memories for this message ----
+  let memoryContext = "";
+  try {
+    const memories = await retrieveMemories(phone, message);
+    if (memories.length > 0) memoryContext = memories.join("\n");
+  } catch { }
+
+  // ---- AGENT ROUTER: send to the right specialist ----
+  const agentType = routeToAgent(message);
+  let gptReply: string;
+
+  if (agentType === "nutrition") {
+    gptReply = await nutritionAgent(user, message, memoryContext, saContext);
+  } else if (agentType === "programming") {
+    const prog = getKamlifeProgramme(user);
+    gptReply = await programmingAgent(user, message, memoryContext, prog, saContext);
+  } else if (agentType === "mindset") {
+    const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
+    gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext);
+  } else if (agentType === "admin") {
+    const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 7000}`;
+    gptReply = await adminAgent(user, message, "log", message, targetValue);
+  } else {
+    // General fallback — full Coach K with all context injected
+    gptReply = await askCoachK(message, user, finalInstruction);
+  }
+
   const finalReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
+
+  // ---- MEMORY: store important facts for future sessions ----
+  try {
+    if (/\b(injury|injured|hurt|pain|bad knee|bad back|bad shoulder|bad hip)\b/i.test(m)) {
+      await storeMemory(phone, `Client reported injury: "${message}"`, "medical");
+    } else if (/\b(allergic|allergy|intolerant|can't eat|cannot eat|dairy free|gluten free|peanut allergy)\b/i.test(m)) {
+      await storeMemory(phone, `Client dietary restriction: "${message}"`, "medical");
+    } else if (/\b(diabetes|diabetic|hypertension|pcos|hiv|tb |tuberculosis|pregnant|epilepsy)\b/i.test(m)) {
+      await storeMemory(phone, `Client medical condition: "${message}"`, "medical");
+    } else if (/\b(i prefer|i hate|i love|don't like|can't stand|favourite food|i always eat|i never eat)\b/i.test(m)) {
+      await storeMemory(phone, `Client food or training preference: "${message}"`, "preference");
+    } else if (/\b(quit|give up|want to stop|not working|no results|nothing is changing)\b/i.test(m)) {
+      await storeMemory(phone, `Client struggled with motivation: "${message}"`, "mindset");
+    } else if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/i.test(m)) {
+      await storeMemory(phone, `Client milestone: "${message}"`, "milestone");
+    }
+  } catch { }
 
   // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
   const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
