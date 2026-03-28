@@ -5,6 +5,7 @@ import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared
 import { eq, gte, lte, and, lt, desc, asc } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { generateVoiceNote } from "./tts";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -55,12 +56,14 @@ const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
   : "";
 
-async function sendWhatsApp(to: string, body: string): Promise<void> {
+async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   if (!FROM_NUMBER) {
     console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
     return;
   }
-  await twilioClient.messages.create({ from: FROM_NUMBER, to, body });
+  const params: any = { from: FROM_NUMBER, to, body };
+  if (mediaUrl) params.mediaUrl = [mediaUrl];
+  await twilioClient.messages.create(params);
   console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
 }
 
@@ -140,12 +143,13 @@ async function runMorningCheckin(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const phone = client.phoneNumber;
+      const proteinTarget = client.proteinTarget || 120;
 
       if (isRamadan()) {
         await sendWhatsApp(phone,
-          `Ramadan Mubarak ${name}. Suhoor is your most important meal today — high protein, slow carbs, and water before Fajr. What are you having?`
+          `Ramadan Mubarak ${name}. Suhoor is your most important meal — high protein, slow carbs, water before Fajr. What are you having at Suhoor?`
         );
         continue;
       }
@@ -153,23 +157,71 @@ async function runMorningCheckin(): Promise<void> {
       const yesterdayLogs = await getYesterdayLogs(client.id);
 
       if (yesterdayLogs.length === 0) {
+        // Completely silent day — short and direct
         await sendWhatsApp(phone,
-          `Morning ${name}. Yesterday was a blank slate. Today we fix that. One thing — log your first meal after you eat it. That is it.`
+          `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`
+        );
+        continue;
+      }
+
+      const foodLogs = yesterdayLogs.filter(l => l.intent === "FOOD_LOG");
+      const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
+      const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
+
+      // Extract protein logged from GPT responses (looks for "Xg protein" patterns)
+      let totalProtLogged = 0;
+      for (const log of foodLogs) {
+        const m = (log.messageOut || "").match(/\b(\d{2,3})g?\s*protein/i);
+        if (m) totalProtLogged += parseInt(m[1]);
+      }
+
+      // Extract steps logged from step log messages
+      let stepsLogged = 0;
+      if (stepsLog) {
+        const sm = (stepsLog.messageIn || "").match(/\b([\d,]+)\s*steps?\b/i);
+        if (sm) stepsLogged = parseInt(sm[1].replace(/,/g, ""));
+      }
+
+      const parts: string[] = [`Morning ${name}.`];
+
+      // Protein — be specific about the number and the gap
+      if (foodLogs.length === 0) {
+        parts.push(`No food logged yesterday.`);
+        parts.push(`You cannot out-train a diet you are not tracking.`);
+      } else if (totalProtLogged >= proteinTarget * 0.9) {
+        parts.push(`${totalProtLogged}g protein logged yesterday — target hit.`);
+      } else if (totalProtLogged > 0) {
+        const gap = proteinTarget - totalProtLogged;
+        parts.push(`${totalProtLogged}g protein logged yesterday — ${gap}g short of your ${proteinTarget}g target.`);
+        parts.push(gap > 50
+          ? `Add pilchards and eggs to every meal today.`
+          : `One extra tin of pilchards or 2 eggs today closes that gap.`
         );
       } else {
-        const foodLogged = yesterdayLogs.some(l => l.intent === "FOOD_LOG");
-        const stepsLogged = yesterdayLogs.some(l => l.intent === "STEP_LOG");
-        const workoutLogged = yesterdayLogs.some(l => (l.messageIn || "").toLowerCase().includes("done"));
-
-        const parts: string[] = [`Morning ${name}.`];
-        if (foodLogged) parts.push("Food was tracked yesterday — good.");
-        if (stepsLogged) parts.push("Steps logged too.");
-        if (workoutLogged) parts.push("Workout done.");
-        if (!foodLogged) parts.push(`Protein target is ${client.proteinTarget || 120}g — hit it today.`);
-        parts.push("What is your breakfast?");
-
-        await sendWhatsApp(phone, parts.join(" "));
+        parts.push(`Food was logged but protein not tracked.`);
       }
+
+      // Workout
+      if (workoutLogged) parts.push(`Session done yesterday. Sharp.`);
+
+      // Steps — specific number vs target
+      if (stepsLogged > 0) {
+        const stepsTarget = client.stepsTarget || 7000;
+        if (stepsLogged >= stepsTarget) {
+          parts.push(`Steps: ${stepsLogged.toLocaleString()} — target hit.`);
+        } else {
+          parts.push(`Steps: ${stepsLogged.toLocaleString()} of ${stepsTarget.toLocaleString()} target.`);
+        }
+      }
+
+      // End with one specific action
+      if (foodLogs.length === 0) {
+        parts.push(`Send me breakfast now.`);
+      } else {
+        parts.push(`What is your first meal today?`);
+      }
+
+      await sendWhatsApp(phone, parts.join(" "));
     } catch (err) {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);
     }
@@ -225,9 +277,11 @@ cron.schedule("0 4 * * 1", async () => {
     if (isPaused(client)) continue;
     try {
       if (client.programmeWeek !== 3) continue;
-      const name = client.name || "champ";
+      const name = client.name || "there";
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const planned = client.trainingDaysPerWeek || 3;
       await sendWhatsApp(client.phoneNumber,
-        `${name}, you are in week 3. This is where 70 percent of people quit. Not because it is too hard. Because results are not visible yet. They are happening inside. Show up this week. It is the most important week of the programme.`
+        `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`
       );
     } catch (err) {
       console.error(`[SCHEDULER] Week 3 intervention error — ${client.phoneNumber}:`, err);
@@ -270,11 +324,36 @@ cron.schedule("0 8 20 * *", async () => {
 // Runs 8am SAST (6am UTC) daily
 // ============================================================
 
-const MILESTONES: Record<number, (name: string) => string> = {
-  7:  (n) => `${n}, one week in. Most people do not make it here. You did. Keep going.`,
-  30: (n) => `${n}, 30 days. This is real now. Your body has changed even if you cannot see it yet. Measurements today — chest, waist, hips. Message them to me.`,
-  60: (n) => `${n}, 60 days of consistent work. That is rare. Genuinely rare.`,
-  90: (n) => `${n}, 90 days. You have built a habit. That is worth more than any weight loss number.`,
+// Day milestones — specific to each client's actual numbers
+function buildDayMilestoneMessage(name: string, days: number, workouts: number, weightKg: string | null): string {
+  if (days === 7) {
+    return `${name}, seven days in. ${workouts > 0 ? `${workouts} session${workouts > 1 ? "s" : ""} completed.` : "Keep building the habit."} Most people quit before they even get here. Send your weight today — I want a baseline for week two.`;
+  }
+  if (days === 30) {
+    const weightLine = weightKg ? `You started at ${weightKg}kg. ` : "";
+    return `${name}, 30 days. ${weightLine}${workouts} workouts completed. The people who last 30 days are the ones who get results — and you are one of them. Measurements today — waist, hips, chest. Send them to me.`;
+  }
+  if (days === 60) {
+    return `${name}, 60 days. ${workouts} sessions logged. That kind of consistency is genuinely rare — most people have been and gone twice already. Send your weight today. I want to see the 60-day number.`;
+  }
+  if (days === 90) {
+    return `${name}, 90 days and ${workouts} workouts. You have built a real habit now. This is where things compound — the next 90 will look different because your body is different. Progress photo today. Send it to me.`;
+  }
+  if (days === 180) {
+    return `${name}, 6 months. ${workouts} workouts. Whatever brought you here — it worked. Progress photo today. I want to see what 180 days of work looks like on your body.`;
+  }
+  if (days === 365) {
+    return `${name}, one year. I do not have words for what you have done this year. ${workouts} workouts. 365 days. Send me a photo. This moment deserves to be seen.`;
+  }
+  return "";
+}
+
+// Workout count milestones — celebrate real numbers with voice note
+const WORKOUT_MILESTONES: Record<number, (name: string) => string> = {
+  10:  (n) => `${n}, 10 sessions done. That is the first real milestone — most people never get here. The habit is forming. Keep going.`,
+  25:  (n) => `${n}, 25 workouts. A quarter century of sessions. You are not talking about fitness anymore. You are doing it.`,
+  50:  (n) => `${n}, 50 sessions. Fifty times you showed up when you could have stayed home. That is not motivation — that is discipline. Lekker work.`,
+  100: (n) => `${n}, 100 workouts. One hundred sessions. That number puts you in a category most people never reach. Whatever happens next — you earned this.`,
 };
 
 cron.schedule("0 6 * * *", async () => {
@@ -284,11 +363,31 @@ cron.schedule("0 6 * * *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
+      const name = client.name || "there";
+      const workouts = client.totalWorkoutsCompleted || 0;
       const days = programmeDaysSince(client.programmeStartDate);
-      const message = MILESTONES[days];
-      if (!message) continue;
-      const name = client.name || "champ";
-      await sendWhatsApp(client.phoneNumber, message(name));
+
+      // Day milestones
+      if ([7, 30, 60, 90, 180, 365].includes(days)) {
+        // Get first weight log for context
+        const firstWeight = await db.select({ weight: weightLogs.weight })
+          .from(weightLogs)
+          .where(eq(weightLogs.userId, client.id))
+          .orderBy(asc(weightLogs.loggedAt))
+          .limit(1);
+        const firstWeightKg = firstWeight[0]?.weight ? String(firstWeight[0].weight) : null;
+        const msg = buildDayMilestoneMessage(name, days, workouts, firstWeightKg);
+        if (msg) await sendWhatsApp(client.phoneNumber, msg);
+      }
+
+      // Workout count milestones — with TTS voice note
+      const workoutMilestoneText = WORKOUT_MILESTONES[workouts];
+      if (workoutMilestoneText) {
+        const text = workoutMilestoneText(name);
+        // Try to send as voice note for the biggest moments
+        const voiceUrl = [25, 50, 100].includes(workouts) ? await generateVoiceNote(text) : null;
+        await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Milestone error — ${client.phoneNumber}:`, err);
     }
@@ -438,6 +537,68 @@ cron.schedule("0 6 * * 0", async () => {
       await sendWhatsApp(client.phoneNumber, report);
     } catch (err) {
       console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB — SUNDAY EVENING PERSONAL CHECK-IN
+// Runs Sunday 5pm UTC (7pm SAST)
+// Asks ONE specific question based on each client's actual week
+// ============================================================
+
+cron.schedule("0 17 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Sunday evening check-in");
+  const clients = await getActiveClients();
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const name = client.name || "there";
+      const plannedSessions = client.trainingDaysPerWeek || 3;
+
+      // Query this week's actual data
+      const [weekWorkouts, weekSteps, weekFoodLogs] = await Promise.all([
+        db.select().from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
+        db.select().from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
+        db.select().from(chatHistory)
+          .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, weekAgo))),
+      ]);
+
+      const completedSessions = weekWorkouts.length;
+      const avgSteps = weekSteps.length > 0
+        ? Math.round(weekSteps.reduce((s, l) => s + (l.steps || 0), 0) / weekSteps.length)
+        : 0;
+
+      // Build one specific question based on the biggest gap this week
+      let question: string;
+
+      if (completedSessions === 0 && weekFoodLogs.length === 0) {
+        // Nothing logged all week — re-engage them
+        question = `${name}, this week was quiet. One question — what got in the way?`;
+      } else if (completedSessions >= plannedSessions && weekFoodLogs.length >= 5) {
+        // Strong week — celebrate and ask forward-looking question
+        question = `${name}, ${completedSessions} sessions done this week and food tracked. Solid week. What was the hardest part?`;
+      } else if (completedSessions < Math.ceil(plannedSessions * 0.5)) {
+        // Missed more than half their sessions
+        question = `${name}, ${completedSessions} of ${plannedSessions} sessions this week. What kept you from the other ${plannedSessions - completedSessions}?`;
+      } else if (weekFoodLogs.length < 3) {
+        // Training but not tracking food
+        question = `${name}, ${completedSessions} sessions done. Food tracking was thin this week. What makes it hard to log?`;
+      } else if (avgSteps > 0 && avgSteps < (client.stepsTarget || 7000) * 0.6) {
+        // Steps consistently low
+        question = `${name}, average steps this week: ${avgSteps.toLocaleString()}. Steps are your daily fat-burning base. What is the real barrier to walking more?`;
+      } else {
+        // General check-in
+        question = `${name}, week done. ${completedSessions} sessions, ${weekFoodLogs.length} meals logged. One sentence — what do you want to be different next week?`;
+      }
+
+      await sendWhatsApp(client.phoneNumber, question);
+    } catch (err) {
+      console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err);
     }
   }
 }, { timezone: "UTC" });

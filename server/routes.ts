@@ -1,7 +1,7 @@
 import { type Express } from "express";
 import { type Server } from "http";
 import { db } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs } from "../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
@@ -14,6 +14,7 @@ import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
+import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -569,7 +570,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (mediaUrl) {
     const ctype = mediaContentType || "";
 
-    // ---- FOOD PHOTO ----
+    // ---- PROGRESS PHOTO or FOOD PHOTO ----
     if (ctype.startsWith("image/")) {
       try {
         // Image endpoint on Twilio is public (no auth needed), but use same pattern for consistency
@@ -580,36 +581,97 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const clientName = user.name || "there";
         const goal = user.goalType || "fat_loss";
 
+        // ---- PROGRESS PHOTO DETECTION ----
+        // If the message contains progress-related keywords, store and optionally compare
+        const isProgressPhoto = /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message);
+        if (isProgressPhoto) {
+          // Get existing progress photos for this client (most recent first)
+          const existingPhotos = await db.select()
+            .from(progressPhotos)
+            .where(eq(progressPhotos.userId, user.id))
+            .orderBy(asc(progressPhotos.loggedAt))
+            .limit(10);
+
+          const photoNumber = existingPhotos.length + 1;
+
+          // Store this photo
+          await db.insert(progressPhotos).values({
+            userId: user.id,
+            photoNumber,
+            photoBase64: base64,
+            contentType,
+          });
+
+          await logChat(user.id, `[Progress Photo ${photoNumber}]`, "", "PROGRESS_PHOTO");
+
+          // If this is a second or later photo — compare with the first
+          if (existingPhotos.length >= 1) {
+            const firstPhoto = existingPhotos[0];
+            const daysBetween = Math.round(
+              (Date.now() - new Date(firstPhoto.loggedAt || "").getTime()) / 86_400_000
+            );
+            const comparisonResponse = await openai.chat.completions.create({
+              model: "gpt-4o",
+              max_tokens: 400,
+              messages: [
+                {
+                  role: "system",
+                  content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. SA voice — direct, warm, specific. Max 4 sentences. Focus on visible physical changes only — posture, muscle definition, body shape. Never discuss weight unless you can see a scale. Be honest and specific. Never say "great progress" as a standalone — describe what you actually see. End with one specific observation about what to focus on next.`,
+                },
+                {
+                  role: "user",
+                  content: [
+                    {
+                      type: "text",
+                      text: `Compare these two progress photos. Photo 1 was taken ${daysBetween} days ago (${Math.round(daysBetween / 7)} weeks). Photo 2 is today. Describe specifically what has changed in the body. Focus on: body composition, posture, visible muscle, waist and hip shape. Be honest — if nothing has changed say so and say why. If it has — describe exactly what you see.`,
+                    },
+                    { type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}` } },
+                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                  ],
+                },
+              ],
+            });
+            const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
+              || "I can see both photos but could not compare them clearly. Send them in better lighting.";
+            await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
+            return `Progress photo ${photoNumber} saved — ${daysBetween} days since photo 1.\n\n${comparisonText}`;
+          } else {
+            // First progress photo stored — acknowledge and tell them when to send the next
+            return `Progress photo 1 saved, ${clientName}. Send your next progress photo in 30 days and I will compare them side by side and tell you exactly what changed.`;
+          }
+        }
+
+        // ---- FOOD PHOTO continues below ----
         const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
         );
         const visionResponse = await openai.chat.completions.create({
           model: "gpt-4o",
-          max_tokens: 350,
+          max_tokens: 400,
           messages: [
             {
               role: "system",
-              content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. Daily targets: ${liveCal} kcal, ${liveProt}g protein. SA voice — firm, warm, direct. HARD LIMIT: Max 3 sentences, 60 words. Never say 'Reply MENU'. End with exactly one specific action.`
+              content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein. SA voice — direct, warm, specific. Never generic. Max 3 sentences. End with exactly one specific action. Never say "Reply MENU". Never say "I hope this helps".`,
             },
             {
               role: "user",
               content: [
                 {
                   type: "text",
-                  text: `You are Coach K with deep knowledge of South African food culture. Analyse this food photo carefully.
+                  text: `Analyse this food photo as Coach K.
 
-IDENTIFICATION: Use SA names always — pap not polenta, pilchards not sardines, vetkoek not fried dough, morogo not wild spinach, umngqusho not samp-and-beans, kota not bunny chow, magwinya not fat cake, smileys not sheep head, walkie talkies not chicken feet, mogodu not tripe, chakalaka not relish, boerewors not sausage, biltong not dried meat, droewors not dry sausage, melktert not milk tart.
+IDENTIFICATION: Always use SA names — pap not polenta, pilchards not sardines, vetkoek not fried dough, morogo not wild spinach, umngqusho not samp-and-beans, kota not bunny chow, magwinya not fat cake, smileys not sheep head, walkie talkies not chicken feet, mogodu not tripe, chakalaka not relish, boerewors not sausage, biltong not dried meat.
 
-ESTIMATION: Estimate calories and protein for the FULL plate as served — not just one component. State the estimate clearly. Example: "This plate is roughly 650 kcal and 35g protein."
+ESTIMATION: State specific calories and protein for the FULL plate as actually served. Format: "That plate is roughly 650 kcal and 35g protein." Then immediately say how that leaves them against their ${liveCal} kcal and ${liveProt}g protein daily target. Example: "That leaves 1,150 kcal and 85g protein for the rest of the day."
 
-COACHING: If the meal is solid for their ${goal} goal — celebrate it specifically and connect the nutrients to their result. If it needs improvement — give ONE specific swap with SA alternative. Never lecture. Never list 3 things to fix.
+COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — give ONE specific SA food swap, not a list.
 
-UNKNOWN FOOD: If you cannot identify any food in the image with confidence — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`
+UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`,
                 },
-                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }
-              ]
-            }
-          ]
+                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+              ],
+            },
+          ],
         });
 
         const visionReply = visionResponse.choices[0]?.message?.content?.trim();
@@ -760,6 +822,13 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     }
     const refCode = user.referralCode;
 
+    const clientFirstName = user.name || "there";
+    const milestoneVoiceTexts: Record<number, string> = {
+      25:  `${clientFirstName}, 25 workouts. A quarter century of sessions. You are not talking about fitness anymore. You are doing it.`,
+      50:  `${clientFirstName}, 50 sessions. Fifty times you chose to show up when you could have stayed home. That is not motivation. That is discipline. Lekker work.`,
+      100: `${clientFirstName}, one hundred workouts with Coach K. That number puts you in a category most people never reach. Whatever happens next — you earned this.`,
+    };
+
     const milestoneNote = newTotal === 1
       ? "\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this."
       : newTotal === 10
@@ -771,6 +840,21 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
             : newTotal === 100
               ? "\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this."
               : "";
+
+    // Send voice note for major milestones — fire and forget, does not block the text response
+    const voiceText = milestoneVoiceTexts[newTotal];
+    if (voiceText) {
+      generateVoiceNote(voiceText).then(voiceUrl => {
+        if (!voiceUrl) return;
+        const fromNum = (process.env.TWILIO_WHATSAPP_NUMBER || "").startsWith("whatsapp:")
+          ? process.env.TWILIO_WHATSAPP_NUMBER!
+          : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+        const tc = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        tc.messages.create({ from: fromNum, to: phone, body: "🎙", mediaUrl: [voiceUrl] })
+          .catch(err => console.error("[TTS] Milestone voice send error:", err));
+      });
+    }
+
     const streakLine = newStreak >= 30 ? `\n\n🔥 *${newStreak}-session streak. This is who you are now.*`
       : newStreak >= 14 ? `\n\n🔥 *${newStreak} sessions straight. Don't stop.*`
       : newStreak >= 7 ? `\n\n🔥 *7-session streak.* You are building a habit.`
@@ -2531,6 +2615,18 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   app.get("/health", (_req, res) => {
     res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+  });
+
+  // ── Voice note file serving ────────────────────────────────
+  // Serves TTS-generated MP3s for milestone voice notes
+  app.get("/voice/:id.mp3", (req, res) => {
+    const { existsSync } = require("fs");
+    const { join } = require("path");
+    const filePath = join(process.cwd(), "tmp", "voice", `${req.params.id}.mp3`);
+    if (!existsSync(filePath)) return res.status(404).end();
+    res.setHeader("Content-Type", "audio/mpeg");
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.sendFile(filePath);
   });
 
   // ── Addition 7: Coach Dashboard API — protected by DASHBOARD_API_KEY ─────

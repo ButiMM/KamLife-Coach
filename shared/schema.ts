@@ -248,6 +248,23 @@ export const exerciseLogs = pgTable(
   (table) => ({ userExerciseIdx: index("exercise_logs_user_idx").on(table.userId) }),
 );
 
+export const progressPhotos = pgTable(
+  "progress_photos",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id),
+    photoNumber: integer("photo_number").notNull().default(1),
+    photoBase64: text("photo_base64").notNull(),
+    contentType: text("content_type").notNull().default("image/jpeg"),
+    loggedAt: timestamp("logged_at").defaultNow(),
+  },
+  (table) => ({ userProgressIdx: index("progress_photos_user_idx").on(table.userId) })
+);
+
+export const progressPhotosRelations = relations(progressPhotos, ({ one }) => ({
+  user: one(users, { fields: [progressPhotos.userId], references: [users.id] }),
+}));
+
 // For Replit AI Integrations compatibility
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
@@ -279,6 +296,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   chatHistory: many(chatHistory),
   clothingCheckins: many(clothingCheckins),
   bodyMeasurements: many(bodyMeasurements),
+  progressPhotos: many(progressPhotos),
 }));
 
 export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({
