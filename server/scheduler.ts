@@ -659,6 +659,79 @@ cron.schedule("0 7 1 * *", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB — PRE-TRAINING NUTRITION REMINDER
+// Runs 12pm SAST (10am UTC) Monday–Saturday
+// Only fires for clients whose training days include today
+// Reminds them to eat 1–2 hours before training
+// ============================================================
+
+cron.schedule("0 10 * * 1-6", async () => {
+  console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
+  const clients = await getActiveClients();
+  const todayDOW = new Date().getDay(); // 0=Sun, 1=Mon, 2=Tue...
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const trainingDays = client.trainingDaysPerWeek || 3;
+      const mode = client.trainingMode || "home";
+      const name = client.name || "champ";
+
+      // Determine if today is a training day for this client based on their schedule
+      // 3 days: Mon/Wed/Fri (1,3,5)
+      // 4 days: Mon/Tue/Thu/Fri (1,2,4,5)
+      // 5 days: Mon/Tue/Wed/Thu/Fri (1,2,3,4,5)
+      // 6 days: Mon–Sat (1,2,3,4,5,6)
+      const TRAINING_SCHEDULES: Record<number, number[]> = {
+        2: [1, 4],
+        3: [1, 3, 5],
+        4: [1, 2, 4, 5],
+        5: [1, 2, 3, 4, 5],
+        6: [1, 2, 3, 4, 5, 6],
+      };
+      const schedule = TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3];
+      if (!schedule.includes(todayDOW)) continue;
+
+      // Only send if they have not already trained today
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const [todayWorkout, todayFoodLog] = await Promise.all([
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+          .limit(1),
+        db.select({ messageIn: chatHistory.messageIn }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
+          .limit(1),
+      ]);
+
+      // Skip if already trained today
+      if (todayWorkout.length > 0) continue;
+
+      const goal = client.goalType || "fat_loss";
+      const isMuscleGain = goal === "muscle_gain";
+      const medicals = (client.medicalConditions || "").split(",").map((s: string) => s.trim());
+      const isDiabetic = medicals.includes("diabetes") || medicals.includes("pcos");
+
+      // Build the pre-training meal recommendation based on goal and mode
+      let preTrainingMsg: string;
+      if (isDiabetic) {
+        preTrainingMsg = `${name}, training day. Eat 1–2 hours before your session — low GI carbs and protein. Oats with eggs or samp and beans. Never train fasted with diabetes. Session starts: reply "today" for your workout.`;
+      } else if (isMuscleGain) {
+        preTrainingMsg = `${name}, training day. Pre-workout meal now — carbs and protein 1–2 hours before your session. Rice or sweet potato with chicken or eggs. This fuels your lifts. Reply "today" for your ${mode === "gym" ? "gym" : "home"} workout.`;
+      } else if (todayFoodLog.length === 0) {
+        preTrainingMsg = `${name}, training day. Eat something before your session — 2 eggs or oats at minimum. Fasted training works but food-fuelled training is better for fat loss long term. Reply "today" for your workout.`;
+      } else {
+        preTrainingMsg = `${name}, training day. Pre-training meal 1 hour out — protein and a small carb. Eggs or oats. Then reply "today" and get the session done.`;
+      }
+
+      await sendWhatsApp(client.phoneNumber, preTrainingMsg);
+    } catch (err) {
+      console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // JOB 11 — SA CULTURAL CALENDAR
 // Runs 7am SAST (5am UTC) daily — only fires on specific dates
 // ============================================================

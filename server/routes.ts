@@ -1578,7 +1578,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const isClothingTrigger = m === "8" || m === "non scale" || m === "nsc" || m === "non-scale" || m === "clothing" || m === "clothing check" || m === "clothing check in" || m === "non scale victory";
   if (isClothingTrigger) {
     await db.update(users).set({ awaitingInputType: "clothing_checkin" }).where(eq(users.phoneNumber, phone));
-    return `*Non-Scale Victory Check-In 👗*\n\nThe scale lies. Your clothes never do. Answer these 4 in one message:\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall feel* — Great / Good / Okay / Bad\n\nExample: "Looser, High, Flatter, Great"`;
+    return `*Non-Scale Victory Check-In*\n\nThe scale lies. Your clothes never do. Answer these 4 in one message:\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall feel* — Great / Good / Okay / Bad\n\nExample: "Looser, High, Flatter, Great"`;
   }
 
   // ---- CLOTHING CHECK-IN RESPONSE — parse when awaiting ----
@@ -1594,15 +1594,48 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const stomachFeel = STOMACH.find(k => m.includes(k)) || "not specified";
       const overallFeel = OVERALL.find(k => m.includes(k)) || "not specified";
       const weekNum = user.programmeWeek || 1;
+      const clientName = user.name ? `, ${user.name}` : "";
       try {
         await db.insert(clothingCheckins).values({ userId: user.id, jeansFit, energyLevel, stomachFeel, overallFeel, weekNumber: weekNum });
         await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
         await storeMemory(phone, `Week ${weekNum} non-scale check-in: jeans ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel}, overall ${overallFeel}`, "milestone");
       } catch { /* non-fatal */ }
-      const isPositive = ["looser", "fitting better", "baggy", "flatter", "better", "flat", "great", "amazing", "high", "energetic"].some(k => m.includes(k));
-      const clothingReply = isPositive
-        ? `Week ${weekNum} check-in saved. Jeans: ${jeansFit}. Energy: ${energyLevel}. Stomach: ${stomachFeel}. That is real progress — the scale might not show it yet but your body is changing. Keep the food and training consistent.`
-        : `Week ${weekNum} check-in saved. This data matters more than the scale. If jeans are tighter it is usually water and hormones, not fat — look at your sodium and sleep this week. Stay on the programme.`;
+
+      // Build a specific coaching response + follow-up question based on what they reported
+      const isPositiveJeans = ["looser", "fitting better", "baggy", "big"].some(k => m.includes(k));
+      const isTighterJeans = ["tighter", "too tight", "small"].some(k => m.includes(k));
+      const isHighEnergy = ["high", "energetic"].some(k => m.includes(k));
+      const isLowEnergy = ["low", "tired"].some(k => m.includes(k));
+      const isFlatStomach = ["flatter", "better", "flat"].some(k => m.includes(k));
+      const isBloated = m.includes("bloated") || m.includes("bigger");
+
+      let observation = "";
+      let followUp: string | null = "";
+
+      if (isPositiveJeans && isHighEnergy) {
+        observation = `Week ${weekNum} saved${clientName}. Jeans looser and energy high — that is body recomposition happening in real time. The scale might not show it but the clothes do.`;
+        followUp = `What has been the biggest change you have made to your diet or training this week?`;
+      } else if (isPositiveJeans) {
+        observation = `Week ${weekNum} saved. Jeans are responding${clientName} — that is centimetres off the waist regardless of what the scale says.`;
+        followUp = `Energy is ${energyLevel} — what time are you training?`;
+      } else if (isTighterJeans && isBloated) {
+        observation = `Week ${weekNum} saved. Tighter jeans and bloating is almost always sodium and water retention${clientName} — not fat gain. Check your sodium this week: polony, Russians, Aromat, stock cubes.`;
+        followUp = `What did you eat most this week?`;
+      } else if (isTighterJeans) {
+        observation = `Week ${weekNum} saved. Jeans tighter${clientName}. Before assuming fat gain — how has your sodium and sleep been this week?`;
+        followUp = null;
+      } else if (isLowEnergy) {
+        observation = `Week ${weekNum} saved${clientName}. Low energy tells me more than the scale does. Could be sleep, could be calories too low, could be stress.`;
+        followUp = `How many hours are you sleeping?`;
+      } else if (isBloated) {
+        observation = `Week ${weekNum} saved. Bloating${clientName} is usually sodium, not enough vegetables, or stress. Aromat, stock cubes, and processed meats are the main culprits in SA.`;
+        followUp = `Are you hitting your vegetable target each day?`;
+      } else {
+        observation = `Week ${weekNum} check-in saved${clientName}. Jeans: ${jeansFit}. Energy: ${energyLevel}. Stomach: ${stomachFeel}. Overall: ${overallFeel}. Stay on the programme.`;
+        followUp = null;
+      }
+
+      const clothingReply = followUp ? `${observation} ${followUp}` : observation;
       await logChat(user.id, message, clothingReply, "CLOTHING_CHECKIN");
       return clothingReply;
     }
@@ -1850,6 +1883,37 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return question;
   }
 
+  // ---- AWAITING GOAL CHANGE REASON — ask why first before applying goal change ----
+  if (user.awaitingInputType?.startsWith("goal_reason:")) {
+    const pendingGoal = user.awaitingInputType.split(":")[1] as string;
+    await db.update(users)
+      .set({ awaitingInputType: null, goalType: pendingGoal })
+      .where(eq(users.phoneNumber, phone));
+    const { calorieTarget: newCals, proteinTarget: newProt } = calculateTargets(
+      parseFloat(user.currentWeight || "75"), pendingGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
+    );
+    await db.update(users).set({ calorieTarget: newCals, proteinTarget: newProt }).where(eq(users.phoneNumber, phone));
+    const goalLabels: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
+    const clientName = user.name ? `, ${user.name}` : "";
+    const goalReply = `Sharp${clientName}. Goal updated to ${goalLabels[pendingGoal] || pendingGoal}. New targets: ${newCals} kcal/day, ${newProt}g protein. Programme stays the same — reply *programme* to see it or *new programme* if you want one built from scratch.`;
+    await logChat(user.id, message, goalReply, "PROFILE_UPDATE");
+    return goalReply;
+  }
+
+  // ---- AWAITING GYM NAME — store gym name and deliver gym programme ----
+  if (user.awaitingInputType === "gym_name") {
+    const gymName = message.trim().length > 1 ? message.trim() : null;
+    await db.update(users)
+      .set({ awaitingInputType: null, trainingMode: "gym", gymName: gymName || user.gymName })
+      .where(eq(users.phoneNumber, phone));
+    const updatedUser = { ...user, trainingMode: "gym", gymName };
+    const gymProg = buildFullProgramme(updatedUser);
+    const clientName = user.name ? `, ${user.name}` : "";
+    const gymReply = `Sharp${clientName}. ${gymName ? `${gymName}` : "Gym"} programme loaded. ${user.trainingDaysPerWeek || 3} days/week.\n\n${gymProg}`;
+    await logChat(user.id, message, gymReply, "PROGRAMME_DELIVERY");
+    return gymReply;
+  }
+
   // ---- FIX 5: PROFILE UPDATE COMMANDS — expanded to catch training mode/days changes ----
   const isProfileUpdate =
     /\b(change my goal|my goal is now|switch to|switch my goal|new goal|update my goal)\b/i.test(m) ||
@@ -1864,16 +1928,18 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const updates: Record<string, any> = {};
     let updateSummary = "";
 
-    // Goal change
-    if (/fat loss|lose weight|lose fat|cut/i.test(m)) {
-      updates.goalType = "fat_loss";
-      updateSummary = "Goal updated to fat loss.";
-    } else if (/muscle|bulk|build|gain/i.test(m)) {
-      updates.goalType = "muscle_gain";
-      updateSummary = "Goal updated to muscle gain.";
-    } else if (/recomposition|recomp|both/i.test(m)) {
-      updates.goalType = "recomposition";
-      updateSummary = "Goal updated to body recomposition.";
+    // Goal change — ask why first before applying
+    let pendingGoal: string | null = null;
+    if (/fat loss|lose weight|lose fat|cut/i.test(m)) pendingGoal = "fat_loss";
+    else if (/muscle|bulk|build|gain/i.test(m)) pendingGoal = "muscle_gain";
+    else if (/recomposition|recomp|both/i.test(m)) pendingGoal = "recomposition";
+
+    if (pendingGoal && pendingGoal !== user.goalType) {
+      const clientName = user.name ? `, ${user.name}` : "";
+      await db.update(users).set({ awaitingInputType: `goal_reason:${pendingGoal}` }).where(eq(users.phoneNumber, phone));
+      const whyReply = `Sharp${clientName}. What changed?`;
+      await logChat(user.id, message, whyReply, "PROFILE_UPDATE");
+      return whyReply;
     }
 
     // Budget change
@@ -1886,7 +1952,14 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       updateSummary += ` Budget updated to R${rands}/week tier.`;
     }
 
-    // Training mode
+    // Training mode — ask which gym before applying
+    if (/joined.*gym|got.*gym|have.*gym|going to.*gym|gym.*membership|now.*gym|want to gym|start.*gym|going to gym/i.test(m) && user.trainingMode !== "gym") {
+      await db.update(users).set({ awaitingInputType: "gym_name" }).where(eq(users.phoneNumber, phone));
+      const clientName = user.name ? `, ${user.name}` : "";
+      const gymQ = `Lekker${clientName}. Which gym?`;
+      await logChat(user.id, message, gymQ, "PROFILE_UPDATE");
+      return gymQ;
+    }
     if (/joined.*gym|got.*gym|have.*gym|going to.*gym|gym.*membership|now.*gym|want to gym|start.*gym|going to gym/i.test(m)) {
       updates.trainingMode = "gym";
       updateSummary += " Training mode updated to gym.";
