@@ -1721,6 +1721,32 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     // Not paused — fall through to GPT which handles "I'm back" motivationally
   }
 
+  // ---- NEW PROGRAMME / CHANGE DAYS REQUEST ----
+  const isNewProgramme =
+    /\b(new programme|new program|change programme|change program|change my programme|change my program|give me a new programme|new workout plan|change workout plan|rebuild.*programme|update.*programme)\b/i.test(m) ||
+    /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
+    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m) ||
+    /\b[2-6]\s*days?\s*(?:a\s*week|per\s*week)\s*(?:please|now|from now|training|programme|program)?\b/i.test(m);
+
+  if (isNewProgramme) {
+    const updates: Record<string, any> = {};
+    const daysMatch = m.match(/\b([2-6])\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i)
+      || m.match(/(?:train|gym|workout)\s+([2-6])\s*days?/i);
+    if (daysMatch) {
+      const days = parseInt(daysMatch[1]);
+      if (days >= 2 && days <= 6) updates.trainingDaysPerWeek = days;
+    }
+    if (Object.keys(updates).length > 0) {
+      await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
+    }
+    const updatedUser = { ...user, ...updates };
+    const programme = buildFullProgramme(updatedUser);
+    const daysLine = updates.trainingDaysPerWeek ? `${updates.trainingDaysPerWeek} days/week. ` : "";
+    const newProgReply = `${daysLine}Here is your updated programme:\n\n${programme}`;
+    await logChat(user.id, message, newProgReply, "PROGRAMME_DELIVERY");
+    return newProgReply;
+  }
+
   // ---- FIX 5: PROFILE UPDATE COMMANDS — expanded to catch training mode/days changes ----
   const isProfileUpdate =
     /\b(change my goal|my goal is now|switch to|switch my goal|new goal|update my goal)\b/i.test(m) ||
@@ -1794,7 +1820,7 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
       let profileReply = `Profile updated. ${updateSummary.trim()}`;
       if (updates.trainingMode || updates.trainingDaysPerWeek) {
         const updatedUser = { ...user, ...updates };
-        const newProgramme = getKamlifeProgramme(updatedUser);
+        const newProgramme = buildFullProgramme(updatedUser);
         profileReply += `\n\nHere is your updated programme:\n\n${newProgramme}`;
       } else {
         profileReply += `\n\nReply *menu* to see your updated programme.`;
@@ -2373,8 +2399,17 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       .replace(/'/g, "&apos;");
   }
 
-  // Fix 1 — splitMessage: split long replies at newline boundaries, max 1500 chars per chunk
+  // Fix 1 — splitMessage: split on day separators first, then char boundaries
   function splitMessage(text: string, maxLen = 1500): string[] {
+    // Programme day separator — each day is one complete WhatsApp message
+    if (/\n\n---\n\n/.test(text)) {
+      const days = text.split(/\n\n---\n\n/);
+      const result: string[] = [];
+      for (const day of days) {
+        if (day.trim()) result.push(...splitMessage(day.trim(), maxLen));
+      }
+      return result;
+    }
     if (text.length <= maxLen) return [text];
     const lines = text.split("\n");
     const chunks: string[] = [];
