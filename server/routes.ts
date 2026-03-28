@@ -1868,6 +1868,24 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return await getMenuText(user);
   }
 
+  // ---- PAYMENT / REJOIN — inactive users asking to pay or rejoin ----
+  if (/\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
+    const merchantId = process.env.PAYFAST_MERCHANT_ID;
+    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const clientName = user.name ? `, ${user.name}` : "";
+    if (merchantId && appUrl) {
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
+      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR99/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
+      await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
+      return payReply;
+    } else {
+      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R99/month — cancel anytime.`;
+      await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
+      return payReply;
+    }
+  }
+
   // ---- HOLIDAY / PAUSE MODE ----
   if (/\b(holiday|pause|pausing|on holiday|going away|vacation|sick leave|taking a break|leave me alone|stop messaging|mute|quiet mode|don.?t message)\b/i.test(m)) {
     // Parse duration
@@ -2920,6 +2938,160 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       }
     } catch (e) {
       console.error("[DELIVERY STATUS] Parse error:", e);
+    }
+  });
+
+  // ============================================================
+  // PAYFAST PAYMENT WEBHOOK — POST /webhook/payfast
+  // PayFast sends an ITN (Instant Transaction Notification) here
+  // for every payment event (success, failed, cancelled).
+  //
+  // Setup in PayFast dashboard:
+  //   Notify URL: https://yourdomain.com/webhook/payfast
+  //   Merchant ID: set PAYFAST_MERCHANT_ID env var
+  //   Merchant Key: set PAYFAST_MERCHANT_KEY env var
+  //   Passphrase: set PAYFAST_PASSPHRASE env var (if configured)
+  //
+  // Send the user's phone number as custom_str1 when creating the
+  // payment request so we can match it to their account here.
+  // ============================================================
+  app.post("/webhook/payfast", async (req: any, res: any) => {
+    // Always respond 200 immediately — PayFast requires this
+    res.sendStatus(200);
+
+    try {
+      const data = req.body as Record<string, string>;
+      const paymentStatus = data.payment_status; // COMPLETE | FAILED | CANCELLED
+      const phone = data.custom_str1;             // user phone — set when creating payment
+      const pfPaymentId = data.pf_payment_id;
+      const amountGross = parseFloat(data.amount_gross || "0");
+
+      if (!phone || !paymentStatus) {
+        console.error("[PAYFAST] Missing phone or payment_status in ITN");
+        return;
+      }
+
+      // Validate PayFast signature
+      const crypto = require("crypto");
+      const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+      const paramString = Object.entries(data)
+        .filter(([k]) => k !== "signature")
+        .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, "+")}`)
+        .join("&");
+      const signatureBase = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase)}` : paramString;
+      const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
+      if (data.signature && data.signature !== expectedSig) {
+        console.error(`[PAYFAST] Signature mismatch for ${phone} — possible spoofed ITN`);
+        return;
+      }
+
+      // Normalise phone to whatsapp: format
+      const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+      const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
+      if (!targetUser) {
+        console.error(`[PAYFAST] No user found for phone: ${phone}`);
+        return;
+      }
+
+      const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
+        ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
+        : "";
+
+      if (paymentStatus === "COMPLETE") {
+        // Set subscription active for 30 days from now
+        const renewsAt = new Date(Date.now() + 30 * 86_400_000);
+        await db.update(users).set({
+          subscriptionStatus: "active",
+          subscriptionRenewsAt: renewsAt,
+          paymentReference: pfPaymentId || null,
+          cancelledAt: null,
+        }).where(eq(users.phoneNumber, normalisedPhone));
+
+        console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
+
+        // Welcome / renewal confirmation WhatsApp
+        const name = targetUser.name || "there";
+        const isRenewal = targetUser.subscriptionStatus === "active";
+        const msg = isRenewal
+          ? `Payment confirmed, ${name}. Your subscription is renewed for another month. Coach K is here — let's go.`
+          : `Payment confirmed, ${name}. Welcome to KamLife Coach. Your 30-day coaching subscription is active. Send me what you ate for breakfast and let's start.`;
+        if (fromNum) {
+          await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: msg });
+        }
+
+      } else if (paymentStatus === "FAILED" || paymentStatus === "CANCELLED") {
+        // Grace period: keep active for 3 more days, then flag
+        const graceUntil = new Date(Date.now() + 3 * 86_400_000);
+        await db.update(users).set({
+          subscriptionStatus: "inactive",
+          cancelledAt: new Date(),
+        }).where(eq(users.phoneNumber, normalisedPhone));
+
+        console.log(`[PAYFAST] Payment ${paymentStatus} — ${normalisedPhone}`);
+
+        const name = targetUser.name || "there";
+        const msg = paymentStatus === "CANCELLED"
+          ? `${name}, your KamLife Coach subscription has been cancelled. Your profile and history are saved. When you are ready to restart, go to kamlifecoach.co.za or reply *rejoin*.`
+          : `${name}, your payment did not go through. Your subscription is paused. Update your payment details at kamlifecoach.co.za or reply *pay* to get a new payment link.`;
+        if (fromNum) {
+          await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: msg });
+        }
+      }
+    } catch (err) {
+      console.error("[PAYFAST] ITN handling error:", err);
+    }
+  });
+
+  // ============================================================
+  // PAYFAST PAYMENT LINK GENERATOR — GET /api/payfast/link?phone=...
+  // Returns a PayFast payment page URL for a given user.
+  // Use this to send a payment link to new or lapsed clients.
+  // ============================================================
+  app.get("/api/payfast/link", requireDashboardKey, async (req: any, res: any) => {
+    try {
+      const phone = decodeURIComponent(req.query.phone as string || "");
+      if (!phone) return res.status(400).json({ error: "phone required" });
+
+      const merchantId = process.env.PAYFAST_MERCHANT_ID;
+      const merchantKey = process.env.PAYFAST_MERCHANT_KEY;
+      if (!merchantId || !merchantKey) {
+        return res.status(503).json({ error: "PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY env vars not set" });
+      }
+
+      const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`)).limit(1);
+      const name = user?.name || "KamLife Client";
+      const isSandbox = process.env.PAYFAST_SANDBOX === "true";
+      const baseUrl = isSandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process";
+      const returnUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-success` : "https://kamlifecoach.co.za/payment-success";
+      const cancelUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-cancel` : "https://kamlifecoach.co.za/payment-cancel";
+      const notifyUrl = process.env.APP_URL ? `${process.env.APP_URL}/webhook/payfast` : "";
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+
+      const params = new URLSearchParams({
+        merchant_id: merchantId,
+        merchant_key: merchantKey,
+        return_url: returnUrl,
+        cancel_url: cancelUrl,
+        notify_url: notifyUrl,
+        name_first: name.split(" ")[0] || name,
+        name_last: name.split(" ").slice(1).join(" ") || "",
+        email_address: `${cleanPhone}@kamlife.local`,
+        m_payment_id: `KAMLIFE-${cleanPhone}-${Date.now()}`,
+        amount: "99.00",
+        item_name: "KamLife Coach — Monthly Subscription",
+        item_description: "WhatsApp fitness and nutrition coaching",
+        custom_str1: phone.replace(/^whatsapp:/, ""),
+        subscription_type: "1",
+        billing_date: new Date().toISOString().slice(0, 10),
+        recurring_amount: "99.00",
+        frequency: "3",  // Monthly
+        cycles: "0",     // 0 = indefinite
+      });
+
+      res.json({ url: `${baseUrl}?${params.toString()}`, phone, name });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
     }
   });
 

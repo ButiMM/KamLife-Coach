@@ -49,3 +49,22 @@ export function useFlaggedUsers() {
     },
   });
 }
+
+export function useMetrics() {
+  return useQuery({
+    queryKey: ["/api/dashboard/metrics"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/metrics");
+      if (!res.ok) throw new Error("Failed to fetch metrics");
+      return res.json() as Promise<{
+        activeClients: number;
+        newThisWeek: number;
+        churnedThisWeek: number;
+        avgMessagesPerClientPerDay: number;
+        totalRevenuePlaceholder: number;
+        currency: string;
+      }>;
+    },
+    refetchInterval: 60_000,
+  });
+}

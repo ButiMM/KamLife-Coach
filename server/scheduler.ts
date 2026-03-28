@@ -1195,6 +1195,122 @@ cron.schedule("0 10 * * *", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB — SUBSCRIPTION EXPIRY CHECK
+// Runs daily at 8am UTC (10am SAST)
+// Warns 3 days before expiry, deactivates on expiry
+// ============================================================
+
+cron.schedule("0 8 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Subscription expiry check");
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const threeDaysMs = 3 * 86_400_000;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const renewsAt = (client as any).subscriptionRenewsAt;
+      if (!renewsAt) continue; // No renewal date = trial or manual management
+      const renewsMs = new Date(renewsAt).getTime();
+      const msUntilRenewal = renewsMs - now;
+      const name = client.name || "there";
+
+      // 3-day warning
+      if (msUntilRenewal > 0 && msUntilRenewal <= threeDaysMs) {
+        const daysLeft = Math.ceil(msUntilRenewal / 86_400_000);
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`
+        );
+      }
+
+      // Expired — deactivate
+      if (msUntilRenewal < 0 && client.subscriptionStatus === "active") {
+        await db.update(users)
+          .set({ subscriptionStatus: "inactive" })
+          .where(eq(users.phoneNumber, client.phoneNumber));
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`
+        );
+        console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber}`);
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Subscription expiry error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB — SUNDAY WEEKDAY vs WEEKEND FOOD PATTERN AUDIT
+// Runs Sunday 8am UTC (10am SAST) — after the weekly report
+// Analyses whether weekend eating is sabotaging the week
+// ============================================================
+
+cron.schedule("0 8 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Weekend food pattern audit");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const foodLogs = await db.select({ messageIn: chatHistory.messageIn, createdAt: chatHistory.createdAt })
+        .from(chatHistory)
+        .where(and(
+          eq(chatHistory.userId, client.id),
+          eq(chatHistory.intent, "FOOD_LOG"),
+          gte(chatHistory.createdAt, sevenDaysAgo),
+        ))
+        .orderBy(asc(chatHistory.createdAt));
+
+      if (foodLogs.length < 5) continue; // Not enough data
+
+      // Classify each log day as weekday (Mon-Fri) or weekend (Sat-Sun)
+      const weekdayLogs: typeof foodLogs = [];
+      const weekendLogs: typeof foodLogs = [];
+      for (const log of foodLogs) {
+        const dow = new Date(log.createdAt!).getDay(); // 0=Sun, 6=Sat
+        if (dow === 0 || dow === 6) weekendLogs.push(log);
+        else weekdayLogs.push(log);
+      }
+
+      if (weekendLogs.length === 0 || weekdayLogs.length === 0) continue;
+
+      // Simple heuristic: count high-calorie keywords in each group
+      const HIGH_CAL = ["kfc", "mcdonalds", "nandos", "pizza", "kotas", "vetkoek", "beer", "wine", "braai", "chips", "cake", "chocolate", "dessert", "ice cream", "takeaway", "takeaways", "cool drink", "coke", "fanta", "sprite", "braai", "pap en vleis"];
+      const GOOD_PROTEIN = ["chicken breast", "pilchards", "eggs", "tuna", "beef mince", "greek yogurt", "cottage cheese"];
+
+      const weekdayJunk = weekdayLogs.filter(l => HIGH_CAL.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
+      const weekendJunk = weekendLogs.filter(l => HIGH_CAL.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
+      const weekdayProtein = weekdayLogs.filter(l => GOOD_PROTEIN.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
+      const weekendProtein = weekendLogs.filter(l => GOOD_PROTEIN.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
+
+      const weekdayJunkRate = weekdayLogs.length > 0 ? weekdayJunk / weekdayLogs.length : 0;
+      const weekendJunkRate = weekendLogs.length > 0 ? weekendJunk / weekendLogs.length : 0;
+      const weekdayProteinRate = weekdayLogs.length > 0 ? weekdayProtein / weekdayLogs.length : 0;
+      const weekendProteinRate = weekendLogs.length > 0 ? weekendProtein / weekendLogs.length : 0;
+
+      const name = client.name || "there";
+
+      // Only message if there's a meaningful pattern to report
+      if (weekendJunkRate > weekdayJunkRate + 0.3) {
+        // Weekends are significantly worse
+        await sendWhatsApp(client.phoneNumber,
+          `${name} — pattern spotted. Your weekday eating is solid. But ${weekendJunk > 0 ? `${weekendJunk} weekend meal${weekendJunk !== 1 ? "s" : ""}` : "your weekends"} this week had foods that are undoing the weekday work. Braais, takeaways, and cool drinks on weekends are the most common reason fat loss stalls. One rule for weekends: protein first at every meal, then eat what you want after. That single rule changes everything.`
+        );
+      } else if (weekendProteinRate < weekdayProteinRate - 0.3) {
+        // Good weekdays, low protein on weekends
+        await sendWhatsApp(client.phoneNumber,
+          `${name} — you are hitting protein well during the week. But weekends your protein drops. When you are out, at a braai, or grabbing food on the go — always anchor the meal with protein first. Eggs in the morning. Chicken or meat at the braai before the pap and dessert. That keeps the week's work intact.`
+        );
+      }
+      // If patterns are similar, no message — don't add noise
+    } catch (err) {
+      console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 

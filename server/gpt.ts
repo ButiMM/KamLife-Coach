@@ -252,10 +252,12 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     "diabetes", "diabetic", "hypertension", "blood pressure", "pcos", "hiv", "arv", "tb ",
     "ramadan", "fasting", "pregnancy", "pregnant", "elderly", "injury", "bad knee",
     "bad back", "bad shoulder", "hip problem", "knee replacement",
-    "calories", "calorie target", "how much should i eat", "muscle gain", "fat loss",
+    // Note: "calories" removed — bare calorie questions are handled hardcoded before GPT.
+    // Only route to gpt-4o when calculating a full nutrition plan or goal-specific advice.
+    "calorie target for", "how much should i eat", "muscle gain", "fat loss",
     "goal change", "want to gain", "want to lose", "supplement stack", "creatine",
     "protein powder", "week 3", "crisis", "suicidal", "self harm",
-    "calculate", "formula", "how many calories", "what should i eat for my goal",
+    "calculate my", "formula", "what should i eat for my goal", "build me a meal plan",
   ];
 
   // Check user message first — this is the primary routing signal

@@ -1,20 +1,22 @@
-import { useUsers, useFlaggedUsers } from "@/hooks/use-users";
+import { useUsers, useFlaggedUsers, useMetrics } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { StatusBadge } from "@/components/status-badge";
-import { Users, UserX, Activity, TrendingUp, AlertCircle, ArrowRight } from "lucide-react";
+import { Users, UserX, Activity, TrendingUp, AlertCircle, ArrowRight, DollarSign, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
 
 export default function Dashboard() {
   const { data: users, isLoading: usersLoading } = useUsers();
   const { data: flaggedUsers, isLoading: flaggedLoading } = useFlaggedUsers();
+  const { data: metrics } = useMetrics();
 
   const totalUsers = users?.length || 0;
   const activeUsers = users?.filter(u => u.subscriptionStatus === 'active').length || 0;
   const trialUsers = users?.filter(u => u.subscriptionStatus === 'trial').length || 0;
-  
+  const mrr = activeUsers * 99;
+
   if (usersLoading) return <DashboardLoading />;
 
   return (
@@ -32,33 +34,47 @@ export default function Dashboard() {
         </div>
 
         {/* Stats Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <StatCard 
-            title="Total Users" 
-            value={totalUsers} 
-            icon={Users} 
-            trend="+12% this month" 
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-6">
+          <StatCard
+            title="Total Users"
+            value={totalUsers}
+            icon={Users}
+            trend={metrics ? `+${metrics.newThisWeek} this week` : "All time"}
             color="text-blue-600 bg-blue-100 dark:bg-blue-900/20"
           />
-          <StatCard 
-            title="Active Subs" 
-            value={activeUsers} 
-            icon={Activity} 
-            trend="R 99.00 / user" 
+          <StatCard
+            title="Active Subs"
+            value={activeUsers}
+            icon={Activity}
+            trend="Paying clients"
             color="text-emerald-600 bg-emerald-100 dark:bg-emerald-900/20"
           />
-          <StatCard 
-            title="On Trial" 
-            value={trialUsers} 
-            icon={TrendingUp} 
-            trend="Conversion needed" 
+          <StatCard
+            title="Monthly Revenue"
+            value={`R${mrr.toLocaleString()}`}
+            icon={DollarSign}
+            trend={`R${(mrr / 12).toFixed(0)}/day`}
+            color="text-green-600 bg-green-100 dark:bg-green-900/20"
+          />
+          <StatCard
+            title="New This Week"
+            value={metrics?.newThisWeek ?? "—"}
+            icon={UserPlus}
+            trend="Just joined"
+            color="text-indigo-600 bg-indigo-100 dark:bg-indigo-900/20"
+          />
+          <StatCard
+            title="On Trial"
+            value={trialUsers}
+            icon={TrendingUp}
+            trend="Need converting"
             color="text-amber-600 bg-amber-100 dark:bg-amber-900/20"
           />
-          <StatCard 
-            title="Flagged" 
-            value={flaggedUsers?.length || 0} 
-            icon={AlertCircle} 
-            trend="Requires attention" 
+          <StatCard
+            title="Flagged"
+            value={flaggedUsers?.length || 0}
+            icon={AlertCircle}
+            trend="Needs attention"
             color="text-rose-600 bg-rose-100 dark:bg-rose-900/20"
           />
         </div>

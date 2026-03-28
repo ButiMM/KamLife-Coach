@@ -89,6 +89,8 @@ export const users = pgTable(
     popiConsentAt: timestamp("popi_consent_at"),
     lastGoalCheckWeek: integer("last_goal_check_week").default(0),
     workoutStreak: integer("workout_streak").default(0),
+    subscriptionRenewsAt: timestamp("subscription_renews_at"),
+    paymentReference: text("payment_reference"), // PayFast payment/subscription ID
   },
   (table) => {
     return {
