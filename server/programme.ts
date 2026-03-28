@@ -498,21 +498,27 @@ export function buildFullProgramme(user: any): string {
     { label: "Day 3 — Legs 🦵", type: "legs" },
   ];
 
-  let out = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+  const header = `*Phase ${phase}: ${phaseName} — Week ${week}* | ${multiplier.sets} sets | Rest ${multiplier.rest}`;
+  const dayMessages: string[] = [];
 
   for (const { label, type } of days) {
     const exercises = library[type].slice(0, 3);
-    out += `*${label}*\n`;
+    let dayOut = `*${label}*\n`;
     for (const ex of exercises) {
       const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
       const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-      out += `• *${ex.name}* — ${multiplier.sets}x${multiplier.reps}\n  ${ex.description}\n  🎥 ${ytLink}\n`;
+      dayOut += `\n• *${ex.name}* — ${multiplier.sets}×${multiplier.reps}\n  ${ex.description}\n  🎥 ${ytLink}\n  ⚠️ ${ex.mistake}`;
+      if (ex.modification) dayOut += `\n  💡 ${ex.modification}`;
+      dayOut += `\n`;
     }
-    out += `\n`;
+    dayMessages.push(dayOut.trim());
   }
 
-  out += `Send *1* for today's full session with cues.`;
-  return out;
+  // Each day arrives as one WhatsApp message — split on --- by splitMessage in routes.ts
+  dayMessages[0] = `${header}\n\n${dayMessages[0]}`;
+  dayMessages[dayMessages.length - 1] += `\n\nSend *1* for today's session.`;
+
+  return dayMessages.join("\n\n---\n\n");
 }
 
 export const WORKOUT_DONE_RESPONSES = [

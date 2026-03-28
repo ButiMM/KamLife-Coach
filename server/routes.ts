@@ -433,28 +433,39 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
 
-  // ---- AWAITING PROGRAMME ANSWERS — parse directly, no GPT ----
+  // ---- AWAITING PROGRAMME ANSWERS — parse "4 days gym" or "3 home" format ----
   if (user.awaitingProgrammeAnswers) {
     const lower = message.toLowerCase();
 
+    // Parse days (required)
     const daysMatch = message.match(/\b([2-6])\b/);
-    const trainingDays = daysMatch ? parseInt(daysMatch[1]) : 3;
+    const trainingDays = daysMatch ? parseInt(daysMatch[1]) : (user.trainingDaysPerWeek || 3);
 
-    let experience = "beginner";
-    if (lower.includes("advanced") || lower.includes("2 plus") || lower.includes("2+") || lower.includes("seriously")) experience = "advanced";
-    else if (lower.includes("intermediate") || lower.includes("inter") || lower.includes("on and off") || lower.includes("some experience")) experience = "intermediate";
+    // Parse gym or home (required)
+    let trainingMode = user.trainingMode || "home";
+    if (/\bgym\b/i.test(lower) || /\bat gym\b/i.test(lower) || /\bthe gym\b/i.test(lower)) trainingMode = "gym";
+    else if (/\bhome\b/i.test(lower) || /\bat home\b/i.test(lower) || /\bno gym\b/i.test(lower)) trainingMode = "home";
 
-    let goalType = "fat_loss";
+    // Keep existing experience if set, otherwise default to beginner
+    let experience = user.trainingExperience || "beginner";
+    if (lower.includes("advanced") || lower.includes("2 plus") || lower.includes("2+")) experience = "advanced";
+    else if (lower.includes("intermediate") || lower.includes("inter") || lower.includes("on and off")) experience = "intermediate";
+    else if (lower.includes("beginner") || lower.includes("never trained") || lower.includes("first time")) experience = "beginner";
+
+    // Keep existing goal if set, otherwise default to fat_loss
+    let goalType = user.goalType || "fat_loss";
     if ((lower.includes("muscle") && lower.includes("fat")) || lower.includes("both") || lower.includes("recomp")) goalType = "recomposition";
     else if (lower.includes("muscle") || lower.includes("build") || lower.includes("gain") || lower.includes("bulk")) goalType = "muscle_gain";
+    else if (lower.includes("fat") || lower.includes("lose") || lower.includes("cut")) goalType = "fat_loss";
 
     await db.update(users)
-      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, awaitingProgrammeAnswers: false })
+      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, awaitingProgrammeAnswers: false, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
       .where(eq(users.phoneNumber, phone));
 
-    const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType };
+    const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode };
     const programme = buildFullProgramme(updatedUser);
-    const reply = `Sharp. Here is your programme — ${trainingDays} days per week, ${experience} level, ${goalType.replace("_", " ")} focus.\n\n${programme}`;
+    const modeLabel = trainingMode === "gym" ? "Gym" : "Home";
+    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
     return reply;
   }
@@ -1047,9 +1058,9 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
 
   if (isWorkoutRelated && (!user.trainingExperience || !user.trainingDaysPerWeek)) {
     await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
-    const questions = `Sharp. Before I build your programme I need three things:\n\n1️⃣ How many days per week can you train? Reply 2, 3, 4, 5, or 6.\n\n2️⃣ Experience level?\nBeginner — never trained consistently\nIntermediate — trained on and off for a year or more\nAdvanced — training consistently for 2 plus years\n\n3️⃣ Main goal?\nLose fat\nBuild muscle\nBoth\n\nReply with your three answers and I build your programme immediately.`;
-    await logChat(user.id, message, questions, "PROGRAMME_QUESTIONS");
-    return questions;
+    const question = `Sharp. How many days can you train and are you at gym or home?`;
+    await logChat(user.id, message, question, "PROGRAMME_QUESTIONS");
+    return question;
   }
 
   // ---- STEP LOG DETECTION (direct — no GPT cost) ----
@@ -1729,22 +1740,30 @@ UNKNOWN FOOD: If you cannot identify any food in the image with confidence — r
     /\b[2-6]\s*days?\s*(?:a\s*week|per\s*week)\s*(?:please|now|from now|training|programme|program)?\b/i.test(m);
 
   if (isNewProgramme) {
-    const updates: Record<string, any> = {};
-    const daysMatch = m.match(/\b([2-6])\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i)
-      || m.match(/(?:train|gym|workout)\s+([2-6])\s*days?/i);
-    if (daysMatch) {
-      const days = parseInt(daysMatch[1]);
-      if (days >= 2 && days <= 6) updates.trainingDaysPerWeek = days;
+    // If client already included days AND mode in this message, act immediately
+    const daysInMsg = m.match(/\b([2-6])\s*days?\b/i) || m.match(/(?:train|gym|workout)\s+([2-6])\s*days?/i);
+    const gymInMsg = /\bgym\b/i.test(m);
+    const homeInMsg = /\bhome\b/i.test(m);
+
+    if (daysInMsg && (gymInMsg || homeInMsg)) {
+      const days = parseInt(daysInMsg[1]);
+      const mode = gymInMsg ? "gym" : "home";
+      await db.update(users)
+        .set({ trainingDaysPerWeek: days, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
+        .where(eq(users.phoneNumber, phone));
+      const updatedUser = { ...user, trainingDaysPerWeek: days, trainingMode: mode };
+      const programme = buildFullProgramme(updatedUser);
+      const modeLabel = mode === "gym" ? "Gym" : "Home";
+      const newProgReply = `Sharp. ${days} days/week. ${modeLabel}. Here is your updated programme.\n\n${programme}`;
+      await logChat(user.id, message, newProgReply, "PROGRAMME_DELIVERY");
+      return newProgReply;
     }
-    if (Object.keys(updates).length > 0) {
-      await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
-    }
-    const updatedUser = { ...user, ...updates };
-    const programme = buildFullProgramme(updatedUser);
-    const daysLine = updates.trainingDaysPerWeek ? `${updates.trainingDaysPerWeek} days/week. ` : "";
-    const newProgReply = `${daysLine}Here is your updated programme:\n\n${programme}`;
-    await logChat(user.id, message, newProgReply, "PROGRAMME_DELIVERY");
-    return newProgReply;
+
+    // Ask the single question — never dump the programme without it
+    await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
+    const question = `Sharp. How many days can you train and are you at gym or home?`;
+    await logChat(user.id, message, question, "PROGRAMME_QUESTIONS");
+    return question;
   }
 
   // ---- FIX 5: PROFILE UPDATE COMMANDS — expanded to catch training mode/days changes ----
@@ -2085,12 +2104,18 @@ CRISIS RESPONSE: Short. Warm. Direct. Give the support resources first — Samar
 MILESTONE CELEBRATION: Energetic, specific, personal. Reference something real and measurable from their journey — a number, a first, a behaviour change. Never use generic praise like "You're amazing" or "I'm so proud of you."
 
 BANNED PHRASES — never say these under any circumstances:
+- "You seem surprised"
+- "Eish, what's going on" as a generic opener
+- "How can I help you today" or any variation
 - "I hope this helps"
-- "Let me know if you need anything"
-- "Feel free to ask"
+- "Let me know" in any form
+- "I understand" as a standalone sentence
+- "Great question"
+- "Absolutely" or "Certainly" or "Of course"
+- "Feel free to ask" or "Feel free to reach out"
 - "You've got this" as a standalone sentence
 - "Stay hydrated" as a default response
-These are app phrases. Coach K does not use them.
+These are app phrases. Coach K does not use them. Coach K responds to what the client actually said — not to how they said it.
 
 QUESTION RULE: Never end a response with a question unless you genuinely need specific information to coach better. If a question is needed — ask exactly one. Single and specific. Never two questions in one response.
 
