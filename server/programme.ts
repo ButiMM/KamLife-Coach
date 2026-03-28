@@ -3,161 +3,559 @@
 // All workout programme content and builder functions
 // ============================================================
 
-export const BEGINNER_GYM_PROGRAMME = `*Full Body Strength — Beginner (3 days/week: Mon/Wed/Fri)*
-3 sets of 12 reps each. Rest 60 seconds between sets. Total time 45–55 minutes.
+// ============================================================
+// TYPE DEFINITIONS
+// ============================================================
 
-1️⃣ *Leg Press Machine — 3×12*
-https://www.youtube.com/results?search_query=leg+press+machine+tutorial+beginners
-Sit in machine. Feet shoulder-width on platform. Lower until knees at 90°. Push through heels. Do not lock knees at top.
-Common mistake: Knees caving inward or lowering too deep.
-Start weight: Whatever allows 12 clean reps with difficulty on last 2.
+export type Exercise = {
+  name: string;
+  sets: string;
+  description: string;
+  mistake: string;
+  modification: string;
+  youtube?: string;
+};
 
-2️⃣ *Leg Curl Machine — 3×12*
-https://www.youtube.com/results?search_query=lying+leg+curl+machine+tutorial
-Lie face down. Pad just above heels. Curl heels toward glutes. Squeeze hamstrings hard at top. Lower slowly over 3 seconds.
-Common mistake: Hips rising off pad to assist the movement.
-Start weight: Light — hamstrings are often underdeveloped in beginners.
+// ============================================================
+// GYM — 3-DAY FULL BODY (FULL EQUIPMENT)
+// ============================================================
 
-3️⃣ *Chest Press Machine — 3×12*
-https://www.youtube.com/results?search_query=chest+press+machine+tutorial+beginners
-Adjust seat so handles are at chest height. Press forward until arms nearly extended. Return slowly. Keep back against pad.
-Common mistake: Shrugging shoulders up during the press.
-Start weight: Whatever allows 12 clean reps.
+const GYM_FULL_DAY_A: Exercise[] = [
+  {
+    name: "Barbell Squat or Leg Press",
+    sets: "3x10",
+    description: "Feet shoulder width. Lower until thighs parallel to floor. Drive through heels to stand. Keep chest tall and core braced throughout the movement.",
+    mistake: "Heels rising off the floor or knees caving inward. Push knees out over toes and keep weight through your heels.",
+    modification: "Leg Press if no barbell available or if you have lower back pain.",
+    youtube: "https://www.youtube.com/results?search_query=barbell+squat+form+tutorial",
+  },
+  {
+    name: "Barbell Bench Press or Chest Press Machine",
+    sets: "3x10",
+    description: "Bar to lower chest. Press until arms are almost fully extended. Lower the bar slowly over 2 seconds. Feet flat on floor, shoulder blades pinched together.",
+    mistake: "Bouncing the bar off your chest. Lower it under control and pause briefly at the bottom.",
+    modification: "Dumbbell press if no barbell is available.",
+    youtube: "https://www.youtube.com/results?search_query=barbell+bench+press+form+tutorial",
+  },
+  {
+    name: "Lat Pulldown",
+    sets: "3x10",
+    description: "Pull the bar down to your upper chest. Drive your elbows down and back. Squeeze your shoulder blades hard together at the bottom. Return slowly under control.",
+    mistake: "Pulling with your arms instead of your back. Think about driving your elbows toward your back pockets.",
+    modification: "Resistance band pulldown if no cable machine is available.",
+    youtube: "https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form",
+  },
+  {
+    name: "Romanian Deadlift",
+    sets: "3x10",
+    description: "Hinge at the hips, push your bum back. Lower until you feel a strong hamstring stretch. Drive hips forward to stand. Back must stay flat throughout.",
+    mistake: "Rounding the lower back at the bottom. Only go as deep as your flexibility allows while keeping a flat back.",
+    modification: "Reduce range of motion if you have tight hamstrings — depth comes with time.",
+    youtube: "https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial",
+  },
+  {
+    name: "Dumbbell Shoulder Press",
+    sets: "3x10",
+    description: "Dumbbells at shoulder height, palms facing forward. Press overhead until arms are nearly extended. Lower slowly back to starting position.",
+    mistake: "Arching your lower back excessively as you press. Brace your core and keep your ribs down.",
+    modification: "Seated press for lower back support.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form",
+  },
+];
 
-4️⃣ *Lat Pulldown — 3×12*
-https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form+beginners
-Thighs under pad. Grip bar wider than shoulders. Pull to upper chest. Lean back slightly. Squeeze back hard. Return slowly.
-Common mistake: Pulling with arms instead of driving elbows down.
-Start weight: Light enough to feel the back working, not just arms.
+const GYM_FULL_DAY_B: Exercise[] = [
+  {
+    name: "Hip Thrust (Barbell or Machine)",
+    sets: "3x12",
+    description: "Upper back resting on bench or in machine. Drive hips up explosively. Squeeze glutes hard at the top and hold for 1 full second. Lower slowly.",
+    mistake: "Using your lower back instead of your glutes. Focus on squeezing your bum at the top — if you feel it in your back, reduce weight.",
+    modification: "Glute bridge flat on the floor if no bench is available.",
+    youtube: "https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form",
+  },
+  {
+    name: "Incline Dumbbell Press",
+    sets: "3x10",
+    description: "Bench set to 30–45 degrees. Press dumbbells up and slightly inward. Full range of motion — lower until dumbbells are beside your chest. Control the descent.",
+    mistake: "Elbows flaring too wide. Keep them at roughly 45 degrees from your torso.",
+    modification: "Flat bench press if incline is not available.",
+    youtube: "https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial+form",
+  },
+  {
+    name: "Seated Cable Row",
+    sets: "3x10",
+    description: "Pull the handle in to your lower chest. Squeeze your shoulder blades hard together and hold briefly. Return slowly — full stretch at the front. Stay upright.",
+    mistake: "Leaning too far back or rocking your torso to generate momentum. Keep your back still.",
+    modification: "Dumbbell bent-over row if no cable machine is available.",
+    youtube: "https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form",
+  },
+  {
+    name: "Bulgarian Split Squat",
+    sets: "3x10 each leg",
+    description: "Back foot elevated on bench. Front foot placed far forward. Lower your back knee toward the floor. Drive up through your front heel. Keep torso upright.",
+    mistake: "Front knee caving inward. Keep it tracking straight over your middle toe throughout.",
+    modification: "Regular lunge if balance is a problem. Progress to elevated over time.",
+    youtube: "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
+  },
+  {
+    name: "Face Pull",
+    sets: "3x15",
+    description: "Cable set at face height with rope attachment. Pull rope to your face with elbows high and wide. Squeeze your rear delts hard at the end position. Return slowly.",
+    mistake: "Pulling too low or using too much momentum. This is a shoulder health exercise — use light weight and focus on the squeeze.",
+    modification: "Rear delt dumbbell fly lying face down on an incline bench if no cable available.",
+    youtube: "https://www.youtube.com/results?search_query=face+pull+cable+tutorial+form",
+  },
+];
 
-5️⃣ *Machine Shoulder Press — 3×12*
-https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial
-Adjust seat so handles are at shoulder height. Press overhead until arms nearly extended. Lower slowly. No arching lower back.
-Common mistake: Using momentum or arching back excessively.
-Start weight: Lighter than you think — shoulders are a small muscle group.
+const GYM_FULL_DAY_C: Exercise[] = [
+  {
+    name: "Hack Squat or Leg Press",
+    sets: "3x10",
+    description: "Aim for a deeper range of motion than Day A. Feet positioned slightly closer together for more quad focus. Control the descent over 2 seconds.",
+    mistake: "Not reaching full depth. Go as deep as your mobility allows while keeping lower back against the pad.",
+    modification: "Leg Press with a wider stance if Hack Squat is not available.",
+    youtube: "https://www.youtube.com/results?search_query=hack+squat+machine+tutorial+form",
+  },
+  {
+    name: "Overhead Press (Barbell or Machine)",
+    sets: "3x10",
+    description: "Press straight overhead until arms are nearly locked. Core tight and ribs down throughout. Lower slowly back to shoulder height.",
+    mistake: "Leaning back excessively to get the bar overhead. Keep your torso upright and brace hard.",
+    modification: "Seated dumbbell press if you have shoulder mobility restrictions.",
+    youtube: "https://www.youtube.com/results?search_query=overhead+press+barbell+form+tutorial",
+  },
+  {
+    name: "Chest-Supported Row or Barbell Row",
+    sets: "3x10",
+    description: "Chest resting on incline bench (chest-supported). Pull dumbbells up toward your hips. Squeeze your back hard at the top. Lower slowly. Eliminates lower back involvement.",
+    mistake: "Using momentum to swing the weight up. If you cannot do it strict, reduce the weight.",
+    modification: "Single arm dumbbell row with knee on bench if chest-supported bench is not available.",
+    youtube: "https://www.youtube.com/results?search_query=chest+supported+dumbbell+row+tutorial",
+  },
+  {
+    name: "Leg Curl Machine",
+    sets: "3x12",
+    description: "Full range of motion — curl heels all the way toward your glutes. Slow lowering phase of 3 seconds. Squeeze hamstrings hard at the top.",
+    mistake: "Hips rising off the pad to assist the movement. Keep your hips pinned down throughout.",
+    modification: "Nordic curl on the floor — both challenging and effective.",
+    youtube: "https://www.youtube.com/results?search_query=leg+curl+machine+tutorial+form",
+  },
+  {
+    name: "Tricep Cable Pushdown",
+    sets: "3x12",
+    description: "Elbows pinned firmly at your sides. Push down until arms are straight. Squeeze triceps hard at the bottom. Return slowly under control.",
+    mistake: "Elbows drifting forward during the movement. If they move, reduce the weight.",
+    modification: "Tricep dips off a bench if no cable machine is available.",
+    youtube: "https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial+form",
+  },
+];
 
-Progressive overload: Add one rep per session. When you hit 15 reps on all sets, increase weight by smallest increment and drop back to 12.`;
+// ============================================================
+// GYM — 3-DAY FULL BODY DUMBBELL-ONLY
+// (For Planet Fitness, basic gyms, no barbell/cable)
+// ============================================================
 
-export const INTERMEDIATE_GYM_UPPER = `*Upper Body Day — Intermediate (4 days/week: Mon/Tue/Thu/Fri)*
+const GYM_DUMBBELL_DAY_A: Exercise[] = [
+  {
+    name: "Goblet Squat",
+    sets: "3x12",
+    description: "Hold one dumbbell vertically at your chest. Feet shoulder width, toes slightly out. Lower until thighs are parallel. Keep elbows tracking inside your knees. Drive through heels.",
+    mistake: "Heels rising off the floor. Keep your full foot flat and drive through the whole foot.",
+    modification: "Squat to a chair if knees are weak — stand up from the chair with control.",
+    youtube: "https://www.youtube.com/results?search_query=goblet+squat+dumbbell+tutorial+form",
+  },
+  {
+    name: "Dumbbell Bench Press",
+    sets: "3x10",
+    description: "Lie on a flat bench. Dumbbells held at chest height. Press up until arms are nearly extended. Lower slowly through full range of motion. Feet flat on the floor.",
+    mistake: "Elbows flaring out wide. Keep them at roughly 45 degrees from your torso.",
+    modification: "Floor press if no bench is available — lie flat on the floor.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+bench+press+tutorial+form",
+  },
+  {
+    name: "Dumbbell Row (each arm)",
+    sets: "3x10 each arm",
+    description: "One knee on bench for support. Pull dumbbell from a full hang up to your hip. Squeeze your back hard at the top. Lower slowly under control.",
+    mistake: "Rotating your torso to pull the weight up. Keep hips square and let only your arm move.",
+    modification: "Both arms bent-over row standing if no bench is available.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+single+arm+row+tutorial",
+  },
+  {
+    name: "Dumbbell Romanian Deadlift",
+    sets: "3x10",
+    description: "Dumbbells in front of thighs. Hinge at hips pushing bum back. Lower along your shins until you feel a strong hamstring stretch. Drive hips forward to return.",
+    mistake: "Rounding your lower back. Only go as deep as a flat back allows.",
+    modification: "Reduce the range of motion while your flexibility builds over time.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+romanian+deadlift+tutorial+form",
+  },
+  {
+    name: "Dumbbell Shoulder Press",
+    sets: "3x10",
+    description: "Dumbbells at shoulder height, palms facing forward. Press overhead until arms are nearly extended. Lower slowly back to starting position. Keep core braced.",
+    mistake: "Arching your lower back excessively as you press. Brace your core and keep ribs down.",
+    modification: "Seated press for lower back support.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form",
+  },
+];
+
+const GYM_DUMBBELL_DAY_B: Exercise[] = [
+  {
+    name: "Hip Thrust with Dumbbell",
+    sets: "3x12",
+    description: "Upper back on bench. Dumbbell or weight plate balanced on your hips. Drive hips up explosively. Squeeze glutes hard at the top. Lower slowly.",
+    mistake: "Using your lower back instead of your glutes. If you feel it in your back, that is the wrong muscle doing the work.",
+    modification: "Bodyweight glute bridge flat on the floor.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+hip+thrust+tutorial+form",
+  },
+  {
+    name: "Incline Dumbbell Press",
+    sets: "3x10",
+    description: "Bench at 30–45 degrees. Press dumbbells up and slightly inward. Full range of motion. Control the descent over 2 seconds.",
+    mistake: "Elbows flaring too wide. Keep them at roughly 45 degrees from your torso.",
+    modification: "Flat bench press if incline is not available.",
+    youtube: "https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial+form",
+  },
+  {
+    name: "Bent Over Dumbbell Row",
+    sets: "3x10",
+    description: "Hinge forward until torso is roughly parallel to the floor. Pull both dumbbells up to your lower chest simultaneously. Squeeze shoulder blades together hard. Lower slowly.",
+    mistake: "Rounding your back to reach the floor. Hinge from the hips and keep your back flat.",
+    modification: "Chest-supported row lying on an incline bench to remove lower back stress.",
+    youtube: "https://www.youtube.com/results?search_query=bent+over+dumbbell+row+tutorial+form",
+  },
+  {
+    name: "Dumbbell Bulgarian Split Squat",
+    sets: "3x10 each leg",
+    description: "Hold dumbbells at sides. Back foot elevated on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel to rise. Torso upright.",
+    mistake: "Front knee caving inward. Keep it tracking straight over your middle toe.",
+    modification: "Regular lunge if balance is a problem — progress to elevated position over time.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+bulgarian+split+squat+tutorial",
+  },
+  {
+    name: "Lateral Raise",
+    sets: "3x15",
+    description: "Light dumbbells at sides. Arms slightly bent. Raise to shoulder height only. Lower slowly over 2 seconds. Do not shrug your shoulders up.",
+    mistake: "Using momentum to swing the weights up. If you cannot control the lowering phase, reduce weight.",
+    modification: "One arm at a time while holding something for balance.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+lateral+raise+tutorial+form",
+  },
+];
+
+const GYM_DUMBBELL_DAY_C: Exercise[] = [
+  {
+    name: "Dumbbell Goblet Squat (heavier)",
+    sets: "3x12",
+    description: "Same mechanics as Day A but use a heavier dumbbell. Focus on depth and control. Slow the descent to 3 seconds. Really feel the quad stretch at the bottom.",
+    mistake: "Rushing to get through reps. The controlled lowering phase is where the muscle gets built.",
+    modification: "Box squat to a bench if depth is a problem.",
+    youtube: "https://www.youtube.com/results?search_query=goblet+squat+dumbbell+tutorial+form",
+  },
+  {
+    name: "Dumbbell Floor Press",
+    sets: "3x10",
+    description: "Lie flat on the floor. Dumbbells at chest height. Press up. Lower slowly until your triceps touch the floor. Pause briefly. Press again. Full range within floor limits.",
+    mistake: "Bouncing your triceps off the floor to generate momentum. Pause at the bottom and press from a dead stop.",
+    modification: "Regular dumbbell press on a bench if available.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+floor+press+tutorial+form",
+  },
+  {
+    name: "Single Arm Row",
+    sets: "3x10 each arm",
+    description: "One knee on bench for support. Pull dumbbell from a full hang to your hip. Focus on a slow 3-second lowering phase. Squeeze the back hard at the top.",
+    mistake: "Rushing the lowering phase. The eccentric is as important as the pull — control it.",
+    modification: "Seated cable row if available and you prefer bilateral.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+single+arm+row+tutorial",
+  },
+  {
+    name: "Dumbbell Hip Thrust",
+    sets: "3x12",
+    description: "Upper back on bench. Heavier dumbbell than Day B. Drive hips up. Squeeze hard at the top for 1 second. Lower slowly under control.",
+    mistake: "Not achieving full hip extension at the top. Push until your body is in a straight line from knees to shoulders.",
+    modification: "Bodyweight hip thrust if heavier dumbbell is too much.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+hip+thrust+tutorial",
+  },
+  {
+    name: "Tricep Overhead Extension",
+    sets: "3x12",
+    description: "Hold one dumbbell overhead with both hands gripping the top plate. Lower the dumbbell behind your head by bending at the elbows. Extend back up. Elbows stay close to head.",
+    mistake: "Elbows flaring out wide as you lower. Keep them pointing forward throughout.",
+    modification: "Tricep dips off a bench if overhead extension causes shoulder discomfort.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+overhead+tricep+extension+tutorial",
+  },
+];
+
+// ============================================================
+// GYM — FEMALE GLUTE-FOCUS PROGRAMME
+// (3 days, for users with primaryFocusArea === "glutes_legs")
+// ============================================================
+
+const GYM_GLUTES_DAY_A: Exercise[] = [
+  {
+    name: "Barbell Hip Thrust",
+    sets: "4x12",
+    description: "This is your primary movement. Upper back on bench. Bar padded on hips. Drive hips up explosively. Squeeze glutes hard for 1 full second at the top. Lower slowly over 2 seconds.",
+    mistake: "Pushing through your lower back instead of your glutes. If your lower back is sore, that is wrong — focus on the bum squeeze at the top.",
+    modification: "Bodyweight or dumbbell hip thrust if no barbell or pad available.",
+    youtube: "https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+glutes",
+  },
+  {
+    name: "Romanian Deadlift",
+    sets: "3x10",
+    description: "Hinge back and feel your hamstrings stretch. Drive through your hips to stand. The hamstring stretch is what activates the glutes — do not rush the bottom position.",
+    mistake: "Rounding your lower back at the bottom. Only go as deep as a flat back allows.",
+    modification: "Reduce range of motion until your form is solid, then increase depth gradually.",
+    youtube: "https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial+glutes",
+  },
+  {
+    name: "Sumo Squat",
+    sets: "3x12",
+    description: "Wide stance with toes pointed out at 45 degrees. Lower down between your legs. Squeeze glutes hard at the top of each rep. Targets inner thighs and glutes together.",
+    mistake: "Knees caving inward as you lower. Push your knees out actively over your toes.",
+    modification: "Goblet sumo squat holding one dumbbell at your chest.",
+    youtube: "https://www.youtube.com/results?search_query=sumo+squat+glutes+tutorial+form",
+  },
+  {
+    name: "Cable Kickback",
+    sets: "3x15 each leg",
+    description: "Ankle strap on cable machine. Hinge slightly forward holding the machine. Drive your leg back and up. Squeeze glute hard at the peak. Control the return.",
+    mistake: "Using momentum or swinging your leg. This is an isolation exercise — slow it down and feel every rep.",
+    modification: "Donkey kick on all fours on the floor if no cable machine.",
+    youtube: "https://www.youtube.com/results?search_query=cable+kickback+glutes+tutorial+form",
+  },
+  {
+    name: "Hip Abduction Machine",
+    sets: "3x15",
+    description: "Sit in machine. Push knees apart against the resistance. Squeeze glutes at the end position. Slow and controlled return. Do not use momentum.",
+    mistake: "Leaning forward to use hip flexors instead of letting the glutes do the work. Sit upright.",
+    modification: "Side-lying leg raise on the floor if no machine available.",
+    youtube: "https://www.youtube.com/results?search_query=hip+abduction+machine+tutorial+glutes",
+  },
+];
+
+const GYM_GLUTES_DAY_B: Exercise[] = [
+  {
+    name: "Leg Press (wide stance)",
+    sets: "3x12",
+    description: "Feet placed wide and high on the platform. This position shifts focus from quads to glutes. Full range of motion — lower until knees reach your chest.",
+    mistake: "Letting knees cave inward as you press. Push them out over your toes throughout.",
+    modification: "Sumo squat if no leg press machine is available.",
+    youtube: "https://www.youtube.com/results?search_query=leg+press+wide+stance+glutes+tutorial",
+  },
+  {
+    name: "Chest Press Machine or Bench Press",
+    sets: "3x10",
+    description: "Upper body balance work. Adjust seat so handles are at chest height. Press forward until arms nearly extended. Return slowly. Keep back against the pad.",
+    mistake: "Shrugging shoulders up during the press. Keep them down and back.",
+    modification: "Dumbbell press on a flat bench if machine not available.",
+    youtube: "https://www.youtube.com/results?search_query=chest+press+machine+tutorial+form",
+  },
+  {
+    name: "Lat Pulldown",
+    sets: "3x10",
+    description: "Upper back balance work. Pull bar to your upper chest. Drive elbows down and back. Squeeze shoulder blades. Creates the upper body shape that complements leg development.",
+    mistake: "Pulling with your arms instead of driving your elbows down. Think elbows to back pockets.",
+    modification: "Resistance band pulldown if no cable machine.",
+    youtube: "https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form",
+  },
+  {
+    name: "Walking Lunge",
+    sets: "3x12 each leg",
+    description: "Hold dumbbells at sides. Take a long stride forward — long stride hits the glutes, short stride hits the quads. Drive through your front heel to step through.",
+    mistake: "Taking short steps which removes glute involvement. Step long and feel the stretch in the front hip.",
+    modification: "Static lunge staying on the spot if balance is a problem.",
+    youtube: "https://www.youtube.com/results?search_query=walking+lunge+dumbbell+tutorial+glutes",
+  },
+  {
+    name: "Shoulder Press",
+    sets: "3x10",
+    description: "Upper body balance. Dumbbells at shoulder height. Press overhead. Lower slowly. Core braced. Creates the shoulder width that gives the hourglass proportion.",
+    mistake: "Arching lower back excessively. Brace your core and keep ribs down.",
+    modification: "Seated press for lower back support.",
+    youtube: "https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form",
+  },
+];
+
+const GYM_GLUTES_DAY_C: Exercise[] = [
+  {
+    name: "Romanian Deadlift (heavier)",
+    sets: "3x12",
+    description: "Heavier than Day A. Really focus on the hamstring stretch at the bottom and the glute activation as you drive your hips through. This builds the glute-hamstring tie-in.",
+    mistake: "Thinking of this as a back exercise. It is a hip hinge — the hips do the work, not the back.",
+    modification: "Dumbbell RDL if no barbell available.",
+    youtube: "https://www.youtube.com/results?search_query=romanian+deadlift+heavier+posterior+chain",
+  },
+  {
+    name: "Leg Curl Machine",
+    sets: "3x12",
+    description: "Full range of motion. Curl heels toward your glutes. Squeeze at the top. Slow 3-second lowering phase. Strong hamstrings directly support glute development.",
+    mistake: "Rushing the lowering phase. The eccentric is where the muscle builds — do not waste it.",
+    modification: "Nordic curl on the floor — very challenging but highly effective.",
+    youtube: "https://www.youtube.com/results?search_query=leg+curl+machine+tutorial+hamstrings",
+  },
+  {
+    name: "Cable Pull Through",
+    sets: "3x15",
+    description: "Face away from the cable machine. Rope between your legs. Hinge forward, then drive your hips through to stand. Pure hip hinge movement for glutes and hamstrings.",
+    mistake: "Squatting down instead of hinging. Push your hips back like you are trying to touch the wall behind you.",
+    modification: "Kettlebell or dumbbell swing if no cable machine — same movement pattern.",
+    youtube: "https://www.youtube.com/results?search_query=cable+pull+through+tutorial+glutes",
+  },
+  {
+    name: "Step Up",
+    sets: "3x10 each leg",
+    description: "Use a high box or bench. Place one foot fully on top. Drive through your front heel to step up. Squeeze glute at the top before lowering. Do not push off the back foot.",
+    mistake: "Pushing off the back foot to help get up. All the force must come through the front leg.",
+    modification: "Lower box or step if balance is a problem. Regular lunge as an alternative.",
+    youtube: "https://www.youtube.com/results?search_query=step+up+exercise+glutes+tutorial+form",
+  },
+  {
+    name: "Hip Abduction Machine (burnout)",
+    sets: "3x20",
+    description: "End of session burnout set. Slow and squeeze every single rep. Do not rush. This finishes off the glute medius — the muscle responsible for the outer glute shape.",
+    mistake: "Using momentum to swing the weight out. Slow controlled reps only — momentum makes this exercise useless.",
+    modification: "Side-lying clamshells on the floor as a replacement.",
+    youtube: "https://www.youtube.com/results?search_query=hip+abduction+machine+burnout+glutes",
+  },
+];
+
+// ============================================================
+// LEGACY GYM STRINGS (kept for backward compat with getKamlifeProgramme)
+// ============================================================
+
+export const BEGINNER_GYM_PROGRAMME = `*Full Body Strength — Beginner (3 days/week)*
+3 sets of 10 reps each. Rest 60 seconds between sets. Total time 45–55 minutes.
+
+1. *Barbell Squat or Leg Press — 3×10*
+https://www.youtube.com/results?search_query=barbell+squat+form+tutorial
+Feet shoulder width. Lower until thighs parallel. Drive through heels. Keep chest tall.
+Common mistake: Heels rising or knees caving inward.
+Modification: Leg Press if no barbell or if lower back pain.
+
+2. *Barbell Bench Press or Chest Press Machine — 3×10*
+https://www.youtube.com/results?search_query=barbell+bench+press+form+tutorial
+Bar to lower chest. Press until arms almost extended. Lower slowly over 2 seconds.
+Common mistake: Bouncing bar off chest.
+Modification: Dumbbell press if no barbell.
+
+3. *Lat Pulldown — 3×10*
+https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form
+Pull bar to upper chest. Drive elbows down and back. Squeeze shoulder blades.
+Common mistake: Pulling with arms not back.
+Modification: Resistance band pulldown if no cable machine.
+
+4. *Romanian Deadlift — 3×10*
+https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial
+Hinge at hips, push bum back. Lower until hamstring stretch. Drive hips forward to stand. Back flat.
+Common mistake: Rounding lower back.
+Modification: Reduce range of motion if tight hamstrings.
+
+5. *Dumbbell Shoulder Press — 3×10*
+https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form
+Dumbbells at shoulder height. Press overhead. Lower slowly.
+Common mistake: Arching lower back excessively.
+Modification: Seated press for lower back support.
+
+Progressive overload: Add one rep per session. When you hit 12 reps on all sets, increase weight by the smallest increment and drop back to 10.`;
+
+export const INTERMEDIATE_GYM_UPPER = `*Upper Body Day — Intermediate (4 days/week)*
 4 sets of 10 reps. Rest 75 seconds. Total time 55–65 minutes.
 
-1️⃣ *Chest Press Machine / Smith Machine Bench Press — 4×10*
+1. *Chest Press Machine / Smith Machine Bench Press — 4×10*
 https://www.youtube.com/results?search_query=smith+machine+bench+press+tutorial
 Focus on feeling the chest, not just moving the weight. 2-second lowering phase.
-Common mistake: Flaring elbows out too wide. Keep at 45°.
+Common mistake: Flaring elbows out too wide. Keep at 45 degrees.
 
-2️⃣ *Seated Cable Row — 4×10*
+2. *Seated Cable Row — 4×10*
 https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form
 Sit upright. Pull handle to belly button. Squeeze shoulder blades hard. Hold 1 second at peak. Return slowly.
 Common mistake: Rounding the back to pull more weight.
 
-3️⃣ *Lat Pulldown — 4×10*
+3. *Lat Pulldown — 4×10*
 https://www.youtube.com/results?search_query=lat+pulldown+tutorial+intermediate
 Full stretch at top, full contraction at bottom. Heavier than beginner.
 Common mistake: Pulling with biceps instead of lats.
 
-4️⃣ *Machine Shoulder Press — 4×10*
+4. *Machine Shoulder Press — 4×10*
 https://www.youtube.com/results?search_query=shoulder+press+machine+form
 Controlled throughout. No bouncing at bottom.
 Common mistake: Leaning back excessively to press more.
 
-5️⃣ *Cable Lateral Raise — 3×15*
+5. *Cable Lateral Raise — 3×15*
 https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
 Stand side-on to cable. Raise to shoulder height. Lower slowly. Creates shoulder width.
 
-6️⃣ *Tricep Cable Pushdown — 3×15*
+6. *Tricep Cable Pushdown — 3×15*
 https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial
 Elbows fixed at sides. Push until arms straight. Squeeze triceps. Return slowly.
 
-7️⃣ *Cable Bicep Curl — 3×15*
+7. *Cable Bicep Curl — 3×15*
 https://www.youtube.com/results?search_query=cable+bicep+curl+tutorial
 Elbows fixed. Curl squeezing biceps. Lower slowly. Full range.`;
 
 export const INTERMEDIATE_GYM_LOWER = `*Lower Body Day — Intermediate*
 4 sets. Rest 75 seconds. Total time 55–65 minutes.
 
-1️⃣ *Hack Squat / Leg Press — 4×10*
+1. *Hack Squat / Leg Press — 4×10*
 https://www.youtube.com/results?search_query=hack+squat+machine+tutorial
 Deeper range than beginner. Feet closer together for quad focus. Control the descent.
 
-2️⃣ *Leg Extension Machine — 4×12*
+2. *Leg Extension Machine — 4×12*
 https://www.youtube.com/results?search_query=leg+extension+machine+tutorial+form
 Extend until legs nearly straight. Squeeze quads hard at top. Lower slowly. No momentum.
 
-3️⃣ *Leg Curl Machine — 4×12*
+3. *Leg Curl Machine — 4×12*
 https://www.youtube.com/results?search_query=leg+curl+machine+seated+or+lying
 Full range of motion. Slow lowering phase. Heavier than beginner.
 
-4️⃣ *Hip Thrust Machine / Cable Pull Through — 4×12*
+4. *Hip Thrust Machine / Cable Pull Through — 4×12*
 https://www.youtube.com/results?search_query=hip+thrust+machine+tutorial
 Drive hips forward powerfully. Squeeze glutes hard at top. Non-negotiable for glute development.
 
-5️⃣ *Seated Calf Raise — 4×15*
+5. *Seated Calf Raise — 4×15*
 https://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial
 Full range — all the way down for stretch, all the way up for contraction. Calves respond to high reps.
 
-6️⃣ *Cable Crunch — 3×15*
+6. *Cable Crunch — 3×15*
 https://www.youtube.com/results?search_query=cable+crunch+tutorial+form
 Kneel facing cable. Rope behind head. Crunch down contracting abs. Beats planks for direct ab development.`;
 
 export const HOME_PROGRAMME_GUIDE = `*Home Training Programme — No Gym Needed*
 These are the only movements. Nothing else. No bicycle kicks. No nonsense.
 
-1️⃣ *Bodyweight Squat → Jump Squat (progression)*
+1. *Bodyweight Squat → Jump Squat (progression)*
 https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial
 3×15. Feet shoulder-width. Lower until thighs parallel. Drive through heels. Keep chest up.
 Common mistake: Knees caving in. Push knees out over toes.
 
-2️⃣ *Push-Up → Decline Push-Up → Archer Push-Up (progression)*
+2. *Push-Up → Decline Push-Up → Archer Push-Up (progression)*
 https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners
 3×10. Hands shoulder-width. Body in straight line. Lower chest to floor. Push up explosively.
 Common mistake: Sagging hips or flaring elbows. Keep core tight.
 
-3️⃣ *Glute Bridge → Single Leg Glute Bridge → Hip Thrust with Backpack (progression)*
+3. *Glute Bridge → Single Leg Glute Bridge → Hip Thrust with Backpack (progression)*
 https://www.youtube.com/results?search_query=glute+bridge+tutorial+form
 3×15. Lie on back. Drive hips up. Squeeze glutes hard at top. Hold 2 seconds.
 Common mistake: Using lower back instead of glutes to lift.
 
-4️⃣ *Reverse Lunge → Bulgarian Split Squat (progression)*
+4. *Reverse Lunge → Bulgarian Split Squat (progression)*
 https://www.youtube.com/results?search_query=reverse+lunge+form+tutorial
 3×10 each leg. Step back, lower back knee toward floor. Front knee stays over ankle.
 Common mistake: Front knee going too far forward. Drive through heel.
 
-5️⃣ *Table Row / Door Frame Row → Resistance Band Row (progression)*
+5. *Table Row / Door Frame Row → Resistance Band Row (progression)*
 https://www.youtube.com/results?search_query=table+row+home+workout+tutorial
 3×10. Lie under table. Grip edge. Pull chest to table. Squeeze back at top.
 Common mistake: Using arms instead of back. Think elbows driving back.
 
-6️⃣ *Plank → Plank with Shoulder Tap (progression)*
+6. *Plank → Plank with Shoulder Tap (progression)*
 https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial
 3×30 seconds. Forearms or hands. Body straight. Core braced. Breathe steadily.
 Common mistake: Hips too high or sagging. Keep hips level.
 
 Progressive overload: Add reps each session. When movements become easy, move to next progression.`;
 
-export function getKamlifeProgramme(user: any, todayOnly = false): string {
-  const mode = user.trainingMode || "home";
-  const exp = (user.trainingExperience || "beginner").toLowerCase();
-
-  if (mode !== "gym") return HOME_PROGRAMME_GUIDE;
-
-  if (exp === "intermediate" || exp === "advanced") {
-    if (todayOnly) {
-      const day = (user.programmeDayInWeek || 1);
-      return day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
-    }
-    return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
-  }
-
-  return BEGINNER_GYM_PROGRAMME;
-}
-
 // ============================================================
-// EXERCISE LIBRARY — PUSH / PULL / LEGS / CORE SPLIT
-// Each training day focuses on ONE category only
+// EXERCISE LIBRARY — kept for backward compat (buildDayWorkoutForType)
 // ============================================================
-
-export type Exercise = { name: string; sets: string; description: string; mistake: string; modification: string };
 
 export const WORKOUTS: Record<string, Record<string, Exercise[]>> = {
   gym: {
@@ -225,8 +623,12 @@ export const WORKOUTS: Record<string, Record<string, Exercise[]>> = {
   },
 };
 
-export function getPhaseMultiplier(phase: number): { sets: string, reps: string, rest: string } {
-  switch(phase) {
+// ============================================================
+// HELPER FUNCTIONS
+// ============================================================
+
+export function getPhaseMultiplier(phase: number): { sets: string; reps: string; rest: string } {
+  switch (phase) {
     case 1: return { sets: "3", reps: "10", rest: "60 seconds" };
     case 2: return { sets: "4", reps: "8", rest: "90 seconds" };
     case 3: return { sets: "4", reps: "6", rest: "120 seconds" };
@@ -240,13 +642,312 @@ export function getPhaseNames(): Record<number, string> {
   return { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
 }
 
-export function getDayType(dowOverride?: number): "push" | "pull" | "legs" | "core" | "rest" {
-  // Fixed weekly schedule: Mon=push, Tue=pull, Wed=legs, Thu=core, Fri=push, Sat=pull, Sun=rest
-  const dow = dowOverride !== undefined ? dowOverride : new Date().getDay();
-  const map: Array<"push" | "pull" | "legs" | "core" | "rest"> =
-    ["rest", "push", "pull", "legs", "core", "push", "pull"];
-  return map[dow];
+/**
+ * getDayType
+ *
+ * For gym users this maps programmeDayInWeek mod 3 to a full-body day slot label.
+ * The old calendar-day logic has been removed — gym day type is now always based
+ * on how many sessions the user has actually done, not what day of the week it is.
+ *
+ * For home users the function returns push/pull/legs/core/rest — these are used
+ * for menu display labels only, not actual programme delivery.
+ *
+ * @param dowOverride  Pass user.programmeDayInWeek for gym users.
+ *                     Pass new Date().getDay() for home display labels.
+ */
+export function getDayType(
+  dowOverride?: number
+): "push" | "pull" | "legs" | "core" | "rest" | "full_a" | "full_b" | "full_c" {
+  if (dowOverride === undefined) {
+    // Default: return based on calendar day for backward compat (home display only)
+    const dow = new Date().getDay();
+    const map: Array<"push" | "pull" | "legs" | "core" | "rest"> =
+      ["rest", "push", "pull", "legs", "core", "push", "pull"];
+    return map[dow];
+  }
+
+  // For gym users: map programmeDayInWeek to full-body day slot
+  // day 1 (and 4, 7...) → full_a
+  // day 2 (and 5, 8...) → full_b
+  // day 3 (and 6, 9...) → full_c
+  const slot = ((dowOverride - 1) % 3) + 1;
+  if (slot === 1) return "full_a";
+  if (slot === 2) return "full_b";
+  return "full_c";
 }
+
+// ============================================================
+// GYM PROGRAMME SELECTOR
+// Returns the correct Exercise[] array for the given day slot and user profile
+// ============================================================
+
+function getGymDay(
+  daySlot: 1 | 2 | 3,
+  isDumbbell: boolean,
+  isGlutesFocus: boolean
+): Exercise[] {
+  if (isGlutesFocus) {
+    const map = { 1: GYM_GLUTES_DAY_A, 2: GYM_GLUTES_DAY_B, 3: GYM_GLUTES_DAY_C };
+    return map[daySlot];
+  }
+  if (isDumbbell) {
+    const map = { 1: GYM_DUMBBELL_DAY_A, 2: GYM_DUMBBELL_DAY_B, 3: GYM_DUMBBELL_DAY_C };
+    return map[daySlot];
+  }
+  const map = { 1: GYM_FULL_DAY_A, 2: GYM_FULL_DAY_B, 3: GYM_FULL_DAY_C };
+  return map[daySlot];
+}
+
+function daySlotLabel(slot: 1 | 2 | 3, isGlutesFocus: boolean, isDumbbell: boolean): string {
+  if (isGlutesFocus) {
+    return ["Glute Push Day A", "Upper + Light Lower B", "Posterior Chain Day C"][slot - 1];
+  }
+  if (isDumbbell) {
+    return [`Dumbbell Full Body A`, `Dumbbell Full Body B`, `Dumbbell Full Body C`][slot - 1];
+  }
+  return [`Full Body A`, `Full Body B`, `Full Body C`][slot - 1];
+}
+
+function formatGymDay(
+  exercises: Exercise[],
+  label: string,
+  phase: number,
+  phaseName: string,
+  week: number,
+  multiplier: { sets: string; reps: string; rest: string }
+): string {
+  let out = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${label} | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+  for (const ex of exercises) {
+    const yt = ex.youtube || `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
+    out += `*${ex.name} — ${ex.sets}*\n${yt}\n${ex.description}\nCommon mistake: ${ex.mistake}\nModification: ${ex.modification}\n\n`;
+  }
+  out += `Send DONE when finished.`;
+  return out;
+}
+
+// ============================================================
+// HOME WORKOUT DAYS (3-day rotating full body)
+// ============================================================
+
+type HomeEx = { name: string; setsReps: string; cue: string; mistake: string; yt: string };
+
+const HOME_DAYS: Record<number, HomeEx[]> = {
+  1: [
+    {
+      name: "Bodyweight Squat",
+      setsReps: "3 sets of 15 reps",
+      cue: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.",
+      mistake: "Knees caving inward. Push knees out over toes throughout.",
+      yt: "https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial",
+    },
+    {
+      name: "Push Up",
+      setsReps: "3 sets of 10 reps",
+      cue: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.",
+      mistake: "Hips sagging or rising. Keep body in one straight line.",
+      yt: "https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners",
+    },
+    {
+      name: "Glute Bridge",
+      setsReps: "3 sets of 15 reps",
+      cue: "Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.",
+      mistake: "Pushing through the lower back instead of the glutes. Drive hips, do not arch back.",
+      yt: "https://www.youtube.com/results?search_query=glute+bridge+tutorial+beginners",
+    },
+    {
+      name: "Reverse Lunge",
+      setsReps: "3 sets of 12 each leg",
+      cue: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.",
+      mistake: "Front knee travelling past toes. Keep shin vertical.",
+      yt: "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
+    },
+    {
+      name: "Table Row",
+      setsReps: "3 sets of 12 reps",
+      cue: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.",
+      mistake: "Hips dropping. Keep body rigid like a plank throughout.",
+      yt: "https://www.youtube.com/results?search_query=table+row+exercise+tutorial",
+    },
+    {
+      name: "Plank",
+      setsReps: "3 sets of 30 seconds",
+      cue: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.",
+      mistake: "Hips rising or sagging. Keep everything in one line.",
+      yt: "https://www.youtube.com/results?search_query=plank+exercise+tutorial+beginners",
+    },
+  ],
+  2: [
+    {
+      name: "Jump Squat",
+      setsReps: "3 sets of 12 reps",
+      cue: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset.",
+      mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.",
+      yt: "https://www.youtube.com/results?search_query=jump+squat+tutorial+form",
+    },
+    {
+      name: "Decline Push Up",
+      setsReps: "3 sets of 10 reps",
+      cue: "Feet on chair or couch. Hands on floor. Lower chest toward floor. Press back up. Body straight.",
+      mistake: "Hips rising to compensate. Keep core tight so body stays in a straight line.",
+      yt: "https://www.youtube.com/results?search_query=decline+push+up+tutorial+beginners",
+    },
+    {
+      name: "Single Leg Glute Bridge",
+      setsReps: "3 sets of 10 reps each leg",
+      cue: "Lie on back. One knee bent foot flat. Extend opposite leg. Drive hips up through planted heel. Squeeze hard at top.",
+      mistake: "Hips dropping to one side. Keep hips level throughout the movement.",
+      yt: "https://www.youtube.com/results?search_query=single+leg+glute+bridge+tutorial",
+    },
+    {
+      name: "Walking Lunge",
+      setsReps: "3 sets of 12 each leg",
+      cue: "Step forward into a lunge. Back knee almost touches floor. Drive front foot into ground and step through. Keep torso upright.",
+      mistake: "Leaning forward. Keep chest up and shoulders back throughout.",
+      yt: "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
+    },
+    {
+      name: "Door Frame Row",
+      setsReps: "3 sets of 12 reps",
+      cue: "Stand in door frame. Grip sides at chest height. Lean back. Pull chest to door frame. Squeeze shoulder blades.",
+      mistake: "Using momentum to swing forward. Control the movement in both directions.",
+      yt: "https://www.youtube.com/results?search_query=doorframe+row+exercise+bodyweight",
+    },
+    {
+      name: "Plank Shoulder Tap",
+      setsReps: "3 sets of 20 taps (10 each side)",
+      cue: "High plank position. Tap opposite shoulder with one hand. Replace hand. Repeat other side. Hips still.",
+      mistake: "Hips rocking side to side with each tap. Brace core hard to keep hips square.",
+      yt: "https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial",
+    },
+  ],
+  3: [
+    {
+      name: "Bulgarian Split Squat",
+      setsReps: "3 sets of 10 reps each leg",
+      cue: "Back foot on chair behind you. Front foot forward. Lower back knee toward floor. Drive through front heel to rise.",
+      mistake: "Front knee caving in. Keep it tracking over your middle toe throughout.",
+      yt: "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
+    },
+    {
+      name: "Diamond Push Up",
+      setsReps: "3 sets of 8 reps",
+      cue: "Hands form a diamond shape under chest. Lower chest to hands. Press up. Elbows stay close to body.",
+      mistake: "Elbows flaring out. Keep them tucked tight to target triceps correctly.",
+      yt: "https://www.youtube.com/results?search_query=diamond+push+up+tutorial+form",
+    },
+    {
+      name: "Hip Thrust",
+      setsReps: "3 sets of 15 reps",
+      cue: "Upper back on couch or chair. Feet flat on floor. Drive hips to ceiling. Squeeze hard at top. Lower slowly.",
+      mistake: "Not getting full hip extension at the top. Push all the way up until body is flat.",
+      yt: "https://www.youtube.com/results?search_query=hip+thrust+bodyweight+tutorial+beginners",
+    },
+    {
+      name: "Deficit Lunge",
+      setsReps: "3 sets of 10 reps each leg",
+      cue: "Stand on a step or book stack. Step one foot forward to the floor. Lower into deep lunge. Rise and repeat.",
+      mistake: "Front knee collapsing inward. Keep knee tracking over toe at all times.",
+      yt: "https://www.youtube.com/results?search_query=deficit+lunge+tutorial+form",
+    },
+    {
+      name: "Resistance Band Row",
+      setsReps: "3 sets of 12 reps",
+      cue: "Anchor band at chest height. Hold handles. Step back. Pull elbows back past your sides. Squeeze shoulder blades together.",
+      mistake: "Shrugging shoulders up during the pull. Keep shoulders down and back.",
+      yt: "https://www.youtube.com/results?search_query=resistance+band+row+tutorial+form",
+    },
+    {
+      name: "Plank with Leg Raise",
+      setsReps: "3 sets of 10 reps each leg",
+      cue: "Forearm plank. Lift one leg 6 inches off floor. Hold 2 seconds. Lower. Switch legs. Core braced throughout.",
+      mistake: "Hips rotating with each leg raise. Keep hips perfectly level.",
+      yt: "https://www.youtube.com/results?search_query=plank+leg+raise+tutorial+form",
+    },
+  ],
+};
+
+// ============================================================
+// getKamlifeProgramme
+// Returns a formatted string overview of the user's programme.
+// For gym users, returns the appropriate 3-day full body programme
+// based on mode (full equipment vs dumbbell) and focus area.
+// ============================================================
+
+export function getKamlifeProgramme(user: any, todayOnly = false): string {
+  const mode = user.trainingMode || "home";
+  const exp = (user.trainingExperience || "beginner").toLowerCase();
+
+  if (mode !== "gym" && mode !== "gym_dumbbell") return HOME_PROGRAMME_GUIDE;
+
+  const isDumbbell = mode === "gym_dumbbell";
+  const isGlutesFocus = user.primaryFocusArea === "glutes_legs";
+
+  if (isDumbbell) {
+    if (todayOnly) {
+      const day = user.programmeDayInWeek || 1;
+      const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
+      const exercises = getGymDay(daySlot, true, false);
+      const label = daySlotLabel(daySlot, false, true);
+      const phase = user.programmePhase || 1;
+      const multiplier = getPhaseMultiplier(phase);
+      const phaseName = getPhaseNames()[phase] || "Foundation";
+      return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+    }
+    const dayA = formatGymDay(GYM_DUMBBELL_DAY_A, "Dumbbell Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));
+    const dayB = formatGymDay(GYM_DUMBBELL_DAY_B, "Dumbbell Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1));
+    const dayC = formatGymDay(GYM_DUMBBELL_DAY_C, "Dumbbell Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1));
+    return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
+  }
+
+  if (isGlutesFocus) {
+    if (todayOnly) {
+      const day = user.programmeDayInWeek || 1;
+      const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
+      const exercises = getGymDay(daySlot, false, true);
+      const label = daySlotLabel(daySlot, true, false);
+      const phase = user.programmePhase || 1;
+      const multiplier = getPhaseMultiplier(phase);
+      const phaseName = getPhaseNames()[phase] || "Foundation";
+      return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+    }
+    const dayA = formatGymDay(GYM_GLUTES_DAY_A, "Glute Push Day A", 1, "Foundation", 1, getPhaseMultiplier(1));
+    const dayB = formatGymDay(GYM_GLUTES_DAY_B, "Upper + Light Lower B", 1, "Foundation", 1, getPhaseMultiplier(1));
+    const dayC = formatGymDay(GYM_GLUTES_DAY_C, "Posterior Chain Day C", 1, "Foundation", 1, getPhaseMultiplier(1));
+    return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
+  }
+
+  // Standard gym full equipment
+  if (exp === "intermediate" || exp === "advanced") {
+    if (todayOnly) {
+      const day = user.programmeDayInWeek || 1;
+      return day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
+    }
+    return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
+  }
+
+  if (todayOnly) {
+    const day = user.programmeDayInWeek || 1;
+    const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
+    const exercises = getGymDay(daySlot, false, false);
+    const label = daySlotLabel(daySlot, false, false);
+    const phase = user.programmePhase || 1;
+    const multiplier = getPhaseMultiplier(phase);
+    const phaseName = getPhaseNames()[phase] || "Foundation";
+    return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+  }
+
+  const dayA = formatGymDay(GYM_FULL_DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));
+  const dayB = formatGymDay(GYM_FULL_DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1));
+  const dayC = formatGymDay(GYM_FULL_DAY_C, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1));
+  return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
+}
+
+// ============================================================
+// buildDayWorkout
+// The primary function used to generate today's session for a user.
+// Gym users: day type is derived from programmeDayInWeek mod 3 — NOT calendar day.
+// Home users: rotating 3-day full body split.
+// ============================================================
 
 export function buildDayWorkout(user: any): string {
   const mode = user.trainingMode || "home";
@@ -257,158 +958,25 @@ export function buildDayWorkout(user: any): string {
   const week = user.programmeWeek || 1;
   const day = user.programmeDayInWeek || 1;
   const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
+  const isDumbbell = mode === "gym_dumbbell";
 
+  // Walk-only users
   if (mode === "walk_only" || mode === "walk") {
-    const duration = phase === 1 ? "15 minutes" : phase === 2 ? "25 minutes" : phase === 3 ? "35 minutes" : "45 minutes";
+    const duration =
+      phase === 1 ? "15 minutes" :
+      phase === 2 ? "25 minutes" :
+      phase === 3 ? "35 minutes" : "45 minutes";
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  // Fix 4 — Home: exact 3-day rotating full-body programme, always 6 exercises minimum
-  if (mode !== "gym") {
-    const daySlot = ((day - 1) % 3) + 1; // cycles 1→2→3→1→2→3...
-
-    type HomeEx = { name: string; setsReps: string; cue: string; mistake: string; yt: string };
-    const HOME_DAYS: Record<number, HomeEx[]> = {
-      1: [
-        {
-          name: "Bodyweight Squat",
-          setsReps: "3 sets of 15 reps",
-          cue: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.",
-          mistake: "Knees caving inward. Push knees out over toes throughout.",
-          yt: "https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial",
-        },
-        {
-          name: "Push Up",
-          setsReps: "3 sets of 10 reps",
-          cue: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.",
-          mistake: "Hips sagging or rising. Keep body in one straight line.",
-          yt: "https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners",
-        },
-        {
-          name: "Glute Bridge",
-          setsReps: "3 sets of 15 reps",
-          cue: "Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.",
-          mistake: "Pushing through the lower back instead of the glutes. Drive hips, do not arch back.",
-          yt: "https://www.youtube.com/results?search_query=glute+bridge+tutorial+beginners",
-        },
-        {
-          name: "Reverse Lunge",
-          setsReps: "3 sets of 12 each leg",
-          cue: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.",
-          mistake: "Front knee travelling past toes. Keep shin vertical.",
-          yt: "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
-        },
-        {
-          name: "Table Row",
-          setsReps: "3 sets of 12 reps",
-          cue: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.",
-          mistake: "Hips dropping. Keep body rigid like a plank throughout.",
-          yt: "https://www.youtube.com/results?search_query=table+row+exercise+tutorial",
-        },
-        {
-          name: "Plank",
-          setsReps: "3 sets of 30 seconds",
-          cue: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.",
-          mistake: "Hips rising or sagging. Keep everything in one line.",
-          yt: "https://www.youtube.com/results?search_query=plank+exercise+tutorial+beginners",
-        },
-      ],
-      2: [
-        {
-          name: "Jump Squat",
-          setsReps: "3 sets of 12 reps",
-          cue: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset.",
-          mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.",
-          yt: "https://www.youtube.com/results?search_query=jump+squat+tutorial+form",
-        },
-        {
-          name: "Decline Push Up",
-          setsReps: "3 sets of 10 reps",
-          cue: "Feet on chair or couch. Hands on floor. Lower chest toward floor. Press back up. Body straight.",
-          mistake: "Hips rising to compensate. Keep core tight so body stays in a straight line.",
-          yt: "https://www.youtube.com/results?search_query=decline+push+up+tutorial+beginners",
-        },
-        {
-          name: "Single Leg Glute Bridge",
-          setsReps: "3 sets of 10 reps each leg",
-          cue: "Lie on back. One knee bent foot flat. Extend opposite leg. Drive hips up through planted heel. Squeeze hard at top.",
-          mistake: "Hips dropping to one side. Keep hips level throughout the movement.",
-          yt: "https://www.youtube.com/results?search_query=single+leg+glute+bridge+tutorial",
-        },
-        {
-          name: "Walking Lunge",
-          setsReps: "3 sets of 12 each leg",
-          cue: "Step forward into a lunge. Back knee almost touches floor. Drive front foot into ground and step through. Keep torso upright.",
-          mistake: "Leaning forward. Keep chest up and shoulders back throughout.",
-          yt: "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
-        },
-        {
-          name: "Door Frame Row",
-          setsReps: "3 sets of 12 reps",
-          cue: "Stand in door frame. Grip sides at chest height. Lean back. Pull chest to door frame. Squeeze shoulder blades.",
-          mistake: "Using momentum to swing forward. Control the movement in both directions.",
-          yt: "https://www.youtube.com/results?search_query=doorframe+row+exercise+bodyweight",
-        },
-        {
-          name: "Plank Shoulder Tap",
-          setsReps: "3 sets of 20 taps (10 each side)",
-          cue: "High plank position. Tap opposite shoulder with one hand. Replace hand. Repeat other side. Hips still.",
-          mistake: "Hips rocking side to side with each tap. Brace core hard to keep hips square.",
-          yt: "https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial",
-        },
-      ],
-      3: [
-        {
-          name: "Bulgarian Split Squat",
-          setsReps: "3 sets of 10 reps each leg",
-          cue: "Back foot on chair behind you. Front foot forward. Lower back knee toward floor. Drive through front heel to rise.",
-          mistake: "Front knee caving in. Keep it tracking over your middle toe throughout.",
-          yt: "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
-        },
-        {
-          name: "Diamond Push Up",
-          setsReps: "3 sets of 8 reps",
-          cue: "Hands form a diamond shape under chest. Lower chest to hands. Press up. Elbows stay close to body.",
-          mistake: "Elbows flaring out. Keep them tucked tight to target triceps correctly.",
-          yt: "https://www.youtube.com/results?search_query=diamond+push+up+tutorial+form",
-        },
-        {
-          name: "Hip Thrust",
-          setsReps: "3 sets of 15 reps",
-          cue: "Upper back on couch or chair. Feet flat on floor. Drive hips to ceiling. Squeeze hard at top. Lower slowly.",
-          mistake: "Not getting full hip extension at the top. Push all the way up until body is flat.",
-          yt: "https://www.youtube.com/results?search_query=hip+thrust+bodyweight+tutorial+beginners",
-        },
-        {
-          name: "Deficit Lunge",
-          setsReps: "3 sets of 10 reps each leg",
-          cue: "Stand on a step or book stack. Step one foot forward to the floor. Lower into deep lunge. Rise and repeat.",
-          mistake: "Front knee collapsing inward. Keep knee tracking over toe at all times.",
-          yt: "https://www.youtube.com/results?search_query=deficit+lunge+tutorial+form",
-        },
-        {
-          name: "Resistance Band Row",
-          setsReps: "3 sets of 12 reps",
-          cue: "Anchor band at chest height. Hold handles. Step back. Pull elbows back past your sides. Squeeze shoulder blades together.",
-          mistake: "Shrugging shoulders up during the pull. Keep shoulders down and back.",
-          yt: "https://www.youtube.com/results?search_query=resistance+band+row+tutorial+form",
-        },
-        {
-          name: "Plank with Leg Raise",
-          setsReps: "3 sets of 10 reps each leg",
-          cue: "Forearm plank. Lift one leg 6 inches off floor. Hold 2 seconds. Lower. Switch legs. Core braced throughout.",
-          mistake: "Hips rotating with each leg raise. Keep hips perfectly level.",
-          yt: "https://www.youtube.com/results?search_query=plank+leg+raise+tutorial+form",
-        },
-      ],
-    };
-
+  // Home users — rotating 3-day full body
+  if (mode !== "gym" && mode !== "gym_dumbbell") {
+    const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
     const exercises = HOME_DAYS[daySlot];
     let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body Day ${daySlot} | Rest 60 seconds between sets | Total 40–50 minutes\n\n`;
     for (const ex of exercises) {
       workout += `*${ex.name} — ${ex.setsReps}*\n${ex.yt}\n${ex.cue}\nCommon mistake: ${ex.mistake}\n\n`;
     }
-    // Glute-focus clients get an extra note
     if (isFemaleGluteFocus) {
       workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
     }
@@ -416,32 +984,67 @@ export function buildDayWorkout(user: any): string {
     return workout;
   }
 
-  // Gym: fixed weekly push-pull-legs-core split
-  const library = WORKOUTS.gym;
-  const dayType = getDayType(day);
-
-  if (dayType === "rest") {
-    return `*Phase ${phase}: ${phaseName} — Week ${week}*\n\n🛌 *Rest Day — Sunday*\n\nYour body builds muscle when you rest, not when you train. Today: stretch, walk lightly, eat your protein, sleep well.\n\nEat your protein target (${user.proteinTarget || 140}g) and get to bed early. Monday is Push day.`;
-  }
-
-  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[dayType];
-  const exercises = library[dayType];
-  const sessionExercises = dayType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
-
-  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel} Day | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
-  for (const ex of sessionExercises) {
-    const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
-      ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
-      : `${multiplier.sets}x${multiplier.reps}`;
-    const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
-    const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
-  }
-  workout += `Send DONE when finished.`;
-  return workout;
+  // Gym users — ALWAYS use programmeDayInWeek mod 3 to pick day slot
+  // Never use calendar day of week for gym sessions
+  const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
+  const exercises = getGymDay(daySlot, isDumbbell, isFemaleGluteFocus);
+  const label = daySlotLabel(daySlot, isFemaleGluteFocus, isDumbbell);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier);
 }
 
-export function buildDayWorkoutForType(user: any, forcedType: "push" | "pull" | "legs" | "core"): string {
+// ============================================================
+// buildDay1Workout / buildDay2Workout / buildDay3Workout
+// Progressive delivery: Day 1 sent at onboarding, Day 2 after Day 1 DONE,
+// Day 3 after Day 2 DONE.
+// ============================================================
+
+export function buildDay1Workout(user: any): string {
+  return buildDayWorkout({ ...user, programmeDayInWeek: 1 });
+}
+
+export function buildDay2Workout(user: any): string {
+  return buildDayWorkout({ ...user, programmeDayInWeek: 2 });
+}
+
+export function buildDay3Workout(user: any): string {
+  return buildDayWorkout({ ...user, programmeDayInWeek: 3 });
+}
+
+// ============================================================
+// buildFullProgramme
+// Returns only Day 1 for new users (initial delivery at onboarding).
+// Days 2 and 3 are sent progressively via buildDay2Workout / buildDay3Workout
+// when the user logs DONE.
+// ============================================================
+
+export function buildFullProgramme(user: any): string {
+  const mode = user.trainingMode || "home";
+  const phase = user.programmePhase || 1;
+  const phaseNames = getPhaseNames();
+  const phaseName = phaseNames[phase] || "Foundation";
+  const week = user.programmeWeek || 1;
+
+  if (mode !== "gym" && mode !== "gym_dumbbell") {
+    // Home: deliver Day 1 only at onboarding
+    const day1 = buildDayWorkout({ ...user, programmeDayInWeek: 1 });
+    return `*Phase ${phase}: ${phaseName} — Week ${week} | Full Body Home Programme*\nTrain on non-consecutive days. Each session hits squat, push, hinge, pull, and core.\n\n${day1}`;
+  }
+
+  // Gym: deliver Day 1 only — Days 2 and 3 follow after DONE is logged
+  return buildDay1Workout(user);
+}
+
+// ============================================================
+// buildDayWorkoutForType
+// Backward-compatible function for forcing a specific day type.
+// For home users returns today's full-body home session.
+// For gym users returns the session for the specified type (legacy push/pull/legs).
+// ============================================================
+
+export function buildDayWorkoutForType(
+  user: any,
+  forcedType: "push" | "pull" | "legs" | "core"
+): string {
   const mode = user.trainingMode || "home";
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
@@ -450,82 +1053,50 @@ export function buildDayWorkoutForType(user: any, forcedType: "push" | "pull" | 
   const week = user.programmeWeek || 1;
   const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
 
-  if (mode !== "gym") {
-    // For home, just return today's home workout since home is full-body
+  if (mode !== "gym" && mode !== "gym_dumbbell") {
     return buildDayWorkout(user);
   }
 
   const library = WORKOUTS.gym;
-  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥" }[forcedType];
+  const dayLabel: Record<string, string> = {
+    push: "Push Day",
+    pull: "Pull Day",
+    legs: "Legs Day",
+    core: "Core Day",
+  };
   const exercises = library[forcedType];
-  const sessionExercises = forcedType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
+  const sessionExercises =
+    forcedType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
 
-  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel} Day | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
+  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel[forcedType]} | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
   for (const ex of sessionExercises) {
-    const setsDisplay = ex.sets.includes("seconds") || ex.sets.includes("min")
-      ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
-      : `${multiplier.sets}x${multiplier.reps}`;
+    const setsDisplay =
+      ex.sets.includes("seconds") || ex.sets.includes("min")
+        ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
+        : `${multiplier.sets}x${multiplier.reps}`;
     const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
     const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\n⚠️ ${ex.mistake}\n🎥 ${ytLink}\n\n`;
+    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\nCommon mistake: ${ex.mistake}\n${ytLink}\n\n`;
   }
   workout += `Send DONE when finished.`;
   return workout;
 }
 
-export function buildFullProgramme(user: any): string {
-  const mode = user.trainingMode || "home";
-  const phase = user.programmePhase || 1;
-  const phaseNames = getPhaseNames();
-  const phaseName = phaseNames[phase] || "Foundation";
-  const multiplier = getPhaseMultiplier(phase);
-  const week = user.programmeWeek || 1;
-
-  // FIX 7: Home users get 3 full-body sessions (squat+push+hinge+pull+core every session)
-  // NOT a push/pull/legs split — beginners need full-body every session
-  if (mode !== "gym") {
-    const day1 = buildDayWorkout({ ...user, programmeDayInWeek: 1 });
-    const day2 = buildDayWorkout({ ...user, programmeDayInWeek: 2 });
-    const day3 = buildDayWorkout({ ...user, programmeDayInWeek: 3 });
-    return `*Phase ${phase}: ${phaseName} — Week ${week} | Full Body Home Programme*\nTrain on non-consecutive days. Each session hits squat, push, hinge, pull, and core.\n\n${day1}\n\n---\n\n${day2}\n\n---\n\n${day3}`;
-  }
-
-  const library = WORKOUTS["gym"];
-
-  const days: Array<{ label: string; type: "push" | "pull" | "legs" }> = [
-    { label: "Day 1 — Push 💪", type: "push" },
-    { label: "Day 2 — Pull 🏋️", type: "pull" },
-    { label: "Day 3 — Legs 🦵", type: "legs" },
-  ];
-
-  const header = `*Phase ${phase}: ${phaseName} — Week ${week}* | ${multiplier.sets} sets | Rest ${multiplier.rest}`;
-  const dayMessages: string[] = [];
-
-  for (const { label, type } of days) {
-    const exercises = library[type].slice(0, 3);
-    let dayOut = `*${label}*\n`;
-    for (const ex of exercises) {
-      const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
-      const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-      dayOut += `\n• *${ex.name}* — ${multiplier.sets}×${multiplier.reps}\n  ${ex.description}\n  🎥 ${ytLink}\n  ⚠️ ${ex.mistake}`;
-      if (ex.modification) dayOut += `\n  💡 ${ex.modification}`;
-      dayOut += `\n`;
-    }
-    dayMessages.push(dayOut.trim());
-  }
-
-  // Each day arrives as one WhatsApp message — split on --- by splitMessage in routes.ts
-  dayMessages[0] = `${header}\n\n${dayMessages[0]}`;
-  dayMessages[dayMessages.length - 1] += `\n\nSend *1* for today's session.`;
-
-  return dayMessages.join("\n\n---\n\n");
-}
+// ============================================================
+// WORKOUT_DONE_RESPONSES
+// ============================================================
 
 export const WORKOUT_DONE_RESPONSES = [
-  (total: number, day: number) => `Workout ${total} done. Day ${day} logged and banked. Rest, eat your protein, come back stronger.`,
-  (total: number, day: number) => `Session ${total} complete. Day ${day} in the books. Consistency over intensity — every single time.`,
-  (total: number, day: number) => `${total} workouts done. You showed up when it was hard. That is the difference between clients who change and clients who talk about it.`,
-  (total: number, day: number) => `Done. ${total} sessions logged. Your body is adapting right now, even if you cannot see it yet. Trust the process.`,
-  (total: number, day: number) => `Workout ${total} complete. Day ${day} ticked off. No shortcuts, no excuses. That is how Coach K clients do it.`,
-  (total: number, _day: number) => `${total} sessions and counting. You did not feel like it and you did it anyway. That is the whole game.`,
+  (total: number, day: number) =>
+    `Workout ${total} done. Day ${day} logged and banked. Rest, eat your protein, come back stronger.`,
+  (total: number, day: number) =>
+    `Session ${total} complete. Day ${day} in the books. Consistency over intensity — every single time.`,
+  (total: number, _day: number) =>
+    `${total} workouts done. You showed up when it was hard. That is the difference between clients who change and clients who talk about it.`,
+  (total: number, _day: number) =>
+    `Done. ${total} sessions logged. Your body is adapting right now, even if you cannot see it yet. Trust the process.`,
+  (total: number, day: number) =>
+    `Workout ${total} complete. Day ${day} ticked off. No shortcuts, no excuses. That is how Coach K clients do it.`,
+  (total: number, _day: number) =>
+    `${total} sessions and counting. You did not feel like it and you did it anyway. That is the whole game.`,
 ];

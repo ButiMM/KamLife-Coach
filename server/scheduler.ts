@@ -1311,6 +1311,59 @@ cron.schedule("0 8 * * 0", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB — SUNDAY COMPLIANCE LEVEL UPDATE
+// Runs Sunday 7am UTC (9am SAST) — calculates weekly score and
+// updates complianceLevel: RESET | BUILDING | CONSISTENT | LOCKED IN
+// ============================================================
+
+cron.schedule("0 7 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Weekly compliance level update");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+  const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const plannedSessions = client.trainingDaysPerWeek || 3;
+
+      // Count workouts this week and last week
+      const [thisWeekWorkouts, lastWeekWorkouts] = await Promise.all([
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourteenDaysAgo), lt(workoutLogs.loggedAt, sevenDaysAgo))),
+      ]);
+
+      const thisWeekCount = thisWeekWorkouts.length;
+      const lastWeekCount = lastWeekWorkouts.length;
+
+      // Score: sessions completed vs planned (0-100)
+      const weeklyScore = Math.min(100, Math.round((thisWeekCount / plannedSessions) * 100));
+
+      // Compliance level logic
+      let complianceLevel: string;
+      if (thisWeekCount === 0) {
+        complianceLevel = "RESET";
+      } else if (thisWeekCount < Math.ceil(plannedSessions * 0.5)) {
+        complianceLevel = "BUILDING";
+      } else if (thisWeekCount >= plannedSessions && lastWeekCount >= plannedSessions) {
+        // Hit target both this week AND last week → LOCKED IN
+        complianceLevel = "LOCKED IN";
+      } else if (thisWeekCount >= Math.ceil(plannedSessions * 0.75)) {
+        complianceLevel = "CONSISTENT";
+      } else {
+        complianceLevel = "BUILDING";
+      }
+
+      await db.update(users).set({ weeklyScore, complianceLevel }).where(eq(users.id, client.id));
+    } catch (err) {
+      console.error(`[SCHEDULER] Compliance update error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 

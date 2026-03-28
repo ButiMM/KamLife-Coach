@@ -8,7 +8,7 @@ import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
-import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType } from "./programme";
+import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
@@ -434,6 +434,21 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
 
+  // ---- SUBSCRIPTION GATE — inactive users locked out of coaching ----
+  if (user.subscriptionStatus === 'inactive') {
+    const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance)\b/i;
+    if (!gateBypass.test(m)) {
+      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+      const merchantId = process.env.PAYFAST_MERCHANT_ID;
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      const name = user.name ? `${user.name}, ` : "";
+      const gateReply = `${name}your subscription is currently inactive.\n\nYour full profile, workout history, and progress are saved — nothing is lost.\n\n*Reactivate for R99/month:* ${payLink}\n\nReply *pay* to get your payment link, or *help* to see options.`;
+      await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
+      return gateReply;
+    }
+  }
+
   // ---- AWAITING PROGRAMME ANSWERS — parse "4 days gym" or "3 home" format ----
   if (user.awaitingProgrammeAnswers) {
     const lower = message.toLowerCase();
@@ -444,7 +459,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
     // Parse gym or home (required)
     let trainingMode = user.trainingMode || "home";
-    if (/\bgym\b/i.test(lower) || /\bat gym\b/i.test(lower) || /\bthe gym\b/i.test(lower)) trainingMode = "gym";
+    if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym|planet fitness|virgin active basic)\b/i.test(lower)) trainingMode = "gym_dumbbell";
+    else if (/\bgym\b/i.test(lower) || /\bat gym\b/i.test(lower) || /\bthe gym\b/i.test(lower)) trainingMode = "gym";
     else if (/\bhome\b/i.test(lower) || /\bat home\b/i.test(lower) || /\bno gym\b/i.test(lower)) trainingMode = "home";
 
     // Keep existing experience if set, otherwise default to beginner
@@ -870,7 +886,22 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       : newStreak >= 7 ? `\n\n🔥 *7-session streak.* You are building a habit.`
       : newStreak >= 3 ? `\n\n🔥 Streak: ${newStreak}. Keep it going.`
       : "";
-    return `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
+    let doneReply = `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
+
+    // Progressive programme delivery — unlock next day's workout after completing each of the first 2 days
+    try {
+      if (newTotal === 1) {
+        const updatedUser = { ...user, programmeDayInWeek: newDay, programmeWeek: newWeek };
+        const nextWorkout = buildDay2Workout(updatedUser);
+        doneReply += `\n\n---\n\n${nextWorkout}`;
+      } else if (newTotal === 2) {
+        const updatedUser = { ...user, programmeDayInWeek: newDay, programmeWeek: newWeek };
+        const nextWorkout = buildDay3Workout(updatedUser);
+        doneReply += `\n\n---\n\n${nextWorkout}`;
+      }
+    } catch { /* non-fatal — day delivery is bonus content */ }
+
+    return doneReply;
   }
 
   // ---- MY LIFTS — show all personal bests ----
@@ -1291,9 +1322,55 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
-  // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
+  // Shared message-type flags used by food handlers below
   const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
   const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
+
+  // ---- BRAAI GUIDE — SA-specific outdoor cooking coaching ----
+  if ((m.includes("braai") || m.includes("braaing") || m.includes("braaiing")) && !isQuestion) {
+    const goal = user.goalType || "fat_loss";
+    const braaiReply = goal === "muscle_gain"
+      ? `*Braai Protocol — Muscle Mode* 🔥\n\n• Chicken pieces: BEST — 28g protein each, skin off after cooking\n• Wors: 1-2 rolls (20-30g protein) ✅ Keep it\n• Boerewors chops: high fat but solid protein — 1 portion\n• Pap + sous: fine — keep butter small\n• Potato salad: small portion or skip\n\n*Your plate:* 3 chicken pieces + 1 wors + small pap = ~750 kcal, ~55g protein. Sorted.\n\nDrink: Water first. Max 2 beers — after food, not before.`
+      : `*Braai Protocol — Fat Loss Mode* 🔥\n\n• Chicken pieces: BEST option — remove skin, 165 kcal, 28g protein each\n• Wors: 1 roll max — not every braai\n• Pap: small portion, no extra butter\n• Potato salad, coleslaw: skip — not worth the calories\n• Braai broodjie: 1 is fine. 3 is not.\n\n*Your plate:* 2-3 chicken pieces + small pap + salad = ~550 kcal, ~45g protein. Win.\n\n⚠️ Beers are the silent killer at braais — 1 Castle = 150 kcal, nobody has just one. Water between drinks minimum.`;
+    await logChat(user.id, message, braaiReply, "FOOD_LOG");
+    return braaiReply;
+  }
+
+  // ---- EATING OUT GUIDE — SA fast food and restaurant coaching ----
+  const eatingOutPlace =
+    m.includes("nandos") || m.includes("nando's") ? "nandos" :
+    m.includes("kfc") ? "kfc" :
+    m.includes("steers") ? "steers" :
+    m.includes("wimpy") ? "wimpy" :
+    m.includes("chicken licken") ? "chicken_licken" :
+    m.includes("debonairs") ? "debonairs" :
+    m.includes("mcdonalds") || m.includes("mcdonald's") ? "mcdonalds" :
+    m.includes("ocean basket") ? "ocean_basket" :
+    null;
+
+  const hasEatingOutTrigger = /\b(eating|ordering|order|going|going to|had|ate|at|having)\b/.test(m);
+  if (eatingOutPlace && (hasEatingOutTrigger || !isQuestion)) {
+    const goal = user.goalType || "fat_loss";
+    const guides: Record<string, string> = {
+      nandos: `*Nando's — Coach K Pick*\n\n✅ Best: Quarter chicken (skin off) + peri-peri chips + coleslaw = ~650 kcal, 35g protein\n✅ Good: Grilled chicken wrap (no sauce, extra coleslaw)\n⚠️ Watch: Double chicken = fine if that's your big meal\n❌ Avoid: Chips as main + roll + dessert = 1,200 kcal\n\nFlame-grilled is always better than fried. Skin off saves 80-100 kcal.`,
+      kfc: `*KFC — Coach K Pick*\n\n✅ Best: Streetwise 2 (original, not zinger) = ~550 kcal, 32g protein\n✅ OK: Grilled chicken pieces × 2\n⚠️ Watch: Coleslaw is fine. Chips is a carb bomb — skip or halve\n❌ Avoid: Zinger towers, combos with large chips + cooldrink = 1,200+ kcal\n\nIf you're going KFC: 2 pieces original + coleslaw. That's it. No cooldrink.`,
+      steers: `*Steers — Coach K Pick*\n\n✅ Best: Classic beef burger, no sauce, extra lettuce = ~650 kcal, 35g protein\n✅ OK: Chicken burger (no mayo)\n⚠️ Watch: Onion rings = 400 extra kcal — skip\n❌ Avoid: Ribs + chips + cooldrink combo = 1,500+ kcal\n\nBurger only, no combo. Ask for no mayo. Works.`,
+      wimpy: `*Wimpy — Coach K Pick*\n\n✅ Best: Grilled chicken + salad (no dressing) = ~500 kcal, 38g protein\n✅ Good: Eggs + toast (breakfast) — solid protein\n⚠️ Watch: Toasted sandwiches are sneaky carbs\n❌ Avoid: Burgers + chips + milkshake = 1,400 kcal\n\nWimpy breakfast is actually one of the better fast food options for protein.`,
+      chicken_licken: `*Chicken Licken — Coach K Pick*\n\n✅ Best: 2-piece soul meal (original) = ~580 kcal, 30g protein\n⚠️ Watch: Hot portions chips = 400 kcal on their own\n❌ Avoid: Family buckets, adding a roll and cooldrink to every order\n\nChicken Licken is fine as a protein hit — just don't turn it into a 4-piece meal with all the extras.`,
+      debonairs: `*Debonairs — Coach K Pick*\n\n✅ Best: Thin base, chicken topping, half a medium = ~500-600 kcal\n⚠️ Watch: Cheese-stuffed crust adds 150 kcal per slice\n❌ Avoid: Triple Decker, Gatsby-style loaded options\n\nPizza can fit — 2 slices thin base chicken is roughly 500-600 kcal. Problem is nobody stops at 2 slices. Set your portion before it arrives.`,
+      mcdonalds: `*McDonald's — Coach K Pick*\n\n✅ Best: McFeast (no sauce) = ~550 kcal, 32g protein\n✅ Good: Grilled chicken wrap\n⚠️ Watch: Fries = 340 kcal. Skip or share.\n❌ Avoid: Combos with large fries + large coke = 1,100+ kcal added\n\nBurger only, water or diet cooldrink. That's a manageable meal.`,
+      ocean_basket: `*Ocean Basket — Coach K Pick*\n\n✅ Best: Grilled linefish + salad = ~450 kcal, 40g protein — legitimately excellent\n✅ Good: Calamari (grilled not battered) + salad\n⚠️ Watch: Battered = adds 200 extra kcal\n❌ Avoid: Chips with everything, creamy sauces\n\nOcean Basket is one of the best restaurant options — high protein, low fat if you go grilled.`,
+    };
+    const guide = guides[eatingOutPlace] || "";
+    if (guide) {
+      const goalNote = goal === "fat_loss" ? `\n\n_Your goal is fat loss — the right order here keeps you on track without missing out._` : `\n\n_Your goal is muscle — prioritise protein options and eat to fullness._`;
+      const eatingReply = `${guide}${goalNote}`;
+      await logChat(user.id, message, eatingReply, "FOOD_LOG");
+      return eatingReply;
+    }
+  }
+
+  // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Only scan short messages if they contain an explicit food log trigger — not every short message
   const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 12;
   if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
@@ -1308,18 +1385,32 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const foodLines = foundFoods.map(f =>
         `• ${f.name}: ~${f.typicalPortionCalories} kcal, ${f.typicalPortionProtein}g protein (${f.typicalPortionDescription})`
       ).join("\n");
-      const calRemaining = calorieTarget - totalCals;
-      const proteinRemaining = proteinTarget - totalProtein;
+
+      // Daily accumulation — track running total across meals
+      const todayStr = new Date().toISOString().slice(0, 10);
+      const prevCals = (user.todayCaloriesDate === todayStr) ? (user.todayCalories || 0) : 0;
+      const prevProtein = (user.todayCaloriesDate === todayStr) ? (user.todayProteinG || 0) : 0;
+      const runningCals = prevCals + totalCals;
+      const runningProtein = prevProtein + Math.round(totalProtein);
+      try {
+        await db.update(users).set({ todayCalories: runningCals, todayProteinG: runningProtein, todayCaloriesDate: todayStr }).where(eq(users.phoneNumber, phone));
+      } catch { /* non-fatal */ }
+
+      const calRemaining = calorieTarget - runningCals;
+      const proteinRemaining = proteinTarget - runningProtein;
       let coachNote = "";
       if (junkFoods.length > 0 && goodProteins.length === 0) {
         coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken. Coach the next meal, not the last one.`;
       } else if (goodProteins.length > 0 && totalProtein >= 20) {
-        coachNote = `\n\nSolid protein choice. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for this meal. ✅"}`;
+        coachNote = `\n\nSolid protein choice. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
       } else if (foundFoods.some(f => f.category === "carb") && goodProteins.length === 0) {
         coachNote = `\n\nCarbs without protein — add a protein source to this meal. Eggs, pilchards, or beans work.`;
       }
       const junkNote = junkFoods.length > 0 ? `\n\n${junkFoods[0].notes}` : "";
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\nRemaining today: ~${Math.max(0, calRemaining)} kcal${coachNote}${junkNote}`;
+      const runningLine = prevCals > 0
+        ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
+        : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}`;
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
       return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}`;
@@ -1400,6 +1491,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   };
   const suppMatch = Object.entries(suppKeywords).find(([kw]) => m.includes(kw));
   if (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take")) {
+    // Supplement week gate — locked before week 4
+    const progWeek = user.programmeWeek || 1;
+    if (progWeek < 4) {
+      const weekGate = `Supplements unlock at Week 4.\n\nYou are in Week ${progWeek} — food consistency is the foundation. No supplement will out-work a solid week of eating right.\n\nFocus now: hit your ${user.proteinTarget || 120}g protein target daily from real food. When you reach Week 4, I give you the full supplement protocol — creatine, protein timing, the works.`;
+      await logChat(user.id, message, weekGate, "SUPPLEMENT_GATED");
+      return weekGate;
+    }
     const suppKey = suppMatch ? suppMatch[1] : null;
     let suppReply: string;
     if (suppKey && SUPPLEMENT_GUIDE[suppKey]) {
@@ -1587,8 +1685,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       return `*Tomorrow — ${tomorrowName}: Rest Day 🛌*\n\nYour body builds during rest. Stretch, walk lightly, hit your protein target, and sleep well. Monday is Push day — come in fresh.`;
     }
     const nextDayUser = { ...user };
-    const nextWorkout = buildDayWorkoutForType(nextDayUser, tomorrowType);
-    return `*Tomorrow — ${tomorrowName}: ${dayLabels[tomorrowType]}*\n\nComplete today's session first, then this is waiting for you.\n\n${nextWorkout}`;
+    // buildDayWorkoutForType only accepts legacy push/pull/legs/core — full body types go via buildDayWorkout
+    const legacyTypes = ["push", "pull", "legs", "core"] as const;
+    const nextWorkout = legacyTypes.includes(tomorrowType as any)
+      ? buildDayWorkoutForType(nextDayUser, tomorrowType as "push" | "pull" | "legs" | "core")
+      : buildDayWorkout(nextDayUser);
+    const tomorrowLabel = dayLabels[tomorrowType] || "Day Session";
+    return `*Tomorrow — ${tomorrowName}: ${tomorrowLabel}*\n\nComplete today's session first, then this is waiting for you.\n\n${nextWorkout}`;
   }
 
   // ---- NEW: STREAK ----

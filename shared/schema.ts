@@ -91,6 +91,9 @@ export const users = pgTable(
     workoutStreak: integer("workout_streak").default(0),
     subscriptionRenewsAt: timestamp("subscription_renews_at"),
     paymentReference: text("payment_reference"), // PayFast payment/subscription ID
+    todayCalories: integer("today_calories").default(0),
+    todayCaloriesDate: text("today_calories_date"), // YYYY-MM-DD — reset daily
+    todayProteinG: integer("today_protein_g").default(0),
   },
   (table) => {
     return {

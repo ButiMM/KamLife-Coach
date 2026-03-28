@@ -434,13 +434,19 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let mode = "home";
     let gymName: string | null = null;
 
-    if (/\bgym\b/i.test(lower) || lower.includes("virgin") || lower.includes("planet fitness") || lower.includes("curves")) {
+    if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym)\b/i.test(lower)) {
+      mode = "gym_dumbbell";
+      gymName = "Basic Gym";
+    } else if (/\bgym\b/i.test(lower) || lower.includes("virgin") || lower.includes("planet fitness") || lower.includes("curves")) {
       mode = "gym";
       if (lower.includes("virgin")) gymName = "Virgin Active";
       else if (lower.includes("planet")) gymName = "Planet Fitness";
       else if (lower.includes("curves")) gymName = "Curves";
       else if (/\bgym\b/i.test(lower)) gymName = "Gym";
     }
+
+    // Female glute focus detection
+    const primaryFocusArea = /\b(glutes?|bum|booty|legs? and glutes?|lower body|hips?)\b/i.test(lower) ? "glutes_legs" : null;
 
     // Set defaults for everything — collected progressively through coaching
     const defaultDays = 3;
@@ -471,6 +477,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeStartDate: new Date(),
       subscriptionStatus: "trial",
       onboardingState: "COMPLETE",
+      ...(primaryFocusArea ? { primaryFocusArea } : {}),
     }).where(eq(users.phoneNumber, phone));
 
     const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -479,7 +486,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const goalLabel: Record<string, string> = {
       fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Both",
     };
-    const modeLabel = mode === "gym" ? `${gymName || "Gym"} programme` : "Home programme";
+    const modeLabel = mode === "gym_dumbbell" ? "Dumbbell gym programme" : mode === "gym" ? `${gymName || "Gym"} programme` : "Home programme";
 
     return `${modeLabel} — 3 days/week to start. ${goalLabel[defaultGoal] || defaultGoal} focus.\n\n${programme}\n\n*Your first action:* Do Day 1 today. Reply *done* when finished and I log it.\n\nSend me what you eat and I will give you the calories. Send your steps daily. Tell me your weight and I will set your exact targets. I will coach you from there.`;
   }
