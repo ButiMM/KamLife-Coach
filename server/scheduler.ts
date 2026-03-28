@@ -1364,6 +1364,102 @@ cron.schedule("0 7 * * 0", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB — TRIAL CONVERSION FLOW
+// Runs daily 9am UTC (11am SAST)
+// Day 5: warm warning — trial ends in 2 days
+// Day 7: hard gate — payment link, move to inactive
+// Day 10: final win-back attempt
+// ============================================================
+
+cron.schedule("0 9 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Trial conversion");
+  const trialClients = await db.select().from(users)
+    .where(eq(users.subscriptionStatus, "trial"));
+
+  const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+  const merchantId = process.env.PAYFAST_MERCHANT_ID;
+
+  for (const client of trialClients) {
+    try {
+      const created = client.createdAt ? new Date(client.createdAt) : null;
+      if (!created) continue;
+
+      const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
+      const name = client.name || "there";
+      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+
+      if (daysSince === 5) {
+        // Day 5 — warm warning
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your 7-day free trial with Coach K ends in 2 days.\n\nYou have done ${client.totalWorkoutsCompleted || 0} workout${(client.totalWorkoutsCompleted || 0) !== 1 ? "s" : ""} and your programme is set up. Do not lose that progress.\n\nKeep coaching for R99/month — that is R3.30 per day: ${payLink}\n\nAny questions, just ask.`
+        );
+      } else if (daysSince === 7) {
+        // Day 7 — hard gate + deactivate
+        await db.update(users).set({ subscriptionStatus: "inactive" })
+          .where(eq(users.id, client.id));
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your free trial has ended.\n\nYour profile, workouts (${client.totalWorkoutsCompleted || 0} sessions), and progress are all saved.\n\nReactivate for R99/month and pick up exactly where you left off: ${payLink}\n\nReply *pay* at any time to get your link again.`
+        );
+      } else if (daysSince === 10) {
+        // Day 10 — win-back for users who haven't converted
+        await sendWhatsApp(client.phoneNumber,
+          `${name} — Coach K here. 3 days since your trial ended.\n\nMost people who quit at this point never start again. The ones who do R99/month for 3 months — they are the ones who actually change.\n\nYour programme is still here: ${payLink}\n\nR99. Less than a single fast food meal.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Trial conversion error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB — WEEKLY NSV CHECK-IN
+// Runs Saturday 8am UTC (10am SAST)
+// Prompts non-scale victory reflection — keeps engagement when
+// the scale isn't moving (most common reason people quit)
+// ============================================================
+
+cron.schedule("0 8 * * 6", async () => {
+  console.log("[SCHEDULER] JOB: Weekly NSV check-in");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      // Only send to clients who have been active this week
+      const recentActivity = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, sevenDaysAgo)))
+        .limit(1);
+      if (recentActivity.length === 0) continue;
+
+      // Skip if already sent this week (state guard)
+      const stateKey = `nsv_sent_${client.id}_${thisWeekUTC()}`;
+      const state = loadState();
+      if (state[stateKey]) continue;
+
+      const name = client.name || "there";
+      const week = client.programmeWeek || 1;
+
+      const nsvPrompts = [
+        `${name} — quick check-in beyond the scale.\n\nHow do your clothes feel this week? Tighter? Looser? Same?\n\nNon-scale wins are often the first signs things are working — before the scale catches up. Tell me one thing that felt different this week, even something small.`,
+        `${name} — end of week check-in.\n\nForget the scale for a second. Three questions:\n1. Energy levels this week vs last week?\n2. Did anything feel easier — stairs, walking, lifting?\n3. Sleep any better?\n\nThese are the real signals. Tell me one.`,
+        `${name}, Week ${week} done.\n\nI track more than your weight. Tell me: any moment this week where you felt stronger, had more energy, or made a better food choice than you would have 3 months ago?\n\nThat is your real progress.`,
+        `${name} — Saturday check-in.\n\nOne question: what is something your body can do now that it could not do when you started?\n\nCould be physical — run further, lift more, climb stairs without breathing hard. Could be habits — less cravings, better sleep, not reaching for junk automatically.\n\nTell me one win.`,
+      ];
+
+      const promptIndex = (week - 1) % nsvPrompts.length;
+      await sendWhatsApp(client.phoneNumber, nsvPrompts[promptIndex]);
+      saveState(stateKey, todayUTC());
+    } catch (err) {
+      console.error(`[SCHEDULER] NSV check-in error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // INIT EXPORT
 // ============================================================
 
