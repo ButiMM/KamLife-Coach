@@ -58,7 +58,12 @@ Primary focus: ${focus}
 Injuries: ${injuries}
 Experience: ${experience}
 Water today: ${water}L
-Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000)}`;
+Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000)}
+Compliance level: ${user.complianceLevel || 'RESET'}
+Workout streak: ${user.workoutStreak || 0} consecutive sessions
+Total sessions completed: ${user.totalWorkoutsCompleted || 0}
+Programme week: ${user.programmeWeek || 1}
+Subscription status: ${user.subscriptionStatus || 'inactive'}`;
 }
 
 // ============================================================
@@ -246,41 +251,38 @@ export async function buildPatternSummary(user: any): Promise<string> {
 // GPT CALL — ALWAYS USES MASTER PROMPT + FULL CONTEXT
 // ============================================================
 
+// Crisis-only signals that justify GPT-4o for text (quality matters for safety)
+const GPT4O_TEXT_SIGNALS = [
+  "suicidal", "suicide", "self harm", "self-harm", "want to die", "kill myself",
+  "end it all", "no reason to live", "want to hurt myself",
+];
+
 export function selectModel(instruction: string, userMessage: string): { model: string; maxTokens: number; reason: string } {
-  const GPT4O_SIGNALS = [
-    "programme", "workout plan", "training plan", "beginner", "intermediate", "advanced",
-    "diabetes", "diabetic", "hypertension", "blood pressure", "pcos", "hiv", "arv", "tb ",
-    "ramadan", "fasting", "pregnancy", "pregnant", "elderly", "injury", "bad knee",
-    "bad back", "bad shoulder", "hip problem", "knee replacement",
-    // Note: "calories" removed — bare calorie questions are handled hardcoded before GPT.
-    // Only route to gpt-4o when calculating a full nutrition plan or goal-specific advice.
-    "calorie target for", "how much should i eat", "muscle gain", "fat loss",
-    "goal change", "want to gain", "want to lose", "supplement stack", "creatine",
-    "protein powder", "week 3", "crisis", "suicidal", "self harm",
-    "calculate my", "formula", "what should i eat for my goal", "build me a meal plan",
-  ];
-
-  // Check user message first — this is the primary routing signal
   const msgLower = userMessage.toLowerCase();
-  const matchedMsg = GPT4O_SIGNALS.find(signal => msgLower.includes(signal));
-  if (matchedMsg) {
-    console.log(`[MODEL] gpt-4o selected — user message matched: "${matchedMsg}" | msg: "${userMessage.slice(0, 60)}"`);
-    return { model: "gpt-4o", maxTokens: 600, reason: matchedMsg };
+
+  // GPT-4o only for genuine crisis — safety requires best model
+  const crisis = GPT4O_TEXT_SIGNALS.find(s => msgLower.includes(s));
+  if (crisis) {
+    console.log(`[MODEL] gpt-4o (crisis) — matched: "${crisis}"`);
+    return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
-  // Check the extra instruction only when it is short (utility calls like celebrations)
-  // Skip scanning the full handleMessage instruction template — it always contains signals
-  if (instruction.length < 200) {
-    const instrLower = instruction.toLowerCase();
-    const matchedInstr = GPT4O_SIGNALS.find(signal => instrLower.includes(signal));
-    if (matchedInstr) {
-      console.log(`[MODEL] gpt-4o selected — instruction matched: "${matchedInstr}"`);
-      return { model: "gpt-4o", maxTokens: 600, reason: matchedInstr };
-    }
-  }
+  // Everything else: gpt-4o-mini — coaching quality is equal, cost is 15x lower
+  console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
+  return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };
+}
 
-  console.log(`[MODEL] gpt-4o-mini selected | msg: "${userMessage.slice(0, 60)}"`);
-  return { model: "gpt-4o-mini", maxTokens: 250, reason: "simple response" };
+export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
+  try {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const result = await db.select({ count: sql`count(*)` })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, todayStart)));
+    const count = parseInt(String(result[0]?.count || 0));
+    return count < 20; // 20 total responses per day — generous but bounded
+  } catch {
+    return true; // fail open
+  }
 }
 
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string): Promise<string> {

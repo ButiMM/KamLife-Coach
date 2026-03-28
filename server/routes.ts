@@ -9,7 +9,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
@@ -452,6 +452,47 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
   }
 
+  // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
+  if (/\b(calorie|calories|kcal)\b.*\b(target|goal|limit|today|daily|mine|my)\b/i.test(m) || m === "my calories" || m === "calories" || m === "calorie target") {
+    const cal = user.calorieTarget || 1800;
+    const prot = user.proteinTarget || 120;
+    const todayStr2 = new Date().toISOString().slice(0, 10);
+    const todayCals = (user.todayCaloriesDate === todayStr2) ? (user.todayCalories || 0) : 0;
+    const remaining = cal - todayCals;
+    return `Your daily target: *${cal} kcal | ${prot}g protein.*${todayCals > 0 ? `\n\nToday so far: ~${todayCals} kcal (${remaining > 0 ? `${remaining} remaining` : "target reached ✅"})` : "\n\nNothing logged today yet — send me what you had for breakfast."}`;
+  }
+
+  if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
+    const prot = user.proteinTarget || 120;
+    return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), sugar beans (8g per 100g cooked).`;
+  }
+
+  if (/\b(streak|my streak|workout streak|current streak)\b/i.test(m)) {
+    const streak = user.workoutStreak || 0;
+    const total = user.totalWorkoutsCompleted || 0;
+    if (streak === 0 && total === 0) return `No sessions logged yet. Do your first workout and reply *done* — that starts the streak.`;
+    if (streak === 0) return `Streak is at 0 — last session was more than 2 days ago. ${total} total sessions completed. Start a new one today.`;
+    return `Current streak: *${streak} session${streak !== 1 ? "s" : ""}* in a row.\n\nTotal sessions with Coach K: ${total}. ${streak >= 7 ? "Don't stop now." : "Keep building."}`;
+  }
+
+  if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
+    const workout = buildDayWorkout(user);
+    const dayNum = user.programmeDayInWeek || 1;
+    await logChat(user.id, message, workout, "WORKOUT_VIEW");
+    return `*Day ${dayNum} — Your Workout*\n\n${workout}`;
+  }
+
+  if (m === "my targets" || m === "targets" || m === "my stats" || m === "stats") {
+    const cal = user.calorieTarget || 1800;
+    const prot = user.proteinTarget || 120;
+    const steps = user.stepsTarget || 7000;
+    const phase = user.programmePhase || 1;
+    const week = user.programmeWeek || 1;
+    const streak = user.workoutStreak || 0;
+    const compliance = user.complianceLevel || "RESET";
+    return `*Your Targets*\n\n🔥 Calories: ${cal} kcal/day\n💪 Protein: ${prot}g/day\n👟 Steps: ${steps.toLocaleString()}/day\n\n*Progress*\nPhase ${phase} · Week ${week} · Streak: ${streak} sessions\nCompliance: ${compliance}`;
+  }
+
   // ---- AWAITING PROGRAMME ANSWERS — parse "4 days gym" or "3 home" format ----
   if (user.awaitingProgrammeAnswers) {
     const lower = message.toLowerCase();
@@ -661,6 +702,16 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         }
 
         // ---- FOOD PHOTO continues below ----
+        // Rate limit food photo logging — max 3 per day
+        const todayStartPhoto = new Date(); todayStartPhoto.setHours(0, 0, 0, 0);
+        const photoCountResult = await db.select({ count: sql`count(*)` })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG")));
+        const photoCountToday = parseInt(String(photoCountResult[0]?.count || 0));
+        if (photoCountToday >= 3) {
+          return `3 food photos logged today — I have a clear picture of how you're eating. Keep it consistent and send me tomorrow's first meal.`;
+        }
+
         const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
         );
@@ -2520,6 +2571,12 @@ CRITICAL RULES — these are non-negotiable:
     if (memories.length > 0) memoryContext = memories.join("\n");
   } catch { }
 
+  // Daily GPT call cap — prevents runaway costs from heavy users
+  const underLimit = await isUnderGPTCallLimit(user.id);
+  if (!underLimit) {
+    return `You've sent a lot today — I like the energy. Rest up tonight, eat your protein, and we go hard again tomorrow. Reply *menu* if you need anything specific.`;
+  }
+
   // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----
   const agentType = routeToAgent(message);
   let gptReply: string;
@@ -2566,6 +2623,20 @@ CRITICAL RULES — these are non-negotiable:
       await storeMemory(phone, `Client milestone: "${message}"`, "milestone");
     }
   } catch { }
+
+  // Auto-store significant coaching notes for future memory
+  try {
+    const mLower = message.toLowerCase();
+    if (/\b(stressed|anxious|depressed|overwhelmed|struggling|bad week|hard week|tough week|not okay|burnout)\b/.test(mLower)) {
+      await storeMemory(phone, `Client mentioned stress or emotional difficulty: "${message.slice(0, 100)}"`, "mindset");
+    } else if (/\b(hate|don.?t like|can.?t stand|avoid|never eat|allergic to|dislike)\b/.test(mLower)) {
+      await storeMemory(phone, `Food/exercise preference noted: "${message.slice(0, 100)}"`, "preference");
+    } else if (/\b(love|favourite|always eat|prefer|enjoy|my go.?to)\b/.test(mLower)) {
+      await storeMemory(phone, `Positive preference noted: "${message.slice(0, 100)}"`, "preference");
+    } else if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(mLower)) {
+      await storeMemory(phone, `Life situation update: "${message.slice(0, 120)}"`, "preference");
+    }
+  } catch { /* non-fatal */ }
 
   // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
   const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];

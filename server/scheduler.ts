@@ -36,6 +36,19 @@ function todayUTC(): string {
   return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
 
+// Track proactive messages sent today per client — max 2 per day
+const dailyMessageCount = new Map<string, number>();
+
+function canSendProactive(clientId: string): boolean {
+  const count = dailyMessageCount.get(clientId) || 0;
+  return count < 2;
+}
+
+function recordProactiveSend(clientId: string): void {
+  const count = dailyMessageCount.get(clientId) || 0;
+  dailyMessageCount.set(clientId, count + 1);
+}
+
 function thisWeekUTC(): string {
   const d = new Date();
   const day = d.getUTCDay(); // 0=Sun, 1=Mon...
@@ -142,15 +155,21 @@ async function runMorningCheckin(): Promise<void> {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
+    // Only send to clients active in the last 3 days — don't spam silent users
+    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+    if (client.lastActiveAt && new Date(client.lastActiveAt) < threeDaysAgo) continue;
     try {
       const name = client.name || "there";
       const phone = client.phoneNumber;
       const proteinTarget = client.proteinTarget || 120;
 
       if (isRamadan()) {
-        await sendWhatsApp(phone,
-          `Ramadan Mubarak ${name}. Suhoor is your most important meal — high protein, slow carbs, water before Fajr. What are you having at Suhoor?`
-        );
+        if (canSendProactive(client.id)) {
+          await sendWhatsApp(phone,
+            `Ramadan Mubarak ${name}. Suhoor is your most important meal — high protein, slow carbs, water before Fajr. What are you having at Suhoor?`
+          );
+          recordProactiveSend(client.id);
+        }
         continue;
       }
 
@@ -158,9 +177,12 @@ async function runMorningCheckin(): Promise<void> {
 
       if (yesterdayLogs.length === 0) {
         // Completely silent day — short and direct
-        await sendWhatsApp(phone,
-          `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`
-        );
+        if (canSendProactive(client.id)) {
+          await sendWhatsApp(phone,
+            `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`
+          );
+          recordProactiveSend(client.id);
+        }
         continue;
       }
 
@@ -221,7 +243,10 @@ async function runMorningCheckin(): Promise<void> {
         parts.push(`What is your first meal today?`);
       }
 
-      await sendWhatsApp(phone, parts.join(" "));
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(phone, parts.join(" "));
+        recordProactiveSend(client.id);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);
     }
@@ -249,9 +274,12 @@ async function runEveningAccountability(): Promise<void> {
       const todayLogs = await getTodayLogs(client.id);
 
       if (todayLogs.length === 0) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.`
-        );
+        if (canSendProactive(client.id)) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name}, it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.`
+          );
+          recordProactiveSend(client.id);
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
