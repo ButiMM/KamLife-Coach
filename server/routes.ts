@@ -84,7 +84,7 @@ async function getOrCreateUser(phone: string): Promise<any> {
   }
   const newUsers = await db.insert(users).values({
     phoneNumber: phone,
-    subscriptionStatus: "trial",
+    subscriptionStatus: "inactive",
     onboardingState: "START",
     programmePhase: 1,
     programmeWeek: 1,
@@ -442,8 +442,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const name = user.name ? `${user.name}, ` : "";
-      const gateReply = `${name}your subscription is currently inactive.\n\nYour full profile, workout history, and progress are saved — nothing is lost.\n\n*Reactivate for R99/month:* ${payLink}\n\nReply *pay* to get your payment link, or *help* to see options.`;
+      const name = user.name ? `${user.name}` : "there";
+      const isNewUser = !user.totalWorkoutsCompleted && !user.lastWorkoutDate;
+      const gateReply = isNewUser
+        ? `Your programme is built, ${name}. Activate coaching to get Day 1 and start.\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Your programme, food coaching, and daily accountability — all on WhatsApp. No apps.\n\nReply *pay* to get your link again.`
+        : `${name}, your subscription is inactive.\n\nYour profile, ${user.totalWorkoutsCompleted || 0} workouts, and all your progress are saved.\n\n*Reactivate for R99/month:*\n${payLink}\n\nReply *pay* to get your link.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
@@ -3116,11 +3119,32 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         // Welcome / renewal confirmation WhatsApp
         const name = targetUser.name || "there";
         const isRenewal = targetUser.subscriptionStatus === "active";
-        const msg = isRenewal
-          ? `Payment confirmed, ${name}. Your subscription is renewed for another month. Coach K is here — let's go.`
-          : `Payment confirmed, ${name}. Welcome to KamLife Coach. Your 30-day coaching subscription is active. Send me what you ate for breakfast and let's start.`;
-        if (fromNum) {
-          await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: msg });
+
+        if (isRenewal) {
+          // Renewal — simple confirmation
+          if (fromNum) {
+            await twilioC.messages.create({
+              from: fromNum, to: normalisedPhone,
+              body: `Payment confirmed, ${name}. Subscription renewed for another month. Coach K is here — let's go.`
+            });
+          }
+        } else {
+          // New subscriber — send welcome + Day 1 workout immediately
+          if (fromNum) {
+            const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
+            const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
+            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\nYour Day 1 workout is below. Do it today and reply *done* when finished — I log it and Day 2 unlocks.`;
+            await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: welcomeMsg });
+
+            // Auto-deliver Day 1 workout
+            try {
+              const { buildDay1Workout } = await import("./programme");
+              const day1 = buildDay1Workout(targetUser);
+              await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: day1 });
+            } catch (e) {
+              console.error("[PAYFAST] Day 1 delivery error:", e);
+            }
+          }
         }
 
       } else if (paymentStatus === "FAILED" || paymentStatus === "CANCELLED") {

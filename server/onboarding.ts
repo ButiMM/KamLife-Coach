@@ -475,20 +475,21 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      subscriptionStatus: "trial",
+      subscriptionStatus: "inactive",
       onboardingState: "COMPLETE",
       ...(primaryFocusArea ? { primaryFocusArea } : {}),
     }).where(eq(users.phoneNumber, phone));
 
-    const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const f = finalUser[0];
-    const programme = getKamlifeProgramme(f);
     const goalLabel: Record<string, string> = {
-      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Both",
+      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Recomposition",
     };
-    const modeLabel = mode === "gym_dumbbell" ? "Dumbbell gym programme" : mode === "gym" ? `${gymName || "Gym"} programme` : "Home programme";
+    const modeLabel = mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
+    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const merchantId = process.env.PAYFAST_MERCHANT_ID;
+    const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
 
-    return `${modeLabel} — 3 days/week to start. ${goalLabel[defaultGoal] || defaultGoal} focus.\n\n${programme}\n\n*Your first action:* Do Day 1 today. Reply *done* when finished and I log it.\n\nSend me what you eat and I will give you the calories. Send your steps daily. Tell me your weight and I will set your exact targets. I will coach you from there.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 3 days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Daily workouts, food coaching, SA meal plans, weekly progress reports — all in WhatsApp. No app needed.\n\nPay now and Day 1 drops immediately.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----

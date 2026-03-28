@@ -4,7 +4,7 @@ import { motion } from "framer-motion";
 import { Link } from "wouter";
 
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
-const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20my%20free%20trial`;
+const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
 
 export default function LandingPage() {
   return (
@@ -45,7 +45,7 @@ export default function LandingPage() {
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
             </span>
-            7-Day Free Trial — No Card Needed
+            Now Accepting Clients — South Africa
           </div>
 
           <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.08] tracking-tight">
@@ -68,7 +68,7 @@ export default function LandingPage() {
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-5 h-5 mr-2" />
-                Start Free Trial on WhatsApp
+                Start Coaching — R99/month
               </a>
             </Button>
             <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-base border-2" asChild>
@@ -80,7 +80,7 @@ export default function LandingPage() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            7 days free · Then R99/month · Cancel anytime
+            R99/month · Cancel anytime · Day 1 sent immediately on payment
           </p>
         </motion.div>
 
@@ -155,7 +155,7 @@ export default function LandingPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {[
-              { icon: CheckCircle, title: "SA-specific meal plans", desc: "Jungle Oats, pilchards, pap, vetkoek — plans built around real SA food at Shoprite prices." },
+              { icon: CheckCircle, title: "SA-specific meal plans", desc: "Jungle Oats, pilchards, pap, vetkoek — plans built around real SA food at Shoprite prices. Under-R100/week plan included." },
               { icon: Zap, title: "3-day full body programme", desc: "Gym, home, or dumbbells only. Science-based full body programme that actually works for beginners and intermediates." },
               { icon: TrendingUp, title: "Photo food logging", desc: "Snap your plate and send it. Coach K identifies the food and gives you macros and feedback instantly." },
               { icon: Shield, title: "Braai and takeout coaching", desc: "Nando's, KFC, Steers, braais — guides for every SA eating scenario so you never feel stuck." },
@@ -197,7 +197,7 @@ export default function LandingPage() {
                 "Photo food logging via WhatsApp",
                 "Weekly progress reports every Sunday",
                 "Braai and eating-out guides",
-                "7-day free trial to start",
+                "Day 1 workout delivered immediately on payment",
               ].map((item) => (
                 <li key={item} className="flex items-start gap-3">
                   <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
@@ -209,10 +209,10 @@ export default function LandingPage() {
             <Button size="lg" className="w-full h-14 rounded-2xl text-base font-bold" asChild>
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-5 h-5 mr-2" />
-                Start Your Free Trial
+                Start Coaching on WhatsApp
               </a>
             </Button>
-            <p className="text-xs text-muted-foreground mt-3">7 days free — no card required to start</p>
+            <p className="text-xs text-muted-foreground mt-3">Day 1 workout sent immediately after payment</p>
           </div>
         </div>
       </section>
@@ -241,7 +241,7 @@ export default function LandingPage() {
               },
               {
                 q: "How do I cancel?",
-                a: "Reply CANCEL to Coach K at any time. No phone calls, no forms, no hassle. Your data stays saved for 90 days if you want to come back.",
+                a: "Reply CANCEL to Coach K at any time. No phone calls, no forms, no hassle. Your data and progress stay saved for 90 days — come back whenever you are ready.",
               },
             ].map((faq) => (
               <div key={faq.q} className="p-6 rounded-2xl bg-card border border-border/50">
@@ -256,17 +256,17 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-24 px-4 bg-primary text-white text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display mb-4">Start today. For free.</h2>
+          <h2 className="text-4xl font-bold font-display mb-4">R99. Start today.</h2>
           <p className="text-primary-foreground/80 text-lg mb-8">
-            7 days free. No credit card. Your programme ready in 2 minutes.
+            3 questions and your programme is built. Day 1 delivered the moment you pay.
           </p>
           <Button size="lg" variant="secondary" className="h-14 px-10 rounded-2xl text-base font-bold" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
               <Phone className="w-5 h-5 mr-2" />
-              Open WhatsApp — Start Free Trial
+              Start Coaching on WhatsApp
             </a>
           </Button>
-          <p className="text-primary-foreground/60 text-sm mt-4">R99/month after trial · Cancel anytime</p>
+          <p className="text-primary-foreground/60 text-sm mt-4">R99/month · Cancel anytime · No app needed</p>
         </div>
       </section>
 

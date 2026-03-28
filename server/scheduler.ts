@@ -1364,51 +1364,64 @@ cron.schedule("0 7 * * 0", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
-// JOB — TRIAL CONVERSION FLOW
+// JOB — NEW SIGNUP NUDGE + LAPSED SUBSCRIBER WIN-BACK
 // Runs daily 9am UTC (11am SAST)
-// Day 5: warm warning — trial ends in 2 days
-// Day 7: hard gate — payment link, move to inactive
-// Day 10: final win-back attempt
+// New signups (inactive, 0 workouts): Day 1 and Day 3 nudges
+// Lapsed paying clients (cancelled): Day 3, Day 7, Day 30 win-back
 // ============================================================
 
 cron.schedule("0 9 * * *", async () => {
-  console.log("[SCHEDULER] JOB: Trial conversion");
-  const trialClients = await db.select().from(users)
-    .where(eq(users.subscriptionStatus, "trial"));
+  console.log("[SCHEDULER] JOB: Signup nudge + lapsed win-back");
+  const inactiveClients = await db.select().from(users)
+    .where(eq(users.subscriptionStatus, "inactive"));
 
   const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
   const merchantId = process.env.PAYFAST_MERCHANT_ID;
 
-  for (const client of trialClients) {
+  for (const client of inactiveClients) {
     try {
-      const created = client.createdAt ? new Date(client.createdAt) : null;
-      if (!created) continue;
-
-      const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
       const name = client.name || "there";
       const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
 
-      if (daysSince === 5) {
-        // Day 5 — warm warning
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, your 7-day free trial with Coach K ends in 2 days.\n\nYou have done ${client.totalWorkoutsCompleted || 0} workout${(client.totalWorkoutsCompleted || 0) !== 1 ? "s" : ""} and your programme is set up. Do not lose that progress.\n\nKeep coaching for R99/month — that is R3.30 per day: ${payLink}\n\nAny questions, just ask.`
-        );
-      } else if (daysSince === 7) {
-        // Day 7 — hard gate + deactivate
-        await db.update(users).set({ subscriptionStatus: "inactive" })
-          .where(eq(users.id, client.id));
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, your free trial has ended.\n\nYour profile, workouts (${client.totalWorkoutsCompleted || 0} sessions), and progress are all saved.\n\nReactivate for R99/month and pick up exactly where you left off: ${payLink}\n\nReply *pay* at any time to get your link again.`
-        );
-      } else if (daysSince === 10) {
-        // Day 10 — win-back for users who haven't converted
-        await sendWhatsApp(client.phoneNumber,
-          `${name} — Coach K here. 3 days since your trial ended.\n\nMost people who quit at this point never start again. The ones who do R99/month for 3 months — they are the ones who actually change.\n\nYour programme is still here: ${payLink}\n\nR99. Less than a single fast food meal.`
-        );
+      const isNewSignup = !client.totalWorkoutsCompleted && !client.lastWorkoutDate;
+      const created = client.createdAt ? new Date(client.createdAt) : null;
+      const cancelled = client.cancelledAt ? new Date(client.cancelledAt) : null;
+
+      if (isNewSignup && created) {
+        // New signup who hasn't paid yet — nudge on day 1 and day 3
+        const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
+        if (daysSince === 1) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name} — your programme is still waiting.\n\nGoal set. Training mode set. Calorie targets calculated. All that is left is the first session.\n\n*Activate for R99/month:*\n${payLink}\n\nDay 1 drops the moment you pay. Less than a KFC streetwise.`
+          );
+        } else if (daysSince === 3) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name} — Coach K here. You set up your profile 3 days ago.\n\nMost people who don't start within 48 hours never start at all. You're still in the window.\n\nR99/month. Day 1 sent immediately on payment:\n${payLink}`
+          );
+        }
+
+      } else if (!isNewSignup && cancelled) {
+        // Lapsed paying subscriber — they paid before, now inactive
+        const daysSinceCancelled = Math.floor((Date.now() - cancelled.getTime()) / 86_400_000);
+        const workouts = client.totalWorkoutsCompleted || 0;
+
+        if (daysSinceCancelled === 3) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R99/month:*\n${payLink}`
+          );
+        } else if (daysSinceCancelled === 7) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR99/month. Your data is here:\n${payLink}`
+          );
+        } else if (daysSinceCancelled === 30) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR99/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`
+          );
+        }
       }
     } catch (err) {
-      console.error(`[SCHEDULER] Trial conversion error — ${client.phoneNumber}:`, err);
+      console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err);
     }
   }
 }, { timezone: "UTC" });
