@@ -1920,13 +1920,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       }
       await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
       // If training mode or days changed, rebuild and show the programme immediately
-      let profileReply = `Profile updated. ${updateSummary.trim()}`;
+      const clientName = user.name || "";
+      let profileReply = "";
       if (updates.trainingMode || updates.trainingDaysPerWeek) {
         const updatedUser = { ...user, ...updates };
         const newProgramme = buildFullProgramme(updatedUser);
-        profileReply += `\n\nHere is your updated programme:\n\n${newProgramme}`;
+        const modeLabel = (updates.trainingMode || user.trainingMode || "home") === "gym" ? "Gym" : "Home";
+        const daysLabel = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
+        profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. ${daysLabel} days/week. ${modeLabel}. New programme built.\n\n${newProgramme}`;
+      } else if (updates.goalType) {
+        const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "recomposition" };
+        profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. Goal updated to ${goalLabel[updates.goalType] || updates.goalType}. New targets: ${updates.calorieTarget} kcal/day, ${updates.proteinTarget}g protein. Programme stays the same — reply *programme* to see it.`;
       } else {
-        profileReply += `\n\nReply *menu* to see your updated programme.`;
+        profileReply = `Sharp. Profile updated. Reply *menu* to see your options.`;
       }
       await logChat(user.id, message, profileReply, "PROFILE_UPDATE");
       return profileReply;
