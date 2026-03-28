@@ -281,7 +281,7 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   return { model: "gpt-4o-mini", maxTokens: 250, reason: "simple response" };
 }
 
-export async function askCoachK(userMessage: string, user: any, extraInstruction?: string): Promise<string> {
+export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string): Promise<string> {
   const context = buildContext(user);
   const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
@@ -289,6 +289,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
+  const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
   try {
@@ -298,7 +299,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${winMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",

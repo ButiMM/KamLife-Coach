@@ -808,6 +808,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
 
+    // Store win memory at streak and total milestones
+    try {
+      if ([5, 10, 20, 30, 50].includes(newStreak)) {
+        await storeMemory(phone, `Workout streak milestone: ${newStreak} sessions in a row without missing`, "milestone");
+      }
+      if ([10, 25, 50, 100].includes(newTotal)) {
+        await storeMemory(phone, `Workout total milestone: completed ${newTotal} training sessions total with Coach K`, "milestone");
+      }
+    } catch { /* non-fatal */ }
+
     const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
     const celebration = celebrationFn(newTotal, newDay);
     const perfectDay = await checkPerfectDay(user.id);
@@ -1002,6 +1012,21 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const prevProtein = user.proteinTarget || newProtein;
       await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
       await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+      // Store win memory at total loss milestones
+      try {
+        const firstLog = await db.select({ weight: weightLogs.weight }).from(weightLogs)
+          .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
+        if (firstLog.length > 0) {
+          const startKg = parseFloat(String(firstLog[0].weight));
+          const totalLoss = startKg - newKg;
+          for (const milestone of [2, 5, 10, 15, 20]) {
+            if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
+              await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
+              break;
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
       // Build weight change note
       let changeNote = "";
       if (prevKg > 0 && Math.abs(newKg - prevKg) > 0.1) {
@@ -1324,8 +1349,32 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
       const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Champ"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
       const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${verdictSentence}`;
-      await logChat(user.id, message, progressReply, "PROGRESS_CHECK");
-      return progressReply;
+
+      // Build shareable weekly wins card for good weeks
+      let winsCard = "";
+      if (onTrack) {
+        const clientDisplayName = user.name || "KamLife";
+        const totalWorkoutsAll = user.totalWorkoutsCompleted || completedSessions;
+        const weekNum = user.programmeWeek || 1;
+        const weightLine = weightChange !== null && parseFloat(weightChange) < 0
+          ? `⬇️ Weight: -${Math.abs(parseFloat(weightChange))}kg this week`
+          : weightChange !== null && parseFloat(weightChange) === 0
+            ? `⚖️ Weight: holding steady`
+            : "";
+        const stepsLine = avgSteps >= stepsTarget
+          ? `👟 Steps: ${avgSteps.toLocaleString()} avg/day ✅`
+          : avgSteps > 0 ? `👟 Steps: ${avgSteps.toLocaleString()} avg/day` : "";
+        const workoutLine = `💪 Sessions: ${completedSessions}/${plannedSessions} ✅`;
+        const streakLine = user.workoutStreak >= 5 ? `🔥 Streak: ${user.workoutStreak} sessions straight` : "";
+        const totalLine = `📊 Total sessions with Coach K: ${totalWorkoutsAll}`;
+        const winsLines = [workoutLine, stepsLine, weightLine, streakLine, totalLine].filter(Boolean).join("\n");
+        const refLine = user.referralCode ? `\n\nYour referral code: *${user.referralCode}* — they get month 1 for R50, you get R50 credit.` : "";
+        winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R99/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
+      }
+
+      const fullReply = `${progressReply}${winsCard}`;
+      await logChat(user.id, message, fullReply, "PROGRESS_CHECK");
+      return fullReply;
     } catch (e) {
       console.error("[PROGRESS CHECK]", e);
     }
@@ -1599,6 +1648,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         await db.insert(clothingCheckins).values({ userId: user.id, jeansFit, energyLevel, stomachFeel, overallFeel, weekNumber: weekNum });
         await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
         await storeMemory(phone, `Week ${weekNum} non-scale check-in: jeans ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel}, overall ${overallFeel}`, "milestone");
+        // Store specific win memory for positive NSV results so Coach K can reference them later
+        const isNSVPositive = ["looser", "fitting better", "baggy"].some(k => jeansFit.includes(k));
+        if (isNSVPositive) {
+          await storeMemory(phone, `NSV WIN at week ${weekNum}: jeans are ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel} — body is changing visibly`, "milestone");
+        }
       } catch { /* non-fatal */ }
 
       // Build a specific coaching response + follow-up question based on what they reported
@@ -2360,14 +2414,14 @@ CRITICAL RULES — these are non-negotiable:
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 7000}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
     } else {
-      gptReply = await askCoachK(message, user, finalInstruction);
+      gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
     }
     // If specialist agent returned its own error string, fall back to full Coach K
     if (gptReply === AGENT_ERROR) {
-      gptReply = await askCoachK(message, user, finalInstruction);
+      gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
     }
   } catch {
-    gptReply = await askCoachK(message, user, finalInstruction);
+    gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
   }
 
   const finalReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
