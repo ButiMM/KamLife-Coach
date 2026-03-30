@@ -232,6 +232,10 @@ const PROTEIN_WORDS: string[] = Array.from(new Set([
   "protein", "shake", "whey", "steak", "braai", "wors", "boerewors",
   "smileys", "mogodu", "tripe", "liver", "walkie talkies", "chicken feet",
   "oxtail", "ox tail", "sosaties", "chesa nyama", "bobotie",
+  // Core protein sources — must ALWAYS suppress protein warning
+  "chicken", "beef", "fish", "tuna", "mince", "pork", "lamb", "turkey",
+  "salmon", "hake", "sardine", "sardines", "prawn", "prawns", "biltong",
+  "droëwors", "droewors", "cottage cheese", "greek yoghurt", "greek yogurt",
 ]));
 
 async function checkFoodPatterns(userId: string): Promise<string | null> {
@@ -453,13 +457,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
-  if (/\b(calorie|calories|kcal)\b.*\b(target|goal|limit|today|daily|mine|my)\b/i.test(m) || m === "my calories" || m === "calories" || m === "calorie target") {
+  if (
+    /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
+    /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my)\b/i.test(m) ||
+    /\b(daily|my)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
+    m === "calories" || m === "calorie" || m === "kcal"
+  ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
+    const name = user.name ? `${user.name} — ` : "";
     const todayStr2 = new Date().toISOString().slice(0, 10);
     const todayCals = (user.todayCaloriesDate === todayStr2) ? (user.todayCalories || 0) : 0;
     const remaining = cal - todayCals;
-    return `Your daily target: *${cal} kcal | ${prot}g protein.*${todayCals > 0 ? `\n\nToday so far: ~${todayCals} kcal (${remaining > 0 ? `${remaining} remaining` : "target reached ✅"})` : "\n\nNothing logged today yet — send me what you had for breakfast."}`;
+    const todayLine = todayCals > 0 ? ` You are at ${todayCals} kcal today — ${remaining > 0 ? `${remaining} remaining.` : "target reached. ✅"}` : "";
+    return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.${todayLine}`;
   }
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
@@ -491,6 +502,23 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const streak = user.workoutStreak || 0;
     const compliance = user.complianceLevel || "RESET";
     return `*Your Targets*\n\n🔥 Calories: ${cal} kcal/day\n💪 Protein: ${prot}g/day\n👟 Steps: ${steps.toLocaleString()}/day\n\n*Progress*\nPhase ${phase} · Week ${week} · Streak: ${streak} sessions\nCompliance: ${compliance}`;
+  }
+
+  // ---- NEW / CHANGE PROGRAMME REQUEST — always ask, never auto-deliver ----
+  // Must be checked BEFORE awaitingProgrammeAnswers so a new request resets the flow
+  const isNewProgrammeRequest =
+    /\b(new|change|different|update|rebuild|swap|switch|give me a new|i need a new|want a new)\b.{0,30}\b(programme|program|workout|training plan|plan|gym|home)\b/i.test(m) ||
+    /\b(programme|program|workout|training)\b.{0,30}\b(new|change|different|update|rebuild)\b/i.test(m) ||
+    /\b(a new one|different one|another one|new gym|new home|new workout|new training)\b/i.test(m) ||
+    /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
+    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m);
+
+  if (isNewProgrammeRequest) {
+    await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
+    const nameQ = user.name ? ` ${user.name}` : "";
+    const askReply = `Sharp${nameQ}. How many days can you train per week and are you at gym or home?`;
+    await logChat(user.id, message, askReply, "PROGRAMME_QUESTIONS");
+    return askReply;
   }
 
   // ---- AWAITING PROGRAMME ANSWERS — parse "4 days gym" or "3 home" format ----
@@ -773,7 +801,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
         console.error("Vision error:", err);
-        return "I can see your food photo. To get full nutritional coaching on your meals add your OpenAI API key. For now tell me what you ate in text and I will coach you on it.";
+        return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
       }
     }
 
@@ -1483,12 +1511,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
       const calRemaining = calorieTarget - runningCals;
       const proteinRemaining = proteinTarget - runningProtein;
+      // Check if message itself mentions a protein source even if not in DB
+      const msgHasProtein = PROTEIN_WORDS.some(w => m.includes(w));
       let coachNote = "";
-      if (junkFoods.length > 0 && goodProteins.length === 0) {
+      if (goodProteins.length > 0 || msgHasProtein) {
+        // Client ate protein — celebrate, never suggest pilchards
+        if (totalProtein >= 20 || msgHasProtein) {
+          coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+        }
+      } else if (junkFoods.length > 0) {
         coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken. Coach the next meal, not the last one.`;
-      } else if (goodProteins.length > 0 && totalProtein >= 20) {
-        coachNote = `\n\nSolid protein choice. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
-      } else if (foundFoods.some(f => f.category === "carb") && goodProteins.length === 0) {
+      } else if (foundFoods.some(f => f.category === "carb")) {
         coachNote = `\n\nCarbs without protein — add a protein source to this meal. Eggs, pilchards, or beans work.`;
       }
       const junkNote = junkFoods.length > 0 ? `\n\n${junkFoods[0].notes}` : "";
@@ -1648,8 +1681,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const name = user.name || "Champ";
     return `*${name}'s Daily Calorie Target*\n\n🔥 Calories: *${user.calorieTarget || "not set"} kcal*\n💪 Protein: *${user.proteinTarget || "not set"}g*\n\nHit protein first — it fills you up, preserves muscle, and drives fat loss. Calories are a guide. Protein is non-negotiable.`;
   }
-  if (["steps", "my steps", "step target", "daily steps", "steps daily", "how many steps", "my steps target", "steps target"].includes(m)) {
-    return `*Your Daily Step Target*\n\n👟 ${(user.stepsTarget || 8000).toLocaleString()} steps per day.\n\nSteps are your baseline activity. Training burns calories for an hour. Steps burn them all day. Log your steps tonight with "X steps".`;
+  if (
+    ["steps", "my steps", "step target", "daily steps", "steps daily", "how many steps", "my steps target", "steps target"].includes(m) ||
+    /\b(steps?\s*target|my\s*steps?\s*target|daily\s*steps?|how\s*many\s*steps?|steps?\s*goal)\b/i.test(m)
+  ) {
+    const stepsT = user.stepsTarget || 8500;
+    const name = user.name ? `${user.name} — ` : "";
+    return `${name}${stepsT.toLocaleString()} steps is your target. Log your steps tonight with the number — "8500 steps" or "I walked 6km". Training burns fat for an hour. Steps burn it all day.`;
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     const p = user.proteinTarget || 140;
@@ -2129,39 +2167,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     // Not paused — fall through to GPT which handles "I'm back" motivationally
   }
 
-  // ---- NEW PROGRAMME / CHANGE DAYS REQUEST ----
-  const isNewProgramme =
-    /\b(new programme|new program|change programme|change program|change my programme|change my program|give me a new programme|new workout plan|change workout plan|rebuild.*programme|update.*programme)\b/i.test(m) ||
-    /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
-    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m) ||
-    /\b[2-6]\s*days?\s*(?:a\s*week|per\s*week)\s*(?:please|now|from now|training|programme|program)?\b/i.test(m);
-
-  if (isNewProgramme) {
-    // If client already included days AND mode in this message, act immediately
-    const daysInMsg = m.match(/\b([2-6])\s*days?\b/i) || m.match(/(?:train|gym|workout)\s+([2-6])\s*days?/i);
-    const gymInMsg = /\bgym\b/i.test(m);
-    const homeInMsg = /\bhome\b/i.test(m);
-
-    if (daysInMsg && (gymInMsg || homeInMsg)) {
-      const days = parseInt(daysInMsg[1]);
-      const mode = gymInMsg ? "gym" : "home";
-      await db.update(users)
-        .set({ trainingDaysPerWeek: days, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
-        .where(eq(users.phoneNumber, phone));
-      const updatedUser = { ...user, trainingDaysPerWeek: days, trainingMode: mode };
-      const programme = buildFullProgramme(updatedUser);
-      const modeLabel = mode === "gym" ? "Gym" : "Home";
-      const newProgReply = `Sharp. ${days} days/week. ${modeLabel}. Here is your updated programme.\n\n${programme}`;
-      await logChat(user.id, message, newProgReply, "PROGRAMME_DELIVERY");
-      return newProgReply;
-    }
-
-    // Ask the single question — never dump the programme without it
-    await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));
-    const question = `Sharp. How many days can you train and are you at gym or home?`;
-    await logChat(user.id, message, question, "PROGRAMME_QUESTIONS");
-    return question;
-  }
+  // (isNewProgrammeRequest handled earlier — before awaitingProgrammeAnswers)
 
   // ---- AWAITING GOAL CHANGE REASON — ask why first before applying goal change ----
   if (user.awaitingInputType?.startsWith("goal_reason:")) {
@@ -2708,6 +2714,7 @@ STEPS LOGGED (number + "steps" / "walked" / "km"):
 
 FOOD / MEAL LOGGED (any food item or meal described):
   Coach specifically on THAT exact food. Use the SA food database. Estimate SA portion calories and protein. If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
+  CRITICAL — If the meal contains ANY of: chicken, beef, mince, fish, tuna, hake, salmon, eggs, pilchards, beans, lentils, pork, lamb, cottage cheese, Greek yoghurt, biltong — DO NOT suggest adding protein or swapping to pilchards. The client is ALREADY eating protein. Celebrate the choice. Budget suggestions (pilchards, eggs, sugar beans) ONLY fire when the client explicitly says they have no money or their stored budget tier is "under_100". Never suggest budget swaps after a quality meal unprompted.
 
 BROKE / BUDGET / MONTH-END / NO MONEY:
   Full affordable plan: Oats R15 (500g, lasts 1 week) — one cup oats + peanut butter = 400 kcal 20g protein. Eggs R25 (12 eggs) — 2 eggs = 160 kcal 12g protein. Pilchards R12 (1 tin) — full tin = 200 kcal 24g protein. Sugar beans R20 (dry 500g) — cooked cup = 220 kcal 15g protein. Peanut butter R25 (lasts 2 weeks). Brown bread R14. Total under R110. Explain how to use each one practically.
@@ -2847,6 +2854,28 @@ CRITICAL RULES — these are non-negotiable:
     const memories = await retrieveMemories(phone, message);
     if (memories.length > 0) memoryContext = memories.join("\n");
   } catch { }
+
+  // ---- FRUSTRATION HANDLER — client venting after a bad bot response ----
+  const isFrustrated =
+    /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|jesus|wtf|what the hell|this is useless|pathetic|terrible|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked)\b/i.test(m) ||
+    (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo)\s*[!?.]*$/i.test(m));
+
+  if (isFrustrated) {
+    try {
+      const lastBotMsg = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+        .from(chatHistory)
+        .where(eq(chatHistory.userId, user.id))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      const lastOut = lastBotMsg[0]?.messageOut || "";
+      const lastIntent = lastBotMsg[0]?.intent || "";
+      const name = user.name ? ` ${user.name}` : "";
+      const frustContext = `Client is frustrated. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: Acknowledge the specific frustration in one sentence — reference what went wrong, not generic apology. Do not say "I apologise" or "I'm sorry" generically. Say what was wrong specifically if you can tell. Then correct course immediately — give the right answer to what they actually needed. SA voice. Direct. No fluff.`;
+      const frustReply = await askCoachK(message, user, frustContext);
+      await logChat(user.id, message, frustReply, "FRUSTRATION");
+      return frustReply;
+    } catch { /* fall through to GPT */ }
+  }
 
   // Daily GPT call cap — prevents runaway costs from heavy users
   const underLimit = await isUnderGPTCallLimit(user.id);
