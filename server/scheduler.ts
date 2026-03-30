@@ -228,7 +228,7 @@ async function runMorningCheckin(): Promise<void> {
 
       // Steps — specific number vs target
       if (stepsLogged > 0) {
-        const stepsTarget = client.stepsTarget || 7000;
+        const stepsTarget = client.stepsTarget || 8500;
         if (stepsLogged >= stepsTarget) {
           parts.push(`Steps: ${stepsLogged.toLocaleString()} — target hit.`);
         } else {
@@ -616,7 +616,7 @@ cron.schedule("0 17 * * 0", async () => {
       } else if (weekFoodLogs.length < 3) {
         // Training but not tracking food
         question = `${name}, ${completedSessions} sessions done. Food tracking was thin this week. What makes it hard to log?`;
-      } else if (avgSteps > 0 && avgSteps < (client.stepsTarget || 7000) * 0.6) {
+      } else if (avgSteps > 0 && avgSteps < (client.stepsTarget || 8500) * 0.6) {
         // Steps consistently low
         question = `${name}, average steps this week: ${avgSteps.toLocaleString()}. Steps are your daily fat-burning base. What is the real barrier to walking more?`;
       } else {
@@ -1059,6 +1059,55 @@ cron.schedule("0 5 * * 1", async () => {
       );
     } catch (err) {
       console.error(`[SCHEDULER] Phase advancement error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 18a — GOAL CHECK / PROGRAMME REVIEW
+// Runs every Monday at 9am SAST (7am UTC)
+// Fires at programme weeks 4, 8, 12 if not yet done that week
+// ============================================================
+
+cron.schedule("0 7 * * 1", async () => {
+  console.log("[SCHEDULER] JOB: Goal check / programme review");
+  const clients = await getActiveClients();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const currentWeek = client.programmeWeek || 1;
+      const lastCheck = client.lastGoalCheckWeek || 0;
+      const checkWeeks = [4, 8, 12, 16, 20, 24];
+      const shouldCheck = checkWeeks.includes(currentWeek) && lastCheck < currentWeek;
+      if (!shouldCheck) continue;
+
+      const name = client.name || "there";
+      const total = client.totalWorkoutsCompleted || 0;
+      const goal = client.goalType || "fat_loss";
+      const goalLabel: Record<string, string> = {
+        fat_loss: "fat loss",
+        muscle_gain: "muscle gain",
+        recomposition: "body recomposition",
+        general: "general fitness",
+      };
+
+      let goalMsg = "";
+      if (currentWeek === 4) {
+        goalMsg = `${name}, you have completed Week 4 — ${total} sessions done. Time for a quick check-in.\n\nThree questions:\n1. Is your goal still *${goalLabel[goal] || goal}*?\n2. Has anything changed — injury, schedule, budget, life?\n3. How is your energy this week compared to Week 1?\n\nReply to any of these and I will adjust your programme if needed.`;
+      } else if (currentWeek === 8) {
+        goalMsg = `${name}, 8 weeks in. ${total} sessions. This is the point where real results start showing up — and where a lot of people shift their goal.\n\n*Is your current goal still right?* ${goalLabel[goal] || goal}.\n\nIf the goal has changed, or if something in your life has changed, tell me now. Your programme adjusts to your reality — not the other way around.`;
+      } else if (currentWeek === 12) {
+        goalMsg = `${name}, 12 weeks with Coach K. ${total} sessions. One quarter of a year of work.\n\nTime for a full review. Tell me:\n1. What is working?\n2. What is not?\n3. What has changed in your body or your life?\n\nYour programme evolves with you. Let me know what to adjust.`;
+      } else {
+        goalMsg = `${name}, Week ${currentWeek} checkpoint — ${total} sessions done. Is your goal still *${goalLabel[goal] || goal}*? Anything in your life or training that needs to change? Reply and we adjust.`;
+      }
+
+      await sendWhatsApp(client.phoneNumber, goalMsg);
+      // Mark this check as done so it does not repeat this week
+      await db.update(users).set({ lastGoalCheckWeek: currentWeek }).where(eq(users.phoneNumber, client.phoneNumber));
+    } catch (err) {
+      console.error(`[SCHEDULER] Goal check error — ${client.phoneNumber}:`, err);
     }
   }
 }, { timezone: "UTC" });

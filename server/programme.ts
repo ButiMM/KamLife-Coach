@@ -418,6 +418,132 @@ const GYM_GLUTES_DAY_C: Exercise[] = [
 ];
 
 // ============================================================
+// FEMALE COMPLETE PROGRAMME
+// Covers all 6 areas: shoulders, back, arms, glutes, hamstrings, calves
+// 3 days/week — glute/posterior emphasis with full upper body balance
+// ============================================================
+
+export const FEMALE_DAY_A = `*Day A — Glute Push + Shoulders + Arms*
+3–4 sets. Rest 60 seconds. Total time 55–65 minutes.
+
+1. *Hip Thrust (Machine or Barbell) — 4×12*
+https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form
+Primary glute builder. Drive hips up explosively — squeeze hard for 1 full second at the top. Lower slowly over 2 seconds.
+Common mistake: Pushing through your lower back. If your back hurts, you are not squeezing your bum at the top.
+
+2. *Sumo Squat (Barbell or Goblet) — 3×12*
+https://www.youtube.com/results?search_query=sumo+squat+glutes+inner+thigh+tutorial
+Wide stance, toes out 45 degrees. Lower between your legs. Squeeze glutes and inner thighs at the top.
+Common mistake: Knees caving inward. Push them out actively over your toes the whole way.
+
+3. *Machine Shoulder Press — 3×10*
+https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial+form
+Press overhead. Lower slowly over 2 seconds. Core braced — do not arch your lower back.
+Common mistake: Shrugging your shoulders up. Keep them down and back throughout.
+
+4. *Cable Lateral Raise — 3×15 each arm*
+https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial+form
+Single cable from low pulley. Raise to shoulder height. Slow and controlled lowering phase. Builds the shoulder width that creates proportion.
+Common mistake: Swinging or using momentum. If you cannot control it — reduce the weight.
+
+5. *Dumbbell or Cable Bicep Curl — 3×12*
+https://www.youtube.com/results?search_query=dumbbell+bicep+curl+tutorial+form
+Full range of motion. Squeeze at the top. 2-second lowering phase. Keep elbows pinned to your sides.
+Common mistake: Swinging the weight up using momentum. Control the movement from start to finish.
+
+6. *Tricep Pushdown (Cable or Machine) — 3×12*
+https://www.youtube.com/results?search_query=cable+tricep+pushdown+tutorial
+Elbows locked at your sides. Push down until arms fully extended. Squeeze triceps hard at the bottom. Slow return.
+Common mistake: Letting your elbows flare out or drift forward. Lock them to your ribs.
+
+7. *Standing Calf Raise — 3×15*
+https://www.youtube.com/results?search_query=standing+calf+raise+machine+tutorial
+Full range — heel fully down below the step, then all the way up onto toes. Slow and controlled. Pause at the top.
+Common mistake: Rushing through half-range reps. Full stretch, full contraction, every rep.
+
+Reply *done* when finished.`;
+
+export const FEMALE_DAY_B = `*Day B — Posterior Chain + Back*
+3–4 sets. Rest 75 seconds. Total time 55–65 minutes.
+
+1. *Romanian Deadlift — 3×10*
+https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial+glutes
+Hinge at hips, push bum back. Lower until you feel a strong hamstring stretch. Drive hips through to stand. Builds the glute-hamstring tie-in.
+Common mistake: Rounding the lower back. Only go as deep as a flat back allows.
+
+2. *Leg Curl Machine — 3×12*
+https://www.youtube.com/results?search_query=leg+curl+machine+hamstrings+tutorial
+Curl heels toward your glutes. Squeeze hard at the top. 3-second lowering phase. Strong hamstrings directly support glute development.
+Common mistake: Rushing the lowering phase — the eccentric is where the muscle builds.
+
+3. *Lat Pulldown — 4×10*
+https://www.youtube.com/results?search_query=lat+pulldown+tutorial+intermediate
+Full stretch at the top, full contraction at the bottom. Drive elbows down and back — not just arms pulling.
+Common mistake: Pulling with your arms instead of your lats. Think elbows to back pockets.
+
+4. *Seated Cable Row — 4×10*
+https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form
+Sit upright. Pull handle to belly button. Squeeze shoulder blades together hard. Hold 1 second. Return slowly.
+Common mistake: Rounding the back or leaning too far back to generate momentum.
+
+5. *Cable Kickback — 3×15 each leg*
+https://www.youtube.com/results?search_query=cable+kickback+glutes+tutorial
+Ankle strap on low cable. Hinge slightly forward. Drive leg back and up. Squeeze glute hard at the peak.
+Common mistake: Using momentum — slow down and feel every single rep.
+
+6. *Face Pull — 3×15*
+https://www.youtube.com/results?search_query=face+pull+cable+tutorial+rear+delt
+Rope attachment at face height. Pull toward your face — hands finish beside your ears. Builds rear delts and upper back. Protects shoulders.
+Common mistake: Pulling straight back instead of pulling apart. Think "pull the rope in two pieces."
+
+7. *Seated Calf Raise — 3×15*
+https://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial
+Full range — heels lowered fully, press to toes. Pause at the top. Targets the soleus (deeper calf muscle) for complete calf development.
+Common mistake: Short range of motion. Full stretch and full contraction every rep.
+
+Reply *done* when finished.`;
+
+export const FEMALE_DAY_C = `*Day C — Full Body + Glute Emphasis*
+3–4 sets. Rest 75 seconds. Total time 55–65 minutes.
+
+1. *Hip Thrust (heavier than Day A) — 4×10*
+https://www.youtube.com/results?search_query=barbell+hip+thrust+progressive+overload
+Add weight from Day A. Drive up explosively. This is your main strength movement of the week — go heavier.
+Common mistake: Not tracking your weight. You should be adding reps or weight every session.
+
+2. *Leg Press (wide stance, high foot placement) — 3×12*
+https://www.youtube.com/results?search_query=leg+press+wide+stance+glutes+tutorial
+Feet wide and high on the platform to shift focus to glutes. Full range — knees to chest. Press through heels.
+Common mistake: Knees caving inward. Push them out over your toes throughout.
+
+3. *Incline Dumbbell Press — 3×10*
+https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial+form
+Bench at 30–45 degrees. Creates upper chest and shoulder definition. Full range — lower until dumbbells are beside your chest.
+Common mistake: Half-range of motion. Lower the dumbbells all the way and feel the stretch.
+
+4. *Hip Abduction Machine — 3×15*
+https://www.youtube.com/results?search_query=hip+abduction+machine+glute+medius+tutorial
+Sit tall. Push knees apart. Squeeze at the end position. Builds the outer glute and the shape on the side of the hip.
+Common mistake: Leaning forward or using momentum. Sit upright and slow the reps down.
+
+5. *Cable Lateral Raise — 3×12 each arm*
+https://www.youtube.com/results?search_query=cable+lateral+raise+shoulders+tutorial
+Second shoulder session of the week — this is what builds the hourglass proportion.
+Common mistake: Too heavy — reduces to momentum and ruins the isolation. Go lighter and control it.
+
+6. *Dumbbell Hammer Curl — 3×12*
+https://www.youtube.com/results?search_query=hammer+curl+dumbbell+tutorial
+Palms facing each other. Curl up. Targets the brachialis which makes the arm look fuller from the side.
+Common mistake: Swinging the body to generate momentum. Pin your elbows to your sides.
+
+7. *Standing Calf Raise — 3×15*
+https://www.youtube.com/results?search_query=standing+calf+raise+tutorial+heavier
+Third calf session of the week. Add a 2.5kg plate to each foot if on machine. Progressive overload applies here too.
+Common mistake: Partial reps. Full heel drop, full toe press. Every single rep.
+
+Reply *done* when finished.`;
+
+// ============================================================
 // LEGACY GYM STRINGS (kept for backward compat with getKamlifeProgramme)
 // ============================================================
 
@@ -902,18 +1028,12 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (isGlutesFocus) {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-      const exercises = getGymDay(daySlot, false, true);
-      const label = daySlotLabel(daySlot, true, false);
-      const phase = user.programmePhase || 1;
-      const multiplier = getPhaseMultiplier(phase);
-      const phaseName = getPhaseNames()[phase] || "Foundation";
-      return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+      const femaleSlot = (((day - 1) % 3) + 1);
+      if (femaleSlot === 1) return FEMALE_DAY_A;
+      if (femaleSlot === 2) return FEMALE_DAY_B;
+      return FEMALE_DAY_C;
     }
-    const dayA = formatGymDay(GYM_GLUTES_DAY_A, "Glute Push Day A", 1, "Foundation", 1, getPhaseMultiplier(1));
-    const dayB = formatGymDay(GYM_GLUTES_DAY_B, "Upper + Light Lower B", 1, "Foundation", 1, getPhaseMultiplier(1));
-    const dayC = formatGymDay(GYM_GLUTES_DAY_C, "Posterior Chain Day C", 1, "Foundation", 1, getPhaseMultiplier(1));
-    return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
+    return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
   }
 
   // Standard gym full equipment
@@ -984,6 +1104,23 @@ export function buildDayWorkout(user: any): string {
     return workout;
   }
 
+  // Female complete programme (shoulders/back/arms/glutes/hamstrings/calves)
+  if (isFemaleGluteFocus) {
+    const femaleSlot = (((day - 1) % 3) + 1);
+    if (femaleSlot === 1) return FEMALE_DAY_A;
+    if (femaleSlot === 2) return FEMALE_DAY_B;
+    return FEMALE_DAY_C;
+  }
+
+  // 4-day upper/lower split — for intermediate/advanced gym users training 4+ days
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const exp = user.trainingExperience || "beginner";
+  if (trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
+    // Alternate upper/lower: odd days = upper, even days = lower
+    const isUpperDay = day % 2 !== 0;
+    return isUpperDay ? INTERMEDIATE_GYM_UPPER : INTERMEDIATE_GYM_LOWER;
+  }
+
   // Gym users — ALWAYS use programmeDayInWeek mod 3 to pick day slot
   // Never use calendar day of week for gym sessions
   const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
@@ -1028,6 +1165,19 @@ export function buildFullProgramme(user: any): string {
     // Home: deliver Day 1 only at onboarding
     const day1 = buildDayWorkout({ ...user, programmeDayInWeek: 1 });
     return `*Phase ${phase}: ${phaseName} — Week ${week} | Full Body Home Programme*\nTrain on non-consecutive days. Each session hits squat, push, hinge, pull, and core.\n\n${day1}`;
+  }
+
+  // Female programme: send Day A first
+  const isFemaleGluteFocusFull = user.primaryFocusArea === "glutes_legs";
+  if (isFemaleGluteFocusFull) {
+    return `*Your 3-Day Programme — Shoulders, Back, Arms, Glutes, Hamstrings, Calves*\nTrain Monday, Wednesday, Friday or Tuesday, Thursday, Saturday. Never two days in a row.\n\n${FEMALE_DAY_A}`;
+  }
+
+  // 4-day upper/lower: send Upper (Day 1) first — Lower follows after DONE
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const exp = user.trainingExperience || "beginner";
+  if (trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
+    return `*4-Day Upper/Lower Split — Week ${week}*\nMonday + Thursday: Upper Body. Tuesday + Friday: Lower Body. Rest Wednesday, Saturday, Sunday.\n\n${INTERMEDIATE_GYM_UPPER}`;
   }
 
   // Gym: deliver Day 1 only — Days 2 and 3 follow after DONE is logged

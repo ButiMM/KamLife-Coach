@@ -24,7 +24,7 @@ export function buildContext(user: any): string {
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
   const phaseName = phaseNames[phase] || "Foundation";
-  const steps = user.stepsTarget || 7000;
+  const steps = user.stepsTarget || 8500;
   // Fix 2 — always use live-calculated targets so GPT sees correct numbers even if DB is stale
   const weight = parseFloat(user.currentWeight || "75");
   const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3);

@@ -470,7 +470,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       workSchedule: "standard",
       calorieTarget,
       proteinTarget,
-      stepsTarget: 7000,
+      stepsTarget: 8500,
       programmePhase: 1,
       programmeWeek: 1,
       programmeDayInWeek: 1,
@@ -636,7 +636,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3
     );
 
-    const stepsTarget = exp === "beginner" ? 7000 : 8000;
+    const stepsTarget = exp === "beginner" ? 8500 : 10000;
     const startPhase = exp === "beginner" ? 1 : 2;
 
     await db.update(users).set({
@@ -648,7 +648,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      subscriptionStatus: "trial",
+      subscriptionStatus: "inactive",
       onboardingState: "COMPLETE",
       popiConsent: true,
       popiConsentAt: new Date(),
@@ -669,7 +669,11 @@ export async function handleOnboarding(user: any, message: string, phone: string
       ? `\n\n⚠️ *Heart condition noted:* Please get doctor clearance before starting the strength programme. Walking and light activity are safe to begin now.`
       : "";
 
-    return `*${f.name}, your profile is set.* Here is what Coach K has built for you.\n\n🎯 *Goal:* ${goalLabel[goal] || goal}\n⚖️ *Weight:* ${weight}kg\n🍽️ *Calories:* ${calorieTarget} kcal/day\n💪 *Protein:* ${proteinTarget}g/day\n👟 *Steps:* ${stepsTarget.toLocaleString()}/day\n\n${programme}\n\n${mealPlan}${nightNote}${heartNote}\n\n*Your action today:* Do your first session. Reply DONE when you finish and I log it.`;
+    const appUrlLeg = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
+    const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
   }
 
   return await getMenuText(user);
