@@ -2507,6 +2507,49 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return underEatReply;
   }
 
+  // ---- CHEAT / SLIP / FELL OFF HANDLER ----
+  const isCheatMsg =
+    /\b(cheat(?:ed|ing|s|meal|day)?|i slipped|slipped up|fell off|fell off track|off track|bad weekend|bad week|ate badly|ate everything|went off plan|broke my diet|broke the diet|ruined.*diet|ruined.*week|i binged|had a binge|ate too much|overdid it|over ate|overate|ate junk|bad food day|terrible eating|ate like crazy|couldn't control|lost control.*eating|eating got out of hand|whole weekend|entire weekend.*ate|pigged out)\b/i.test(m);
+
+  if (isCheatMsg) {
+    const name = user.name ? `, ${user.name}` : "";
+    const total = user.totalWorkoutsCompleted || 0;
+    const week = user.programmeWeek || 1;
+    const sessionLine = total > 0 ? `You have ${total} training session${total > 1 ? "s" : ""} logged. That does not disappear overnight.` : `You are in Week ${week} of your programme. One rough day does not erase that.`;
+    const cheatReply = `One bad meal or weekend does not undo weeks of work${name}. That is not how the body works.\n\n*The math:* To gain 1kg of real fat you need to eat 7,700 kcal MORE than you burn. A bad weekend is usually 1,000–2,000 kcal over — mostly water weight, glycogen, and bloat. It looks worse than it is. It comes off in 2–3 days of normal eating.\n\n${sessionLine}\n\n*The move:*\n• Do not "make up" for it with less food tomorrow — that starts a restrict-binge cycle\n• Do not skip your next training session out of guilt — guilt makes it worse\n• Eat your normal meals today, hit your protein, drink water\n• One bad day means nothing. Missing the next 3 days means something\n\nReset starts with the next meal — not Monday.`;
+    await logChat(user.id, message, cheatReply, "CHEAT_RECOVERY");
+    return cheatReply;
+  }
+
+  // ---- SCALE NOT MOVING / PLATEAU / NOT LOSING WEIGHT ----
+  const isScaleStuck =
+    /\b(scale.*not.*moving|scale.*same|scale.*hasn.?t moved|scale.*stuck|not losing.*weight|weight.*not.*changing|weight.*not.*moving|weight.*the same|weight.*stuck|not dropping|no.*weight loss|haven.?t lost|didn.?t lose|losing nothing|same weight|still the same|haven.?t changed|weight.*hasn.?t|not seeing.*change|scale.*lie|scale.*wrong|the scale|why.*not losing|why am i not losing|why aren.?t i losing|why isn.?t.*working|why is nothing|nothing.*happening)\b/i.test(m);
+
+  if (isScaleStuck) {
+    const name = user.name ? `, ${user.name}` : "";
+    const week = user.programmeWeek || 1;
+    const total = user.totalWorkoutsCompleted || 0;
+    const goal = user.goalType || "fat_loss";
+    const prot = user.proteinTarget || 120;
+
+    let scaleReply = `The scale is one data point${name} — and it is often the least honest one in the first 4–8 weeks.\n\n*What the scale does NOT show:*\n• Muscle gain — 1kg of muscle takes up less space than 1kg of fat. You can lose fat and gain muscle and the scale barely moves — but your body is completely different\n• Water retention — sodium, stress, poor sleep, and your cycle (for women) all cause 1–3kg swings that are not fat\n• Glycogen — when you start training, muscles store more glycogen (with water attached). Scale goes up. Body fat goes down. Both things are true.\n\n*The real questions:*\n• Do your clothes fit differently?\n• Is your energy better?\n• Are you stronger in the gym?\n• Are you sleeping better?\n\nIf yes to any of those — your body is changing. The scale will catch up.\n\n`;
+
+    if (week <= 3) {
+      scaleReply += `You are in Week ${week}. The first 3 weeks are adaptation — your body is building the foundation. Real visible changes show up at Week 4–6 for most people. Stay consistent.`;
+    } else if (total > 0 && week >= 4) {
+      scaleReply += `*If the scale has genuinely not moved in 3+ weeks:*\n1. Log your food honestly for 3 days — portion sizes creep up without noticing\n2. Add a 20-minute walk on top of your current steps target\n3. Check sodium — SA processed food (polony, chips, takeaways) retains water\n4. Is sleep under 7 hours? Cortisol from poor sleep actively holds fat, especially belly fat\n\nPick one of these and fix it this week. Then update me.`;
+    } else {
+      scaleReply += `Stay consistent with your ${prot}g protein target and your sessions. Body recomposition is happening even when the scale lies. Trust the 8-week process — not the 1-week number.`;
+    }
+
+    if (goal === "muscle_gain") {
+      scaleReply = `${name ? name.slice(2) + ", the" : "The"} scale going up is the goal on a muscle-building programme. If it is not moving, you are likely not eating enough. Your body cannot build muscle in a deficit — it needs fuel.\n\nAre you hitting your calorie and protein targets consistently? That is where muscle gain starts.`;
+    }
+
+    await logChat(user.id, message, scaleReply, "SCALE_STUCK");
+    return scaleReply;
+  }
+
   // ============================================================
   // MYTH BUSTERS — hardcoded, zero GPT cost
   // Coach K's real positions on common SA fitness myths
