@@ -1445,6 +1445,36 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- COMMAND INTERCEPT — "log the meal", "log this", "save this", "log it" ----
+  // These are commands, not food entries — redirect to food diary summary
+  const isLogCommand =
+    /^(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i.test(m.trim());
+
+  if (isLogCommand) {
+    const todayStart2 = new Date(); todayStart2.setHours(0, 0, 0, 0);
+    const todayLogs = await db.select({ messageIn: chatHistory.messageIn })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart2)));
+    if (todayLogs.length === 0) {
+      return `Nothing logged yet today. Tell me what you ate — "I had pap and eggs" or "chicken and sweet potato" — and I will log the calories and protein.`;
+    }
+    const name = user.name ? ` ${user.name}` : "";
+    let totalCal = 0; let totalProt = 0;
+    for (const log of todayLogs) {
+      const matched = scanForSAFoods(log.messageIn || "");
+      totalCal += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+      totalProt += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+    }
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 120;
+    const remaining = calTarget - totalCal;
+    const protRemaining = protTarget - totalProt;
+    const summary = totalCal > 0
+      ? `Today so far:${name} *${totalCal} kcal | ${totalProt}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`
+      : `${todayLogs.length} meal${todayLogs.length > 1 ? "s" : ""} logged today. Keep sending what you eat and I track the running total.`;
+    return summary;
+  }
+
   // Shared message-type flags used by food handlers below
   const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
   const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
@@ -3097,7 +3127,8 @@ CRITICAL RULES — these are non-negotiable:
 
   // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
   const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
-  const isFoodLog = FOOD_KEYWORDS.some(k => m.includes(k));
+  // Guard: "log the meal", "log this", "save this" are commands not food — already handled above
+  const isFoodLog = !isLogCommand && FOOD_KEYWORDS.some(k => m.includes(k));
   if (isFoodLog) {
     const pattern = await checkFoodPatterns(user.id);
     const perfectDay = await checkPerfectDay(user.id);
@@ -3114,8 +3145,8 @@ CRITICAL RULES — these are non-negotiable:
       for (const msg of allMsgs) {
         const matched = scanForSAFoods(msg);
         if (matched.length > 0) {
-          totalCal += matched.reduce((s: number, f: any) => s + (f.calories || 0), 0);
-          totalProt += matched.reduce((s: number, f: any) => s + (f.protein || 0), 0);
+          totalCal += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
+          totalProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
         }
       }
       const calTarget = user.calorieTarget || 1800;
