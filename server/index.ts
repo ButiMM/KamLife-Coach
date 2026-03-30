@@ -48,6 +48,10 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories NUMERIC DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories_date TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_protein_g NUMERIC DEFAULT 0`,
+    // Bump all existing users from old 7000 default to new 8500 — only updates those still at 7000
+    `UPDATE users SET steps_target = 8500 WHERE steps_target = 7000 OR steps_target IS NULL`,
+    // Clear any stuck awaitingProgrammeAnswers flags older than 24 hours
+    `UPDATE users SET awaiting_programme_answers = false WHERE awaiting_programme_answers = true AND last_active_at < NOW() - INTERVAL '24 hours'`,
     `CREATE TABLE IF NOT EXISTS exercise_logs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), exercise_name TEXT NOT NULL, weight_kg NUMERIC, reps INTEGER, sets INTEGER, logged_at TIMESTAMP DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS exercise_logs_user_idx ON exercise_logs(user_id)`,
   ];

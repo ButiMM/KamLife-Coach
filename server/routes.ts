@@ -523,6 +523,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- AWAITING PROGRAMME ANSWERS — parse "4 days gym" or "3 home" format ----
   if (user.awaitingProgrammeAnswers) {
+    // Bail out if this looks like a non-programme message — clear the flag and let normal handlers fire
+    const isObviouslyNotProgrammeAnswer =
+      /\b(hungry|starving|cancel|unsubscribe|steps|calories|weight|sleep|slept|walked|water|drank|done|menu|help|hello|hi|hey|programme|program|workout)\b/i.test(m) ||
+      /\b(i ate|i had|breakfast|lunch|dinner|supper|oats|eggs|chicken|pap|rice)\b/i.test(m) ||
+      m.length < 3;
+    if (isObviouslyNotProgrammeAnswer) {
+      await db.update(users).set({ awaitingProgrammeAnswers: false }).where(eq(users.phoneNumber, phone));
+      // Fall through to normal handlers
+    } else {
     const lower = message.toLowerCase();
 
     // Parse days (required)
@@ -557,6 +566,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
     return reply;
+    } // end else (not an obvious non-programme message)
   }
 
   // ---- GREETINGS / MENU (direct — no GPT) ----
@@ -1677,17 +1687,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- QUICK STAT LOOKUPS — never touch GPT ----
-  if (["calories", "calorie", "what are my calories", "what are my calories for the day", "how many calories", "my calories", "calorie target", "my calorie target"].includes(m)) {
-    const name = user.name || "Champ";
-    return `*${name}'s Daily Calorie Target*\n\n🔥 Calories: *${user.calorieTarget || "not set"} kcal*\n💪 Protein: *${user.proteinTarget || "not set"}g*\n\nHit protein first — it fills you up, preserves muscle, and drives fat loss. Calories are a guide. Protein is non-negotiable.`;
+  // (calorie and steps handlers already fire at top of function — these are safety fallbacks for exact matches)
+  if (["calories", "calorie", "my calories", "calorie target", "my calorie target"].includes(m)) {
+    const cal = user.calorieTarget || 1800;
+    const prot = user.proteinTarget || 120;
+    const name2 = user.name ? `${user.name} — ` : "";
+    return `${name2}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.`;
   }
-  if (
-    ["steps", "my steps", "step target", "daily steps", "steps daily", "how many steps", "my steps target", "steps target"].includes(m) ||
-    /\b(steps?\s*target|my\s*steps?\s*target|daily\s*steps?|how\s*many\s*steps?|steps?\s*goal)\b/i.test(m)
-  ) {
+  if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m)) {
     const stepsT = user.stepsTarget || 8500;
-    const name = user.name ? `${user.name} — ` : "";
-    return `${name}${stepsT.toLocaleString()} steps is your target. Log your steps tonight with the number — "8500 steps" or "I walked 6km". Training burns fat for an hour. Steps burn it all day.`;
+    const name2 = user.name ? `${user.name} — ` : "";
+    return `${name2}${stepsT.toLocaleString()} steps is your target. Log your steps tonight — "8500 steps" or "I walked 6km".`;
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     const p = user.proteinTarget || 140;
@@ -1837,7 +1847,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
   }
   if (m === "3" || m === "log steps" || m === "step log") {
-    return `Send me your step count and I will log it.\n\nExamples:\n• "8500 steps"\n• "I walked 5km"\n• "10,000 steps done"\n\nYour daily target: ${user.stepsTarget?.toLocaleString() || "7,000"} steps.`;
+    return `Send me your step count and I will log it.\n\nExamples:\n• "8500 steps"\n• "I walked 5km"\n• "10,000 steps done"\n\nYour daily target: ${(user.stepsTarget || 8500).toLocaleString()} steps.`;
   }
   if (m === "4" || m === "log sleep" || m === "sleep log") {
     return `Send me how many hours you slept.\n\nExamples:\n• "I slept 6 hours"\n• "7 hours sleep"\n• "bad sleep, maybe 5 hours"\n\nTarget: 7–9 hours for full recovery and fat loss.`;
@@ -2554,6 +2564,147 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
     await logChat(user.id, message, scaleReply, "SCALE_STUCK");
     return scaleReply;
+  }
+
+  // ---- STRESS / ANXIETY / OVERWHELM HANDLER ----
+  const isStressMsg =
+    /\b(i.?m stressed|so stressed|very stressed|feeling stressed|work stress|life stress|stressed out|anxious|anxiety|overwhelmed|too much going on|can.?t cope|everything is too much|mental health|burnout|burned out|burnt out|exhausted mentally|emotionally drained)\b/i.test(m);
+
+  if (isStressMsg) {
+    const name = user.name ? ` ${user.name}` : "";
+    const goal = user.goalType || "fat_loss";
+    const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, pilchards right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;
+    await logChat(user.id, message, stressReply, "STRESS");
+    return stressReply;
+  }
+
+  // ---- TIRED / LOW ENERGY HANDLER ----
+  const isTiredMsg =
+    /\b(i.?m tired|so tired|very tired|exhausted|no energy|low energy|drained|fatigued|fatigue|lethargic|sluggish|can.?t wake up|always tired|tired all the time|tired today|feeling flat|body feels heavy|legs feel heavy)\b/i.test(m) &&
+    !/\b(tired of|tired with|sick and tired)\b/i.test(m);
+
+  if (isTiredMsg) {
+    const name = user.name ? ` ${user.name}` : "";
+    const tiredReply = `Three questions${name} before I give you advice:\n\n1. *Sleep* — How many hours last night? Under 7 means your body is not recovering properly. This is the most common cause of low energy by far.\n\n2. *Food* — What did you eat today? Low energy by afternoon is almost always low carbs or skipped meals. Your muscles need fuel.\n\n3. *Water* — Have you drunk 1.5-2L today? Even mild dehydration drops energy by 20%.\n\nWhich of these is off? Tell me and I will give you a specific fix — not "rest more" or "drink water" in general, the actual solution.`;
+    await logChat(user.id, message, tiredReply, "TIRED");
+    return tiredReply;
+  }
+
+  // ---- REST DAY HANDLER ----
+  const isRestDayMsg =
+    /\b(rest day|no gym today|off today|taking a rest|rest today|not training today|skipping gym|not going to gym|day off|recovery day|active recovery|not working out today|off day)\b/i.test(m);
+
+  if (isRestDayMsg) {
+    const name = user.name ? ` ${user.name}` : "";
+    const stepsT = user.stepsTarget || 8500;
+    const prot = user.proteinTarget || 120;
+    const restReply = `Rest day is part of the programme${name} — not a break from it.\n\n*What happens on rest days:*\nYour muscles repair and grow. Strength is built during rest, not during the session. Skipping rest days is how people overtrain and plateau.\n\n*Rest day checklist:*\n✅ *Steps* — still hit ${stepsT.toLocaleString()}. Walk, do not train. Low intensity movement speeds recovery.\n✅ *Protein* — still hit ${prot}g. Muscle repair needs amino acids even when you are not lifting.\n✅ *Sleep* — 7-9 hours tonight. This is where the gains actually happen.\n✅ *Stretch* — 10 minutes. Hips, quads, chest, shoulders. Whatever is tight.\n\nCome back to your next session fresher than if you had trained today.`;
+    await logChat(user.id, message, restReply, "REST_DAY");
+    return restReply;
+  }
+
+  // ---- MISSED WORKOUT / SKIPPED SESSION HANDLER ----
+  const isMissedWorkout =
+    /\b(missed.*(?:workout|session|gym|training)|couldn.?t.*(?:train|gym|workout)|skipped.*(?:gym|session|workout|training)|didn.?t.*(?:train|go to gym|workout)|missed.*gym|didn.?t make it|couldn.?t make it|no gym yesterday|missed yesterday|no training today|didn.?t train)\b/i.test(m);
+
+  if (isMissedWorkout) {
+    const name = user.name ? ` ${user.name}` : "";
+    const total = user.totalWorkoutsCompleted || 0;
+    const missedReply = `One missed session${name} — that is all it is.\n\n${total > 0 ? `You have ${total} sessions completed. One miss does not erase that.` : "Getting back on track starts now."}\n\n*The rule:* Never miss twice. One miss is life. Two misses in a row is the start of a habit.\n\n*What to do right now:*\nDecide when you train next — not "tomorrow maybe", give me the specific time. 6am? 12pm? After work at 5pm?\n\nThat is your only job. Pick the time.`;
+    await logChat(user.id, message, missedReply, "MISSED_WORKOUT");
+    return missedReply;
+  }
+
+  // ---- SORE / DOMS HANDLER ----
+  const isSoreMsg =
+    /\b(i.?m sore|so sore|very sore|muscle soreness|doms|delayed onset|my muscles are sore|legs are sore|arms are sore|body is sore|everything is sore|sore from|sore after|still sore|too sore to train|too sore to gym|can.?t move|can.?t walk properly|struggling to walk|legs killing me|arms killing me)\b/i.test(m);
+
+  if (isSoreMsg) {
+    const name = user.name ? ` ${user.name}` : "";
+    const soreArea = /\b(legs?|quads?|hamstrings?|glutes?|calves?)\b/i.test(m) ? "legs"
+      : /\b(chest|pecs?|push|bench)\b/i.test(m) ? "chest"
+      : /\b(back|lats?|rows?|pull)\b/i.test(m) ? "back"
+      : /\b(shoulders?|delts?|press)\b/i.test(m) ? "shoulders"
+      : /\b(arms?|biceps?|triceps?|curls?)\b/i.test(m) ? "arms"
+      : "muscles";
+    const trainAround = soreArea === "legs" ? "upper body — chest, back, shoulders, arms. Nothing that loads the legs."
+      : soreArea === "chest" || soreArea === "shoulders" || soreArea === "arms" ? "lower body — squats, leg press, lunges, walking."
+      : soreArea === "back" ? "lower body and chest press machine — avoid rowing and pulling movements."
+      : "whatever body part is NOT sore.";
+    const soreReply = `DOMS${name} — delayed onset muscle soreness. It means you trained hard enough to create adaptation. This is the process working.\n\n*Normal DOMS lasts 24-72 hours.* Peak soreness is usually day 2 after training, not day 1.\n\n*What to do:*\n✅ *Keep moving* — light walking speeds recovery by increasing blood flow to the muscle\n✅ *Protein* — your muscles are actively repairing right now and need amino acids\n✅ *Train around it* — if ${soreArea} is sore, train ${trainAround}\n✅ *Do NOT foam roll aggressively on day 1-2* — you can increase inflammation. Light rolling only.\n\n❌ *Do not rest completely* — passive rest slows recovery. Active recovery wins.\n\nThe soreness means it is working. Keep going.`;
+    await logChat(user.id, message, soreReply, "DOMS");
+    return soreReply;
+  }
+
+  // ---- WATER TARGET HANDLER ----
+  const isWaterTargetMsg =
+    /\b(how much water|water target|water goal|daily water|water intake|how many litres|how many liters|litres of water|liters of water|water per day|water recommendation|should i drink|water a day)\b/i.test(m);
+
+  if (isWaterTargetMsg) {
+    const name = user.name ? ` ${user.name}` : "";
+    const weight = parseFloat(user.currentWeight || "75");
+    const waterLitres = (weight * 0.033).toFixed(1);
+    const waterReply = `${name ? name.trimStart() + " — " : ""}your water target is *${waterLitres}L per day* (based on your body weight × 0.033).\n\nSimplest way to hit it: 500ml when you wake up, 500ml mid-morning, 500ml before lunch, 500ml mid-afternoon, 500ml before dinner. That is 2.5L without thinking about it.\n\nThirst and hunger feel identical — most cravings at 3pm are actually dehydration. Drink first, eat after. Log your water by sending "2L water" or "drank 1.5 litres".`;
+    await logChat(user.id, message, waterReply, "WATER_TARGET");
+    return waterReply;
+  }
+
+  // ---- PRE / POST WORKOUT NUTRITION HANDLER ----
+  const isWorkoutNutrition =
+    /\b(what.*eat.*(?:before|pre).?(?:gym|workout|training|session)|(?:before|pre).?(?:gym|workout|training).*(?:eat|food|meal|snack)|pre.?workout.*(?:food|meal|eat|nutrition)|what.*eat.*after.*(?:gym|workout|training)|post.?workout.*(?:food|meal|eat|nutrition)|after.*gym.*eat|eat.*after.*training)\b/i.test(m);
+
+  if (isWorkoutNutrition) {
+    const name = user.name ? ` ${user.name}` : "";
+    const goal = user.goalType || "fat_loss";
+    const isPre = /\b(before|pre.?workout|pre.?gym)\b/i.test(m);
+    const isPost = /\b(after|post.?workout|post.?gym)\b/i.test(m);
+
+    if (isPre && !isPost) {
+      const preReply = `Pre-workout nutrition${name}:\n\n*60-90 minutes before training:*\n🍠 *Carbs* — fuel the session. Sweet potato, oats, brown rice, banana. Enough to fill your tank.\n🥩 *Protein* — 20-30g to protect muscle. Eggs, chicken, or a protein shake.\n💧 *Water* — 500ml before you start. Dehydration drops performance by 10-20%.\n\n*SA quick options:*\n• 2 eggs + 1 slice brown bread — 280 kcal, 18g protein ✅\n• Oats + milk — 320 kcal, 12g protein ✅\n• Sweet potato + chicken — 400 kcal, 30g protein ✅\n\n*Avoid:* Fatty foods (slows digestion), heavy meals within 45 minutes, training completely fasted if strength is the goal.\n\n${goal === "fat_loss" ? "For fat loss: eat light but eat. A small pre-workout meal does NOT block fat burning." : "For muscle gain: bigger pre-workout meal, more carbs — your muscles need the fuel."}`;
+      await logChat(user.id, message, preReply, "PRE_WORKOUT_NUTRITION");
+      return preReply;
+    }
+
+    const postReply = `Post-workout nutrition${name}:\n\n*Within 60 minutes after training:*\n🥩 *Protein first* — 30-40g to start muscle repair. This is the most important window.\n🍠 *Carbs* — replenish glycogen. Sweet potato, rice, oats, fruit.\n💧 *Water* — replace what you sweated out.\n\n*SA quick options:*\n• Pilchards + sweet potato — 380 kcal, 35g protein ✅\n• 3 eggs + pap — 420 kcal, 28g protein ✅\n• Chicken + rice — 500 kcal, 40g protein ✅\n• Protein shake + banana (if no time) — 300 kcal, 30g protein ✅\n\n*The rule:* Protein is non-negotiable post-workout. Skip the carbs if you must — never skip the protein.\n\n${goal === "fat_loss" ? "Post-workout is not the time to restrict — eat your protein. The rest of the day you can be in a deficit." : "Post-workout is the most important meal of the day for muscle gain. Eat big here."}`;
+    await logChat(user.id, message, postReply, "POST_WORKOUT_NUTRITION");
+    return postReply;
+  }
+
+  // ---- MEAL-SPECIFIC PLATE METHOD ("what to eat for breakfast/lunch/dinner") ----
+  const isMealSpecificQ =
+    /\b(what.*(?:eat|have|make|cook).*(?:for|at)?\s*(?:breakfast|lunch|dinner|supper|snack)|(?:breakfast|lunch|dinner|supper|snack).*(?:ideas?|option|suggestion|help|advice)|what.*(?:breakfast|lunch|dinner|supper)|good.*(?:breakfast|lunch|dinner|supper))\b/i.test(m) &&
+    !/\b(i had|i ate|i have|just had|just ate)\b/i.test(m); // exclude food logs
+
+  if (isMealSpecificQ) {
+    const goal = user.goalType || "fat_loss";
+    const budget = user.weeklyFoodBudget || "100_300";
+    const name = user.name ? ` ${user.name}` : "";
+    const isMealBreakfast = /breakfast/i.test(m);
+    const isMealLunch = /lunch/i.test(m);
+    const isMealDinner = /dinner|supper/i.test(m);
+    const isSnack = /snack/i.test(m);
+
+    let mealReply = "";
+    if (isMealBreakfast) {
+      mealReply = `Breakfast${name} — the meal that sets your protein baseline for the day:\n\n${budget === "under_100"
+        ? "• *2 boiled eggs + pap* — 310 kcal, 18g protein. Cheapest solid breakfast in SA.\n• *Oats + water + peanut butter* — 350 kcal, 12g protein. R5 a bowl.\n• *3 eggs scrambled* — 250 kcal, 21g protein. Nothing beats it."
+        : "• *3 eggs + 1 slice brown bread* — 320 kcal, 22g protein\n• *Oats + low fat milk + boiled egg* — 380 kcal, 20g protein\n• *Greek yoghurt + banana + handful nuts* — 350 kcal, 18g protein"}\n\n${goal === "fat_loss" ? "Protein first at breakfast kills hunger for 4 hours. No protein = cravings by 10am." : "Bigger breakfast for muscle gain — add an extra egg or a scoop of protein."}`;
+    } else if (isMealLunch) {
+      mealReply = `Lunch${name} — your biggest protein hit of the day:\n\n${budget === "under_100"
+        ? "• *Pilchards + pap + cabbage* — 420 kcal, 30g protein. R15 total.\n• *Sugar beans + brown rice + spinach* — 380 kcal, 18g protein. R8 total.\n• *2 eggs + bread + tomato* — 340 kcal, 16g protein."
+        : "• *Chicken breast + sweet potato + salad* — 480 kcal, 38g protein ✅ Best option\n• *Tuna + brown rice + cucumber* — 400 kcal, 32g protein\n• *Mince + pap + morogo* — 500 kcal, 35g protein"}\n\n${goal === "fat_loss" ? "Make lunch your biggest meal — front-loading calories earlier means less hunger at night." : "This is where muscle gain happens — eat big and get your protein in."}`;
+    } else if (isMealDinner) {
+      mealReply = `Dinner${name}:\n\n${goal === "fat_loss"
+        ? "• Smaller carb portion than lunch — protein and vegetables carry the meal\n• *Chicken + cabbage + tomato* — 350 kcal, 32g protein ✅\n• *Hake + spinach* — 280 kcal, 35g protein ✅\n• *Pilchards + salad* — 250 kcal, 26g protein ✅\n\nAfter 6pm: cut carbs in half, double the vegetables. Not zero carbs — half."
+        : "• *Beef mince + pap + chakalaka* — 600 kcal, 40g protein\n• *Chicken thighs + rice + broccoli* — 580 kcal, 42g protein\n• Keep carbs in — your muscles recover overnight and need glycogen."}\n\nProtein at every dinner, every night. That is non-negotiable.`;
+    } else if (isSnack) {
+      mealReply = `Snacks${name} — only if you have calories left:\n\n✅ *High-protein snacks:*\n• Biltong 30g — 90 kcal, 18g protein\n• Boiled egg — 80 kcal, 6g protein\n• Cottage cheese ½ cup — 100 kcal, 14g protein\n• Pilchards half tin — 100 kcal, 12g protein\n\n❌ *Avoid:* Chips, biscuits, chocolate, rusks — calories with almost zero protein.\n\n${goal === "fat_loss" ? "If you are hungry between meals, your previous meal did not have enough protein. Fix the meal — do not add snacks." : "Between meals: protein shake or Greek yoghurt to keep amino acids flowing."}`;
+    }
+
+    if (mealReply) {
+      await logChat(user.id, message, mealReply, "MEAL_ADVICE");
+      return mealReply;
+    }
   }
 
   // ============================================================
