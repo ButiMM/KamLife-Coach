@@ -44,6 +44,7 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS profile_notes TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_streak INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMP`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_reference TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories NUMERIC DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories_date TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_protein_g NUMERIC DEFAULT 0`,
