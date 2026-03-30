@@ -798,8 +798,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           let totalCal = 0; let totalProt = 0;
           for (const log of todayFoodLogs) {
             const matched = scanForSAFoods(log.messageIn || "");
-            totalCal += matched.reduce((s: number, f: any) => s + (f.calories || 0), 0);
-            totalProt += matched.reduce((s: number, f: any) => s + (f.protein || 0), 0);
+            totalCal += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
+            totalProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
           }
           const calTarget = user.calorieTarget || 1800;
           const protTarget = user.proteinTarget || 130;
@@ -2422,8 +2422,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const msgIn = log.messageIn || "";
       const matched = scanForSAFoods(msgIn);
       if (matched.length > 0) {
-        const mCal = matched.reduce((s: number, f: any) => s + (f.calories || 0), 0);
-        const mProt = matched.reduce((s: number, f: any) => s + (f.protein || 0), 0);
+        const mCal = matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
+        const mProt = matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
         totalCal += mCal; totalProt += mProt;
         mealLines.push(`• ${matched.map((f: any) => f.name).join(", ")} — ~${mCal} kcal, ${mProt}g protein`);
       } else {
