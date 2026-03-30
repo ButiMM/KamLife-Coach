@@ -1596,6 +1596,7 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Streak-at-risk        — 8pm alert if streak endangered");
   console.log("[SCHEDULER]   Women's Month         — August Mondays");
   console.log("[SCHEDULER]   Phase advancement     — auto-advance on 75% compliance");
+  console.log("[SCHEDULER]   Goal check / review   — Monday 7am UTC at weeks 4/8/12/16/20/24");
   console.log("[SCHEDULER]   Injury follow-up      — Wednesday check on injured clients");
   console.log("[SCHEDULER]   New Year reset        — January 2nd continuation message");
   console.log("[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)");
