@@ -2,7 +2,7 @@ import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
-import { eq, gte, lte, and, lt, desc, asc } from "drizzle-orm";
+import { eq, gte, lte, and, lt, desc, asc, or } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { generateVoiceNote } from "./tts";
@@ -99,7 +99,17 @@ async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promis
 // ============================================================
 
 async function getActiveClients() {
-  return db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+  const now = new Date();
+  return db.select().from(users).where(
+    and(
+      eq(users.onboardingState, "COMPLETE"),
+      or(
+        eq(users.subscriptionStatus, "active"),
+        eq(users.subscriptionStatus, "trial"),
+        gte(users.betaBypassUntil, now)
+      )
+    )
+  );
 }
 
 // Returns true if client has set a pause until a future date
@@ -153,6 +163,15 @@ function isRamadan(): boolean {
   return now >= new Date(range[0]) && now <= new Date(range[1]);
 }
 
+// Training day schedule per weekly frequency — Mon=1, Tue=2, ... Sat=6
+const TRAINING_SCHEDULES: Record<number, number[]> = {
+  2: [1, 4],
+  3: [1, 3, 5],
+  4: [1, 2, 4, 5],
+  5: [1, 2, 3, 4, 5],
+  6: [1, 2, 3, 4, 5, 6],
+};
+
 function programmeDaysSince(startDate: Date | null | undefined): number {
   if (!startDate) return 0;
   return Math.floor((Date.now() - new Date(startDate).getTime()) / 86_400_000);
@@ -165,6 +184,14 @@ function programmeDaysSince(startDate: Date | null | undefined): number {
 
 async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
+
+  // Skip Sunday — rest-day comms handled by Sunday evening check-in
+  const todayDOW = new Date().getDay(); // 0=Sun
+  if (todayDOW === 0) {
+    console.log("[SCHEDULER] Morning check-in — skipping Sunday");
+    return;
+  }
+
   const clients = await getActiveClients();
 
   for (const client of clients) {
@@ -176,16 +203,6 @@ async function runMorningCheckin(): Promise<void> {
       const name = client.name || "there";
       const phone = client.phoneNumber;
       const proteinTarget = client.proteinTarget || 120;
-
-      if (isRamadan()) {
-        if (canSendProactive(client.id)) {
-          await sendWhatsApp(phone,
-            `Ramadan Mubarak ${name}. Suhoor is your most important meal — high protein, slow carbs, water before Fajr. What are you having at Suhoor?`
-          );
-          recordProactiveSend(client.id);
-        }
-        continue;
-      }
 
       const yesterdayLogs = await getYesterdayLogs(client.id);
 
@@ -250,11 +267,16 @@ async function runMorningCheckin(): Promise<void> {
         }
       }
 
-      // End with one specific action
+      // End with one specific action — include training nudge if today is a training day
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const isTodayTrainingDay = schedule.includes(todayDOW);
+
       if (foodLogs.length === 0) {
-        parts.push(`Send me breakfast now.`);
+        parts.push(isTodayTrainingDay ? `Send me breakfast now — then reply "today" for your workout.` : `Send me breakfast now.`);
+      } else if (isTodayTrainingDay) {
+        parts.push(`Training day today. Reply "today" after your first meal to get your session.`);
       } else {
-        parts.push(`What is your first meal today?`);
+        parts.push(`Rest day today. Stay on food and steps.`);
       }
 
       if (canSendProactive(client.id)) {
@@ -406,6 +428,7 @@ const WORKOUT_MILESTONES: Record<number, (name: string) => string> = {
 cron.schedule("0 6 * * *", async () => {
   console.log("[SCHEDULER] JOB: Milestone celebrations");
   const clients = await getActiveClients();
+  const state = loadState();
 
   for (const client of clients) {
     if (isPaused(client)) continue;
@@ -414,9 +437,8 @@ cron.schedule("0 6 * * *", async () => {
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = programmeDaysSince(client.programmeStartDate);
 
-      // Day milestones
+      // Day milestones — naturally de-duplicated because `days` is exact on one calendar date
       if ([7, 30, 60, 90, 180, 365].includes(days)) {
-        // Get first weight log for context
         const firstWeight = await db.select({ weight: weightLogs.weight })
           .from(weightLogs)
           .where(eq(weightLogs.userId, client.id))
@@ -427,13 +449,16 @@ cron.schedule("0 6 * * *", async () => {
         if (msg) await sendWhatsApp(client.phoneNumber, msg);
       }
 
-      // Workout count milestones — with TTS voice note
+      // Workout count milestones — de-duplicated via state file so they only fire once per milestone
       const workoutMilestoneText = WORKOUT_MILESTONES[workouts];
       if (workoutMilestoneText) {
+        const milestoneKey = `workout_milestone_${workouts}_${client.id}`;
+        if (state[milestoneKey] === "sent") continue;
         const text = workoutMilestoneText(name);
         // Try to send as voice note for the biggest moments
         const voiceUrl = [25, 50, 100].includes(workouts) ? await generateVoiceNote(text) : null;
         await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);
+        saveState(milestoneKey, "sent");
       }
     } catch (err) {
       console.error(`[SCHEDULER] Milestone error — ${client.phoneNumber}:`, err);
@@ -499,9 +524,12 @@ cron.schedule("0 14 * * 5", async () => {
     if (isPaused(client)) continue;
     try {
       const name = client.name || "champ";
-      await sendWhatsApp(client.phoneNumber,
-        `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
-      );
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
+        );
+        recordProactiveSend(client.id);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err);
     }
@@ -713,7 +741,10 @@ cron.schedule("0 17 * * 0", async () => {
         question = `${name}, week done. ${completedSessions} sessions, ${weekFoodLogs.length} meals logged. One sentence — what do you want to be different next week?`;
       }
 
-      await sendWhatsApp(client.phoneNumber, question);
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber, question);
+        recordProactiveSend(client.id);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err);
     }
@@ -795,17 +826,6 @@ cron.schedule("0 10 * * 1-6", async () => {
       const name = client.name || "champ";
 
       // Determine if today is a training day for this client based on their schedule
-      // 3 days: Mon/Wed/Fri (1,3,5)
-      // 4 days: Mon/Tue/Thu/Fri (1,2,4,5)
-      // 5 days: Mon/Tue/Wed/Thu/Fri (1,2,3,4,5)
-      // 6 days: Mon–Sat (1,2,3,4,5,6)
-      const TRAINING_SCHEDULES: Record<number, number[]> = {
-        2: [1, 4],
-        3: [1, 3, 5],
-        4: [1, 2, 4, 5],
-        5: [1, 2, 3, 4, 5],
-        6: [1, 2, 3, 4, 5, 6],
-      };
       const schedule = TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3];
       if (!schedule.includes(todayDOW)) continue;
 
@@ -841,7 +861,10 @@ cron.schedule("0 10 * * 1-6", async () => {
         preTrainingMsg = `${name}, training day. Pre-training meal 1 hour out — protein and a small carb. Eggs or oats. Then reply "today" and get the session done.`;
       }
 
-      await sendWhatsApp(client.phoneNumber, preTrainingMsg);
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber, preTrainingMsg);
+        recordProactiveSend(client.id);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
     }

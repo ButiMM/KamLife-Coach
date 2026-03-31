@@ -1466,7 +1466,9 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const lastReset = user.waterLastResetDate;
     const currentWater = lastReset === today ? parseFloat(user.todayWater as string || "0") : 0;
     const newTotal = Math.round((currentWater + litres) * 10) / 10;
-    const waterTarget = 2.0;
+    // Personalise water target: 33ml per kg of bodyweight, minimum 2.0L
+    const weightKgForWater = parseFloat(user.currentWeight as string || "0") || 75;
+    const waterTarget = Math.max(2.0, Math.round(weightKgForWater * 0.033 * 10) / 10);
 
     await db.update(users).set({
       todayWater: newTotal.toString(),
