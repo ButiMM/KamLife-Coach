@@ -23,6 +23,7 @@ export const users = pgTable(
       .primaryKey()
       .default(sql`gen_random_uuid()`),
     phoneNumber: text("phone_number").notNull().unique(),
+    email: text("email"),
     name: text("name"),
     goalType: text("goal_type"), // fat_loss | muscle_gain
     age: integer("age"),

@@ -508,6 +508,28 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
   }
 
+  // ---- HEART CONDITION CLEARANCE GATE ----
+  // Users with heart_condition must confirm doctor clearance before receiving workouts
+  if (user.doctorClearanceRequired && !/(doctor|cleared|clearance|got clearance|doctor said|my doctor|spoke to doctor|physician|cardiologist)/i.test(m)) {
+    const conditions = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
+    if (conditions.includes("heart_condition")) {
+      const name = user.name || "there";
+      const clearanceMsg = `${name}, your profile shows a heart condition. Before I give you a workout programme, please confirm you have spoken to your doctor and have clearance for exercise.\n\nReply *my doctor cleared me* to continue, or ask anything about food, steps, or general questions — those are always available.`;
+      // Allow food/step/weight questions and crisis through
+      const allowThrough = /\b(food|eat|meal|calories|protein|steps|walked|weight|water|sleep|how am i|status|diary|crisis|help)\b/i.test(m);
+      if (!allowThrough) {
+        await logChat(user.id, message, clearanceMsg, "HEART_GATE");
+        return clearanceMsg;
+      }
+    }
+  }
+  // Accept doctor clearance confirmation
+  if (user.doctorClearanceRequired && /(my doctor cleared me|doctor cleared|got clearance|cleared by doctor|cleared by my doctor|physician cleared|cardiologist cleared)/i.test(m)) {
+    await db.update(users).set({ doctorClearanceRequired: false }).where(eq(users.phoneNumber, phone));
+    const name = user.name || "there";
+    return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
+  }
+
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
@@ -3339,14 +3361,19 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // Simple key-based auth: client sends COACH_DASHBOARD_KEY, gets back a session token
   // stored in localStorage. All /api/* admin routes require the X-Dashboard-Key header.
   function requireAdminKey(req: any, res: any, next: any) {
-    const key = process.env.COACH_DASHBOARD_KEY || "kamlife2024";
+    const key = process.env.COACH_DASHBOARD_KEY;
+    if (!key) {
+      console.error("[AUTH] COACH_DASHBOARD_KEY env var is not set — admin access blocked");
+      return res.status(503).json({ message: "Dashboard not configured" });
+    }
     const provided = (req.headers["x-dashboard-key"] as string) || (req.query.key as string) || "";
     if (provided !== key) return res.status(401).json({ message: "Unauthorized" });
     next();
   }
 
   app.post("/api/auth/login", (req: any, res: any) => {
-    const key = process.env.COACH_DASHBOARD_KEY || "kamlife2024";
+    const key = process.env.COACH_DASHBOARD_KEY;
+    if (!key) return res.status(503).json({ message: "Dashboard not configured — set COACH_DASHBOARD_KEY env var" });
     const { password } = req.body || {};
     if (!password || password !== key) {
       return res.status(401).json({ message: "Invalid password" });
@@ -3356,10 +3383,29 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   // ── REST API for admin dashboard ──────────────────────────
 
-  app.get("/api/users", requireAdminKey, async (_req, res) => {
+  app.get("/api/users", requireAdminKey, async (req: any, res) => {
     try {
-      const all = await db.select().from(users).orderBy(desc(users.createdAt));
-      res.json(all);
+      const page = Math.max(1, parseInt(String(req.query.page || "1")));
+      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || "50"))));
+      const offset = (page - 1) * limit;
+
+      const [all, total] = await Promise.all([
+        db.select().from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset),
+        db.select({ count: sql`count(*)` }).from(users),
+      ]);
+
+      // Audit log
+      console.log(`[ADMIN AUDIT] GET /api/users — page ${page}, limit ${limit} — ${new Date().toISOString()}`);
+
+      res.json({
+        users: all,
+        pagination: {
+          page,
+          limit,
+          total: parseInt(String(total[0]?.count || 0)),
+          pages: Math.ceil(parseInt(String(total[0]?.count || 0)) / limit),
+        },
+      });
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch users" });
     }
@@ -3924,7 +3970,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
           if (fromNum) {
             const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
             const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
-            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\nYour Day 1 workout is below. Do it today and reply *done* when finished — I log it and Day 2 unlocks.`;
+            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\n📍 Week 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\n📍 Week 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\n📍 Week 4–6: Visible changes start. This is where the work pays off.\n📍 Week 8–12: Real transformation. Clothes fit differently. Strength up.\n\nCoach K checks in every morning and evening. Log everything — meals, steps, workouts. The more you log, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nYour Day 1 workout is below. Do it today and reply *done* when finished.`;
             await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: welcomeMsg });
 
             // Auto-deliver Day 1 workout

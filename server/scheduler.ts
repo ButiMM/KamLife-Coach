@@ -1233,13 +1233,13 @@ cron.schedule("0 6 * * 1", async () => {
       let msg = "";
 
       if (week === 1) {
-        msg = `${name}, Week 1 starts now. Your only goal this week: complete ${planned} sessions and log every meal. Do not try to be perfect — try to be consistent. Send me your first meal of the day.`;
+        msg = `${name}, Week 1. This week is about building the habit, not the body — the physical changes come later.\n\nExpect: some soreness, hunger changes, maybe lower energy by day 3. All normal. Your only job this week: complete ${planned} sessions and log every meal. Nothing else.\n\nSend me your first meal of the day.`;
       } else if (week === 2) {
-        msg = `${name}, Week 2. Your body is adapting — soreness from last week means it is working. ${sessions} sessions done. This week: push your step count above ${(client.stepsTarget || 8500).toLocaleString()} every day. Small daily win.`;
+        msg = `${name}, Week 2. The soreness from last week means your muscles responded. ${sessions} sessions banked.\n\nExpect: energy starts stabilising. Scale might go up slightly (water and glycogen) — ignore it, it normalises by week 3. Focus: hit your step target of ${(client.stepsTarget || 8500).toLocaleString()} every day this week.`;
       } else if (week === 3) {
-        msg = `${name}, Week 3 — this is where most people drop off. Not because it got hard, but because the mirror has not changed yet. Your muscles are adapting right now. Results show in weeks 4–6. Complete ${planned} sessions this week and you will be past the hardest point.`;
+        msg = `${name}, Week 3 — this is the hardest week. Not because it got heavier, but because the mirror has not changed yet and motivation is low.\n\nThis is normal. The physical changes are happening inside — metabolism adapting, muscle fibres rebuilding. Visible results show at week 4–6 for most people. You are 7 days away from seeing the shift.\n\nComplete ${planned} sessions. That is all.`;
       } else if (week === 4) {
-        msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is the week things start to click. Your body knows the movements now. Push harder than last week on every exercise — more reps or more weight. You earned this week.`;
+        msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is where it starts to show.\n\nExpect: clothes fitting slightly differently, energy more consistent, strength up on at least one exercise. If you have been logging food, your calorie awareness is now automatic. This week: push harder — more reps or more weight on every exercise. You built the foundation. Now use it.`;
       } else if (week <= 8) {
         const sessionGoal = sessions + planned;
         msg = `${name}, Week ${week} — ${sessions} sessions in the bank. Target for this week: ${planned} sessions and ${sessionGoal} total. ${streak >= 3 ? `You are on a ${streak}-session streak — do not break it.` : "Get the streak going."}`;

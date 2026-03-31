@@ -24,10 +24,12 @@ export function useUsers() {
   return useQuery({
     queryKey: [api.users.list.path],
     queryFn: async () => {
-      const res = await fetch(api.users.list.path);
+      const res = await fetch(`${api.users.list.path}?limit=100`, { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch users");
       const data = await res.json();
-      return parseWithLogging<User[]>(api.users.list.responses[200], data, "users.list");
+      // API now returns { users, pagination } — extract the array
+      const arr = Array.isArray(data) ? data : (data.users ?? data);
+      return arr as User[];
     },
   });
 }

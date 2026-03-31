@@ -386,7 +386,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
   // ---- START — POPIA consent combined with introduction ----
   if (state === "START") {
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here. SA fitness and nutrition coach — real programmes, real food advice, real accountability.\n\nI store your health and fitness data to coach you personally (POPIA protected, never sold, deleted on request).\n\nReply *yes* to start. Three questions and your programme is ready.`;
+    return `Coach K here — your AI-powered SA fitness and nutrition coach. Real programmes, real food advice, real accountability.\n\n⚠️ *Important:* Coach K is an AI coaching tool, not a human coach and not a medical professional. Always consult your doctor before starting any new exercise or nutrition programme, especially if you have a medical condition.\n\nI store your health and fitness data to coach you personally (POPIA protected, never sold, deleted on request).\n\nReply *yes* to start. Three questions and your programme is ready.`;
   }
 
   // ---- ASK_POPIA ----
@@ -409,8 +409,21 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Just your first name — what do people call you?`;
     }
     const name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-    await db.update(users).set({ name, onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `Sharp ${name}. What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    await db.update(users).set({ name, onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
+    return `Sharp ${name}. What's your email address? (Used as a backup if WhatsApp ever has issues — type *skip* if you'd rather not.)`;
+  }
+
+  // ---- ASK_EMAIL — optional, backup contact ----
+  if (state === "ASK_EMAIL") {
+    const lower = msg.toLowerCase().trim();
+    const isSkip = lower === "skip" || lower === "no" || lower === "nope" || lower === "n/a" || lower === "none";
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!isSkip && !emailRegex.test(msg.trim())) {
+      return `Just your email address, or type *skip* to continue without one.`;
+    }
+    const emailVal = isSkip ? null : msg.trim().toLowerCase();
+    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
+    return `${emailVal ? "Got it." : "No problem."} What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
   }
 
   // ---- ASK_GOAL ----
@@ -489,7 +502,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
 
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 3 days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Daily workouts, food coaching, SA meal plans, weekly progress reports — all in WhatsApp. No app needed.\n\nPay now and Day 1 drops immediately.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 3 days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Daily workouts, food coaching, SA meal plans, weekly progress reports — all in WhatsApp. No app needed.\n\nPay now and Day 1 drops immediately.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
@@ -673,7 +686,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
   }
 
   return await getMenuText(user);

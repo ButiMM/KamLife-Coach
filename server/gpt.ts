@@ -41,6 +41,12 @@ export function buildContext(user: any): string {
   const water = user.todayWater || 0;
   const experience = user.trainingExperience || "beginner";
 
+  const medicalConditions = user.medicalConditions || "none";
+  const hasMedical = medicalConditions !== "none" && medicalConditions.trim() !== "";
+  const medicalDisclaimer = hasMedical
+    ? `\nMEDICAL NOTE: This client has: ${medicalConditions}. When giving condition-specific advice (diet, exercise modification, medication timing), ALWAYS end with a one-sentence reminder to consult their doctor or healthcare provider for personalised medical guidance. Never diagnose, never contraindicate prescribed medication, never tell them to stop medication.`
+    : "";
+
   return `CLIENT PROFILE:
 Name: ${name}
 Goal: ${goal}
@@ -56,6 +62,7 @@ Job type: ${job}
 Activity level: ${activity}
 Primary focus: ${focus}
 Injuries: ${injuries}
+Medical conditions: ${medicalConditions}
 Experience: ${experience}
 Water today: ${water}L
 Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000)}
@@ -63,7 +70,7 @@ Compliance level: ${user.complianceLevel || 'RESET'}
 Workout streak: ${user.workoutStreak || 0} consecutive sessions
 Total sessions completed: ${user.totalWorkoutsCompleted || 0}
 Programme week: ${user.programmeWeek || 1}
-Subscription status: ${user.subscriptionStatus || 'inactive'}`;
+Subscription status: ${user.subscriptionStatus || 'inactive'}${medicalDisclaimer}`;
 }
 
 // ============================================================
