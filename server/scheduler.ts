@@ -148,20 +148,6 @@ async function getTodayLogs(userId: string) {
   ).limit(1);
 }
 
-function isRamadan(): boolean {
-  const now = new Date();
-  const year = now.getFullYear();
-  const RAMADAN: Record<number, [string, string]> = {
-    2025: ["2025-03-01", "2025-03-30"],
-    2026: ["2026-02-17", "2026-03-18"],
-    2027: ["2027-02-06", "2027-03-07"],
-    2028: ["2028-01-26", "2028-02-24"],
-    2029: ["2029-01-14", "2029-02-12"],
-  };
-  const range = RAMADAN[year];
-  if (!range) return false;
-  return now >= new Date(range[0]) && now <= new Date(range[1]);
-}
 
 // Training day schedule per weekly frequency — Mon=1, Tue=2, ... Sat=6
 const TRAINING_SCHEDULES: Record<number, number[]> = {
@@ -1759,7 +1745,6 @@ export function initScheduler(): void {
     }
   })();
 
-  const ramadanActive = isRamadan();
   console.log("[SCHEDULER] Proactive coaching jobs active:");
   console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
   console.log("[SCHEDULER]   Evening accountability — daily 7pm SAST");
