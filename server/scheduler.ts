@@ -308,23 +308,28 @@ cron.schedule("0 17 * * *", async () => {
 
 // ============================================================
 // JOB 3 — WEEK 3 INTERVENTION
-// Runs Monday 6am SAST (Monday 4am UTC)
+// Runs daily 6am SAST (4am UTC) — sends once per user on their first day of week 3
 // ============================================================
 
-cron.schedule("0 4 * * 1", async () => {
+cron.schedule("0 4 * * *", async () => {
   console.log("[SCHEDULER] JOB: Week 3 intervention");
   const clients = await getActiveClients();
+  const state = loadState();
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
       if (client.programmeWeek !== 3) continue;
+      // Only send once per user when they enter week 3
+      const sentKey = `week3_sent_${client.id}`;
+      if (state[sentKey] === "sent") continue;
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const planned = client.trainingDaysPerWeek || 3;
       await sendWhatsApp(client.phoneNumber,
         `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`
       );
+      saveState(sentKey, "sent");
     } catch (err) {
       console.error(`[SCHEDULER] Week 3 intervention error — ${client.phoneNumber}:`, err);
     }
@@ -454,7 +459,19 @@ cron.schedule("0 4,16 * * *", async () => {
       const name = client.name || "champ";
       const silenceMs = now - new Date(client.lastActiveAt).getTime();
 
-      if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
+      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
+        // 14-day silence: send final re-engagement, flag for manual coach intervention
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, two weeks since we last spoke. I am not going anywhere — when you are ready just say Hi and we pick up exactly where we left off. No judgement, no guilt. Your progress is saved.`
+        );
+        // Flag in DB so coach dashboard surfaces this user immediately
+        try {
+          await db.update(users).set({ lastActiveAt: client.lastActiveAt }).where(eq(users.id, client.id));
+          console.log(`[SCHEDULER] 14-day silence — flagged for manual review: ${client.phoneNumber}`);
+        } catch (flagErr) {
+          console.error(`[SCHEDULER] Failed to flag 14-day silent user ${client.phoneNumber}:`, flagErr);
+        }
+      } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
         await sendWhatsApp(client.phoneNumber,
           `${name}, a week without checking in. Life gets busy — I get it. When you are ready just say Hello and we pick up exactly where we left off. No guilt.`
         );
@@ -1687,7 +1704,15 @@ cron.schedule("0 8 * * 6", async () => {
 // INIT EXPORT
 // ============================================================
 
+let schedulerInitialised = false;
+
 export function initScheduler(): void {
+  if (schedulerInitialised) {
+    console.log("[SCHEDULER] Already initialised — skipping duplicate registration");
+    return;
+  }
+  schedulerInitialised = true;
+
   // ---- Catch up any daily jobs missed due to server restart ----
   (async () => {
     try {

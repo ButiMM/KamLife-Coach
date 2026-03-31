@@ -1,7 +1,7 @@
 import { QueryClient, QueryFunction } from "@tanstack/react-query";
 import { getToken } from "./auth";
 
-function authHeaders(extra?: Record<string, string>): Record<string, string> {
+export function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = getToken();
   return {
     ...(token ? { "x-dashboard-key": token } : {}),

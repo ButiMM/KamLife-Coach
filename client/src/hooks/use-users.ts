@@ -1,6 +1,15 @@
 import { useQuery } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
-import type { User, FlaggedUser } from "@shared/schema";
+import type { User, FlaggedUser, WeightLog } from "@shared/schema";
+import { authHeaders } from "@/lib/queryClient";
+
+export interface UserDetailResponse {
+  user: User;
+  weightLogs: WeightLog[];
+  stepLogs: { steps: number; loggedAt: string }[];
+  workoutLogs: { completed: boolean; loggedAt: string }[];
+  chatHistory: { messageIn: string; messageOut: string; intent: string; createdAt: string }[];
+}
 
 function parseWithLogging<T>(schema: any, data: unknown, label: string): T {
   const result = schema.safeParse(data);
@@ -28,13 +37,13 @@ export function useUser(id: number) {
     queryKey: [api.users.get.path, id],
     queryFn: async () => {
       const url = buildUrl(api.users.get.path, { id });
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: authHeaders() });
       if (res.status === 404) return null;
       if (!res.ok) throw new Error("Failed to fetch user");
-      const data = await res.json();
-      return parseWithLogging<User>(api.users.get.responses[200], data, "users.get");
+      return res.json() as Promise<UserDetailResponse>;
     },
     enabled: !!id && !isNaN(id),
+    refetchInterval: 30_000, // auto-refresh every 30s so coach sees live data
   });
 }
 

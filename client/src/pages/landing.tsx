@@ -2,11 +2,23 @@ import { Button } from "@/components/ui/button";
 import { MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star, ChevronRight, Phone, Crown } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "wouter";
+import { useQuery } from "@tanstack/react-query";
 
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
 
 export default function LandingPage() {
+  // Pull live public stats
+  const { data: stats } = useQuery({
+    queryKey: ["/api/public/stats"],
+    queryFn: async () => {
+      const res = await fetch("/api/public/stats");
+      if (!res.ok) return null;
+      return res.json() as Promise<{ activeClients: number; workoutsLogged: number }>;
+    },
+    staleTime: 5 * 60_000,
+    retry: false,
+  });
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden">
       {/* Nav */}
@@ -57,7 +69,7 @@ export default function LandingPage() {
 
           <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
             Real programmes. SA food advice. Accountability that keeps you consistent.
-            No app to download. No gym required to start.
+            No new app to download — runs entirely in WhatsApp. No gym required to start.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-6">
@@ -92,10 +104,10 @@ export default function LandingPage() {
           className="mt-16 flex flex-wrap justify-center gap-8 text-sm text-muted-foreground"
         >
           {[
-            { label: "Active clients", value: "200+" },
-            { label: "Workouts logged", value: "4,800+" },
+            { label: "Active clients", value: stats ? `${stats.activeClients}+` : "200+" },
+            { label: "Workouts logged", value: stats ? `${stats.workoutsLogged.toLocaleString()}+` : "4,800+" },
             { label: "Average cost per day", value: "R3.30" },
-            { label: "Works on WhatsApp", value: "No app needed" },
+            { label: "No new apps", value: "Just WhatsApp" },
           ].map((s) => (
             <div key={s.label} className="text-center">
               <div className="text-2xl font-bold font-display text-foreground">{s.value}</div>
@@ -110,7 +122,7 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold font-display mb-4">How it works</h2>
-            <p className="text-muted-foreground text-lg">Three steps. No apps. No gym required.</p>
+            <p className="text-muted-foreground text-lg">Three steps. No new apps. No gym required.</p>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[

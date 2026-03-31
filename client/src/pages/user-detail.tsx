@@ -12,14 +12,25 @@ import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTri
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function UserDetail() {
   const [, params] = useRoute("/users/:id");
   const userId = params?.id ? params.id : "";
   const [coachMessage, setCoachMessage] = useState("");
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const { data: user, isLoading: userLoading } = useUser(userId as any);
+  const { data: userData, isLoading: userLoading } = useUser(userId as any);
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
@@ -28,12 +39,20 @@ export default function UserDetail() {
     },
     onSuccess: (data) => {
       setCoachMessage("");
+      setPendingMessage(null);
       toast({ title: "Message sent", description: `Delivered to ${data.sentTo}` });
     },
     onError: (err: any) => {
       toast({ title: "Failed to send", description: err.message || "Check Twilio configuration", variant: "destructive" });
     },
   });
+
+  const user = userData?.user;
+  const weightData = (userData?.weightLogs || [])
+    .slice()
+    .sort((a, b) => new Date(a.loggedAt).getTime() - new Date(b.loggedAt).getTime())
+    .map(w => ({ date: format(new Date(w.loggedAt), "MMM d"), weight: parseFloat(String(w.weight)) }))
+    .filter(w => !isNaN(w.weight));
 
   if (userLoading) {
     return (
@@ -49,9 +68,7 @@ export default function UserDetail() {
     );
   }
 
-  if (!user) return <DashboardLayout>User not found</DashboardLayout>;
-
-  const weightData: { date: string; weight: number }[] = [];
+  if (!userData || !user) return <DashboardLayout>User not found</DashboardLayout>;
 
   const daysOnProgramme = user.programmeStartDate
     ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
@@ -229,7 +246,7 @@ export default function UserDetail() {
               data-testid="input-coach-message"
             />
             <Button
-              onClick={() => sendMessageMutation.mutate(coachMessage)}
+              onClick={() => setPendingMessage(coachMessage)}
               disabled={!coachMessage.trim() || sendMessageMutation.isPending}
               className="self-end gap-2"
               data-testid="button-send-message"
@@ -247,6 +264,26 @@ export default function UserDetail() {
           )}
         </Card>
       </div>
+
+      {/* Send confirmation dialog */}
+      <AlertDialog open={!!pendingMessage} onOpenChange={(open) => { if (!open) setPendingMessage(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send message to {user.name || "client"}?</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap break-words">
+              "{pendingMessage}"
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => { if (pendingMessage) sendMessageMutation.mutate(pendingMessage); }}
+            >
+              Send via WhatsApp
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }

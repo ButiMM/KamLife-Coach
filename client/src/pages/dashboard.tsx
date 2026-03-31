@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useUsers, useFlaggedUsers, useMetrics } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
@@ -6,16 +7,41 @@ import { StatusBadge } from "@/components/status-badge";
 import { Users, UserX, Activity, TrendingUp, AlertCircle, ArrowRight, DollarSign, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
+import { useQuery } from "@tanstack/react-query";
+import { authHeaders } from "@/lib/queryClient";
 
 export default function Dashboard() {
   const { data: users, isLoading: usersLoading } = useUsers();
   const { data: flaggedUsers, isLoading: flaggedLoading } = useFlaggedUsers();
   const { data: metrics } = useMetrics();
+  const [flagFilter, setFlagFilter] = useState<"all" | "inactive_7_days" | "plateau_2_weeks">("all");
+  const [flagSort, setFlagSort] = useState<"lastActive" | "name">("lastActive");
+
+  // Live health check — polls every 60s
+  const { data: health } = useQuery({
+    queryKey: ["/api/health"],
+    queryFn: async () => {
+      const res = await fetch("/api/health", { headers: authHeaders() });
+      if (!res.ok) return null;
+      return res.json() as Promise<{ status: string; checks: Record<string, { status: string }> }>;
+    },
+    refetchInterval: 60_000,
+    retry: false,
+  });
 
   const totalUsers = users?.length || 0;
   const activeUsers = users?.filter(u => u.subscriptionStatus === 'active').length || 0;
   const trialUsers = users?.filter(u => u.subscriptionStatus === 'trial').length || 0;
-  const mrr = activeUsers * 99;
+  const mrr = metrics?.estimatedMRR ?? (activeUsers * 99);
+
+  const displayedFlagged = (flaggedUsers || [])
+    .filter(u => flagFilter === "all" || u.flagReason === flagFilter)
+    .sort((a, b) => {
+      if (flagSort === "name") return (a.name || "").localeCompare(b.name || "");
+      const aDate = a.lastLogDate ? new Date(a.lastLogDate).getTime() : 0;
+      const bDate = b.lastLogDate ? new Date(b.lastLogDate).getTime() : 0;
+      return aDate - bDate; // oldest activity first
+    });
 
   if (usersLoading) return <DashboardLoading />;
 
@@ -50,10 +76,10 @@ export default function Dashboard() {
             color="text-emerald-600 bg-emerald-100 dark:bg-emerald-900/20"
           />
           <StatCard
-            title="Monthly Revenue"
+            title="Est. MRR"
             value={`R${mrr.toLocaleString()}`}
             icon={DollarSign}
-            trend={`R${(mrr / 12).toFixed(0)}/day`}
+            trend={`${metrics?.payingClients ?? activeUsers} paying × R99`}
             color="text-green-600 bg-green-100 dark:bg-green-900/20"
           />
           <StatCard
@@ -82,17 +108,36 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Flagged Users List - Takes up 2 cols */}
           <div className="lg:col-span-2 space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <h3 className="text-xl font-bold font-display">Attention Required</h3>
-              <Button variant="outline" size="sm">View All</Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                {/* Filter buttons */}
+                {(["all", "inactive_7_days", "plateau_2_weeks"] as const).map(f => (
+                  <button
+                    key={f}
+                    onClick={() => setFlagFilter(f)}
+                    className={`text-xs px-3 py-1.5 rounded-full border transition-colors ${flagFilter === f ? "bg-primary text-white border-primary" : "border-border bg-card hover:bg-muted"}`}
+                  >
+                    {f === "all" ? "All" : f === "inactive_7_days" ? "Inactive 7d" : "Plateau"}
+                  </button>
+                ))}
+                <select
+                  value={flagSort}
+                  onChange={e => setFlagSort(e.target.value as "lastActive" | "name")}
+                  className="text-xs px-2 py-1.5 rounded-lg border border-border bg-card"
+                >
+                  <option value="lastActive">Sort: Least Active</option>
+                  <option value="name">Sort: Name</option>
+                </select>
+              </div>
             </div>
-            
+
             <div className="bg-card rounded-2xl border border-border overflow-hidden shadow-sm">
               {flaggedLoading ? (
                 <div className="p-8 text-center text-muted-foreground">Loading flagged users...</div>
-              ) : flaggedUsers && flaggedUsers.length > 0 ? (
+              ) : displayedFlagged.length > 0 ? (
                 <div className="divide-y divide-border">
-                  {flaggedUsers.map((user) => (
+                  {displayedFlagged.map((user) => (
                     <motion.div 
                         initial={{ opacity: 0 }}
                         animate={{ opacity: 1 }}
@@ -150,11 +195,12 @@ export default function Dashboard() {
                 <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
                     <h4 className="font-semibold mb-4 text-sm text-muted-foreground uppercase tracking-wider">System Status</h4>
                     <div className="space-y-4">
-                        <StatusRow label="WhatsApp API" status="online" />
-                        <StatusRow label="OpenAI GPT-4" status="online" />
-                        <StatusRow label="PayFast Payments" status="online" />
-                        <StatusRow label="Weekly Scheduler" status="idle" />
+                        <StatusRow label="WhatsApp API" status={health?.checks?.whatsapp?.status === "online" ? "online" : health ? "offline" : "idle"} />
+                        <StatusRow label="OpenAI GPT-4" status={health?.checks?.openai?.status === "online" ? "online" : health ? "offline" : "idle"} />
+                        <StatusRow label="PayFast Payments" status={health?.checks?.payfast?.status === "online" ? "online" : health ? "offline" : "idle"} />
+                        <StatusRow label="Database" status={health?.checks?.database?.status === "online" ? "online" : health ? "offline" : "idle"} />
                     </div>
+                    {health && <p className="text-xs text-muted-foreground mt-3">Last checked: {new Date().toLocaleTimeString()}</p>}
                 </div>
             </div>
           </div>

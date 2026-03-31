@@ -267,6 +267,25 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
+  // GPT-4o for complex coaching that needs nuanced, accurate advice
+  const COMPLEX_SIGNALS = [
+    "injury", "hurt my", "pain in", "hurts when", "sore knee", "sore shoulder", "sore back",
+    "recomposition", "body recomp", "recomp",
+    "creatine", "supplement", "pre-workout", "bcaa", "whey",
+    "change my programme", "switch my programme", "adjust my programme",
+    "not losing weight", "not seeing results", "why am i not",
+    "plateau", "weight plateau", "stuck at",
+    "should i take", "is it safe to",
+    "diabetes", "hypertension", "blood pressure", "thyroid", "pcos",
+    "doctor said", "medical", "chronic",
+    "pregnant", "postpartum",
+  ];
+  const isComplex = COMPLEX_SIGNALS.some(s => msgLower.includes(s));
+  if (isComplex) {
+    console.log(`[MODEL] gpt-4o (complex coaching) | msg: "${userMessage.slice(0, 60)}"`);
+    return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
+  }
+
   // Everything else: gpt-4o-mini — coaching quality is equal, cost is 15x lower
   console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
   return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };

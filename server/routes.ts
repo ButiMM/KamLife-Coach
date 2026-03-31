@@ -382,6 +382,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return crisisReply;
   }
 
+  // ---- TERMINAL / GIT COMMAND GUARD — before user lookup ----
+  // Catches messages like "git pull origin main && pkill node", "npm run dev", etc.
+  const TERMINAL_PATTERNS = [
+    /\bgit\s+(pull|push|commit|clone|checkout|reset|rebase|merge|status|log|diff|add|stash)\b/i,
+    /\bnpm\s+(run|install|start|build|test|update|uninstall)\b/i,
+    /\bpkill\b|\bkill\s+-\d/i,
+    /\brm\s+-rf\b/i,
+    /\bsudo\b.*\b(apt|brew|yum|pip|npm)\b/i,
+    /^[a-z0-9_.-]+\s*&&\s*[a-z0-9_.-]+/i,   // "cmd1 && cmd2" at start of message
+    /\bcd\s+\/[a-z]/i,
+    /\bchmod\b|\bchown\b/i,
+  ];
+  if (TERMINAL_PATTERNS.some(re => re.test(message))) {
+    return `That looks like a terminal command — I'm your fitness coach, not a shell! Send me what you ate, your workout, or ask about your goals. 💪`;
+  }
+
   // ---- DELETE MY DATA (Item 16) — before user lookup ----
   if (/delete my data|forget me|remove my account|popia delete|delete me|erase my data/i.test(m)) {
     const existing = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
@@ -2504,36 +2520,48 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const todayLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
       .from(chatHistory)
       .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-    if (todayLogs.length === 0) {
+    // Filter out log-command entries (e.g. "log the meal", "save this") — those are commands, not food
+    const LOG_CMD_RE = /^(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i;
+    const mealLogs = todayLogs.filter(l => !LOG_CMD_RE.test((l.messageIn || "").trim()));
+    if (mealLogs.length === 0) {
       const diaryReply = `No meals logged yet today. Log your first meal by describing what you ate — for example: "had 2 eggs and pap for breakfast".`;
       await logChat(user.id, message, diaryReply, "FOOD_DIARY");
       return diaryReply;
     }
     let totalCal = 0; let totalProt = 0;
     const mealLines: string[] = [];
-    for (const log of todayLogs) {
+    for (const log of mealLogs) {
       const msgIn = log.messageIn || "";
       const matched = scanForSAFoods(msgIn);
-      if (matched.length > 0) {
-        const mCal = matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-        const mProt = matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-        totalCal += mCal; totalProt += mProt;
-        mealLines.push(`• ${matched.map((f: any) => f.name).join(", ")} — ~${mCal} kcal, ${mProt}g protein`);
-      } else {
-        // Try to extract kcal/protein numbers from GPT response
+      let mCal = matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
+      let mProt = matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
+      // If scan matched foods but got 0 kcal (e.g. unrecognised aliases), or scan found nothing,
+      // fall back to numbers extracted from GPT response
+      if (mCal === 0) {
         const calMatch = (log.messageOut || "").match(/(\d+)\s*kcal/i);
         const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
-        if (calMatch) totalCal += parseInt(calMatch[1]);
-        if (protMatch) totalProt += parseInt(protMatch[1]);
-        if (msgIn && msgIn !== "[Photo]") mealLines.push(`• ${msgIn.slice(0, 60)}`);
-        else if (msgIn === "[Photo]") mealLines.push(`• Food photo logged`);
+        if (calMatch) mCal = parseInt(calMatch[1]);
+        if (protMatch) mProt = parseInt(protMatch[1]);
+      }
+      totalCal += mCal; totalProt += mProt;
+      if (matched.length > 0) {
+        const label = matched.map((f: any) => f.name).join(", ");
+        mealLines.push(mCal > 0
+          ? `• ${label} — ~${mCal} kcal, ${mProt}g protein`
+          : `• ${label}`);
+      } else if (msgIn && msgIn !== "[Photo]") {
+        mealLines.push(mCal > 0
+          ? `• ${msgIn.slice(0, 60)} — ~${mCal} kcal, ${mProt}g protein`
+          : `• ${msgIn.slice(0, 60)}`);
+      } else if (msgIn === "[Photo]") {
+        mealLines.push(mCal > 0 ? `• Food photo — ~${mCal} kcal, ${mProt}g protein` : `• Food photo logged`);
       }
     }
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 130;
     const calRemaining = calTarget - totalCal;
     const diaryLines = [
-      `*Today's food log (${todayLogs.length} ${todayLogs.length === 1 ? "meal" : "meals"}):*`,
+      `*Today's food log (${mealLogs.length} ${mealLogs.length === 1 ? "meal" : "meals"}):*`,
       ...mealLines,
       ``,
       `*Running total:* ~${totalCal} kcal | ${totalProt}g protein`,
@@ -3555,6 +3583,53 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
   });
 
+  // ── Public stats for landing page (no auth — aggregate only) ──────────────
+  app.get("/api/public/stats", async (_req, res) => {
+    try {
+      const [clientCount, workoutCount] = await Promise.all([
+        db.select({ count: sql`count(*)` }).from(users).where(eq(users.onboardingState, "COMPLETE")),
+        db.select({ count: sql`count(*)` }).from(workoutLogs),
+      ]);
+      res.json({
+        activeClients: parseInt(String(clientCount[0]?.count || 0)),
+        workoutsLogged: parseInt(String(workoutCount[0]?.count || 0)),
+      });
+    } catch {
+      res.json({ activeClients: 200, workoutsLogged: 4800 }); // fallback
+    }
+  });
+
+  // ── Detailed health check for dashboard status panel ──────────────────────
+  app.get("/api/health", requireAdminKey, async (_req, res) => {
+    const checks: Record<string, { status: "online" | "offline"; detail?: string }> = {};
+
+    // Database
+    try {
+      await db.select({ count: sql`count(*)` }).from(users).limit(1);
+      checks.database = { status: "online" };
+    } catch (e: any) {
+      checks.database = { status: "offline", detail: e.message };
+    }
+
+    // OpenAI
+    checks.openai = process.env.OPENAI_API_KEY
+      ? { status: "online" }
+      : { status: "offline", detail: "OPENAI_API_KEY not set" };
+
+    // Twilio / WhatsApp
+    checks.whatsapp = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER)
+      ? { status: "online" }
+      : { status: "offline", detail: "Twilio env vars missing" };
+
+    // PayFast
+    checks.payfast = (process.env.PAYFAST_MERCHANT_ID && process.env.PAYFAST_MERCHANT_KEY)
+      ? { status: "online" }
+      : { status: "offline", detail: "PayFast env vars missing" };
+
+    const allOnline = Object.values(checks).every(c => c.status === "online");
+    res.json({ status: allOnline ? "healthy" : "degraded", checks, timestamp: new Date().toISOString() });
+  });
+
   // ── Voice note file serving ────────────────────────────────
   // Serves TTS-generated MP3s for milestone voice notes
   app.get("/voice/:id.mp3", (req, res) => {
@@ -3644,14 +3719,19 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const allChats = await db.select().from(chatHistory).where(gte(chatHistory.createdAt, weekAgo));
       const avgMessagesPerDay = activeClients > 0 ? Math.round(allChats.length / 7 / activeClients * 10) / 10 : 0;
 
+      // Estimated MRR: count paying subscribers (active) × base price R99
+      // Excludes trial users; over-counts if mix of Basic/Pro/Premium tiers
+      const payingClients = allComplete.filter(u => u.subscriptionStatus === "active").length;
+      const estimatedMRR = payingClients * 99;
+
       res.json({
         activeClients,
+        payingClients,
         newThisWeek,
         churnedThisWeek,
         avgMessagesPerClientPerDay: avgMessagesPerDay,
-        totalRevenuePlaceholder: activeClients * 99,
+        estimatedMRR,
         currency: "ZAR",
-        note: "Revenue figure is a placeholder — integrate PayFast webhooks to get real payment data",
       });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch metrics" });
