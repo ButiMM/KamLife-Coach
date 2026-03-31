@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { users, chatHistory, weightLogs, stepLogs, workoutLogs } from "../shared/schema";
+import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
@@ -294,6 +294,27 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
+
+  // Inject recent lift data so GPT can reference real numbers (never fabricate)
+  let liftContext = "";
+  try {
+    const recentLifts = await db.select().from(exerciseLogs)
+      .where(eq(exerciseLogs.userId, user.id))
+      .orderBy(desc(exerciseLogs.loggedAt))
+      .limit(10);
+    if (recentLifts.length > 0) {
+      const seen = new Map<string, typeof recentLifts[0]>();
+      for (const l of recentLifts) { if (!seen.has(l.exerciseName)) seen.set(l.exerciseName, l); }
+      const lines = [...seen.values()].slice(0, 5).map(l => {
+        const w = parseFloat(String(l.weightKg || 0));
+        const rStr = l.sets && l.reps ? ` ${l.sets}×${l.reps}` : l.reps ? ` ×${l.reps}` : "";
+        const dAgo = Math.floor((Date.now() - new Date(l.loggedAt || "").getTime()) / 86_400_000);
+        return `${l.exerciseName}: ${w}kg${rStr} (${dAgo === 0 ? "today" : dAgo + "d ago"})`;
+      });
+      liftContext = `\n\nCLIENT'S RECENT LIFTS (use these exact numbers — never guess):\n${lines.join("\n")}\nWhen advising on weight/progression, reference these numbers directly.`;
+    }
+  } catch { /* non-fatal */ }
+
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
   try {
@@ -303,7 +324,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${winMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
+          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${liftContext}${winMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
         },
         {
           role: "user",

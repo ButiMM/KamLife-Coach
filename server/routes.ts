@@ -285,6 +285,42 @@ async function getDamageControlNote(userId: string, message: string): Promise<st
 }
 
 // ============================================================
+// PROGRESSIVE OVERLOAD CONTEXT — pulls last logged weights for a user
+// Call before delivering a workout. If they've logged any lifts, prepend targets.
+// ============================================================
+
+async function getProgressiveOverloadContext(userId: string): Promise<string> {
+  try {
+    const recentLifts = await db.select().from(exerciseLogs)
+      .where(eq(exerciseLogs.userId, userId))
+      .orderBy(desc(exerciseLogs.loggedAt))
+      .limit(20);
+    if (recentLifts.length === 0) return "";
+
+    // Deduplicate — keep most recent entry per exercise
+    const seen = new Map<string, typeof recentLifts[0]>();
+    for (const lift of recentLifts) {
+      if (!seen.has(lift.exerciseName)) seen.set(lift.exerciseName, lift);
+    }
+    const entries = [...seen.values()].slice(0, 6);
+
+    const lines = entries.map(lift => {
+      const w = parseFloat(String(lift.weightKg || 0));
+      const repsStr = lift.sets && lift.reps
+        ? ` ${lift.sets}×${lift.reps} reps`
+        : lift.reps ? ` ×${lift.reps} reps` : "";
+      const nextW = (w + 2.5).toFixed(1).replace(".0", "");
+      const daysAgo = Math.floor((Date.now() - new Date(lift.loggedAt || "").getTime()) / 86_400_000);
+      const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
+      return `• ${lift.exerciseName}: ${w}kg${repsStr} (${when}) → aim ${nextW}kg or add 1–2 reps`;
+    });
+
+    return `*Your Targets — Based on Last Session:*\n${lines.join("\n")}\n\n`;
+  } catch {
+    return "";
+  }
+}
+
 // PERFECT DAY DETECTION
 // ============================================================
 
@@ -489,8 +525,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
-    await logChat(user.id, message, workout, "WORKOUT_VIEW");
-    return `*Day ${dayNum} — Your Workout*\n\n${workout}`;
+    const poContext = await getProgressiveOverloadContext(user.id);
+    const week = user.programmeWeek || 1;
+    const sessionNum = user.totalWorkoutsCompleted || 0;
+    const sessionNote = sessionNum > 0 ? ` — Session ${sessionNum + 1}` : "";
+    const weekNote = `*Week ${week}${sessionNote}*\n\n`;
+    const reply = `${weekNote}${poContext}${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
+    await logChat(user.id, message, reply, "WORKOUT_VIEW");
+    return reply;
   }
 
   if (m === "my targets" || m === "targets" || m === "my stats" || m === "stats") {
@@ -1008,7 +1050,12 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       : newStreak >= 7 ? `\n\n🔥 *7-session streak.* You are building a habit.`
       : newStreak >= 3 ? `\n\n🔥 Streak: ${newStreak}. Keep it going.`
       : "";
-    let doneReply = `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}`;
+    const liftPrompt = newTotal >= 2
+      ? `\n\n💡 *Log your lifts to track progress:* "bench 80kg 3x10", "squat 100kg x5", "deadlift 120kg"\nType *my lifts* anytime to see your all-time bests.`
+      : newTotal === 1
+      ? `\n\n💡 *Next session — log your weights* after each exercise: "bench 60kg 3x10". I track your progress week to week.`
+      : "";
+    let doneReply = `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
 
     // Progressive programme delivery — unlock next day's workout after completing each session
     try {
@@ -1264,7 +1311,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     try {
       const workout = buildDayWorkout(user);
       const dayNum = user.programmeDayInWeek || 1;
-      const r = `*Day ${dayNum} — Your Workout Today*\n\n${workout}`;
+      const week = user.programmeWeek || 1;
+      const totalSessions = user.totalWorkoutsCompleted || 0;
+      const poCtx = await getProgressiveOverloadContext(user.id);
+      const sessionNote = totalSessions > 0 ? ` | Session ${totalSessions + 1}` : "";
+      const r = `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Your Workout Today*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
       await logChat(user.id, message, r, "WORKOUT_VIEW");
       return r;
     } catch (e) {
@@ -1830,11 +1881,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const requestedDay = parseInt(dayMatch[1]);
       const dayUser = { ...user, programmeDayInWeek: requestedDay };
       const workout = buildDayWorkout(dayUser);
-      return `*Day ${requestedDay} Workout*\n\n${workout}`;
+      const poCtx = await getProgressiveOverloadContext(user.id);
+      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
     }
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
-    return `*Day ${dayNum} — Your Workout Today*\n\n${workout}`;
+    const week = user.programmeWeek || 1;
+    const totalSessions = user.totalWorkoutsCompleted || 0;
+    const poCtx = await getProgressiveOverloadContext(user.id);
+    const sessionNote = totalSessions > 0 ? ` | Session ${totalSessions + 1}` : "";
+    return `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
   }
 
   // ---- NEW: NEXT WORKOUT ----
