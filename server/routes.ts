@@ -713,8 +713,17 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     // ---- PROGRESS PHOTO or FOOD PHOTO ----
     if (ctype.startsWith("image/")) {
       try {
-        // Image endpoint on Twilio is public (no auth needed), but use same pattern for consistency
-        const imageResponse = await fetch(mediaUrl);
+        // Twilio media requires auth — same as audio, use Basic auth with SID:TOKEN
+        const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
+        const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
+        const imgAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+        const imageResponse = await fetch(mediaUrl, {
+          headers: { Authorization: imgAuthHeader },
+        });
+        if (!imageResponse.ok) {
+          console.error(`[VISION] Twilio image fetch failed: ${imageResponse.status} ${imageResponse.statusText}`);
+          return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
+        }
         const buffer = await imageResponse.arrayBuffer();
         const base64 = Buffer.from(buffer).toString("base64");
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
@@ -1297,10 +1306,10 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }).where(eq(users.phoneNumber, phone));
 
     const updatedUser = { ...user, trainingDaysPerWeek: days, trainingExperience: exp, goalType: goal };
-    const programme = getKamlifeProgramme(updatedUser);
+    const day1 = buildFullProgramme(updatedUser);
     const goalLabel = goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Body recomposition";
 
-    return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Programme built.\n\n${programme}`;
+    return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Here is Day 1 — send *done* when finished to unlock Day 2.\n\n${day1}`;
   }
 
   // ---- FIX 4: EXPLICIT WORKOUT COMMANDS — hardcoded, never touch GPT ----
@@ -1731,7 +1740,10 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       let dataPoint = "";
       if (totalWorkouts > 0) dataPoint = `You have completed ${totalWorkouts} training session${totalWorkouts > 1 ? "s" : ""}.`;
       else if (avgStepsStruggle > 4000) dataPoint = `You are averaging ${avgStepsStruggle.toLocaleString()} steps per day this week.`;
-      const struggleContext = `Client is struggling and said: "${message}". RULES — empathy first in one sentence, no generic motivation speech. Then state this real data point: "${dataPoint || "You showed up and sent this message — that means you have not quit."}". Then give ONE single specific action for today only. Never a list. Never "you've got this" or "believe in yourself". Be real and direct like a coach, not a cheerleader. SA voice.`;
+      const week3Note = (user.programmeWeek || 1) === 3
+        ? " IMPORTANT — this client is in WEEK 3, which is statistically the highest dropout point. The physical adaptation is happening but is not yet visible. Specifically acknowledge Week 3 by name. Tell them exactly what is happening physiologically this week (muscles adapting, metabolism shifting) and that the visible results come in weeks 4–6 if they do not stop now."
+        : "";
+      const struggleContext = `Client is struggling and said: "${message}". RULES — empathy first in one sentence, no generic motivation speech. Then state this real data point: "${dataPoint || "You showed up and sent this message — that means you have not quit."}". Then give ONE single specific action for today only. Never a list. Never "you've got this" or "believe in yourself". Be real and direct like a coach, not a cheerleader. SA voice.${week3Note}`;
       const struggleReply = await askCoachK(message, user, struggleContext);
       await logChat(user.id, message, struggleReply, "MOTIVATION");
       return struggleReply;
@@ -2113,6 +2125,31 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
     await logChat(user.id, message, storeReply, "STORE_ADVICE");
     return storeReply;
+  }
+
+  // ---- "CAN'T DO X" EXERCISE ALTERNATIVE — no GPT, instant swap ----
+  const CANT_DO_MAP: Record<string, string> = {
+    "pull.?up|chin.?up": "Do lat pulldown or seated cable row instead. Same pulling muscles. Start with lat pulldown at 50% bodyweight and build from there.",
+    "push.?up|pushup": "Elevate your hands on a bench or wall. Reduce the angle until you can do 3×10 clean, then lower it over time.",
+    "squat": "Leg press or goblet squat. If knees are the problem, reduce depth — only go as low as is pain-free. Box squat (sit down on a low bench and stand up) builds the same pattern.",
+    "deadlift|dead lift": "Romanian Deadlift with lighter weight — keeps the movement pattern without the full load on the lower back. Or trap bar deadlift if available.",
+    "bench|chest press": "Dumbbell press — easier on the shoulders and joints. Or push-up variations if no equipment. Same muscles.",
+    "dip": "Close-grip bench press or tricep pushdown. Dips are shoulder-intensive — these alternatives are safer if shoulders are the issue.",
+    "lunge": "Step-up onto a bench or box instead. Same single-leg demand, more controlled. Or Bulgarian split squat with a shorter range.",
+    "plank|core|abs": "Dead bug — lie on back, extend opposite arm and leg while keeping lower back flat. Harder than it looks. Or bird dog on hands and knees.",
+    "shoulder press|overhead|ohp": "Lateral raise and front raise instead — builds shoulders without the overhead load. Or seated dumbbell press with shorter range of motion.",
+    "run|running|cardio": "Brisk walking — 30 minutes at a pace that makes you slightly breathless is equivalent to 15 minutes of running for fat loss. Zero joint impact.",
+  };
+  const cantDoMatch = m.match(/\b(can.?t|cannot|don.?t|won.?t|not able to|unable to)\b.{0,20}\b(do|try|perform|handle)\b/i)
+    || m.match(/\b(can.?t|cannot|don.?t)\s+do\s+/i)
+    || m.match(/\b(can.?t|cannot)\s+(do|handle|manage)\s+\w+/i);
+  if (cantDoMatch || /\b(alternative|swap|instead of|substitute|replace)\b.{0,20}\b(exercise|workout|movement|squat|bench|pull|push|deadlift|lunge|run|plank|dip)\b/i.test(m)) {
+    const altKey = Object.keys(CANT_DO_MAP).find(k => new RegExp(k, "i").test(m));
+    if (altKey) {
+      const altReply = `No problem — ${CANT_DO_MAP[altKey]}`;
+      await logChat(user.id, message, altReply, "EXERCISE_ALT");
+      return altReply;
+    }
   }
 
   // ---- INJURY MODIFICATIONS (Item 18) — no GPT for known injuries ----

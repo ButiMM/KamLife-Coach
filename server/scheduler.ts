@@ -1113,6 +1113,68 @@ cron.schedule("0 7 * * 1", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 18b — WEEKLY MONDAY PROGRAMME CHECK-IN
+// Runs every Monday at 8am SAST (6am UTC)
+// Sends a week-specific message to ALL active clients
+// (different from 18a which only fires at milestone weeks)
+// ============================================================
+
+cron.schedule("0 6 * * 1", async () => {
+  console.log("[SCHEDULER] JOB: Weekly Monday check-in");
+  const clients = await getActiveClients();
+  const thisWeek = thisWeekUTC();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    // Skip clients not active in last 5 days — already handled by morning check-in
+    const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000);
+    if (client.lastActiveAt && new Date(client.lastActiveAt) < fiveDaysAgo) continue;
+    try {
+      const stateKey = `weekly_checkin_${client.id}`;
+      const state = loadState();
+      if (state[stateKey] === thisWeek) continue; // Already sent this week
+
+      const name = client.name || "there";
+      const week = client.programmeWeek || 1;
+      const sessions = client.totalWorkoutsCompleted || 0;
+      const planned = client.trainingDaysPerWeek || 3;
+      const goal = client.goalType || "fat_loss";
+      const streak = client.workoutStreak || 0;
+
+      let msg = "";
+
+      if (week === 1) {
+        msg = `${name}, Week 1 starts now. Your only goal this week: complete ${planned} sessions and log every meal. Do not try to be perfect — try to be consistent. Send me your first meal of the day.`;
+      } else if (week === 2) {
+        msg = `${name}, Week 2. Your body is adapting — soreness from last week means it is working. ${sessions} sessions done. This week: push your step count above ${(client.stepsTarget || 8500).toLocaleString()} every day. Small daily win.`;
+      } else if (week === 3) {
+        msg = `${name}, Week 3 — this is where most people drop off. Not because it got hard, but because the mirror has not changed yet. Your muscles are adapting right now. Results show in weeks 4–6. Complete ${planned} sessions this week and you will be past the hardest point.`;
+      } else if (week === 4) {
+        msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is the week things start to click. Your body knows the movements now. Push harder than last week on every exercise — more reps or more weight. You earned this week.`;
+      } else if (week <= 8) {
+        const sessionGoal = sessions + planned;
+        msg = `${name}, Week ${week} — ${sessions} sessions in the bank. Target for this week: ${planned} sessions and ${sessionGoal} total. ${streak >= 3 ? `You are on a ${streak}-session streak — do not break it.` : "Get the streak going."}`;
+      } else if (week <= 12) {
+        const goalMsg = goal === "fat_loss" ? "Fat loss compounds from here — the early weeks built the foundation."
+          : goal === "muscle_gain" ? "Muscle building accelerates after week 8 — progressive overload is everything now."
+          : "Your body is recomposing — fat down, muscle up. The scale may not move much but the mirror will.";
+        msg = `${name}, Week ${week} — ${sessions} total sessions. ${goalMsg} One focus this week: log your lifts and add weight or reps to every exercise.`;
+      } else {
+        msg = `${name}, Week ${week} — ${sessions} sessions. You are in the top 5% of people who stick with a programme this long. What is your goal for this week? One specific thing.`;
+      }
+
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber, msg);
+        saveState(stateKey, thisWeek);
+        recordProactiveSend(client.id);
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
 // JOB 18 — INJURY FOLLOW-UP
 // Runs every Wednesday at 10am SAST (8am UTC)
 // ============================================================
