@@ -37,17 +37,31 @@ function todayUTC(): string {
 }
 
 // Track proactive messages sent today per client — max 2 per day
+// Key format: "YYYY-MM-DD:clientId" so the map is self-expiring by day
 const dailyMessageCount = new Map<string, number>();
 
+function dailyKey(clientId: string): string {
+  return `${todayUTC()}:${clientId}`;
+}
+
 function canSendProactive(clientId: string): boolean {
-  const count = dailyMessageCount.get(clientId) || 0;
+  const count = dailyMessageCount.get(dailyKey(clientId)) || 0;
   return count < 2;
 }
 
 function recordProactiveSend(clientId: string): void {
-  const count = dailyMessageCount.get(clientId) || 0;
-  dailyMessageCount.set(clientId, count + 1);
+  const key = dailyKey(clientId);
+  dailyMessageCount.set(key, (dailyMessageCount.get(key) || 0) + 1);
 }
+
+// Purge stale keys at midnight SAST (22:00 UTC) — prevents unbounded Map growth
+cron.schedule("0 22 * * *", () => {
+  const today = todayUTC();
+  for (const key of dailyMessageCount.keys()) {
+    if (!key.startsWith(today)) dailyMessageCount.delete(key);
+  }
+  console.log("[SCHEDULER] dailyMessageCount purged — entries remaining:", dailyMessageCount.size);
+}, { timezone: "UTC" });
 
 function thisWeekUTC(): string {
   const d = new Date();
@@ -492,11 +506,12 @@ cron.schedule("0 6 * * 0", async () => {
     try {
       const name = client.name || "champ";
 
-      // Query all logs for the past 7 days in parallel
-      const [chats, workoutEntries, weightEntries] = await Promise.all([
+      // Single parallel fetch for all week data
+      const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, weekAgo))),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
         db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, weekAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
       ]);
 
       // No logs at all — send a nudge, not a report
@@ -507,7 +522,6 @@ cron.schedule("0 6 * * 0", async () => {
         continue;
       }
 
-      // Only generate full report if they logged at least 3 times
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
         await sendWhatsApp(client.phoneNumber,
@@ -516,53 +530,111 @@ cron.schedule("0 6 * * 0", async () => {
         continue;
       }
 
-      // Calculate metrics
       const foodLogs = chats.filter(c => c.intent === "FOOD_LOG");
-      const foodDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
       const plannedSessions = client.trainingDaysPerWeek || 3;
       const completedSessions = workoutEntries.length;
       const weekNum = client.programmeWeek || 1;
+      const proteinTarget = client.proteinTarget || 120;
+      const stepsTarget = client.stepsTarget || 8500;
 
-      // Weight change
-      let weightLine = "Weight: no weigh-ins this week";
+      // ── Weight line ────────────────────────────────────────
+      let weightLine = "";
+      let weightEmoji = "⚖️";
       if (weightEntries.length >= 2) {
         const diff = parseFloat(String(weightEntries[weightEntries.length - 1].weight)) - parseFloat(String(weightEntries[0].weight));
-        if (diff < -0.1) weightLine = `Weight: down ${Math.abs(diff).toFixed(1)}kg this week`;
-        else if (diff > 0.1) weightLine = `Weight: up ${diff.toFixed(1)}kg this week`;
-        else weightLine = `Weight: unchanged this week`;
+        if (diff < -0.1) { weightLine = `${Math.abs(diff).toFixed(1)}kg down`; weightEmoji = "📉"; }
+        else if (diff > 0.1) { weightLine = `${diff.toFixed(1)}kg up`; weightEmoji = "📈"; }
+        else { weightLine = "unchanged"; weightEmoji = "➡️"; }
       } else if (weightEntries.length === 1) {
-        weightLine = `Weight: ${weightEntries[0].weight}kg logged once — log at start and end of week for accurate tracking`;
+        weightLine = `${weightEntries[0].weight}kg logged`;
+      } else {
+        weightLine = "not logged — weigh in Monday morning";
       }
 
-      // Best protein meal and worst pattern
-      let bestMeal = "";
-      let worstPattern = "";
-      const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey"];
-      const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "vetkoek", "kotas", "polony", "vetkoek", "chocolate", "cool drink", "alcohol", "beer", "wine"];
-      const proteinMeals = foodLogs.filter(l => PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w)));
-      if (proteinMeals.length > 0) bestMeal = (proteinMeals[0].messageIn || "").slice(0, 60);
+      // ── Steps average ──────────────────────────────────────
+      let stepsLine = "";
+      let stepsEmoji = "👟";
+      if (stepEntries.length > 0) {
+        const avgSteps = Math.round(stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length);
+        const pct = Math.round((avgSteps / stepsTarget) * 100);
+        stepsEmoji = pct >= 100 ? "✅" : pct >= 75 ? "👟" : "⚠️";
+        stepsLine = `${avgSteps.toLocaleString()} avg (${pct}% of ${stepsTarget.toLocaleString()} target)`;
+      } else {
+        stepsLine = "not logged this week";
+        stepsEmoji = "⚠️";
+      }
+
+      // ── Protein hit rate ───────────────────────────────────
+      const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey", "mince", "biltong", "sardines", "lentils"];
+      const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "vetkoek", "kotas", "polony", "chocolate", "cool drink", "alcohol", "beer", "wine", "magwinya", "fat cake"];
+
+      const foodDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
+      const proteinDays = new Set(
+        foodLogs.filter(l => PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w)))
+          .map(c => new Date(c.createdAt!).toDateString())
+      ).size;
+      const proteinHitRate = foodDays > 0 ? Math.round((proteinDays / foodDays) * 100) : 0;
+      const proteinEmoji = proteinHitRate >= 80 ? "✅" : proteinHitRate >= 50 ? "⚠️" : "❌";
+
+      // ── Training emoji ─────────────────────────────────────
+      const trainPct = Math.round((completedSessions / plannedSessions) * 100);
+      const trainEmoji = trainPct >= 100 ? "✅" : trainPct >= 66 ? "💪" : "⚠️";
+
+      // ── Workout streak ─────────────────────────────────────
+      const streak = client.workoutStreak || 0;
+      const streakLine = streak > 0 ? `🔥 ${streak}-session streak` : "";
+
+      // ── Pattern / warning ──────────────────────────────────
       const junkCount = foodLogs.filter(l => JUNK.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
-      const noProteinCount = foodLogs.filter(l => !PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
-      if (junkCount >= 3) worstPattern = `junk food appeared ${junkCount} times this week`;
-      else if (noProteinCount >= 3) worstPattern = `${noProteinCount} meals with no protein logged`;
-      else if (completedSessions < Math.floor(plannedSessions * 0.5)) worstPattern = `only ${completedSessions} of ${plannedSessions} planned sessions completed`;
-      else worstPattern = "no major pattern this week — keep the consistency going";
+      const noProteinDays = foodDays - proteinDays;
+      let warning = "";
+      if (junkCount >= 3) warning = `⚠️ Junk appeared ${junkCount}x — one bad meal is recoverable, four is a pattern.`;
+      else if (noProteinDays >= 3) warning = `⚠️ ${noProteinDays} days with no protein logged — eggs, pilchards, or beans at every meal.`;
+      else if (completedSessions === 0) warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
 
-      // This week focus
-      let weekFocus = "";
-      if (completedSessions < plannedSessions) weekFocus = `Get ${plannedSessions - completedSessions} missed session${plannedSessions - completedSessions !== 1 ? "s" : ""} done this week — training is non-negotiable`;
-      else if (noProteinCount >= 3) weekFocus = "Protein at every single meal this week — eggs, pilchards, chicken, beans";
-      else weekFocus = "Maintain what you built — consistency beats intensity every time";
+      // ── Next week focus ────────────────────────────────────
+      let focus = "";
+      if (completedSessions < plannedSessions) focus = `Train ${plannedSessions - completedSessions} more time${plannedSessions - completedSessions !== 1 ? "s" : ""} than last week.`;
+      else if (proteinHitRate < 60) focus = `Protein at every meal — eggs, pilchards, beans, chicken.`;
+      else if (stepEntries.length === 0) focus = `Log your steps at least 3 days this week.`;
+      else focus = `Maintain the consistency — same output or better.`;
 
-      // Encouragement
-      const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
-      const encouragement = onTrack
-        ? `${name}, ${completedSessions} sessions done this week. That kind of consistency is exactly what builds real results. Same energy this week.`
-        : `${name}, this week was below your best — but you are still here and that counts for something. Reset and go again.`;
+      // ── Score (0–100) ──────────────────────────────────────
+      const logScore = Math.round((daysWithLogs / 7) * 25);
+      const trainScore = Math.round((Math.min(completedSessions, plannedSessions) / plannedSessions) * 35);
+      const proteinScore = Math.round((proteinHitRate / 100) * 25);
+      const stepsScore = stepEntries.length > 0 ? Math.round((Math.min(1, stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length / stepsTarget)) * 15) : 0;
+      const totalScore = logScore + trainScore + proteinScore + stepsScore;
+      const scoreLabel = totalScore >= 85 ? "Outstanding" : totalScore >= 70 ? "Strong" : totalScore >= 50 ? "Building" : "Below target";
 
-      const report = `${name} — Week ${weekNum} Report 💪\n\nLogged: ${daysWithLogs} of 7 days\nTraining: ${completedSessions} of ${plannedSessions} sessions completed\n${weightLine}\nBest meal: ${bestMeal || "no high-protein meal logged — fix this week"}\nPattern spotted: ${worstPattern}\n\nThis week focus: ${weekFocus}\n\n${encouragement}`;
+      // ── Assemble report card ───────────────────────────────
+      const lines = [
+        `*${name} — Week ${weekNum} Report Card*`,
+        ``,
+        `${trainEmoji} Training: ${completedSessions}/${plannedSessions} sessions`,
+        `${weightEmoji} Weight: ${weightLine}`,
+        `${stepsEmoji} Steps: ${stepsLine}`,
+        `${proteinEmoji} Protein days: ${proteinDays}/${foodDays} meals tracked`,
+        `📅 Logged: ${daysWithLogs}/7 days`,
+        streakLine ? streakLine : "",
+        ``,
+        `*Weekly Score: ${totalScore}/100 — ${scoreLabel}*`,
+        ``,
+      ].filter(l => l !== null);
 
-      await sendWhatsApp(client.phoneNumber, report);
+      if (warning) lines.push(warning, ``);
+      lines.push(`*This week:* ${focus}`);
+
+      // Personal sign-off based on score
+      if (totalScore >= 85) {
+        lines.push(``, `${name}, this is what results look like. Same energy next week.`);
+      } else if (totalScore >= 60) {
+        lines.push(``, `Solid week, ${name}. One more push and you are in the top tier. Go.`);
+      } else {
+        lines.push(``, `${name}, below your best but you are still here. That matters. Reset Sunday night and go again Monday.`);
+      }
+
+      await sendWhatsApp(client.phoneNumber, lines.join("\n"));
     } catch (err) {
       console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
     }

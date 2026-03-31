@@ -10,7 +10,7 @@ import {
   type BodyMeasurement, type InsertBodyMeasurement,
   type FlaggedUser
 } from "@shared/schema";
-import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { eq, desc, and, gte, sql, inArray } from "drizzle-orm";
 
 export interface IStorage {
   // User CRUD
@@ -154,35 +154,57 @@ export class DatabaseStorage implements IStorage {
   }
 
   async getFlaggedUsers(): Promise<FlaggedUser[]> {
-    const allUsers = await this.getAllUsers();
-    const flagged: FlaggedUser[] = [];
-
     const sevenDaysAgo = new Date();
     sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
 
-    for (const user of allUsers) {
-      if (user.subscriptionStatus !== 'active') continue;
+    // Single query: only active, onboarded users
+    const activeUsers = await db.select().from(users).where(
+      and(eq(users.subscriptionStatus, 'active'), eq(users.onboardingState, 'COMPLETE'))
+    ).orderBy(desc(users.lastActiveAt));
 
+    const flagged: FlaggedUser[] = [];
+    const inactiveUsers: typeof activeUsers = [];
+    const recentlyActiveUsers: typeof activeUsers = [];
+
+    for (const user of activeUsers) {
       if (!user.lastActiveAt || new Date(user.lastActiveAt) < sevenDaysAgo) {
         flagged.push({
           ...user,
           flagReason: "inactive_7_days",
           lastLogDate: user.lastActiveAt ? user.lastActiveAt.toString() : null
         });
-        continue;
+      } else {
+        recentlyActiveUsers.push(user);
+      }
+    }
+
+    // Batch fetch all checkins for recently-active users in one query
+    if (recentlyActiveUsers.length > 0) {
+      const userIds = recentlyActiveUsers.map(u => u.id);
+      const allCheckins = await db.select().from(weeklyCheckins)
+        .where(inArray(weeklyCheckins.userId, userIds))
+        .orderBy(desc(weeklyCheckins.weekStartDate));
+
+      // Group by userId
+      const checkinsByUser = new Map<string, typeof allCheckins>();
+      for (const c of allCheckins) {
+        const list = checkinsByUser.get(c.userId) || [];
+        list.push(c);
+        checkinsByUser.set(c.userId, list);
       }
 
-      const checkins = await this.getWeeklyCheckins(user.id);
-      
-      if (checkins.length >= 2) {
-        const w1 = Number(checkins[0].weight);
-        const w2 = Number(checkins[1].weight);
-        if (w1 >= w2) { // plateau or gain
-             flagged.push({
-                ...user,
-                flagReason: "plateau_2_weeks",
-                lastLogDate: user.lastActiveAt.toString()
+      for (const user of recentlyActiveUsers) {
+        const checkins = checkinsByUser.get(user.id) || [];
+        if (checkins.length >= 2) {
+          const w1 = Number(checkins[0].weight);
+          const w2 = Number(checkins[1].weight);
+          if (w1 >= w2) {
+            flagged.push({
+              ...user,
+              flagReason: "plateau_2_weeks",
+              lastLogDate: user.lastActiveAt!.toString()
             });
+          }
         }
       }
     }

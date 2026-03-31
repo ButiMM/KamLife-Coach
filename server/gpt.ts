@@ -313,7 +313,9 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       });
       liftContext = `\n\nCLIENT'S RECENT LIFTS (use these exact numbers — never guess):\n${lines.join("\n")}\nWhen advising on weight/progression, reference these numbers directly.`;
     }
-  } catch { /* non-fatal */ }
+  } catch (liftErr) {
+    console.warn("[GPT] Could not fetch lift context:", liftErr);
+  }
 
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
@@ -332,12 +334,40 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
         }
       ]
     });
+    // ── Cost tracking ──────────────────────────────────────
+    const usage = response.usage;
+    if (usage) {
+      const inputTokens = usage.prompt_tokens ?? 0;
+      const outputTokens = usage.completion_tokens ?? 0;
+      // gpt-4o-mini: $0.00015/1k input, $0.0006/1k output
+      // gpt-4o:      $0.005/1k input,   $0.015/1k output
+      const isMini = model === "gpt-4o-mini";
+      const costUSD = isMini
+        ? (inputTokens / 1000) * 0.00015 + (outputTokens / 1000) * 0.0006
+        : (inputTokens / 1000) * 0.005   + (outputTokens / 1000) * 0.015;
+      const costZAR = costUSD * 18.5; // approximate USD→ZAR
+      console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
+    }
+
     return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
   } catch (err: any) {
-    console.error("OpenAI error:", err);
-    if (err?.status === 401 || err?.code === 401 || (err?.message && err.message.includes("401"))) {
+    const status = err?.status ?? err?.statusCode ?? 0;
+    const code = err?.code ?? "";
+    const msg = err?.message ?? "";
+
+    if (status === 401 || code === 401 || msg.includes("401")) {
+      console.error("[GPT] OpenAI auth error (401) — check AI_INTEGRATIONS_OPENAI_API_KEY:", msg);
       return "Coach K is almost ready. Type *menu* to see your options or *calories* for your daily target. Your programme, meal plan, and targets are all set.";
     }
+    if (status === 429 || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota")) {
+      console.error("[GPT] OpenAI rate limit / quota exceeded:", msg);
+      return "Coach K is a bit busy right now. Give it 30 seconds and try again.";
+    }
+    if (status === 503 || status === 504 || msg.toLowerCase().includes("timeout") || code === "ECONNRESET") {
+      console.error("[GPT] OpenAI timeout / service unavailable:", msg);
+      return "Network hiccup on my side. Send that again in a moment.";
+    }
+    console.error("[GPT] OpenAI unexpected error:", { status, code, msg });
     return "Eish Coach K had a moment. Try that again.";
   }
 }

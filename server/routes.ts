@@ -116,14 +116,14 @@ async function getStepStreak(userId: string): Promise<number> {
     const days = new Set<string>();
     for (const log of logs) {
       const d = new Date(log.loggedAt!);
-      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      days.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`);
     }
     let streak = 0;
     const checkDate = new Date();
-    const todayKey = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
+    const todayKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
     if (!days.has(todayKey)) checkDate.setDate(checkDate.getDate() - 1);
     while (true) {
-      const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
+      const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, '0')}-${String(checkDate.getDate()).padStart(2, '0')}`;
       if (!days.has(key)) break;
       streak++;
       checkDate.setDate(checkDate.getDate() - 1);
@@ -1863,7 +1863,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       code = `${namePrefix}${randomSuffix}`;
       await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
     }
-    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with someone ready to change:\n\n_"I am working with a WhatsApp fitness coach — real SA food advice, full workout programmes, daily accountability. R99/month, no app, just WhatsApp. Use my code ${code} when you sign up and get your first month at R50."_\n\nEvery person who stays for a full month earns you R20 off your next payment. No limit on referrals.`;
+    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with a friend:\n\n_"I'm working with a WhatsApp fitness coach — real SA food, full workout programmes, daily accountability. From R99/month, no app needed. Use code ${code} when you sign up and we BOTH get one month free."_\n\nWhen your friend pays their first month, Coach K sends you a free month automatically. No limit on referrals — every friend earns you a free month.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;
   }
@@ -3306,9 +3306,29 @@ function checkRateLimit(phone: string): boolean {
 
 export async function registerRoutes(server: Server, app: Express): Promise<void> {
 
+  // ── Admin auth ────────────────────────────────────────────
+
+  // Simple key-based auth: client sends COACH_DASHBOARD_KEY, gets back a session token
+  // stored in localStorage. All /api/* admin routes require the X-Dashboard-Key header.
+  function requireAdminKey(req: any, res: any, next: any) {
+    const key = process.env.COACH_DASHBOARD_KEY || "kamlife2024";
+    const provided = (req.headers["x-dashboard-key"] as string) || (req.query.key as string) || "";
+    if (provided !== key) return res.status(401).json({ message: "Unauthorized" });
+    next();
+  }
+
+  app.post("/api/auth/login", (req: any, res: any) => {
+    const key = process.env.COACH_DASHBOARD_KEY || "kamlife2024";
+    const { password } = req.body || {};
+    if (!password || password !== key) {
+      return res.status(401).json({ message: "Invalid password" });
+    }
+    return res.json({ token: key });
+  });
+
   // ── REST API for admin dashboard ──────────────────────────
 
-  app.get("/api/users", async (_req, res) => {
+  app.get("/api/users", requireAdminKey, async (_req, res) => {
     try {
       const all = await db.select().from(users).orderBy(desc(users.createdAt));
       res.json(all);
@@ -3317,7 +3337,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.get("/api/users/:id", async (req, res) => {
+  app.get("/api/users/:id", requireAdminKey, async (req, res) => {
     try {
       const user = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
       if (!user.length) return res.status(404).json({ message: "User not found" });
@@ -3333,7 +3353,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.get("/api/admin/flagged", async (_req, res) => {
+  app.get("/api/admin/flagged", requireAdminKey, async (_req, res) => {
     try {
       const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
       const inactive = await db.select().from(users).where(
@@ -3348,7 +3368,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.get("/api/admin/beta-testers", async (_req, res) => {
+  app.get("/api/admin/beta-testers", requireAdminKey, async (_req, res) => {
     try {
       const all = await db.select().from(users).where(eq(users.subscriptionStatus, "trial")).orderBy(desc(users.createdAt));
       res.json(all);
@@ -3357,31 +3377,40 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  // ---- ADMIN: Send message to a client directly ----
-  app.post("/api/admin/send-message", async (req, res) => {
-    const { userId, message: adminMessage } = req.body;
-    if (!userId || !adminMessage?.trim()) {
-      return res.status(400).json({ error: "userId and message are required" });
-    }
+  // ── Admin: send message to client as Coach K ─────────────
+  app.post("/api/admin/send-message", requireAdminKey, async (req: any, res: any) => {
     try {
-      const [targetUser] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (!targetUser) return res.status(404).json({ error: "User not found" });
-      if (!process.env.TWILIO_ACCOUNT_SID || !process.env.TWILIO_AUTH_TOKEN || !process.env.TWILIO_WHATSAPP_NUMBER) {
-        return res.status(503).json({ error: "Twilio not configured — message not sent" });
+      const { userId, message } = req.body;
+      if (!userId || !message?.trim()) {
+        return res.status(400).json({ message: "userId and message are required" });
       }
-      const adminTwilio = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
-      const toNum = targetUser.phoneNumber.startsWith("whatsapp:") ? targetUser.phoneNumber : `whatsapp:${targetUser.phoneNumber}`;
-      await adminTwilio.messages.create({ from: fromNum, to: toNum, body: adminMessage.trim() });
-      await db.insert(chatHistory).values({ userId: targetUser.id, messageIn: null, messageOut: adminMessage.trim(), intent: "ADMIN_MANUAL" });
-      return res.json({ success: true, sentTo: targetUser.name || targetUser.phoneNumber });
+
+      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!user) return res.status(404).json({ message: "User not found" });
+
+      const accountSid = process.env.TWILIO_ACCOUNT_SID;
+      const authToken = process.env.TWILIO_AUTH_TOKEN;
+      const whatsappFrom = process.env.TWILIO_WHATSAPP_NUMBER;
+      if (!accountSid || !authToken || !whatsappFrom) {
+        return res.status(503).json({ message: "Twilio not configured — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER" });
+      }
+
+      const twilioC = twilio(accountSid, authToken);
+      const fromNum = whatsappFrom.startsWith("whatsapp:") ? whatsappFrom : `whatsapp:${whatsappFrom}`;
+      const toNum = user.phoneNumber.startsWith("whatsapp:") ? user.phoneNumber : `whatsapp:${user.phoneNumber}`;
+
+      await twilioC.messages.create({ from: fromNum, to: toNum, body: message.trim() });
+      await logChat(user.id, "[admin-sent]", message.trim(), "ADMIN_MESSAGE");
+
+      console.log(`[ADMIN] Message sent to ${toNum.slice(-8)}: "${message.slice(0, 60)}"`);
+      return res.json({ success: true, sentTo: user.phoneNumber });
     } catch (err: any) {
-      console.error("[ADMIN] Send message failed:", err);
-      return res.status(500).json({ error: err.message || "Failed to send message" });
+      console.error("[ADMIN] send-message error:", err);
+      return res.status(500).json({ message: err.message || "Failed to send message" });
     }
   });
 
-  app.post("/api/admin/run-test", async (req, res) => {
+  app.post("/api/admin/run-test", requireAdminKey, async (req, res) => {
     const { testId, liveMode } = req.body;
     const logs: string[] = [];
     try {
@@ -3509,7 +3538,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   // ── Admin test harness webhook ────────────────────────────
 
-  app.post("/api/admin/test-webhook", async (req, res) => {
+  app.post("/api/admin/test-webhook", requireAdminKey, async (req, res) => {
     try {
       const { phone, message } = req.body;
       if (!phone || !message) return res.status(400).json({ message: "phone and message required" });
@@ -3767,6 +3796,36 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         }).where(eq(users.phoneNumber, normalisedPhone));
 
         console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
+
+        // ── Referral reward: first payment by a referred user → both get +30 days free ──
+        const wasInactive = targetUser.subscriptionStatus !== "active";
+        if (wasInactive && targetUser.referredBy) {
+          try {
+            const [referrer] = await db.select().from(users)
+              .where(eq(users.referralCode, targetUser.referredBy))
+              .limit(1);
+            if (referrer && referrer.subscriptionStatus === "active") {
+              // Extend referrer's subscription by 30 days
+              const referrerNewExpiry = new Date(
+                Math.max(Date.now(), new Date(referrer.subscriptionRenewsAt || Date.now()).getTime()) + 30 * 86_400_000
+              );
+              await db.update(users)
+                .set({ subscriptionRenewsAt: referrerNewExpiry })
+                .where(eq(users.id, referrer.id));
+              const twilioC2 = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+              if (fromNum) {
+                await twilioC2.messages.create({
+                  from: fromNum,
+                  to: referrer.phoneNumber.startsWith("whatsapp:") ? referrer.phoneNumber : `whatsapp:${referrer.phoneNumber}`,
+                  body: `${referrer.name || "Hey"} 🎉 Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${referrerNewExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`,
+                });
+              }
+              console.log(`[REFERRAL] Rewarded ${referrer.phoneNumber} — extended to ${referrerNewExpiry.toISOString().slice(0, 10)}`);
+            }
+          } catch (refErr) {
+            console.error("[REFERRAL] Reward error:", refErr);
+          }
+        }
 
         // Welcome / renewal confirmation WhatsApp
         const name = targetUser.name || "there";

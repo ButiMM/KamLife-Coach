@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star, ChevronRight, Phone } from "lucide-react";
+import { MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star, ChevronRight, Phone, Crown } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "wouter";
 
@@ -18,7 +18,7 @@ export default function LandingPage() {
           <span className="font-bold font-display text-xl tracking-tight">KamLife Coach</span>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/dashboard">
+          <Link href="/login">
             <Button variant="ghost" size="sm" className="font-medium hidden sm:flex">Coach Login</Button>
           </Link>
           <Button size="sm" className="rounded-full font-semibold" asChild>
@@ -68,7 +68,7 @@ export default function LandingPage() {
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-5 h-5 mr-2" />
-                Start Coaching — R99/month
+                Start Free Trial — from R99/month
               </a>
             </Button>
             <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-base border-2" asChild>
@@ -80,7 +80,7 @@ export default function LandingPage() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            R99/month · Cancel anytime · Day 1 sent immediately on payment
+            From R99/month · Cancel anytime · Day 1 sent immediately on payment
           </p>
         </motion.div>
 
@@ -176,44 +176,114 @@ export default function LandingPage() {
 
       {/* Pricing */}
       <section className="py-24 px-4 bg-muted/30">
-        <div className="max-w-lg mx-auto text-center">
-          <h2 className="text-4xl font-bold font-display mb-4">One price. Everything included.</h2>
-          <p className="text-muted-foreground mb-12">No hidden fees. No premium tiers. Cancel anytime.</p>
+        <div className="max-w-5xl mx-auto text-center">
+          <h2 className="text-4xl font-bold font-display mb-4">Choose your level</h2>
+          <p className="text-muted-foreground mb-12">All plans on WhatsApp. No app needed. Cancel anytime.</p>
 
-          <div className="bg-card rounded-3xl border border-border p-8 shadow-xl relative overflow-hidden">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary to-emerald-500 rounded-t-3xl" />
-            <div className="text-sm font-semibold text-primary mb-2">Monthly Plan</div>
-            <div className="flex items-end justify-center gap-1 mb-2">
-              <span className="text-6xl font-bold font-display">R99</span>
-              <span className="text-muted-foreground mb-3">/month</span>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-start">
+
+            {/* Basic */}
+            <div className="bg-card rounded-3xl border border-border p-8 relative overflow-hidden text-left">
+              <div className="text-sm font-semibold text-muted-foreground mb-2">Basic</div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-5xl font-bold font-display">R99</span>
+                <span className="text-muted-foreground mb-2">/month</span>
+              </div>
+              <p className="text-muted-foreground text-sm mb-6">R3.30/day — less than a taxi fare</p>
+              <ul className="space-y-3 mb-8">
+                {[
+                  "Personalised workout programme",
+                  "SA meal plans at Shoprite prices",
+                  "Daily WhatsApp check-ins",
+                  "Step & food logging",
+                  "Weekly Sunday report",
+                  "Braai & takeout guides",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button className="w-full rounded-2xl" asChild>
+                <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
+                  <MessageCircle className="w-4 h-4 mr-2" />
+                  Start Basic
+                </a>
+              </Button>
             </div>
-            <p className="text-muted-foreground text-sm mb-8">That is R3.30 per day — less than a coffee</p>
 
-            <ul className="space-y-3 text-left mb-8">
-              {[
-                "Personalised workout programme (gym, home, or dumbbell)",
-                "SA-specific meal plan and food coaching",
-                "Daily check-ins and accountability",
-                "Photo food logging via WhatsApp",
-                "Weekly progress reports every Sunday",
-                "Braai and eating-out guides",
-                "Day 1 workout delivered immediately on payment",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-3">
-                  <CheckCircle className="w-5 h-5 text-emerald-500 mt-0.5 shrink-0" />
-                  <span className="text-sm">{item}</span>
-                </li>
-              ))}
-            </ul>
+            {/* Pro — most popular */}
+            <div className="bg-card rounded-3xl border-2 border-primary p-8 relative overflow-hidden text-left shadow-xl shadow-primary/10">
+              <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary to-emerald-500 rounded-t-3xl" />
+              <div className="flex items-center justify-between mb-2">
+                <div className="text-sm font-semibold text-primary">Pro</div>
+                <span className="text-xs font-bold bg-primary text-white px-2 py-0.5 rounded-full">Most popular</span>
+              </div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-5xl font-bold font-display">R199</span>
+                <span className="text-muted-foreground mb-2">/month</span>
+              </div>
+              <p className="text-muted-foreground text-sm mb-6">R6.60/day — less than a Nando's quarter</p>
+              <ul className="space-y-3 mb-8">
+                {[
+                  "Everything in Basic",
+                  "Weekly coach review of your logs",
+                  "Progress photo analysis",
+                  "Personalised monthly check-in call",
+                  "Priority response within 2 hours",
+                  "Custom meal swaps for your budget",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-primary mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button size="lg" className="w-full h-12 rounded-2xl font-bold" asChild>
+                <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
+                  <MessageCircle className="w-4 h-4 mr-2" />
+                  Start Pro
+                </a>
+              </Button>
+            </div>
 
-            <Button size="lg" className="w-full h-14 rounded-2xl text-base font-bold" asChild>
-              <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="w-5 h-5 mr-2" />
-                Start Coaching on WhatsApp
-              </a>
-            </Button>
-            <p className="text-xs text-muted-foreground mt-3">Day 1 workout sent immediately after payment</p>
+            {/* Premium */}
+            <div className="bg-card rounded-3xl border border-border p-8 relative overflow-hidden text-left">
+              <div className="flex items-center gap-2 mb-2">
+                <Crown className="w-4 h-4 text-amber-500" />
+                <div className="text-sm font-semibold text-amber-500">Premium</div>
+              </div>
+              <div className="flex items-end gap-1 mb-1">
+                <span className="text-5xl font-bold font-display">R349</span>
+                <span className="text-muted-foreground mb-2">/month</span>
+              </div>
+              <p className="text-muted-foreground text-sm mb-6">Full coaching experience</p>
+              <ul className="space-y-3 mb-8">
+                {[
+                  "Everything in Pro",
+                  "Weekly personal voice note from Coach Kam",
+                  "Unlimited WhatsApp voice replies",
+                  "Injury rehab protocol",
+                  "Supplement & blood work guidance",
+                  "Direct line — replies within 30 minutes",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-2 text-sm">
+                    <CheckCircle className="w-4 h-4 text-amber-500 mt-0.5 shrink-0" />
+                    <span>{item}</span>
+                  </li>
+                ))}
+              </ul>
+              <Button variant="outline" className="w-full rounded-2xl border-2" asChild>
+                <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
+                  <Crown className="w-4 h-4 mr-2" />
+                  Start Premium
+                </a>
+              </Button>
+            </div>
+
           </div>
+          <p className="text-sm text-muted-foreground mt-6">All plans: cancel anytime · Day 1 workout sent immediately on payment · Refer a friend and you both get one month free</p>
         </div>
       </section>
 
@@ -256,9 +326,9 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-24 px-4 bg-primary text-white text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display mb-4">R99. Start today.</h2>
+          <h2 className="text-4xl font-bold font-display mb-4">Start today. Results in week one.</h2>
           <p className="text-primary-foreground/80 text-lg mb-8">
-            3 questions and your programme is built. Day 1 delivered the moment you pay.
+            3 questions and your programme is built. Day 1 delivered the moment you pay. From R99/month.
           </p>
           <Button size="lg" variant="secondary" className="h-14 px-10 rounded-2xl text-base font-bold" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
@@ -266,7 +336,7 @@ export default function LandingPage() {
               Start Coaching on WhatsApp
             </a>
           </Button>
-          <p className="text-primary-foreground/60 text-sm mt-4">R99/month · Cancel anytime · No app needed</p>
+          <p className="text-primary-foreground/60 text-sm mt-4">From R99/month · Cancel anytime · No app needed</p>
         </div>
       </section>
 
@@ -279,8 +349,8 @@ export default function LandingPage() {
             </div>
             <span className="font-semibold text-foreground">KamLife Coach</span>
           </div>
-          <p>Built for South Africa 🇿🇦 · POPIA compliant · R99/month</p>
-          <Link href="/dashboard" className="hover:text-foreground transition-colors">Coach Login</Link>
+          <p>Built for South Africa 🇿🇦 · POPIA compliant · From R99/month</p>
+          <Link href="/login" className="hover:text-foreground transition-colors">Coach Login</Link>
         </div>
       </footer>
     </div>

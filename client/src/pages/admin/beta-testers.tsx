@@ -47,13 +47,14 @@ export default function BetaTesters() {
             </TableHeader>
             <TableBody>
               {testers?.map((tester) => {
-                const isExpired = new Date(tester.betaBypassUntil) < new Date();
+                const bypassDate = tester.betaBypassUntil ? new Date(tester.betaBypassUntil) : null;
+                const isExpired = bypassDate ? bypassDate < new Date() : true;
                 return (
                   <TableRow key={tester.id}>
                     <TableCell className="font-mono">{tester.phoneNumber}</TableCell>
                     <TableCell>{tester.name || "Unknown"}</TableCell>
                     <TableCell>
-                      {format(new Date(tester.betaBypassUntil), "PPP")}
+                      {bypassDate ? format(bypassDate, "PPP") : "No expiry set"}
                     </TableCell>
                     <TableCell>
                       <Badge variant={isExpired ? "destructive" : "default"}>

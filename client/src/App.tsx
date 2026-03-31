@@ -1,4 +1,4 @@
-import { Switch, Route } from "wouter";
+import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
@@ -9,18 +9,25 @@ import Dashboard from "@/pages/dashboard";
 import UsersList from "@/pages/users";
 import UserDetail from "@/pages/user-detail";
 import BetaTesters from "@/pages/admin/beta-testers";
-
 import AdminTest from "@/pages/admin/test";
+import Login from "@/pages/login";
+import { isAuthenticated } from "@/lib/auth";
+
+function AuthGuard({ component: Component }: { component: React.ComponentType }) {
+  if (!isAuthenticated()) return <Redirect to="/login" />;
+  return <Component />;
+}
 
 function Router() {
   return (
     <Switch>
       <Route path="/" component={LandingPage} />
-      <Route path="/dashboard" component={Dashboard} />
-      <Route path="/users" component={UsersList} />
-      <Route path="/users/:id" component={UserDetail} />
-      <Route path="/admin/test" component={AdminTest} />
-      <Route path="/admin/beta" component={BetaTesters} />
+      <Route path="/login" component={Login} />
+      <Route path="/dashboard">{() => <AuthGuard component={Dashboard} />}</Route>
+      <Route path="/users">{() => <AuthGuard component={UsersList} />}</Route>
+      <Route path="/users/:id">{() => <AuthGuard component={UserDetail} />}</Route>
+      <Route path="/admin/test">{() => <AuthGuard component={AdminTest} />}</Route>
+      <Route path="/admin/beta">{() => <AuthGuard component={BetaTesters} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );

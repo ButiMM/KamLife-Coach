@@ -94,6 +94,20 @@ export const api = {
       responses: {
         200: z.object({ success: z.boolean(), count: z.number() })
       }
+    },
+    sendMessage: {
+      method: 'POST' as const,
+      path: '/api/admin/send-message' as const,
+      input: z.object({
+        userId: z.string(),
+        message: z.string().min(1),
+      }),
+      responses: {
+        200: z.object({ success: z.boolean(), sentTo: z.string() }),
+        400: errorSchemas.validation,
+        404: errorSchemas.notFound,
+        503: errorSchemas.internal,
+      }
     }
   }
 };
