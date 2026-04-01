@@ -18,7 +18,7 @@ function loadState(): Record<string, string> {
     if (existsSync(STATE_FILE)) {
       return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
     }
-  } catch { /* ignore */ }
+  } catch (_e) { /* ignore parse errors on missing state file */ }
   return {};
 }
 
@@ -32,9 +32,15 @@ function saveState(key: string, dateStr: string): void {
   }
 }
 
-function todayUTC(): string {
-  return new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+// South Africa is UTC+2 year-round (no DST). Use SAST for all daily keys so
+// "today" for rate-limiting and state tracking aligns with SA midnight, not UTC midnight.
+function todaySAST(): string {
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  return sast.toISOString().slice(0, 10); // "YYYY-MM-DD"
 }
+
+// Keep todayUTC as alias for state-file keys (they're permanent, format doesn't matter)
+function todayUTC(): string { return todaySAST(); }
 
 // Track proactive messages sent today per client — max 2 per day
 // Key format: "YYYY-MM-DD:clientId" so the map is self-expiring by day
@@ -67,7 +73,8 @@ function thisWeekUTC(): string {
   const d = new Date();
   const day = d.getUTCDay(); // 0=Sun, 1=Mon...
   const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1); // Monday of current week
-  const monday = new Date(d.setUTCDate(diff));
+  // Construct new Date without mutating d
+  const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff));
   return monday.toISOString().slice(0, 10);
 }
 
@@ -339,10 +346,13 @@ cron.schedule("0 4 * * *", async () => {
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const planned = client.trainingDaysPerWeek || 3;
-      await sendWhatsApp(client.phoneNumber,
-        `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`
-      );
-      saveState(sentKey, "sent");
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`
+        );
+        recordProactiveSend(client.id);
+        saveState(sentKey, "sent");
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Week 3 intervention error — ${client.phoneNumber}:`, err);
     }
@@ -372,7 +382,10 @@ cron.schedule("0 8 20 * *", async () => {
       } else {
         budgetMsg = `${name}, month end coming. You have more budget flexibility than most clients — still prioritise protein. Pre-cook chicken, buy oats in bulk, and prep your meals Sunday. Consistency over the month end is what separates people who get results.`;
       }
-      await sendWhatsApp(client.phoneNumber, budgetMsg);
+      if (canSendProactive(client.id)) {
+        await sendWhatsApp(client.phoneNumber, budgetMsg);
+        recordProactiveSend(client.id);
+      }
     } catch (err) {
       console.error(`[SCHEDULER] Month-end budget error — ${client.phoneNumber}:`, err);
     }
@@ -756,18 +769,23 @@ cron.schedule("0 8 * * *", async () => {
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       const name = client.name || "champ";
-      if (days === 1) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• "2" to log food\n• "3" to log your steps\n\nOne small action today is better than a perfect week planned and not started.`
-        );
-      } else if (days === 2) {
-        await sendWhatsApp(client.phoneNumber,
-          `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`
-        );
-      } else if (days === 3) {
-        await sendWhatsApp(client.phoneNumber,
-          `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead. Send me today's food and keep the momentum going.`
-        );
+      if (canSendProactive(client.id)) {
+        if (days === 1) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• "2" to log food\n• "3" to log your steps\n\nOne small action today is better than a perfect week planned and not started.`
+          );
+          recordProactiveSend(client.id);
+        } else if (days === 2) {
+          await sendWhatsApp(client.phoneNumber,
+            `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`
+          );
+          recordProactiveSend(client.id);
+        } else if (days === 3) {
+          await sendWhatsApp(client.phoneNumber,
+            `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead. Send me today's food and keep the momentum going.`
+          );
+          recordProactiveSend(client.id);
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Early onboarding error — ${client.phoneNumber}:`, err);
@@ -786,11 +804,13 @@ cron.schedule("0 7 1 * *", async () => {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
+    if (!(await canSendProactive(client.phoneNumber))) continue;
     try {
       const name = client.name || "champ";
       await sendWhatsApp(client.phoneNumber,
         `${name}, it is the 1st. Measurement day.\n\nGet a tape measure and send me:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nWeigh in as well. Same conditions — morning, after bathroom, before food. The tape does not lie when the scale does.`
       );
+      await recordProactiveSend(client.phoneNumber);
     } catch (err) {
       console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err);
     }
@@ -1073,10 +1093,12 @@ cron.schedule("0 18 * * *", async () => {
       }
 
       if (streakCount >= 3) {
+        if (!(await canSendProactive(client.phoneNumber))) continue;
         const name = client.name || "champ";
         await sendWhatsApp(client.phoneNumber,
           `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
         );
+        await recordProactiveSend(client.phoneNumber);
       }
     } catch (err) {
       console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);

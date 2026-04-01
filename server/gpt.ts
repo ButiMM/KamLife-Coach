@@ -345,6 +345,19 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
+  // Cap winMemory to prevent context blowout for long-running users
+  const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
+
+  // Assemble system prompt and enforce hard character ceiling (~10k chars)
+  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
+  const MAX_SYSTEM_CHARS = 10_000;
+  if (systemContent.length > MAX_SYSTEM_CHARS) {
+    console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
+    // Preserve the essential tail (hardLimit + instruction) when truncating
+    const tail = `\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
+    systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS - tail.length) + tail;
+  }
+
   try {
     const response = await openai.chat.completions.create({
       model,
@@ -352,7 +365,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       messages: [
         {
           role: "system",
-          content: `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${liftContext}${winMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`
+          content: systemContent
         },
         {
           role: "user",

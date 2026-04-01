@@ -21,6 +21,14 @@ const openai = new OpenAI({
   baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
 });
 
+// SA timezone helper — South Africa is UTC+2 year-round (no DST)
+// All date strings used for daily reset keys must use SAST, not UTC, so that
+// midnight for the user is actually midnight in Johannesburg/Cape Town/Durban.
+function sastToday(): string {
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  return sast.toISOString().slice(0, 10); // "YYYY-MM-DD"
+}
+
 // COACH_K_SYSTEM imported from ./coach-prompt
 
 // Programme constants, workout builders, and GPT functions moved to dedicated modules (see imports above)
@@ -269,7 +277,8 @@ async function checkFoodPatterns(userId: string): Promise<string | null> {
     }
 
     return null;
-  } catch {
+  } catch (e) {
+    console.warn("[non-fatal]", e);
     return null;
   }
 }
@@ -325,7 +334,8 @@ async function getProgressiveOverloadContext(userId: string): Promise<string> {
     });
 
     return `*Your Targets — Based on Last Session:*\n${lines.join("\n")}\n\n`;
-  } catch {
+  } catch (e) {
+    console.warn("[non-fatal]", e);
     return "";
   }
 }
@@ -348,7 +358,8 @@ async function checkPerfectDay(userId: string): Promise<string | null> {
       return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Food tracked. This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
     }
     return null;
-  } catch {
+  } catch (e) {
+    console.warn("[checkPerfectDay]", e);
     return null;
   }
 }
@@ -373,7 +384,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const crisisUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const crisisName = crisisUser[0]?.name || "friend";
     const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
-    try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch { }
+    try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
     // Alert the coach immediately — safety-critical, any failure must be loud and visible
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
     if (!coachAlertPhone) {
@@ -556,7 +567,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name} — ` : "";
-    const todayStr2 = new Date().toISOString().slice(0, 10);
+    const todayStr2 = sastToday();
     const todayCals = (user.todayCaloriesDate === todayStr2) ? (user.todayCalories || 0) : 0;
     const remaining = cal - todayCals;
     const todayLine = todayCals > 0 ? ` You are at ${todayCals} kcal today — ${remaining > 0 ? `${remaining} remaining.` : "target reached. ✅"}` : "";
@@ -912,7 +923,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
             const remaining = calTarget - totalCal;
             photoDailyTotal = `\n\n_Today so far: ~${totalCal} kcal | ${totalProt}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
           }
-        } catch { /* non-fatal */ }
+        } catch (e) { console.warn("[non-fatal]", e); }
         return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
         console.error("Vision error:", err);
@@ -1040,7 +1051,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const daysPerWeek = user.trainingDaysPerWeek || 3;
 
     if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
-    if (newWeek > 4) { newWeek = 4; }
+    // When week exceeds 4, cycle back to week 1 and advance the phase (4-week programme structure)
+    // Phase advancement is also handled by the scheduler's Phase Advancement job (75% compliance check)
+    // but this inline advance ensures the user is never stuck at "Week 4" indefinitely.
+    let newPhase = user.programmePhase || 1;
+    if (newWeek > 4) { newWeek = 1; newPhase = Math.min(newPhase + 1, 4); }
 
     // Workout streak — continues if last session was within 2 days (but NOT same calendar day,
     // which is already prevented by the double-log guard above)
@@ -1059,6 +1074,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       lastWorkoutDate: new Date(),
       programmeDayInWeek: newDay,
       programmeWeek: newWeek,
+      programmePhase: newPhase,
       workoutStreak: newStreak,
     }).where(eq(users.phoneNumber, phone));
 
@@ -1072,7 +1088,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       if ([10, 25, 50, 100].includes(newTotal)) {
         await storeMemory(phone, `Workout total milestone: completed ${newTotal} training sessions total with Coach K`, "milestone");
       }
-    } catch { /* non-fatal */ }
+    } catch (e) { console.warn("[non-fatal]", e); }
 
     const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
     const celebration = celebrationFn(newTotal, newDay);
@@ -1154,7 +1170,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         // 4-day programme: deliver Day 4 (second lower body) after Day 3
         doneReply += `\n\n---\n\n${buildDayWorkout({ ...updatedUser, programmeDayInWeek: 4 })}`;
       }
-    } catch { /* non-fatal — day delivery is bonus content */ }
+    } catch (e) { console.warn("[day-delivery]", e); }
 
     return doneReply;
   }
@@ -1313,7 +1329,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
             }
           }
         }
-      } catch { /* non-fatal */ }
+      } catch (e) { console.warn("[non-fatal]", e); }
       // Build weight change note
       let changeNote = "";
       if (prevKg > 0 && Math.abs(newKg - prevKg) > 0.1) {
@@ -1500,8 +1516,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     else if (unit === "cup" || unit === "cups") litres = amount * 0.25;
     else if (unit === "bottle" || unit === "bottles") litres = amount * 0.5;
 
-    // Reset daily water if date has changed
-    const today = new Date().toISOString().split("T")[0];
+    // Reset daily water if date has changed — use SAST so midnight aligns with SA users
+    const today = sastToday();
     const lastReset = user.waterLastResetDate;
     const currentWater = lastReset === today ? parseFloat(user.todayWater as string || "0") : 0;
     const newTotal = Math.round((currentWater + litres) * 10) / 10;
@@ -1509,12 +1525,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const weightKgForWater = parseFloat(user.currentWeight as string || "0") || 75;
     const waterTarget = Math.max(2.0, Math.round(weightKgForWater * 0.033 * 10) / 10);
 
+    // Water streak: only increment if this message crossed the target threshold AND
+    // yesterday was also a logged day — prevents streak inflation after missed days.
+    const yesterdaySAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
+    const crossedTarget = newTotal >= waterTarget && currentWater < waterTarget;
+    const lastReset = user.waterLastResetDate;
+    const isConsecutive = lastReset === today || lastReset === yesterdaySAST;
+    const newWaterStreak = crossedTarget
+      ? (isConsecutive ? (user.waterStreak || 0) + 1 : 1)
+      : (user.waterStreak || 0);
+
     await db.update(users).set({
       todayWater: newTotal.toString(),
       waterLastResetDate: today,
-      waterStreak: newTotal >= waterTarget && currentWater < waterTarget
-        ? (user.waterStreak || 0) + 1
-        : (user.waterStreak || 0),
+      waterStreak: newWaterStreak,
     }).where(eq(users.phoneNumber, phone));
 
     const remaining = Math.max(0, Math.round((waterTarget - newTotal) * 10) / 10);
@@ -1522,9 +1546,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     let waterReply = `Logged ${litres}L water. Total today: ${newTotal}L / ${waterTarget}L target.`;
     if (targetHit) {
       waterReply += ` Daily target hit.`;
-      if (newTotal >= waterTarget && currentWater < waterTarget) {
-        const streak = (user.waterStreak || 0) + 1;
-        if (streak >= 3) waterReply += ` ${streak}-day water streak — consistency is showing.`;
+      if (crossedTarget && newWaterStreak >= 3) {
+        waterReply += ` ${newWaterStreak}-day water streak — consistency is showing.`;
       }
     } else {
       waterReply += ` ${remaining}L still to go.`;
@@ -1538,8 +1561,10 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const isWaterOnlyMsg = /^water\s*$/i.test(m.trim());
   if (isWaterQuestion || isWaterOnlyMsg) {
     const todayW = parseFloat(user.todayWater as string || "0");
-    const remaining = Math.max(0, Math.round((2.0 - todayW) * 10) / 10);
-    const waterQReply = `Daily water target: *2 litres*.\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
+    const wKg = parseFloat(user.currentWeight as string || "0") || 75;
+    const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
+    const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);
+    const waterQReply = `Daily water target: *${wTarget}L* (based on your body weight).\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
     await logChat(user.id, message, waterQReply, "WATER_QUESTION");
     return waterQReply;
   }
@@ -1561,7 +1586,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       if (lastFoodLog.length > 0) {
         await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
       }
-    } catch { /* non-fatal */ }
+    } catch (e) { console.warn("[non-fatal]", e); }
     // Strip the correction prefix and process the remaining message as the actual food
     const correctedMsg = m.replace(CORRECTION_PREFIX, "").trim();
     if (correctedMsg && correctedMsg.length > 2 && correctedMsg !== m) {
@@ -1678,15 +1703,15 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         `• ${f.name}: ~${f.typicalPortionCalories} kcal, ${f.typicalPortionProtein}g protein (${f.typicalPortionDescription})`
       ).join("\n");
 
-      // Daily accumulation — track running total across meals
-      const todayStr = new Date().toISOString().slice(0, 10);
+      // Daily accumulation — track running total across meals (SAST date so reset at SA midnight)
+      const todayStr = sastToday();
       const prevCals = (user.todayCaloriesDate === todayStr) ? (user.todayCalories || 0) : 0;
       const prevProtein = (user.todayCaloriesDate === todayStr) ? (user.todayProteinG || 0) : 0;
       const runningCals = prevCals + totalCals;
       const runningProtein = prevProtein + Math.round(totalProtein);
       try {
         await db.update(users).set({ todayCalories: runningCals, todayProteinG: runningProtein, todayCaloriesDate: todayStr }).where(eq(users.phoneNumber, phone));
-      } catch { /* non-fatal */ }
+      } catch (e) { console.warn("[non-fatal]", e); }
 
       const calRemaining = calorieTarget - runningCals;
       const proteinRemaining = proteinTarget - runningProtein;
@@ -2066,7 +2091,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         if (isNSVPositive) {
           await storeMemory(phone, `NSV WIN at week ${weekNum}: jeans are ${jeansFit}, energy ${energyLevel}, stomach ${stomachFeel} — body is changing visibly`, "milestone");
         }
-      } catch { /* non-fatal */ }
+      } catch (e) { console.warn("[non-fatal]", e); }
 
       // Build a specific coaching response + follow-up question based on what they reported
       const isPositiveJeans = ["looser", "fitting better", "baggy", "big"].some(k => m.includes(k));
@@ -2115,7 +2140,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (injuryBetter && user.injuries && user.injuries !== "none") {
     const oldInjury = user.injuries;
     await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
-    try { await storeMemory(phone, `Injury resolved: "${oldInjury}" — client reported recovery`, "medical"); } catch { }
+    try { await storeMemory(phone, `Injury resolved: "${oldInjury}" — client reported recovery`, "medical"); } catch (e) { console.warn("[non-fatal]", e); }
     const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back. Build up gradually this week — don't jump straight to max weight. Reply "today" for your session.`;
     await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
     return injuryReply;
@@ -2278,7 +2303,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           else if (diff < 0) compareNote = ` Down ${Math.abs(diff).toFixed(1)}cm from ${prev}cm (${daysAgo} days ago). Moving in the right direction.`;
           else compareNote = ` Up ${diff.toFixed(1)}cm from ${prev}cm (${daysAgo} days ago). Check your nutrition consistency.`;
         }
-      } catch { }
+      } catch (e) { console.warn("[non-fatal]", e); }
       await db.insert(bodyMeasurements).values({ userId: user.id, measurementType: measType, value: measValue.toString() });
       const measReply = `Logged ${measValue}cm ${measType}.${compareNote}`;
       await logChat(user.id, message, measReply, "MEASUREMENT_LOG");
@@ -3053,7 +3078,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       recentChatText = thread;
       recentConvBlock = `\n\nRECENT CONVERSATION (last 10 exchanges — build on this, do not repeat):\n${thread}`;
     }
-  } catch { }
+  } catch (e) { console.warn("[non-fatal]", e); }
 
   // Fix 5 — Ramadan check against recent chat history (in addition to profile notes)
   const RAMADAN_KW = ["ramadan", "ramadhan", "fasting", "iftar", "suhoor", "sehri", "muslim", "islam", "halaal", "halal"];
@@ -3218,7 +3243,7 @@ CRITICAL RULES — these are non-negotiable:
   try {
     const memories = await retrieveMemories(phone, message);
     if (memories.length > 0) memoryContext = memories.join("\n");
-  } catch { }
+  } catch (e) { console.warn("[non-fatal]", e); }
 
   // ---- FRUSTRATION HANDLER — client venting after a bad bot response ----
   const isFrustrated =
@@ -3239,7 +3264,7 @@ CRITICAL RULES — these are non-negotiable:
       const frustReply = await askCoachK(message, user, frustContext);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
-    } catch { /* fall through to GPT */ }
+    } catch (e) { console.warn("[fall-through-gpt]", e); }
   }
 
   // Daily GPT call cap — prevents runaway costs from heavy users
@@ -3272,7 +3297,8 @@ CRITICAL RULES — these are non-negotiable:
     if (gptReply === AGENT_ERROR) {
       gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
     }
-  } catch {
+  } catch (e) {
+    console.warn("[agent-routing]", e);
     gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
   }
 
@@ -3293,7 +3319,7 @@ CRITICAL RULES — these are non-negotiable:
     } else if (/\b(hit my goal|reached my goal|lost.*kg|gained.*kg|pb|personal best|new record)\b/i.test(m)) {
       await storeMemory(phone, `Client milestone: "${message}"`, "milestone");
     }
-  } catch { }
+  } catch (e) { console.warn("[non-fatal]", e); }
 
   // Auto-store significant coaching notes for future memory
   try {
@@ -3307,7 +3333,7 @@ CRITICAL RULES — these are non-negotiable:
     } else if (/\b(night shift|work from home|just had a baby|new job|retrenched|moved|single mom|single dad|divorce|breakup)\b/.test(mLower)) {
       await storeMemory(phone, `Life situation update: "${message.slice(0, 120)}"`, "preference");
     }
-  } catch { /* non-fatal */ }
+  } catch (e) { console.warn("[non-fatal]", e); }
 
   // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
   const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
@@ -3339,7 +3365,7 @@ CRITICAL RULES — these are non-negotiable:
         const remaining = calTarget - totalCal;
         dailyTotal = `\n\n_Today so far: ~${totalCal} kcal | ${totalProt}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : remaining < -100 ? ` Over by ${Math.abs(remaining)} kcal.` : " On target."}_`;
       }
-    } catch { /* non-fatal */ }
+    } catch (e) { console.warn("[non-fatal]", e); }
     const damageControl = await getDamageControlNote(user.id, message);
     const fullReply = finalReply + (pattern ? "\n\n" + pattern : "") + (perfectDay || "") + dailyTotal + damageControl;
     await logChat(user.id, message, fullReply, "FOOD_LOG");
@@ -3681,7 +3707,8 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         activeClients: parseInt(String(clientCount[0]?.count || 0)),
         workoutsLogged: parseInt(String(workoutCount[0]?.count || 0)),
       });
-    } catch {
+    } catch (e) {
+      console.warn("[dashboard-stats]", e);
       res.json({ activeClients: 200, workoutsLogged: 4800 }); // fallback
     }
   });

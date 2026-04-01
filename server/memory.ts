@@ -38,6 +38,9 @@ export async function storeMemory(phone: string, content: string, category: stri
   try {
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: content });
     const vec = resp.data[0].embedding;
+    if (!Array.isArray(vec) || vec.length !== 1536) {
+      throw new Error(`[MEMORY] Unexpected embedding size: ${vec?.length} (expected 1536)`);
+    }
     const importance = IMPORTANCE[category] || 3;
     await pool.query(
       `INSERT INTO memories (phone, content, embedding, category, importance) VALUES ($1, $2, $3::vector, $4, $5)`,
@@ -52,6 +55,9 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
   try {
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: query });
     const vec = resp.data[0].embedding;
+    if (!Array.isArray(vec) || vec.length !== 1536) {
+      throw new Error(`[MEMORY] Unexpected query embedding size: ${vec?.length} (expected 1536)`);
+    }
     const result = await pool.query(
       `SELECT content FROM memories WHERE phone = $1 ORDER BY embedding <=> $2::vector LIMIT 8`,
       [phone, `[${vec.join(",")}]`]
