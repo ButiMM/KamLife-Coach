@@ -1,6 +1,6 @@
 import { type Express } from "express";
 import { type Server } from "http";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import OpenAI from "openai";
@@ -136,14 +136,23 @@ async function getStepStreak(userId: string): Promise<number> {
 // SA FOOD SCANNER — in-memory match against 40 SA foods
 // ============================================================
 
+// Escape special regex characters in alias strings
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function scanForSAFoods(msg: string): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
   for (const food of SA_FOODS_SEED) {
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
-    if (allAliases.some(alias => lower.includes(alias))) {
-      if (!matched.find(f => f.name === food.name)) matched.push(food);
-    }
+    // Use word-boundary matching to prevent short aliases from matching inside longer words
+    // e.g. "pap" should not match "papaya", "bean" should not match "beansprout"
+    const hit = allAliases.some(alias => {
+      const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
+      return re.test(lower);
+    });
+    if (hit && !matched.find(f => f.name === food.name)) matched.push(food);
   }
   return matched;
 }
@@ -365,9 +374,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const crisisName = crisisUser[0]?.name || "friend";
     const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
     try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch { }
-    // Alert the coach immediately if COACH_ALERT_PHONE is set
+    // Alert the coach immediately — safety-critical, any failure must be loud and visible
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
-    if (coachAlertPhone && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+    if (!coachAlertPhone) {
+      console.error(`[CRISIS] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${crisisName} (${phone}). Message: "${message.slice(0, 150)}"`);
+    } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
       try {
         const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
@@ -377,7 +388,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
         });
         console.log(`[CRISIS] Coach alert sent to ${coachAlertPhone}`);
-      } catch (e) { console.error("[CRISIS] Coach alert failed:", e); }
+      } catch (e) {
+        // Log at ERROR level — must surface in monitoring so the coach can be reached manually
+        console.error(`[CRISIS] ⚠️  COACH ALERT SEND FAILED — coach NOT notified! Client: ${crisisName} (${phone}). Error:`, e);
+      }
     }
     return crisisReply;
   }
@@ -414,30 +428,32 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
       const uid = existing[0].id;
       console.log(`[POPIA DELETE] User ${uid} (${phone}) requested data deletion at ${new Date().toISOString()}`);
-      await Promise.all([
-        db.delete(chatHistory).where(eq(chatHistory.userId, uid)),
-        db.delete(stepLogs).where(eq(stepLogs.userId, uid)),
-        db.delete(workoutLogs).where(eq(workoutLogs.userId, uid)),
-        db.delete(weightLogs).where(eq(weightLogs.userId, uid)),
-        db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid)),
-        db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid)),
-        db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid)),
-      ]);
-      // Nullify PII rather than delete user row (preserves compliance log)
-      await db.update(users).set({
-        name: null,
-        onboardingState: null,
-        popiConsent: false,
-        awaitingInputType: null,
-        currentWeight: null,
-        heightCm: null,
-        age: null,
-        medicalConditions: null,
-        injuries: null,
-        otherMedicalNotes: null,
-        profileNotes: null,
-        cancelledAt: new Date(),
-      }).where(eq(users.phoneNumber, phone));
+      // Wrap all deletes in a transaction — partial deletion is worse than no deletion
+      await db.transaction(async (tx) => {
+        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
+        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
+        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
+        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+        // Nullify PII rather than delete user row (preserves compliance log)
+        await tx.update(users).set({
+          name: null,
+          onboardingState: null,
+          popiConsent: false,
+          awaitingInputType: null,
+          currentWeight: null,
+          heightCm: null,
+          age: null,
+          medicalConditions: null,
+          injuries: null,
+          otherMedicalNotes: null,
+          profileNotes: null,
+          cancelledAt: new Date(),
+        }).where(eq(users.phoneNumber, phone));
+      });
+      console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
       return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
     }
   }
@@ -1007,6 +1023,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
   // ---- DONE — workout complete (direct) ----
   if (m === "done" || m === "workout done" || m === "finished" || m === "completed") {
+    // Guard: prevent double-logging on the same calendar day (race condition + accidental re-send)
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
+      .from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
+      .limit(1);
+    if (alreadyLoggedToday.length > 0) {
+      const name = user.name || "champ";
+      return `${name}, today's session is already logged. One workout counted per day — come back tomorrow and keep the streak going.`;
+    }
+
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     let newDay = (user.programmeDayInWeek || 1) + 1;
     let newWeek = user.programmeWeek || 1;
@@ -1015,14 +1042,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
     if (newWeek > 4) { newWeek = 4; }
 
-    // Workout streak — continues if last session was within 2 days
+    // Workout streak — continues if last session was within 2 days (but NOT same calendar day,
+    // which is already prevented by the double-log guard above)
     const lastW = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
     const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
     let newStreak = 1;
     if (lastW) {
       const lastDay = new Date(lastW); lastDay.setHours(0, 0, 0, 0);
       const daysDiff = Math.floor((todayMidnight.getTime() - lastDay.getTime()) / 86400000);
-      if (daysDiff <= 2) newStreak = (user.workoutStreak || 0) + 1;
+      // daysDiff === 0 means same day — treated as fresh start (shouldn't happen after guard above)
+      if (daysDiff >= 1 && daysDiff <= 2) newStreak = (user.workoutStreak || 0) + 1;
     }
 
     await db.update(users).set({
@@ -1049,13 +1078,22 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const celebration = celebrationFn(newTotal, newDay);
     const perfectDay = await checkPerfectDay(user.id);
 
-    // Auto-generate referral code at first milestone if not set
+    // Auto-generate referral code at first milestone if not set — retry on collision
     if (!user.referralCode && [10, 25, 50].includes(newTotal)) {
       const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();
-      const newCode = `${namePrefix}${randomSuffix}`;
-      await db.update(users).set({ referralCode: newCode }).where(eq(users.phoneNumber, phone));
-      user.referralCode = newCode;
+      let assigned = false;
+      for (let attempt = 0; attempt < 5 && !assigned; attempt++) {
+        const randomSuffix = Math.floor(1000 + Math.random() * 9000).toString();
+        const candidateCode = `${namePrefix}${randomSuffix}`;
+        const existing = await db.select({ id: users.id }).from(users)
+          .where(eq(users.referralCode, candidateCode)).limit(1);
+        if (existing.length === 0) {
+          await db.update(users).set({ referralCode: candidateCode }).where(eq(users.phoneNumber, phone));
+          user.referralCode = candidateCode;
+          assigned = true;
+        }
+      }
+      if (!assigned) console.warn(`[REFERRAL] Could not assign unique code for ${phone} after 5 attempts`);
     }
     const refCode = user.referralCode;
 
@@ -1186,7 +1224,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       lunge: "Lunge", row: "Seated Row",
     };
     let exerciseName = "Exercise";
-    for (const [key, val] of Object.entries(EXERCISE_MAP)) {
+    // Sort longest keys first so "bench press machine" matches before "bench press" before "bench"
+    for (const [key, val] of Object.entries(EXERCISE_MAP).sort((a, b) => b[0].length - a[0].length)) {
       if (m.includes(key)) { exerciseName = val; break; }
     }
 
@@ -3895,8 +3934,9 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         .join("&");
       const signatureBase = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase)}` : paramString;
       const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
-      if (data.signature && data.signature !== expectedSig) {
-        console.error(`[PAYFAST] Signature mismatch for ${phone} — possible spoofed ITN`);
+      // Reject if signature is missing OR doesn't match — both are invalid
+      if (!data.signature || data.signature !== expectedSig) {
+        console.error(`[PAYFAST] Signature ${!data.signature ? "missing" : "mismatch"} for ${phone} — rejecting ITN`);
         return;
       }
 

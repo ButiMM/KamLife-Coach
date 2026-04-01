@@ -207,11 +207,16 @@ async function runMorningCheckin(): Promise<void> {
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
       const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
-      // Extract protein logged from GPT responses (looks for "Xg protein" patterns)
+      // Extract protein logged from GPT responses
+      // Matches: "35g protein", "protein: 120g", "protein 8g", "total protein 45g", "1200g protein"
       let totalProtLogged = 0;
       for (const log of foodLogs) {
-        const m = (log.messageOut || "").match(/\b(\d{2,3})g?\s*protein/i);
-        if (m) totalProtLogged += parseInt(m[1]);
+        const out = log.messageOut || "";
+        // Try "Xg protein" or "X grams protein" (protein after value)
+        let pm = out.match(/\b(\d{1,4})\s*g(?:rams?)?\s*(?:of\s+)?protein/i);
+        // Fallback: "protein: Xg" or "protein Xg" (protein before value)
+        if (!pm) pm = out.match(/\bprotein[:\s]+(\d{1,4})\s*g?/i);
+        if (pm) totalProtLogged += parseInt(pm[1]);
       }
 
       // Extract steps logged from step log messages
