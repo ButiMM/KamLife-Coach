@@ -90,19 +90,28 @@ async function getOrCreateUser(phone: string): Promise<any> {
     await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
     return existing[0];
   }
-  const newUsers = await db.insert(users).values({
-    phoneNumber: phone,
-    subscriptionStatus: "inactive",
-    onboardingState: "START",
-    programmePhase: 1,
-    programmeWeek: 1,
-    programmeDayInWeek: 1,
-    trainingMode: "home",
-    stepsTarget: 8500,
-    createdAt: new Date(),
-    lastActiveAt: new Date(),
-  }).returning();
-  return newUsers[0];
+  try {
+    const newUsers = await db.insert(users).values({
+      phoneNumber: phone,
+      subscriptionStatus: "inactive",
+      onboardingState: "START",
+      programmePhase: 1,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
+      trainingMode: "home",
+      stepsTarget: 8500,
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    }).returning();
+    return newUsers[0];
+  } catch (err: any) {
+    if (err.code === "23505") {
+      // Race condition — concurrent first message created this user; fetch it
+      const fallback = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      if (fallback.length > 0) return fallback[0];
+    }
+    throw err;
+  }
 }
 
 
@@ -1518,28 +1527,29 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
     // Reset daily water if date has changed — use SAST so midnight aligns with SA users
     const today = sastToday();
-    const lastReset = user.waterLastResetDate;
-    const currentWater = lastReset === today ? parseFloat(user.todayWater as string || "0") : 0;
-    const newTotal = Math.round((currentWater + litres) * 10) / 10;
+    const lastReset = user.waterLastResetDate; // stale value — used for streak check below
     // Personalise water target: 33ml per kg of bodyweight, minimum 2.0L
     const weightKgForWater = parseFloat(user.currentWeight as string || "0") || 75;
     const waterTarget = Math.max(2.0, Math.round(weightKgForWater * 0.033 * 10) / 10);
 
-    // Water streak: only increment if this message crossed the target threshold AND
+    // Atomic increment — prevents race condition on concurrent water logs
+    const waterUpdated = await db.update(users).set({
+      todayWater: sql`CASE WHEN water_last_reset_date = ${today} THEN COALESCE(today_water::numeric, 0) + ${litres} ELSE ${litres} END`,
+      waterLastResetDate: today,
+    }).where(eq(users.phoneNumber, phone)).returning({ todayWater: users.todayWater });
+    const newTotal = Math.round((Number(waterUpdated[0]?.todayWater) || 0) * 10) / 10;
+    const currentWater = Math.max(0, newTotal - litres); // value before this log
+
+    // Water streak: only increment if this log crossed the target threshold AND
     // yesterday was also a logged day — prevents streak inflation after missed days.
     const yesterdaySAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
     const crossedTarget = newTotal >= waterTarget && currentWater < waterTarget;
-    const lastReset = user.waterLastResetDate;
     const isConsecutive = lastReset === today || lastReset === yesterdaySAST;
     const newWaterStreak = crossedTarget
       ? (isConsecutive ? (user.waterStreak || 0) + 1 : 1)
       : (user.waterStreak || 0);
 
-    await db.update(users).set({
-      todayWater: newTotal.toString(),
-      waterLastResetDate: today,
-      waterStreak: newWaterStreak,
-    }).where(eq(users.phoneNumber, phone));
+    await db.update(users).set({ waterStreak: newWaterStreak }).where(eq(users.phoneNumber, phone));
 
     const remaining = Math.max(0, Math.round((waterTarget - newTotal) * 10) / 10);
     const targetHit = newTotal >= waterTarget;
@@ -1703,15 +1713,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         `• ${f.name}: ~${f.typicalPortionCalories} kcal, ${f.typicalPortionProtein}g protein (${f.typicalPortionDescription})`
       ).join("\n");
 
-      // Daily accumulation — track running total across meals (SAST date so reset at SA midnight)
+      // Daily accumulation — atomic SQL increment prevents race condition on concurrent food logs
       const todayStr = sastToday();
-      const prevCals = (user.todayCaloriesDate === todayStr) ? (user.todayCalories || 0) : 0;
-      const prevProtein = (user.todayCaloriesDate === todayStr) ? (user.todayProteinG || 0) : 0;
-      const runningCals = prevCals + totalCals;
-      const runningProtein = prevProtein + Math.round(totalProtein);
+      let runningCals = 0;
+      let runningProtein = 0;
       try {
-        await db.update(users).set({ todayCalories: runningCals, todayProteinG: runningProtein, todayCaloriesDate: todayStr }).where(eq(users.phoneNumber, phone));
-      } catch (e) { console.warn("[non-fatal]", e); }
+        const updated = await db.update(users).set({
+          todayCalories: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_calories, 0) + ${totalCals} ELSE ${totalCals} END`,
+          todayProteinG: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_protein_g, 0) + ${Math.round(totalProtein)} ELSE ${Math.round(totalProtein)} END`,
+          todayCaloriesDate: todayStr,
+        }).where(eq(users.phoneNumber, phone)).returning({ cal: users.todayCalories, prot: users.todayProteinG });
+        runningCals = Number(updated[0]?.cal) || 0;
+        runningProtein = Number(updated[0]?.prot) || 0;
+      } catch (e) { console.warn("[non-fatal] calorie update:", e); }
+      const prevCals = Math.max(0, runningCals - totalCals);
 
       const calRemaining = calorieTarget - runningCals;
       const proteinRemaining = proteinTarget - runningProtein;
@@ -3765,9 +3780,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     next();
   }
 
-  app.get("/api/dashboard/clients", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/clients", requireDashboardKey, async (req: any, res) => {
     try {
-      const all = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE")).orderBy(desc(users.lastActiveAt));
+      const page = Math.max(0, parseInt(req.query.page as string) || 0);
+      const limit = 200;
+      const all = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE")).orderBy(desc(users.lastActiveAt)).limit(limit).offset(page * limit);
       const now = Date.now();
       const weekAgo = new Date(now - 7 * 86400000);
 

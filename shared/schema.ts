@@ -195,7 +195,10 @@ export const chatHistory = pgTable("chat_history", {
   messageOut: text("message_out"),
   intent: text("intent"),
   createdAt: timestamp("created_at").defaultNow(),
-});
+}, (table) => ({
+  userDateIdx: index("chat_history_user_date_idx").on(table.userId, table.createdAt),
+  userIntentIdx: index("chat_history_user_intent_idx").on(table.userId, table.intent, table.createdAt),
+}));
 
 export const clothingCheckins = pgTable(
   "clothing_checkins",

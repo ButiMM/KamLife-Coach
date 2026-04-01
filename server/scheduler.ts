@@ -804,13 +804,13 @@ cron.schedule("0 7 1 * *", async () => {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
-    if (!(await canSendProactive(client.phoneNumber))) continue;
+    if (!canSendProactive(client.id)) continue;
     try {
       const name = client.name || "champ";
       await sendWhatsApp(client.phoneNumber,
         `${name}, it is the 1st. Measurement day.\n\nGet a tape measure and send me:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nWeigh in as well. Same conditions — morning, after bathroom, before food. The tape does not lie when the scale does.`
       );
-      await recordProactiveSend(client.phoneNumber);
+      recordProactiveSend(client.id);
     } catch (err) {
       console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err);
     }
@@ -827,7 +827,7 @@ cron.schedule("0 7 1 * *", async () => {
 cron.schedule("0 10 * * 1-6", async () => {
   console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
   const clients = await getActiveClients();
-  const todayDOW = new Date().getDay(); // 0=Sun, 1=Mon, 2=Tue...
+  const todayDOW = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // SAST day-of-week
 
   for (const client of clients) {
     if (isPaused(client)) continue;
@@ -1093,12 +1093,12 @@ cron.schedule("0 18 * * *", async () => {
       }
 
       if (streakCount >= 3) {
-        if (!(await canSendProactive(client.phoneNumber))) continue;
+        if (!canSendProactive(client.id)) continue;
         const name = client.name || "champ";
         await sendWhatsApp(client.phoneNumber,
           `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
         );
-        await recordProactiveSend(client.phoneNumber);
+        recordProactiveSend(client.id);
       }
     } catch (err) {
       console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);
