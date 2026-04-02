@@ -9,6 +9,8 @@ import { pool } from "./db";
 
 async function runMigrations(): Promise<void> {
   const migrations = [
+    // Email (optional, collected during onboarding)
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
     // POPIA consent columns
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent BOOLEAN DEFAULT false`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent_at TIMESTAMP`,
