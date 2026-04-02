@@ -648,12 +648,12 @@ export const HOME_PROGRAMME_GUIDE = `*Home Training Programme — No Gym Needed*
 These are the only movements. Nothing else. No bicycle kicks. No nonsense.
 
 1. *Bodyweight Squat → Jump Squat (progression)*
-https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial
+https://www.youtube.com/watch?v=aclHkVaku9U
 3×15. Feet shoulder-width. Lower until thighs parallel. Drive through heels. Keep chest up.
 Common mistake: Knees caving in. Push knees out over toes.
 
 2. *Push-Up → Decline Push-Up → Archer Push-Up (progression)*
-https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners
+https://www.youtube.com/watch?v=IODxDxX7oi4
 3×10. Hands shoulder-width. Body in straight line. Lower chest to floor. Push up explosively.
 Common mistake: Sagging hips or flaring elbows. Keep core tight.
 
@@ -864,42 +864,42 @@ const HOME_DAYS: Record<number, HomeEx[]> = {
       setsReps: "3 sets of 15 reps",
       cue: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.",
       mistake: "Knees caving inward. Push knees out over toes throughout.",
-      yt: "https://www.youtube.com/results?search_query=bodyweight+squat+form+tutorial",
+      yt: "https://www.youtube.com/watch?v=aclHkVaku9U",
     },
     {
       name: "Push Up",
       setsReps: "3 sets of 10 reps",
       cue: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.",
       mistake: "Hips sagging or rising. Keep body in one straight line.",
-      yt: "https://www.youtube.com/results?search_query=push+up+form+tutorial+beginners",
+      yt: "https://www.youtube.com/watch?v=IODxDxX7oi4",
     },
     {
       name: "Glute Bridge",
       setsReps: "3 sets of 15 reps",
       cue: "Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.",
       mistake: "Pushing through the lower back instead of the glutes. Drive hips, do not arch back.",
-      yt: "https://www.youtube.com/results?search_query=glute+bridge+tutorial+beginners",
+      yt: "https://www.youtube.com/watch?v=OUgsJ8-Vi0E",
     },
     {
       name: "Reverse Lunge",
       setsReps: "3 sets of 12 each leg",
       cue: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.",
       mistake: "Front knee travelling past toes. Keep shin vertical.",
-      yt: "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
+      yt: "https://www.youtube.com/watch?v=xrPteyQLGAo",
     },
     {
       name: "Table Row",
       setsReps: "3 sets of 12 reps",
       cue: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.",
       mistake: "Hips dropping. Keep body rigid like a plank throughout.",
-      yt: "https://www.youtube.com/results?search_query=table+row+exercise+tutorial",
+      yt: "https://www.youtube.com/watch?v=PGRiMK_2jLI",
     },
     {
       name: "Plank",
       setsReps: "3 sets of 30 seconds",
       cue: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.",
       mistake: "Hips rising or sagging. Keep everything in one line.",
-      yt: "https://www.youtube.com/results?search_query=plank+exercise+tutorial+beginners",
+      yt: "https://www.youtube.com/watch?v=ASdvN_XEl_c",
     },
   ],
   2: [
@@ -908,14 +908,14 @@ const HOME_DAYS: Record<number, HomeEx[]> = {
       setsReps: "3 sets of 12 reps",
       cue: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset.",
       mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.",
-      yt: "https://www.youtube.com/results?search_query=jump+squat+tutorial+form",
+      yt: "https://www.youtube.com/watch?v=A-cFYGvaKfc",
     },
     {
       name: "Decline Push Up",
       setsReps: "3 sets of 10 reps",
       cue: "Feet on chair or couch. Hands on floor. Lower chest toward floor. Press back up. Body straight.",
       mistake: "Hips rising to compensate. Keep core tight so body stays in a straight line.",
-      yt: "https://www.youtube.com/results?search_query=decline+push+up+tutorial+beginners",
+      yt: "https://www.youtube.com/watch?v=SKPab2YC9AY",
     },
     {
       name: "Single Leg Glute Bridge",
@@ -1069,6 +1069,37 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
 // Home users: rotating 3-day full body split.
 // ============================================================
 
+// Exercises that load specific body areas — used to filter when injured
+const INJURY_EXERCISE_MAP: Record<string, string[]> = {
+  knee: ["squat", "lunge", "jump squat", "split squat", "leg press", "leg extension", "step up", "box jump", "bulgarian"],
+  shoulder: ["push up", "overhead press", "shoulder press", "lateral raise", "front raise", "military press", "arnold press", "bench press", "incline press", "decline push"],
+  back: ["deadlift", "bent over row", "barbell row", "good morning", "superman", "back extension", "hyperextension"],
+  hip: ["squat", "lunge", "deadlift", "hip thrust", "glute bridge", "split squat", "step up", "sumo"],
+  wrist: ["push up", "bench press", "overhead press", "barbell curl", "front raise"],
+  ankle: ["squat", "lunge", "jump squat", "calf raise", "box jump", "step up", "split squat"],
+};
+
+function filterInjuredExercises(exercises: HomeEx[], injuries: string): { safe: HomeEx[]; skipped: string[] } {
+  if (!injuries || injuries === "none") return { safe: exercises, skipped: [] };
+  const injuryLower = injuries.toLowerCase();
+  const blockedPatterns: string[] = [];
+  for (const [area, patterns] of Object.entries(INJURY_EXERCISE_MAP)) {
+    if (injuryLower.includes(area)) blockedPatterns.push(...patterns);
+  }
+  if (blockedPatterns.length === 0) return { safe: exercises, skipped: [] };
+  const safe: HomeEx[] = [];
+  const skipped: string[] = [];
+  for (const ex of exercises) {
+    const nameLower = ex.name.toLowerCase();
+    if (blockedPatterns.some(p => nameLower.includes(p))) {
+      skipped.push(ex.name);
+    } else {
+      safe.push(ex);
+    }
+  }
+  return { safe, skipped };
+}
+
 export function buildDayWorkout(user: any): string {
   const mode = user.trainingMode || "home";
   const phase = user.programmePhase || 1;
@@ -1079,6 +1110,7 @@ export function buildDayWorkout(user: any): string {
   const day = user.programmeDayInWeek || 1;
   const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
   const isDumbbell = mode === "gym_dumbbell";
+  const injuries = user.injuries || "none";
 
   // Walk-only users
   if (mode === "walk_only" || mode === "walk") {
@@ -1089,15 +1121,44 @@ export function buildDayWorkout(user: any): string {
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  // Home users — rotating 3-day full body
+  // Home users — rotating 3-day full body with week-based variation
   if (mode !== "gym" && mode !== "gym_dumbbell") {
     const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-    const exercises = HOME_DAYS[daySlot];
-    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body Day ${daySlot} | Rest 60 seconds between sets | Total 40–50 minutes\n\n`;
-    for (const ex of exercises) {
-      workout += `*${ex.name} — ${ex.setsReps}*\n${ex.yt}\n${ex.cue}\nCommon mistake: ${ex.mistake}\n\n`;
+    let allExercises = [...HOME_DAYS[daySlot]];
+    // Week-based variation: swap exercises to prevent staleness
+    // Week 1: base exercises, Week 2: swap first exercise from Day 3 pool
+    // Week 3: increase reps/tempo, Week 4: use Day 2 pool as alternate
+    if (week === 2 && daySlot === 1) {
+      // Week 2 Day 1: swap Bodyweight Squat for Jump Squat (from Day 2)
+      allExercises = allExercises.map(ex =>
+        ex.name === "Bodyweight Squat" ? { ...HOME_DAYS[2][0], setsReps: "3 sets of 10 reps" } : ex
+      );
+    } else if (week === 3) {
+      // Week 3: increase volume — add 2 reps to everything
+      allExercises = allExercises.map(ex => ({
+        ...ex,
+        setsReps: ex.setsReps.replace(/(\d+) reps/, (_, n) => `${Math.min(parseInt(n) + 2, 20)} reps`)
+          .replace(/(\d+) seconds/, (_, n) => `${parseInt(n) + 10} seconds`),
+      }));
+    } else if (week === 4) {
+      // Week 4: swap middle exercises between day pools for novelty
+      if (daySlot === 1 && HOME_DAYS[3].length > 2) {
+        allExercises[2] = HOME_DAYS[3][2]; // Swap 3rd exercise
+      } else if (daySlot === 2 && HOME_DAYS[1].length > 1) {
+        allExercises[1] = HOME_DAYS[1][1]; // Swap 2nd exercise
+      }
     }
-    if (isFemaleGluteFocus) {
+    const { safe: exercises, skipped } = filterInjuredExercises(allExercises, injuries);
+    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body Day ${daySlot} | Rest ${multiplier.rest} between sets | Total 40–50 minutes\n\n`;
+    for (const ex of exercises) {
+      // Apply phase multiplier to sets/reps for phases 2+
+      const displaySetsReps = phase > 1 ? `${multiplier.sets} sets of ${multiplier.reps} reps` : ex.setsReps;
+      workout += `*${ex.name} — ${displaySetsReps}*\n${ex.yt}\n${ex.cue}\nCommon mistake: ${ex.mistake}\n\n`;
+    }
+    if (skipped.length > 0) {
+      workout += `⚠️ *Skipped due to ${injuries}:* ${skipped.join(", ")}. These return when you report recovery.\n\n`;
+    }
+    if (isFemaleGluteFocus && !skipped.some(s => s.toLowerCase().includes("glute"))) {
       workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
     }
     workout += `Train on non-consecutive days. Send DONE when finished.`;

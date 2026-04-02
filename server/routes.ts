@@ -3262,10 +3262,28 @@ CRITICAL RULES — these are non-negotiable:
     if (memories.length > 0) memoryContext = memories.join("\n");
   } catch (e) { console.warn("[non-fatal]", e); }
 
+  // ---- SHORT REPLY HANDLER — "yes", "no", "ok" etc need conversation context ----
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish"];
+  if (SHORT_REPLIES.includes(m)) {
+    try {
+      const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+        .from(chatHistory)
+        .where(eq(chatHistory.userId, user.id))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      const lastOut = lastExchange[0]?.messageOut || "";
+      const lastIntent = lastExchange[0]?.intent || "";
+      const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
+      const shortReply = await askCoachK(message, user, shortReplyContext, memoryContext);
+      await logChat(user.id, message, shortReply, "SHORT_REPLY");
+      return shortReply;
+    } catch (e) { console.warn("[short-reply]", e); }
+  }
+
   // ---- FRUSTRATION HANDLER — client venting after a bad bot response ----
   const isFrustrated =
-    /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|jesus|wtf|what the hell|this is useless|pathetic|terrible|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked)\b/i.test(m) ||
-    (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo)\s*[!?.]*$/i.test(m));
+    /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|jesus|wtf|what the hell|this is useless|pathetic|terrible|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked|not worth|waste of money|waste of time|cancel|refund|unsubscribe|this is bad|this is shit|this sucks|useless|rubbish|garbage|disappointed|i.?m done|giving up on this|doesn.?t work|broken|stupid)\b/i.test(m) ||
+    (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo|omg|oh my god|yoh)\s*[!?.]*$/i.test(m));
 
   if (isFrustrated) {
     try {

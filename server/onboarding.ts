@@ -490,6 +490,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeStartDate: new Date(),
       subscriptionStatus: "inactive",
       onboardingState: "COMPLETE",
+      popiConsent: true,
+      popiConsentAt: new Date(),
       ...(primaryFocusArea ? { primaryFocusArea } : {}),
     }).where(eq(users.phoneNumber, phone));
 
