@@ -1509,13 +1509,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const stepNumMatch = m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
     || m.match(/(?:walked|done|did|logged)\s+([\d,]+)\s*(?:steps?|staps?)/i);
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
-  if (stepNumMatch || hasKmWalk) {
+  // Duration-based walk: "walked for 30 minutes", "did a 45 min walk"
+  const hasDurationWalk = !stepNumMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
+  if (stepNumMatch || hasKmWalk || hasDurationWalk) {
     let steps = 0;
     if (stepNumMatch) {
       steps = parseInt(stepNumMatch[1].replace(/,/g, ""));
     } else if (hasKmWalk) {
       const km = parseFloat(hasKmWalk[1]);
       steps = Math.round(km * 1300);
+    } else if (hasDurationWalk) {
+      let minutes = parseInt(hasDurationWalk[1]);
+      const unit = hasDurationWalk[2]?.toLowerCase() || "";
+      if (unit.startsWith("h")) minutes *= 60; // hours to minutes
+      steps = Math.round(minutes * 100); // ~100 steps per minute walking pace
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
@@ -1802,7 +1809,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const stepSentence = avgSteps > 0 ? `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.` : `Steps: no step logs this week — start logging daily.`;
       const weightSentence = weightChange !== null ? (parseFloat(weightChange) < 0 ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.` : parseFloat(weightChange) > 0 ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.` : `Weight: holding steady this week.`) : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
       const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
-      const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Champ"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
+      const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Hey"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
       const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${verdictSentence}`;
 
       // Build shareable weekly wins card for good weeks
@@ -3296,7 +3303,7 @@ CRITICAL RULES — these are non-negotiable:
   } catch (e) { console.warn("[non-fatal]", e); }
 
   // ---- SHORT REPLY HANDLER — "yes", "no", "ok" etc need conversation context ----
-  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish"];
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish", "thanks", "thank you", "dankie", "lekker", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "aight", "right"];
   if (SHORT_REPLIES.includes(m)) {
     try {
       const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
@@ -3954,7 +3961,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       let targets = allComplete;
       if (filter === "active") targets = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= twoDaysAgo);
-      if (filter === "atrisk") targets = allComplete.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < twoWeeksAgo);
+      if (filter === "atrisk") targets = allComplete.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < twoDaysAgo);
 
       let sent = 0;
       let failed = 0;
@@ -4302,18 +4309,19 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         return Math.floor((now - new Date(d).getTime()) / 86400000);
       };
 
-      const atRiskRows = allCompleteUsers.map((u: any) => {
+      const atRiskRows = allCompleteUsers.filter((u: any) => daysSince(u.lastActiveAt) >= 2).map((u: any) => {
         const days = daysSince(u.lastActiveAt);
-        const rowBg = days >= 14 ? "#3b0a0a" : "#1a2a1a";
-        const badgeColor = days >= 14 ? "#ef4444" : "#f59e0b";
+        const rowBg = days >= 14 ? "#3b0a0a" : days >= 5 ? "#2a1a0a" : "#1a2a1a";
+        const badgeColor = days >= 14 ? "#ef4444" : days >= 5 ? "#f97316" : "#f59e0b";
+        const riskLabel = days >= 14 ? "SEVERE" : days >= 5 ? "HIGH" : "WARNING";
         const injuries = u.injuries || u.medicalConditions || "";
         return `
           <tr style="background:${rowBg}; border-bottom: 1px solid #2d3748;">
             <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${u.name || "—"}</td>
             <td style="padding:10px 12px; color:#9ca3af; font-family:monospace;">${maskPhone(u.phoneNumber)}</td>
             <td style="padding:10px 12px;">
-              <span style="background:${badgeColor}; color:#000; border-radius:4px; padding:2px 8px; font-size:12px; font-weight:700;">${fmtDate(u.lastActiveAt)}</span>
-              <span style="color:#9ca3af; font-size:11px; margin-left:6px;">(${days}d ago)</span>
+              <span style="background:${badgeColor}; color:#000; border-radius:4px; padding:2px 8px; font-size:12px; font-weight:700;">${riskLabel}</span>
+              <span style="color:#9ca3af; font-size:11px; margin-left:6px;">${fmtDate(u.lastActiveAt)} (${days}d ago)</span>
             </td>
             <td style="padding:10px 12px; color:#22c55e; font-weight:600; text-align:center;">${u.programmeWeek ?? "—"}</td>
             <td style="padding:10px 12px; color:#d1d5db; text-align:center;">${u.totalWorkoutsCompleted ?? 0}</td>

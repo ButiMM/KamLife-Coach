@@ -304,14 +304,24 @@ async function runEveningAccountability(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const todayLogs = await getTodayLogs(client.id);
 
       if (todayLogs.length === 0) {
         if (canSendProactive(client.id)) {
-          await sendWhatsApp(client.phoneNumber,
-            `${name}, it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.`
-          );
+          // First-workout activation nudge: if 0 workouts ever and signed up > 6h ago
+          const isNewClient = !client.totalWorkoutsCompleted && client.createdAt &&
+            (Date.now() - new Date(client.createdAt).getTime()) > 6 * 3_600_000 &&
+            (Date.now() - new Date(client.createdAt).getTime()) < 48 * 3_600_000;
+          if (isNewClient) {
+            await sendWhatsApp(client.phoneNumber,
+              `${name}, your programme is loaded and ready. Reply *1* to see today's workout — it takes 20 minutes. The first session is always the hardest. Get it done tonight.`
+            );
+          } else {
+            await sendWhatsApp(client.phoneNumber,
+              `${name}, it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.`
+            );
+          }
           recordProactiveSend(client.id);
         }
       }
@@ -371,7 +381,7 @@ cron.schedule("0 8 20 * *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const budget = client.weeklyFoodBudget || "100_300";
 
       let budgetMsg: string;
@@ -485,7 +495,7 @@ cron.schedule("0 4,16 * * *", async () => {
     if (isPaused(client)) continue;
     try {
       if (!client.lastActiveAt) continue;
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const silenceMs = now - new Date(client.lastActiveAt).getTime();
 
       if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
@@ -527,7 +537,7 @@ cron.schedule("0 14 * * 5", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       if (canSendProactive(client.id)) {
         await sendWhatsApp(client.phoneNumber,
           `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
@@ -553,7 +563,7 @@ cron.schedule("0 6 * * 0", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
 
       // Single parallel fetch for all week data
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
@@ -768,7 +778,7 @@ cron.schedule("0 8 * * *", async () => {
     if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
-      const name = client.name || "champ";
+      const name = client.name || "there";
       if (canSendProactive(client.id)) {
         if (days === 1) {
           await sendWhatsApp(client.phoneNumber,
@@ -806,7 +816,7 @@ cron.schedule("0 7 1 * *", async () => {
     if (isPaused(client)) continue;
     if (!canSendProactive(client.id)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       await sendWhatsApp(client.phoneNumber,
         `${name}, it is the 1st. Measurement day.\n\nGet a tape measure and send me:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nWeigh in as well. Same conditions — morning, after bathroom, before food. The tape does not lie when the scale does.`
       );
@@ -834,7 +844,7 @@ cron.schedule("0 10 * * 1-6", async () => {
     try {
       const trainingDays = client.trainingDaysPerWeek || 3;
       const mode = client.trainingMode || "home";
-      const name = client.name || "champ";
+      const name = client.name || "there";
 
       // Determine if today is a training day for this client based on their schedule
       const schedule = TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3];
@@ -922,7 +932,7 @@ cron.schedule("0 5 * * *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       await sendWhatsApp(client.phoneNumber, eventFn(name));
     } catch (err) {
       console.error(`[SCHEDULER] Cultural event error — ${client.phoneNumber}:`, err);
@@ -945,7 +955,7 @@ cron.schedule("0 5,17 * * *", async () => {
     if (isPaused(client)) continue;
     try {
       if (!client.lastActiveAt) continue;
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const silenceMs = now - new Date(client.lastActiveAt).getTime();
       const workouts = client.totalWorkoutsCompleted || 0;
       const week = client.programmeWeek || 1;
@@ -987,7 +997,7 @@ cron.schedule("0 7 * * *", async () => {
       if (![7, 30, 60, 90].includes(days)) continue;
       if (!client.referralCode) continue; // Only nudge if they have a code
 
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const code = client.referralCode;
 
       const msgs: Record<number, string> = {
@@ -1017,7 +1027,7 @@ cron.schedule("0 9 * * *", async () => {
     if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const goal = client.goalType || "fat_loss";
       const goalLabel: Record<string, string> = {
         fat_loss: "fat loss", muscle_gain: "muscle gain",
@@ -1094,7 +1104,7 @@ cron.schedule("0 18 * * *", async () => {
 
       if (streakCount >= 3) {
         if (!canSendProactive(client.id)) continue;
-        const name = client.name || "champ";
+        const name = client.name || "there";
         await sendWhatsApp(client.phoneNumber,
           `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
         );
@@ -1124,7 +1134,7 @@ cron.schedule("0 5 * 8 1", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const isFemale = femaleIndicators(client);
 
@@ -1178,7 +1188,7 @@ cron.schedule("0 5 * * 1", async () => {
         .set({ programmePhase: newPhase, programmeWeek: 1, programmeDayInWeek: 1, phaseReadyToAdvance: false })
         .where(eq(users.id, client.id));
 
-      const name = client.name || "champ";
+      const name = client.name || "there";
       await sendWhatsApp(client.phoneNumber,
         `${name}, you have completed Phase ${currentPhase} (${phaseNames[currentPhase]}). ${completedSessions.length} of ${plannedSessions} planned sessions done — ${Math.round(compliance * 100)}% compliance. You have earned Phase ${newPhase}: ${phaseNames[newPhase]}. Your programme has been updated. Reply "today" for your first Phase ${newPhase} session.`
       );
@@ -1313,7 +1323,7 @@ cron.schedule("0 8 * * 3", async () => {
     try {
       if (!client.injuries || client.injuries === "" || client.injuries === "none") continue;
 
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const injuryNote = client.injuries.slice(0, 60);
 
       await sendWhatsApp(client.phoneNumber,
@@ -1337,7 +1347,7 @@ cron.schedule("0 5 2 1 *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "champ";
+      const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = programmeDaysSince(client.programmeStartDate);
 
