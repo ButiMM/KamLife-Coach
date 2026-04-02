@@ -301,11 +301,16 @@ export function selectModel(instruction: string, userMessage: string): { model: 
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    // Only count messages the CLIENT actually sent (messageIn not empty) — excludes scheduler proactive messages
     const result = await db.select({ count: sql`count(*)` })
       .from(chatHistory)
-      .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, todayStart)));
+      .where(and(
+        eq(chatHistory.userId, userId),
+        gte(chatHistory.createdAt, todayStart),
+        sql`message_in IS NOT NULL AND message_in != ''`
+      ));
     const count = parseInt(String(result[0]?.count || 0));
-    return count < 20; // 20 total responses per day — generous but bounded
+    return count < 40; // 40 client-initiated messages per day
   } catch {
     return true; // fail open
   }

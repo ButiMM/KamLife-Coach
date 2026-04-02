@@ -2412,7 +2412,12 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- HOLIDAY / PAUSE MODE ----
-  if (/\b(holiday|pause|pausing|on holiday|going away|vacation|sick leave|taking a break|leave me alone|stop messaging|mute|quiet mode|don.?t message)\b/i.test(m)) {
+  // Only pause when the client EXPLICITLY wants to stop messages.
+  // "I'm on holiday, any tips?" is a QUESTION — do NOT pause.
+  // Questions contain: "?", "tips", "what can I", "how", "recommend", "suggest", "advice", "help"
+  const hasHolidayWord = /\b(holiday|pause|pausing|on holiday|going away|vacation|sick leave|taking a break|leave me alone|stop messaging|mute|quiet mode|don.?t message)\b/i.test(m);
+  const isAskingQuestion = /\?|tips|what can|what should|how do|how can|recommend|suggest|advice|help|any ideas|give me/i.test(m);
+  if (hasHolidayWord && !isAskingQuestion) {
     // Parse duration
     const daysMatch = m.match(/(\d+)\s*(day|days|week|weeks)/i);
     let pauseDays = 7; // default 1 week
@@ -3175,6 +3180,9 @@ RAMADAN / FASTING:
 TRAVELLING / HOTEL:
   4 exercises, hotel room, bodyweight only, sets x reps. No equipment assumed.
 
+HOLIDAY / VACATION:
+  Client is on holiday and asking for advice. Give practical holiday-specific tips: bodyweight exercises they can do anywhere (beach, hotel, park), walking targets, how to eat well at restaurants/buffets while still enjoying the holiday. Do NOT pause their coaching or tell them to stop messaging. They WANT coaching while on holiday. Keep it fun and practical — holiday is not a reason to stop, it is a chance to stay consistent in a new way.
+
 ALCOHOL:
   Coach forward. Acknowledge it happened. One practical next step. Never shame.
 
@@ -3320,7 +3328,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
       const name = user.name ? ` ${user.name}` : "";
-      const frustContext = `Client is frustrated. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: Acknowledge the specific frustration in one sentence — reference what went wrong, not generic apology. Do not say "I apologise" or "I'm sorry" generically. Say what was wrong specifically if you can tell. Then correct course immediately — give the right answer to what they actually needed. SA voice. Direct. No fluff.`;
+      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course — give a better, more specific answer to what they originally needed. If you cannot tell what they needed, ask directly: "What do you need from me right now?" SA voice. Direct. No fluff.`;
       const frustReply = await askCoachK(message, user, frustContext);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
@@ -3330,7 +3338,9 @@ CRITICAL RULES — these are non-negotiable:
   // Daily GPT call cap — prevents runaway costs from heavy users
   const underLimit = await isUnderGPTCallLimit(user.id);
   if (!underLimit) {
-    return `You've sent a lot today — I like the energy. Rest up tonight, eat your protein, and we go hard again tomorrow. Reply *menu* if you need anything specific.`;
+    const capName = user.name || "there";
+    const capGoal = user.goalType === "muscle_gain" ? "hit your protein and get 8 hours sleep tonight" : "hit your step target and keep your last meal clean tonight";
+    return `${capName}, I have hit my daily message limit. Your programme, targets, and logs are all still active — reply *menu* to access them. Focus on one thing: ${capGoal}. Full coaching resumes tomorrow morning.`;
   }
 
   // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----
