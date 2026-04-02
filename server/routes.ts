@@ -3654,7 +3654,9 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const authToken = process.env.TWILIO_AUTH_TOKEN || "";
       if (authToken) {
         const signature = (req.headers["x-twilio-signature"] as string) || "";
-        const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
+        // Use x-forwarded-proto to get the real protocol behind proxies (Replit, Render, etc.)
+        const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+        const fullUrl = `${proto}://${req.get("host")}${req.originalUrl}`;
         const valid = twilio.validateRequest(authToken, signature, fullUrl, req.body);
         if (!valid) {
           console.warn(`[SECURITY] Twilio signature validation failed from ${req.ip}`);
