@@ -2797,6 +2797,35 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return winReply;
   }
 
+  // ---- SUGAR / JUNK CRAVINGS HANDLER — different from general hunger ----
+  const isCravingMsg =
+    /\b(craving|cravings|craving sugar|craving chocolate|craving sweets|craving junk|want.*chocolate|want.*sweets|want.*chips|want.*biscuits|want.*cake|want.*ice cream|want.*pizza|dying for.*chocolate|dying for.*sweets|need.*chocolate|need.*sugar|sugar craving|sweet tooth|can.?t stop craving|want to eat junk|want.*takeaway|want.*kfc|want.*mcdonalds|want.*burger king)\b/i.test(m) &&
+    !/\b(i.?m hungry|starving)\b/i.test(m); // Don't double-fire with hunger handler
+
+  if (isCravingMsg) {
+    const name = user.name ? `, ${user.name}` : "";
+    const goal = user.goalType || "fat_loss";
+    const isSugar = /\b(sugar|sweet|chocolate|sweets|biscuit|cake|ice cream)\b/i.test(m);
+    const cravingReply = isSugar
+      ? `Sugar cravings are not weakness${name} — they are a signal.\n\n*Most common causes:*\n1. *Low protein* — when protein is under target, your body craves fast energy (sugar). Fix: eat protein NOW — eggs, biltong, chicken, cottage cheese.\n2. *Skipped meals* — blood sugar crashed. Your body wants the fastest fix. Fix: eat a proper meal, do not try to resist on an empty stomach.\n3. *Poor sleep* — under 7 hours spikes ghrelin and makes you crave carbs. Fix: tonight, bed by 10pm.\n4. *Habit* — if you always eat sweets at 3pm, your body expects it. Fix: replace with Greek yoghurt and peanut butter — sweet, filling, high protein.\n\n*The 10-minute rule:* When the craving hits, eat protein first and wait 10 minutes. Most cravings pass. If it is still there after 10 min — eat a small portion of what you want. No guilt. Log it. Move on.`
+      : `Craving junk food${name}? That is normal — especially when you are eating clean consistently.\n\n*The move:*\n1. Eat protein first — RIGHT NOW. Eggs, biltong, chicken. A full stomach craves nothing.\n2. If you still want it after — have a small portion. One slice, not a whole pizza. One serving, not the bag.\n3. Log it honestly. One takeaway meal is 800-1200 kcal. Your daily target is ${user.calorieTarget || 1800} kcal. Adjust the rest of the day.\n\nBanning food creates binges. Managing portions creates results.`;
+    await logChat(user.id, message, cravingReply, "CRAVINGS");
+    return cravingReply;
+  }
+
+  // ---- SOCIAL EVENT / PARTY / WEDDING / DECEMBER HANDLER ----
+  const isSocialEvent =
+    /\b(party|parties|wedding|matric dance|year.?end|december|festive|christmas|new year|birthday.*party|birthday.*eat|function|work function|office party|team building|dinner out|dinner party|family gathering|family dinner|lobola|umemulo|funeral.*food|after tears|stokvel|meat day|shisa nyama)\b/i.test(m) &&
+    /\b(eat|eating|what should|how do i|tips|going to|this weekend|tonight|tomorrow|coming up|worried|nervous|scared|what do i do)\b/i.test(m);
+
+  if (isSocialEvent) {
+    const name = user.name ? `, ${user.name}` : "";
+    const goal = user.goalType || "fat_loss";
+    const socialReply = `Social events are part of life${name} — not an excuse to abandon the programme and not a reason to feel guilty.\n\n*Before the event:*\n• Eat a high-protein meal 2 hours before — eggs, chicken, anything filling. Arriving hungry is how you overeat.\n• Decide in advance: "I will have one plate" — not a restriction, a plan.\n\n*At the event:*\n• Protein first on the plate — meat, chicken, fish. Then vegetables. Then carbs/starch last.\n• One plate, not three. Enjoy it fully — no guilt.\n• Alcohol: alternate with water. Every second drink is water.\n\n*After the event:*\n• Do NOT skip meals the next day to "make up for it". That starts a restrict-binge cycle.\n• Normal meals tomorrow. Hit your protein. Train if scheduled.\n• One event does not break a programme. Seven events with no plan in between does.\n\n${goal === "fat_loss" ? "Your deficit runs across weeks, not one meal. Enjoy it and get back on track." : "Extra calories at an event are fuel — use them in your next session."}`;
+    await logChat(user.id, message, socialReply, "SOCIAL_EVENT");
+    return socialReply;
+  }
+
   // ---- UNDER-EATING WARNING — client logs very low calories ----
   const todayCalCheck = (user.todayCaloriesDate === new Date().toISOString().slice(0, 10)) ? (user.todayCalories || 0) : 0;
   const calTarget2 = user.calorieTarget || 1800;
@@ -3244,6 +3273,12 @@ QUESTION RULE: Never end a response with a question unless you genuinely need sp
 
 FORMATTING RULE: Never use asterisks for bold in conversational responses. Asterisks and bold are only allowed in programme delivery and meal plan delivery.
 
+ANTI-GENERIC ENFORCEMENT — every response MUST pass these checks:
+1. SPECIFICITY CHECK: Every response must contain at least ONE of: a specific number (calories, kg, reps, steps, rands), a specific food name, a specific exercise name, or a specific time/date. If your response contains none of these, it is too generic — rewrite it.
+2. CONTEXT CHECK: Reference something the client actually said or something from their profile (goal, weight, training mode, week number). If your response could apply to literally anyone, it is too generic.
+3. ACTION CHECK: End every response with ONE specific action the client can do right now. Not "keep going" or "stay consistent" — a real action like "do 20 squats before your shower tonight" or "add 2 boiled eggs to your next meal".
+4. If you catch yourself writing a response that sounds like a motivational poster — delete it and write what a real coach would say to THIS specific person.
+
 CRITICAL RULES — these are non-negotiable:
 - Client's name is ${clientName}. Never call them "a client", "Hi client", or "champ" if you have a real name.
 - NEVER say "drink 2 litres of water" as a response to anything except a water question.
@@ -3251,7 +3286,7 @@ CRITICAL RULES — these are non-negotiable:
 - Never append a protein warning at the end of a food coaching response.
 - Never mention AI, bot, system, or technology.
 - Never use a motivational quote as a standalone response.
-- Maximum 3 sentences and 60 words for conversational responses. Exception: programme and meal plan delivery may be longer.
+- Maximum 3 sentences and 60 words for conversational responses. Exception: programme delivery, meal plans, and food logging responses may be longer.
 - Always end with exactly one specific action the client must take right now.
 - SA voice throughout: real, warm, firm, direct.`;
 
@@ -3942,6 +3977,109 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch metrics" });
+    }
+  });
+
+  // ---- FUNNEL METRICS — signup → onboard → first workout → week-1 retention ----
+  app.get("/api/dashboard/funnel", requireDashboardKey, async (_req, res) => {
+    try {
+      const allUsers = await db.select().from(users);
+      const now = Date.now();
+      const sevenDays = 7 * 86_400_000;
+      const thirtyDays = 30 * 86_400_000;
+
+      const totalSignups = allUsers.length;
+      const onboardingComplete = allUsers.filter(u => u.onboardingState === "COMPLETE").length;
+      const firstWorkoutDone = allUsers.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
+      const activeWeek1 = allUsers.filter(u => {
+        if (!u.createdAt) return false;
+        const age = now - new Date(u.createdAt).getTime();
+        return age >= sevenDays && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < sevenDays * 2;
+      }).length;
+      const signupsWithWeek1 = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays).length;
+
+      // Retention cohorts
+      const d1Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= 86_400_000);
+      const d1Retained = d1Eligible.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < now - new Date(u.createdAt!).getTime() + 86_400_000);
+      const d7Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays);
+      const d7Retained = d7Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + sevenDays - 86_400_000));
+      const d30Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= thirtyDays);
+      const d30Retained = d30Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + thirtyDays - sevenDays));
+
+      // At-risk breakdown
+      const atRisk48h = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 2 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 5 * 86_400_000).length;
+      const atRisk5d = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 5 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000).length;
+      const atRisk14d = allUsers.filter(u => u.onboardingState === "COMPLETE" && (!u.lastActiveAt || (now - new Date(u.lastActiveAt).getTime()) >= 14 * 86_400_000)).length;
+
+      // Conversion rates
+      const payingClients = allUsers.filter(u => u.subscriptionStatus === "active").length;
+      const trialToPaid = totalSignups > 0 ? Math.round(payingClients / totalSignups * 100) : 0;
+
+      // Avg workouts per client per week (active clients only)
+      const activeClients = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86_400_000);
+      const totalWorkoutsActiveClients = activeClients.reduce((sum, u) => sum + (u.totalWorkoutsCompleted || 0), 0);
+      const avgWorkoutsPerWeek = activeClients.length > 0
+        ? Math.round(totalWorkoutsActiveClients / activeClients.length / Math.max(1, activeClients.reduce((sum, u) => sum + Math.max(1, Math.floor((now - new Date(u.createdAt!).getTime()) / sevenDays)), 0) / activeClients.length) * 10) / 10
+        : 0;
+
+      res.json({
+        funnel: {
+          totalSignups,
+          onboardingComplete,
+          firstWorkoutDone,
+          activeWeek1,
+          signupsWithWeek1Data: signupsWithWeek1,
+        },
+        conversionRates: {
+          signupToOnboard: totalSignups > 0 ? Math.round(onboardingComplete / totalSignups * 100) : 0,
+          onboardToFirstWorkout: onboardingComplete > 0 ? Math.round(firstWorkoutDone / onboardingComplete * 100) : 0,
+          firstWorkoutToWeek1: signupsWithWeek1 > 0 ? Math.round(activeWeek1 / signupsWithWeek1 * 100) : 0,
+          trialToPaid,
+        },
+        retention: {
+          d1: { eligible: d1Eligible.length, retained: d1Retained.length, rate: d1Eligible.length > 0 ? Math.round(d1Retained.length / d1Eligible.length * 100) : 0 },
+          d7: { eligible: d7Eligible.length, retained: d7Retained.length, rate: d7Eligible.length > 0 ? Math.round(d7Retained.length / d7Eligible.length * 100) : 0 },
+          d30: { eligible: d30Eligible.length, retained: d30Retained.length, rate: d30Eligible.length > 0 ? Math.round(d30Retained.length / d30Eligible.length * 100) : 0 },
+        },
+        atRisk: { warning48h: atRisk48h, high5d: atRisk5d, severe14d: atRisk14d },
+        engagement: { avgWorkoutsPerWeek, activeClientsThisWeek: activeClients.length, payingClients },
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch funnel metrics" });
+    }
+  });
+
+  // ---- ONE-CLICK INTERVENTION — send a targeted message to a specific at-risk client ----
+  app.post("/api/dashboard/intervene", requireDashboardKey, async (req, res) => {
+    try {
+      const { phone, type = "checkin" } = req.body;
+      if (!phone) return res.status(400).json({ error: "phone required" });
+
+      const targetUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      if (targetUser.length === 0) return res.status(404).json({ error: "user not found" });
+      const client = targetUser[0];
+      const name = client.name || "there";
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const week = client.programmeWeek || 1;
+
+      const twilioClient2 = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
+      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
+
+      const messages: Record<string, string> = {
+        checkin: `${name}, Coach K here. Haven't heard from you in a while — everything okay? No pressure, just checking in. Reply anything and we pick up where we left off.`,
+        motivation: `${name}, ${workouts} sessions completed. Week ${week}. That is more than most people ever do. The programme is still here, your progress is saved. One session today changes the momentum.`,
+        workout: `${name}, your next workout is ready. Reply *1* to see it — takes 20 minutes. One session. That is all I am asking for today.`,
+        nutrition: `${name}, quick question — what did you eat today? Just tell me and I will give you the breakdown. No judgement. One message.`,
+      };
+
+      const msg = messages[type] || messages.checkin;
+      await twilioClient2.messages.create({ from: fromNum, to: phone, body: msg });
+      await logChat(client.id, `[COACH_INTERVENTION:${type}]`, msg, "COACH_INTERVENTION");
+
+      res.json({ success: true, type, phone: phone.slice(-4) });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to send intervention" });
     }
   });
 

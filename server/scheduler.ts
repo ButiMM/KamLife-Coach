@@ -498,12 +498,14 @@ cron.schedule("0 4,16 * * *", async () => {
       const name = client.name || "there";
       const silenceMs = now - new Date(client.lastActiveAt).getTime();
 
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const week = client.programmeWeek || 1;
+
       if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
-        // 14-day silence: send final re-engagement, flag for manual coach intervention
+        // 14-day silence: final re-engagement with personal data
         await sendWhatsApp(client.phoneNumber,
-          `${name}, two weeks since we last spoke. I am not going anywhere — when you are ready just say Hi and we pick up exactly where we left off. No judgement, no guilt. Your progress is saved.`
+          `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
         );
-        // Flag in DB so coach dashboard surfaces this user immediately
         try {
           await db.update(users).set({ lastActiveAt: client.lastActiveAt }).where(eq(users.id, client.id));
           console.log(`[SCHEDULER] 14-day silence — flagged for manual review: ${client.phoneNumber}`);
@@ -511,8 +513,9 @@ cron.schedule("0 4,16 * * *", async () => {
           console.error(`[SCHEDULER] Failed to flag 14-day silent user ${client.phoneNumber}:`, flagErr);
         }
       } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
+        // 7-day silence: use workout data to pull them back
         await sendWhatsApp(client.phoneNumber,
-          `${name}, a week without checking in. Life gets busy — I get it. When you are ready just say Hello and we pick up exactly where we left off. No guilt.`
+          `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\nReply *1* to see today's workout. That is all — one session.`
         );
       } else if (silenceMs >= 48 * HOUR && silenceMs < 48 * HOUR + 12 * HOUR) {
         await sendWhatsApp(client.phoneNumber,
@@ -1453,6 +1456,56 @@ cron.schedule("0 8 * * *", async () => {
       }
     } catch (err) {
       console.error(`[SCHEDULER] Subscription expiry error — ${client.phoneNumber}:`, err);
+    }
+  }
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB — PAYMENT FAILURE RECOVERY SEQUENCE
+// Runs daily 10am UTC (12pm SAST)
+// Day 1: Gentle reminder. Day 3: Urgency. Day 7: Final attempt with data.
+// ============================================================
+
+cron.schedule("0 10 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Payment failure recovery");
+  const allUsers = await db.select().from(users);
+  const failedUsers = allUsers.filter(u =>
+    u.subscriptionStatus === "inactive" &&
+    u.cancelledAt &&
+    u.onboardingState === "COMPLETE" &&
+    u.totalWorkoutsCompleted && u.totalWorkoutsCompleted > 0
+  );
+
+  const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+  const merchantId = process.env.PAYFAST_MERCHANT_ID;
+
+  for (const client of failedUsers) {
+    try {
+      const name = client.name || "there";
+      const daysSinceFail = Math.floor((Date.now() - new Date(client.cancelledAt!).getTime()) / 86_400_000);
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+
+      if (daysSinceFail === 1) {
+        // Day 1 — soft, assume payment glitch
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`
+        );
+      } else if (daysSinceFail === 3) {
+        // Day 3 — create urgency with personal data
+        const weekNum = client.programmeWeek || 1;
+        await sendWhatsApp(client.phoneNumber,
+          `${name} — 3 days without coaching. You are in Week ${weekNum} with ${workouts} sessions done.\n\nClients who take more than a week off lose momentum and rarely come back at the same level. Your streak, your targets, your programme — all still here.\n\nFix your payment in 30 seconds:\n${payLink}`
+        );
+      } else if (daysSinceFail === 7) {
+        // Day 7 — final attempt, acknowledge the situation honestly
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nIf money is tight right now, I get it — reply *pay* when you are ready and I will send a fresh link. No pressure, no expiry on your data.\n\nIf you want to stop completely, reply *STOP* and I won't message again.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err);
     }
   }
 }, { timezone: "UTC" });
