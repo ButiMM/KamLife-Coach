@@ -84,7 +84,7 @@ export function getSAContextFlags(user?: any): string {
   const flags: string[] = [];
 
   if (day >= 20) {
-    flags.push("BUDGET MODE ACTIVE: Date is after the 20th. Client may be tight on money. Prioritise cheap high-protein SA foods — eggs, pilchards, sugar beans, pap. Do not suggest expensive supplements or premium foods.");
+    flags.push("BUDGET MODE ACTIVE: Date is after the 20th. Client may be tight on money. Only mention budget alternatives if the client brings up money or budget concerns. Do NOT assume everyone is broke — if they send a photo of steak, coach them on steak. Never downgrade their food choices unsolicited.");
   }
 
   // Fix 2 — Ramadan only activates on explicit user mention, never on calendar date alone
@@ -358,6 +358,28 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS - tail.length) + tail;
   }
 
+  // Fetch last 6 messages for conversation context so GPT understands the flow
+  let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
+  try {
+    const recentMessages = await db.select({
+      messageIn: chatHistory.messageIn,
+      messageOut: chatHistory.messageOut,
+    }).from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(6);
+
+    // Build in chronological order (oldest first)
+    conversationHistory = recentMessages.reverse().flatMap(m => {
+      const msgs: { role: "user" | "assistant"; content: string }[] = [];
+      if (m.messageIn) msgs.push({ role: "user", content: m.messageIn });
+      if (m.messageOut) msgs.push({ role: "assistant", content: m.messageOut.slice(0, 300) });
+      return msgs;
+    });
+  } catch (histErr) {
+    console.warn("[GPT] Could not fetch chat history:", histErr);
+  }
+
   try {
     const response = await openai.chat.completions.create({
       model,
@@ -367,6 +389,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
           role: "system",
           content: systemContent
         },
+        ...conversationHistory,
         {
           role: "user",
           content: userMessage
