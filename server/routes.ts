@@ -530,7 +530,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- SUBSCRIPTION GATE — inactive users locked out of coaching ----
   if (user.subscriptionStatus === 'inactive') {
-    const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance)\b/i;
+    const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance|hi|hello|hey|howzit|sawubona|dumela|heita|eita|status|what did i eat|food diary|food log|my food|calories today|protein today)\b/i;
     if (!gateBypass.test(m)) {
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
@@ -867,11 +867,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         }
 
         // ---- FOOD PHOTO continues below ----
-        // Rate limit food photo logging — max 3 per day
+        // Rate limit food photo logging — max 3 per day (only count actual photo logs, not text food entries)
         const todayStartPhoto = new Date(); todayStartPhoto.setHours(0, 0, 0, 0);
         const photoCountResult = await db.select({ count: sql`count(*)` })
           .from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG")));
+          .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
         const photoCountToday = parseInt(String(photoCountResult[0]?.count || 0));
         if (photoCountToday >= 3) {
           return `3 food photos logged today — I have a clear picture of how you're eating. Keep it consistent and send me tomorrow's first meal.`;

@@ -1400,63 +1400,7 @@ cron.schedule("0 7 * * 0", async () => {
   }
 }, { timezone: "UTC" });
 
-// ============================================================
-// JOB 21 — PRE-TRAINING NUTRITION REMINDER
-// Runs 12pm SAST (10am UTC) daily
-// Sends pre-training nutrition reminder on workout days
-// ============================================================
-
-cron.schedule("0 10 * * *", async () => {
-  console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
-  const clients = await getActiveClients();
-  const todayStart = dayStart(0);
-  const todayDow = new Date().getDay(); // 0=Sun, 1=Mon...
-
-  for (const client of clients) {
-    if (isPaused(client)) continue;
-    try {
-      // Determine if today is a training day
-      const trainingDays = client.trainingDaysPerWeek || 3;
-      // Training schedules by days/week (days of week: 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat)
-      const TRAINING_SCHEDULES: Record<number, number[]> = {
-        2: [1, 4],       // Mon, Thu
-        3: [1, 3, 5],    // Mon, Wed, Fri
-        4: [1, 2, 4, 6], // Mon, Tue, Thu, Sat
-        5: [1, 2, 3, 4, 6], // Mon-Thu, Sat
-        6: [1, 2, 3, 4, 5, 6], // Mon-Sat
-      };
-      const schedule = TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3];
-      if (!schedule.includes(todayDow)) continue; // Not a training day
-
-      // Check if already trained today
-      const todayWorkout = await db.select({ id: workoutLogs.id })
-        .from(workoutLogs)
-        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
-        .limit(1);
-      if (todayWorkout.length > 0) continue; // Already done
-
-      const name = client.name || "there";
-      const budget = client.weeklyFoodBudget || "100_300";
-      const goal = client.goalType || "fat_loss";
-
-      let preMeal = "";
-      if (budget === "under_50" || budget === "50_100") {
-        preMeal = "2 eggs + slice of bread 90 minutes before. Or a banana if you have one. Never train completely fasted.";
-      } else if (goal === "muscle_gain") {
-        preMeal = "Oats with milk + banana 90 minutes before, or rice and chicken 2 hours before. Carbs fuel the session, protein builds after it.";
-      } else {
-        preMeal = "Chicken or eggs + small portion of carbs (pap, oats, or sweet potato) 90 minutes before. This fuels the session without spiking fat storage.";
-      }
-
-      const mode = client.trainingMode || "home";
-      const modeWord = mode === "gym" ? "gym session" : "training session";
-      const reminderMsg = `${name}, training day. Eat before you train — ${preMeal}\n\nReply DONE after your session and I log it.`;
-      await sendWhatsApp(client.phoneNumber, reminderMsg);
-    } catch (err) {
-      console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
-    }
-  }
-}, { timezone: "UTC" });
+// JOB 21 — REMOVED: Was a duplicate of the pre-training nutrition reminder at line ~827
 
 // ============================================================
 // JOB — SUBSCRIPTION EXPIRY CHECK
