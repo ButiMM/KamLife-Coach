@@ -4,3 +4,15 @@ dist
 server/public
 vite.config.ts.*
 *.tar.gz.local/
+
+# Secrets — NEVER commit these
+.env
+.env.local
+.env.production
+.env.*.local
+
+# Scheduler state (contains user IDs)
+server/.scheduler-state.json
+
+# Voice note cache
+tmp/

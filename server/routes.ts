@@ -3650,16 +3650,18 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   app.post("/twilio/whatsapp", async (req, res) => {
     try {
-      // ---- Twilio signature verification (skip in development) ----
-      if (process.env.NODE_ENV !== "development") {
-        const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+      // ---- Twilio signature verification (always enabled) ----
+      const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+      if (authToken) {
         const signature = (req.headers["x-twilio-signature"] as string) || "";
         const fullUrl = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
         const valid = twilio.validateRequest(authToken, signature, fullUrl, req.body);
         if (!valid) {
-          console.warn(`Twilio signature validation failed from ${req.ip}`);
+          console.warn(`[SECURITY] Twilio signature validation failed from ${req.ip}`);
           return res.status(403).end();
         }
+      } else {
+        console.warn("[SECURITY] TWILIO_AUTH_TOKEN not set — signature validation skipped. Set this env var in production!");
       }
 
       // ---- Rate limiter ----
@@ -3747,9 +3749,9 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
 
     // OpenAI
-    checks.openai = process.env.OPENAI_API_KEY
+    checks.openai = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
       ? { status: "online" }
-      : { status: "offline", detail: "OPENAI_API_KEY not set" };
+      : { status: "offline", detail: "AI_INTEGRATIONS_OPENAI_API_KEY not set" };
 
     // Twilio / WhatsApp
     checks.whatsapp = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER)

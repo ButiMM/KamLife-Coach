@@ -158,7 +158,9 @@ app.use((req, res, next) => {
     { key: "TWILIO_AUTH_TOKEN", warn: true, hint: "WhatsApp messages will not send" },
     { key: "TWILIO_WHATSAPP_NUMBER", warn: true, hint: "WhatsApp messages will not send" },
     { key: "AI_INTEGRATIONS_OPENAI_API_KEY", warn: true, hint: "GPT coaching responses will fail" },
-    { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard using insecure default key 'kamlife2024' — set this env var immediately" },
+    { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard admin access blocked until this is set" },
+    { key: "PAYFAST_MERCHANT_ID", warn: true, hint: "Payment links will not work" },
+    { key: "PAYFAST_MERCHANT_KEY", warn: true, hint: "PayFast ITN signature validation disabled" },
   ];
 
   const missing = REQUIRED_ENV.filter(e => !process.env[e.key]);
