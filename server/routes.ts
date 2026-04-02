@@ -1,5 +1,7 @@
 import { type Express } from "express";
 import { type Server } from "http";
+import crypto from "crypto";
+import path from "path";
 import { db, pool } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
@@ -3448,8 +3450,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       console.error("[AUTH] COACH_DASHBOARD_KEY env var is not set — admin access blocked");
       return res.status(503).json({ message: "Dashboard not configured" });
     }
-    const provided = (req.headers["x-dashboard-key"] as string) || (req.query.key as string) || "";
-    if (provided !== key) return res.status(401).json({ message: "Unauthorized" });
+    // Accept key via header only — never query string (query strings appear in logs and referers)
+    const provided = (req.headers["x-dashboard-key"] as string) || "";
+    let match = false;
+    try { match = provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key)); } catch { match = false; }
+    if (!match) return res.status(401).json({ message: "Unauthorized" });
     next();
   }
 
@@ -3460,7 +3465,8 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     if (!password || password !== key) {
       return res.status(401).json({ message: "Invalid password" });
     }
-    return res.json({ token: key });
+    // Never return the raw key — return success only; client uses the password directly as the header value
+    return res.json({ success: true });
   });
 
   // ── REST API for admin dashboard ──────────────────────────
@@ -3763,8 +3769,10 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // Serves TTS-generated MP3s for milestone voice notes
   app.get("/voice/:id.mp3", (req, res) => {
     const { existsSync } = require("fs");
-    const { join } = require("path");
-    const filePath = join(process.cwd(), "tmp", "voice", `${req.params.id}.mp3`);
+    // Sanitise to prevent path traversal — allow only alphanumeric, dash, underscore
+    const safeId = path.basename(req.params.id || "").replace(/[^a-zA-Z0-9_-]/g, "");
+    if (!safeId) return res.status(400).end();
+    const filePath = path.join(process.cwd(), "tmp", "voice", `${safeId}.mp3`);
     if (!existsSync(filePath)) return res.status(404).end();
     res.setHeader("Content-Type", "audio/mpeg");
     res.setHeader("Cache-Control", "public, max-age=86400");
@@ -3775,8 +3783,12 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   function requireDashboardKey(req: any, res: any, next: any) {
     const key = process.env.DASHBOARD_API_KEY;
-    const provided = req.headers["x-dashboard-key"] || req.query.key;
-    if (key && provided !== key) return res.status(403).json({ error: "Forbidden" });
+    // Deny all access if key is not configured — never fail open
+    if (!key) return res.status(503).json({ error: "Dashboard not configured" });
+    const provided = (req.headers["x-dashboard-key"] as string) || "";
+    let match = false;
+    try { match = provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key)); } catch { match = false; }
+    if (!match) return res.status(403).json({ error: "Forbidden" });
     next();
   }
 
@@ -3984,6 +3996,20 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         return;
       }
 
+      // Validate merchant ID matches our account
+      const expectedMerchantId = process.env.PAYFAST_MERCHANT_ID;
+      if (expectedMerchantId && data.merchant_id !== expectedMerchantId) {
+        console.error(`[PAYFAST] Merchant ID mismatch (got ${data.merchant_id}) — rejecting ITN`);
+        return;
+      }
+
+      // Sanity-check amount — reject anything outside a reasonable subscription range (R1–R500)
+      // Prevents forged webhooks that activate subscriptions for R0.01
+      if (paymentStatus === "COMPLETE" && (amountGross < 1 || amountGross > 500)) {
+        console.error(`[PAYFAST] Amount R${amountGross} outside acceptable range — rejecting ITN`);
+        return;
+      }
+
       // Normalise phone to whatsapp: format
       const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
       const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
@@ -4149,8 +4175,12 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // COACH ADMIN DASHBOARD — GET /coach?key=COACH_DASHBOARD_KEY
   // ============================================================
   app.get("/coach", async (req: any, res: any) => {
-    const key = req.query.key as string;
-    if (key !== (process.env.COACH_DASHBOARD_KEY || "kamlife2024")) {
+    const key = req.query.key as string || "";
+    const dashKey = process.env.COACH_DASHBOARD_KEY;
+    if (!dashKey) return res.status(503).send("<h1>Dashboard not configured — set COACH_DASHBOARD_KEY</h1>");
+    let authorized = false;
+    try { authorized = key.length === dashKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey)); } catch { authorized = false; }
+    if (!authorized) {
       return res.status(401).send("<h1>Unauthorized</h1>");
     }
     try {
