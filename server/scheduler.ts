@@ -1795,5 +1795,5 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   New Year reset        — January 2nd continuation message");
   console.log("[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)");
   console.log("[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)");
-  console.log(`[SCHEDULER]   Ramadan mode         — ${ramadanActive ? "ACTIVE ☪️" : "inactive"}`);
+  console.log("[SCHEDULER]   Ramadan mode         — activates only on explicit client mention");
 }
