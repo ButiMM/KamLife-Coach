@@ -786,6 +786,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (mediaUrl) {
     const ctype = mediaContentType || "";
 
+    // ---- STICKER DETECTION — skip stickers (image/webp with no caption) ----
+    if (ctype === "image/webp" && !message) {
+      return "I see you sent a sticker — send me a food photo or type what you ate and I will log it.";
+    }
+
     // ---- PROGRESS PHOTO or FOOD PHOTO ----
     if (ctype.startsWith("image/")) {
       try {
@@ -901,7 +906,7 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.`,
+UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this to help identify the food.` : ""}`,
                 },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
               ],
@@ -1052,7 +1057,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
       .limit(1);
     if (alreadyLoggedToday.length > 0) {
-      const name = user.name || "champ";
+      const name = user.name || "there";
       return `${name}, today's session is already logged. One workout counted per day — come back tomorrow and keep the streak going.`;
     }
 
@@ -1315,8 +1320,9 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- WEIGHT UPDATE (explicit) — "I weigh 83kg", "my weight is 83kg", bare "83kg" ----
-  const isExplicitWeight = /\b(weigh|weight is|weight now|i am|i'm)\b/.test(m) || /^\d{2,3}(\.\d)?\s*kg$/.test(m.trim());
-  const explicitKgMatch = m.match(/\b(\d{2,3}(?:\.\d)?)\s*kg\b/);
+  const isExplicitWeight = /\b(weigh|weight is|weight now|weighed|i am|i'm|scale says|scale said)\b/.test(m) || /^\d{2,3}(\.\d)?\s*kg$/.test(m.trim());
+  // Match "85kg" or "85 kg" or just "85" when preceded by a weight keyword
+  const explicitKgMatch = m.match(/\b(\d{2,3}(?:\.\d{1,2})?)\s*(?:kg|kilos?)?\b/);
   if (isExplicitWeight && explicitKgMatch) {
     const newKg = parseFloat(explicitKgMatch[1]);
     if (newKg >= 35 && newKg <= 250) {
@@ -1325,7 +1331,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const prevCals = user.calorieTarget || newCals;
       const prevProtein = user.proteinTarget || newProtein;
       await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
-      await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+      // Prevent duplicate weight logs — update today's entry if it exists, otherwise insert
+      const todayWeightStart = new Date(); todayWeightStart.setHours(0, 0, 0, 0);
+      const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
+        .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
+        .limit(1);
+      if (existingToday.length > 0) {
+        await db.update(weightLogs).set({ weight: newKg.toString() }).where(eq(weightLogs.id, existingToday[0].id));
+      } else {
+        await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+      }
       // Store win memory at total loss milestones
       try {
         const firstLog = await db.select({ weight: weightLogs.weight }).from(weightLogs)
@@ -1504,7 +1519,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
-      await db.insert(stepLogs).values({ userId: user.id, steps });
+      // Dedup: update today's entry instead of creating duplicates
+      const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+      const existingStep = await db.select({ id: stepLogs.id })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
+        .limit(1);
+      if (existingStep.length > 0) {
+        await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existingStep[0].id));
+      } else {
+        await db.insert(stepLogs).values({ userId: user.id, steps });
+      }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       const stepReply = getStepResponse(steps, target);
       const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
@@ -3073,7 +3098,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
   const hour = now.getHours();
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const clientName = user.name || "champ";
+  const clientName = user.name || "there";
   const trainingMode = user.trainingMode || "home";
   const saContext = getSAContextFlags(user);
 
