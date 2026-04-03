@@ -1639,6 +1639,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- FOOD ADDITION HANDLER — "there was also X in the meal", "X was in the meal" ----
+  // Catches when the client corrects a food log by adding a missing item
+  const isFoodAddition = /\b(there was|was also|also had|forgot|missed|you missed|you forgot|didn.?t include|didn.?t log|was in the meal|in the meal|it also had|it had|was in there)\b/i.test(m) &&
+    scanForSAFoods(m).length > 0;
+  if (isFoodAddition) {
+    // Don't strip — just process as a new food log to add to today's total
+    // The food scanner will pick up the food items and add them to the running total
+    // Fall through to the food scanner below
+  }
+
   // ---- FIX 3: WATER GUARD — messages about water/hydration never reach food scanner ----
   // Water handlers above (lines ~919-971) catch most cases. This catches the remainder.
   const hasWaterWord = /\b(water|h2o|hydrat(e|ion|ing))\b/i.test(m);
@@ -1738,14 +1748,41 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
     const foundFoods = scanForSAFoods(m);
     if (foundFoods.length > 0) {
-      const totalCals = foundFoods.reduce((s, f) => s + f.typicalPortionCalories, 0);
-      const totalProtein = foundFoods.reduce((s, f) => s + f.typicalPortionProtein, 0);
+      // Quantity detection — adjust portions based on what the user actually said
+      // e.g. "3 eggs" → 3 eggs instead of default 2, "2 slices bread" → 2 slices
+      const adjustedFoods = foundFoods.map(f => {
+        const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
+        let quantity = 1; // multiplier — 1 = default portion
+        for (const alias of allAliases) {
+          // Look for number before the food name: "3 eggs", "2 viennas", "1 tin fish"
+          const qtyBefore = m.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
+          if (qtyBefore) {
+            const userQty = parseInt(qtyBefore[1]);
+            // Extract the default quantity from portion description (e.g. "2 large eggs" → 2, "1 tin" → 1)
+            const defaultQtyMatch = f.typicalPortionDescription.match(/^(\d+)/);
+            const defaultQty = defaultQtyMatch ? parseInt(defaultQtyMatch[1]) : 1;
+            if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
+              quantity = userQty / defaultQty;
+            }
+            break;
+          }
+        }
+        return {
+          ...f,
+          adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
+          adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
+          adjustedDescription: quantity !== 1 ? f.typicalPortionDescription.replace(/^\d+/, String(Math.round(parseInt(f.typicalPortionDescription.match(/^\d+/)?.[0] || "1") * quantity))) : f.typicalPortionDescription,
+          quantity,
+        };
+      });
+      const totalCals = adjustedFoods.reduce((s, f) => s + f.adjustedCalories, 0);
+      const totalProtein = adjustedFoods.reduce((s, f) => s + f.adjustedProtein, 0);
       const calorieTarget = user.calorieTarget || 2000;
       const proteinTarget = user.proteinTarget || 120;
-      const junkFoods = foundFoods.filter(f => f.category === "junk");
-      const goodProteins = foundFoods.filter(f => f.category === "protein");
-      const foodLines = foundFoods.map(f =>
-        `• ${f.name}: ~${f.typicalPortionCalories} kcal, ${f.typicalPortionProtein}g protein (${f.typicalPortionDescription})`
+      const junkFoods = adjustedFoods.filter(f => f.category === "junk");
+      const goodProteins = adjustedFoods.filter(f => f.category === "protein");
+      const foodLines = adjustedFoods.map(f =>
+        `• ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein (${f.adjustedDescription})`
       ).join("\n");
 
       // Daily accumulation — atomic SQL increment prevents race condition on concurrent food logs
@@ -1778,7 +1815,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       } else if (foundFoods.some(f => f.category === "carb")) {
         coachNote = `\n\nCarbs without protein — add a protein source to this meal. Eggs, pilchards, or beans work.`;
       }
-      const junkNote = junkFoods.length > 0 ? `\n\n${junkFoods[0].notes}` : "";
+      // Only show junk food note if it doesn't contradict the rest of the meal
+      // e.g. don't say "better to choose eggs" when client already has eggs in the meal
+      let junkNote = "";
+      if (junkFoods.length > 0) {
+        let note = junkFoods[0].notes || "";
+        // If client already ate a protein source, don't suggest protein alternatives
+        if (goodProteins.length > 0 || msgHasProtein) {
+          note = note.replace(/Better to choose.*$/i, "").replace(/Add (?:eggs|pilchards|protein).*$/i, "").trim();
+        }
+        if (note) junkNote = `\n\n${note}`;
+      }
       const runningLine = prevCals > 0
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
