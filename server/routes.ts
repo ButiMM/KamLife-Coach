@@ -957,13 +957,17 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
         const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
 
-        const audioResponse = await fetch(mediaUrl, {
-          headers: { Authorization: authHeader },
-        });
+        // Retry once if Twilio download fails (intermittent 5xx errors)
+        let audioResponse = await fetch(mediaUrl, { headers: { Authorization: authHeader } });
+        if (!audioResponse.ok) {
+          console.warn(`[VOICE] Twilio download attempt 1 failed: ${audioResponse.status}. Retrying...`);
+          await new Promise(r => setTimeout(r, 1500));
+          audioResponse = await fetch(mediaUrl, { headers: { Authorization: authHeader } });
+        }
 
         if (!audioResponse.ok) {
-          console.error(`[VOICE] Twilio download failed: ${audioResponse.status} ${audioResponse.statusText}`);
-          return "I received your voice note. Voice coaching needs the OpenAI API key active. For now type what you want to tell me and I will respond immediately.";
+          console.error(`[VOICE] Twilio download failed after retry: ${audioResponse.status} ${audioResponse.statusText}`);
+          return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
         }
 
         const audioBuffer = await audioResponse.arrayBuffer();
@@ -971,36 +975,46 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         // Part 2 — WhatsApp voice notes are always ogg/opus; use fixed mime type for Whisper
         const audioFile = new File([audioBuffer], "audio.ogg", { type: "audio/ogg" });
 
+        // Detect language from user's stored preference for better Whisper accuracy
+        const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
+        const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
+        const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
+
         const transcription = await openai.audio.transcriptions.create({
           file: audioFile,
           model: "whisper-1",
+          ...(whisperLang ? { language: whisperLang } : {}),
         });
 
         const transcribedText = transcription.text?.trim();
 
         // Part 3 — Handle result
         if (!transcribedText) {
-          return "I could not hear that clearly. Try sending a voice note in a quieter spot or type your message.";
+          return "I could not hear that clearly. Try sending a voice note in a quieter spot, or type your message.";
         }
 
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
         if (wordCount < 3) {
-          return `I only caught a few words — ${transcribedText}. Send again or type your message.`;
+          return `I only caught a few words — "${transcribedText}". Send again or type your message.`;
         }
 
-        // Language detection (Zulu, Sotho, Xhosa, Afrikaans keywords)
-        const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies"];
-        const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme"];
-        const XHOSA_WORDS = ["molo", "enkosi", "unjani", "ewe", "hayi", "camagu", "ndiyabona"];
-        const AFRIKAANS_WORDS = ["dankie", "asseblief", "môre", "more", "lekker", "braai", "howzit", "baie", "nee", "ja nee", "ag nee", "eina", "ek is", "ek het", "ons het"];
+        // Language detection — includes Tswana and Tsonga alongside Zulu, Sotho, Xhosa, Afrikaans
+        const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
+        const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme", "ke kopa", "ke batla"];
+        const XHOSA_WORDS = ["molo", "enkosi", "unjani", "ewe", "hayi", "camagu", "ndiyabona", "ndicela", "ndifuna"];
+        const TSWANA_WORDS = ["go siame", "ke a leboga", "rra", "lo kae", "ke tsile", "ke kopa", "thobela", "pula"];
+        const TSONGA_WORDS = ["avuxeni", "nkhensa", "ndza khensa", "hi kona", "ndzi lava", "ndzi kopa", "swinene"];
+        const AFRIKAANS_WORDS = ["dankie", "asseblief", "môre", "more", "lekker", "baie", "nee", "ja nee", "ag nee", "eina", "ek is", "ek het"];
         const lowerTranscribed = transcribedText.toLowerCase();
         let languageNote = "";
-        if (ZULU_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Zulu. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Zulu if it fits.";
+        if (ZULU_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Zulu. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Zulu.";
         else if (SOTHO_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Sesotho. Respond in simple SA English but acknowledge their language naturally.";
         else if (XHOSA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xhosa. Respond in simple SA English but acknowledge their language naturally.";
-        else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans if it fits.";
+        else if (TSWANA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Setswana. Respond in simple SA English but acknowledge their language naturally.";
+        else if (TSONGA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xitsonga. Respond in simple SA English but acknowledge their language naturally.";
+        else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans.";
 
-        console.log(`[VOICE] Transcribed: "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
+        console.log(`[VOICE] Transcribed (${whisperLang || "auto"}): "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
 
         const voiceReply = await handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""));
         // Part 4 — explicit return, no fall-through
@@ -1009,7 +1023,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       } catch (err) {
         console.error("[VOICE] Transcription error:", err);
         // Part 4 — always return, never fall through to text handler
-        return "I received your voice note. Voice coaching needs the OpenAI API key active. For now type what you want to tell me and I will respond immediately.";
+        return "I got your voice note but could not process it right now. Please send it again, or type your message and I will respond immediately.";
       }
     }
 
@@ -1743,22 +1757,38 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
-  // Only scan short messages if they contain an explicit food log trigger — not every short message
-  const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 12;
+  // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
+  const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
   if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
-    const foundFoods = scanForSAFoods(m);
-    if (foundFoods.length > 0) {
-      // Quantity detection — adjust portions based on what the user actually said
-      // e.g. "3 eggs" → 3 eggs instead of default 2, "2 slices bread" → 2 slices
-      const adjustedFoods = foundFoods.map(f => {
+    // Split message by meal keywords to handle multi-meal logging
+    const MEAL_SPLIT_RE = /\b(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b[:\s]*/gi;
+    const mealSegments: { label: string; text: string }[] = [];
+    const mealMatches = [...m.matchAll(MEAL_SPLIT_RE)];
+    if (mealMatches.length >= 2) {
+      // Multi-meal message detected — split into segments
+      for (let i = 0; i < mealMatches.length; i++) {
+        const label = mealMatches[i][1].charAt(0).toUpperCase() + mealMatches[i][1].slice(1);
+        const start = mealMatches[i].index! + mealMatches[i][0].length;
+        const end = i + 1 < mealMatches.length ? mealMatches[i + 1].index! : m.length;
+        const segText = m.slice(start, end).trim();
+        if (segText) mealSegments.push({ label, text: segText });
+      }
+    }
+    // If no multi-meal split or only 1 meal keyword, treat whole message as single meal
+    if (mealSegments.length < 2) {
+      mealSegments.length = 0;
+      mealSegments.push({ label: "", text: m });
+    }
+
+    // Helper: adjust foods by quantity for a given text segment
+    function adjustFoodsForSegment(foods: SAFood[], segText: string) {
+      return foods.map(f => {
         const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
-        let quantity = 1; // multiplier — 1 = default portion
+        let quantity = 1;
         for (const alias of allAliases) {
-          // Look for number before the food name: "3 eggs", "2 viennas", "1 tin fish"
-          const qtyBefore = m.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
+          const qtyBefore = segText.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
           if (qtyBefore) {
             const userQty = parseInt(qtyBefore[1]);
-            // Extract the default quantity from portion description (e.g. "2 large eggs" → 2, "1 tin" → 1)
             const defaultQtyMatch = f.typicalPortionDescription.match(/^(\d+)/);
             const defaultQty = defaultQtyMatch ? parseInt(defaultQtyMatch[1]) : 1;
             if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
@@ -1775,15 +1805,44 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           quantity,
         };
       });
-      const totalCals = adjustedFoods.reduce((s, f) => s + f.adjustedCalories, 0);
-      const totalProtein = adjustedFoods.reduce((s, f) => s + f.adjustedProtein, 0);
+    }
+
+    // Scan each meal segment separately
+    type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number };
+    const allAdjustedFoods: AdjFood[] = [];
+    const mealLines: string[] = [];
+    const isMultiMeal = mealSegments.length >= 2;
+
+    for (const seg of mealSegments) {
+      const segFoods = scanForSAFoods(seg.text);
+      if (segFoods.length === 0) continue;
+      const adjusted = adjustFoodsForSegment(segFoods, seg.text);
+      allAdjustedFoods.push(...adjusted);
+      if (isMultiMeal && seg.label) {
+        const segCals = adjusted.reduce((s, f) => s + f.adjustedCalories, 0);
+        const segProt = adjusted.reduce((s, f) => s + f.adjustedProtein, 0);
+        const lines = adjusted.map(f => `  • ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein`).join("\n");
+        mealLines.push(`*${seg.label}:* ~${segCals} kcal | ${segProt}g protein\n${lines}`);
+      }
+    }
+
+    if (allAdjustedFoods.length > 0) {
+      const totalCals = allAdjustedFoods.reduce((s, f) => s + f.adjustedCalories, 0);
+      const totalProtein = allAdjustedFoods.reduce((s, f) => s + f.adjustedProtein, 0);
       const calorieTarget = user.calorieTarget || 2000;
       const proteinTarget = user.proteinTarget || 120;
-      const junkFoods = adjustedFoods.filter(f => f.category === "junk");
-      const goodProteins = adjustedFoods.filter(f => f.category === "protein");
-      const foodLines = adjustedFoods.map(f =>
-        `• ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein (${f.adjustedDescription})`
-      ).join("\n");
+      const junkFoods = allAdjustedFoods.filter(f => f.category === "junk");
+      const goodProteins = allAdjustedFoods.filter(f => f.category === "protein");
+
+      // Build food lines — grouped by meal or flat list
+      let foodLines: string;
+      if (isMultiMeal && mealLines.length > 0) {
+        foodLines = mealLines.join("\n\n");
+      } else {
+        foodLines = allAdjustedFoods.map(f =>
+          `• ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein (${f.adjustedDescription})`
+        ).join("\n");
+      }
 
       // Daily accumulation — atomic SQL increment prevents race condition on concurrent food logs
       const todayStr = sastToday();
@@ -1802,25 +1861,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
       const calRemaining = calorieTarget - runningCals;
       const proteinRemaining = proteinTarget - runningProtein;
-      // Check if message itself mentions a protein source even if not in DB
       const msgHasProtein = PROTEIN_WORDS.some(w => m.includes(w));
       let coachNote = "";
       if (goodProteins.length > 0 || msgHasProtein) {
-        // Client ate protein — celebrate, never suggest pilchards
         if (totalProtein >= 20 || msgHasProtein) {
           coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
         }
       } else if (junkFoods.length > 0) {
-        coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken. Coach the next meal, not the last one.`;
-      } else if (foundFoods.some(f => f.category === "carb")) {
-        coachNote = `\n\nCarbs without protein — add a protein source to this meal. Eggs, pilchards, or beans work.`;
+        coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
+      } else if (allAdjustedFoods.some(f => f.category === "carb")) {
+        coachNote = `\n\nCarbs without protein — add a protein source. Eggs, pilchards, or beans work.`;
       }
-      // Only show junk food note if it doesn't contradict the rest of the meal
-      // e.g. don't say "better to choose eggs" when client already has eggs in the meal
       let junkNote = "";
       if (junkFoods.length > 0) {
         let note = junkFoods[0].notes || "";
-        // If client already ate a protein source, don't suggest protein alternatives
         if (goodProteins.length > 0 || msgHasProtein) {
           note = note.replace(/Better to choose.*$/i, "").replace(/Add (?:eggs|pilchards|protein).*$/i, "").trim();
         }
@@ -1829,7 +1883,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const runningLine = prevCals > 0
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}`;
+      const mealLabel = isMultiMeal ? "Day total" : "Meal total";
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}`;
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
       return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}`;
@@ -2275,17 +2330,25 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return sleepReply;
   }
 
-  // ---- EQUIPMENT ALTERNATIVES (Item 5) — no GPT ----
-  if (/no\s+.*(gym|equipment|weights|barbell|dumbbell|machine|bench)/i.test(m) ||
-      /can.?t\s+(go to\s+)?gym|don.?t\s+have\s+(a\s+)?(gym|weights|equipment|dumbbell|barbell)|no\s+gym|without\s+gym|without\s+equipment/i.test(m) ||
-      /what\s+can\s+i\s+use\s+instead|home\s+alternative|bodyweight\s+alternative|no\s+weights/i.test(m)) {
+  // ---- NO GYM / EQUIPMENT ALTERNATIVES — deliver home programme directly ----
+  const isNoGymMsg = /no\s+.*(gym|equipment|weights|barbell|dumbbell|machine|bench)/i.test(m) ||
+      /can.?t\s+(go to\s+)?gym|don.?t\s+have\s+(a\s+)?(gym|weights|equipment|dumbbell|barbell|access)/i.test(m) ||
+      /no\s+gym|without\s+gym|without\s+equipment/i.test(m) ||
+      /no\s+access\s+to\s+(?:a\s+)?gym|don.?t\s+have\s+access\s+to\s+(?:a\s+|the\s+)?gym/i.test(m) ||
+      /won.?t\s+have\s+(?:access|a\s+gym)|can.?t\s+(?:get to|make it to|go to).*gym/i.test(m) ||
+      /what\s+can\s+i\s+use\s+instead|home\s+alternative|bodyweight\s+alternative|no\s+weights/i.test(m);
+  if (isNoGymMsg) {
     const eqKeys = Object.keys(EQUIPMENT_ALTERNATIVES);
     const matchedEquip = eqKeys.find(eq => m.includes(eq));
     let equipReply: string;
     if (matchedEquip) {
       equipReply = `No ${matchedEquip}? Use ${EQUIPMENT_ALTERNATIVES[matchedEquip].join(" or ")}.\n\nFull home programme is available — reply *programme* or *menu* to see it. You do not need a gym to build real strength.`;
     } else {
-      equipReply = `No gym or equipment? Here is what you can use instead:\n\nDumbbells — 2L water bottles, rice bags, or a loaded backpack (books in a bag).\nBarbell — broomstick for form practice, loaded backpack for resistance.\nBench press — push-up variations (decline, diamond, archer push-up).\nPull-up bar — table row lying under a sturdy table.\nCable machine — resistance bands (Dischem R30-50).\nGym — your bodyweight. Reply *programme* for your full home programme.`;
+      // Deliver a home workout directly instead of just telling them to reply
+      const homeUser = { ...user, trainingMode: "home" };
+      const homeWorkout = buildDayWorkout(homeUser);
+      const nameStr = user.name || "there";
+      equipReply = `No gym? No problem, ${nameStr}. Here is your home workout:\n\n${homeWorkout}\n\nYour bodyweight is the gym. Reply *DONE* when finished.`;
     }
     await logChat(user.id, message, equipReply, "EQUIPMENT_ALTERNATIVES");
     return equipReply;
@@ -2540,14 +2603,15 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FIX 5: PROFILE UPDATE COMMANDS — expanded to catch training mode/days changes ----
+  // IMPORTANT: do NOT match "no gym" / "don't have gym" — those are handled by the equipment alternatives handler above
+  const hasNegativeGym = /\b(no|don.?t|won.?t|can.?t|not|without|never|quit|left)\b.{0,15}\bgym\b/i.test(m);
   const isProfileUpdate =
     /\b(change my goal|my goal is now|switch to|switch my goal|new goal|update my goal)\b/i.test(m) ||
     /\b(change.*budget|budget.*changed|my budget is now|budget is now|new budget)\b/i.test(m) ||
-    /\b(joined.*gym|got.*gym|have.*gym|going to.*gym|now.*gym|gym.*membership)\b/i.test(m) ||
+    (!hasNegativeGym && /\b(joined.*gym|got.*gym|have.*gym|going to.*gym|now.*gym|gym.*membership)\b/i.test(m)) ||
     /\b(change.*training days|training.*(\d)\s*days|now training.*(\d)|(\d)\s*days.*week.*train)\b/i.test(m) ||
     /\b(training at home|working out at home|no.*gym.*more|quit.*gym|left.*gym|home.*workout.*now)\b/i.test(m) ||
-    // FIX 5: catch "I want to gym X days a week", "train X days a week", "gym X days"
-    /\b(want to gym|going to gym|start gym|gym.*\d+.*day|train.*\d+.*day|workout.*\d+.*day|\d+.*day.*gym|\d+.*day.*train|\d+.*day.*week)\b/i.test(m);
+    (!hasNegativeGym && /\b(want to gym|going to gym|start gym|gym.*\d+.*day|train.*\d+.*day|workout.*\d+.*day|\d+.*day.*gym|\d+.*day.*train|\d+.*day.*week)\b/i.test(m));
 
   if (isProfileUpdate) {
     const updates: Record<string, any> = {};
@@ -2705,7 +2769,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.*food|food.*today|what.*eat.*today|how many.*calories|calories today|protein today|macros today)\b/i.test(m)) {
+  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.*food|food.*today|what.*eat.*today|how many.*calories|calories today|today.*calories|protein today|today.*protein|macros today|today.*macros|daily total|today.*total|total today)\b/i.test(m)) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
       .from(chatHistory)
@@ -3376,6 +3440,13 @@ CRITICAL RULES — these are non-negotiable:
       cycleContext = `FEMALE CLIENT CYCLE CONTEXT: Client has mentioned her cycle or period. Acknowledge this with empathy. Adjust training and nutrition advice accordingly. Ask which day of her cycle she is on if it helps give better advice.`;
     }
     if (cycleContext) finalInstruction = `${cycleContext}\n\n${finalInstruction}`;
+  }
+
+  // ---- LANGUAGE-AWARE COACHING — simplify English for non-English speakers ----
+  if (activeLang !== "en") {
+    const langNames: Record<string, string> = { zu: "Zulu", xh: "Xhosa", st: "Sesotho", tn: "Setswana", ts: "Xitsonga", af: "Afrikaans" };
+    const langName = langNames[activeLang] || "non-English";
+    finalInstruction = `LANGUAGE CONTEXT: This client's primary language is ${langName}. Use SIMPLE English — short sentences, basic words, no jargon. Maximum 8-10 words per sentence. Say "eat" not "consume". Say "belly fat" not "visceral fat". Explain any exercise in one plain sentence.\n\n${finalInstruction}`;
   }
 
   // ---- MEMORY: retrieve relevant memories for this message ----

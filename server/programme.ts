@@ -423,261 +423,242 @@ const GYM_GLUTES_DAY_C: Exercise[] = [
 // 3 days/week — glute/posterior emphasis with full upper body balance
 // ============================================================
 
-export const FEMALE_DAY_A = `*Day A — Glute Push + Shoulders + Arms*
-3–4 sets. Rest 60 seconds. Total time 55–65 minutes.
+export const FEMALE_DAY_A = `*Day A — Glutes + Shoulders + Arms*
+Rest 60 sec between sets | 55–65 min
 
-1. *Hip Thrust (Machine or Barbell) — 4×12*
-https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form
-Primary glute builder. Drive hips up explosively — squeeze hard for 1 full second at the top. Lower slowly over 2 seconds.
-Common mistake: Pushing through your lower back. If your back hurts, you are not squeezing your bum at the top.
+1. *Hip Thrust* — 4×12
+Drive hips up, squeeze bum hard at top, lower slow
 
-2. *Sumo Squat (Barbell or Goblet) — 3×12*
-https://www.youtube.com/results?search_query=sumo+squat+glutes+inner+thigh+tutorial
-Wide stance, toes out 45 degrees. Lower between your legs. Squeeze glutes and inner thighs at the top.
-Common mistake: Knees caving inward. Push them out actively over your toes the whole way.
+2. *Sumo Squat* — 3×12
+Wide stance, toes out. Push knees out over toes
 
-3. *Machine Shoulder Press — 3×10*
-https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial+form
-Press overhead. Lower slowly over 2 seconds. Core braced — do not arch your lower back.
-Common mistake: Shrugging your shoulders up. Keep them down and back throughout.
+3. *Machine Shoulder Press* — 3×10
+Press up, lower slow. Keep core tight
 
-4. *Cable Lateral Raise — 3×15 each arm*
-https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial+form
-Single cable from low pulley. Raise to shoulder height. Slow and controlled lowering phase. Builds the shoulder width that creates proportion.
-Common mistake: Swinging or using momentum. If you cannot control it — reduce the weight.
+4. *Cable Lateral Raise* — 3×15 each arm
+Raise to shoulder height. Control the weight down
 
-5. *Dumbbell or Cable Bicep Curl — 3×12*
-https://www.youtube.com/results?search_query=dumbbell+bicep+curl+tutorial+form
-Full range of motion. Squeeze at the top. 2-second lowering phase. Keep elbows pinned to your sides.
-Common mistake: Swinging the weight up using momentum. Control the movement from start to finish.
+5. *Bicep Curl* — 3×12
+Full range. Squeeze at top. Elbows stay at your sides
 
-6. *Tricep Pushdown (Cable or Machine) — 3×12*
-https://www.youtube.com/results?search_query=cable+tricep+pushdown+tutorial
-Elbows locked at your sides. Push down until arms fully extended. Squeeze triceps hard at the bottom. Slow return.
-Common mistake: Letting your elbows flare out or drift forward. Lock them to your ribs.
+6. *Tricep Pushdown* — 3×12
+Push down, squeeze triceps. Elbows locked to ribs
 
-7. *Standing Calf Raise — 3×15*
-https://www.youtube.com/results?search_query=standing+calf+raise+machine+tutorial
-Full range — heel fully down below the step, then all the way up onto toes. Slow and controlled. Pause at the top.
-Common mistake: Rushing through half-range reps. Full stretch, full contraction, every rep.
+7. *Standing Calf Raise* — 3×15
+Full stretch down, full press up. Pause at top
 
-Reply *done* when finished.`;
+Reply *DONE* when finished.
 
-export const FEMALE_DAY_B = `*Day B — Posterior Chain + Back*
-3–4 sets. Rest 75 seconds. Total time 55–65 minutes.
+_Form videos:_
+1. Hip Thrust: https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form
+2. Sumo Squat: https://www.youtube.com/results?search_query=sumo+squat+glutes+tutorial
+3. Shoulder Press: https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial
+4. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
+5. Bicep Curl: https://www.youtube.com/results?search_query=dumbbell+bicep+curl+tutorial
+6. Tricep Pushdown: https://www.youtube.com/results?search_query=cable+tricep+pushdown+tutorial
+7. Calf Raise: https://www.youtube.com/results?search_query=standing+calf+raise+tutorial`;
 
-1. *Romanian Deadlift — 3×10*
-https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial+glutes
-Hinge at hips, push bum back. Lower until you feel a strong hamstring stretch. Drive hips through to stand. Builds the glute-hamstring tie-in.
-Common mistake: Rounding the lower back. Only go as deep as a flat back allows.
+export const FEMALE_DAY_B = `*Day B — Back + Hamstrings*
+Rest 75 sec between sets | 55–65 min
 
-2. *Leg Curl Machine — 3×12*
-https://www.youtube.com/results?search_query=leg+curl+machine+hamstrings+tutorial
-Curl heels toward your glutes. Squeeze hard at the top. 3-second lowering phase. Strong hamstrings directly support glute development.
-Common mistake: Rushing the lowering phase — the eccentric is where the muscle builds.
+1. *Romanian Deadlift* — 3×10
+Push bum back, lower until hamstring stretch. Back stays flat
 
-3. *Lat Pulldown — 4×10*
-https://www.youtube.com/results?search_query=lat+pulldown+tutorial+intermediate
-Full stretch at the top, full contraction at the bottom. Drive elbows down and back — not just arms pulling.
-Common mistake: Pulling with your arms instead of your lats. Think elbows to back pockets.
+2. *Leg Curl Machine* — 3×12
+Curl heels to bum. Squeeze. Lower slow (3 seconds)
 
-4. *Seated Cable Row — 4×10*
-https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form
-Sit upright. Pull handle to belly button. Squeeze shoulder blades together hard. Hold 1 second. Return slowly.
-Common mistake: Rounding the back or leaning too far back to generate momentum.
+3. *Lat Pulldown* — 4×10
+Pull to chest. Drive elbows down and back
 
-5. *Cable Kickback — 3×15 each leg*
-https://www.youtube.com/results?search_query=cable+kickback+glutes+tutorial
-Ankle strap on low cable. Hinge slightly forward. Drive leg back and up. Squeeze glute hard at the peak.
-Common mistake: Using momentum — slow down and feel every single rep.
+4. *Seated Cable Row* — 4×10
+Pull to belly. Squeeze shoulder blades. Sit tall
 
-6. *Face Pull — 3×15*
-https://www.youtube.com/results?search_query=face+pull+cable+tutorial+rear+delt
-Rope attachment at face height. Pull toward your face — hands finish beside your ears. Builds rear delts and upper back. Protects shoulders.
-Common mistake: Pulling straight back instead of pulling apart. Think "pull the rope in two pieces."
+5. *Cable Kickback* — 3×15 each leg
+Drive leg back, squeeze glute at top. Slow reps
 
-7. *Seated Calf Raise — 3×15*
-https://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial
-Full range — heels lowered fully, press to toes. Pause at the top. Targets the soleus (deeper calf muscle) for complete calf development.
-Common mistake: Short range of motion. Full stretch and full contraction every rep.
+6. *Face Pull* — 3×15
+Pull rope to face, elbows high. Squeeze at end
 
-Reply *done* when finished.`;
+7. *Seated Calf Raise* — 3×15
+Full stretch down, full press up. Pause at top
 
-export const FEMALE_DAY_C = `*Day C — Full Body + Glute Emphasis*
-3–4 sets. Rest 75 seconds. Total time 55–65 minutes.
+Reply *DONE* when finished.
 
-1. *Hip Thrust (heavier than Day A) — 4×10*
-https://www.youtube.com/results?search_query=barbell+hip+thrust+progressive+overload
-Add weight from Day A. Drive up explosively. This is your main strength movement of the week — go heavier.
-Common mistake: Not tracking your weight. You should be adding reps or weight every session.
+_Form videos:_
+1. Romanian Deadlift: https://www.youtube.com/results?search_query=romanian+deadlift+tutorial+glutes
+2. Leg Curl: https://www.youtube.com/results?search_query=leg+curl+machine+tutorial
+3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
+4. Cable Row: https://www.youtube.com/results?search_query=seated+cable+row+tutorial
+5. Cable Kickback: https://www.youtube.com/results?search_query=cable+kickback+glutes+tutorial
+6. Face Pull: https://www.youtube.com/results?search_query=face+pull+cable+tutorial
+7. Calf Raise: https://www.youtube.com/results?search_query=seated+calf+raise+tutorial`;
 
-2. *Leg Press (wide stance, high foot placement) — 3×12*
-https://www.youtube.com/results?search_query=leg+press+wide+stance+glutes+tutorial
-Feet wide and high on the platform to shift focus to glutes. Full range — knees to chest. Press through heels.
-Common mistake: Knees caving inward. Push them out over your toes throughout.
+export const FEMALE_DAY_C = `*Day C — Full Body + Glutes*
+Rest 75 sec between sets | 55–65 min
 
-3. *Incline Dumbbell Press — 3×10*
-https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial+form
-Bench at 30–45 degrees. Creates upper chest and shoulder definition. Full range — lower until dumbbells are beside your chest.
-Common mistake: Half-range of motion. Lower the dumbbells all the way and feel the stretch.
+1. *Hip Thrust (heavier)* — 4×10
+Go heavier than Day A. Squeeze hard at top
 
-4. *Hip Abduction Machine — 3×15*
-https://www.youtube.com/results?search_query=hip+abduction+machine+glute+medius+tutorial
-Sit tall. Push knees apart. Squeeze at the end position. Builds the outer glute and the shape on the side of the hip.
-Common mistake: Leaning forward or using momentum. Sit upright and slow the reps down.
+2. *Leg Press (wide stance)* — 3×12
+Feet wide and high. Press through heels. Full range
 
-5. *Cable Lateral Raise — 3×12 each arm*
-https://www.youtube.com/results?search_query=cable+lateral+raise+shoulders+tutorial
-Second shoulder session of the week — this is what builds the hourglass proportion.
-Common mistake: Too heavy — reduces to momentum and ruins the isolation. Go lighter and control it.
+3. *Incline Dumbbell Press* — 3×10
+Bench at 30–45 degrees. Lower to chest, press up
 
-6. *Dumbbell Hammer Curl — 3×12*
-https://www.youtube.com/results?search_query=hammer+curl+dumbbell+tutorial
-Palms facing each other. Curl up. Targets the brachialis which makes the arm look fuller from the side.
-Common mistake: Swinging the body to generate momentum. Pin your elbows to your sides.
+4. *Hip Abduction Machine* — 3×15
+Push knees apart. Squeeze. Sit tall, no leaning
 
-7. *Standing Calf Raise — 3×15*
-https://www.youtube.com/results?search_query=standing+calf+raise+tutorial+heavier
-Third calf session of the week. Add a 2.5kg plate to each foot if on machine. Progressive overload applies here too.
-Common mistake: Partial reps. Full heel drop, full toe press. Every single rep.
+5. *Cable Lateral Raise* — 3×12 each arm
+Raise to shoulder height. Light weight, control it
 
-Reply *done* when finished.`;
+6. *Hammer Curl* — 3×12
+Palms face each other. Elbows pinned to sides
+
+7. *Standing Calf Raise* — 3×15
+Full stretch down, full press up. Add weight from last week
+
+Reply *DONE* when finished.
+
+_Form videos:_
+1. Hip Thrust: https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial
+2. Leg Press: https://www.youtube.com/results?search_query=leg+press+wide+stance+glutes+tutorial
+3. Incline Press: https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial
+4. Hip Abduction: https://www.youtube.com/results?search_query=hip+abduction+machine+tutorial
+5. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
+6. Hammer Curl: https://www.youtube.com/results?search_query=hammer+curl+dumbbell+tutorial
+7. Calf Raise: https://www.youtube.com/results?search_query=standing+calf+raise+tutorial`;
 
 // ============================================================
 // LEGACY GYM STRINGS (kept for backward compat with getKamlifeProgramme)
 // ============================================================
 
-export const BEGINNER_GYM_PROGRAMME = `*Full Body Strength — Beginner (3 days/week)*
-3 sets of 10 reps each. Rest 60 seconds between sets. Total time 45–55 minutes.
+export const BEGINNER_GYM_PROGRAMME = `*Full Body — Beginner (3 days/week)*
+3 sets of 10 reps each | Rest 60 sec | 45–55 min
 
-1. *Barbell Squat or Leg Press — 3×10*
-https://www.youtube.com/results?search_query=barbell+squat+form+tutorial
-Feet shoulder width. Lower until thighs parallel. Drive through heels. Keep chest tall.
-Common mistake: Heels rising or knees caving inward.
-Modification: Leg Press if no barbell or if lower back pain.
+1. *Squat or Leg Press* — 3×10
+Lower until thighs level. Push through heels. Chest up
 
-2. *Barbell Bench Press or Chest Press Machine — 3×10*
-https://www.youtube.com/results?search_query=barbell+bench+press+form+tutorial
-Bar to lower chest. Press until arms almost extended. Lower slowly over 2 seconds.
-Common mistake: Bouncing bar off chest.
-Modification: Dumbbell press if no barbell.
+2. *Bench Press or Chest Press Machine* — 3×10
+Bar to chest. Press up. Lower slow (2 seconds)
 
-3. *Lat Pulldown — 3×10*
-https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form
-Pull bar to upper chest. Drive elbows down and back. Squeeze shoulder blades.
-Common mistake: Pulling with arms not back.
-Modification: Resistance band pulldown if no cable machine.
+3. *Lat Pulldown* — 3×10
+Pull to chest. Elbows down and back. Squeeze
 
-4. *Romanian Deadlift — 3×10*
-https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial
-Hinge at hips, push bum back. Lower until hamstring stretch. Drive hips forward to stand. Back flat.
-Common mistake: Rounding lower back.
-Modification: Reduce range of motion if tight hamstrings.
+4. *Romanian Deadlift* — 3×10
+Push bum back. Lower until hamstring stretch. Back flat
 
-5. *Dumbbell Shoulder Press — 3×10*
-https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form
-Dumbbells at shoulder height. Press overhead. Lower slowly.
-Common mistake: Arching lower back excessively.
-Modification: Seated press for lower back support.
+5. *Shoulder Press* — 3×10
+Press overhead. Lower slow. Keep core tight
 
-Progressive overload: Add one rep per session. When you hit 12 reps on all sets, increase weight by the smallest increment and drop back to 10.`;
+Each session: try 1 more rep. Hit 12 reps? Add small weight, drop to 10.
 
-export const INTERMEDIATE_GYM_UPPER = `*Upper Body Day — Intermediate (4 days/week)*
-4 sets of 10 reps. Rest 75 seconds. Total time 55–65 minutes.
+Reply *DONE* when finished.
 
-1. *Chest Press Machine / Smith Machine Bench Press — 4×10*
-https://www.youtube.com/results?search_query=smith+machine+bench+press+tutorial
-Focus on feeling the chest, not just moving the weight. 2-second lowering phase.
-Common mistake: Flaring elbows out too wide. Keep at 45 degrees.
+_Form videos:_
+1. Squat: https://www.youtube.com/results?search_query=barbell+squat+form+tutorial
+2. Bench Press: https://www.youtube.com/results?search_query=bench+press+form+tutorial
+3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
+4. Romanian Deadlift: https://www.youtube.com/results?search_query=romanian+deadlift+tutorial
+5. Shoulder Press: https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial`;
 
-2. *Seated Cable Row — 4×10*
-https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form
-Sit upright. Pull handle to belly button. Squeeze shoulder blades hard. Hold 1 second at peak. Return slowly.
-Common mistake: Rounding the back to pull more weight.
+export const INTERMEDIATE_GYM_UPPER = `*Upper Body — Intermediate*
+4 sets | Rest 75 sec | 55–65 min
 
-3. *Lat Pulldown — 4×10*
-https://www.youtube.com/results?search_query=lat+pulldown+tutorial+intermediate
-Full stretch at top, full contraction at bottom. Heavier than beginner.
-Common mistake: Pulling with biceps instead of lats.
+1. *Chest Press* — 4×10
+Feel the chest working. Lower slow (2 sec)
 
-4. *Machine Shoulder Press — 4×10*
-https://www.youtube.com/results?search_query=shoulder+press+machine+form
-Controlled throughout. No bouncing at bottom.
-Common mistake: Leaning back excessively to press more.
+2. *Seated Cable Row* — 4×10
+Pull to belly. Squeeze shoulder blades. Sit tall
 
-5. *Cable Lateral Raise — 3×15*
-https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
-Stand side-on to cable. Raise to shoulder height. Lower slowly. Creates shoulder width.
+3. *Lat Pulldown* — 4×10
+Full stretch at top, squeeze at bottom
 
-6. *Tricep Cable Pushdown — 3×15*
-https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial
-Elbows fixed at sides. Push until arms straight. Squeeze triceps. Return slowly.
+4. *Shoulder Press* — 4×10
+Press up controlled. No bouncing at bottom
 
-7. *Cable Bicep Curl — 3×15*
-https://www.youtube.com/results?search_query=cable+bicep+curl+tutorial
-Elbows fixed. Curl squeezing biceps. Lower slowly. Full range.`;
+5. *Cable Lateral Raise* — 3×15
+Raise to shoulder height. Lower slow
 
-export const INTERMEDIATE_GYM_LOWER = `*Lower Body Day — Intermediate*
-4 sets. Rest 75 seconds. Total time 55–65 minutes.
+6. *Tricep Pushdown* — 3×15
+Elbows at sides. Push down, squeeze
 
-1. *Hack Squat / Leg Press — 4×10*
-https://www.youtube.com/results?search_query=hack+squat+machine+tutorial
-Deeper range than beginner. Feet closer together for quad focus. Control the descent.
+7. *Cable Bicep Curl* — 3×15
+Elbows fixed. Squeeze at top. Full range
 
-2. *Leg Extension Machine — 4×12*
-https://www.youtube.com/results?search_query=leg+extension+machine+tutorial+form
-Extend until legs nearly straight. Squeeze quads hard at top. Lower slowly. No momentum.
+Reply *DONE* when finished.
 
-3. *Leg Curl Machine — 4×12*
-https://www.youtube.com/results?search_query=leg+curl+machine+seated+or+lying
-Full range of motion. Slow lowering phase. Heavier than beginner.
+_Form videos:_
+1. Chest Press: https://www.youtube.com/results?search_query=chest+press+machine+tutorial
+2. Cable Row: https://www.youtube.com/results?search_query=seated+cable+row+tutorial
+3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
+4. Shoulder Press: https://www.youtube.com/results?search_query=shoulder+press+machine+tutorial
+5. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
+6. Tricep Pushdown: https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial
+7. Bicep Curl: https://www.youtube.com/results?search_query=cable+bicep+curl+tutorial`;
 
-4. *Hip Thrust Machine / Cable Pull Through — 4×12*
-https://www.youtube.com/results?search_query=hip+thrust+machine+tutorial
-Drive hips forward powerfully. Squeeze glutes hard at top. Non-negotiable for glute development.
+export const INTERMEDIATE_GYM_LOWER = `*Lower Body — Intermediate*
+4 sets | Rest 75 sec | 55–65 min
 
-5. *Seated Calf Raise — 4×15*
-https://www.youtube.com/results?search_query=seated+calf+raise+machine+tutorial
-Full range — all the way down for stretch, all the way up for contraction. Calves respond to high reps.
+1. *Hack Squat or Leg Press* — 4×10
+Go deep. Control the way down. Press through heels
 
-6. *Cable Crunch — 3×15*
-https://www.youtube.com/results?search_query=cable+crunch+tutorial+form
-Kneel facing cable. Rope behind head. Crunch down contracting abs. Beats planks for direct ab development.`;
+2. *Leg Extension* — 4×12
+Squeeze quads hard at top. Lower slow
 
-export const HOME_PROGRAMME_GUIDE = `*Home Training Programme — No Gym Needed*
-These are the only movements. Nothing else. No bicycle kicks. No nonsense.
+3. *Leg Curl* — 4×12
+Full range. Slow lowering. Heavier than last time
 
-1. *Bodyweight Squat → Jump Squat (progression)*
-https://www.youtube.com/watch?v=aclHkVaku9U
-3×15. Feet shoulder-width. Lower until thighs parallel. Drive through heels. Keep chest up.
-Common mistake: Knees caving in. Push knees out over toes.
+4. *Hip Thrust* — 4×12
+Drive hips up. Squeeze glutes hard at top
 
-2. *Push-Up → Decline Push-Up → Archer Push-Up (progression)*
-https://www.youtube.com/watch?v=IODxDxX7oi4
-3×10. Hands shoulder-width. Body in straight line. Lower chest to floor. Push up explosively.
-Common mistake: Sagging hips or flaring elbows. Keep core tight.
+5. *Seated Calf Raise* — 4×15
+Full stretch down, full press up. High reps
 
-3. *Glute Bridge → Single Leg Glute Bridge → Hip Thrust with Backpack (progression)*
-https://www.youtube.com/results?search_query=glute+bridge+tutorial+form
-3×15. Lie on back. Drive hips up. Squeeze glutes hard at top. Hold 2 seconds.
-Common mistake: Using lower back instead of glutes to lift.
+6. *Cable Crunch* — 3×15
+Rope behind head. Crunch down, squeeze abs
 
-4. *Reverse Lunge → Bulgarian Split Squat (progression)*
-https://www.youtube.com/results?search_query=reverse+lunge+form+tutorial
-3×10 each leg. Step back, lower back knee toward floor. Front knee stays over ankle.
-Common mistake: Front knee going too far forward. Drive through heel.
+Reply *DONE* when finished.
 
-5. *Table Row / Door Frame Row → Resistance Band Row (progression)*
-https://www.youtube.com/results?search_query=table+row+home+workout+tutorial
-3×10. Lie under table. Grip edge. Pull chest to table. Squeeze back at top.
-Common mistake: Using arms instead of back. Think elbows driving back.
+_Form videos:_
+1. Hack Squat: https://www.youtube.com/results?search_query=hack+squat+machine+tutorial
+2. Leg Extension: https://www.youtube.com/results?search_query=leg+extension+machine+tutorial
+3. Leg Curl: https://www.youtube.com/results?search_query=leg+curl+machine+tutorial
+4. Hip Thrust: https://www.youtube.com/results?search_query=hip+thrust+machine+tutorial
+5. Calf Raise: https://www.youtube.com/results?search_query=seated+calf+raise+tutorial
+6. Cable Crunch: https://www.youtube.com/results?search_query=cable+crunch+tutorial`;
 
-6. *Plank → Plank with Shoulder Tap (progression)*
-https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial
-3×30 seconds. Forearms or hands. Body straight. Core braced. Breathe steadily.
-Common mistake: Hips too high or sagging. Keep hips level.
+export const HOME_PROGRAMME_GUIDE = `*Home Workout — No Gym Needed*
+3 sets each | Rest 60 sec | 40–50 min
 
-Progressive overload: Add reps each session. When movements become easy, move to next progression.`;
+1. *Squat* — 3×15
+Feet shoulder width. Go down until thighs level. Push up through heels
+
+2. *Push-Up* — 3×10
+Hands shoulder width. Body straight. Chest to floor, push up
+
+3. *Glute Bridge* — 3×15
+Lie on back. Push hips up. Squeeze bum at top. Hold 2 sec
+
+4. *Reverse Lunge* — 3×10 each leg
+Step back, lower knee to floor. Push up through front heel
+
+5. *Table Row* — 3×10
+Lie under a table. Grip edge. Pull chest up. Squeeze back
+
+6. *Plank* — 3×30 seconds
+Body straight. Core tight. Breathe steady
+
+Getting easy? Add reps. Still easy? Move to harder version.
+
+Reply *DONE* when finished.
+
+_Form videos:_
+1. Squat: https://www.youtube.com/watch?v=aclHkVaku9U
+2. Push-Up: https://www.youtube.com/watch?v=IODxDxX7oi4
+3. Glute Bridge: https://www.youtube.com/results?search_query=glute+bridge+tutorial
+4. Lunge: https://www.youtube.com/results?search_query=reverse+lunge+tutorial
+5. Table Row: https://www.youtube.com/results?search_query=table+row+home+workout+tutorial
+6. Plank: https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial`;
 
 // ============================================================
 // EXERCISE LIBRARY — kept for backward compat (buildDayWorkoutForType)
@@ -842,12 +823,18 @@ function formatGymDay(
   week: number,
   multiplier: { sets: string; reps: string; rest: string }
 ): string {
-  let out = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${label} | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
-  for (const ex of exercises) {
+  let out = `*Week ${week} — ${label}*\nRest ${multiplier.rest} between sets\n\n`;
+  const ytLinks: string[] = [];
+  for (let i = 0; i < exercises.length; i++) {
+    const ex = exercises[i];
+    const num = i + 1;
+    // Short one-line cue — just the key thing to remember
+    const shortCue = ex.description.split(". ").slice(0, 1).join(". ");
+    out += `${num}. *${ex.name}* — ${ex.sets}\n${shortCue}\n\n`;
     const yt = ex.youtube || `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
-    out += `*${ex.name} — ${ex.sets}*\n${yt}\n${ex.description}\nCommon mistake: ${ex.mistake}\nModification: ${ex.modification}\n\n`;
+    ytLinks.push(`${num}. ${ex.name}: ${yt}`);
   }
-  out += `Send DONE when finished.`;
+  out += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
   return out;
 }
 
@@ -1149,11 +1136,14 @@ export function buildDayWorkout(user: any): string {
       }
     }
     const { safe: exercises, skipped } = filterInjuredExercises(allExercises, injuries);
-    let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\nFull Body Day ${daySlot} | Rest ${multiplier.rest} between sets | Total 40–50 minutes\n\n`;
-    for (const ex of exercises) {
-      // Apply phase multiplier to sets/reps for phases 2+
+    let workout = `*Week ${week} — Home Day ${daySlot}*\nRest ${multiplier.rest} between sets | 40–50 min total\n\n`;
+    const ytLinks: string[] = [];
+    for (let i = 0; i < exercises.length; i++) {
+      const ex = exercises[i];
+      const num = i + 1;
       const displaySetsReps = phase > 1 ? `${multiplier.sets} sets of ${multiplier.reps} reps` : ex.setsReps;
-      workout += `*${ex.name} — ${displaySetsReps}*\n${ex.yt}\n${ex.cue}\nCommon mistake: ${ex.mistake}\n\n`;
+      workout += `${num}. *${ex.name}* — ${displaySetsReps}\n${ex.cue}\n\n`;
+      ytLinks.push(`${num}. ${ex.name}: ${ex.yt}`);
     }
     if (skipped.length > 0) {
       workout += `⚠️ *Skipped due to ${injuries}:* ${skipped.join(", ")}. These return when you report recovery.\n\n`;
@@ -1161,7 +1151,7 @@ export function buildDayWorkout(user: any): string {
     if (isFemaleGluteFocus && !skipped.some(s => s.toLowerCase().includes("glute"))) {
       workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
     }
-    workout += `Train on non-consecutive days. Send DONE when finished.`;
+    workout += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
     return workout;
   }
 
