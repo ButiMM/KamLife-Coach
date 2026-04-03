@@ -17,6 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
+import { deliveryStats } from "./scheduler";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -4415,8 +4416,17 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       // Goal breakdown from allCompleteUsers (already fetched)
       const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+      const allUsersForFunnel = await db.select().from(users);
       const goalCounts: Record<string, number> = {};
       const budgetCounts: Record<string, number> = {};
+
+      // Funnel metrics
+      const funnelTotal = allUsersForFunnel.length;
+      const funnelOnboarded = allComplete.length;
+      const funnelFirstWorkout = allComplete.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
+      const funnelPaying = allComplete.filter(u => u.subscriptionStatus === "active").length;
+      const funnelActiveWeek = allComplete.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86400000).length;
+      const estimatedMRR = funnelPaying * 99;
       for (const u of allComplete) {
         const g = (u as any).goalType || "unknown";
         goalCounts[g] = (goalCounts[g] || 0) + 1;
@@ -4453,6 +4463,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         const badgeColor = days >= 14 ? "#ef4444" : days >= 5 ? "#f97316" : "#f59e0b";
         const riskLabel = days >= 14 ? "SEVERE" : days >= 5 ? "HIGH" : "WARNING";
         const injuries = u.injuries || u.medicalConditions || "";
+        const ph = u.phoneNumber.replace(/'/g, "\\'");
         return `
           <tr style="background:${rowBg}; border-bottom: 1px solid #2d3748;">
             <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${u.name || "—"}</td>
@@ -4464,7 +4475,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
             <td style="padding:10px 12px; color:#22c55e; font-weight:600; text-align:center;">${u.programmeWeek ?? "—"}</td>
             <td style="padding:10px 12px; color:#d1d5db; text-align:center;">${u.totalWorkoutsCompleted ?? 0}</td>
             <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${u.goalType || "—"}</td>
-            <td style="padding:10px 12px; color:#fbbf24; font-size:12px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${injuries}">${injuries || "—"}</td>
+            <td style="padding:8px 6px; white-space:nowrap;">
+              <button onclick="intervene('${ph}','checkin',this)" style="background:#3b82f6; color:#fff; border:none; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; margin:1px;">Check-in</button>
+              <button onclick="intervene('${ph}','workout',this)" style="background:#22c55e; color:#000; border:none; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; margin:1px;">Workout</button>
+              <button onclick="intervene('${ph}','motivation',this)" style="background:#a78bfa; color:#000; border:none; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; margin:1px;">Motivate</button>
+            </td>
           </tr>`;
       }).join("");
 
@@ -4586,11 +4601,71 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       </div>
     </div>
 
+    <!-- REVENUE + FUNNEL -->
+    <div style="margin-bottom:16px; font-size:11px; color:#4b5563; text-transform:uppercase; letter-spacing:0.12em; font-weight:700;">Revenue & Funnel</div>
+    <div class="grid-4">
+      <div class="card" style="border-color:#22c55e44;">
+        <div class="stat-value" style="color:#22c55e;">R${estimatedMRR.toLocaleString()}</div>
+        <div class="stat-label">Estimated MRR</div>
+      </div>
+      <div class="card" style="border-color:#22c55e44;">
+        <div class="stat-value" style="color:#4ade80;">${funnelPaying}</div>
+        <div class="stat-label">Paying Clients</div>
+      </div>
+      <div class="card" style="border-color:#3b82f644;">
+        <div class="stat-value" style="color:#38bdf8;">${funnelFirstWorkout}</div>
+        <div class="stat-label">Completed 1+ Workout</div>
+      </div>
+      <div class="card" style="border-color:#a78bfa44;">
+        <div class="stat-value" style="color:#a78bfa;">${funnelActiveWeek}</div>
+        <div class="stat-label">Active This Week</div>
+      </div>
+    </div>
+
+    <!-- DELIVERY HEALTH -->
+    <div class="grid-3" style="margin-bottom:16px;">
+      <div class="card" style="border-color:${deliveryStats.failed > 0 ? '#ef444444' : '#22c55e44'};">
+        <div class="stat-value" style="color:${deliveryStats.failed > 0 ? '#ef4444' : '#22c55e'};">${deliveryStats.sent}</div>
+        <div class="stat-label">Messages Sent Today</div>
+      </div>
+      <div class="card" style="border-color:${deliveryStats.failed > 0 ? '#ef444444' : '#37415144'};">
+        <div class="stat-value" style="color:${deliveryStats.failed > 0 ? '#ef4444' : '#4b5563'};">${deliveryStats.failed}</div>
+        <div class="stat-label">Delivery Failures Today</div>
+      </div>
+      <div class="card">
+        <div class="stat-value" style="color:${deliveryStats.sent + deliveryStats.failed > 0 ? (deliveryStats.failed / (deliveryStats.sent + deliveryStats.failed) > 0.1 ? '#ef4444' : '#22c55e') : '#4b5563'};">${deliveryStats.sent + deliveryStats.failed > 0 ? Math.round(deliveryStats.sent / (deliveryStats.sent + deliveryStats.failed) * 100) : 100}%</div>
+        <div class="stat-label">Delivery Rate</div>
+      </div>
+    </div>
+
+    <!-- CONVERSION FUNNEL -->
+    <div class="card" style="margin-bottom:16px; padding:20px;">
+      <div class="section-title" style="margin-bottom:16px;">Conversion Funnel</div>
+      ${[
+        { label: "Signed Up", count: funnelTotal, color: "#6b7280" },
+        { label: "Onboarding Complete", count: funnelOnboarded, color: "#3b82f6" },
+        { label: "First Workout Done", count: funnelFirstWorkout, color: "#a78bfa" },
+        { label: "Paying", count: funnelPaying, color: "#22c55e" },
+        { label: "Active This Week", count: funnelActiveWeek, color: "#4ade80" },
+      ].map(step => {
+        const pct = funnelTotal > 0 ? Math.round(step.count / funnelTotal * 100) : 0;
+        return \`<div style="margin-bottom:8px;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
+            <span style="color:#d1d5db; font-size:13px;">\${step.label}</span>
+            <span style="color:#9ca3af; font-size:13px;">\${step.count} (\${pct}%)</span>
+          </div>
+          <div style="background:#1f2937; border-radius:4px; height:20px; overflow:hidden; border:1px solid #374151;">
+            <div style="background:\${step.color}; height:100%; width:\${pct}%; border-radius:3px; transition:width 0.3s;"></div>
+          </div>
+        </div>\`;
+      }).join("")}
+    </div>
+
     <!-- AT RISK -->
     <div class="section">
       <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
         <span style="background:#ef4444; color:#fff; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">At Risk</span>
-        <span class="section-title" style="margin-bottom:0;">7+ Days Silent (${allCompleteUsers.length} clients)</span>
+        <span class="section-title" style="margin-bottom:0;">At-Risk Clients (${allCompleteUsers.filter((u: any) => daysSince(u.lastActiveAt) >= 2).length} clients)</span>
       </div>
       ${allCompleteUsers.length === 0
         ? `<div class="card" style="color:#4b5563; text-align:center; padding:30px;">All clients active — no at-risk clients right now.</div>`
@@ -4604,7 +4679,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
                 <th style="${thStyle} text-align:center;">Week</th>
                 <th style="${thStyle} text-align:center;">Workouts</th>
                 <th style="${thStyle}">Goal</th>
-                <th style="${thStyle}">Notes</th>
+                <th style="${thStyle}">Actions</th>
               </tr>
             </thead>
             <tbody>${atRiskRows}</tbody>
@@ -4665,9 +4740,73 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   </div>
 
+  <!-- BROADCAST -->
+  <div class="container">
+    <div class="section">
+      <div class="section-title">Quick Broadcast</div>
+      <div class="card" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <input id="broadcastMsg" type="text" placeholder="Type message to send..." style="flex:1; min-width:200px; background:#111827; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#f9fafb; font-size:14px; outline:none;" />
+        <select id="broadcastFilter" style="background:#111827; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#f9fafb; font-size:13px;">
+          <option value="all">All Clients</option>
+          <option value="active">Active Only</option>
+          <option value="atrisk">At-Risk Only</option>
+        </select>
+        <button onclick="sendBroadcast()" style="background:#22c55e; color:#000; border:none; border-radius:6px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer;">Send</button>
+        <span id="broadcastStatus" style="color:#9ca3af; font-size:12px;"></span>
+      </div>
+    </div>
+  </div>
+
   <div style="text-align:center; padding:20px; color:#374151; font-size:12px; border-top:1px solid #1f2937; margin-top:8px;">
     KamLife Coach Admin Dashboard — Confidential &nbsp;|&nbsp; Refresh to update
   </div>
+
+  <script>
+    const DASH_KEY = "${key}";
+    async function intervene(phone, type, btn) {
+      btn.disabled = true;
+      btn.textContent = "...";
+      try {
+        const res = await fetch("/api/dashboard/intervene", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ phone, type })
+        });
+        const data = await res.json();
+        if (data.success) {
+          btn.textContent = "Sent ✓";
+          btn.style.background = "#065f46";
+          btn.style.color = "#fff";
+        } else {
+          btn.textContent = "Failed";
+          btn.style.background = "#7f1d1d";
+        }
+      } catch {
+        btn.textContent = "Error";
+        btn.style.background = "#7f1d1d";
+      }
+    }
+    async function sendBroadcast() {
+      const msg = document.getElementById("broadcastMsg").value.trim();
+      const filter = document.getElementById("broadcastFilter").value;
+      const status = document.getElementById("broadcastStatus");
+      if (!msg) { status.textContent = "Type a message first"; return; }
+      if (!confirm("Send to " + filter + " clients?")) return;
+      status.textContent = "Sending...";
+      try {
+        const res = await fetch("/api/dashboard/broadcast", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ message: msg, filter })
+        });
+        const data = await res.json();
+        status.textContent = "Sent: " + data.sent + " | Failed: " + data.failed;
+        document.getElementById("broadcastMsg").value = "";
+      } catch {
+        status.textContent = "Error sending";
+      }
+    }
+  </script>
 </body>
 </html>`;
 

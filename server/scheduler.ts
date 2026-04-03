@@ -90,15 +90,35 @@ const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
   : "";
 
+// Delivery tracking — counts successes and failures per day
+export const deliveryStats = { sent: 0, failed: 0, lastReset: new Date().toISOString().slice(0, 10) };
+function resetDeliveryStatsIfNeeded() {
+  const today = new Date().toISOString().slice(0, 10);
+  if (deliveryStats.lastReset !== today) {
+    deliveryStats.sent = 0;
+    deliveryStats.failed = 0;
+    deliveryStats.lastReset = today;
+  }
+}
+
 async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
+  resetDeliveryStatsIfNeeded();
   if (!FROM_NUMBER) {
     console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
+    deliveryStats.failed++;
     return;
   }
-  const params: any = { from: FROM_NUMBER, to, body };
-  if (mediaUrl) params.mediaUrl = [mediaUrl];
-  await twilioClient.messages.create(params);
-  console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
+  try {
+    const params: any = { from: FROM_NUMBER, to, body };
+    if (mediaUrl) params.mediaUrl = [mediaUrl];
+    await twilioClient.messages.create(params);
+    deliveryStats.sent++;
+    console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
+  } catch (err) {
+    deliveryStats.failed++;
+    console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)}:`, err);
+    throw err; // re-throw so callers can handle
+  }
 }
 
 // ============================================================
@@ -357,9 +377,16 @@ cron.schedule("0 4 * * *", async () => {
       const workouts = client.totalWorkoutsCompleted || 0;
       const planned = client.trainingDaysPerWeek || 3;
       if (canSendProactive(client.id)) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`
-        );
+        // Check if they have been active recently — if not, make the message more urgent
+        const daysSinceActive = client.lastActiveAt
+          ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+          : 999;
+        const isSlipping = daysSinceActive >= 3;
+
+        const week3Msg = isSlipping
+          ? `${name}, I have not heard from you in ${daysSinceActive} days. You are in Week 3 — the week most people quit.\n\n${workouts} sessions completed. That work is real and it does not disappear.\n\nI am not asking for a perfect week. I am asking for ONE session today. Reply *1* and I will send your workout. 20 minutes. That is all.`
+          : `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`;
+        await sendWhatsApp(client.phoneNumber, week3Msg);
         recordProactiveSend(client.id);
         saveState(sentKey, "sent");
       }
@@ -796,6 +823,30 @@ cron.schedule("0 8 * * *", async () => {
         } else if (days === 3) {
           await sendWhatsApp(client.phoneNumber,
             `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead. Send me today's food and keep the momentum going.`
+          );
+          recordProactiveSend(client.id);
+        } else if (days === 5) {
+          // Day 5 — value proof: show what they have achieved so far
+          const workoutsDone = client.totalWorkoutsCompleted || 0;
+          const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+          const fiveDaysAgoOnb = new Date(Date.now() - 5 * 86_400_000);
+          const recentSteps = await db.select({ steps: stepLogs.steps })
+            .from(stepLogs)
+            .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fiveDaysAgoOnb)));
+          const totalStepsLogged = recentSteps.reduce((s, r) => s + (r.steps || 0), 0);
+          const recentFoodLogs = await db.select({ id: chatHistory.id })
+            .from(chatHistory)
+            .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, fiveDaysAgoOnb)));
+          await sendWhatsApp(client.phoneNumber,
+            `Day 5, ${name}. Here is what you have built in less than a week:\n\n✅ ${workoutsDone} workout${workoutsDone !== 1 ? "s" : ""} completed\n👟 ${totalStepsLogged.toLocaleString()} steps logged\n🍽 ${recentFoodLogs.length} meal${recentFoodLogs.length !== 1 ? "s" : ""} tracked\n\nThis is data. Data becomes results. Most people never get this far. You did.\n\nKeep logging — reply *1* for today's workout.`
+          );
+          recordProactiveSend(client.id);
+        } else if (days === 7) {
+          // Day 7 — week-1 milestone, build commitment
+          const workoutsDone = client.totalWorkoutsCompleted || 0;
+          const goal = client.goalType === "muscle_gain" ? "building muscle" : client.goalType === "recomposition" ? "body recomp" : "fat loss";
+          await sendWhatsApp(client.phoneNumber,
+            `One week done, ${name}. Seven days of showing up.\n\n${workoutsDone >= 3 ? `${workoutsDone} sessions this week — you are on track.` : workoutsDone > 0 ? `${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done — aim for ${client.trainingDaysPerWeek || 3} next week.` : "No sessions logged yet — this week, do one. Just one."}\n\n*What happens in Week 2:*\nYour body starts adapting. Energy improves. Soreness decreases. The habit begins to form. Most ${goal} results show at Week 4-6 — you are building the foundation right now.\n\nReply *menu* to see all your options. Keep going.`
           );
           recordProactiveSend(client.id);
         }
