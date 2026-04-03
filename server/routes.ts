@@ -4515,6 +4515,31 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         </div>`
       ).join("");
 
+      // Pre-compute funnel HTML to avoid nested template literal issues
+      const funnelSteps = [
+        { label: "Signed Up", count: funnelTotal, color: "#6b7280" },
+        { label: "Onboarding Complete", count: funnelOnboarded, color: "#3b82f6" },
+        { label: "First Workout Done", count: funnelFirstWorkout, color: "#a78bfa" },
+        { label: "Paying", count: funnelPaying, color: "#22c55e" },
+        { label: "Active This Week", count: funnelActiveWeek, color: "#4ade80" },
+      ];
+      const funnelHtml = funnelSteps.map(step => {
+        const pct = funnelTotal > 0 ? Math.round(step.count / funnelTotal * 100) : 0;
+        return '<div style="margin-bottom:8px;">' +
+          '<div style="display:flex; justify-content:space-between; margin-bottom:3px;">' +
+          '<span style="color:#d1d5db; font-size:13px;">' + step.label + '</span>' +
+          '<span style="color:#9ca3af; font-size:13px;">' + step.count + ' (' + pct + '%)</span>' +
+          '</div>' +
+          '<div style="background:#1f2937; border-radius:4px; height:20px; overflow:hidden; border:1px solid #374151;">' +
+          '<div style="background:' + step.color + '; height:100%; width:' + pct + '%; border-radius:3px; transition:width 0.3s;"></div>' +
+          '</div></div>';
+      }).join("");
+
+      // Pre-compute delivery rate
+      const deliveryTotal = deliveryStats.sent + deliveryStats.failed;
+      const deliveryRate = deliveryTotal > 0 ? Math.round(deliveryStats.sent / deliveryTotal * 100) : 100;
+      const deliveryRateColor = deliveryTotal > 0 ? (deliveryStats.failed / deliveryTotal > 0.1 ? '#ef4444' : '#22c55e') : '#4b5563';
+
       const tableStyle = `width:100%; border-collapse:collapse; font-size:14px;`;
       const thStyle = `padding:10px 12px; text-align:left; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:0.08em; color:#6b7280; background:#0d1117; border-bottom:2px solid #22c55e;`;
 
@@ -4633,7 +4658,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         <div class="stat-label">Delivery Failures Today</div>
       </div>
       <div class="card">
-        <div class="stat-value" style="color:${deliveryStats.sent + deliveryStats.failed > 0 ? (deliveryStats.failed / (deliveryStats.sent + deliveryStats.failed) > 0.1 ? '#ef4444' : '#22c55e') : '#4b5563'};">${deliveryStats.sent + deliveryStats.failed > 0 ? Math.round(deliveryStats.sent / (deliveryStats.sent + deliveryStats.failed) * 100) : 100}%</div>
+        <div class="stat-value" style="color:${deliveryRateColor};">${deliveryRate}%</div>
         <div class="stat-label">Delivery Rate</div>
       </div>
     </div>
@@ -4641,24 +4666,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     <!-- CONVERSION FUNNEL -->
     <div class="card" style="margin-bottom:16px; padding:20px;">
       <div class="section-title" style="margin-bottom:16px;">Conversion Funnel</div>
-      ${[
-        { label: "Signed Up", count: funnelTotal, color: "#6b7280" },
-        { label: "Onboarding Complete", count: funnelOnboarded, color: "#3b82f6" },
-        { label: "First Workout Done", count: funnelFirstWorkout, color: "#a78bfa" },
-        { label: "Paying", count: funnelPaying, color: "#22c55e" },
-        { label: "Active This Week", count: funnelActiveWeek, color: "#4ade80" },
-      ].map(step => {
-        const pct = funnelTotal > 0 ? Math.round(step.count / funnelTotal * 100) : 0;
-        return \`<div style="margin-bottom:8px;">
-          <div style="display:flex; justify-content:space-between; margin-bottom:3px;">
-            <span style="color:#d1d5db; font-size:13px;">\${step.label}</span>
-            <span style="color:#9ca3af; font-size:13px;">\${step.count} (\${pct}%)</span>
-          </div>
-          <div style="background:#1f2937; border-radius:4px; height:20px; overflow:hidden; border:1px solid #374151;">
-            <div style="background:\${step.color}; height:100%; width:\${pct}%; border-radius:3px; transition:width 0.3s;"></div>
-          </div>
-        </div>\`;
-      }).join("")}
+      ${funnelHtml}
     </div>
 
     <!-- AT RISK -->
