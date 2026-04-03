@@ -274,6 +274,66 @@ export const progressPhotosRelations = relations(progressPhotos, ({ one }) => ({
   user: one(users, { fields: [progressPhotos.userId], references: [users.id] }),
 }));
 
+// === ESCALATION INBOX — human-review queue with SLA timers ===
+export const escalations = pgTable("escalations", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  reason: text("reason").notNull(), // e.g. "injury", "billing", "frustrated", "medical", "manual"
+  triggerMessage: text("trigger_message"), // the user message that triggered escalation
+  status: text("status").notNull().default("open"), // open | claimed | resolved | expired
+  priority: text("priority").notNull().default("normal"), // low | normal | high | urgent
+  claimedBy: text("claimed_by"), // coach name or "auto"
+  resolution: text("resolution"), // coach notes on how it was resolved
+  createdAt: timestamp("created_at").defaultNow(),
+  claimedAt: timestamp("claimed_at"),
+  resolvedAt: timestamp("resolved_at"),
+  slaDeadline: timestamp("sla_deadline"), // auto-set based on priority
+}, (table) => ({
+  statusIdx: index("escalations_status_idx").on(table.status),
+  userIdx: index("escalations_user_idx").on(table.userId),
+}));
+
+export const escalationsRelations = relations(escalations, ({ one }) => ({
+  user: one(users, { fields: [escalations.userId], references: [users.id] }),
+}));
+
+// === A/B TEST EXPERIMENTS — message template testing engine ===
+export const abExperiments = pgTable("ab_experiments", {
+  id: serial("id").primaryKey(),
+  name: text("name").notNull(), // e.g. "morning_checkin_tone"
+  description: text("description"),
+  status: text("status").notNull().default("active"), // active | paused | completed
+  variantA: text("variant_a").notNull(), // the control message template
+  variantB: text("variant_b").notNull(), // the challenger message template
+  messageType: text("message_type").notNull(), // e.g. "morning_checkin", "nudge", "workout_reminder"
+  createdAt: timestamp("created_at").defaultNow(),
+  completedAt: timestamp("completed_at"),
+});
+
+export const abAssignments = pgTable("ab_assignments", {
+  id: serial("id").primaryKey(),
+  experimentId: integer("experiment_id").notNull().references(() => abExperiments.id),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  variant: text("variant").notNull(), // "A" or "B"
+  delivered: boolean("delivered").default(false),
+  responded: boolean("responded").default(false),
+  convertedAction: text("converted_action"), // e.g. "workout_done", "food_logged", "replied"
+  deliveredAt: timestamp("delivered_at"),
+  respondedAt: timestamp("responded_at"),
+}, (table) => ({
+  expUserIdx: index("ab_assignments_exp_user_idx").on(table.experimentId, table.userId),
+  expIdx: index("ab_assignments_exp_idx").on(table.experimentId),
+}));
+
+export const abExperimentsRelations = relations(abExperiments, ({ many }) => ({
+  assignments: many(abAssignments),
+}));
+
+export const abAssignmentsRelations = relations(abAssignments, ({ one }) => ({
+  experiment: one(abExperiments, { fields: [abAssignments.experimentId], references: [abExperiments.id] }),
+  user: one(users, { fields: [abAssignments.userId], references: [users.id] }),
+}));
+
 // For Replit AI Integrations compatibility
 export const conversations = pgTable("conversations", {
   id: serial("id").primaryKey(),
@@ -306,6 +366,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   clothingCheckins: many(clothingCheckins),
   bodyMeasurements: many(bodyMeasurements),
   progressPhotos: many(progressPhotos),
+  escalations: many(escalations),
 }));
 
 export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({
@@ -393,6 +454,8 @@ export type ClothingCheckin = typeof clothingCheckins.$inferSelect;
 export type InsertClothingCheckin = z.infer<typeof insertClothingCheckinSchema>;
 export type BodyMeasurement = typeof bodyMeasurements.$inferSelect;
 export type InsertBodyMeasurement = z.infer<typeof insertBodyMeasurementSchema>;
+
+export type Escalation = typeof escalations.$inferSelect;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UserResponse = User;

@@ -3,8 +3,8 @@ import { type Server } from "http";
 import crypto from "crypto";
 import path from "path";
 import { db, pool } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos } from "../shared/schema";
-import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments } from "../shared/schema";
+import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
@@ -3618,6 +3618,27 @@ CRITICAL RULES — these are non-negotiable:
 async function logChat(userId: string, messageIn: string, messageOut: string, intent: string): Promise<void> {
   try {
     await db.insert(chatHistory).values({ userId, messageIn, messageOut, intent });
+
+    // Auto-escalation: detect messages that need human review
+    if (messageIn && messageIn.length > 2) {
+      const esc = detectEscalation(messageIn);
+      if (esc.should) {
+        // Check for recent open escalation for this user to avoid duplicates
+        const recent = await db.select({ id: escalations.id }).from(escalations)
+          .where(and(eq(escalations.userId, userId), eq(escalations.status, "open")))
+          .limit(1);
+        if (recent.length === 0) {
+          await db.insert(escalations).values({
+            userId,
+            reason: esc.reason,
+            triggerMessage: messageIn.slice(0, 500),
+            priority: esc.priority,
+            slaDeadline: escalationSLA(esc.priority),
+          });
+          console.log(`[ESCALATION] Auto-created: ${esc.reason} (${esc.priority}) for user ${userId}`);
+        }
+      }
+    }
   } catch (err) {
     console.error("Chat log error:", err);
   }
@@ -4231,6 +4252,345 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       res.json({ sent, failed, total: targets.length });
     } catch (err) {
       res.status(500).json({ error: "Broadcast failed" });
+    }
+  });
+
+  // ---- CLIENT TIMELINE — full activity history for a single client ----
+  app.get("/api/dashboard/timeline/:phone", requireDashboardKey, async (req, res) => {
+    try {
+      const phoneParam = decodeURIComponent(req.params.phone);
+      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+      const [weights, steps, workouts, chats] = await Promise.all([
+        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
+          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({ steps: stepLogs.steps, date: stepLogs.loggedAt }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
+        db.select({ date: workoutLogs.loggedAt, dayType: workoutLogs.dayType }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(workoutLogs.loggedAt)),
+        db.select({ date: chatHistory.createdAt, intent: chatHistory.intent, msgIn: chatHistory.messageIn, msgOut: chatHistory.messageOut })
+          .from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, thirtyDaysAgo)))
+          .orderBy(desc(chatHistory.createdAt)).limit(200),
+      ]);
+
+      // Build timeline events sorted by date
+      const events: { date: string; type: string; detail: string }[] = [];
+      for (const w of weights) events.push({ date: new Date(w.date!).toISOString(), type: "weight", detail: `${w.weight}kg` });
+      for (const s of steps) events.push({ date: new Date(s.date!).toISOString(), type: "steps", detail: `${s.steps} steps` });
+      for (const wo of workouts) events.push({ date: new Date(wo.date!).toISOString(), type: "workout", detail: wo.dayType || "session" });
+      for (const c of chats) events.push({ date: new Date(c.date!).toISOString(), type: "chat", detail: `[${c.intent}] ${(c.msgIn || "").slice(0, 80)}` });
+      events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+
+      // Summary stats
+      const daysOnProgramme = client.programmeStartDate ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000) : 0;
+      const avgSteps = steps.length > 0 ? Math.round(steps.reduce((s, x) => s + (x.steps || 0), 0) / steps.length) : 0;
+      const weightTrend = weights.length >= 2 ? parseFloat((parseFloat(String(weights[weights.length - 1].weight)) - parseFloat(String(weights[0].weight))).toFixed(1)) : 0;
+
+      res.json({
+        client: { name: client.name, phone: client.phoneNumber, goal: client.goalType, mode: client.trainingMode, week: client.programmeWeek, totalWorkouts: client.totalWorkoutsCompleted, streak: client.workoutStreak },
+        summary: { daysOnProgramme, workoutsLast30: workouts.length, avgSteps, weightTrend, messagesLast30: chats.length },
+        events: events.slice(0, 200),
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch timeline" });
+    }
+  });
+
+  // ---- COHORT ANALYTICS — grouped by signup month ----
+  app.get("/api/dashboard/cohorts", requireDashboardKey, async (_req, res) => {
+    try {
+      const allUsers = await db.select({
+        id: users.id,
+        createdAt: users.createdAt,
+        subscriptionStatus: users.subscriptionStatus,
+        onboardingState: users.onboardingState,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        lastActiveAt: users.lastActiveAt,
+      }).from(users);
+
+      const now = Date.now();
+      const cohorts: Record<string, { month: string; signups: number; onboarded: number; paying: number; retained: number; avgWorkouts: number }> = {};
+
+      for (const u of allUsers) {
+        if (!u.createdAt) continue;
+        const d = new Date(u.createdAt);
+        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        if (!cohorts[key]) cohorts[key] = { month: key, signups: 0, onboarded: 0, paying: 0, retained: 0, avgWorkouts: 0 };
+        cohorts[key].signups++;
+        if (u.onboardingState === "COMPLETE") cohorts[key].onboarded++;
+        if (u.subscriptionStatus === "active") cohorts[key].paying++;
+        if (u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000) cohorts[key].retained++;
+        cohorts[key].avgWorkouts += u.totalWorkoutsCompleted || 0;
+      }
+
+      // Calculate averages
+      const result = Object.values(cohorts).map(c => ({
+        ...c,
+        avgWorkouts: c.signups > 0 ? Math.round(c.avgWorkouts / c.signups * 10) / 10 : 0,
+        onboardRate: c.signups > 0 ? Math.round(c.onboarded / c.signups * 100) : 0,
+        payRate: c.signups > 0 ? Math.round(c.paying / c.signups * 100) : 0,
+        retentionRate: c.onboarded > 0 ? Math.round(c.retained / c.onboarded * 100) : 0,
+      })).sort((a, b) => a.month.localeCompare(b.month));
+
+      res.json({ cohorts: result });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch cohorts" });
+    }
+  });
+
+  // ============================================================
+  // ESCALATION INBOX — human review queue with SLA timers
+  // ============================================================
+
+  // Helper: compute SLA deadline based on priority
+  function escalationSLA(priority: string): Date {
+    const hours: Record<string, number> = { urgent: 1, high: 4, normal: 12, low: 48 };
+    return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
+  }
+
+  // Helper: auto-detect if a message should be escalated
+  function detectEscalation(message: string): { should: boolean; reason: string; priority: string } {
+    const m = message.toLowerCase();
+    if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)\b/i.test(m))
+      return { should: true, reason: "injury", priority: "urgent" };
+    if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
+      return { should: true, reason: "billing", priority: "high" };
+    if (/\b(doctor|hospital|surgery|medication|diabete|blood pressure|heart|pregnant|pregnanc|asthma|epilep)\b/i.test(m))
+      return { should: true, reason: "medical", priority: "high" };
+    if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
+      return { should: true, reason: "frustrated", priority: "high" };
+    if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
+      return { should: true, reason: "human_requested", priority: "normal" };
+    return { should: false, reason: "", priority: "normal" };
+  }
+
+  // Create escalation (auto or manual)
+  app.post("/api/dashboard/escalations", requireDashboardKey, async (req, res) => {
+    try {
+      const { phone, reason, triggerMessage, priority } = req.body;
+      if (!phone || !reason) return res.status(400).json({ error: "phone and reason required" });
+      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+
+      const prio = priority || "normal";
+      const [esc] = await db.insert(escalations).values({
+        userId: client.id,
+        reason,
+        triggerMessage: triggerMessage || null,
+        priority: prio,
+        slaDeadline: escalationSLA(prio),
+      }).returning();
+
+      res.json({ success: true, escalation: esc });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to create escalation" });
+    }
+  });
+
+  // List escalations (open/claimed/all)
+  app.get("/api/dashboard/escalations", requireDashboardKey, async (req, res) => {
+    try {
+      const statusFilter = (req.query.status as string) || "open";
+      const conditions = statusFilter === "all" ? [] : [eq(escalations.status, statusFilter)];
+
+      const rows = await db.select({
+        id: escalations.id,
+        reason: escalations.reason,
+        triggerMessage: escalations.triggerMessage,
+        status: escalations.status,
+        priority: escalations.priority,
+        claimedBy: escalations.claimedBy,
+        resolution: escalations.resolution,
+        createdAt: escalations.createdAt,
+        claimedAt: escalations.claimedAt,
+        resolvedAt: escalations.resolvedAt,
+        slaDeadline: escalations.slaDeadline,
+        userName: users.name,
+        userPhone: users.phoneNumber,
+        userGoal: users.goalType,
+      }).from(escalations)
+        .leftJoin(users, eq(escalations.userId, users.id))
+        .where(conditions.length > 0 ? conditions[0] : undefined)
+        .orderBy(desc(escalations.createdAt))
+        .limit(200);
+
+      // Mark SLA breaches
+      const now = Date.now();
+      const enriched = rows.map(r => ({
+        ...r,
+        slaBreach: r.slaDeadline && r.status === "open" && new Date(r.slaDeadline).getTime() < now,
+        slaRemaining: r.slaDeadline && r.status === "open"
+          ? Math.max(0, Math.round((new Date(r.slaDeadline).getTime() - now) / 60_000))
+          : null,
+      }));
+
+      res.json({ escalations: enriched });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch escalations" });
+    }
+  });
+
+  // Claim an escalation
+  app.post("/api/dashboard/escalations/:id/claim", requireDashboardKey, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { claimedBy } = req.body;
+      const [updated] = await db.update(escalations)
+        .set({ status: "claimed", claimedBy: claimedBy || "Coach", claimedAt: new Date() })
+        .where(eq(escalations.id, id))
+        .returning();
+      res.json({ success: true, escalation: updated });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to claim escalation" });
+    }
+  });
+
+  // Resolve an escalation
+  app.post("/api/dashboard/escalations/:id/resolve", requireDashboardKey, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { resolution } = req.body;
+      const [updated] = await db.update(escalations)
+        .set({ status: "resolved", resolution: resolution || "Resolved", resolvedAt: new Date() })
+        .where(eq(escalations.id, id))
+        .returning();
+      res.json({ success: true, escalation: updated });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to resolve escalation" });
+    }
+  });
+
+  // ============================================================
+  // A/B TESTING ENGINE — message template experiments
+  // ============================================================
+
+  // Helper: get A/B variant for a user in an active experiment
+  async function getABVariant(userId: string, messageType: string): Promise<{ template: string; experimentId: number; variant: string } | null> {
+    try {
+      const [experiment] = await db.select().from(abExperiments)
+        .where(and(eq(abExperiments.messageType, messageType), eq(abExperiments.status, "active")))
+        .limit(1);
+      if (!experiment) return null;
+
+      // Check existing assignment
+      const [existing] = await db.select().from(abAssignments)
+        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.userId, userId)))
+        .limit(1);
+
+      if (existing) {
+        return { template: existing.variant === "A" ? experiment.variantA : experiment.variantB, experimentId: experiment.id, variant: existing.variant };
+      }
+
+      // Assign: count current split, assign to smaller group
+      const countA = await db.select({ c: count() }).from(abAssignments)
+        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.variant, "A")));
+      const countB = await db.select({ c: count() }).from(abAssignments)
+        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.variant, "B")));
+      const variant = (countA[0]?.c || 0) <= (countB[0]?.c || 0) ? "A" : "B";
+
+      await db.insert(abAssignments).values({
+        experimentId: experiment.id,
+        userId,
+        variant,
+      });
+
+      return { template: variant === "A" ? experiment.variantA : experiment.variantB, experimentId: experiment.id, variant };
+    } catch (err) {
+      console.error("[A/B] Error getting variant:", err);
+      return null;
+    }
+  }
+
+  // Mark A/B delivery
+  async function markABDelivered(experimentId: number, userId: string): Promise<void> {
+    try {
+      await db.update(abAssignments)
+        .set({ delivered: true, deliveredAt: new Date() })
+        .where(and(eq(abAssignments.experimentId, experimentId), eq(abAssignments.userId, userId)));
+    } catch {}
+  }
+
+  // Mark A/B response
+  async function markABResponse(userId: string, action: string): Promise<void> {
+    try {
+      // Find any active experiment assignment for this user that hasn't been responded to
+      const [assignment] = await db.select({ id: abAssignments.id, experimentId: abAssignments.experimentId })
+        .from(abAssignments)
+        .innerJoin(abExperiments, eq(abAssignments.experimentId, abExperiments.id))
+        .where(and(
+          eq(abAssignments.userId, userId),
+          eq(abAssignments.delivered, true),
+          eq(abAssignments.responded, false),
+          eq(abExperiments.status, "active"),
+        ))
+        .limit(1);
+      if (assignment) {
+        await db.update(abAssignments)
+          .set({ responded: true, respondedAt: new Date(), convertedAction: action })
+          .where(eq(abAssignments.id, assignment.id));
+      }
+    } catch {}
+  }
+
+  // Create experiment
+  app.post("/api/dashboard/ab/experiments", requireDashboardKey, async (req, res) => {
+    try {
+      const { name, description, variantA, variantB, messageType } = req.body;
+      if (!name || !variantA || !variantB || !messageType) return res.status(400).json({ error: "name, variantA, variantB, messageType required" });
+      const [exp] = await db.insert(abExperiments).values({ name, description, variantA, variantB, messageType }).returning();
+      res.json({ success: true, experiment: exp });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to create experiment" });
+    }
+  });
+
+  // List experiments
+  app.get("/api/dashboard/ab/experiments", requireDashboardKey, async (_req, res) => {
+    try {
+      const exps = await db.select().from(abExperiments).orderBy(desc(abExperiments.createdAt));
+      // Enrich with stats
+      const enriched = await Promise.all(exps.map(async (exp) => {
+        const assignments = await db.select({
+          variant: abAssignments.variant,
+          delivered: abAssignments.delivered,
+          responded: abAssignments.responded,
+        }).from(abAssignments).where(eq(abAssignments.experimentId, exp.id));
+
+        const statsA = { sent: 0, delivered: 0, responded: 0 };
+        const statsB = { sent: 0, delivered: 0, responded: 0 };
+        for (const a of assignments) {
+          const s = a.variant === "A" ? statsA : statsB;
+          s.sent++;
+          if (a.delivered) s.delivered++;
+          if (a.responded) s.responded++;
+        }
+        return {
+          ...exp,
+          statsA,
+          statsB,
+          responseRateA: statsA.delivered > 0 ? Math.round(statsA.responded / statsA.delivered * 100) : 0,
+          responseRateB: statsB.delivered > 0 ? Math.round(statsB.responded / statsB.delivered * 100) : 0,
+        };
+      }));
+      res.json({ experiments: enriched });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch experiments" });
+    }
+  });
+
+  // Pause/complete experiment
+  app.post("/api/dashboard/ab/experiments/:id/status", requireDashboardKey, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id);
+      const { status } = req.body; // "active" | "paused" | "completed"
+      const updates: any = { status };
+      if (status === "completed") updates.completedAt = new Date();
+      const [updated] = await db.update(abExperiments).set(updates).where(eq(abExperiments.id, id)).returning();
+      res.json({ success: true, experiment: updated });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to update experiment" });
     }
   });
 
@@ -4866,6 +5226,82 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
   </div>
 
+  <!-- ESCALATION INBOX -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#ef4444; color:#fff; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Inbox</span>
+        <span class="section-title" style="margin-bottom:0;">Escalation Inbox</span>
+        <select id="escFilter" onchange="loadEscalations()" style="margin-left:auto; background:#111827; border:1px solid #374151; border-radius:6px; padding:6px 10px; color:#f9fafb; font-size:12px;">
+          <option value="open">Open</option>
+          <option value="claimed">Claimed</option>
+          <option value="resolved">Resolved</option>
+          <option value="all">All</option>
+        </select>
+      </div>
+      <div id="escWrap" class="card" style="color:#4b5563; text-align:center; padding:30px;">Loading escalations...</div>
+    </div>
+  </div>
+
+  <!-- COHORT ANALYTICS -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#a78bfa; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Cohorts</span>
+        <span class="section-title" style="margin-bottom:0;">Signup Cohort Analytics</span>
+      </div>
+      <div id="cohortWrap" class="card" style="color:#4b5563; text-align:center; padding:30px;">Loading cohort data...</div>
+    </div>
+  </div>
+
+  <!-- A/B EXPERIMENTS -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#f59e0b; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">A/B</span>
+        <span class="section-title" style="margin-bottom:0;">Message Experiments</span>
+        <button onclick="showNewExperiment()" style="margin-left:auto; background:#f59e0b; color:#000; border:none; border-radius:6px; padding:6px 14px; font-size:12px; font-weight:700; cursor:pointer;">+ New</button>
+      </div>
+      <div id="newExpForm" style="display:none; margin-bottom:12px;" class="card">
+        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:8px;">
+          <input id="expName" placeholder="Experiment name" style="background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; color:#f9fafb; font-size:13px;" />
+          <select id="expType" style="background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; color:#f9fafb; font-size:13px;">
+            <option value="morning_checkin">Morning Check-in</option>
+            <option value="nudge">Nudge / Re-engagement</option>
+            <option value="workout_reminder">Workout Reminder</option>
+            <option value="food_reminder">Food Logging Reminder</option>
+            <option value="weekly_checkin">Weekly Check-in</option>
+          </select>
+        </div>
+        <textarea id="expA" rows="2" placeholder="Variant A (control) message template..." style="width:100%; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; color:#f9fafb; font-size:13px; margin-bottom:6px; resize:vertical;"></textarea>
+        <textarea id="expB" rows="2" placeholder="Variant B (challenger) message template..." style="width:100%; background:#111827; border:1px solid #374151; border-radius:6px; padding:8px; color:#f9fafb; font-size:13px; margin-bottom:8px; resize:vertical;"></textarea>
+        <div style="display:flex; gap:8px;">
+          <button onclick="createExperiment()" style="background:#f59e0b; color:#000; border:none; border-radius:6px; padding:8px 16px; font-size:13px; font-weight:700; cursor:pointer;">Create</button>
+          <button onclick="document.getElementById('newExpForm').style.display='none'" style="background:#374151; color:#9ca3af; border:none; border-radius:6px; padding:8px 16px; font-size:13px; cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+      <div id="abWrap" class="card" style="color:#4b5563; text-align:center; padding:30px;">Loading experiments...</div>
+    </div>
+  </div>
+
+  <!-- CLIENT TIMELINE -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#38bdf8; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Timeline</span>
+        <span class="section-title" style="margin-bottom:0;">Client Timeline (30 days)</span>
+      </div>
+      <div class="card" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+        <input id="timelinePhone" type="text" placeholder="Enter phone number e.g. +27..." style="flex:1; min-width:200px; background:#111827; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#f9fafb; font-size:14px; outline:none;" />
+        <button onclick="loadTimeline()" style="background:#38bdf8; color:#000; border:none; border-radius:6px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer;">Load</button>
+      </div>
+      <div id="timelineWrap" style="display:none;">
+        <div id="timelineSummary" class="card" style="margin-bottom:12px;"></div>
+        <div id="timelineEvents" class="table-wrap"></div>
+      </div>
+    </div>
+  </div>
+
   <!-- BROADCAST -->
   <div class="container">
     <div class="section">
@@ -4931,6 +5367,240 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       } catch {
         status.textContent = "Error sending";
       }
+    }
+
+    // ---- ESCALATION INBOX ----
+    async function loadEscalations() {
+      const filter = document.getElementById("escFilter").value;
+      const wrap = document.getElementById("escWrap");
+      wrap.innerHTML = '<div style="color:#9ca3af;">Loading...</div>';
+      try {
+        const res = await fetch("/api/dashboard/escalations?status=" + filter, { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        if (!data.escalations || data.escalations.length === 0) {
+          wrap.innerHTML = '<div style="color:#4b5563; padding:20px; text-align:center;">No ' + filter + ' escalations.</div>';
+          return;
+        }
+        const prioColors = { urgent: "#ef4444", high: "#f59e0b", normal: "#38bdf8", low: "#6b7280" };
+        let rows = "";
+        for (const e of data.escalations) {
+          const created = new Date(e.createdAt).toLocaleDateString("en-ZA", { day:"2-digit", month:"short", hour:"2-digit", minute:"2-digit" });
+          const slaColor = e.slaBreach ? "#ef4444" : "#22c55e";
+          const slaText = e.slaBreach ? "BREACHED" : e.slaRemaining !== null ? e.slaRemaining + "m left" : "—";
+          const actions = e.status === "open"
+            ? '<button onclick="claimEsc(' + e.id + ', this)" style="background:#38bdf8; color:#000; border:none; border-radius:4px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">Claim</button>'
+            : e.status === "claimed"
+            ? '<button onclick="resolveEsc(' + e.id + ')" style="background:#22c55e; color:#000; border:none; border-radius:4px; padding:4px 10px; font-size:11px; font-weight:700; cursor:pointer;">Resolve</button>'
+            : '<span style="color:#4b5563; font-size:11px;">' + (e.resolution || "Done") + '</span>';
+          rows += '<tr>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937;"><span style="color:' + (prioColors[e.priority] || "#9ca3af") + '; font-weight:700; font-size:11px; text-transform:uppercase;">' + e.priority + '</span></td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; color:#d1d5db; font-weight:600; font-size:13px;">' + (e.userName || "Unknown") + '</td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; color:#9ca3af; font-size:12px;">' + (e.userPhone || "") + '</td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; font-size:12px;"><span style="background:#374151; border-radius:4px; padding:2px 6px; color:#d1d5db;">' + e.reason + '</span></td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; color:#6b7280; font-size:12px; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">' + (e.triggerMessage || "—") + '</td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; color:' + slaColor + '; font-size:11px; font-weight:700;">' + slaText + '</td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937; color:#6b7280; font-size:11px;">' + created + '</td>' +
+            '<td style="padding:6px 10px; border-bottom:1px solid #1f2937;">' + actions + '</td>' +
+            '</tr>';
+        }
+        wrap.innerHTML =
+          '<div class="table-wrap"><table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+          '<thead><tr>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Priority</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Client</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Phone</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Reason</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Message</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">SLA</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Created</th>' +
+          '<th style="padding:8px 10px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Action</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to load escalations.</div>'; }
+    }
+    loadEscalations();
+
+    async function claimEsc(id, btn) {
+      btn.disabled = true; btn.textContent = "...";
+      try {
+        await fetch("/api/dashboard/escalations/" + id + "/claim", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ claimedBy: "Coach" })
+        });
+        loadEscalations();
+      } catch { btn.textContent = "Error"; }
+    }
+    async function resolveEsc(id) {
+      const note = prompt("Resolution notes (optional):");
+      try {
+        await fetch("/api/dashboard/escalations/" + id + "/resolve", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ resolution: note || "Resolved" })
+        });
+        loadEscalations();
+      } catch { alert("Error resolving"); }
+    }
+
+    // ---- COHORT ANALYTICS ----
+    (async function loadCohorts() {
+      try {
+        const res = await fetch("/api/dashboard/cohorts", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        if (!data.cohorts || data.cohorts.length === 0) {
+          document.getElementById("cohortWrap").innerHTML = '<div style="color:#4b5563;">No cohort data yet.</div>';
+          return;
+        }
+        let rows = "";
+        for (const c of data.cohorts) {
+          const retColor = c.retentionRate >= 60 ? "#22c55e" : c.retentionRate >= 30 ? "#f59e0b" : "#ef4444";
+          rows += '<tr>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; color:#d1d5db; font-weight:600;">' + c.month + '</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; text-align:center;">' + c.signups + '</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; text-align:center; color:#4ade80;">' + c.onboardRate + '%</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; text-align:center; color:#22c55e;">' + c.payRate + '%</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; text-align:center; color:' + retColor + ';">' + c.retentionRate + '%</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; text-align:center; color:#a78bfa;">' + c.avgWorkouts + '</td>' +
+            '</tr>';
+        }
+        document.getElementById("cohortWrap").innerHTML =
+          '<div class="table-wrap"><table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+          '<thead><tr>' +
+          '<th style="padding:10px 12px; text-align:left; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Month</th>' +
+          '<th style="padding:10px 12px; text-align:center; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Signups</th>' +
+          '<th style="padding:10px 12px; text-align:center; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Onboard %</th>' +
+          '<th style="padding:10px 12px; text-align:center; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Pay %</th>' +
+          '<th style="padding:10px 12px; text-align:center; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Retention %</th>' +
+          '<th style="padding:10px 12px; text-align:center; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Avg Workouts</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      } catch { document.getElementById("cohortWrap").innerHTML = '<div style="color:#ef4444;">Failed to load cohort data.</div>'; }
+    })();
+
+    // ---- A/B EXPERIMENTS ----
+    function showNewExperiment() { document.getElementById("newExpForm").style.display = "block"; }
+    async function createExperiment() {
+      const name = document.getElementById("expName").value.trim();
+      const messageType = document.getElementById("expType").value;
+      const variantA = document.getElementById("expA").value.trim();
+      const variantB = document.getElementById("expB").value.trim();
+      if (!name || !variantA || !variantB) { alert("Fill in all fields"); return; }
+      try {
+        await fetch("/api/dashboard/ab/experiments", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ name, variantA, variantB, messageType })
+        });
+        document.getElementById("newExpForm").style.display = "none";
+        loadABExperiments();
+      } catch { alert("Error creating experiment"); }
+    }
+    async function toggleExp(id, newStatus) {
+      try {
+        await fetch("/api/dashboard/ab/experiments/" + id + "/status", {
+          method: "POST", headers: { "Content-Type": "application/json", "x-dashboard-key": DASH_KEY },
+          body: JSON.stringify({ status: newStatus })
+        });
+        loadABExperiments();
+      } catch {}
+    }
+    async function loadABExperiments() {
+      const wrap = document.getElementById("abWrap");
+      try {
+        const res = await fetch("/api/dashboard/ab/experiments", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        if (!data.experiments || data.experiments.length === 0) {
+          wrap.innerHTML = '<div style="color:#4b5563;">No experiments yet. Click "+ New" to start one.</div>';
+          return;
+        }
+        let html = "";
+        for (const exp of data.experiments) {
+          const statusColor = exp.status === "active" ? "#22c55e" : exp.status === "paused" ? "#f59e0b" : "#6b7280";
+          const winnerRate = Math.max(exp.responseRateA, exp.responseRateB);
+          const winner = exp.responseRateA > exp.responseRateB ? "A" : exp.responseRateB > exp.responseRateA ? "B" : "—";
+          const toggleBtn = exp.status === "active"
+            ? '<button onclick="toggleExp(' + exp.id + ',\\'paused\\')" style="background:#f59e0b22; color:#f59e0b; border:1px solid #f59e0b44; border-radius:4px; padding:3px 8px; font-size:10px; cursor:pointer;">Pause</button> <button onclick="toggleExp(' + exp.id + ',\\'completed\\')" style="background:#6b728022; color:#6b7280; border:1px solid #6b728044; border-radius:4px; padding:3px 8px; font-size:10px; cursor:pointer;">Complete</button>'
+            : exp.status === "paused"
+            ? '<button onclick="toggleExp(' + exp.id + ',\\'active\\')" style="background:#22c55e22; color:#22c55e; border:1px solid #22c55e44; border-radius:4px; padding:3px 8px; font-size:10px; cursor:pointer;">Resume</button>'
+            : '';
+          html += '<div style="background:#111827; border:1px solid #374151; border-radius:8px; padding:14px; margin-bottom:10px;">' +
+            '<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">' +
+              '<div><span style="font-weight:700; color:#f9fafb; font-size:14px;">' + exp.name + '</span> <span style="font-size:11px; color:#6b7280; margin-left:6px;">' + exp.messageType + '</span></div>' +
+              '<div style="display:flex; gap:6px; align-items:center;"><span style="color:' + statusColor + '; font-size:11px; font-weight:700; text-transform:uppercase;">' + exp.status + '</span> ' + toggleBtn + '</div>' +
+            '</div>' +
+            '<div style="display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:12px;">' +
+              '<div style="background:#1f2937; border-radius:6px; padding:10px;">' +
+                '<div style="color:#9ca3af; font-size:10px; text-transform:uppercase; margin-bottom:4px;">Variant A (Control)</div>' +
+                '<div style="color:#d1d5db; font-size:12px; margin-bottom:6px; max-height:40px; overflow:hidden;">' + exp.variantA.slice(0, 100) + '</div>' +
+                '<div style="display:flex; gap:12px;"><span style="color:#38bdf8;">' + exp.statsA.delivered + ' sent</span><span style="color:#22c55e;">' + exp.statsA.responded + ' responded</span><span style="color:#a78bfa; font-weight:700;">' + exp.responseRateA + '%</span></div>' +
+              '</div>' +
+              '<div style="background:#1f2937; border-radius:6px; padding:10px;">' +
+                '<div style="color:#9ca3af; font-size:10px; text-transform:uppercase; margin-bottom:4px;">Variant B (Challenger)</div>' +
+                '<div style="color:#d1d5db; font-size:12px; margin-bottom:6px; max-height:40px; overflow:hidden;">' + exp.variantB.slice(0, 100) + '</div>' +
+                '<div style="display:flex; gap:12px;"><span style="color:#38bdf8;">' + exp.statsB.delivered + ' sent</span><span style="color:#22c55e;">' + exp.statsB.responded + ' responded</span><span style="color:#a78bfa; font-weight:700;">' + exp.responseRateB + '%</span></div>' +
+              '</div>' +
+            '</div>' +
+            (winner !== "—" ? '<div style="margin-top:8px; text-align:center; font-size:11px; color:#f59e0b;">Leading: Variant ' + winner + ' (' + winnerRate + '% response rate)</div>' : '') +
+          '</div>';
+        }
+        wrap.innerHTML = html;
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to load experiments.</div>'; }
+    }
+    loadABExperiments();
+
+    // ---- CLIENT TIMELINE ----
+    async function loadTimeline() {
+      const phone = document.getElementById("timelinePhone").value.trim();
+      if (!phone) return;
+      const wrap = document.getElementById("timelineWrap");
+      const summary = document.getElementById("timelineSummary");
+      const eventsDiv = document.getElementById("timelineEvents");
+      wrap.style.display = "block";
+      summary.innerHTML = '<div style="color:#9ca3af;">Loading...</div>';
+      eventsDiv.innerHTML = "";
+      try {
+        const res = await fetch("/api/dashboard/timeline/" + encodeURIComponent(phone), { headers: { "x-dashboard-key": DASH_KEY } });
+        if (!res.ok) { summary.innerHTML = '<div style="color:#ef4444;">Client not found.</div>'; return; }
+        const data = await res.json();
+        const c = data.client;
+        const s = data.summary;
+        const trendColor = s.weightTrend < 0 ? "#22c55e" : s.weightTrend > 0 ? "#ef4444" : "#9ca3af";
+        const trendLabel = s.weightTrend < 0 ? s.weightTrend + "kg ↓" : s.weightTrend > 0 ? "+" + s.weightTrend + "kg ↑" : "—";
+        summary.innerHTML =
+          '<div style="display:flex; flex-wrap:wrap; gap:16px; align-items:center; margin-bottom:12px;">' +
+            '<div style="font-size:18px; font-weight:800; color:#f9fafb;">' + (c.name || "Unknown") + '</div>' +
+            '<div style="font-size:12px; color:#6b7280;">' + c.phone + '</div>' +
+            '<div style="font-size:12px; color:#9ca3af; background:#1f2937; border-radius:4px; padding:2px 8px;">' + (c.goal || "—") + ' · ' + (c.mode || "—") + ' · Week ' + (c.week || 0) + '</div>' +
+          '</div>' +
+          '<div style="display:grid; grid-template-columns:repeat(5,1fr); gap:12px;">' +
+            '<div><div style="font-size:20px; font-weight:800; color:#a78bfa;">' + s.daysOnProgramme + '</div><div style="font-size:11px; color:#6b7280;">Days on programme</div></div>' +
+            '<div><div style="font-size:20px; font-weight:800; color:#22c55e;">' + s.workoutsLast30 + '</div><div style="font-size:11px; color:#6b7280;">Workouts (30d)</div></div>' +
+            '<div><div style="font-size:20px; font-weight:800; color:#38bdf8;">' + s.avgSteps.toLocaleString() + '</div><div style="font-size:11px; color:#6b7280;">Avg Steps</div></div>' +
+            '<div><div style="font-size:20px; font-weight:800; color:' + trendColor + ';">' + trendLabel + '</div><div style="font-size:11px; color:#6b7280;">Weight Trend</div></div>' +
+            '<div><div style="font-size:20px; font-weight:800; color:#f59e0b;">' + s.messagesLast30 + '</div><div style="font-size:11px; color:#6b7280;">Messages (30d)</div></div>' +
+          '</div>';
+
+        // Events table
+        if (data.events.length === 0) {
+          eventsDiv.innerHTML = '<div class="card" style="color:#4b5563; text-align:center; padding:20px;">No activity in last 30 days.</div>';
+          return;
+        }
+        const icons = { weight: "⚖️", steps: "🚶", workout: "💪", chat: "💬" };
+        const colors = { weight: "#22c55e", steps: "#38bdf8", workout: "#a78bfa", chat: "#9ca3af" };
+        let eventRows = "";
+        for (const e of data.events.slice(0, 100)) {
+          const d = new Date(e.date);
+          const dateStr = d.toLocaleDateString("en-ZA", { day:"2-digit", month:"short" }) + " " + d.toLocaleTimeString("en-ZA", { hour:"2-digit", minute:"2-digit" });
+          eventRows += '<tr>' +
+            '<td style="padding:6px 12px; border-bottom:1px solid #1f2937; color:#6b7280; font-size:12px; white-space:nowrap;">' + dateStr + '</td>' +
+            '<td style="padding:6px 12px; border-bottom:1px solid #1f2937; text-align:center;">' + (icons[e.type] || "·") + '</td>' +
+            '<td style="padding:6px 12px; border-bottom:1px solid #1f2937; color:' + (colors[e.type] || "#d1d5db") + '; font-size:13px;">' + e.detail + '</td>' +
+            '</tr>';
+        }
+        eventsDiv.innerHTML =
+          '<table style="width:100%; border-collapse:collapse;">' +
+          '<thead><tr>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Date</th>' +
+          '<th style="padding:8px 12px; text-align:center; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Type</th>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Detail</th>' +
+          '</tr></thead><tbody>' + eventRows + '</tbody></table>';
+      } catch { summary.innerHTML = '<div style="color:#ef4444;">Error loading timeline.</div>'; }
     }
   </script>
 </body>

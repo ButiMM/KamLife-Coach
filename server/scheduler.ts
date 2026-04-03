@@ -2,7 +2,7 @@ import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
-import { eq, gte, lte, and, lt, desc, asc, or } from "drizzle-orm";
+import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { generateVoiceNote } from "./tts";
@@ -1854,4 +1854,80 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)");
   console.log("[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)");
   console.log("[SCHEDULER]   Ramadan mode         — activates only on explicit client mention");
+  console.log("[SCHEDULER]   Weekly KPI report       — Monday 7am SAST to coach WhatsApp");
+
+  // ============================================================
+  // WEEKLY KPI AUTO-REPORT — Monday 5am UTC (7am SAST)
+  // Sends business KPIs to the coach's WhatsApp number
+  // ============================================================
+  cron.schedule("0 5 * * 1", async () => {
+    const coachPhone = process.env.COACH_ALERT_PHONE;
+    if (!coachPhone) {
+      console.log("[KPI] COACH_ALERT_PHONE not set — skipping weekly report");
+      return;
+    }
+    try {
+      const now = new Date();
+      const sevenDaysAgo = new Date(now.getTime() - 7 * 86_400_000);
+      const twoDaysAgo = new Date(now.getTime() - 2 * 86_400_000);
+      const fourteenDaysAgo = new Date(now.getTime() - 14 * 86_400_000);
+
+      const allClients = await db.select({
+        id: users.id,
+        subscriptionStatus: users.subscriptionStatus,
+        createdAt: users.createdAt,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        lastWorkoutDate: users.lastWorkoutDate,
+      }).from(users);
+
+      const totalClients = allClients.length;
+      const paying = allClients.filter(c => c.subscriptionStatus === "active").length;
+      const newThisWeek = allClients.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length;
+
+      const churned = allClients.filter(c =>
+        c.subscriptionStatus === "active" &&
+        (!c.lastWorkoutDate || new Date(c.lastWorkoutDate) < fourteenDaysAgo)
+      ).length;
+
+      const [weekWorkouts] = await db.select({ c: count() }).from(workoutLogs)
+        .where(gte(workoutLogs.loggedAt, sevenDaysAgo));
+      const [weekSteps] = await db.select({ c: count() }).from(stepLogs)
+        .where(gte(stepLogs.loggedAt, sevenDaysAgo));
+      const [weekMessages] = await db.select({ c: count() }).from(chatHistory)
+        .where(gte(chatHistory.createdAt, sevenDaysAgo));
+
+      const atRisk = allClients.filter(c => {
+        if (c.subscriptionStatus !== "active") return false;
+        const lastActivity = c.lastWorkoutDate ? new Date(c.lastWorkoutDate) : (c.createdAt ? new Date(c.createdAt) : now);
+        return lastActivity < twoDaysAgo;
+      }).length;
+
+      const mrr = paying * 99;
+
+      const report = `*📊 KamLife Weekly Report*
+_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_
+
+*Revenue*
+MRR: R${mrr.toLocaleString()} (${paying} paying)
+New this week: ${newThisWeek}
+
+*Engagement*
+Workouts: ${weekWorkouts?.c || 0}
+Step logs: ${weekSteps?.c || 0}
+Messages: ${weekMessages?.c || 0}
+
+*Health*
+Total clients: ${totalClients}
+At-risk (48h+ silent): ${atRisk}
+Churn risk (14d+): ${churned}
+
+*Delivery*
+Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
+
+      await sendWhatsApp(`whatsapp:${coachPhone}`, report);
+      console.log(`[KPI] Weekly report sent to coach`);
+    } catch (e) {
+      console.error("[KPI] Weekly report error:", e);
+    }
+  });
 }
