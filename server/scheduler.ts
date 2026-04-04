@@ -1856,6 +1856,37 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Ramadan mode         — activates only on explicit client mention");
   console.log("[SCHEDULER]   Weekly KPI report       — Monday 7am SAST to coach WhatsApp");
   console.log("[SCHEDULER]   Step leaderboard        — Sunday 5pm SAST broadcast");
+  console.log("[SCHEDULER]   Payday shopping nudge   — 15th + 25th of each month");
+
+  // ============================================================
+  // PAYDAY SHOPPING NUDGE — 15th + 25th at 9am SAST (7am UTC)
+  // Most SA workers get paid on the 15th or 25th
+  // ============================================================
+  cron.schedule("0 7 15,25 * *", async () => {
+    console.log("[SCHEDULER] JOB: Payday shopping nudge");
+    const clients = await getActiveClients();
+    for (const client of clients) {
+      if (isPaused(client)) continue;
+      try {
+        const name = client.name || "there";
+        const budget = client.weeklyFoodBudget || "100_300";
+        let msg = "";
+        if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
+          msg = `${name}, if today is payday — buy your protein FIRST before anything else.\n\n*Priority list:*\n1. Eggs 12 pack — R45\n2. Pilchards 3 tins — R36\n3. Sugar beans 500g — R20\n\nThat is R101 and covers your protein for the week. Everything else is secondary. Reply *shopping list* for the full plan.`;
+        } else if (budget === "100_300") {
+          msg = `${name}, payday reminder — stock up on your week's food today before the money goes.\n\n*Top priority:*\n1. Frozen chicken 1kg — R40\n2. Eggs 12 pack — R45\n3. Oats 500g — R15\n4. Sweet potato 1kg — R12\n\nReply *shopping list* for the complete list. Reply *meal prep* for a batch cooking plan.`;
+        } else {
+          msg = `${name}, start of the pay cycle — perfect time to stock your kitchen.\n\nBuy protein in bulk today: chicken breast, eggs, mince. Freeze what you won't use this week.\n\nReply *shopping list* for your personalised list or *meal prep* for a batch cooking plan.`;
+        }
+        if (canSendProactive(client.id)) {
+          await sendWhatsApp(client.phoneNumber, msg);
+          recordProactiveSend(client.id);
+        }
+      } catch (err) {
+        console.error(`[SCHEDULER] Payday nudge error — ${client.phoneNumber}:`, err);
+      }
+    }
+  }, { timezone: "UTC" });
 
   // ============================================================
   // WEEKLY STEP LEADERBOARD BROADCAST — Sunday 3pm UTC (5pm SAST)

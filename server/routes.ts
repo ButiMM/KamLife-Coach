@@ -2180,6 +2180,213 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return cycleReply;
   }
 
+  // ---- SMART NEXT MEAL — "what should I eat next?" based on daily gap ----
+  if (/\b(what should i eat next|next meal|suggest.?a?\s*meal|what.?s? next|what to eat now|what can i eat|what must i eat|hungry|starving|i.?m hungry|what now)\b/i.test(m) && !/\b(breakfast|lunch|dinner|supper|braai|social)\b/i.test(m)) {
+    const todayStr = sastToday();
+    const todayCals = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
+    const todayProt = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 120;
+    const calLeft = Math.max(0, calTarget - todayCals);
+    const protLeft = Math.max(0, protTarget - todayProt);
+    const budget = user.weeklyFoodBudget || "100_300";
+    const name = user.name?.split(" ")[0] || "";
+    const goal = user.goalType || "fat_loss";
+
+    // Determine what's needed
+    const needsProtein = protLeft > 20;
+    const lowCalBudget = calLeft < 400;
+    const highCalBudget = calLeft > 800;
+
+    let suggestion = `*🍽️ Next Meal Suggestion${name ? ` — ${name}` : ""}*\n\n`;
+
+    if (todayCals === 0) {
+      suggestion += `No food logged yet today.\n\n`;
+      if (budget === "under_100") {
+        suggestion += goal === "muscle_gain"
+          ? `Start with: *3 eggs + pap + spinach* (~420 kcal, 24g protein)\nCheap, filling, high protein to start the day.`
+          : `Start with: *2 eggs + oats with water* (~350 kcal, 18g protein)\nLow calorie, high protein start.`;
+      } else {
+        suggestion += goal === "muscle_gain"
+          ? `Start with: *3 eggs + 2 toast + banana* (~550 kcal, 25g protein)\nCarbs + protein for energy and muscle.`
+          : `Start with: *2 eggs + oats + coffee* (~380 kcal, 20g protein)\nBalanced, keeps you full until lunch.`;
+      }
+    } else if (lowCalBudget && needsProtein) {
+      suggestion += `You have ${calLeft} kcal and ${protLeft}g protein left.\n\n`;
+      suggestion += `*Best option:* ${budget === "under_100" ? "Tin of pilchards with lemon (~180 kcal, 22g protein)" : "Grilled chicken breast + salad (~250 kcal, 30g protein)"}\nHigh protein, low calories — exactly what you need to finish the day.`;
+    } else if (lowCalBudget && !needsProtein) {
+      suggestion += `You have ${calLeft} kcal left and protein is sorted.\n\n`;
+      suggestion += `*Best option:* Vegetable stir-fry or salad (~150 kcal)\nOr just call it — you're close to target. ${goal === "fat_loss" ? "Slight deficit is fine for fat loss." : ""}`;
+    } else if (needsProtein) {
+      suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
+      const meals: string[] = [];
+      if (budget === "under_100") {
+        meals.push("2 eggs + sugar beans (~300 kcal, 22g protein)");
+        meals.push("Tin of pilchards + pap (~350 kcal, 24g protein)");
+      } else {
+        meals.push("Chicken breast + rice + spinach (~450 kcal, 35g protein)");
+        meals.push("3 eggs + brown bread + tomato (~400 kcal, 24g protein)");
+        meals.push("Tin of pilchards + sweet potato (~380 kcal, 24g protein)");
+      }
+      suggestion += `Pick one:\n${meals.map((m, i) => `${i + 1}. ${m}`).join("\n")}`;
+    } else {
+      suggestion += `${calLeft} kcal and ${protLeft}g protein to go.\n\n`;
+      if (budget === "under_100") {
+        suggestion += `*Balanced option:* Pap + beans + cabbage (~400 kcal, 14g protein)\n*Protein push:* 2 eggs + pilchards + pap (~500 kcal, 28g protein)`;
+      } else {
+        suggestion += `*Balanced option:* Chicken + sweet potato + vegetables (~500 kcal, 30g protein)\n*Light option:* Greek yoghurt + banana + oats (~350 kcal, 18g protein)`;
+      }
+    }
+
+    await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
+    return suggestion;
+  }
+
+  // ---- HABIT CALENDAR — visual 4-week consistency grid ----
+  if (m === "calendar" || m === "habit calendar" || m === "my calendar" || m === "consistency" || m === "habit tracker" || /\b(habit\s*calendar|consistency\s*check|my\s*consistency)\b/i.test(m)) {
+    try {
+      const twentyEightDaysAgo = new Date(Date.now() - 28 * 86_400_000);
+      const [workoutDates, stepDates, foodDates] = await Promise.all([
+        db.select({ date: workoutLogs.loggedAt }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo))),
+        db.select({ date: stepLogs.loggedAt, steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, twentyEightDaysAgo))),
+        db.select({ date: chatHistory.createdAt }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, twentyEightDaysAgo))),
+      ]);
+
+      const stepsTarget = user.stepsTarget || 8500;
+
+      // Build day-by-day map for last 28 days
+      const workoutSet = new Set(workoutDates.map(w => new Date(w.date!).toISOString().slice(0, 10)));
+      const stepMap: Record<string, number> = {};
+      for (const s of stepDates) { const d = new Date(s.date!).toISOString().slice(0, 10); stepMap[d] = Math.max(stepMap[d] || 0, s.steps); }
+      const foodSet = new Set(foodDates.map(f => new Date(f.date!).toISOString().slice(0, 10)));
+
+      const dayNames = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+      let cal = `*📅 4-Week Habit Calendar*\n\n`;
+      cal += `Legend: 💪=workout ✅=steps hit 🍽️=food logged ·=nothing\n\n`;
+
+      let perfectDays = 0;
+      let activeDays = 0;
+
+      for (let week = 3; week >= 0; week--) {
+        const weekStart = new Date(Date.now() - (week * 7 + 6) * 86_400_000);
+        let weekLine = `*W${4 - week}:* `;
+        for (let d = 0; d < 7; d++) {
+          const day = new Date(weekStart.getTime() + d * 86_400_000);
+          const dateStr = day.toISOString().slice(0, 10);
+          const hasWorkout = workoutSet.has(dateStr);
+          const stepsHit = (stepMap[dateStr] || 0) >= stepsTarget;
+          const hasFood = foodSet.has(dateStr);
+
+          if (hasWorkout && stepsHit && hasFood) { weekLine += "⭐"; perfectDays++; activeDays++; }
+          else if (hasWorkout && stepsHit) { weekLine += "💪"; activeDays++; }
+          else if (hasWorkout) { weekLine += "💪"; activeDays++; }
+          else if (stepsHit) { weekLine += "✅"; activeDays++; }
+          else if (hasFood) { weekLine += "🍽️"; activeDays++; }
+          else weekLine += "·";
+        }
+        cal += weekLine + "\n";
+      }
+      cal += `     ${dayNames.join("")}\n\n`;
+      cal += `⭐ Perfect days: ${perfectDays}/28\n`;
+      cal += `Active days: ${activeDays}/28 (${Math.round(activeDays / 28 * 100)}%)\n\n`;
+      cal += activeDays >= 24 ? `Elite consistency. This is how results happen.` :
+             activeDays >= 18 ? `Good consistency. Fill the gaps and watch what happens.` :
+             activeDays >= 10 ? `Building the habit. More dots = more results.` :
+             `Too many empty days. One workout and one step log today — start filling the calendar.`;
+
+      await logChat(user.id, message, cal, "HABIT_CALENDAR");
+      return cal;
+    } catch (err) {
+      console.error("[HABIT CALENDAR]", err);
+      return `Calendar not available right now. Try again.`;
+    }
+  }
+
+  // ---- MONTHLY TRANSFORMATION REPORT ----
+  if (m === "monthly report" || m === "my month" || m === "transformation" || m === "month report" || m === "monthly" || /\b(month.?s?\s*report|month.?s?\s*summary|this month|my transformation|30.?day\s*report)\b/i.test(m)) {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+      const [weights, steps, workouts, foodLogs, sleepLogs] = await Promise.all([
+        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
+          .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, thirtyDaysAgo))),
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, thirtyDaysAgo))),
+        db.select({ id: chatHistory.id }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, thirtyDaysAgo))),
+        db.select({ intent: chatHistory.intent, messageIn: chatHistory.messageIn }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, thirtyDaysAgo))),
+      ]);
+
+      const name = user.name?.split(" ")[0] || "you";
+      const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+
+      // Weight change
+      let weightLine = "No weight logs this month — step on the scale.";
+      if (weights.length >= 2) {
+        const first = parseFloat(String(weights[0].weight));
+        const last = parseFloat(String(weights[weights.length - 1].weight));
+        const diff = last - first;
+        if (diff < -0.5) weightLine = `⚖️ Weight: *${Math.abs(diff).toFixed(1)}kg DOWN* (${first.toFixed(1)} → ${last.toFixed(1)}kg)`;
+        else if (diff > 0.5) weightLine = `⚖️ Weight: ${diff.toFixed(1)}kg up (${first.toFixed(1)} → ${last.toFixed(1)}kg)`;
+        else weightLine = `⚖️ Weight: Holding steady at ${last.toFixed(1)}kg`;
+      } else if (weights.length === 1) {
+        weightLine = `⚖️ Weight: ${parseFloat(String(weights[0].weight)).toFixed(1)}kg — log more to track trend`;
+      }
+
+      // Steps
+      const totalStepsMonth = steps.reduce((s, l) => s + l.steps, 0);
+      const avgSteps = steps.length > 0 ? Math.round(totalStepsMonth / steps.length) : 0;
+      const stepsTarget = user.stepsTarget || 8500;
+      const stepsHitDays = steps.filter(l => l.steps >= stepsTarget).length;
+
+      // Workouts
+      const workoutCount = workouts.length;
+      const planned = (user.trainingDaysPerWeek || 3) * 4; // 4 weeks
+      const workoutRate = planned > 0 ? Math.round(workoutCount / planned * 100) : 0;
+
+      // Food logging
+      const foodDays = foodLogs.length;
+
+      // Sleep
+      const sleepCount = sleepLogs.length;
+
+      // Grade
+      let grade = "D";
+      const score = (workoutRate >= 75 ? 2 : workoutRate >= 50 ? 1 : 0) +
+        (avgSteps >= stepsTarget ? 2 : avgSteps >= stepsTarget * 0.7 ? 1 : 0) +
+        (foodDays >= 20 ? 1 : 0) +
+        (weights.length >= 3 ? 1 : 0);
+      if (score >= 5) grade = "A";
+      else if (score >= 4) grade = "B";
+      else if (score >= 3) grade = "C";
+
+      const report = `*📊 Monthly Transformation Report — ${name}*\n` +
+        `_${daysOn} days on programme_\n\n` +
+        `${weightLine}\n` +
+        `💪 Workouts: *${workoutCount}/${planned}* planned (${workoutRate}%)\n` +
+        `👟 Steps: ${avgSteps.toLocaleString()} avg/day | ${stepsHitDays} days hit target\n` +
+        `🍽️ Food logged: ${foodDays} meals this month\n` +
+        `😴 Sleep logged: ${sleepCount} times\n` +
+        `🔥 Current streak: ${user.workoutStreak || 0} sessions\n\n` +
+        `*Month Grade: ${grade}*\n\n` +
+        (grade === "A" ? `Elite consistency${name ? `, ${name}` : ""}. This is how bodies change. Keep it going.` :
+         grade === "B" ? `Strong month. Tighten up the gaps and A is yours next month.` :
+         grade === "C" ? `Room to improve. Focus on showing up — 3 workouts and 8,500 steps every single day.` :
+         `Inconsistent month. The programme works when you work it. New month, fresh start. One workout today.`);
+
+      await logChat(user.id, message, report, "MONTHLY_REPORT");
+      return report;
+    } catch (err) {
+      console.error("[MONTHLY REPORT]", err);
+      return `Could not generate report right now. Try again later.`;
+    }
+  }
+
   // ---- QUICK STAT LOOKUPS — never touch GPT ----
   // (calorie and steps handlers already fire at top of function — these are safety fallbacks for exact matches)
   if (["calories", "calorie", "my calories", "calorie target", "my calorie target"].includes(m)) {
@@ -2427,6 +2634,116 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     } catch (err) {
       console.error("[LEADERBOARD]", err);
       return `Leaderboard is not available right now. Log your steps and try again later.`;
+    }
+  }
+
+  // ---- ACCOUNTABILITY BUDDY SYSTEM ----
+  if (m === "buddy" || m === "my buddy" || m === "accountability" || m === "accountability buddy" || m === "partner") {
+    if (user.buddyId) {
+      // Show buddy status
+      try {
+        const [buddy] = await db.select({
+          name: users.name,
+          totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+          workoutStreak: users.workoutStreak,
+          lastActiveAt: users.lastActiveAt,
+          todayCalories: users.todayCalories,
+          todayCaloriesDate: users.todayCaloriesDate,
+        }).from(users).where(eq(users.id, user.buddyId)).limit(1);
+
+        if (!buddy) {
+          await db.update(users).set({ buddyId: null, buddyPairedAt: null }).where(eq(users.phoneNumber, phone));
+          return `Your buddy is no longer active. Reply *find buddy* to get matched with someone new.`;
+        }
+
+        const buddyName = buddy.name?.split(" ")[0] || "Your buddy";
+        const buddyActive = buddy.lastActiveAt && (Date.now() - new Date(buddy.lastActiveAt).getTime()) < 2 * 86_400_000;
+        const buddyStreak = buddy.workoutStreak || 0;
+        const todayStr = sastToday();
+        const buddyCals = buddy.todayCaloriesDate === todayStr ? (buddy.todayCalories || 0) : 0;
+        const myStreak = user.workoutStreak || 0;
+
+        let comparison = "";
+        if (myStreak > buddyStreak) comparison = `You are ahead by ${myStreak - buddyStreak} sessions. Keep the lead.`;
+        else if (buddyStreak > myStreak) comparison = `${buddyName} is ${buddyStreak - myStreak} sessions ahead. Time to catch up.`;
+        else comparison = `You are neck and neck. Don't let them pull ahead.`;
+
+        const buddyStatus = `*🤝 Accountability Buddy — ${buddyName}*\n\n` +
+          `${buddyName}: ${buddyActive ? "Active ✅" : "Silent ⚠️"} | Streak: ${buddyStreak} | Workouts: ${buddy.totalWorkoutsCompleted || 0}${buddyCals > 0 ? ` | Today: ${buddyCals} kcal` : ""}\n` +
+          `You: Streak: ${myStreak} | Workouts: ${user.totalWorkoutsCompleted || 0}\n\n` +
+          `${comparison}\n\nReply *remove buddy* to unpair.`;
+        await logChat(user.id, message, buddyStatus, "BUDDY_CHECK");
+        return buddyStatus;
+      } catch (err) {
+        return `Could not load buddy info. Try again later.`;
+      }
+    } else {
+      return `*🤝 Accountability Buddy*\n\nGet matched with another KamLife client. You'll see each other's streaks and workouts — friendly competition.\n\nReply *find buddy* to get matched.\n\nRules:\n• First names only — privacy protected\n• You see streaks and workout counts, nothing else\n• Either person can unpair anytime`;
+    }
+  }
+
+  // ---- FIND BUDDY — auto-match with another unpaired active client ----
+  if (m === "find buddy" || m === "find a buddy" || m === "get buddy" || m === "match me" || m === "pair me") {
+    if (user.buddyId) {
+      return `You already have a buddy. Reply *buddy* to see their status, or *remove buddy* to unpair first.`;
+    }
+    try {
+      // Find another active, unpaired client
+      const candidates = await db.select({ id: users.id, name: users.name })
+        .from(users)
+        .where(and(
+          eq(users.subscriptionStatus, "active"),
+          sql`${users.buddyId} IS NULL`,
+          sql`${users.id} != ${user.id}`,
+          gte(users.lastActiveAt, new Date(Date.now() - 7 * 86_400_000)), // active in last 7 days
+        ))
+        .limit(10);
+
+      if (candidates.length === 0) {
+        return `No available buddies right now — you are the first in the queue. I will match you as soon as someone else signs up. Keep training.`;
+      }
+
+      // Pick random candidate
+      const pick = candidates[Math.floor(Math.random() * candidates.length)];
+      const now = new Date();
+
+      // Create mutual pairing
+      await Promise.all([
+        db.update(users).set({ buddyId: pick.id, buddyPairedAt: now }).where(eq(users.id, user.id)),
+        db.update(users).set({ buddyId: user.id, buddyPairedAt: now }).where(eq(users.id, pick.id)),
+      ]);
+
+      const buddyFirst = pick.name?.split(" ")[0] || "Your buddy";
+      const myFirst = user.name?.split(" ")[0] || "Your buddy";
+
+      // Notify the other person
+      try {
+        await sendWhatsApp(
+          (await db.select({ phone: users.phoneNumber }).from(users).where(eq(users.id, pick.id)).limit(1))[0].phone,
+          `*🤝 New Accountability Buddy!*\n\nYou've been matched with *${myFirst}*. You'll see each other's streaks and workouts.\n\nReply *buddy* anytime to check their progress. Let's see who can be more consistent.`
+        );
+      } catch {}
+
+      await logChat(user.id, message, `Matched with ${buddyFirst}`, "BUDDY_MATCH");
+      return `*🤝 Matched!*\n\nYou and *${buddyFirst}* are now accountability buddies. You'll see each other's streaks and workout counts.\n\nReply *buddy* anytime to check how they're doing. Don't let them beat you.`;
+    } catch (err) {
+      console.error("[BUDDY MATCH]", err);
+      return `Matching failed. Try again later.`;
+    }
+  }
+
+  // ---- REMOVE BUDDY ----
+  if (m === "remove buddy" || m === "unpair" || m === "remove partner" || m === "no buddy") {
+    if (!user.buddyId) return `You don't have a buddy. Reply *find buddy* to get matched.`;
+    try {
+      const buddyId = user.buddyId;
+      await Promise.all([
+        db.update(users).set({ buddyId: null, buddyPairedAt: null }).where(eq(users.id, user.id)),
+        db.update(users).set({ buddyId: null, buddyPairedAt: null }).where(eq(users.id, buddyId)),
+      ]);
+      return `Buddy removed. Reply *find buddy* anytime to get matched with someone new.`;
+    } catch {
+      return `Could not remove buddy. Try again.`;
     }
   }
 

@@ -95,6 +95,8 @@ export const users = pgTable(
     todayCalories: integer("today_calories").default(0),
     todayCaloriesDate: text("today_calories_date"), // YYYY-MM-DD — reset daily
     todayProteinG: integer("today_protein_g").default(0),
+    buddyId: uuid("buddy_id"), // accountability partner — mutual pairing
+    buddyPairedAt: timestamp("buddy_paired_at"),
   },
   (table) => {
     return {
