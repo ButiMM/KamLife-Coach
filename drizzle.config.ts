@@ -11,5 +11,21 @@ export default defineConfig({
   dbCredentials: {
     url: process.env.DATABASE_URL,
   },
-  tablesFilter: ["!sa_foods", "!memories"],
+  tablesFilter: [
+    "users",
+    "weight_logs",
+    "workout_logs",
+    "step_logs",
+    "weekly_checkins",
+    "chat_history",
+    "clothing_checkins",
+    "body_measurements",
+    "exercise_logs",
+    "progress_photos",
+    "escalations",
+    "ab_experiments",
+    "ab_assignments",
+    "conversations",
+    "messages",
+  ],
 });
