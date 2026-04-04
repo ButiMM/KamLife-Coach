@@ -762,6 +762,127 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return plan;
   }
 
+  // ---- MY GROCERY LIST — personalized from last 7 days of logged meals ----
+  if (m === "my grocery list" || m === "my groceries" || m === "personal shopping list" || /\b(my\s*grocery|personal.*shop|buy.*based.*on.*what.*eat|smart.*shop)\b/i.test(m)) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+
+      if (recentFoodLogs.length < 3) {
+        return `Not enough food logs to build your personal list yet. Log what you eat for a few days — just tell me "I had eggs and pap" — and I will build a grocery list based on YOUR actual meals.\n\nMeanwhile, type *shopping list* for a generic budget list.`;
+      }
+
+      // Scan all logged foods and count frequency
+      const foodCounts: Record<string, { count: number; cal: number; prot: number; name: string }> = {};
+      for (const log of recentFoodLogs) {
+        const matched = scanForSAFoods(log.messageIn || "");
+        for (const food of matched) {
+          const key = food.name.toLowerCase();
+          if (!foodCounts[key]) foodCounts[key] = { count: 0, cal: food.typicalPortionCalories || 0, prot: food.typicalPortionProtein || 0, name: food.name };
+          foodCounts[key].count++;
+        }
+      }
+
+      const sorted = Object.values(foodCounts).sort((a, b) => b.count - a.count);
+      if (sorted.length === 0) {
+        return `I could not match specific foods from your logs. Type *shopping list* for a generic budget list, or log meals using SA food names (pap, pilchards, chicken, etc).`;
+      }
+
+      const budget = user.weeklyFoodBudget || "100_300";
+      const name = user.name?.split(" ")[0] || "there";
+      const topFoods = sorted.slice(0, 12);
+
+      // Build grocery items from their actual eating patterns
+      const groceryItems: string[] = [];
+      const proteinItems: string[] = [];
+      const carbItems: string[] = [];
+      const vegItems: string[] = [];
+      const otherItems: string[] = [];
+
+      for (const food of topFoods) {
+        const n = food.name.toLowerCase();
+        const weeklyServings = Math.ceil(food.count * (7 / 7)); // project to full week
+        if (["chicken", "beef", "mince", "fish", "hake", "pilchards", "tuna", "eggs", "biltong", "boerewors", "wors", "sardines", "salmon", "pork", "lamb", "turkey"].some(p => n.includes(p))) {
+          proteinItems.push(`${food.name} — ${weeklyServings}× this week`);
+        } else if (["pap", "rice", "bread", "oats", "sweet potato", "potato", "samp", "pasta", "cereal", "weetbix"].some(c => n.includes(c))) {
+          carbItems.push(`${food.name} — ${weeklyServings}× this week`);
+        } else if (["spinach", "cabbage", "broccoli", "tomato", "onion", "lettuce", "morogo", "beans", "lentils", "butternut"].some(v => n.includes(v))) {
+          vegItems.push(`${food.name} — ${weeklyServings}× this week`);
+        } else {
+          otherItems.push(`${food.name} — ${weeklyServings}×`);
+        }
+      }
+
+      let list = `*🛒 ${name}'s Personal Grocery List*\n_Based on your last 7 days of meals_\n\n`;
+      if (proteinItems.length > 0) list += `*Protein:*\n${proteinItems.map(i => `• ${i}`).join("\n")}\n\n`;
+      if (carbItems.length > 0) list += `*Carbs:*\n${carbItems.map(i => `• ${i}`).join("\n")}\n\n`;
+      if (vegItems.length > 0) list += `*Vegetables:*\n${vegItems.map(i => `• ${i}`).join("\n")}\n\n`;
+      if (otherItems.length > 0) list += `*Other:*\n${otherItems.map(i => `• ${i}`).join("\n")}\n\n`;
+
+      // Add what's missing based on their targets
+      const totalProtein = topFoods.reduce((s, f) => s + f.prot * f.count, 0);
+      const avgDailyProt = totalProtein / 7;
+      const protTarget = user.proteinTarget || 120;
+      if (avgDailyProt < protTarget * 0.7 && proteinItems.length < 3) {
+        const budgetSuggestion = budget === "under_100" ? "pilchards (R12/tin) or eggs (R4/egg)" : "frozen chicken portions (R40/kg) or eggs";
+        list += `⚠️ *Protein gap detected* — add more ${budgetSuggestion} to hit your ${protTarget}g target.\n\n`;
+      }
+
+      list += `_Type *shopping list* for a full budget grocery list._`;
+      await logChat(user.id, message, list, "PERSONAL_GROCERY");
+      return list;
+    } catch (err) {
+      console.error("[PERSONAL GROCERY]", err);
+      return `Could not generate your personal grocery list. Type *shopping list* for a generic one.`;
+    }
+  }
+
+  // ---- SUPPLEMENT TRACKING — "my supplements" / "supps" / "vitamins" ----
+  if (m === "supplements" || m === "supps" || m === "my supplements" || m === "vitamins" || m === "my vitamins" || /\b(supplement|supps|vitamin|multivitamin|creatine|omega|magnesium|zinc|iron|collagen)\b/i.test(m)) {
+    // Check if they are logging a supplement intake
+    const logSupp = /\b(took|taken|had|drank)\b.*\b(supplement|supps|vitamin|creatine|omega|magnesium|zinc|iron|collagen|multivitamin|fish oil|whey|bcaa)\b/i.test(m)
+      || /\b(supplement|supps|vitamin|creatine|omega|magnesium|zinc|iron|collagen|multivitamin|fish oil|whey|bcaa)\b.*\b(took|taken|done|logged|had)\b/i.test(m);
+
+    if (logSupp) {
+      await logChat(user.id, message, "Supplement logged", "SUPPLEMENT_LOG");
+      // Count today's supplement logs
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
+      return `Supplement logged ✅ (${todaySuppLogs.length} today)\n\nConsistency with supplements matters more than the brand. Take them at the same time daily — set a phone alarm if needed.`;
+    }
+
+    // Otherwise give supplement guide based on their goal
+    const goal = user.goalType || "fat_loss";
+    const budget = user.weeklyFoodBudget || "100_300";
+    const name = user.name?.split(" ")[0] || "";
+
+    let suppGuide = `*💊 Supplement Guide${name ? ` — ${name}` : ""}*\n\n`;
+    suppGuide += `*Essential (everyone):*\n`;
+    suppGuide += `• Multivitamin — R50-R80/month (Clicks or Dis-Chem)\n`;
+    suppGuide += `• Vitamin D3 — especially if indoor job\n\n`;
+
+    if (goal === "muscle_gain") {
+      suppGuide += `*For muscle gain:*\n`;
+      suppGuide += `• Creatine monohydrate 5g/day — R150/month (most evidence-backed supplement)\n`;
+      suppGuide += `• Whey protein — only if you cannot hit ${user.proteinTarget || 120}g from food\n\n`;
+    } else {
+      suppGuide += `*For fat loss:*\n`;
+      suppGuide += `• Magnesium glycinate — R80/month (sleep, recovery, cravings)\n`;
+      suppGuide += `• Omega 3 / Fish oil — R60/month (inflammation, joint health)\n\n`;
+    }
+
+    if (budget === "under_100") {
+      suppGuide += `_On a tight budget? Skip supplements — get your protein from eggs and pilchards, your vitamins from spinach and cabbage. Food first, always._`;
+    } else {
+      suppGuide += `_Log your supplements: say "took my creatine" or "had my vitamins" and I will track consistency._`;
+    }
+
+    await logChat(user.id, message, suppGuide, "SUPPLEMENT_GUIDE");
+    return suppGuide;
+  }
+
   // ---- WHY command ----
   if (m === "why") {
     const goal = user.goalType || "fat_loss";
@@ -2832,7 +2953,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return injuryReply;
   }
 
-  // ---- SLEEP LOGGING — hardcoded, no GPT ----
+  // ---- SLEEP LOGGING — hardcoded + weekly trend, no GPT ----
   const sleepMatch = m.match(/\b(slept|sleep|sleeping)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)/i)
     || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
     || m.match(/\b(bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia)\b/i);
@@ -2860,8 +2981,78 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     } else {
       sleepReply = `Log your sleep hours so I can track your recovery — just say something like "I slept 7 hours".`;
     }
+
+    // Weekly sleep trend — show 7-day average if they have enough logs
+    let trendLine = "";
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const recentSleepLogs = await db.select({ messageIn: chatHistory.messageIn }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+      const sleepHours: number[] = [];
+      for (const log of recentSleepLogs) {
+        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+        if (hMatch) sleepHours.push(parseFloat(hMatch[1]));
+      }
+      if (hours !== null) sleepHours.push(hours); // include today
+      if (sleepHours.length >= 3) {
+        const avg = sleepHours.reduce((a, b) => a + b, 0) / sleepHours.length;
+        const trend = avg >= 7 ? "✅ On track" : avg >= 6 ? "⚠️ Could improve" : "🔴 Needs work";
+        trendLine = `\n\n_7-day avg: ${avg.toFixed(1)} hrs (${sleepHours.length} logs) — ${trend}_`;
+      }
+    } catch { /* non-fatal */ }
+
     await logChat(user.id, message, sleepReply, "SLEEP_LOG");
-    return sleepReply;
+    return sleepReply + trendLine;
+  }
+
+  // ---- SLEEP REPORT — "my sleep" or "sleep report" ----
+  if (m === "my sleep" || m === "sleep report" || m === "sleep stats" || /\b(sleep\s*report|sleep\s*history|how.?s?\s*my\s*sleep|sleep\s*trend)\b/i.test(m)) {
+    try {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+      const sleepEntries = await db.select({ messageIn: chatHistory.messageIn, date: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo)))
+        .orderBy(desc(chatHistory.createdAt));
+
+      const entries: { date: string; hours: number }[] = [];
+      for (const log of sleepEntries) {
+        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+        if (hMatch && log.date) entries.push({ date: new Date(log.date).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" }), hours: parseFloat(hMatch[1]) });
+      }
+
+      if (entries.length === 0) {
+        return `No sleep logs in the last 14 days. Start logging: just say "I slept 7 hours" and I will track your recovery over time.`;
+      }
+
+      const avg = entries.reduce((s, e) => s + e.hours, 0) / entries.length;
+      const best = Math.max(...entries.map(e => e.hours));
+      const worst = Math.min(...entries.map(e => e.hours));
+      const goodNights = entries.filter(e => e.hours >= 7).length;
+      const name = user.name?.split(" ")[0] || "there";
+
+      let grade = "🔴";
+      if (avg >= 7.5) grade = "🟢";
+      else if (avg >= 6.5) grade = "🟡";
+
+      const historyLines = entries.slice(0, 7).map(e => {
+        const emoji = e.hours >= 7 ? "✅" : e.hours >= 6 ? "⚠️" : "🔴";
+        return `${e.date}: ${e.hours}h ${emoji}`;
+      }).join("\n");
+
+      const report = `*😴 Sleep Report — ${name}*\n\n` +
+        `Average: *${avg.toFixed(1)} hours* ${grade}\n` +
+        `Best night: ${best}h | Worst: ${worst}h\n` +
+        `Good nights (7h+): ${goodNights}/${entries.length}\n\n` +
+        `_Last 7 entries:_\n${historyLines}\n\n` +
+        (avg < 6.5 ? `Your sleep is hurting your results. Fix tonight: phone off at 9pm, dark room, no caffeine after 2pm.` :
+         avg < 7.5 ? `Close to the 7-hour minimum. Push bedtime 30 minutes earlier and watch your energy and fat loss improve.` :
+         `Solid recovery. This sleep pattern supports fat loss and muscle repair. Keep it consistent.`);
+
+      await logChat(user.id, message, report, "SLEEP_REPORT");
+      return report;
+    } catch (err) {
+      console.error("[SLEEP REPORT]", err);
+      return `Could not generate sleep report right now. Try again later.`;
+    }
   }
 
   // ---- NO GYM / EQUIPMENT ALTERNATIVES — deliver home programme directly ----
@@ -4875,6 +5066,82 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ============================================================
+  // PINNED NEXT-ACTIONS — auto-generated priorities per client
+  // ============================================================
+  app.get("/api/dashboard/next-actions", requireDashboardKey, async (_req, res) => {
+    try {
+      const now = Date.now();
+      const twoDaysAgo = new Date(now - 2 * 86_400_000);
+      const sevenDaysAgo = new Date(now - 7 * 86_400_000);
+      const fourteenDaysAgo = new Date(now - 14 * 86_400_000);
+
+      const allClients = await db.select({
+        id: users.id,
+        name: users.name,
+        phoneNumber: users.phoneNumber,
+        subscriptionStatus: users.subscriptionStatus,
+        onboardingState: users.onboardingState,
+        lastActiveAt: users.lastActiveAt,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        programmeWeek: users.programmeWeek,
+        workoutStreak: users.workoutStreak,
+        createdAt: users.createdAt,
+        goalType: users.goalType,
+        currentWeight: users.currentWeight,
+      }).from(users);
+
+      const actions: { phone: string; name: string; action: string; priority: "urgent" | "high" | "medium" | "low"; category: string }[] = [];
+
+      for (const client of allClients) {
+        const lastActive = client.lastActiveAt ? new Date(client.lastActiveAt) : null;
+        const daysOnProgramme = client.createdAt ? Math.floor((now - new Date(client.createdAt).getTime()) / 86_400_000) : 0;
+        const name = client.name || client.phoneNumber.slice(-4);
+
+        // Not onboarded after 24h
+        if (client.onboardingState !== "COMPLETE" && daysOnProgramme >= 1) {
+          actions.push({ phone: client.phoneNumber, name, action: "Hasn't completed onboarding — send welcome nudge", priority: "high", category: "onboarding" });
+          continue;
+        }
+
+        // Paying but silent 14+ days — churn risk
+        if (client.subscriptionStatus === "active" && lastActive && lastActive < fourteenDaysAgo) {
+          actions.push({ phone: client.phoneNumber, name, action: `Silent ${Math.floor((now - lastActive.getTime()) / 86_400_000)} days — high churn risk, call or send personal message`, priority: "urgent", category: "churn" });
+          continue;
+        }
+
+        // Silent 5-14 days
+        if (client.onboardingState === "COMPLETE" && lastActive && lastActive < sevenDaysAgo && lastActive >= fourteenDaysAgo) {
+          actions.push({ phone: client.phoneNumber, name, action: `Silent ${Math.floor((now - lastActive.getTime()) / 86_400_000)} days — send re-engagement`, priority: "high", category: "engagement" });
+          continue;
+        }
+
+        // Active but zero workouts — needs push
+        if (client.onboardingState === "COMPLETE" && (client.totalWorkoutsCompleted || 0) === 0 && daysOnProgramme >= 3) {
+          actions.push({ phone: client.phoneNumber, name, action: "Onboarded but zero workouts — send first workout prompt", priority: "medium", category: "activation" });
+        }
+
+        // Week 4+ milestone — check in on goals
+        if ((client.programmeWeek || 0) === 4 && (client.totalWorkoutsCompleted || 0) >= 8) {
+          actions.push({ phone: client.phoneNumber, name, action: "Hitting week 4 milestone — send progress check + measurements reminder", priority: "low", category: "milestone" });
+        }
+
+        // Lost streak — had 5+ streak, now at 0
+        if ((client.workoutStreak || 0) === 0 && (client.totalWorkoutsCompleted || 0) >= 10 && lastActive && lastActive >= twoDaysAgo) {
+          actions.push({ phone: client.phoneNumber, name, action: "Lost workout streak — motivational message to restart", priority: "medium", category: "streak" });
+        }
+      }
+
+      // Sort by priority
+      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
+      actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
+
+      res.json({ actions: actions.slice(0, 50), total: actions.length });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to compute next actions" });
+    }
+  });
+
+  // ============================================================
   // ESCALATION INBOX — human review queue with SLA timers
   // ============================================================
 
@@ -5675,6 +5942,15 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       </div>
     </div>
 
+    <!-- PINNED NEXT ACTIONS -->
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#8b5cf6; color:#fff; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Actions</span>
+        <span class="section-title" style="margin-bottom:0;">Pinned Next Actions</span>
+      </div>
+      <div id="next-actions-container" class="card" style="color:#4b5563; text-align:center; padding:20px;">Loading actions...</div>
+    </div>
+
     <!-- CONVERSION FUNNEL -->
     <div class="card" style="margin-bottom:16px; padding:20px;">
       <div class="section-title" style="margin-bottom:16px;">Conversion Funnel</div>
@@ -5973,6 +6249,44 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         loadEscalations();
       } catch { alert("Error resolving"); }
     }
+
+    // ---- PINNED NEXT ACTIONS ----
+    (async function loadNextActions() {
+      const container = document.getElementById("next-actions-container");
+      try {
+        const res = await fetch("/api/dashboard/next-actions", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        if (!data.actions || data.actions.length === 0) {
+          container.innerHTML = '<div style="color:#4ade80; text-align:center; padding:20px;">No pending actions — all clients in good shape.</div>';
+          return;
+        }
+        const priorityColors = { urgent: "#ef4444", high: "#f59e0b", medium: "#3b82f6", low: "#6b7280" };
+        const priorityLabels = { urgent: "URGENT", high: "HIGH", medium: "MED", low: "LOW" };
+        let rows = "";
+        for (const a of data.actions.slice(0, 20)) {
+          const color = priorityColors[a.priority] || "#6b7280";
+          rows += '<tr>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937;">' +
+              '<span style="background:' + color + '; color:#fff; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:800;">' + (priorityLabels[a.priority] || "LOW") + '</span>' +
+            '</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; color:#d1d5db; font-weight:600;">' + a.name + '</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937; color:#9ca3af; font-size:12px;">' + a.action + '</td>' +
+            '<td style="padding:8px 12px; border-bottom:1px solid #1f2937;">' +
+              '<button onclick="intervene(\'' + a.phone.replace(/'/g, "\\'") + '\',\'checkin\')" style="background:#22c55e; color:#000; border:none; padding:4px 10px; border-radius:4px; font-size:11px; cursor:pointer; font-weight:700;">Nudge</button>' +
+            '</td>' +
+            '</tr>';
+        }
+        container.innerHTML =
+          '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">' + data.total + ' actions identified</div>' +
+          '<div class="table-wrap"><table style="width:100%; border-collapse:collapse; font-size:13px;">' +
+          '<thead><tr>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Priority</th>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Client</th>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;">Action</th>' +
+          '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:10px; text-transform:uppercase; border-bottom:2px solid #374151;"></th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table></div>';
+      } catch { container.innerHTML = '<div style="color:#ef4444;">Failed to load actions.</div>'; }
+    })();
 
     // ---- COHORT ANALYTICS ----
     (async function loadCohorts() {

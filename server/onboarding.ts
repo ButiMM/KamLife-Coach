@@ -67,8 +67,13 @@ What do you need?
 
 *Quick commands:*
 • _shopping list_ — budget grocery list
+• _my grocery list_ — personalized from your meals
 • _meal prep_ — batch cooking plan
 • _same as yesterday_ — re-log last meal
+• _my sleep_ — sleep report & trends
+• _supplements_ — supplement guide
+• _monthly report_ — 30-day transformation
+• _calendar_ — habit streak calendar
 
 Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
 }

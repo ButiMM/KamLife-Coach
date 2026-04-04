@@ -1857,6 +1857,7 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Weekly KPI report       — Monday 7am SAST to coach WhatsApp");
   console.log("[SCHEDULER]   Step leaderboard        — Sunday 5pm SAST broadcast");
   console.log("[SCHEDULER]   Payday shopping nudge   — 15th + 25th of each month");
+  console.log("[SCHEDULER]   Supplement reminder       — daily 8am SAST (logged users)");
 
   // ============================================================
   // PAYDAY SHOPPING NUDGE — 15th + 25th at 9am SAST (7am UTC)
@@ -2024,4 +2025,50 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
       console.error("[KPI] Weekly report error:", e);
     }
   });
+
+  // ============================================================
+  // SUPPLEMENT REMINDER — daily 6am UTC (8am SAST)
+  // Sends supplement reminder to clients who have logged supplements before
+  // ============================================================
+  cron.schedule("0 6 * * *", async () => {
+    console.log("[SCHEDULER] JOB: Supplement reminder");
+    const stateKey = "supplement_reminder";
+    const today = todaySAST();
+    if (loadState()[stateKey] === today) return;
+    saveState(stateKey, today);
+
+    try {
+      // Find clients who have logged supplements in the last 14 days
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+      const suppLoggers = await db.select({ userId: chatHistory.userId })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo)));
+
+      const uniqueUserIds = [...new Set(suppLoggers.map(s => s.userId))];
+      if (uniqueUserIds.length === 0) return;
+
+      // Check which ones have NOT logged today
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      let sent = 0;
+      for (const uid of uniqueUserIds) {
+        const todayLog = await db.select({ id: chatHistory.id }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, uid), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)))
+          .limit(1);
+        if (todayLog.length > 0) continue; // already logged today
+
+        const [client] = await db.select({ phoneNumber: users.phoneNumber, name: users.name, subscriptionStatus: users.subscriptionStatus })
+          .from(users).where(eq(users.id, uid)).limit(1);
+        if (!client || client.subscriptionStatus !== "active") continue;
+
+        const name = client.name?.split(" ")[0] || "there";
+        const msg = `Morning ${name} — have you taken your supplements today? Reply "took my vitamins" when done. Consistency matters more than the brand. 💊`;
+        await sendWhatsApp(client.phoneNumber, msg);
+        sent++;
+        if (sent >= 50) break; // rate limit
+      }
+      console.log(`[SCHEDULER] Supplement reminders sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Supplement reminder error:", err);
+    }
+  }, { timezone: "UTC" });
 }
