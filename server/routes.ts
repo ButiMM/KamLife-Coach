@@ -1521,11 +1521,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- STEP LOG DETECTION (direct — no GPT cost) ----
+  // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
+  // we log steps but do NOT return early — let it fall through to food scanning
   const stepNumMatch = m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
     || m.match(/(?:walked|done|did|logged)\s+([\d,]+)\s*(?:steps?|staps?)/i);
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
-  // Duration-based walk: "walked for 30 minutes", "did a 45 min walk"
   const hasDurationWalk = !stepNumMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
+  let stepReplyPart = ""; // stored so we can combine with food reply if needed
   if (stepNumMatch || hasKmWalk || hasDurationWalk) {
     let steps = 0;
     if (stepNumMatch) {
@@ -1536,12 +1538,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     } else if (hasDurationWalk) {
       let minutes = parseInt(hasDurationWalk[1]);
       const unit = hasDurationWalk[2]?.toLowerCase() || "";
-      if (unit.startsWith("h")) minutes *= 60; // hours to minutes
-      steps = Math.round(minutes * 100); // ~100 steps per minute walking pace
+      if (unit.startsWith("h")) minutes *= 60;
+      steps = Math.round(minutes * 100);
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
-      // Dedup: update today's entry instead of creating duplicates
       const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
       const existingStep = await db.select({ id: stepLogs.id })
         .from(stepLogs)
@@ -1556,9 +1557,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const stepReply = getStepResponse(steps, target);
       const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
       const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
-      const fullReply = stepReply + streakNote + (perfectDay || "");
-      await logChat(user.id, message, fullReply, "STEP_LOG");
-      return fullReply;
+      stepReplyPart = stepReply + streakNote + (perfectDay || "");
+
+      // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too
+      const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
+      if (!alsoHasFood) {
+        await logChat(user.id, message, stepReplyPart, "STEP_LOG");
+        return stepReplyPart;
+      }
+      // If food is also present, log steps but continue to food scanning below
+      await logChat(user.id, message, stepReplyPart, "STEP_LOG");
     }
   }
 
@@ -1761,20 +1769,65 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
   if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
     // Split message by meal keywords to handle multi-meal logging
-    const MEAL_SPLIT_RE = /\b(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b[:\s]*/gi;
+    // Supports BOTH patterns:
+    //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
+    //   "eggs and toast for breakfast, chicken rice for lunch"  (keyword AFTER food)
+    const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
-    const mealMatches = [...m.matchAll(MEAL_SPLIT_RE)];
-    if (mealMatches.length >= 2) {
-      // Multi-meal message detected — split into segments
-      for (let i = 0; i < mealMatches.length; i++) {
-        const label = mealMatches[i][1].charAt(0).toUpperCase() + mealMatches[i][1].slice(1);
-        const start = mealMatches[i].index! + mealMatches[i][0].length;
-        const end = i + 1 < mealMatches.length ? mealMatches[i + 1].index! : m.length;
-        const segText = m.slice(start, end).trim();
+
+    // Detect pattern: check if "for breakfast" / "for lunch" style (keyword AFTER food)
+    const FOR_MEAL_RE = /\bfor\s+(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+    const forMealMatches = [...m.matchAll(FOR_MEAL_RE)];
+
+    if (forMealMatches.length >= 2) {
+      // "X for breakfast, Y for lunch" pattern — food comes BEFORE the keyword
+      for (let i = 0; i < forMealMatches.length; i++) {
+        const label = forMealMatches[i][1].charAt(0).toUpperCase() + forMealMatches[i][1].slice(1);
+        const keyEnd = forMealMatches[i].index! + forMealMatches[i][0].length;
+        // Text for this meal: from end of previous keyword to start of "for <meal>"
+        const prevEnd = i > 0 ? (forMealMatches[i - 1].index! + forMealMatches[i - 1][0].length) : 0;
+        const segText = m.slice(prevEnd, forMealMatches[i].index!).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
         if (segText) mealSegments.push({ label, text: segText });
       }
+      // Check for trailing text after last "for <meal>" keyword (e.g. "...for lunch with coffee")
+      const lastEnd = forMealMatches[forMealMatches.length - 1].index! + forMealMatches[forMealMatches.length - 1][0].length;
+      const trailing = m.slice(lastEnd).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+      if (trailing && mealSegments.length > 0) {
+        // Append trailing text to last meal segment (e.g. "with coffee" goes to lunch)
+        mealSegments[mealSegments.length - 1].text += " " + trailing;
+      }
+    } else if (forMealMatches.length === 1) {
+      // Single "for breakfast" — check if there's also a "keyword:" style for another meal
+      const KEYWORD_BEFORE_RE = /\b(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b[:\s]+/gi;
+      const beforeMatches = [...m.matchAll(KEYWORD_BEFORE_RE)].filter(
+        bm => !m.slice(Math.max(0, bm.index! - 4), bm.index!).match(/\bfor\s*$/i)
+      );
+      if (beforeMatches.length >= 1) {
+        // Mixed pattern — just treat whole message as single meal
+        mealSegments.push({ label: "", text: m });
+      } else {
+        // Only one "for breakfast" — single meal
+        const label = forMealMatches[0][1].charAt(0).toUpperCase() + forMealMatches[0][1].slice(1);
+        const segText = m.slice(0, forMealMatches[0].index!).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+        if (segText) mealSegments.push({ label, text: segText });
+        else mealSegments.push({ label, text: m });
+      }
+    } else {
+      // Try "breakfast: eggs, lunch: chicken" pattern (keyword BEFORE food)
+      const MEAL_BEFORE_RE = /\b(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b[:\s]+/gi;
+      const beforeMatches = [...m.matchAll(MEAL_BEFORE_RE)];
+      if (beforeMatches.length >= 2) {
+        for (let i = 0; i < beforeMatches.length; i++) {
+          const label = beforeMatches[i][1].charAt(0).toUpperCase() + beforeMatches[i][1].slice(1);
+          const start = beforeMatches[i].index! + beforeMatches[i][0].length;
+          const end = i + 1 < beforeMatches.length ? beforeMatches[i + 1].index! : m.length;
+          const segText = m.slice(start, end).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+          if (segText) mealSegments.push({ label, text: segText });
+        }
+      }
     }
-    // If no multi-meal split or only 1 meal keyword, treat whole message as single meal
+
+    // Fallback: if no multi-meal split worked, treat whole message as single meal
     if (mealSegments.length < 2) {
       mealSegments.length = 0;
       mealSegments.push({ label: "", text: m });
@@ -1887,7 +1940,9 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}`;
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
-      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}`;
+      // If steps were also logged from same message, combine both replies
+      const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
+      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
     }
   }
 
@@ -2768,8 +2823,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return statusReply;
   }
 
-  // ---- FOOD DIARY SUMMARY — "what did I eat today?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.*food|food.*today|what.*eat.*today|how many.*calories|calories today|today.*calories|protein today|today.*protein|macros today|today.*macros|daily total|today.*total|total today)\b/i.test(m)) {
+  // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
+  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals)\b/i.test(m)) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
       .from(chatHistory)

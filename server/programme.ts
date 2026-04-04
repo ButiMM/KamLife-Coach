@@ -1269,17 +1269,22 @@ export function buildDayWorkoutForType(
   const sessionExercises =
     forcedType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
 
-  let workout = `*Phase ${phase}: ${phaseName} — Week ${week}*\n${dayLabel[forcedType]} | ${multiplier.sets} sets | Rest ${multiplier.rest}\n\n`;
-  for (const ex of sessionExercises) {
+  // Use the clean short format — same as formatGymDay
+  let workout = `*Week ${week} — ${dayLabel[forcedType]}*\nRest ${multiplier.rest} between sets\n\n`;
+  const ytLinks: string[] = [];
+  for (let i = 0; i < sessionExercises.length; i++) {
+    const ex = sessionExercises[i];
+    const num = i + 1;
     const setsDisplay =
       ex.sets.includes("seconds") || ex.sets.includes("min")
         ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
         : `${multiplier.sets}x${multiplier.reps}`;
-    const ytQuery = ex.name.replace(/\s+/g, "+") + "+tutorial";
-    const ytLink = `https://www.youtube.com/results?search_query=${ytQuery}`;
-    workout += `*${ex.name} — ${setsDisplay}*\n${ex.description}\nCommon mistake: ${ex.mistake}\n${ytLink}\n\n`;
+    const shortCue = ex.description.split(". ").slice(0, 1).join(". ");
+    workout += `${num}. *${ex.name}* — ${setsDisplay}\n${shortCue}\n\n`;
+    const yt = `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
+    ytLinks.push(`${num}. ${ex.name}: ${yt}`);
   }
-  workout += `Send DONE when finished.`;
+  workout += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
   return workout;
 }
 
