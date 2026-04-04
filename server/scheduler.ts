@@ -1855,6 +1855,69 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)");
   console.log("[SCHEDULER]   Ramadan mode         — activates only on explicit client mention");
   console.log("[SCHEDULER]   Weekly KPI report       — Monday 7am SAST to coach WhatsApp");
+  console.log("[SCHEDULER]   Step leaderboard        — Sunday 5pm SAST broadcast");
+
+  // ============================================================
+  // WEEKLY STEP LEADERBOARD BROADCAST — Sunday 3pm UTC (5pm SAST)
+  // Sends top 5 + personal rank to all active clients with step logs
+  // ============================================================
+  cron.schedule("0 15 * * 0", async () => {
+    console.log("[SCHEDULER] JOB: Weekly step leaderboard broadcast");
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const allStepLogs = await db.select({ userId: stepLogs.userId, steps: stepLogs.steps })
+        .from(stepLogs).where(gte(stepLogs.loggedAt, sevenDaysAgo));
+
+      const userSteps: Record<string, { total: number; days: number }> = {};
+      for (const log of allStepLogs) {
+        if (!userSteps[log.userId]) userSteps[log.userId] = { total: 0, days: 0 };
+        userSteps[log.userId].total += log.steps;
+        userSteps[log.userId].days++;
+      }
+
+      const participantIds = Object.keys(userSteps);
+      if (participantIds.length < 3) return; // Need at least 3 to make it competitive
+
+      const participants = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus })
+        .from(users).where(sql`${users.id} = ANY(${participantIds})`);
+      const infoMap: Record<string, { name: string; phone: string; active: boolean }> = {};
+      for (const p of participants) infoMap[p.id] = { name: p.name || "Anonymous", phone: p.phoneNumber, active: p.subscriptionStatus === "active" };
+
+      const ranked = participantIds.map(uid => ({
+        uid, name: infoMap[uid]?.name || "Anonymous", phone: infoMap[uid]?.phone || "",
+        avg: Math.round(userSteps[uid].total / userSteps[uid].days),
+        active: infoMap[uid]?.active || false,
+      })).sort((a, b) => b.avg - a.avg);
+
+      const medals = ["🥇", "🥈", "🥉"];
+      // Build top 5 board
+      let boardBase = `*🏆 Weekly Step Leaderboard*\n\n`;
+      for (let i = 0; i < Math.min(5, ranked.length); i++) {
+        const r = ranked[i];
+        const medal = i < 3 ? medals[i] : `${i + 1}.`;
+        const firstName = r.name.split(" ")[0];
+        boardBase += `${medal} ${firstName} — ${r.avg.toLocaleString()} avg/day\n`;
+      }
+
+      // Send personalised leaderboard to each active participant
+      let sent = 0;
+      for (const r of ranked) {
+        if (!r.active || !r.phone) continue;
+        const myRank = ranked.indexOf(r) + 1;
+        const personal = myRank <= 5
+          ? `\nYou are *#${myRank}*! ${myRank === 1 ? "You led the pack this week. 👑" : "Keep pushing for #1 next week."}`
+          : `\nYou are *#${myRank}* of ${ranked.length}. ${r.avg.toLocaleString()} avg steps. Log more to climb next week.`;
+        try {
+          await sendWhatsApp(r.phone, `${boardBase}${personal}\n\nNew week starts now. Reply *leaderboard* anytime to check rankings.`);
+          sent++;
+        } catch {}
+        if (sent % 10 === 0) await new Promise(r => setTimeout(r, 2000)); // Rate limit
+      }
+      console.log(`[SCHEDULER] Leaderboard sent to ${sent} clients`);
+    } catch (err) {
+      console.error("[SCHEDULER] Leaderboard broadcast error:", err);
+    }
+  }, { timezone: "UTC" });
 
   // ============================================================
   // WEEKLY KPI AUTO-REPORT — Monday 5am UTC (7am SAST)

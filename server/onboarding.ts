@@ -63,6 +63,12 @@ What do you need?
 6️⃣ Weekly report
 7️⃣ Measurements check-in
 8️⃣ Non-scale victory check-in
+9️⃣ Step leaderboard
+
+*Quick commands:*
+• _shopping list_ — budget grocery list
+• _meal prep_ — batch cooking plan
+• _same as yesterday_ — re-log last meal
 
 Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
 }

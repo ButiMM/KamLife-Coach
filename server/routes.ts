@@ -717,6 +717,51 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nChicken breast 1kg — R80\n${noFish ? "" : "Salmon 400g ×2 — R160\n"}Beef mince 500g — R60\n${noDairy ? "" : "Low fat Greek yoghurt 500g — R35\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 2kg — R24\nBanana bunch — R15\n${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Broccoli — R20\nSpinach — R10\n${noDairy ? "" : "Low fat milk 1L — R20\n"}Almonds 100g — R40\nOlive oil 250ml — R40\n\nEstimated total: ≈R619\n\n🛒 Pro tip: Salmon goes on special at Shoprite most Fridays — buy two packs and freeze immediately.`;
   }
 
+  // ---- MEAL PREP PLAN — "meal prep" / "prep" / "sunday cook" ----
+  if (m === "meal prep" || m === "prep" || m === "sunday cook" || m === "batch cook" || m === "food prep" || /\b(meal prep|food prep|batch cook|sunday cook|cook for the week|prep for the week)\b/i.test(m)) {
+    const budget = user.weeklyFoodBudget || "100_300";
+    const goal = user.goalType || "fat_loss";
+    const cal = user.calorieTarget || 1800;
+    const prot = user.proteinTarget || 120;
+    const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
+    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard");
+    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk");
+    const name = user.name ? `, ${user.name}` : "";
+
+    let plan = `*🍳 Meal Prep Plan — Cook Once, Eat All Week*\n\n`;
+
+    if (budget === "under_100") {
+      plan += `*Total cook time: ~90 min*\n*Budget: under R100*\n\n`;
+      plan += `*Step 1 — Big Pot of Beans (30 min)*\nSoak 500g sugar beans overnight. Boil until soft. Add onion, garlic, tomato. Makes 6 portions.\n_Store: 3 in fridge, 3 in freezer._\n\n`;
+      plan += `*Step 2 — Boiled Eggs (15 min)*\nBoil 12 eggs. Cool. Store in fridge. That is 72g protein ready to grab.\n\n`;
+      plan += `*Step 3 — Pap Base (20 min)*\nCook 1kg pap. Divide into 5 portions in containers.\n\n`;
+      plan += `*Step 4 — Spinach + Cabbage (15 min)*\nWilt a bunch of spinach with garlic. Shred half a cabbage, stir-fry with onion.\n\n`;
+      plan += `*Daily assembly:*\n• Breakfast: 2 eggs + pap\n• Lunch: Beans + cabbage + pap\n• Dinner: ${noFish ? "2 eggs + beans" : "Pilchards (open tin)"} + spinach + pap\n\n`;
+      plan += `~${cal} kcal | ~${prot}g protein/day. All from R100/week.`;
+    } else if (budget === "100_300") {
+      plan += `*Total cook time: ~2 hours*\n*Budget: R150–R250*\n\n`;
+      plan += `*Step 1 — Chicken (40 min)*\nSeason 1kg frozen chicken portions with garlic, paprika, salt. Bake at 180°C for 40 min. Makes 5 portions.\n\n`;
+      plan += `*Step 2 — Rice or Sweet Potato (25 min)*\nCook 1kg brown rice OR chop 1.5kg sweet potato, boil until soft. Divide into 5 containers.\n\n`;
+      plan += `*Step 3 — Beans + Lentils (30 min)*\nCook 500g sugar beans with tomato and onion. Makes 4 portions.\n\n`;
+      plan += `*Step 4 — Eggs (15 min)*\nBoil 12 eggs for grab-and-go breakfasts.\n\n`;
+      plan += `*Step 5 — Vegetables (15 min)*\nStir-fry cabbage + spinach + onion. Divide into containers.\n\n`;
+      plan += `*Daily assembly:*\n• Breakfast: 2 eggs + oats (cook fresh, 3 min)\n• Lunch: Chicken + rice + vegetables\n• Dinner: Beans + sweet potato + spinach\n• Snack: ${noDairy ? "Banana + 2 eggs" : "Yoghurt + banana"}\n\n`;
+      plan += `~${cal} kcal | ~${prot}g protein/day.`;
+    } else {
+      plan += `*Total cook time: ~2.5 hours*\n*Budget: R300+*\n\n`;
+      plan += `*Step 1 — Protein Rotation (50 min)*\nBake 1kg chicken breast (40 min). Brown 500g lean mince with onion + garlic (15 min). Boil 12 eggs (15 min).\n5 chicken portions + 4 mince portions + 12 eggs = week sorted.\n\n`;
+      plan += `*Step 2 — Carb Base (25 min)*\nCook 1kg brown rice. Bake 1kg sweet potato chunks. Divide into containers.\n\n`;
+      plan += `*Step 3 — Vegetables (20 min)*\nRoast broccoli + butternut (20 min at 200°C). Stir-fry spinach + cabbage.\n\n`;
+      plan += `*Step 4 — Snack Prep (10 min)*\n${noDairy ? "Portion banana + peanut butter into containers." : "Portion Greek yoghurt + oats + banana into containers."}\n\n`;
+      plan += `*Daily assembly:*\n• Breakfast: Oats + 2 eggs + banana\n• Lunch: Chicken + rice + roast veg\n• Dinner: Mince + sweet potato + spinach\n• Snack: ${noDairy ? "Peanut butter + banana" : "Greek yoghurt + oats"}\n\n`;
+      plan += `~${cal} kcal | ~${prot}g protein/day.`;
+    }
+
+    plan += `\n\n*Pro tip:* Do this every Sunday. 2 hours saves you 7 days of bad decisions.`;
+    await logChat(user.id, message, plan, "MEAL_PREP");
+    return plan;
+  }
+
   // ---- WHY command ----
   if (m === "why") {
     const goal = user.goalType || "fat_loss";
@@ -1764,6 +1809,51 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- QUICK RE-LOG — "same as yesterday", "repeat meal", "same breakfast" ----
+  const isRepeatMeal = /\b(same as yesterday|same meal|repeat meal|same as last|same again|same food|same breakfast|same lunch|same dinner|repeat breakfast|repeat lunch|repeat dinner|yesterday.?s meal|yesterday.?s food)\b/i.test(m);
+  if (isRepeatMeal) {
+    try {
+      // Find the most recent food log (yesterday or last logged)
+      const yesterdayStart = new Date(Date.now() - 48 * 3600_000); // up to 2 days back
+      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+        .from(chatHistory)
+        .where(and(
+          eq(chatHistory.userId, user.id),
+          eq(chatHistory.intent, "FOOD_LOG"),
+          gte(chatHistory.createdAt, yesterdayStart),
+        ))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(5);
+
+      // Filter to find one with actual food content
+      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s)/i;
+      const validLogs = recentFoodLogs.filter(l => l.messageIn && !LOG_CMD_RE2.test(l.messageIn.trim()) && l.messageIn.length > 5);
+
+      if (validLogs.length === 0) {
+        return `No recent meals to repeat. Tell me what you had — for example: "2 eggs and toast for breakfast".`;
+      }
+
+      // Which meal to repeat? Check if user specified
+      const wantBreakfast = /breakfast|morning/i.test(m);
+      const wantLunch = /lunch|afternoon/i.test(m);
+      const wantDinner = /dinner|supper|evening/i.test(m);
+
+      let toRepeat = validLogs[0].messageIn!;
+      if (wantBreakfast || wantLunch || wantDinner) {
+        const keyword = wantBreakfast ? "breakfast" : wantLunch ? "lunch" : "dinner";
+        const match = validLogs.find(l => l.messageIn!.toLowerCase().includes(keyword));
+        if (match) toRepeat = match.messageIn!;
+      }
+
+      // Re-process through the food scanner by calling handleMessage recursively
+      const repeatReply = await handleMessage(phone, toRepeat);
+      return `♻️ Re-logging: "${toRepeat.slice(0, 60)}"\n\n${repeatReply}`;
+    } catch (err) {
+      console.error("[REPEAT MEAL]", err);
+      return `Could not find a recent meal to repeat. Tell me what you had.`;
+    }
+  }
+
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
   const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
@@ -2266,6 +2356,78 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
   if (m === "7" || m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
     return `*Measurements Check-In*\n\nSend me your current measurements in this format:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nMeasure first thing in morning, relaxed (not flexed). Same spot every time. The tape does not lie even when the scale does.`;
+  }
+
+  // ---- WEEKLY STEP LEADERBOARD — anonymous competition ----
+  if (m === "leaderboard" || m === "leader board" || m === "rankings" || m === "step leaderboard" || m === "top steps" || m === "9" || m === "challenge") {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      // Get all users who logged steps this week, compute their daily averages
+      const allStepLogs = await db.select({
+        userId: stepLogs.userId,
+        steps: stepLogs.steps,
+      }).from(stepLogs).where(gte(stepLogs.loggedAt, sevenDaysAgo));
+
+      // Aggregate by user
+      const userSteps: Record<string, { total: number; days: number }> = {};
+      for (const log of allStepLogs) {
+        if (!userSteps[log.userId]) userSteps[log.userId] = { total: 0, days: 0 };
+        userSteps[log.userId].total += log.steps;
+        userSteps[log.userId].days++;
+      }
+
+      // Get names for all participating users
+      const participantIds = Object.keys(userSteps);
+      if (participantIds.length === 0) {
+        return `No step logs this week yet. Be the first — send your step count now.`;
+      }
+
+      const participants = await db.select({ id: users.id, name: users.name })
+        .from(users).where(sql`${users.id} = ANY(${participantIds})`);
+      const nameMap: Record<string, string> = {};
+      for (const p of participants) nameMap[p.id] = p.name || "Anonymous";
+
+      // Sort by average steps descending
+      const ranked = participantIds.map(uid => ({
+        uid,
+        name: nameMap[uid] || "Anonymous",
+        avg: Math.round(userSteps[uid].total / userSteps[uid].days),
+        days: userSteps[uid].days,
+        total: userSteps[uid].total,
+      })).sort((a, b) => b.avg - a.avg);
+
+      // Find current user's rank
+      const myRank = ranked.findIndex(r => r.uid === user.id) + 1;
+      const myEntry = ranked.find(r => r.uid === user.id);
+
+      // Build top 10 leaderboard
+      const medals = ["🥇", "🥈", "🥉"];
+      const top10 = ranked.slice(0, 10);
+      let board = `*🏆 Weekly Step Leaderboard*\n_${top10.length} clients competing this week_\n\n`;
+      for (let i = 0; i < top10.length; i++) {
+        const r = top10[i];
+        const medal = i < 3 ? medals[i] : `${i + 1}.`;
+        const isYou = r.uid === user.id;
+        const firstName = r.name.split(" ")[0];
+        // Anonymise: show first name + last initial only
+        const displayName = r.name.includes(" ") ? `${firstName} ${r.name.split(" ")[1][0]}.` : firstName;
+        board += `${medal} ${isYou ? `*${displayName} (YOU)*` : displayName} — ${r.avg.toLocaleString()} avg/day (${r.days}d)\n`;
+      }
+
+      if (myRank > 0 && myRank <= 10) {
+        board += `\nYou are *#${myRank}*. ${myRank === 1 ? "Leading the pack. Don't stop." : myRank <= 3 ? "Podium position. Push for #1." : "Keep climbing."}`;
+      } else if (myRank > 10) {
+        board += `\n---\n${myRank}. *${myEntry?.name.split(" ")[0] || "You"} (YOU)* — ${myEntry?.avg.toLocaleString()} avg/day\n\nYou are #${myRank} of ${ranked.length}. Log more steps to climb.`;
+      } else {
+        board += `\nYou haven't logged steps this week. Send your step count to join the leaderboard.`;
+      }
+
+      await logChat(user.id, message, board, "LEADERBOARD");
+      return board;
+    } catch (err) {
+      console.error("[LEADERBOARD]", err);
+      return `Leaderboard is not available right now. Log your steps and try again later.`;
+    }
   }
 
   // ---- CLOTHING CHECK-IN (Non-Scale Victory) — option 8 ----
