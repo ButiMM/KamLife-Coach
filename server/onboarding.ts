@@ -71,9 +71,12 @@ What do you need?
 • _meal prep_ — batch cooking plan
 • _same as yesterday_ — re-log last meal
 • _my sleep_ — sleep report & trends
+• _my water_ — water intake report
 • _supplements_ — supplement guide
+• _badges_ — your achievements
 • _monthly report_ — 30-day transformation
 • _calendar_ — habit streak calendar
+• _rate_ — give feedback
 
 Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
 }

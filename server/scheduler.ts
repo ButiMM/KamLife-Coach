@@ -1858,6 +1858,8 @@ export function initScheduler(): void {
   console.log("[SCHEDULER]   Step leaderboard        — Sunday 5pm SAST broadcast");
   console.log("[SCHEDULER]   Payday shopping nudge   — 15th + 25th of each month");
   console.log("[SCHEDULER]   Supplement reminder       — daily 8am SAST (logged users)");
+  console.log("[SCHEDULER]   Auto calorie adjustment   — Sunday 10am SAST (3-week plateau)");
+  console.log("[SCHEDULER]   Monthly NPS survey        — 1st of each month 10am SAST");
 
   // ============================================================
   // PAYDAY SHOPPING NUDGE — 15th + 25th at 9am SAST (7am UTC)
@@ -2069,6 +2071,109 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
       console.log(`[SCHEDULER] Supplement reminders sent: ${sent}`);
     } catch (err) {
       console.error("[SCHEDULER] Supplement reminder error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // AUTO CALORIE ADJUSTMENT — Sunday 10am SAST (8am UTC)
+  // If weight is stalling for 3+ weeks, adjust targets automatically
+  // ============================================================
+  cron.schedule("0 8 * * 0", async () => {
+    console.log("[SCHEDULER] JOB: Auto calorie adjustment");
+    const stateKey = "auto_cal_adjust";
+    const today = todaySAST();
+    if (loadState()[stateKey] === today) return;
+    saveState(stateKey, today);
+
+    try {
+      const activeClients = await db.select({
+        id: users.id,
+        phoneNumber: users.phoneNumber,
+        name: users.name,
+        goalType: users.goalType,
+        calorieTarget: users.calorieTarget,
+        proteinTarget: users.proteinTarget,
+        currentWeight: users.currentWeight,
+        subscriptionStatus: users.subscriptionStatus,
+      }).from(users).where(eq(users.subscriptionStatus, "active"));
+
+      let adjusted = 0;
+      for (const client of activeClients) {
+        try {
+          const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
+          const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
+            .from(weightLogs)
+            .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, threeWeeksAgo)))
+            .orderBy(asc(weightLogs.loggedAt));
+
+          if (weights.length < 3) continue; // not enough data
+
+          const first = parseFloat(String(weights[0].weight));
+          const last = parseFloat(String(weights[weights.length - 1].weight));
+          const change = last - first;
+          const currentCal = client.calorieTarget || 1800;
+          const currentProt = client.proteinTarget || 120;
+          const name = client.name?.split(" ")[0] || "there";
+          const goal = client.goalType || "fat_loss";
+
+          // Fat loss: if weight hasn't dropped in 3 weeks, reduce by 100-150 kcal
+          if (goal === "fat_loss" && change >= -0.3 && currentCal > 1400) {
+            const newCal = Math.max(1400, currentCal - 100);
+            await db.update(users).set({ calorieTarget: newCal }).where(eq(users.id, client.id));
+            const msg = `${name}, your weight has held steady for 3 weeks. I have adjusted your daily target from ${currentCal} to *${newCal} kcal* to keep progress moving.\n\nProtein stays at ${currentProt}g — that does not change. The deficit is small and sustainable. Keep training and logging.`;
+            await sendWhatsApp(client.phoneNumber, msg);
+            adjusted++;
+          }
+
+          // Muscle gain: if weight hasn't increased in 3 weeks, add 100-150 kcal
+          if (goal === "muscle_gain" && change <= 0.3 && currentCal < 3500) {
+            const newCal = Math.min(3500, currentCal + 150);
+            await db.update(users).set({ calorieTarget: newCal }).where(eq(users.id, client.id));
+            const msg = `${name}, your weight has not moved in 3 weeks. For muscle gain, you need more fuel. I have bumped your target from ${currentCal} to *${newCal} kcal*.\n\nProtein stays at ${currentProt}g. Focus on adding carbs around training — rice, oats, sweet potato. Your body needs the surplus to grow.`;
+            await sendWhatsApp(client.phoneNumber, msg);
+            adjusted++;
+          }
+
+          if (adjusted >= 20) break; // batch limit
+        } catch { /* skip individual client errors */ }
+      }
+      console.log(`[SCHEDULER] Auto calorie adjustments made: ${adjusted}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Auto calorie adjustment error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // MONTHLY NPS SURVEY — 1st of each month, 10am SAST (8am UTC)
+  // Sends satisfaction survey to active clients
+  // ============================================================
+  cron.schedule("0 8 1 * *", async () => {
+    console.log("[SCHEDULER] JOB: Monthly NPS survey");
+    const stateKey = "nps_survey";
+    const today = todaySAST();
+    if (loadState()[stateKey] === today) return;
+    saveState(stateKey, today);
+
+    try {
+      const activeClients = await db.select({
+        phoneNumber: users.phoneNumber,
+        name: users.name,
+        subscriptionStatus: users.subscriptionStatus,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+      }).from(users).where(eq(users.subscriptionStatus, "active"));
+
+      let sent = 0;
+      for (const client of activeClients) {
+        if ((client.totalWorkoutsCompleted || 0) < 3) continue; // too early to survey
+        const name = client.name?.split(" ")[0] || "there";
+        const msg = `${name}, quick monthly check-in:\n\nOn a scale of 1-10, how likely are you to recommend Coach K to a friend?\n\nJust reply with "rate" followed by your number (e.g. "rate 8").\n\nYour honest answer helps me improve. 🙏`;
+        await sendWhatsApp(client.phoneNumber, msg);
+        sent++;
+        if (sent >= 100) break;
+      }
+      console.log(`[SCHEDULER] NPS surveys sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] NPS survey error:", err);
     }
   }, { timezone: "UTC" });
 }

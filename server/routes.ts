@@ -2669,6 +2669,172 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return `${streakMsg}\n\nTotal workouts completed: ${workoutCount}.`;
   }
 
+  // ---- NPS / CLIENT FEEDBACK — "rate", "feedback", "survey" ----
+  if (m === "rate" || m === "feedback" || m === "survey" || m === "rate coach k" || m === "nps" || /\b(rate\s*coach|give\s*feedback|how.?s?\s*the\s*service|satisfaction)\b/i.test(m)) {
+    // Check if they are sending a rating (1-10)
+    const ratingMatch = m.match(/\b([1-9]|10)\s*(?:out of 10|\/10|stars?)?\b/);
+    if (ratingMatch && /\b(rate|rating|score|feedback|survey|nps)\b/i.test(m)) {
+      const score = parseInt(ratingMatch[1]);
+      const category = score >= 9 ? "promoter" : score >= 7 ? "passive" : "detractor";
+      await logChat(user.id, message, `NPS: ${score}/10 (${category})`, "NPS_RATING");
+
+      let followUp = "";
+      if (score >= 9) {
+        followUp = `${score}/10 — thank you! That means a lot. If you know someone who needs this, share your referral code: type *refer* to get it. Your recommendation is the best way to grow this.`;
+      } else if (score >= 7) {
+        followUp = `${score}/10 — solid. What is the ONE thing that would make this a 10? Tell me straight — I want to improve.`;
+      } else {
+        followUp = `${score}/10 — I hear you. What is not working? Be specific — I read every response and I will fix it. Your honesty helps me build something better.`;
+      }
+      return followUp;
+    }
+
+    // Check if they're giving written feedback after a rating
+    const recentNPS = await db.select({ id: chatHistory.id }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "NPS_RATING")))
+      .orderBy(desc(chatHistory.createdAt)).limit(1);
+
+    if (recentNPS.length > 0 && m.length > 10 && !/\b(rate|feedback|survey)\b/i.test(m)) {
+      await logChat(user.id, message, "Feedback noted", "NPS_FEEDBACK");
+      return `Noted — thank you for the honest feedback. I will use this to improve. Keep pushing, and keep telling me what works and what does not.`;
+    }
+
+    // Prompt for rating
+    const name = user.name?.split(" ")[0] || "there";
+    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+    return `*${name}, quick question:*\n\nOn a scale of 1-10, how likely are you to recommend Coach K to a friend?\n\n1 = Not at all\n10 = Absolutely\n\n_You have been on the programme for ${daysOn} days. Your honest answer helps me improve for everyone._\n\nJust reply with your number (e.g. "rate 8").`;
+  }
+
+  // ---- WATER REPORT — "my water" trend report ----
+  if (m === "my water" || m === "water report" || m === "water stats" || m === "water history" || /\b(water\s*report|water\s*history|water\s*trend|how.?s?\s*my\s*water|water\s*stats)\b/i.test(m)) {
+    try {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+      const waterLogs = await db.select({ messageIn: chatHistory.messageIn, date: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "WATER_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo)))
+        .orderBy(desc(chatHistory.createdAt));
+
+      if (waterLogs.length === 0) {
+        return `No water logs in the last 14 days. Start logging: "drank 500ml water" or "had 2 glasses water". Hydration is recovery.`;
+      }
+
+      // Group by date and sum litres
+      const dailyTotals: Record<string, number> = {};
+      for (const log of waterLogs) {
+        if (!log.date) continue;
+        const dateKey = new Date(log.date).toISOString().slice(0, 10);
+        const litreMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:l|litre|liter|ml|glass|cup|bottle)/i);
+        if (litreMatch) {
+          const val = parseFloat(litreMatch[1]);
+          const unit = (log.messageIn || "").match(/(ml|glass|cup|bottle)/i)?.[1]?.toLowerCase() || "l";
+          let litres = val;
+          if (unit === "ml") litres = val / 1000;
+          else if (unit === "glass" || unit === "cup") litres = val * 0.25;
+          else if (unit === "bottle") litres = val * 0.5;
+          dailyTotals[dateKey] = (dailyTotals[dateKey] || 0) + litres;
+        }
+      }
+
+      const days = Object.entries(dailyTotals).sort((a, b) => b[0].localeCompare(a[0]));
+      const wKg = parseFloat(user.currentWeight as string || "0") || 75;
+      const waterTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
+      const avgDaily = days.length > 0 ? days.reduce((s, [, v]) => s + v, 0) / days.length : 0;
+      const targetHitDays = days.filter(([, v]) => v >= waterTarget).length;
+      const name = user.name?.split(" ")[0] || "there";
+
+      let grade = "🔴";
+      if (avgDaily >= waterTarget * 0.9) grade = "🟢";
+      else if (avgDaily >= waterTarget * 0.6) grade = "🟡";
+
+      const historyLines = days.slice(0, 7).map(([date, litres]) => {
+        const d = new Date(date).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" });
+        const emoji = litres >= waterTarget ? "✅" : litres >= waterTarget * 0.5 ? "⚠️" : "🔴";
+        return `${d}: ${litres.toFixed(1)}L ${emoji}`;
+      }).join("\n");
+
+      const report = `*💧 Water Report — ${name}*\n\n` +
+        `Target: *${waterTarget}L/day* (based on ${wKg}kg)\n` +
+        `Average: *${avgDaily.toFixed(1)}L/day* ${grade}\n` +
+        `Target hit: ${targetHitDays}/${days.length} days\n` +
+        `Streak: ${user.waterStreak || 0} days\n\n` +
+        `_Last 7 days:_\n${historyLines}\n\n` +
+        (avgDaily < waterTarget * 0.6 ? `You are significantly under-hydrated. Dehydration slows fat loss, kills energy, and makes training harder. Set a phone alarm every 2 hours to drink.` :
+         avgDaily < waterTarget * 0.9 ? `Close but not consistent. Carry a bottle everywhere. If you can see it, you will drink it.` :
+         `Solid hydration. This supports every other goal — fat loss, recovery, energy. Keep it up.`);
+
+      await logChat(user.id, message, report, "WATER_REPORT");
+      return report;
+    } catch (err) {
+      console.error("[WATER REPORT]", err);
+      return `Could not generate water report. Try again later.`;
+    }
+  }
+
+  // ---- ACHIEVEMENTS / BADGES — "badges", "achievements", "my badges" ----
+  if (m === "badges" || m === "achievements" || m === "my badges" || m === "my achievements" || m === "trophies" || /\b(badge|achievement|trophy|unlock|reward)\b/i.test(m)) {
+    const totalWorkouts = user.totalWorkoutsCompleted || 0;
+    const streak = user.workoutStreak || 0;
+    const waterStreak = user.waterStreak || 0;
+    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+    const name = user.name?.split(" ")[0] || "Champ";
+
+    // Calculate badges earned
+    const badges: string[] = [];
+    const locked: string[] = [];
+
+    // Workout badges
+    if (totalWorkouts >= 1) badges.push("🏋️ *First Session* — Completed your first workout");
+    else locked.push("🔒 First Session — Complete 1 workout");
+
+    if (totalWorkouts >= 10) badges.push("💪 *Getting Serious* — 10 workouts done");
+    else if (totalWorkouts >= 1) locked.push("🔒 Getting Serious — Complete 10 workouts (${10 - totalWorkouts} to go)");
+
+    if (totalWorkouts >= 25) badges.push("🔥 *Quarter Century* — 25 workouts smashed");
+    else if (totalWorkouts >= 10) locked.push(`🔒 Quarter Century — Complete 25 workouts (${25 - totalWorkouts} to go)`);
+
+    if (totalWorkouts >= 50) badges.push("🏆 *Half Ton* — 50 workouts completed");
+    else if (totalWorkouts >= 25) locked.push(`🔒 Half Ton — Complete 50 workouts (${50 - totalWorkouts} to go)`);
+
+    if (totalWorkouts >= 100) badges.push("👑 *Centurion* — 100 workouts. Elite.");
+    else if (totalWorkouts >= 50) locked.push(`🔒 Centurion — Complete 100 workouts (${100 - totalWorkouts} to go)`);
+
+    // Streak badges
+    if (streak >= 7) badges.push("📅 *Week Warrior* — 7-day workout streak");
+    if (streak >= 14) badges.push("⚡ *Two Week Terror* — 14-day streak");
+    if (streak >= 30) badges.push("🌟 *Monthly Machine* — 30-day streak");
+
+    // Water badges
+    if (waterStreak >= 7) badges.push("💧 *Hydration Hero* — 7-day water streak");
+    if (waterStreak >= 14) badges.push("🌊 *Water Warrior* — 14-day water streak");
+
+    // Duration badges
+    if (daysOn >= 7) badges.push("📆 *One Week In* — 7 days on programme");
+    if (daysOn >= 30) badges.push("📅 *One Month Strong* — 30 days committed");
+    if (daysOn >= 90) badges.push("🗓️ *Quarter Year* — 90 days of discipline");
+
+    // Weight loss badge (check weight logs)
+    try {
+      const weightData = await db.select({ weight: weightLogs.weight }).from(weightLogs)
+        .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
+      if (weightData.length >= 2) {
+        const first = parseFloat(String(weightData[0].weight));
+        const last = parseFloat(String(weightData[weightData.length - 1].weight));
+        const diff = first - last;
+        if (diff >= 2) badges.push(`⚖️ *Scale Victory* — Down ${diff.toFixed(1)}kg from start`);
+        if (diff >= 5) badges.push(`🎯 *5kg Club* — Dropped 5+ kg`);
+        if (diff >= 10) badges.push(`💎 *10kg Transformation* — Life-changing progress`);
+      }
+    } catch { /* non-fatal */ }
+
+    const totalBadges = badges.length;
+    const reply = `*🏆 ${name}'s Achievements — ${totalBadges} Badge${totalBadges !== 1 ? "s" : ""} Earned*\n\n` +
+      (badges.length > 0 ? badges.join("\n") : "_No badges yet — complete your first workout to start earning._") +
+      (locked.length > 0 ? `\n\n_Next to unlock:_\n${locked.slice(0, 3).join("\n")}` : "") +
+      `\n\n_Keep showing up. Every session counts._`;
+
+    await logChat(user.id, message, reply, "ACHIEVEMENTS");
+    return reply;
+  }
+
   // ---- MENU NUMBER SHORTCUTS ----
   if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
