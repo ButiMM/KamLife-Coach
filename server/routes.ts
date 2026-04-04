@@ -2835,6 +2835,232 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return reply;
   }
 
+  // ---- BODY RECOMPOSITION TRACKER — "my body", "body check", "recomp" ----
+  if (m === "my body" || m === "body check" || m === "recomp" || m === "body recomp" || m === "body composition" || /\b(body\s*check|body\s*comp|recomp|my\s*body|body\s*progress)\b/i.test(m)) {
+    try {
+      const [weights, measurements, workouts, clothingData] = await Promise.all([
+        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
+          .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)),
+        db.select({ type: bodyMeasurements.measurementType, value: bodyMeasurements.value, date: bodyMeasurements.loggedAt })
+          .from(bodyMeasurements).where(eq(bodyMeasurements.userId, user.id)).orderBy(desc(bodyMeasurements.loggedAt)).limit(20),
+        db.select({ id: workoutLogs.id }).from(workoutLogs).where(eq(workoutLogs.userId, user.id)),
+        db.select().from(clothingCheckins).where(eq(clothingCheckins.userId, user.id)).orderBy(desc(clothingCheckins.loggedAt)).limit(1),
+      ]);
+
+      const name = user.name?.split(" ")[0] || "there";
+      const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+      let report = `*🏋️ Body Composition Check — ${name}*\n_${daysOn} days on programme_\n\n`;
+
+      // Weight trend
+      if (weights.length >= 2) {
+        const first = parseFloat(String(weights[0].weight));
+        const last = parseFloat(String(weights[weights.length - 1].weight));
+        const diff = last - first;
+        const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : "➡️ Stable";
+        report += `*Weight:* ${last.toFixed(1)}kg (${trend} from ${first.toFixed(1)}kg start)\n`;
+
+        // Monthly rate
+        const monthsOn = Math.max(1, daysOn / 30);
+        const monthlyRate = Math.abs(diff) / monthsOn;
+        if (user.goalType === "fat_loss" && diff < 0) {
+          report += `Rate: ${monthlyRate.toFixed(1)}kg/month ${monthlyRate >= 2 && monthlyRate <= 4 ? "✅ healthy pace" : monthlyRate > 4 ? "⚠️ fast — ensure you are eating enough" : "— could push harder"}\n`;
+        }
+      } else {
+        report += `*Weight:* ${user.currentWeight || "not logged"}kg — log more to see trends\n`;
+      }
+
+      // Measurements
+      const latestByType: Record<string, string> = {};
+      for (const m2 of measurements) {
+        if (!latestByType[m2.type]) latestByType[m2.type] = m2.value;
+      }
+      if (Object.keys(latestByType).length > 0) {
+        report += `\n*Measurements:*\n`;
+        for (const [type, val] of Object.entries(latestByType)) {
+          report += `• ${type}: ${val}\n`;
+        }
+      }
+
+      // Clothing check-in
+      if (clothingData.length > 0) {
+        const c = clothingData[0];
+        report += `\n*Last Clothing Check-In:*\n`;
+        if (c.jeansFit) report += `Jeans: ${c.jeansFit}\n`;
+        if (c.energyLevel) report += `Energy: ${c.energyLevel}\n`;
+        if (c.stomachFeel) report += `Stomach: ${c.stomachFeel}\n`;
+      }
+
+      // Training volume
+      report += `\n*Training:* ${workouts.length} total sessions | Streak: ${user.workoutStreak || 0}\n`;
+
+      // Verdict
+      const totalWorkoutsN = workouts.length;
+      if (weights.length >= 2 && totalWorkoutsN >= 5) {
+        const wDiff = parseFloat(String(weights[weights.length - 1].weight)) - parseFloat(String(weights[0].weight));
+        if (wDiff < -1 && totalWorkoutsN >= 10) {
+          report += `\n✅ *Verdict:* Losing fat while training consistently. Body recomposition in progress. Stay the course.`;
+        } else if (wDiff > 1 && user.goalType === "muscle_gain") {
+          report += `\n✅ *Verdict:* Gaining weight while training. If lifts are going up — this is muscle. Keep pushing.`;
+        } else if (Math.abs(wDiff) < 1 && totalWorkoutsN >= 10) {
+          report += `\n📊 *Verdict:* Weight stable but training hard. This often means fat loss + muscle gain happening simultaneously. Check measurements and how clothes fit — the scale does not tell the full story.`;
+        } else {
+          report += `\n📊 Keep logging weight and training. More data = better insights.`;
+        }
+      } else {
+        report += `\n📊 Need more data — keep logging weight and workouts for a full picture.`;
+      }
+
+      await logChat(user.id, message, report, "BODY_RECOMP");
+      return report;
+    } catch (err) {
+      console.error("[BODY RECOMP]", err);
+      return `Could not generate body check right now. Try again later.`;
+    }
+  }
+
+  // ---- SHARE CARD — "share my progress", "share" ----
+  if (m === "share" || m === "share my progress" || m === "share progress" || m === "brag" || /\b(share\s*my|share\s*progress|tell\s*everyone|brag)\b/i.test(m)) {
+    const name = user.name?.split(" ")[0] || "Champion";
+    const totalWorkouts = user.totalWorkoutsCompleted || 0;
+    const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
+    const streak = user.workoutStreak || 0;
+
+    let weightLine = "";
+    try {
+      const weights2 = await db.select({ weight: weightLogs.weight }).from(weightLogs)
+        .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
+      if (weights2.length >= 2) {
+        const diff = parseFloat(String(weights2[0].weight)) - parseFloat(String(weights2[weights2.length - 1].weight));
+        if (diff > 1) weightLine = `\n⚖️ Down ${diff.toFixed(1)}kg`;
+      }
+    } catch { /* non-fatal */ }
+
+    const shareCard = `*💪 ${name}'s KamLife Coach Progress*\n\n` +
+      `📅 ${daysOn} days on programme\n` +
+      `✅ ${totalWorkouts} workouts completed\n` +
+      `🔥 ${streak}-session streak${weightLine}\n\n` +
+      `_Coached by KamLife Coach on WhatsApp — SA's AI fitness coach._\n` +
+      `_R99/month. Real food. Real workouts. Real results._\n\n` +
+      `Copy this and share it in your WhatsApp status or group. Show them what you are building. 💪`;
+
+    await logChat(user.id, message, shareCard, "SHARE_CARD");
+    return shareCard;
+  }
+
+  // ---- MEAL TIMING COACH — "when should I eat", "pre workout meal", "post workout" ----
+  if (/\b(pre.?workout|post.?workout|before\s*(?:gym|training|workout)|after\s*(?:gym|training|workout)|when\s*(?:should|must|do)\s*i\s*eat|meal\s*timing|eating\s*before|eating\s*after)\b/i.test(m)) {
+    const goal = user.goalType || "fat_loss";
+    const budget = user.weeklyFoodBudget || "100_300";
+    const name = user.name?.split(" ")[0] || "";
+    const isPreWorkout = /\b(pre.?workout|before\s*(?:gym|training|workout)|eating\s*before)\b/i.test(m);
+    const isPostWorkout = /\b(post.?workout|after\s*(?:gym|training|workout)|eating\s*after)\b/i.test(m);
+
+    let timing = `*🕐 Meal Timing Guide${name ? ` — ${name}` : ""}*\n\n`;
+
+    if (isPreWorkout || (!isPostWorkout)) {
+      timing += `*Pre-Workout (60-90 min before):*\n`;
+      if (budget === "under_100") {
+        timing += goal === "muscle_gain"
+          ? `• 2 slices bread + peanut butter + banana (~350 kcal, 12g protein)\n• Or: pap + 1 egg (~280 kcal, 8g protein)\n`
+          : `• 1 banana + 1 slice bread (~180 kcal)\n• Or: small bowl oats with water (~200 kcal)\n`;
+      } else {
+        timing += goal === "muscle_gain"
+          ? `• Oats + banana + scoop whey (~450 kcal, 30g protein)\n• Or: 2 toast + 2 eggs + banana (~420 kcal, 20g protein)\n`
+          : `• Small banana + handful almonds (~200 kcal)\n• Or: 1 toast + 1 egg (~180 kcal)\n`;
+      }
+      timing += `_Empty stomach training is fine for fat loss walks, but eat before weights._\n\n`;
+    }
+
+    if (isPostWorkout || (!isPreWorkout)) {
+      timing += `*Post-Workout (within 60 min after):*\n`;
+      if (budget === "under_100") {
+        timing += `• 2 eggs + pap + spinach (~380 kcal, 20g protein)\n• Or: tin of pilchards + bread (~350 kcal, 22g protein)\n`;
+      } else {
+        timing += `• Chicken breast + rice + vegetables (~500 kcal, 35g protein)\n• Or: whey shake + banana + oats (~400 kcal, 30g protein)\n`;
+      }
+      timing += `_Protein within 60 minutes after training is the priority. Carbs refuel your muscles._\n`;
+    }
+
+    timing += `\n*Key rule:* Do not train on completely empty if it is a weights session. Even a banana 30 minutes before helps performance.`;
+    await logChat(user.id, message, timing, "MEAL_TIMING");
+    return timing;
+  }
+
+  // ---- WEEKLY FOOD AUDIT — "food audit", "eating audit", "diet check" ----
+  if (m === "food audit" || m === "diet check" || m === "eating audit" || m === "audit" || /\b(food\s*audit|diet\s*check|eating\s*audit|week.?s?\s*eating|how.?s?\s*my\s*diet|diet\s*review)\b/i.test(m)) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const foodLogs = await db.select({ messageIn: chatHistory.messageIn, date: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)))
+        .orderBy(desc(chatHistory.createdAt));
+
+      if (foodLogs.length < 3) {
+        return `Not enough food logs this week for an audit. Log at least 3 meals and I will analyse your eating patterns.\n\nJust tell me what you ate — "2 eggs and toast" — and I will track it.`;
+      }
+
+      let junkCount = 0;
+      let proteinMeals = 0;
+      let totalMeals = foodLogs.length;
+      const foodFreq: Record<string, number> = {};
+
+      for (const log of foodLogs) {
+        const text = (log.messageIn || "").toLowerCase();
+        // Junk detection
+        if (JUNK_WORDS.some(j => text.includes(j))) junkCount++;
+        // Protein detection
+        if (PROTEIN_WORDS.some(p => text.includes(p))) proteinMeals++;
+        // Food frequency
+        const matched = scanForSAFoods(text);
+        for (const food of matched) {
+          const key = food.name;
+          foodFreq[key] = (foodFreq[key] || 0) + 1;
+        }
+      }
+
+      const topFoods = Object.entries(foodFreq).sort((a, b) => b[1] - a[1]).slice(0, 5);
+      const proteinRate = Math.round(proteinMeals / totalMeals * 100);
+      const junkRate = Math.round(junkCount / totalMeals * 100);
+      const name = user.name?.split(" ")[0] || "there";
+
+      let audit = `*🔍 Weekly Food Audit — ${name}*\n_${totalMeals} meals logged this week_\n\n`;
+
+      // Top foods
+      if (topFoods.length > 0) {
+        audit += `*Most eaten:*\n${topFoods.map(([food, count]) => `• ${food} (${count}×)`).join("\n")}\n\n`;
+      }
+
+      // Protein consistency
+      audit += `*Protein in meals:* ${proteinRate}% ${proteinRate >= 80 ? "✅" : proteinRate >= 50 ? "⚠️" : "🔴"}\n`;
+      if (proteinRate < 50) audit += `_Add protein to every meal — eggs, chicken, pilchards, beans._\n`;
+
+      // Junk frequency
+      audit += `*Junk food frequency:* ${junkCount}/${totalMeals} meals (${junkRate}%) ${junkRate <= 10 ? "✅" : junkRate <= 20 ? "⚠️" : "🔴"}\n`;
+      if (junkRate > 20) audit += `_More than 1 in 5 meals is junk. Replace one junk meal per week with a real food option._\n`;
+
+      // Variety check
+      const uniqueFoods = Object.keys(foodFreq).length;
+      audit += `*Variety:* ${uniqueFoods} different foods ${uniqueFoods >= 10 ? "✅ Good variety" : uniqueFoods >= 5 ? "⚠️ Could be more varied" : "🔴 Very limited — try new foods"}\n`;
+
+      // Overall grade
+      const auditScore = (proteinRate >= 70 ? 2 : proteinRate >= 50 ? 1 : 0) +
+        (junkRate <= 10 ? 2 : junkRate <= 20 ? 1 : 0) +
+        (uniqueFoods >= 8 ? 1 : 0);
+      const auditGrade = auditScore >= 4 ? "A" : auditScore >= 3 ? "B" : auditScore >= 2 ? "C" : "D";
+
+      audit += `\n*Week Grade: ${auditGrade}*\n`;
+      audit += auditGrade === "A" ? `Elite eating this week. Keep it up.` :
+        auditGrade === "B" ? `Good week. Small tweaks — more protein, less junk — and this is an A.` :
+        auditGrade === "C" ? `Room to improve. Focus on protein at every meal and cut one junk meal.` :
+        `Inconsistent week. Start tomorrow with eggs and build from there.`;
+
+      await logChat(user.id, message, audit, "FOOD_AUDIT");
+      return audit;
+    } catch (err) {
+      console.error("[FOOD AUDIT]", err);
+      return `Could not generate food audit right now. Try again later.`;
+    }
+  }
+
   // ---- MENU NUMBER SHORTCUTS ----
   if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
