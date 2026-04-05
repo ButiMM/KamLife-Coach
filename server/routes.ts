@@ -183,12 +183,13 @@ function levenshtein(a: string, b: string): number {
   return dp[la][lb];
 }
 
-// Max edit distance allowed based on word length — STRICT to avoid false matches
+// Max edit distance allowed based on word length — VERY STRICT to avoid false matches
+// "better" → "butter" was distance 1 and matched. Now requiring longer words for any fuzzy.
 function maxDistance(wordLen: number): number {
-  if (wordLen <= 3) return 0;  // too short — exact only (egg, pap, tea)
-  if (wordLen <= 5) return 1;  // rice, bread, steak — 1 typo
-  if (wordLen <= 8) return 2;  // chicken, pilchards — 2 typos
-  return 2;                     // boerewors, butternut — still only 2 typos (was 3, caused "for breakfast" → "spur breakfast")
+  if (wordLen <= 4) return 0;  // exact only: egg, pap, tea, rice, oats, bread
+  if (wordLen <= 6) return 1;  // steak, mince, pasta — 1 typo only
+  if (wordLen <= 10) return 2; // chicken, pilchards, boerewors — 2 typos
+  return 2;                     // everything else — max 2
 }
 
 // Common non-food words that should NEVER fuzzy-match to food names
@@ -204,6 +205,11 @@ const FUZZY_BLACKLIST = new Set([
   "supper", "snack", "meal", "food", "total", "remaining", "calories",
   "protein", "daily", "target", "please", "thanks", "thank", "help",
   "read", "again", "true", "adjust", "correct", "wrong", "right",
+  "better", "everything", "nothing", "something", "doing", "being",
+  "getting", "looking", "working", "trying", "never", "always",
+  "start", "stop", "keep", "send", "show", "tell", "look", "work",
+  "think", "know", "really", "thing", "things", "stuff", "great",
+  "terrible", "horrible", "broken", "fixed", "update", "check",
 ]);
 
 function scanForSAFoods(msg: string): SAFood[] {
@@ -247,9 +253,9 @@ function scanForSAFoods(msg: string): SAFood[] {
         // STRICT: word count must match — "breakfast" (1 word) can never match "spur breakfast" (2 words)
         if (aliasWordCount !== comboWordCount) continue;
 
-        // STRICT: lengths must be similar (within 30%) — prevents "for" matching "spur"
+        // STRICT: lengths must be similar (within 20%) — prevents "better" matching "butter"
         const lenRatio = Math.min(combo.length, alias.length) / Math.max(combo.length, alias.length);
-        if (lenRatio < 0.7) continue;
+        if (lenRatio < 0.8) continue;
 
         const dist = levenshtein(combo, alias);
         const allowed = maxDistance(alias.length);
@@ -690,9 +696,16 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
-  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal)\b/i.test(m)) {
+  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today)\b/i.test(m)) {
+    // Reset the stored counter
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-    return `Calories reset to 0 for today. ✅\n\nYour food log history is kept — only today's running total was cleared. Start logging again from here.`;
+    // Also delete today's FOOD_LOG entries from chat_history to prevent phantom re-counts
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    try {
+      await db.delete(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
+    } catch (e) { console.warn("[non-fatal] clear food log:", e); }
+    return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
@@ -2159,7 +2172,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FRUSTRATION / CORRECTION GUARD — do NOT treat complaints as food ----
-  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous)\b/i.test(m);
+  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
 
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
