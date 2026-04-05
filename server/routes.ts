@@ -2078,12 +2078,18 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return summary;
   }
 
-  // Shared message-type flags used by food handlers below
-  const isQuestion = m.includes("?") || /^(what|should|can i|is |are |how|why|when|tell me about|which|do i)/.test(m);
-  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|just had|just ate|meal was|meal is|food was|logged|i eat)\b/.test(m);
+  // Shared message-type flags used by ALL food handlers below
+  const isQuestion = m.includes("?") ||
+    /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|where)/.test(m) ||
+    /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
+  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
+  // Log triggers: words that suggest the user is REPORTING food they ate/are eating
+  // "breakfast"/"lunch"/"dinner" alone are kept because "chicken for lunch" is valid food logging
+  // BUT they are protected by isQuestion + isFrustration guards upstream
+  const hasLogTrigger = /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had)\b/.test(m);
 
   // ---- BRAAI GUIDE — SA-specific outdoor cooking coaching ----
-  if ((m.includes("braai") || m.includes("braaing") || m.includes("braaiing")) && !isQuestion) {
+  if ((m.includes("braai") || m.includes("braaing") || m.includes("braaiing")) && !isQuestion && !isFrustration) {
     const goal = user.goalType || "fat_loss";
     const braaiReply = goal === "muscle_gain"
       ? `*Braai Protocol — Muscle Mode* 🔥\n\n• Chicken pieces: BEST — 28g protein each, skin off after cooking\n• Wors: 1-2 rolls (20-30g protein) ✅ Keep it\n• Boerewors chops: high fat but solid protein — 1 portion\n• Pap + sous: fine — keep butter small\n• Potato salad: small portion or skip\n\n*Your plate:* 3 chicken pieces + 1 wors + small pap = ~750 kcal, ~55g protein. Sorted.\n\nDrink: Water first. Max 2 beers — after food, not before.`
@@ -2104,8 +2110,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     m.includes("ocean basket") ? "ocean_basket" :
     null;
 
-  const hasEatingOutTrigger = /\b(eating|ordering|order|going|going to|had|ate|at|having)\b/.test(m);
-  if (eatingOutPlace && (hasEatingOutTrigger || !isQuestion)) {
+  const hasEatingOutTrigger = /\b(eating at|ordering from|order from|going to|had at|ate at|having at|went to|was at|from)\b/.test(m);
+  if (eatingOutPlace && !isQuestion && !isFrustration) {
     const goal = user.goalType || "fat_loss";
     const guides: Record<string, string> = {
       nandos: `*Nando's — Coach K Pick*\n\n✅ Best: Quarter chicken (skin off) + peri-peri chips + coleslaw = ~650 kcal, 35g protein\n✅ Good: Grilled chicken wrap (no sauce, extra coleslaw)\n⚠️ Watch: Double chicken = fine if that's your big meal\n❌ Avoid: Chips as main + roll + dessert = 1,200 kcal\n\nFlame-grilled is always better than fried. Skin off saves 80-100 kcal.`,
@@ -2171,15 +2177,16 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
-  // ---- FRUSTRATION / CORRECTION GUARD — do NOT treat complaints as food ----
-  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
-
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
   // Also catches direct food names: "bolognaise", "2 eggs", "oats with milk"
-  const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
-  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && m.split(/\s+/).length <= 8 && scanForSAFoods(m).length > 0;
-  if (!isQuestion && !isFrustration && (hasLogTrigger || isShortFoodMsg || directFoodScan)) {
+  // Food logging gate: MUST have actual food detected by scanner
+  // hasLogTrigger alone is not enough — "I had a great day" has "had" but no food
+  const foodsInMsg = scanForSAFoods(m);
+  const hasActualFood = foodsInMsg.length > 0;
+  const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
+  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 8;
+  if (!isQuestion && !isFrustration && hasActualFood && (hasLogTrigger || directFoodScan)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
     //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
@@ -5253,14 +5260,15 @@ CRITICAL RULES — these are non-negotiable:
     }
   } catch (e) { console.warn("[non-fatal]", e); }
 
-  // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
-  const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
-  // Guard: "log the meal", "log this", "save this" are commands not food — already handled above
-  const isFoodLog = !isLogCommand && !isQuestion && FOOD_KEYWORDS.some(k => m.includes(k));
+  // ---- FOOD CONTEXT CHECK — only if GPT response is about food the user actually ate ----
+  // STRICT: must have BOTH a log trigger AND actual SA food detected by scanner
+  // This prevents "I had a great workout", "food is expensive", "dinner plans" from being logged as food
+  const gptFoodMatch = scanForSAFoods(m);
+  const isFoodLog = !isLogCommand && !isQuestion && !isFrustration && hasLogTrigger && gptFoodMatch.length > 0;
   if (isFoodLog) {
     const pattern = await checkFoodPatterns(user.id);
     const perfectDay = await checkPerfectDay(user.id);
-    // ---- Calorie running total for the day ----
+    // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -5268,10 +5276,9 @@ CRITICAL RULES — these are non-negotiable:
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
       let totalCal = 0; let totalProt = 0;
-      // Include current message in the scan
-      const allMsgs = [...todayFoodLogs.map((l: any) => l.messageIn || ""), m];
-      for (const msg of allMsgs) {
-        const matched = scanForSAFoods(msg);
+      // Only scan EXISTING food logs — do NOT include current message (GPT handled it, not the food scanner)
+      for (const log of todayFoodLogs) {
+        const matched = scanForSAFoods(log.messageIn || "");
         if (matched.length > 0) {
           totalCal += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
           totalProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
