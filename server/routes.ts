@@ -3061,6 +3061,187 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- DAILY FACT — "fact", "tip", "did you know" ----
+  if (m === "fact" || m === "tip" || m === "daily tip" || m === "did you know" || m === "fitness fact" || m === "coach tip") {
+    const facts = [
+      `Walking 8,000 steps burns roughly 350-400 calories — that is a full meal's worth of energy. Steps are the cheapest fat loss tool you have.`,
+      `Muscle burns 3× more calories at rest than fat. Every kg of muscle you add raises your metabolism permanently. Lift heavy.`,
+      `South Africans eat an average of 52g of protein per day. Your target is ${user.proteinTarget || 120}g. Most people need to double their protein intake to see results.`,
+      `Sleep deprivation increases ghrelin (hunger hormone) by 28%. One bad night = more cravings tomorrow. Protect your sleep like you protect your training.`,
+      `Eggs are the cheapest complete protein in South Africa — R4 per egg, 6g protein each. 3 eggs = 18g protein for R12. No supplement beats that value.`,
+      `It takes 66 days to form a habit, not 21. You are ${user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0} days in. ${(user.programmeStartDate && Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) >= 66) ? "You have crossed the habit line." : "Keep going — the habit is forming."}`,
+      `A 500 calorie daily deficit = 0.5kg fat loss per week. That is 2kg per month. Small, consistent deficit beats extreme dieting every time.`,
+      `Pilchards have more omega-3 than salmon per rand spent. R12 for a tin that gives 22g protein, omega-3, calcium, and vitamin D. The real superfood is in the tin aisle at Shoprite.`,
+      `Your body does not know the difference between a gym machine and a filled water bottle. Home training builds real muscle — equipment is not an excuse.`,
+      `Dehydration drops exercise performance by 25%. If you feel tired during training, drink water before you blame your programme.`,
+      `Pap is not the enemy. Pap + pilchards + spinach = a complete meal under R20 with 25g protein. It is how you build the plate that matters.`,
+      `Cortisol from stress directly increases belly fat storage. Walking 20 minutes drops cortisol by 14%. Steps are stress management.`,
+      `Creatine monohydrate is the most studied supplement in sports science — safe, effective, and R5/day from Dis-Chem. 5g daily, every day.`,
+      `Boerewors has 25g protein per 100g but also 26g fat. Grill, do not fry. Drain the fat. Pair with salad, not rolls. Same food, better result.`,
+      `Your metabolism does not "break" from dieting. It adapts. When weight stalls, a small 100-calorie adjustment is all you need — not a crash diet.`,
+    ];
+    const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
+    const todayFact = facts[dayOfYear % facts.length];
+    const reply = `*💡 Coach K Fact of the Day*\n\n${todayFact}`;
+    await logChat(user.id, message, reply, "DAILY_FACT");
+    return reply;
+  }
+
+  // ---- WORKOUT HISTORY — "my workouts", "workout history", "workout diary" ----
+  if (m === "my workouts" || m === "workout history" || m === "workout diary" || m === "recent workouts" || /\b(workout\s*history|workout\s*diary|my\s*workouts|recent\s*workout|past\s*workout|training\s*history)\b/i.test(m)) {
+    try {
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+      const [recentWorkouts, recentLifts] = await Promise.all([
+        db.select({ date: workoutLogs.loggedAt, completed: workoutLogs.workoutCompleted })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, thirtyDaysAgo)))
+          .orderBy(desc(workoutLogs.loggedAt)),
+        db.select({ exercise: exerciseLogs.exerciseName, weight: exerciseLogs.weightKg, reps: exerciseLogs.reps, sets: exerciseLogs.sets, date: exerciseLogs.loggedAt })
+          .from(exerciseLogs)
+          .where(and(eq(exerciseLogs.userId, user.id), gte(exerciseLogs.loggedAt, thirtyDaysAgo)))
+          .orderBy(desc(exerciseLogs.loggedAt))
+          .limit(30),
+      ]);
+
+      if (recentWorkouts.length === 0) {
+        return `No workouts logged in the last 30 days. Reply *1* to see today's workout and get started.`;
+      }
+
+      const name = user.name?.split(" ")[0] || "there";
+      const totalWorkouts = user.totalWorkoutsCompleted || 0;
+      const streak = user.workoutStreak || 0;
+
+      // Group workouts by week
+      const weekMap: Record<string, number> = {};
+      for (const w of recentWorkouts) {
+        if (!w.date) continue;
+        const d = new Date(w.date);
+        const weekStart = new Date(d); weekStart.setDate(d.getDate() - d.getDay());
+        const key = weekStart.toLocaleDateString("en-ZA", { day: "numeric", month: "short" });
+        weekMap[key] = (weekMap[key] || 0) + 1;
+      }
+
+      let history = `*📋 Workout History — ${name}*\n` +
+        `_${recentWorkouts.length} sessions in last 30 days | ${totalWorkouts} all-time | Streak: ${streak}_\n\n`;
+
+      // Weekly breakdown
+      history += `*By week:*\n`;
+      for (const [week, count] of Object.entries(weekMap)) {
+        const target = user.trainingDaysPerWeek || 3;
+        const emoji = count >= target ? "✅" : count >= target - 1 ? "⚠️" : "🔴";
+        history += `• Week of ${week}: ${count}/${target} sessions ${emoji}\n`;
+      }
+
+      // Recent lifts
+      if (recentLifts.length > 0) {
+        const uniqueExercises = [...new Set(recentLifts.map(l => l.exercise))].slice(0, 5);
+        history += `\n*Recent lifts:*\n`;
+        for (const ex of uniqueExercises) {
+          const latest = recentLifts.find(l => l.exercise === ex);
+          if (latest) {
+            history += `• ${ex}: ${latest.weight}kg × ${latest.sets || 3}×${latest.reps || 10}\n`;
+          }
+        }
+      }
+
+      // Consistency check
+      const weeksTracked = Object.keys(weekMap).length;
+      const avgPerWeek = weeksTracked > 0 ? (recentWorkouts.length / weeksTracked).toFixed(1) : "0";
+      history += `\n*Average:* ${avgPerWeek} sessions/week`;
+      history += parseFloat(avgPerWeek) >= (user.trainingDaysPerWeek || 3) ? ` ✅ On target` : ` — target is ${user.trainingDaysPerWeek || 3}/week`;
+
+      await logChat(user.id, message, history, "WORKOUT_HISTORY");
+      return history;
+    } catch (err) {
+      console.error("[WORKOUT HISTORY]", err);
+      return `Could not load workout history. Try again later.`;
+    }
+  }
+
+  // ---- MOOD / STRESS CHECK-IN — "stressed", "mood", "how am I feeling" ----
+  if (m === "mood" || m === "stress" || m === "stressed" || m === "anxious" || m === "feeling down" || m === "mental health" || /\b(stress|mood|anxious|anxiety|depressed|burnt?\s*out|overwhelm|mental\s*health|feeling\s*down|feeling\s*low|not\s*coping)\b/i.test(m)) {
+    // Check if they are logging a mood score
+    const moodScore = m.match(/\b(mood|stress|feeling)\b.*?(\d)\s*(?:out of|\/)\s*(?:5|10)/i) || m.match(/\b(mood|stress)\s*(\d)\b/i);
+    if (moodScore) {
+      const score = parseInt(moodScore[2]);
+      await logChat(user.id, message, `Mood: ${score}`, "MOOD_LOG");
+      const reply = score <= 3
+        ? `Mood ${score} — noted. On hard days, a 15-minute walk outside does more for your brain than any motivational quote. Move your body even if training feels impossible today. Small action beats no action.`
+        : score <= 6
+          ? `Mood ${score} — middle ground. Your body and mind are connected. A good training session or even a walk will shift this upward. What can you do in the next 30 minutes?`
+          : `Mood ${score} — strong. Channel that energy into today's session. Good headspace = good training = good results. Let's go.`;
+      return reply;
+    }
+
+    // General stress/mood handler
+    const name = user.name?.split(" ")[0] || "";
+    const isStressed = /\b(stress|overwhelm|burnt?\s*out|not\s*coping|too\s*much)\b/i.test(m);
+    const isAnxious = /\b(anxious|anxiety|panic|worry|worried)\b/i.test(m);
+    const isLow = /\b(depress|down|low|sad|feeling\s*down|feeling\s*low)\b/i.test(m);
+
+    let moodReply = "";
+    if (isLow) {
+      moodReply = `${name ? name + ", " : ""}I hear you. Low days happen — they do not define you or your progress.\n\nThree things that help:\n1. *Walk outside* for 15 minutes — sunlight and movement shift brain chemistry\n2. *Eat protein* — low blood sugar worsens mood\n3. *Text someone you trust* — not about fitness, just connect\n\nIf this is ongoing and affecting your daily life, please reach out to SADAG (SA Depression & Anxiety Group): 0800 567 567 (free). No shame, real support.\n\nYour training and food log are still here. We continue when you are ready.`;
+    } else if (isAnxious) {
+      moodReply = `${name ? name + ", " : ""}Anxiety spikes cortisol — which blocks fat loss and kills recovery. The best counter:\n\n1. *Box breathing* — breathe in 4 counts, hold 4, out 4, hold 4. Repeat 5 times.\n2. *Walk* — 15 minutes outside, no phone\n3. *Train* — a workout burns anxiety fuel\n\nIf anxiety is persistent, SADAG helpline: 0800 567 567 (free, confidential).\n\nLog your mood: reply "mood 4/10" and I will track it over time.`;
+    } else {
+      moodReply = `${name ? name + ", " : ""}Stress is the silent killer of fitness progress. High cortisol = belly fat storage, poor sleep, muscle breakdown.\n\n*Immediate fixes:*\n1. Walk 20 minutes — drops cortisol 14%\n2. Eat before your next stressor — low blood sugar amplifies stress\n3. Sleep 7+ hours tonight — non-negotiable\n\nStress management IS part of your programme. Do not ignore it.\n\nLog your mood anytime: "mood 5/10" — I will track patterns.`;
+    }
+    await logChat(user.id, message, moodReply, "MOOD_CHECKIN");
+    return moodReply;
+  }
+
+  // ---- FASTING TRACKER — "fasting", "intermittent fasting", "IF" ----
+  if (m === "fasting" || m === "intermittent fasting" || m === "if" || m === "fasting window" || /\b(fast(?:ing)?|intermittent\s*fast|eating\s*window|16.?8|18.?6|omad|one\s*meal)\b/i.test(m)) {
+    // Check if logging fast start/end
+    const startFast = /\b(start(?:ed|ing)?\s*(?:my\s*)?fast|fasting\s*now|began?\s*fast|going\s*to\s*fast)\b/i.test(m);
+    const endFast = /\b(broke?\s*(?:my\s*)?fast|end(?:ed|ing)?\s*fast|breaking\s*fast|stopped?\s*fast|ate\s*first\s*meal)\b/i.test(m);
+
+    if (startFast) {
+      const now = new Date();
+      const timeStr = now.toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" });
+      await logChat(user.id, message, `Fast started at ${timeStr}`, "FAST_START");
+      return `Fast started at ${timeStr} ⏱️\n\nI will track it. Tell me when you break your fast — "broke my fast" — and I will log the window.\n\nDuring your fast:\n• Water, black coffee, and plain tea are fine\n• No calories — no milk, no sugar\n• If you feel dizzy or weak, break the fast immediately. Safety first.`;
+    }
+
+    if (endFast) {
+      // Find the most recent fast start
+      const recentStart = await db.select({ date: chatHistory.createdAt }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FAST_START")))
+        .orderBy(desc(chatHistory.createdAt)).limit(1);
+
+      let fastDuration = "";
+      if (recentStart.length > 0 && recentStart[0].date) {
+        const startTime = new Date(recentStart[0].date).getTime();
+        const hours = Math.round((Date.now() - startTime) / 3_600_000 * 10) / 10;
+        fastDuration = ` — *${hours} hours*`;
+        if (hours >= 16) fastDuration += ` ✅ 16:8 achieved`;
+        else if (hours >= 14) fastDuration += ` (close to 16:8 target)`;
+      }
+
+      await logChat(user.id, message, `Fast ended${fastDuration}`, "FAST_END");
+      return `Fast complete${fastDuration} 🍽️\n\nBreak your fast with protein first — eggs, chicken, or pilchards. Protein after fasting maximises muscle retention.\n\nAvoid breaking with sugar or processed carbs — blood sugar will spike and crash hard after a fast.\n\nLog your first meal now: tell me what you ate.`;
+    }
+
+    // General fasting guide
+    const goal = user.goalType || "fat_loss";
+    const name = user.name?.split(" ")[0] || "";
+    let guide = `*⏱️ Intermittent Fasting Guide${name ? ` — ${name}` : ""}*\n\n`;
+    guide += `*16:8 Protocol (recommended):*\n• Eat within an 8-hour window (e.g. 12pm–8pm)\n• Fast for 16 hours (including sleep)\n• During fast: water, black coffee, plain rooibos\n\n`;
+
+    if (goal === "fat_loss") {
+      guide += `*For fat loss:*\n• Fasting naturally reduces calories without counting\n• Train fasted for walks/cardio — eat before weights\n• Break fast with high protein meal\n\n`;
+    } else {
+      guide += `*For muscle gain:*\n• Fasting is NOT ideal for muscle gain — you need frequent protein\n• If you do fast, eat more in your window\n• Break fast with 40g+ protein\n\n`;
+    }
+
+    guide += `*Track it:*\n• Say "starting fast" → I log the start time\n• Say "broke my fast" → I calculate the window\n\n`;
+    guide += `_Fasting is a tool, not a rule. If you are hungry, eat. If you feel dizzy, eat. Never fast to the point of feeling unwell._`;
+
+    await logChat(user.id, message, guide, "FASTING_GUIDE");
+    return guide;
+  }
+
   // ---- MENU NUMBER SHORTCUTS ----
   if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
@@ -5534,6 +5715,57 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ============================================================
+  // NPS DASHBOARD — satisfaction scores summary
+  // ============================================================
+  app.get("/api/dashboard/nps", requireDashboardKey, async (_req, res) => {
+    try {
+      const npsLogs = await db.select({ messageOut: chatHistory.messageOut, date: chatHistory.createdAt })
+        .from(chatHistory)
+        .where(eq(chatHistory.intent, "NPS_RATING"))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(200);
+
+      let promoters = 0, passives = 0, detractors = 0;
+      const scores: number[] = [];
+      const recent: { score: number; date: string }[] = [];
+
+      for (const log of npsLogs) {
+        const scoreMatch = (log.messageOut || "").match(/NPS:\s*(\d+)/);
+        if (scoreMatch) {
+          const score = parseInt(scoreMatch[1]);
+          scores.push(score);
+          if (score >= 9) promoters++;
+          else if (score >= 7) passives++;
+          else detractors++;
+          if (recent.length < 10) {
+            recent.push({ score, date: log.date ? new Date(log.date).toLocaleDateString("en-ZA") : "" });
+          }
+        }
+      }
+
+      const totalResponses = scores.length;
+      const npsScore = totalResponses > 0
+        ? Math.round(((promoters - detractors) / totalResponses) * 100)
+        : 0;
+      const avgScore = totalResponses > 0
+        ? (scores.reduce((a, b) => a + b, 0) / totalResponses).toFixed(1)
+        : "0";
+
+      res.json({
+        npsScore,
+        avgScore: parseFloat(avgScore),
+        totalResponses,
+        promoters,
+        passives,
+        detractors,
+        recent,
+      });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch NPS data" });
+    }
+  });
+
+  // ============================================================
   // ESCALATION INBOX — human review queue with SLA timers
   // ============================================================
 
@@ -6504,6 +6736,17 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     </div>
   </div>
 
+  <!-- NPS SUMMARY -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#22c55e; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">NPS</span>
+        <span class="section-title" style="margin-bottom:0;">Client Satisfaction</span>
+      </div>
+      <div id="npsWrap" class="card" style="color:#4b5563; text-align:center; padding:20px;">Loading NPS data...</div>
+    </div>
+  </div>
+
   <!-- BROADCAST -->
   <div class="container">
     <div class="section">
@@ -6641,6 +6884,34 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         loadEscalations();
       } catch { alert("Error resolving"); }
     }
+
+    // ---- NPS SUMMARY ----
+    (async function loadNPS() {
+      const wrap = document.getElementById("npsWrap");
+      try {
+        const res = await fetch("/api/dashboard/nps", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        if (data.totalResponses === 0) {
+          wrap.innerHTML = '<div style="color:#4b5563;">No NPS responses yet. Clients can reply "rate" to submit feedback.</div>';
+          return;
+        }
+        const npsColor = data.npsScore >= 50 ? "#22c55e" : data.npsScore >= 0 ? "#f59e0b" : "#ef4444";
+        let recentRows = "";
+        for (const r of data.recent) {
+          const color = r.score >= 9 ? "#22c55e" : r.score >= 7 ? "#f59e0b" : "#ef4444";
+          recentRows += '<span style="display:inline-block; background:' + color + '22; color:' + color + '; border:1px solid ' + color + '44; border-radius:6px; padding:3px 8px; margin:2px; font-size:12px; font-weight:700;">' + r.score + '</span>';
+        }
+        wrap.innerHTML =
+          '<div style="display:grid; grid-template-columns:repeat(4, 1fr); gap:12px; margin-bottom:16px;">' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:' + npsColor + ';">' + data.npsScore + '</div><div style="font-size:11px; color:#6b7280;">NPS Score</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#22c55e;">' + data.promoters + '</div><div style="font-size:11px; color:#6b7280;">Promoters (9-10)</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#f59e0b;">' + data.passives + '</div><div style="font-size:11px; color:#6b7280;">Passives (7-8)</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#ef4444;">' + data.detractors + '</div><div style="font-size:11px; color:#6b7280;">Detractors (1-6)</div></div>' +
+          '</div>' +
+          '<div style="font-size:12px; color:#6b7280; margin-bottom:8px;">Avg score: ' + data.avgScore + '/10 | ' + data.totalResponses + ' total responses</div>' +
+          '<div style="font-size:11px; color:#4b5563;">Recent scores: ' + recentRows + '</div>';
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to load NPS data.</div>'; }
+    })();
 
     // ---- PINNED NEXT ACTIONS ----
     (async function loadNextActions() {
