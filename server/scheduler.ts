@@ -2176,4 +2176,201 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
       console.error("[SCHEDULER] NPS survey error:", err);
     }
   }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: WEEKLY WINS CELEBRATION (Sunday 6pm SAST = 4pm UTC)
+  // Celebrates what the client achieved this week — #1 retention driver
+  // ============================================================
+  cron.schedule("0 16 * * 0", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (hasRunToday("weekly_wins", today)) return;
+    saveState("weekly_wins", today);
+    console.log("[SCHEDULER] Running weekly wins celebration...");
+    try {
+      const allClients = await db.select().from(users)
+        .where(eq(users.onboardingState, "COMPLETE"));
+
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+      let sent = 0;
+
+      for (const client of allClients) {
+        try {
+          // Count this week's activities
+          const [workouts] = await db.select({ c: count() }).from(workoutLogs)
+            .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
+          const [stepDays] = await db.select({ c: count() }).from(stepLogs)
+            .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
+          const weights = await db.select({ weight: weightLogs.weight }).from(weightLogs)
+            .where(eq(weightLogs.userId, client.id))
+            .orderBy(desc(weightLogs.createdAt)).limit(2);
+
+          const wk = workouts.c || 0;
+          const st = stepDays.c || 0;
+          if (wk === 0 && st === 0) continue; // skip inactive clients
+
+          const name = client.name?.split(" ")[0] || "Champ";
+          const total = client.totalWorkoutsCompleted || 0;
+          const streak = client.workoutStreak || 0;
+
+          // Build wins list
+          const wins: string[] = [];
+          if (wk > 0) wins.push(`💪 ${wk} workout${wk > 1 ? "s" : ""} completed`);
+          if (st > 0) wins.push(`🚶 ${st} day${st > 1 ? "s" : ""} of steps logged`);
+          if (streak >= 3) wins.push(`🔥 ${streak}-session streak`);
+          if (total > 0 && total % 10 === 0) wins.push(`🏆 ${total} total sessions milestone`);
+
+          // Weight progress
+          if (weights.length >= 2) {
+            const diff = Number(weights[0].weight) - Number(weights[1].weight);
+            if (diff < -0.3) wins.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg this week`);
+          }
+
+          if (wins.length === 0) continue;
+
+          const msg = `*${name}, your week in review:*\n\n${wins.join("\n")}\n\n${total >= 10 ? `You have done more than most people do in a year. ${total} sessions total.` : "Every session counts. Keep stacking."}\n\nSame energy next week. Monday starts now. 💪`;
+          await sendWhatsApp(client.phoneNumber, msg);
+          sent++;
+          await new Promise(r => setTimeout(r, 200));
+          if (sent >= 200) break;
+        } catch { /* skip individual client errors */ }
+      }
+      console.log(`[SCHEDULER] Weekly wins sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Weekly wins error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: COMEBACK MESSAGE — re-engage clients silent 3-7 days
+  // Tuesday & Thursday 10am SAST = 8am UTC
+  // ============================================================
+  cron.schedule("0 8 * * 2,4", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (hasRunToday("comeback_msg", today)) return;
+    saveState("comeback_msg", today);
+    console.log("[SCHEDULER] Running comeback messages...");
+    try {
+      const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+
+      const silentClients = await db.select().from(users)
+        .where(and(
+          eq(users.onboardingState, "COMPLETE"),
+          lt(users.lastActiveAt, threeDaysAgo),
+          gte(users.lastActiveAt, sevenDaysAgo)
+        ));
+
+      const comebacks = [
+        (name: string, wk: number) => `${name}, it has been a few days. Your programme is still here waiting. ${wk > 0 ? `You were on ${wk} workouts — do not let that go.` : ""} One session today changes the trajectory. What time are you training?`,
+        (name: string, wk: number) => `${name}. No judgment. Life happens. But your goals have not changed.\n\n${wk >= 3 ? `You had a ${wk}-session streak going — that is worth protecting.` : "One workout today puts you back on track."}\n\nReply "menu" to see today's workout. That is all I am asking.`,
+        (name: string, wk: number) => `${name}, quick check — you good? Have not heard from you in a few days.\n\nYour programme is ready whenever you are. Just reply "menu" and we pick up exactly where you left off.\n\nNo reset. No guilt. Just forward.`,
+        (name: string, wk: number) => `${name}, I noticed you have been quiet. That is usually when the excuses win.\n\nBut not today. ${wk >= 5 ? `${wk} sessions done already — that is more than most people do in a month.` : "Every session counts."}\n\nReply *done* after your next workout. I will be here.`,
+      ];
+
+      let sent = 0;
+      for (const client of silentClients) {
+        const name = client.name?.split(" ")[0] || "Champ";
+        const wk = client.totalWorkoutsCompleted || 0;
+        const idx = sent % comebacks.length;
+        const msg = comebacks[idx](name, wk);
+        await sendWhatsApp(client.phoneNumber, msg);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 100) break;
+      }
+      console.log(`[SCHEDULER] Comeback messages sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Comeback error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: DAILY MOTIVATION — morning kickstart (6am SAST = 4am UTC)
+  // Only for active clients who logged something in last 3 days
+  // ============================================================
+  cron.schedule("0 4 * * 1,2,3,4,5", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (hasRunToday("daily_motivation", today)) return;
+    saveState("daily_motivation", today);
+    console.log("[SCHEDULER] Running morning motivation...");
+    try {
+      const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
+      const activeClients = await db.select().from(users)
+        .where(and(
+          eq(users.onboardingState, "COMPLETE"),
+          gte(users.lastActiveAt, threeDaysAgo)
+        ));
+
+      const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon, etc
+      const messages = [
+        [], // Sun — not scheduled
+        // Monday
+        [(name: string) => `Good morning ${name}. New week. Clean slate.\n\nYour only job today: hit your protein target and move your body. Everything else is noise.\n\nReply *menu* for today's workout.`],
+        // Tuesday
+        [(name: string) => `Morning ${name}. Day 2 of the week.\n\nConsistency beats intensity. A moderate workout done > a perfect workout skipped.\n\nWhat are you training today?`],
+        // Wednesday
+        [(name: string) => `Halfway through the week ${name}.\n\nLog what you eat today — every meal. Awareness is the first step to control.\n\nReply *menu* for your workout.`],
+        // Thursday
+        [(name: string) => `${name}, Thursday.\n\nYour body is adapting right now. The soreness, the hunger changes, the energy shifts — that is adaptation. Do not stop when the process is working.\n\nWhat is your plan for today?`],
+        // Friday
+        [(name: string) => `Friday ${name}. The weekend does not mean the plan stops.\n\nGet your workout in before tonight. Log everything you eat — even if it is braai and beers.\n\nOwnership > perfection.`],
+      ];
+
+      if (!messages[dayOfWeek] || messages[dayOfWeek].length === 0) return;
+
+      let sent = 0;
+      for (const client of activeClients) {
+        const name = client.name?.split(" ")[0] || "Champ";
+        const msgFn = messages[dayOfWeek][0];
+        const msg = msgFn(name);
+        await sendWhatsApp(client.phoneNumber, msg);
+        sent++;
+        await new Promise(r => setTimeout(r, 150));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Morning motivation sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Morning motivation error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: WEIGHT CHECK-IN REMINDER (Wednesday 7am SAST = 5am UTC)
+  // Reminds clients who haven't weighed in this week
+  // ============================================================
+  cron.schedule("0 5 * * 3", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+    if (hasRunToday("weight_reminder", today)) return;
+    saveState("weight_reminder", today);
+    console.log("[SCHEDULER] Running weight check-in reminder...");
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+      const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
+
+      // Get active clients
+      const activeClients = await db.select().from(users)
+        .where(and(
+          eq(users.onboardingState, "COMPLETE"),
+          gte(users.lastActiveAt, threeDaysAgo)
+        ));
+
+      let sent = 0;
+      for (const client of activeClients) {
+        // Check if they weighed in this week
+        const [recent] = await db.select({ c: count() }).from(weightLogs)
+          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.createdAt, sevenDaysAgo)));
+        if ((recent.c || 0) > 0) continue; // already weighed in
+
+        const name = client.name?.split(" ")[0] || "there";
+        const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\nSend me the number: "84.5kg"\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
+        await sendWhatsApp(client.phoneNumber, msg);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 150) break;
+      }
+      console.log(`[SCHEDULER] Weight reminders sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Weight reminder error:", err);
+    }
+  }, { timezone: "UTC" });
 }
