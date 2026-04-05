@@ -276,6 +276,13 @@ function scanForSAFoods(msg: string): SAFood[] {
     "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
     "Boerewors roll": ["Boerewors", "Brown bread", "White bread"],
     "Peanut butter on bread": ["Peanut butter", "Peanut butter (smooth)", "Brown bread", "White bread"],
+    "Chicken and pap": ["Chicken breast", "Chicken thigh", "Pap (stiff maize porridge)"],
+    "Fish and chips": ["Hake (frozen, battered)", "Chips (slap chips)"],
+    "Pap and pilchards": ["Pap (stiff maize porridge)", "Pilchards in tomato sauce"],
+    "Rice and beans": ["Brown rice", "White rice", "Sugar beans"],
+    "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
+    "Vetkoek with mince": ["Vetkoek", "Beef mince"],
+    "Cereal with milk": ["Corn Flakes", "Full cream milk"],
   };
 
   const comboNames = matched.filter(f => COMBO_OVERRIDES[f.name]).map(f => f.name);
@@ -2156,8 +2163,10 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
+  // Also catches direct food names: "bolognaise", "2 eggs", "oats with milk"
   const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
-  if (!isQuestion && !isFrustration && (hasLogTrigger || isShortFoodMsg)) {
+  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && m.split(/\s+/).length <= 8 && scanForSAFoods(m).length > 0;
+  if (!isQuestion && !isFrustration && (hasLogTrigger || isShortFoodMsg || directFoodScan)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
     //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
