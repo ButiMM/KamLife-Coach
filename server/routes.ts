@@ -153,7 +153,8 @@ async function getStepStreak(userId: string): Promise<number> {
 }
 
 // ============================================================
-// SA FOOD SCANNER — in-memory match against 40 SA foods
+// SA FOOD SCANNER — in-memory match against 414 SA foods
+// with fuzzy matching for misspellings & typos
 // ============================================================
 
 // Escape special regex characters in alias strings
@@ -161,19 +162,87 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// Levenshtein edit distance — how many character changes to turn a into b
+function levenshtein(a: string, b: string): number {
+  const la = a.length, lb = b.length;
+  if (la === 0) return lb;
+  if (lb === 0) return la;
+  const dp: number[][] = Array.from({ length: la + 1 }, () => Array(lb + 1).fill(0));
+  for (let i = 0; i <= la; i++) dp[i][0] = i;
+  for (let j = 0; j <= lb; j++) dp[0][j] = j;
+  for (let i = 1; i <= la; i++) {
+    for (let j = 1; j <= lb; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      dp[i][j] = Math.min(
+        dp[i - 1][j] + 1,      // deletion
+        dp[i][j - 1] + 1,      // insertion
+        dp[i - 1][j - 1] + cost // substitution
+      );
+    }
+  }
+  return dp[la][lb];
+}
+
+// Max edit distance allowed based on word length
+function maxDistance(wordLen: number): number {
+  if (wordLen <= 3) return 0;  // too short — exact only (egg, pap, tea)
+  if (wordLen <= 5) return 1;  // rice, bread, steak — 1 typo
+  if (wordLen <= 8) return 2;  // chicken, pilchards — 2 typos
+  return 3;                     // boerewors, butternut — 3 typos
+}
+
 function scanForSAFoods(msg: string): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
+
+  // PASS 1: Exact word-boundary matching (fast, preferred)
   for (const food of SA_FOODS_SEED) {
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
-    // Use word-boundary matching to prevent short aliases from matching inside longer words
-    // e.g. "pap" should not match "papaya", "bean" should not match "beansprout"
     const hit = allAliases.some(alias => {
       const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
       return re.test(lower);
     });
     if (hit && !matched.find(f => f.name === food.name)) matched.push(food);
   }
+
+  // PASS 2: Fuzzy matching for misspellings (only if exact didn't catch it)
+  // Split message into words and check each against all food aliases
+  const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4);
+
+  // Also check 2-word and 3-word combos for multi-word foods like "corn flakes", "peanut butter"
+  const combos: string[] = [...words];
+  const rawWords = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 2);
+  for (let i = 0; i < rawWords.length - 1; i++) {
+    combos.push(rawWords[i] + " " + rawWords[i + 1]);
+    if (i < rawWords.length - 2) {
+      combos.push(rawWords[i] + " " + rawWords[i + 1] + " " + rawWords[i + 2]);
+    }
+  }
+
+  for (const food of SA_FOODS_SEED) {
+    if (matched.find(f => f.name === food.name)) continue; // already matched exactly
+    const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
+
+    let bestScore = Infinity;
+    for (const combo of combos) {
+      for (const alias of allAliases) {
+        // For single-word aliases, compare against single words
+        // For multi-word aliases, compare against combos
+        const aliasWords = alias.split(/\s+/);
+        if (aliasWords.length === 1 && combo.includes(" ")) continue;
+
+        const dist = levenshtein(combo, alias);
+        const allowed = maxDistance(alias.length);
+        if (dist <= allowed && dist < bestScore) {
+          bestScore = dist;
+        }
+      }
+    }
+    if (bestScore < Infinity && !matched.find(f => f.name === food.name)) {
+      matched.push(food);
+    }
+  }
+
   return matched;
 }
 
@@ -1853,11 +1922,46 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- COMMAND INTERCEPT — "log the meal", "log this", "save this", "log it" ----
-  // These are commands, not food entries — redirect to food diary summary
+  // If user says "log it" / "sis you log it?" etc., check if the last message contained food
+  // that wasn't logged, and re-process it as a food entry
   const isLogCommand =
-    /^(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i.test(m.trim());
+    /\b(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*log|can\s*you\s*log|you\s*log\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i.test(m.trim());
 
   if (isLogCommand) {
+    // Check if the previous message had food that wasn't logged — re-process it
+    try {
+      const recentChats = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent })
+        .from(chatHistory)
+        .where(eq(chatHistory.userId, user.id))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(3);
+      const lastUnloggedFood = recentChats.find(c => c.intent !== "FOOD_LOG" && c.messageIn);
+      if (lastUnloggedFood) {
+        const foodsInLastMsg = scanForSAFoods(lastUnloggedFood.messageIn || "");
+        if (foodsInLastMsg.length > 0) {
+          // Re-process the last message as food
+          let totalCals = 0; let totalProt2 = 0;
+          const parts: string[] = [];
+          for (const food of foodsInLastMsg) {
+            totalCals += food.typicalPortionCalories || 0;
+            totalProt2 += food.typicalPortionProtein || 0;
+            parts.push(`${food.name} — ${food.typicalPortionCalories} kcal | ${food.typicalPortionProtein}g protein`);
+          }
+          await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
+          // Update daily totals
+          const todayStr3 = sastToday();
+          const prevCals = user.todayCaloriesDate === todayStr3 ? (user.todayCalories || 0) : 0;
+          const prevProt = user.todayCaloriesDate === todayStr3 ? (user.todayProteinG || 0) : 0;
+          await db.update(users).set({
+            todayCalories: prevCals + totalCals,
+            todayProteinG: prevProt + totalProt2,
+            todayCaloriesDate: todayStr3,
+          }).where(eq(users.phoneNumber, phone));
+          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${prevCals + totalCals} kcal | ${prevProt + totalProt2}g protein_`;
+        }
+      }
+    } catch { /* non-fatal — fall through to summary */ }
+
     const todayStart2 = new Date(); todayStart2.setHours(0, 0, 0, 0);
     const todayLogs = await db.select({ messageIn: chatHistory.messageIn })
       .from(chatHistory)
