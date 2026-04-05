@@ -752,12 +752,37 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), sugar beans (8g per 100g cooked).`;
   }
 
-  if (/\b(streak|my streak|workout streak|current streak)\b/i.test(m)) {
+  if (/\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m)) {
     const streak = user.workoutStreak || 0;
     const total = user.totalWorkoutsCompleted || 0;
-    if (streak === 0 && total === 0) return `No sessions logged yet. Do your first workout and reply *done* — that starts the streak.`;
-    if (streak === 0) return `Streak is at 0 — last session was more than 2 days ago. ${total} total sessions completed. Start a new one today.`;
-    return `Current streak: *${streak} session${streak !== 1 ? "s" : ""}* in a row.\n\nTotal sessions with Coach K: ${total}. ${streak >= 7 ? "Don't stop now." : "Keep building."}`;
+    const target = user.trainingDaysPerWeek || 3;
+
+    // Calculate 7-day consistency — more motivating than a hard reset
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const [weekResult] = await db.select({ c: count() }).from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
+      const weekWorkouts = weekResult.c || 0;
+      const pct = Math.min(100, Math.round((weekWorkouts / target) * 100));
+
+      if (total === 0) return `No sessions logged yet. Do your first workout and reply *done* — that starts the streak.`;
+
+      const lines = [`*Your consistency:*`];
+      lines.push(`\n📊 This week: ${weekWorkouts} of ${target} sessions (${pct}%)`);
+      if (streak > 0) lines.push(`🔥 Current streak: ${streak} in a row`);
+      lines.push(`💪 Total sessions: ${total}`);
+
+      if (pct >= 80) lines.push(`\nYou are consistent. That is the only thing that matters.`);
+      else if (pct >= 50) lines.push(`\nGood week so far. ${target - weekWorkouts} session${target - weekWorkouts > 1 ? "s" : ""} left to hit your target.`);
+      else if (weekWorkouts > 0) lines.push(`\n${weekWorkouts} done, ${target - weekWorkouts} to go. Still time to hit your target this week.`);
+      else lines.push(`\nNo sessions this week yet. Reply *today* and let's fix that.`);
+
+      return lines.join("\n");
+    } catch {
+      // Fallback to basic streak
+      if (streak === 0) return `Streak at 0. ${total} total sessions. Start a new one today — reply *today* for your workout.`;
+      return `Current streak: *${streak}* in a row. Total: ${total}. Keep building.`;
+    }
   }
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
@@ -2088,14 +2113,25 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // BUT they are protected by isQuestion + isFrustration guards upstream
   const hasLogTrigger = /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had)\b/.test(m);
 
-  // ---- BRAAI GUIDE — SA-specific outdoor cooking coaching ----
-  if ((m.includes("braai") || m.includes("braaing") || m.includes("braaiing")) && !isQuestion && !isFrustration) {
+  // ---- BRAAI / SOCIAL EVENT GUIDE — SA-specific coaching ----
+  const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
+  if (hasSocialEventKeyword && !isQuestion && !isFrustration) {
     const goal = user.goalType || "fat_loss";
-    const braaiReply = goal === "muscle_gain"
-      ? `*Braai Protocol — Muscle Mode* 🔥\n\n• Chicken pieces: BEST — 28g protein each, skin off after cooking\n• Wors: 1-2 rolls (20-30g protein) ✅ Keep it\n• Boerewors chops: high fat but solid protein — 1 portion\n• Pap + sous: fine — keep butter small\n• Potato salad: small portion or skip\n\n*Your plate:* 3 chicken pieces + 1 wors + small pap = ~750 kcal, ~55g protein. Sorted.\n\nDrink: Water first. Max 2 beers — after food, not before.`
-      : `*Braai Protocol — Fat Loss Mode* 🔥\n\n• Chicken pieces: BEST option — remove skin, 165 kcal, 28g protein each\n• Wors: 1 roll max — not every braai\n• Pap: small portion, no extra butter\n• Potato salad, coleslaw: skip — not worth the calories\n• Braai broodjie: 1 is fine. 3 is not.\n\n*Your plate:* 2-3 chicken pieces + small pap + salad = ~550 kcal, ~45g protein. Win.\n\n⚠️ Beers are the silent killer at braais — 1 Castle = 150 kcal, nobody has just one. Water between drinks minimum.`;
-    await logChat(user.id, message, braaiReply, "FOOD_LOG");
-    return braaiReply;
+    const name = user.name?.split(" ")[0] || "";
+    const isBraai = /braai/i.test(m);
+
+    let eventReply = "";
+    if (isBraai) {
+      eventReply = goal === "muscle_gain"
+        ? `*Braai Protocol — Muscle Mode* 🔥\n\n• Chicken pieces: BEST — 28g protein each, skin off after cooking\n• Wors: 1-2 rolls (20-30g protein) ✅ Keep it\n• Boerewors chops: high fat but solid protein — 1 portion\n• Pap + sous: fine — keep butter small\n• Potato salad: small portion or skip\n\n*Your plate:* 3 chicken pieces + 1 wors + small pap = ~750 kcal, ~55g protein. Sorted.\n\nDrink: Water first. Max 2 beers — after food, not before.`
+        : `*Braai Protocol — Fat Loss Mode* 🔥\n\n• Chicken pieces: BEST option — remove skin, 165 kcal, 28g protein each\n• Wors: 1 roll max — not every braai\n• Pap: small portion, no extra butter\n• Potato salad, coleslaw: skip — not worth the calories\n• Braai broodjie: 1 is fine. 3 is not.\n\n*Your plate:* 2-3 chicken pieces + small pap + salad = ~550 kcal, ~45g protein. Win.\n\n⚠️ Beers are the silent killer at braais — 1 Castle = 150 kcal, nobody has just one. Water between drinks minimum.`;
+    } else {
+      eventReply = `*Social Event Strategy* 🎉\n\n${name ? name + ", " : ""}Go. Enjoy. Do not avoid social events because of your plan.\n\n*Before:*\n• Eat a high-protein meal before you go — 2 eggs, chicken, pilchards\n• This kills hunger so you are not eating everything in sight\n\n*During:*\n• Plate protein FIRST — chicken, meat, fish\n• One plate, not three. Serve yourself once.\n• Water between drinks. Every time.\n• ${goal === "fat_loss" ? "Skip the starch if you can — focus on meat and salad" : "Eat the starch — you need the fuel. Just one serving."}\n\n*After:*\n• Log what you ate tomorrow morning — I will be here\n• No guilt. One event does not undo weeks of work\n• Back on plan the next meal. Not Monday. The next meal.`;
+    }
+
+    eventReply += `\n\n_Send me what you ate tomorrow morning — no judgment, just logging. I will help you get back on track._`;
+    await logChat(user.id, message, eventReply, "FOOD_LOG");
+    return eventReply;
   }
 
   // ---- EATING OUT GUIDE — SA fast food and restaurant coaching ----
@@ -2356,7 +2392,22 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}`;
+      // Smart protein suggestion based on remaining protein target
+      let proteinTip = "";
+      const protRemaining = (user.proteinTarget || 120) - runningProtein;
+      if (protRemaining > 40 && calRemaining > 200) {
+        const suggestions = [
+          `Add pilchards (22g protein, R12) to your next meal.`,
+          `2 boiled eggs = 12g protein. Quick win.`,
+          `Tin of tuna = 25g protein. Easy add.`,
+          `Greek yogurt = 10g protein. Good snack option.`,
+        ];
+        proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
+      } else if (protRemaining <= 0) {
+        proteinTip = `\n\nProtein target hit. ✅`;
+      }
+
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}`;
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
       // If steps were also logged from same message, combine both replies

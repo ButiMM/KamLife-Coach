@@ -285,6 +285,33 @@ async function runMorningCheckin(): Promise<void> {
         }
       }
 
+      // ---- ONE-TAP REPEAT LOGGING ----
+      // Find user's most common breakfast from last 7 days of food logs
+      let repeatSuggestion = "";
+      try {
+        const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+        const recentFoods = await db.select({ messageIn: chatHistory.messageIn })
+          .from(chatHistory)
+          .where(and(
+            eq(chatHistory.userId, client.id),
+            eq(chatHistory.intent, "FOOD_LOG"),
+            gte(chatHistory.createdAt, weekAgo)
+          ))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(14);
+
+        // Find a recent breakfast or first meal of the day
+        const breakfastLog = recentFoods.find(l =>
+          l.messageIn && /\b(breakfast|morning|oats|eggs?|cereal|toast|bread)\b/i.test(l.messageIn)
+        );
+        if (breakfastLog && breakfastLog.messageIn) {
+          const meal = breakfastLog.messageIn.replace(/\b(for breakfast|breakfast was|this morning|had|ate|eating|having|i |my )\b/gi, "").trim();
+          if (meal.length > 3 && meal.length < 60) {
+            repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${meal.slice(0, 50)}"* to log it instantly.`;
+          }
+        }
+      } catch { /* non-critical */ }
+
       // End with one specific action — include training nudge if today is a training day
       const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
       const isTodayTrainingDay = schedule.includes(todayDOW);
@@ -296,6 +323,9 @@ async function runMorningCheckin(): Promise<void> {
       } else {
         parts.push(`Rest day today. Stay on food and steps.`);
       }
+
+      // Append one-tap repeat suggestion if available
+      if (repeatSuggestion) parts.push(repeatSuggestion);
 
       if (canSendProactive(client.id)) {
         await sendWhatsApp(phone, parts.join(" "));
@@ -2373,4 +2403,295 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
       console.error("[SCHEDULER] Weight reminder error:", err);
     }
   }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: MONDAY PROGRESS SUMMARY (Monday 7am SAST = 5am UTC)
+  // The "proof of progress" message — specific numbers, personal, 3 lines
+  // This is the #1 retention lever: makes people feel SEEN
+  // ============================================================
+  cron.schedule("0 5 * * 1", async () => {
+    const today = todaySAST();
+    if (loadState()["monday_progress"] === today) return;
+    saveState("monday_progress", today);
+    console.log("[SCHEDULER] Running Monday progress summary...");
+    try {
+      const clients = await getActiveClients();
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      let sent = 0;
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+        if (client.lastActiveAt && new Date(client.lastActiveAt) < threeDaysAgo) continue;
+        if (!canSendProactive(client.id)) continue;
+
+        try {
+          const name = client.name?.split(" ")[0] || "Champ";
+
+          // Count workouts this week
+          const [wk] = await db.select({ c: count() }).from(workoutLogs)
+            .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
+          const workouts = wk.c || 0;
+
+          // Count food logs this week
+          const [fl] = await db.select({ c: count() }).from(chatHistory)
+            .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+          const foodLogs = fl.c || 0;
+
+          // Count step log days this week
+          const [sl] = await db.select({ c: count() }).from(stepLogs)
+            .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
+          const stepDays = sl.c || 0;
+
+          // Weight change this week
+          const weights = await db.select({ weight: weightLogs.weight, createdAt: weightLogs.createdAt })
+            .from(weightLogs)
+            .where(eq(weightLogs.userId, client.id))
+            .orderBy(desc(weightLogs.createdAt)).limit(2);
+
+          // Calculate protein average from food logs
+          let proteinTotal = 0; let proteinMeals = 0;
+          const weekFoodLogs = await db.select({ messageOut: chatHistory.messageOut })
+            .from(chatHistory)
+            .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+          for (const log of weekFoodLogs) {
+            const pm = (log.messageOut || "").match(/(\d{1,4})\s*g\s*(?:of\s+)?protein/i);
+            if (pm) { proteinTotal += parseInt(pm[1]); proteinMeals++; }
+          }
+
+          if (workouts === 0 && foodLogs === 0 && stepDays === 0) continue; // skip fully inactive
+
+          // Build the 3-line progress message
+          const lines: string[] = [`*${name}, your week:*`];
+
+          // Line 1: What improved or was consistent
+          if (workouts >= 3) {
+            lines.push(`💪 ${workouts} workouts — that is consistency. ${client.totalWorkoutsCompleted || 0} total sessions.`);
+          } else if (workouts > 0) {
+            lines.push(`💪 ${workouts} workout${workouts > 1 ? "s" : ""} done. Target: ${client.trainingDaysPerWeek || 3} per week.`);
+          }
+
+          if (foodLogs >= 10) {
+            lines.push(`🍽️ ${foodLogs} meals tracked — you are logging consistently.`);
+          } else if (foodLogs > 0) {
+            lines.push(`🍽️ ${foodLogs} meals logged. More logging = better coaching from me.`);
+          }
+
+          if (stepDays >= 4) {
+            lines.push(`🚶 Steps logged ${stepDays} days — keep the movement up.`);
+          }
+
+          // Line 2: Weight progress (if available)
+          if (weights.length >= 2) {
+            const diff = Number(weights[0].weight) - Number(weights[1].weight);
+            const goal = client.goalType || "fat_loss";
+            if (diff < -0.3 && (goal === "fat_loss" || goal === "recomp")) {
+              lines.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg. Moving in the right direction.`);
+            } else if (diff > 0.3 && goal === "muscle_gain") {
+              lines.push(`⚖️ Up ${diff.toFixed(1)}kg — good for muscle gain. Track lifts to confirm strength is going up.`);
+            } else if (diff > 0.5 && goal === "fat_loss") {
+              lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week. Not a disaster — check water, sodium, and food volume.`);
+            }
+          }
+
+          // Protein average
+          if (proteinMeals >= 3) {
+            const avg = Math.round(proteinTotal / proteinMeals);
+            const target = client.proteinTarget || 120;
+            if (avg >= target * 0.9) {
+              lines.push(`🥩 Protein averaging ~${avg}g per logged meal — on target.`);
+            } else {
+              lines.push(`🥩 Protein averaging ~${avg}g — target is ${target}g. Add eggs or pilchards to every meal.`);
+            }
+          }
+
+          // Line 3: One focus for this week
+          if (workouts === 0) {
+            lines.push(`\n*This week's focus:* Get one workout done. Just one. Reply *today* for your session.`);
+          } else if (foodLogs < 5) {
+            lines.push(`\n*This week's focus:* Log every meal. I cannot coach what I cannot see.`);
+          } else {
+            lines.push(`\n*This week's focus:* Keep the same energy. Consistency is the only strategy that works.`);
+          }
+
+          await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+          recordProactiveSend(client.id);
+          sent++;
+          await new Promise(r => setTimeout(r, 200));
+          if (sent >= 200) break;
+        } catch { /* skip individual errors */ }
+      }
+      console.log(`[SCHEDULER] Monday progress summaries sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Monday progress error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: REST DAY MICRO-TIPS (daily 10am SAST = 8am UTC)
+  // On non-training days, send one actionable SA-specific health tip
+  // Fills the engagement gap — 7 touchpoints/week instead of 3
+  // ============================================================
+  cron.schedule("0 8 * * *", async () => {
+    const today = todaySAST();
+    if (loadState()["rest_tips"] === today) return;
+    saveState("rest_tips", today);
+    console.log("[SCHEDULER] Running rest day tips...");
+
+    const REST_TIPS = [
+      `💡 *Cheapest high-protein foods at Shoprite this week:*\n\n1. Eggs 6-pack — R22 (36g protein)\n2. Pilchards tin — R12 (22g protein)\n3. Sugar beans 500g — R20 (43g protein dry)\n4. Frozen chicken quarters 1kg — R40 (60g protein)\n\nR94 total. That is 4 days of protein covered.`,
+      `💡 *Reading food labels — the SA cheat sheet:*\n\nLook at "per 100g" column, not "per serving" (servings are rigged).\n\n✅ Protein >10g per 100g = good source\n⚠️ Sugar >15g per 100g = too sweet\n❌ Fat >20g per 100g = heavy\n\nThat "healthy" yogurt? Check the sugar. Most SA yogurts have 15-20g sugar per 100g. Rather eat plain yogurt with honey.`,
+      `💡 *Your taxi commute counts:*\n\nWalking to the taxi rank: ~100 steps per minute\nStanding at the rank: burns 50% more calories than sitting\nWalking from taxi to work: more steps\n\nA 15-minute walk each way = 3,000 steps done before your day even starts.\n\nLog it: "3000 steps"`,
+      `💡 *Water hack for SA heat:*\n\nKeep a 2L bottle visible on your desk or counter. Goal: finish it by 4pm.\n\n2L = your daily minimum.\nTraining day? Add another 500ml.\nHot day (30°C+)? Add another 500ml.\n\nDehydration kills performance and makes you think you are hungry when you are just thirsty.`,
+      `💡 *The pap upgrade:*\n\nPlain pap = 120 kcal, 2g protein per cup. Just carbs.\n\n*Make it work:*\n• Add an egg INTO the pap while cooking = +6g protein\n• Serve with pilchards instead of gravy = +22g protein\n• Add a spoon of peanut butter = +7g protein\n\nPap is not bad. Pap with no protein source is the problem.`,
+      `💡 *Sleep and fat loss:*\n\nLess than 6 hours sleep = your body holds onto fat 55% more.\n\nIt is not about willpower. Your hormones change:\n• Ghrelin (hunger) goes UP\n• Leptin (fullness) goes DOWN\n• Cortisol (stress/fat storage) goes UP\n\nSleep is not lazy. Sleep is recovery. Target 7 hours minimum.`,
+      `💡 *Meal prep Sunday — 1 hour, 5 days sorted:*\n\nBatch cook these:\n1. 1kg chicken thighs — season with Aromat, bake 40 min\n2. 2 cups dry rice — cook and portion into 5 containers\n3. 1 bag frozen mixed veg — steam 10 min\n\nTotal cost: ~R80. That is 5 lunches at ~400 kcal, 35g protein each.\n\nReply *meal prep* for the full guide.`,
+      `💡 *The braai-day strategy:*\n\nBraai is not the enemy. The extras are.\n\n✅ 3 chicken pieces (skin off after cooking) = 500 kcal, 84g protein\n⚠️ Add 1 boerewors roll = +350 kcal\n❌ Add 3 beers = +450 kcal\n❌ Add potato salad + braai broodjie = +600 kcal\n\nThe chicken alone? Great meal. The chicken + everything? Full day's calories in one sitting.`,
+      `💡 *Why the scale lies:*\n\nYour weight can fluctuate 1-2kg in a single day from:\n• Water retention (salty food, period, creatine)\n• Food in your stomach (undigested)\n• Glycogen (carb storage in muscles)\n\nWeigh yourself once a week, same time, same conditions. The *trend* over 4 weeks is what matters, not any single number.`,
+      `💡 *Fast food survival guide:*\n\nBest protein-per-rand at SA fast food:\n\n1. KFC 2-piece original = 32g protein, ~R50\n2. Nando's quarter chicken = 35g protein, ~R65\n3. Steers beef burger (no chips) = 35g protein, ~R55\n\nWorst: any combo meal with large chips + cooldrink. That is an extra 600-800 kcal you did not need.\n\nOrder protein only. Skip the combo.`,
+    ];
+
+    try {
+      const clients = await getActiveClients();
+      const todayDOW = new Date().getDay();
+      let sent = 0;
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+        if (client.lastActiveAt && new Date(client.lastActiveAt) < threeDaysAgo) continue;
+        if (!canSendProactive(client.id)) continue;
+
+        // Only send on REST days for this client
+        const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+        if (schedule.includes(todayDOW)) continue; // training day — skip
+
+        // Pick tip based on day of year for variety
+        const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
+        const tipIdx = dayOfYear % REST_TIPS.length;
+        const tip = REST_TIPS[tipIdx];
+
+        await sendWhatsApp(client.phoneNumber, tip);
+        recordProactiveSend(client.id);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Rest day tips sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Rest day tips error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: PAYDAY MEAL PREP SEQUENCE (18th, 19th, 20th of month)
+  // 3-message sequence: shopping list → prep instructions → daily breakdown
+  // The feature that makes R99 pay for itself
+  // ============================================================
+
+  // Day 1: Shopping list (18th, 9am SAST = 7am UTC)
+  cron.schedule("0 7 18 * *", async () => {
+    const today = todaySAST();
+    if (loadState()["payday_prep_1"] === today) return;
+    saveState("payday_prep_1", today);
+    console.log("[SCHEDULER] Payday prep Day 1: Shopping list...");
+    try {
+      const clients = await getActiveClients();
+      let sent = 0;
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!canSendProactive(client.id)) continue;
+        const name = client.name?.split(" ")[0] || "there";
+        const budget = client.weeklyFoodBudget || "100_300";
+        const goal = client.goalType || "fat_loss";
+
+        let msg = "";
+        if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R95 protein-first grocery list:\n\n*Proteins (buy FIRST):*\n☐ Eggs 12-pack — R45\n☐ Pilchards 3 tins — R36\n☐ Sugar beans 500g — R14\n\n*Carbs + Veg:*\n☐ Pap 2.5kg — R18\n☐ Onions 1kg — R10\n☐ Cabbage head — R8\n\n*Total: ~R131*\nThis covers protein for 7 days. ${goal === "fat_loss" ? "Eat smaller portions of pap, bigger portions of beans and eggs." : "Eat full portions — you need the fuel."}\n\n_Tomorrow I send the prep plan. Buy today or this weekend._`;
+        } else if (budget === "100_300") {
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R250 balanced grocery list:\n\n*Proteins (buy FIRST):*\n☐ Frozen chicken quarters 2kg — R80\n☐ Eggs 18-pack — R55\n☐ Pilchards 4 tins — R48\n☐ Sugar beans 500g — R14\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Pap 2.5kg — R18\n☐ Sweet potato 1kg — R12\n☐ Brown bread — R16\n\n*Vegetables:*\n☐ Frozen mixed veg 1kg — R25\n☐ Spinach bunch — R10\n☐ Tomatoes 1kg — R15\n☐ Onions 1kg — R10\n\n*Total: ~R321*\n${goal === "muscle_gain" ? "Protein is king. Eat chicken at every main meal." : "Split chicken into 8 portions — 2 per day for 4 days."}\n\n_Tomorrow I send the batch cooking plan._`;
+        } else {
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R400+ performance grocery list:\n\n*Proteins:*\n☐ Chicken breast 1.5kg — R120\n☐ Lean beef mince 500g — R55\n☐ Eggs 18-pack — R55\n☐ Greek yogurt 500g — R45\n☐ Tuna 3 tins — R54\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Sweet potato 2kg — R24\n☐ Oats 1kg — R25\n☐ Brown bread — R16\n\n*Vegetables + Extras:*\n☐ Broccoli 500g — R20\n☐ Spinach bunch — R10\n☐ Avocado 3-pack — R25\n☐ Banana bunch — R12\n☐ Peanut butter 400g — R32\n\n*Total: ~R511*\n\n_Tomorrow: the batch cooking plan that turns this into 20+ meals._`;
+        }
+
+        await sendWhatsApp(client.phoneNumber, msg);
+        recordProactiveSend(client.id);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Payday prep Day 1 sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Payday prep 1 error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // Day 2: Batch cooking instructions (19th, 9am SAST = 7am UTC)
+  cron.schedule("0 7 19 * *", async () => {
+    const today = todaySAST();
+    if (loadState()["payday_prep_2"] === today) return;
+    saveState("payday_prep_2", today);
+    console.log("[SCHEDULER] Payday prep Day 2: Cooking plan...");
+    try {
+      const clients = await getActiveClients();
+      let sent = 0;
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!canSendProactive(client.id)) continue;
+        const name = client.name?.split(" ")[0] || "there";
+        const budget = client.weeklyFoodBudget || "100_300";
+
+        let msg = "";
+        if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
+          msg = `*${name}, Batch Cook Plan — 1 hour, 5 days sorted* 🍳\n\n*Step 1 (10 min):* Boil 6 eggs. Store in fridge.\n*Step 2 (5 min):* Open 2 tins pilchards, portion into 2 containers.\n*Step 3 (15 min):* Cook sugar beans — soak overnight, boil 1 hour (or use pressure cooker 20 min). Portion into 3 containers.\n*Step 4 (20 min):* Cook pap for 2 days. Store covered.\n\n*Daily plan:*\n🌅 Breakfast: 2 boiled eggs + slice bread\n🌞 Lunch: Pap + pilchards\n🌙 Dinner: Pap + sugar beans + fried onion\n\n*~1,200 kcal | ~75g protein per day*\n\nNot fancy. But it works. Tomorrow I send the day-by-day breakdown.`;
+        } else {
+          msg = `*${name}, Sunday Batch Cook — 1.5 hours, done for the week* 🍳\n\n*Step 1 (40 min):* Season chicken with Aromat + paprika. Bake at 180°C for 40 min. Portion into 5-6 meals.\n*Step 2 (20 min):* Cook 2 cups dry rice. Portion into 5 containers.\n*Step 3 (10 min):* Steam frozen mixed veg. Add to each container.\n*Step 4 (10 min):* Boil 6 eggs for grab-and-go snacks.\n*Step 5 (5 min):* Portion sugar beans into 3 containers for dinners.\n\n*Daily plan:*\n🌅 Breakfast: 2 eggs + toast OR oats with milk\n🌞 Lunch: Chicken + rice + veg (prepped container)\n🌙 Dinner: Pilchards/beans + pap + spinach\n🍎 Snack: Boiled egg or peanut butter on bread\n\n*~1,600-1,800 kcal | ~120g protein per day*\n\nPrep once. Eat clean all week. Tomorrow I send the exact daily breakdown.`;
+        }
+
+        await sendWhatsApp(client.phoneNumber, msg);
+        recordProactiveSend(client.id);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Payday prep Day 2 sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Payday prep 2 error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // Day 3: Daily breakdown (20th, 9am SAST = 7am UTC)
+  cron.schedule("0 7 20 * *", async () => {
+    const today = todaySAST();
+    if (loadState()["payday_prep_3"] === today) return;
+    saveState("payday_prep_3", today);
+    console.log("[SCHEDULER] Payday prep Day 3: Daily breakdown...");
+    try {
+      const clients = await getActiveClients();
+      let sent = 0;
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!canSendProactive(client.id)) continue;
+        const name = client.name?.split(" ")[0] || "there";
+        const goal = client.goalType || "fat_loss";
+        const calTarget = client.calorieTarget || 1800;
+        const protTarget = client.proteinTarget || 120;
+
+        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n2 eggs + 1 slice toast = ~250 kcal, 14g protein\n\n*🌞 Lunch (1pm):*\nChicken + rice + veg = ~450 kcal, 35g protein\n\n*🌙 Dinner (7pm):*\nPap + pilchards OR beans = ~400 kcal, 25g protein\n\n*🍎 Snack (if needed):*\nPeanut butter on bread OR boiled egg = ~200 kcal, 8g protein\n\n*Daily total: ~1,300 kcal | ~82g protein*\n${calTarget > 1500 ? `\nYour target is ${calTarget} kcal — add bigger portions at lunch and dinner to close the gap.` : `\nYour target is ${calTarget} kcal — this keeps you in a deficit. ${goal === "fat_loss" ? "Exactly where you want to be." : ""}`}\n\nLog every meal this week. Just send what you eat — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R99 subscription. That is the goal._`;
+
+        await sendWhatsApp(client.phoneNumber, msg);
+        recordProactiveSend(client.id);
+        sent++;
+        await new Promise(r => setTimeout(r, 200));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Payday prep Day 3 sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Payday prep 3 error:", err);
+    }
+  }, { timezone: "UTC" });
+
 }
