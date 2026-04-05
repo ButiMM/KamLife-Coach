@@ -682,6 +682,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
   }
 
+  // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
+  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal)\b/i.test(m)) {
+    await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    return `Calories reset to 0 for today. ✅\n\nYour food log history is kept — only today's running total was cleared. Start logging again from here.`;
+  }
+
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
@@ -694,9 +700,25 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
-    const todayStr2 = sastToday();
-    const todayCals = (user.todayCaloriesDate === todayStr2) ? (user.todayCalories || 0) : 0;
-    const todayProt = (user.todayCaloriesDate === todayStr2) ? (user.todayProteinG || 0) : 0;
+    // ALWAYS recalculate from actual food logs — never trust stored counter (can get corrupted)
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
+    let todayCals = 0; let todayProt = 0;
+    for (const log of todayFoodLogs) {
+      const matched = scanForSAFoods(log.messageIn || "");
+      if (matched.length > 0) {
+        todayCals += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
+        todayProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
+      } else {
+        // Fallback: extract from GPT response
+        const calMatch = (log.messageOut || "").match(/~?(\d+)\s*kcal/i);
+        const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
+        if (calMatch) todayCals += parseInt(calMatch[1]);
+        if (protMatch) todayProt += parseInt(protMatch[1]);
+      }
+    }
     const remaining = cal - todayCals;
     const protRemaining = prot - todayProt;
     if (todayCals > 0) {
@@ -7963,6 +7985,139 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
           '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; text-transform:uppercase; border-bottom:2px solid #374151;">Detail</th>' +
           '</tr></thead><tbody>' + eventRows + '</tbody></table>';
       } catch { summary.innerHTML = '<div style="color:#ef4444;">Error loading timeline.</div>'; }
+    }
+    // ---- KPI METRICS ----
+    (async function loadKPIs() {
+      const wrap = document.getElementById("kpiWrap");
+      try {
+        const res = await fetch("/api/dashboard/kpis?days=30", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        const u = data.users;
+        const r = data.rates;
+        const a = data.activity;
+        wrap.innerHTML =
+          '<div class="grid-3" style="margin-bottom:12px;">' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#22c55e;">' + r.retention + '</div><div style="color:#9ca3af; font-size:11px;">Retention</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#38bdf8;">' + r.engagement + '</div><div style="color:#9ca3af; font-size:11px;">Engagement</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#f59e0b;">' + r.conversion + '</div><div style="color:#9ca3af; font-size:11px;">Conversion</div></div>' +
+          '</div>' +
+          '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; font-size:12px; color:#d1d5db;">' +
+            '<div>Active: <b style="color:#22c55e;">' + u.active + '</b></div>' +
+            '<div>New: <b style="color:#38bdf8;">' + u.new + '</b></div>' +
+            '<div>Churned: <b style="color:#ef4444;">' + u.churned + '</b></div>' +
+            '<div>Paying: <b style="color:#f59e0b;">' + u.paying + '</b></div>' +
+          '</div>' +
+          '<div style="margin-top:10px; display:grid; grid-template-columns:repeat(4,1fr); gap:8px; font-size:12px; color:#d1d5db;">' +
+            '<div>Messages: <b>' + a.messages + '</b></div>' +
+            '<div>Workouts: <b>' + a.workouts + '</b></div>' +
+            '<div>Weigh-ins: <b>' + a.weighIns + '</b></div>' +
+            '<div>Avg msg/user: <b>' + a.avgMessagesPerUser + '</b></div>' +
+          '</div>';
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to load KPIs.</div>'; }
+    })();
+
+    // ---- REVENUE ----
+    (async function loadRevenue() {
+      const wrap = document.getElementById("revenueWrap");
+      try {
+        const res = await fetch("/api/dashboard/revenue", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        const c = data.current;
+        const r = data.rates;
+        const f = data.forecast;
+        wrap.innerHTML =
+          '<div class="grid-3" style="margin-bottom:12px;">' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#22c55e;">' + c.mrr + '</div><div style="color:#9ca3af; font-size:11px;">Monthly Revenue</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#38bdf8;">' + c.arr + '</div><div style="color:#9ca3af; font-size:11px;">Annual Revenue</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:28px; font-weight:800; color:#f59e0b;">' + r.estimatedLTV + '</div><div style="color:#9ca3af; font-size:11px;">Est. LTV</div></div>' +
+          '</div>' +
+          '<div style="display:grid; grid-template-columns:repeat(4,1fr); gap:8px; font-size:12px; color:#d1d5db;">' +
+            '<div>Paying: <b style="color:#22c55e;">' + c.payingUsers + '</b></div>' +
+            '<div>Trial: <b style="color:#38bdf8;">' + c.trialUsers + '</b></div>' +
+            '<div>Cancelled: <b style="color:#ef4444;">' + c.cancelledUsers + '</b></div>' +
+            '<div>Conversion: <b style="color:#f59e0b;">' + r.trialConversion + '</b></div>' +
+          '</div>' +
+          '<div style="margin-top:10px; padding:8px; background:#111827; border-radius:6px; font-size:12px; color:#9ca3af;">' +
+            'Forecast: <b style="color:#22c55e;">' + f.projectedMRR + '</b>/mo if ' + f.projectedNewPaying + ' trial users convert' +
+          '</div>';
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to load revenue.</div>'; }
+    })();
+
+    // ---- CLIENT SEARCH ----
+    let searchTimeout;
+    function searchClients() {
+      clearTimeout(searchTimeout);
+      const q = document.getElementById("clientSearch").value.trim();
+      const wrap = document.getElementById("searchResults");
+      if (q.length < 2) { wrap.style.display = "none"; return; }
+      searchTimeout = setTimeout(async () => {
+        try {
+          const res = await fetch("/api/dashboard/search?q=" + encodeURIComponent(q), { headers: { "x-dashboard-key": DASH_KEY } });
+          const data = await res.json();
+          if (!data.results || data.results.length === 0) {
+            wrap.style.display = "block";
+            wrap.innerHTML = '<div style="color:#4b5563; padding:12px; text-align:center;">No clients found.</div>';
+            return;
+          }
+          let rows = "";
+          for (const c of data.results) {
+            const lastActive = c.lastActive ? new Date(c.lastActive).toLocaleDateString("en-ZA", { day:"2-digit", month:"short" }) : "Never";
+            rows += '<tr style="border-bottom:1px solid #1f2937;">' +
+              '<td style="padding:8px 12px; color:#f9fafb; font-weight:600;">' + (c.name || "—") + '</td>' +
+              '<td style="padding:8px 12px; color:#9ca3af; font-family:monospace; font-size:12px;">' + (c.phone || "") + '</td>' +
+              '<td style="padding:8px 12px; color:#a78bfa;">' + (c.goal || "—") + '</td>' +
+              '<td style="padding:8px 12px; color:#6b7280;">' + lastActive + '</td>' +
+              '<td style="padding:8px 12px;"><span style="color:' + (c.payment === "active" ? "#22c55e" : "#f59e0b") + '; font-size:11px; font-weight:700;">' + (c.payment || "trial") + '</span></td>' +
+            '</tr>';
+          }
+          wrap.style.display = "block";
+          wrap.innerHTML = '<table style="width:100%; border-collapse:collapse;"><thead><tr>' +
+            '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Name</th>' +
+            '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Phone</th>' +
+            '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Goal</th>' +
+            '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Last Active</th>' +
+            '<th style="padding:8px 12px; text-align:left; color:#9ca3af; font-size:11px; border-bottom:2px solid #374151;">Payment</th>' +
+            '</tr></thead><tbody>' + rows + '</tbody></table>';
+        } catch { wrap.innerHTML = '<div style="color:#ef4444;">Search failed.</div>'; }
+      }, 300);
+    }
+
+    // ---- WEEKLY REPORT ----
+    async function loadWeeklyReport() {
+      const wrap = document.getElementById("weeklyReportWrap");
+      wrap.innerHTML = '<div style="color:#9ca3af;">Generating report...</div>';
+      try {
+        const res = await fetch("/api/dashboard/weekly-report", { headers: { "x-dashboard-key": DASH_KEY } });
+        const data = await res.json();
+        const s = data.summary;
+        let rows = "";
+        for (const c of data.clients.slice(0, 50)) {
+          const statusColor = c.status === "at_risk" ? "#ef4444" : c.status === "needs_attention" ? "#f59e0b" : "#22c55e";
+          const statusLabel = c.status === "at_risk" ? "AT RISK" : c.status === "needs_attention" ? "ATTENTION" : "ON TRACK";
+          rows += '<tr style="border-bottom:1px solid #1f2937;">' +
+            '<td style="padding:6px 10px; color:#f9fafb; font-weight:500;">' + c.name + '</td>' +
+            '<td style="padding:6px 10px;"><span style="background:' + statusColor + '22; color:' + statusColor + '; border-radius:4px; padding:2px 8px; font-size:10px; font-weight:700;">' + statusLabel + '</span></td>' +
+            '<td style="padding:6px 10px; color:#d1d5db; font-size:12px; text-align:center;">' + c.weekActivity.messages + '</td>' +
+            '<td style="padding:6px 10px; color:#d1d5db; font-size:12px; text-align:center;">' + c.weekActivity.workouts + '</td>' +
+            '<td style="padding:6px 10px; color:#d1d5db; font-size:12px;">' + (c.weight.change !== null ? (c.weight.change > 0 ? "+" : "") + c.weight.change + "kg" : "—") + '</td>' +
+            '<td style="padding:6px 10px; color:#6b7280; font-size:11px;">' + (c.risks.length > 0 ? c.risks.join(", ") : "none") + '</td>' +
+          '</tr>';
+        }
+        wrap.innerHTML =
+          '<div style="display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px;">' +
+            '<div style="text-align:center;"><div style="font-size:24px; font-weight:800; color:#ef4444;">' + s.atRisk + '</div><div style="color:#9ca3af; font-size:11px;">At Risk</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:24px; font-weight:800; color:#f59e0b;">' + s.needsAttention + '</div><div style="color:#9ca3af; font-size:11px;">Needs Attention</div></div>' +
+            '<div style="text-align:center;"><div style="font-size:24px; font-weight:800; color:#22c55e;">' + s.onTrack + '</div><div style="color:#9ca3af; font-size:11px;">On Track</div></div>' +
+          '</div>' +
+          '<table style="width:100%; border-collapse:collapse;"><thead><tr>' +
+            '<th style="padding:6px 10px; text-align:left; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Client</th>' +
+            '<th style="padding:6px 10px; text-align:left; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Status</th>' +
+            '<th style="padding:6px 10px; text-align:center; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Msgs</th>' +
+            '<th style="padding:6px 10px; text-align:center; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Workouts</th>' +
+            '<th style="padding:6px 10px; text-align:left; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Weight</th>' +
+            '<th style="padding:6px 10px; text-align:left; color:#9ca3af; font-size:10px; border-bottom:2px solid #374151;">Risks</th>' +
+          '</tr></thead><tbody>' + rows + '</tbody></table>';
+      } catch { wrap.innerHTML = '<div style="color:#ef4444;">Failed to generate report.</div>'; }
     }
   </script>
 </body>
