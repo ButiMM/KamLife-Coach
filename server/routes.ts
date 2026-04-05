@@ -183,13 +183,28 @@ function levenshtein(a: string, b: string): number {
   return dp[la][lb];
 }
 
-// Max edit distance allowed based on word length
+// Max edit distance allowed based on word length — STRICT to avoid false matches
 function maxDistance(wordLen: number): number {
   if (wordLen <= 3) return 0;  // too short — exact only (egg, pap, tea)
   if (wordLen <= 5) return 1;  // rice, bread, steak — 1 typo
   if (wordLen <= 8) return 2;  // chicken, pilchards — 2 typos
-  return 3;                     // boerewors, butternut — 3 typos
+  return 2;                     // boerewors, butternut — still only 2 typos (was 3, caused "for breakfast" → "spur breakfast")
 }
+
+// Common non-food words that should NEVER fuzzy-match to food names
+const FUZZY_BLACKLIST = new Set([
+  "just", "had", "have", "having", "that", "this", "with", "from", "for",
+  "what", "when", "where", "which", "about", "after", "before", "been",
+  "would", "could", "should", "want", "need", "like", "make", "made",
+  "take", "took", "give", "gave", "come", "came", "going", "went",
+  "here", "there", "then", "than", "them", "they", "their", "your",
+  "more", "some", "much", "many", "very", "also", "still", "well",
+  "good", "feel", "feeling", "today", "yesterday", "morning",
+  "afternoon", "evening", "night", "breakfast", "lunch", "dinner",
+  "supper", "snack", "meal", "food", "total", "remaining", "calories",
+  "protein", "daily", "target", "please", "thanks", "thank", "help",
+  "read", "again", "true", "adjust", "correct", "wrong", "right",
+]);
 
 function scanForSAFoods(msg: string): SAFood[] {
   const lower = msg.toLowerCase();
@@ -205,31 +220,36 @@ function scanForSAFoods(msg: string): SAFood[] {
     if (hit && !matched.find(f => f.name === food.name)) matched.push(food);
   }
 
-  // PASS 2: Fuzzy matching for misspellings (only if exact didn't catch it)
-  // Split message into words and check each against all food aliases
-  const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4);
+  // PASS 2: Fuzzy matching for misspellings (only if exact didn't catch anything)
+  // Only activate fuzzy if PASS 1 found nothing — prevents phantom matches on normal messages
+  if (matched.length > 0) return matched;
 
-  // Also check 2-word and 3-word combos for multi-word foods like "corn flakes", "peanut butter"
+  // Split message into words and check each against all food aliases
+  const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
+
+  // Also check 2-word combos for multi-word foods like "corn flakes", "peanut butter"
   const combos: string[] = [...words];
   const rawWords = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 2);
   for (let i = 0; i < rawWords.length - 1; i++) {
     combos.push(rawWords[i] + " " + rawWords[i + 1]);
-    if (i < rawWords.length - 2) {
-      combos.push(rawWords[i] + " " + rawWords[i + 1] + " " + rawWords[i + 2]);
-    }
   }
 
   for (const food of SA_FOODS_SEED) {
-    if (matched.find(f => f.name === food.name)) continue; // already matched exactly
+    if (matched.find(f => f.name === food.name)) continue;
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
 
     let bestScore = Infinity;
     for (const combo of combos) {
       for (const alias of allAliases) {
-        // For single-word aliases, compare against single words
-        // For multi-word aliases, compare against combos
-        const aliasWords = alias.split(/\s+/);
-        if (aliasWords.length === 1 && combo.includes(" ")) continue;
+        const aliasWordCount = alias.split(/\s+/).length;
+        const comboWordCount = combo.split(/\s+/).length;
+
+        // STRICT: word count must match — "breakfast" (1 word) can never match "spur breakfast" (2 words)
+        if (aliasWordCount !== comboWordCount) continue;
+
+        // STRICT: lengths must be similar (within 30%) — prevents "for" matching "spur"
+        const lenRatio = Math.min(combo.length, alias.length) / Math.max(combo.length, alias.length);
+        if (lenRatio < 0.7) continue;
 
         const dist = levenshtein(combo, alias);
         const allowed = maxDistance(alias.length);
@@ -241,6 +261,30 @@ function scanForSAFoods(msg: string): SAFood[] {
     if (bestScore < Infinity && !matched.find(f => f.name === food.name)) {
       matched.push(food);
     }
+  }
+
+  // PASS 3: Combo meal dedup — if a combo meal is matched, remove its standalone components
+  // e.g. "Pasta bolognaise" matched → remove standalone "Pasta (spaghetti)" and "Beef mince"
+  const COMBO_OVERRIDES: Record<string, string[]> = {
+    "Pasta bolognaise": ["Pasta (spaghetti)", "Beef mince"],
+    "Chicken stir-fry with rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
+    "Chicken and rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
+    "Eggs on toast": ["Eggs", "Brown bread", "White bread"],
+    "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef"],
+    "Pap and wors": ["Pap (stiff maize porridge)", "Boerewors"],
+    "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Brown rice", "White rice"],
+    "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
+    "Boerewors roll": ["Boerewors", "Brown bread", "White bread"],
+    "Peanut butter on bread": ["Peanut butter", "Peanut butter (smooth)", "Brown bread", "White bread"],
+  };
+
+  const comboNames = matched.filter(f => COMBO_OVERRIDES[f.name]).map(f => f.name);
+  if (comboNames.length > 0) {
+    const toRemove = new Set<string>();
+    for (const cn of comboNames) {
+      for (const component of COMBO_OVERRIDES[cn]) toRemove.add(component);
+    }
+    return matched.filter(f => !toRemove.has(f.name));
   }
 
   return matched;
@@ -2085,10 +2129,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- FRUSTRATION / CORRECTION GUARD — do NOT treat complaints as food ----
+  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous)\b/i.test(m);
+
   // ---- SA FOOD DATABASE MATCHING — instant calorie/protein lookup ----
   // Supports multi-meal messages: "breakfast eggs and toast, lunch chicken rice, dinner pap and pilchards"
   const isShortFoodMsg = !isQuestion && hasLogTrigger && m.split(/\s+/).length <= 30;
-  if (!isQuestion && (hasLogTrigger || isShortFoodMsg)) {
+  if (!isQuestion && !isFrustration && (hasLogTrigger || isShortFoodMsg)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
     //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
@@ -7517,6 +7564,54 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         <button onclick="sendBroadcast()" style="background:#22c55e; color:#000; border:none; border-radius:6px; padding:10px 20px; font-size:14px; font-weight:700; cursor:pointer;">Send</button>
         <span id="broadcastStatus" style="color:#9ca3af; font-size:12px;"></span>
       </div>
+    </div>
+  </div>
+
+  <!-- KPI METRICS -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#22c55e; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">KPIs</span>
+        <span class="section-title" style="margin-bottom:0;">Business Metrics (30 days)</span>
+      </div>
+      <div id="kpiWrap" class="card" style="color:#4b5563; text-align:center; padding:20px;">Loading KPI data...</div>
+    </div>
+  </div>
+
+  <!-- REVENUE -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#f59e0b; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Revenue</span>
+        <span class="section-title" style="margin-bottom:0;">Revenue Dashboard</span>
+      </div>
+      <div id="revenueWrap" class="card" style="color:#4b5563; text-align:center; padding:20px;">Loading revenue data...</div>
+    </div>
+  </div>
+
+  <!-- CLIENT SEARCH -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#38bdf8; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Search</span>
+        <span class="section-title" style="margin-bottom:0;">Client Search</span>
+      </div>
+      <div class="card" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-bottom:12px;">
+        <input id="clientSearch" type="text" placeholder="Search by name or phone..." onkeyup="searchClients()" style="flex:1; min-width:200px; background:#111827; border:1px solid #374151; border-radius:6px; padding:10px 12px; color:#f9fafb; font-size:14px; outline:none;" />
+      </div>
+      <div id="searchResults" style="display:none;" class="table-wrap"></div>
+    </div>
+  </div>
+
+  <!-- WEEKLY REPORT -->
+  <div class="container">
+    <div class="section">
+      <div style="display:flex; align-items:center; gap:10px; margin-bottom:12px;">
+        <span style="background:#a78bfa; color:#000; border-radius:6px; padding:3px 10px; font-size:11px; font-weight:800; text-transform:uppercase; letter-spacing:0.08em;">Report</span>
+        <span class="section-title" style="margin-bottom:0;">Weekly Coach Report</span>
+        <button onclick="loadWeeklyReport()" style="margin-left:auto; background:#a78bfa; color:#000; border:none; border-radius:6px; padding:6px 14px; font-size:12px; font-weight:700; cursor:pointer;">Generate</button>
+      </div>
+      <div id="weeklyReportWrap" class="card" style="color:#4b5563; text-align:center; padding:20px;">Click Generate to load weekly report.</div>
     </div>
   </div>
 
