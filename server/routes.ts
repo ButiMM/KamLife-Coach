@@ -5256,7 +5256,7 @@ CRITICAL RULES — these are non-negotiable:
   // ---- FOOD PATTERN CHECK — append warning if junk/protein pattern detected ----
   const FOOD_KEYWORDS = ["ate", "had", "eating", "breakfast", "lunch", "dinner", "supper", "meal", "food", "pap", "rice", "bread", "chicken", "beef", "fish", "pilchards", "eggs", "oats", "kfc", "burger", "pizza", "vetkoek", "kota", "chips", "cool drink", "coke", "biscuit", "chocolate", "sweets", "yogurt", "beans", "lentils", "mince", "polony", "viennas", "russian", "magwinya", "fat cake", "samp", "morogo", "spinach", "peanut butter", "tuna", "sardines"];
   // Guard: "log the meal", "log this", "save this" are commands not food — already handled above
-  const isFoodLog = !isLogCommand && FOOD_KEYWORDS.some(k => m.includes(k));
+  const isFoodLog = !isLogCommand && !isQuestion && FOOD_KEYWORDS.some(k => m.includes(k));
   if (isFoodLog) {
     const pattern = await checkFoodPatterns(user.id);
     const perfectDay = await checkPerfectDay(user.id);
