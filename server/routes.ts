@@ -3242,6 +3242,194 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return guide;
   }
 
+  // ---- EXERCISE SUBSTITUTION ENGINE — "can't do X", "alternative to X" ----
+  if (/\b(can.?t\s+do|cannot\s+do|alternative\s+(?:to|for)|replace\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row)|instead\s+of\s+(?:squat|bench|deadlift|pull.?up|push.?up|lunge|press|curl|row))\b/i.test(m)) {
+    const exerciseSubs: Record<string, { why: string; home: string[]; gym: string[] }> = {
+      squat: { why: "knee, hip, or back issue", home: ["Wall sit (30-60 seconds)", "Glute bridge (3×15)", "Step-ups on chair (3×10 each leg)", "Sumo squat (wider stance, less knee pressure)"], gym: ["Leg press (less spine load)", "Goblet squat (lighter, controlled)", "Smith machine squat (guided path)", "Hack squat"] },
+      deadlift: { why: "lower back concern", home: ["Hip hinge with water bottles (3×12)", "Single-leg Romanian deadlift (3×10)", "Glute bridge (3×15)", "Bird dog (3×10 each)"], gym: ["Trap bar deadlift (neutral spine)", "Romanian deadlift (lighter, controlled)", "Cable pull-through", "Hip thrust (barbell or machine)"] },
+      bench: { why: "shoulder or chest strain", home: ["Push-ups (knees if needed, 3×12)", "Floor press with water bottles (3×12)", "Wall push-ups (3×15)", "Resistance band chest press"], gym: ["Dumbbell bench (better shoulder position)", "Incline dumbbell press", "Cable chest fly", "Machine chest press"] },
+      "pull-up": { why: "not strong enough yet or shoulder issue", home: ["Doorframe row with towel (3×10)", "Resistance band pull-apart (3×15)", "Inverted row under table (3×8)", "Superman hold (3×20 seconds)"], gym: ["Lat pulldown (build strength first)", "Assisted pull-up machine", "Cable row", "Band-assisted pull-ups"] },
+      "push-up": { why: "wrist, shoulder, or strength limitation", home: ["Wall push-ups (3×15)", "Knee push-ups (3×12)", "Incline push-ups on chair (3×10)", "Plank hold (3×30 seconds)"], gym: ["Machine chest press", "Dumbbell bench press", "Cable chest press", "Smith machine push-up"] },
+      lunge: { why: "knee or balance issue", home: ["Split squat (stationary, 3×10)", "Step-ups (3×10 each)", "Wall sit (3×30 seconds)", "Glute bridge (3×15)"], gym: ["Leg press (single leg)", "Bulgarian split squat (bench support)", "Step-ups with dumbbells", "Leg extension + leg curl combo"] },
+      "overhead press": { why: "shoulder impingement or pain", home: ["Lateral raise with bottles (3×12)", "Front raise (3×10)", "Wall slide (3×12)", "Resistance band press (45° angle)"], gym: ["Landmine press (shoulder-friendly angle)", "Cable lateral raise", "Machine shoulder press (guided path)", "Incline dumbbell press (30°)"] },
+    };
+
+    const exerciseNames = Object.keys(exerciseSubs);
+    const matchedExercise = exerciseNames.find(ex => m.includes(ex) || m.includes(ex.replace("-", " ")) || m.includes(ex.replace("-", "")));
+    const mode = user.trainingMode || "home";
+    const name = user.name?.split(" ")[0] || "";
+
+    if (matchedExercise) {
+      const sub = exerciseSubs[matchedExercise];
+      const alternatives = mode === "gym" ? sub.gym : sub.home;
+      const reply = `*🔄 ${matchedExercise.charAt(0).toUpperCase() + matchedExercise.slice(1)} Alternatives${name ? ` — ${name}` : ""}*\n\n` +
+        `Common reason: ${sub.why}\n\n` +
+        `*${mode === "gym" ? "Gym" : "Home"} alternatives:*\n${alternatives.map((a, i) => `${i + 1}. ${a}`).join("\n")}\n\n` +
+        `Pick one and work it into your programme. Same muscles, different movement. Reply *done* after your session.`;
+      await logChat(user.id, message, reply, "EXERCISE_SUB");
+      return reply;
+    }
+
+    // Generic substitution advice
+    const reply = `Tell me which exercise you cannot do and I will give you alternatives.\n\nExamples:\n• "can't do squats" (knee issue)\n• "alternative to deadlift" (back concern)\n• "can't do pull-ups" (not strong enough yet)\n• "instead of bench press" (shoulder pain)\n\nI have alternatives for every exercise — ${mode === "gym" ? "gym" : "home"} options based on your setup.`;
+    return reply;
+  }
+
+  // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
+  if (m === "portions" || m === "portion guide" || m === "serving size" || m === "how much" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m)) {
+    const goal = user.goalType || "fat_loss";
+    const name = user.name?.split(" ")[0] || "";
+    const portionGuide = `*✋ Portion Size Guide${name ? ` — ${name}` : ""}*\n_Use your hand — works everywhere, no scale needed_\n\n` +
+      `*Protein* (palm size = ~25-30g protein):\n` +
+      `👋 ${goal === "muscle_gain" ? "2 palms per meal (men), 1.5 palms (women)" : "1 palm per meal (women), 1.5 palms (men)"}\n` +
+      `That is: 1 chicken breast, 150g mince, 2 eggs + pilchards, 200g fish\n\n` +
+      `*Carbs* (cupped hand = ~25-30g carbs):\n` +
+      `🤲 ${goal === "fat_loss" ? "1 cupped hand per meal" : "2 cupped hands per meal"}\n` +
+      `That is: 1 scoop pap, 1 scoop rice, 1 slice bread, 1 small sweet potato\n\n` +
+      `*Vegetables* (fist size):\n` +
+      `✊ 2 fists per meal — fill half your plate\n` +
+      `That is: big portion spinach, cabbage, broccoli, salad, tomatoes\n\n` +
+      `*Fats* (thumb size = ~7-10g fat):\n` +
+      `👍 ${goal === "fat_loss" ? "1 thumb per meal" : "2 thumbs per meal"}\n` +
+      `That is: 1 tsp oil, 1 tbsp peanut butter, small handful nuts\n\n` +
+      `*The Plate Rule:*\n` +
+      `Half vegetables | Quarter protein | Quarter carbs\n` +
+      `This works at any braai, restaurant, or family dinner. No counting needed.`;
+
+    await logChat(user.id, message, portionGuide, "PORTION_GUIDE");
+    return portionGuide;
+  }
+
+  // ---- WEIGHT TREND CHART — "weight chart", "weight graph", "weight trend" ----
+  if (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend|my\s*weight)\b/i.test(m)) {
+    try {
+      const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
+        .from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
+
+      if (weights.length < 2) {
+        return `Not enough weight logs for a trend. Log your weight regularly — "84.5kg" — and I will show you the full picture over time.`;
+      }
+
+      const name = user.name?.split(" ")[0] || "there";
+      const vals = weights.map(w => parseFloat(String(w.weight)));
+      const dates = weights.map(w => w.date ? new Date(w.date).toLocaleDateString("en-ZA", { day: "numeric", month: "short" }) : "");
+      const minW = Math.floor(Math.min(...vals) - 1);
+      const maxW = Math.ceil(Math.max(...vals) + 1);
+      const range = maxW - minW || 1;
+
+      // Build ASCII chart — last 12 entries
+      const recent = vals.slice(-12);
+      const recentDates = dates.slice(-12);
+      const chartHeight = 8;
+      let chart = "";
+
+      for (let row = chartHeight; row >= 0; row--) {
+        const threshold = minW + (range * row / chartHeight);
+        const label = threshold.toFixed(0).padStart(3) + "│";
+        let line = label;
+        for (let col = 0; col < recent.length; col++) {
+          if (Math.abs(recent[col] - threshold) <= range / (chartHeight * 2)) {
+            line += " ● ";
+          } else if (recent[col] > threshold && row < chartHeight && (minW + range * (row + 1) / chartHeight) > recent[col]) {
+            line += " ● ";
+          } else {
+            line += "   ";
+          }
+        }
+        chart += line + "\n";
+      }
+      chart += "   └" + "───".repeat(recent.length) + "\n";
+      chart += "    " + recentDates.map(d => d.slice(0, 3).padEnd(3)).join("");
+
+      const first = vals[0];
+      const last = vals[vals.length - 1];
+      const diff = last - first;
+      const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
+
+      const reply = `*⚖️ Weight Trend — ${name}*\n\n` +
+        `\`\`\`\n${chart}\`\`\`\n\n` +
+        `Start: ${first.toFixed(1)}kg → Now: ${last.toFixed(1)}kg (${trend})\n` +
+        `${weights.length} weigh-ins total\n\n` +
+        (diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
+         diff > 2 && user.goalType === "muscle_gain" ? `Gaining as planned. If lifts are going up, this is muscle. Keep training hard.` :
+         Math.abs(diff) < 1 ? `Weight holding. Check measurements — you could be recomping (losing fat, gaining muscle). The tape does not lie.` :
+         `Keep logging. Trends become clear after 4+ weeks of consistent data.`);
+
+      await logChat(user.id, message, reply, "WEIGHT_TREND");
+      return reply;
+    } catch (err) {
+      console.error("[WEIGHT TREND]", err);
+      return `Could not generate weight chart. Try again later.`;
+    }
+  }
+
+  // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----
+  if (/\b(braai\s*day|heritage\s*day|christmas\s*(?:meal|food|eat)|easter\s*(?:meal|food|eat)|new\s*year.?s?\s*(?:meal|food|eat)|holiday\s*(?:meal|food|eat)|party\s*food|social\s*eating|eating\s*out\s*(?:guide|tips|help))\b/i.test(m)) {
+    const goal = user.goalType || "fat_loss";
+    const name = user.name?.split(" ")[0] || "";
+    const isBraai = /braai/i.test(m);
+    const isChristmas = /christmas|december/i.test(m);
+    const isEaster = /easter/i.test(m);
+
+    let guide = "";
+    if (isBraai) {
+      guide = `*🔥 Coach K's Braai Survival Guide${name ? ` — ${name}` : ""}*\n\n` +
+        `*Best picks:*\n` +
+        `• Chicken thigh (skin off after cooking) — 25g protein, ~200 kcal\n` +
+        `• Boerewors (1 piece, grilled well) — 25g protein, ~350 kcal\n` +
+        `• Steak (palm-sized) — 30g protein, ~250 kcal\n` +
+        `• Sosatie (3 sticks) — 20g protein, ~280 kcal\n\n` +
+        `*Limit:*\n` +
+        `• Rolls/bread — 1 max (save your carbs for the meat)\n` +
+        `• Pap — 1 serving (fist-sized)\n` +
+        `• Chakalaka — good, it is mostly veg\n` +
+        `• Dumplings/vetkoek — skip or 1 only (250 kcal each)\n\n` +
+        `*Drinks:*\n` +
+        `• Water between every drink\n` +
+        `• 2 beers max (each = 150 kcal of zero nutrition)\n` +
+        `• Brandy & Coke Zero > Brandy & Coke (saves 140 kcal)\n\n` +
+        `*Strategy:* Eat protein first. Fill up on meat and salad. Then add 1 starch. ${goal === "fat_loss" ? "You do not need to eat everything — pick your favourites and enjoy them." : "Load the plate — braai day is a surplus day. Enjoy it, hit the gym Monday."}`;
+    } else if (isChristmas) {
+      guide = `*🎄 Christmas Meal Guide${name ? ` — ${name}` : ""}*\n\n` +
+        `*Best picks:*\n` +
+        `• Roast chicken or turkey — best protein source on the table\n` +
+        `• Ham (lean cuts, trim visible fat)\n` +
+        `• Salads — go heavy on these\n` +
+        `• Roast vegetables — sweet potato, butternut, green beans\n\n` +
+        `*Limit:*\n` +
+        `• Dessert — 1 small serving, enjoy it, then stop\n` +
+        `• Alcohol — water between every drink\n` +
+        `• Starchy sides — 1 serving rice/potato\n\n` +
+        `*Strategy:* Eat slowly. It takes 20 minutes for fullness signals to reach your brain. One plate, no seconds. Enjoy the day — one meal does not break a programme.`;
+    } else if (isEaster) {
+      guide = `*🐣 Easter Eating Guide${name ? ` — ${name}` : ""}*\n\n` +
+        `Easter eggs: 1 small egg = ~200 kcal. That is a full snack.\n\n` +
+        `*Strategy:*\n` +
+        `• Buy ONE egg, enjoy it slowly. Do not buy the 6-pack.\n` +
+        `• Hot cross buns: 1 bun = 200 kcal. Max 1 per day.\n` +
+        `• Keep training through the weekend. A 30-min walk burns off that bun.\n\n` +
+        `*Meal plan stays the same.* The holiday is one day — your programme is every day.`;
+    } else {
+      guide = `*🎉 Social Eating Survival Guide${name ? ` — ${name}` : ""}*\n\n` +
+        `*Before you go:*\n` +
+        `• Eat a high-protein snack (2 eggs or biltong) so you arrive not starving\n` +
+        `• Decide in advance: 1 plate, no seconds\n\n` +
+        `*At the event:*\n` +
+        `• Protein first — meat, chicken, fish\n` +
+        `• Fill half your plate with salad/veg\n` +
+        `• 1 starch portion (fist-sized)\n` +
+        `• Water between every alcoholic drink\n\n` +
+        `*After:*\n` +
+        `• Do NOT skip meals the next day to "make up for it"\n` +
+        `• Train the next morning — sweat it out and move on\n` +
+        `• One meal does not break your programme. Going dark for 3 days after does.\n\n` +
+        `*${goal === "fat_loss" ? "Enjoy the event. Log what you ate tomorrow. We keep going." : "Enjoy the surplus — your muscles will use it. Train hard Monday."}*`;
+    }
+
+    await logChat(user.id, message, guide, "HOLIDAY_GUIDE");
+    return guide;
+  }
+
   // ---- MENU NUMBER SHORTCUTS ----
   if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
