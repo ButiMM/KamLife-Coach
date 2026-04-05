@@ -641,18 +641,24 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
-    /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my)\b/i.test(m) ||
-    /\b(daily|my)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
+    /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||
+    /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
+    /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
+    /\b(calories today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining)\b/i.test(m) ||
     m === "calories" || m === "calorie" || m === "kcal"
   ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
-    const name = user.name ? `${user.name} — ` : "";
+    const name = user.name ? `${user.name}, ` : "";
     const todayStr2 = sastToday();
     const todayCals = (user.todayCaloriesDate === todayStr2) ? (user.todayCalories || 0) : 0;
+    const todayProt = (user.todayCaloriesDate === todayStr2) ? (user.todayProteinG || 0) : 0;
     const remaining = cal - todayCals;
-    const todayLine = todayCals > 0 ? ` You are at ${todayCals} kcal today — ${remaining > 0 ? `${remaining} remaining.` : "target reached. ✅"}` : "";
-    return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.${todayLine}`;
+    const protRemaining = prot - todayProt;
+    if (todayCals > 0) {
+      return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅`}\n\nHit protein first — everything else follows.`;
+    }
+    return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
   }
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
@@ -1925,7 +1931,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // If user says "log it" / "sis you log it?" etc., check if the last message contained food
   // that wasn't logged, and re-process it as a food entry
   const isLogCommand =
-    /\b(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*log|can\s*you\s*log|you\s*log\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i.test(m.trim());
+    /\b(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*log|can\s*you\s*log|you\s*log\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))[?!.\s]*$/i.test(m.trim());
 
   if (isLogCommand) {
     // Check if the previous message had food that wasn't logged — re-process it
@@ -6308,6 +6314,464 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       res.json({ success: true, experiment: updated });
     } catch (err) {
       res.status(500).json({ error: "Failed to update experiment" });
+    }
+  });
+
+  // ============================================================
+  // KPI REPORTS — business metrics dashboard API
+  // ============================================================
+
+  app.get("/api/dashboard/kpis", requireDashboardKey, async (req, res) => {
+    try {
+      const days = parseInt(req.query.days as string) || 30;
+      const since = new Date(Date.now() - days * 86400_000);
+
+      // Total & active users
+      const [totalUsers] = await db.select({ c: count() }).from(users);
+      const [activeUsers] = await db.select({ c: count() }).from(users)
+        .where(gte(users.lastActiveAt, since));
+
+      // New signups in period
+      const [newUsers] = await db.select({ c: count() }).from(users)
+        .where(gte(users.createdAt, since));
+
+      // Paying users
+      const [payingUsers] = await db.select({ c: count() }).from(users)
+        .where(eq(users.paymentStatus, "active"));
+
+      // Churn: users who were active before period but not during
+      const beforePeriod = new Date(since.getTime() - days * 86400_000);
+      const [churned] = await db.select({ c: count() }).from(users)
+        .where(and(
+          gte(users.lastActiveAt, beforePeriod),
+          lt(users.lastActiveAt, since)
+        ));
+
+      // Messages in period
+      const [totalMessages] = await db.select({ c: count() }).from(chatHistory)
+        .where(gte(chatHistory.createdAt, since));
+
+      // Workouts logged
+      const [totalWorkouts] = await db.select({ c: count() }).from(workoutLogs)
+        .where(gte(workoutLogs.createdAt, since));
+
+      // Weight logs
+      const [totalWeighIns] = await db.select({ c: count() }).from(weightLogs)
+        .where(gte(weightLogs.createdAt, since));
+
+      // Step logs
+      const [totalStepLogs] = await db.select({ c: count() }).from(stepLogs)
+        .where(gte(stepLogs.createdAt, since));
+
+      // Average messages per active user
+      const avgMessages = (activeUsers.c || 0) > 0
+        ? Math.round((totalMessages.c || 0) / (activeUsers.c || 1))
+        : 0;
+
+      // Retention rate
+      const retentionRate = (totalUsers.c || 0) > 0
+        ? Math.round(((activeUsers.c || 0) / (totalUsers.c || 1)) * 100)
+        : 0;
+
+      // Conversion rate (paying / total)
+      const conversionRate = (totalUsers.c || 0) > 0
+        ? Math.round(((payingUsers.c || 0) / (totalUsers.c || 1)) * 100)
+        : 0;
+
+      // Revenue estimate (paying users × R99)
+      const estimatedMRR = (payingUsers.c || 0) * 99;
+
+      // Engagement score: % of active users who logged workout OR weight OR steps
+      const [engagedWorkout] = await db.selectDistinct({ userId: workoutLogs.userId }).from(workoutLogs)
+        .where(gte(workoutLogs.createdAt, since));
+      // Use raw query for distinct count
+      const engagedUsersQuery = await db.execute(
+        sql`SELECT COUNT(DISTINCT user_id) as c FROM (
+          SELECT user_id FROM workout_logs WHERE created_at >= ${since}
+          UNION SELECT user_id FROM weight_logs WHERE created_at >= ${since}
+          UNION SELECT user_id FROM step_logs WHERE created_at >= ${since}
+        ) engaged`
+      );
+      const engagedCount = Number(engagedUsersQuery.rows?.[0]?.c || 0);
+      const engagementRate = (activeUsers.c || 0) > 0
+        ? Math.round((engagedCount / (activeUsers.c || 1)) * 100)
+        : 0;
+
+      // Daily active users trend (last 14 days)
+      const dauTrend: { date: string; count: number }[] = [];
+      for (let i = 13; i >= 0; i--) {
+        const dayStart = new Date(Date.now() - i * 86400_000);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(dayStart.getTime() + 86400_000);
+        const [dau] = await db.select({ c: count() }).from(chatHistory)
+          .where(and(gte(chatHistory.createdAt, dayStart), lt(chatHistory.createdAt, dayEnd)));
+        dauTrend.push({
+          date: dayStart.toISOString().slice(0, 10),
+          count: dau.c || 0,
+        });
+      }
+
+      res.json({
+        period: `${days} days`,
+        users: {
+          total: totalUsers.c || 0,
+          active: activeUsers.c || 0,
+          new: newUsers.c || 0,
+          paying: payingUsers.c || 0,
+          churned: churned.c || 0,
+        },
+        rates: {
+          retention: `${retentionRate}%`,
+          conversion: `${conversionRate}%`,
+          engagement: `${engagementRate}%`,
+        },
+        activity: {
+          messages: totalMessages.c || 0,
+          workouts: totalWorkouts.c || 0,
+          weighIns: totalWeighIns.c || 0,
+          stepLogs: totalStepLogs.c || 0,
+          avgMessagesPerUser: avgMessages,
+        },
+        revenue: {
+          estimatedMRR: `R${estimatedMRR}`,
+          payingUsers: payingUsers.c || 0,
+        },
+        dauTrend,
+      });
+    } catch (err) {
+      console.error("[KPI] Error:", err);
+      res.status(500).json({ error: "Failed to compute KPIs" });
+    }
+  });
+
+  // ============================================================
+  // COHORT ANALYTICS — weekly signup cohort retention
+  // ============================================================
+
+  app.get("/api/dashboard/cohorts", requireDashboardKey, async (req, res) => {
+    try {
+      const weeks = parseInt(req.query.weeks as string) || 8;
+      const cohorts: {
+        week: string;
+        signups: number;
+        retention: number[];
+      }[] = [];
+
+      for (let w = weeks - 1; w >= 0; w--) {
+        const weekStart = new Date(Date.now() - (w + 1) * 7 * 86400_000);
+        weekStart.setHours(0, 0, 0, 0);
+        const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
+
+        // Users who signed up in this week
+        const cohortUsers = await db.select({ id: users.id, lastActive: users.lastActiveAt })
+          .from(users)
+          .where(and(gte(users.createdAt, weekStart), lt(users.createdAt, weekEnd)));
+
+        if (cohortUsers.length === 0) {
+          cohorts.push({
+            week: weekStart.toISOString().slice(0, 10),
+            signups: 0,
+            retention: [],
+          });
+          continue;
+        }
+
+        // Check how many are still active in each subsequent week
+        const retention: number[] = [];
+        for (let r = 1; r <= w + 1 && r <= 8; r++) {
+          const checkStart = new Date(weekStart.getTime() + r * 7 * 86400_000);
+          const checkEnd = new Date(checkStart.getTime() + 7 * 86400_000);
+
+          // Count cohort users who had any chat activity in week r
+          const activeInWeek = cohortUsers.filter(u =>
+            u.lastActive && new Date(u.lastActive) >= checkStart
+          ).length;
+
+          retention.push(Math.round((activeInWeek / cohortUsers.length) * 100));
+        }
+
+        cohorts.push({
+          week: weekStart.toISOString().slice(0, 10),
+          signups: cohortUsers.length,
+          retention,
+        });
+      }
+
+      res.json({ cohorts });
+    } catch (err) {
+      console.error("[COHORT] Error:", err);
+      res.status(500).json({ error: "Failed to compute cohorts" });
+    }
+  });
+
+  // ============================================================
+  // WEEKLY COACH REPORT — client summary digest for coach
+  // ============================================================
+
+  app.get("/api/dashboard/weekly-report", requireDashboardKey, async (req, res) => {
+    try {
+      const since = new Date(Date.now() - 7 * 86400_000);
+
+      // Get all users with activity summary
+      const allUsers = await db.select().from(users);
+
+      const clientReports: any[] = [];
+      for (const u of allUsers) {
+        // Messages this week
+        const [msgs] = await db.select({ c: count() }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, u.id), gte(chatHistory.createdAt, since)));
+
+        // Workouts this week
+        const [wk] = await db.select({ c: count() }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, u.id), gte(workoutLogs.createdAt, since)));
+
+        // Weight change
+        const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.createdAt })
+          .from(weightLogs)
+          .where(eq(weightLogs.userId, u.id))
+          .orderBy(desc(weightLogs.createdAt))
+          .limit(2);
+
+        const currentWeight = weights[0]?.weight || null;
+        const prevWeight = weights[1]?.weight || null;
+        const weightChange = currentWeight && prevWeight ? Number(currentWeight) - Number(prevWeight) : null;
+
+        // Steps this week
+        const [stps] = await db.select({ c: count() }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, u.id), gte(stepLogs.createdAt, since)));
+
+        // Days since last message
+        const daysSinceLastMsg = u.lastActiveAt
+          ? Math.round((Date.now() - new Date(u.lastActiveAt).getTime()) / 86400_000)
+          : null;
+
+        // Risk flags
+        const risks: string[] = [];
+        if (daysSinceLastMsg !== null && daysSinceLastMsg >= 3) risks.push("inactive_3d");
+        if (daysSinceLastMsg !== null && daysSinceLastMsg >= 7) risks.push("inactive_7d");
+        if ((msgs.c || 0) === 0) risks.push("no_messages");
+        if ((wk.c || 0) === 0) risks.push("no_workouts");
+        if (weightChange !== null && weightChange > 1) risks.push("weight_gain");
+
+        // Status
+        let status = "on_track";
+        if (risks.length >= 3) status = "at_risk";
+        else if (risks.length >= 1) status = "needs_attention";
+
+        clientReports.push({
+          name: u.name || "Unknown",
+          phone: u.phoneNumber,
+          goal: u.goalType,
+          status,
+          risks,
+          weekActivity: {
+            messages: msgs.c || 0,
+            workouts: wk.c || 0,
+            stepLogs: stps.c || 0,
+          },
+          weight: {
+            current: currentWeight ? Number(currentWeight) : null,
+            change: weightChange ? Number(weightChange.toFixed(1)) : null,
+          },
+          daysSinceLastMsg,
+          paymentStatus: u.paymentStatus || "unknown",
+        });
+      }
+
+      // Sort: at_risk first, then needs_attention, then on_track
+      const statusOrder: Record<string, number> = { at_risk: 0, needs_attention: 1, on_track: 2 };
+      clientReports.sort((a, b) => (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2));
+
+      // Summary stats
+      const atRisk = clientReports.filter(c => c.status === "at_risk").length;
+      const needsAttention = clientReports.filter(c => c.status === "needs_attention").length;
+      const onTrack = clientReports.filter(c => c.status === "on_track").length;
+
+      res.json({
+        period: "Last 7 days",
+        summary: {
+          totalClients: clientReports.length,
+          atRisk,
+          needsAttention,
+          onTrack,
+        },
+        clients: clientReports,
+      });
+    } catch (err) {
+      console.error("[WEEKLY REPORT] Error:", err);
+      res.status(500).json({ error: "Failed to generate weekly report" });
+    }
+  });
+
+  // ============================================================
+  // CLIENT SEARCH — quick search by name or phone
+  // ============================================================
+
+  app.get("/api/dashboard/search", requireDashboardKey, async (req, res) => {
+    try {
+      const q = (req.query.q as string || "").trim().toLowerCase();
+      if (!q || q.length < 2) return res.json({ results: [] });
+
+      const allUsers = await db.select({
+        id: users.id,
+        name: users.name,
+        phone: users.phoneNumber,
+        goal: users.goalType,
+        payment: users.paymentStatus,
+        lastActive: users.lastActiveAt,
+      }).from(users).limit(500);
+
+      const results = allUsers.filter(u =>
+        (u.name || "").toLowerCase().includes(q) ||
+        (u.phone || "").includes(q)
+      ).slice(0, 20);
+
+      res.json({ results });
+    } catch (err) {
+      res.status(500).json({ error: "Search failed" });
+    }
+  });
+
+  // ============================================================
+  // BULK MESSAGE — send WhatsApp to multiple clients
+  // ============================================================
+
+  app.post("/api/dashboard/bulk-message", requireDashboardKey, async (req, res) => {
+    try {
+      const { message, filter } = req.body;
+      if (!message) return res.status(400).json({ error: "message required" });
+
+      // Filter options: "all", "active", "inactive", "paying", "at_risk"
+      const filterType = filter || "all";
+      let allUsers = await db.select({ id: users.id, phone: users.phoneNumber, lastActive: users.lastActiveAt, payment: users.paymentStatus }).from(users);
+
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+      if (filterType === "active") {
+        allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) >= sevenDaysAgo);
+      } else if (filterType === "inactive") {
+        allUsers = allUsers.filter(u => !u.lastActive || new Date(u.lastActive) < sevenDaysAgo);
+      } else if (filterType === "paying") {
+        allUsers = allUsers.filter(u => u.payment === "active");
+      } else if (filterType === "at_risk") {
+        allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) < sevenDaysAgo && new Date(u.lastActive) >= new Date(Date.now() - 14 * 86400_000));
+      }
+
+      const twilioClient = (await import("twilio")).default(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      let sent = 0, failed = 0;
+
+      for (const u of allUsers) {
+        if (!u.phone) continue;
+        try {
+          await twilioClient.messages.create({
+            from: `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`,
+            to: `whatsapp:${u.phone}`,
+            body: message,
+          });
+          sent++;
+          // Rate limit: 1 message per 100ms to avoid Twilio throttling
+          await new Promise(r => setTimeout(r, 100));
+        } catch {
+          failed++;
+        }
+      }
+
+      res.json({ success: true, sent, failed, total: allUsers.length });
+    } catch (err) {
+      console.error("[BULK MSG] Error:", err);
+      res.status(500).json({ error: "Bulk message failed" });
+    }
+  });
+
+  // ============================================================
+  // CLIENT NOTES — coach can add notes to a client profile
+  // ============================================================
+
+  app.post("/api/dashboard/clients/:phone/notes", requireDashboardKey, async (req, res) => {
+    try {
+      const phone = req.params.phone;
+      const { note } = req.body;
+      if (!note) return res.status(400).json({ error: "note required" });
+
+      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+
+      // Append note with timestamp to existing notes
+      const existingNotes = client.notes || "";
+      const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
+      const updated = existingNotes + `\n[${timestamp}] ${note}`;
+
+      await db.update(users).set({ notes: updated.trim() }).where(eq(users.id, client.id));
+      res.json({ success: true });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to save note" });
+    }
+  });
+
+  // Get client notes
+  app.get("/api/dashboard/clients/:phone/notes", requireDashboardKey, async (req, res) => {
+    try {
+      const phone = req.params.phone;
+      const [client] = await db.select({ notes: users.notes, name: users.name }).from(users)
+        .where(eq(users.phoneNumber, phone)).limit(1);
+      if (!client) return res.status(404).json({ error: "Client not found" });
+      res.json({ name: client.name, notes: client.notes || "" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to get notes" });
+    }
+  });
+
+  // ============================================================
+  // REVENUE DASHBOARD — payment tracking & forecasting
+  // ============================================================
+
+  app.get("/api/dashboard/revenue", requireDashboardKey, async (req, res) => {
+    try {
+      const [paying] = await db.select({ c: count() }).from(users)
+        .where(eq(users.paymentStatus, "active"));
+      const [trial] = await db.select({ c: count() }).from(users)
+        .where(or(eq(users.paymentStatus, "trial"), isNull(users.paymentStatus)));
+      const [cancelled] = await db.select({ c: count() }).from(users)
+        .where(eq(users.paymentStatus, "cancelled"));
+      const [total] = await db.select({ c: count() }).from(users);
+
+      const mrr = (paying.c || 0) * 99;
+      const arr = mrr * 12;
+      const trialConversion = (trial.c || 0) > 0
+        ? Math.round(((paying.c || 0) / ((paying.c || 0) + (trial.c || 0))) * 100)
+        : 0;
+
+      // ARPU (Average Revenue Per User — paying only)
+      const arpu = (paying.c || 0) > 0 ? 99 : 0;
+
+      // LTV estimate (ARPU × avg months retained, assume 6 months avg)
+      const estimatedLTV = arpu * 6;
+
+      // Monthly projection: if trial conversion holds
+      const projectedNewPaying = Math.round((trial.c || 0) * trialConversion / 100);
+      const projectedMRR = ((paying.c || 0) + projectedNewPaying) * 99;
+
+      res.json({
+        current: {
+          mrr: `R${mrr.toLocaleString()}`,
+          arr: `R${arr.toLocaleString()}`,
+          payingUsers: paying.c || 0,
+          trialUsers: trial.c || 0,
+          cancelledUsers: cancelled.c || 0,
+          totalUsers: total.c || 0,
+        },
+        rates: {
+          trialConversion: `${trialConversion}%`,
+          arpu: `R${arpu}`,
+          estimatedLTV: `R${estimatedLTV}`,
+        },
+        forecast: {
+          projectedNewPaying,
+          projectedMRR: `R${projectedMRR.toLocaleString()}`,
+        },
+      });
+    } catch (err) {
+      console.error("[REVENUE] Error:", err);
+      res.status(500).json({ error: "Failed to compute revenue" });
     }
   });
 
