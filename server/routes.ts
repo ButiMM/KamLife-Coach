@@ -510,7 +510,7 @@ async function checkPerfectDay(userId: string): Promise<string | null> {
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string): Promise<string> {
   try {
-  const m = message.toLowerCase().trim();
+  const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
 
   // ---- ADDITION 6: EMERGENCY / CRISIS DETECTION — before everything ----
   const CRISIS_PHRASES = [
@@ -714,8 +714,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||
     /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
     /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
-    /\b(calories today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining)\b/i.test(m) ||
-    m === "calories" || m === "calorie" || m === "kcal"
+    /\b(calories today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over)\b/i.test(m) ||
+    m === "calories" || m === "calorie" || m === "kcal" || m === "remaining" || m === "what's left"
   ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
@@ -1391,7 +1391,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
 
   // ---- DONE — workout complete (direct) ----
-  if (m === "done" || m === "workout done" || m === "finished" || m === "completed") {
+  if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
     // Guard: prevent double-logging on the same calendar day (race condition + accidental re-send)
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
@@ -1662,7 +1662,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- WEIGHT UPDATE (explicit) — "I weigh 83kg", "my weight is 83kg", bare "83kg" ----
-  const isExplicitWeight = /\b(weigh|weight is|weight now|weighed|i am|i'm|scale says|scale said)\b/.test(m) || /^\d{2,3}(\.\d)?\s*kg$/.test(m.trim());
+  const isExplicitWeight = /\b(weigh|weight is|weight now|weighed|weighed in|i am|i'm|my weight|scale says|scale said|came in at)\b/.test(m) || /^\d{2,3}(\.\d)?\s*kg[.!]?$/.test(m.trim()) || /\b\d{2,3}(\.\d)?\s*kg\b/.test(m);
   // Match "85kg" or "85 kg" or just "85" when preceded by a weight keyword
   const explicitKgMatch = m.match(/\b(\d{2,3}(?:\.\d{1,2})?)\s*(?:kg|kilos?)?\b/);
   if (isExplicitWeight && explicitKgMatch) {
@@ -1860,7 +1860,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     if (stepNumMatch) {
       steps = parseInt(stepNumMatch[1].replace(/,/g, ""));
     } else if (hasKmWalk) {
-      const km = parseFloat(hasKmWalk[1]);
+      const km = Math.min(parseFloat(hasKmWalk[1]), 50); // cap at 50km (marathon+)
       steps = Math.round(km * 1300);
     } else if (hasDurationWalk) {
       let minutes = parseInt(hasDurationWalk[1]);
@@ -1899,7 +1899,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
   // ---- WATER LOGGING HANDLER (Item 10) — no GPT ----
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
-  const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today)\b/i.test(m);
+  const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
   if (waterMatch && hasWaterKeyword) {
     const amount = parseFloat(waterMatch[1]);
     const unit = waterMatch[2].toLowerCase();
