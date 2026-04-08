@@ -53,7 +53,7 @@ export function useFlaggedUsers() {
   return useQuery({
     queryKey: [api.users.flagged.path],
     queryFn: async () => {
-      const res = await fetch(api.users.flagged.path);
+      const res = await fetch(api.users.flagged.path, { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch flagged users");
       const data = await res.json();
       return parseWithLogging<FlaggedUser[]>(api.users.flagged.responses[200], data, "users.flagged");
@@ -65,14 +65,15 @@ export function useMetrics() {
   return useQuery({
     queryKey: ["/api/dashboard/metrics"],
     queryFn: async () => {
-      const res = await fetch("/api/dashboard/metrics");
+      const res = await fetch("/api/dashboard/metrics", { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json() as Promise<{
         activeClients: number;
+        payingClients: number;
         newThisWeek: number;
         churnedThisWeek: number;
         avgMessagesPerClientPerDay: number;
-        totalRevenuePlaceholder: number;
+        estimatedMRR: number;
         currency: string;
       }>;
     },

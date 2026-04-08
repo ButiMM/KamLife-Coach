@@ -50,8 +50,9 @@ export default function UserDetail() {
   const user = userData?.user;
   const weightData = (userData?.weightLogs || [])
     .slice()
-    .sort((a, b) => new Date(a.loggedAt).getTime() - new Date(b.loggedAt).getTime())
-    .map(w => ({ date: format(new Date(w.loggedAt), "MMM d"), weight: parseFloat(String(w.weight)) }))
+    .filter((w) => Boolean(w.loggedAt))
+    .sort((a, b) => new Date(a.loggedAt ?? 0).getTime() - new Date(b.loggedAt ?? 0).getTime())
+    .map(w => ({ date: format(new Date(w.loggedAt ?? 0), "MMM d"), weight: parseFloat(String(w.weight)) }))
     .filter(w => !isNaN(w.weight));
 
   if (userLoading) {

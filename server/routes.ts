@@ -17,7 +17,7 @@ import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboardi
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
-import { deliveryStats } from "./scheduler";
+import { deliveryStats, sendWhatsApp } from "./scheduler";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
@@ -78,6 +78,26 @@ function getDisplayName(user: any): string {
   const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
   if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
   return user.name;
+}
+
+function escalationSLA(priority: string): Date {
+  const hours: Record<string, number> = { urgent: 1, high: 4, normal: 12, low: 48 };
+  return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
+}
+
+function detectEscalation(message: string): { should: boolean; reason: string; priority: string } {
+  const m = message.toLowerCase();
+  if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)\b/i.test(m))
+    return { should: true, reason: "injury", priority: "urgent" };
+  if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
+    return { should: true, reason: "billing", priority: "high" };
+  if (/\b(doctor|hospital|surgery|medication|diabete|blood pressure|heart|pregnant|pregnanc|asthma|epilep)\b/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
+    return { should: true, reason: "frustrated", priority: "high" };
+  if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
+    return { should: true, reason: "human_requested", priority: "normal" };
+  return { should: false, reason: "", priority: "normal" };
 }
 
 
@@ -6013,7 +6033,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
           .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
         db.select({ steps: stepLogs.steps, date: stepLogs.loggedAt }).from(stepLogs)
           .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
-        db.select({ date: workoutLogs.loggedAt, dayType: workoutLogs.dayType }).from(workoutLogs)
+        db.select({ date: workoutLogs.loggedAt }).from(workoutLogs)
           .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(workoutLogs.loggedAt)),
         db.select({ date: chatHistory.createdAt, intent: chatHistory.intent, msgIn: chatHistory.messageIn, msgOut: chatHistory.messageOut })
           .from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, thirtyDaysAgo)))
@@ -6024,7 +6044,14 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const events: { date: string; type: string; detail: string }[] = [];
       for (const w of weights) events.push({ date: new Date(w.date!).toISOString(), type: "weight", detail: `${w.weight}kg` });
       for (const s of steps) events.push({ date: new Date(s.date!).toISOString(), type: "steps", detail: `${s.steps} steps` });
-      for (const wo of workouts) events.push({ date: new Date(wo.date!).toISOString(), type: "workout", detail: wo.dayType || "session" });
+      for (const wo of workouts) {
+        const workoutDate = wo.date ? new Date(wo.date) : null;
+        events.push({
+          date: workoutDate?.toISOString() || new Date().toISOString(),
+          type: "workout",
+          detail: workoutDate ? getDayType(workoutDate.getDay()) : "session",
+        });
+      }
       for (const c of chats) events.push({ date: new Date(c.date!).toISOString(), type: "chat", detail: `[${c.intent}] ${(c.msgIn || "").slice(0, 80)}` });
       events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
@@ -6215,28 +6242,6 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // ============================================================
   // ESCALATION INBOX — human review queue with SLA timers
   // ============================================================
-
-  // Helper: compute SLA deadline based on priority
-  function escalationSLA(priority: string): Date {
-    const hours: Record<string, number> = { urgent: 1, high: 4, normal: 12, low: 48 };
-    return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
-  }
-
-  // Helper: auto-detect if a message should be escalated
-  function detectEscalation(message: string): { should: boolean; reason: string; priority: string } {
-    const m = message.toLowerCase();
-    if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)\b/i.test(m))
-      return { should: true, reason: "injury", priority: "urgent" };
-    if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
-      return { should: true, reason: "billing", priority: "high" };
-    if (/\b(doctor|hospital|surgery|medication|diabete|blood pressure|heart|pregnant|pregnanc|asthma|epilep)\b/i.test(m))
-      return { should: true, reason: "medical", priority: "high" };
-    if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
-      return { should: true, reason: "frustrated", priority: "high" };
-    if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
-      return { should: true, reason: "human_requested", priority: "normal" };
-    return { should: false, reason: "", priority: "normal" };
-  }
 
   // Create escalation (auto or manual)
   app.post("/api/dashboard/escalations", requireDashboardKey, async (req, res) => {
@@ -6486,7 +6491,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       // Paying users
       const [payingUsers] = await db.select({ c: count() }).from(users)
-        .where(eq(users.paymentStatus, "active"));
+        .where(eq(users.subscriptionStatus, "active"));
 
       // Churn: users who were active before period but not during
       const beforePeriod = new Date(since.getTime() - days * 86400_000);
@@ -6502,15 +6507,15 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       // Workouts logged
       const [totalWorkouts] = await db.select({ c: count() }).from(workoutLogs)
-        .where(gte(workoutLogs.createdAt, since));
+        .where(gte(workoutLogs.loggedAt, since));
 
       // Weight logs
       const [totalWeighIns] = await db.select({ c: count() }).from(weightLogs)
-        .where(gte(weightLogs.createdAt, since));
+        .where(gte(weightLogs.loggedAt, since));
 
       // Step logs
       const [totalStepLogs] = await db.select({ c: count() }).from(stepLogs)
-        .where(gte(stepLogs.createdAt, since));
+        .where(gte(stepLogs.loggedAt, since));
 
       // Average messages per active user
       const avgMessages = (activeUsers.c || 0) > 0
@@ -6531,14 +6536,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const estimatedMRR = (payingUsers.c || 0) * 99;
 
       // Engagement score: % of active users who logged workout OR weight OR steps
-      const [engagedWorkout] = await db.selectDistinct({ userId: workoutLogs.userId }).from(workoutLogs)
-        .where(gte(workoutLogs.createdAt, since));
-      // Use raw query for distinct count
       const engagedUsersQuery = await db.execute(
         sql`SELECT COUNT(DISTINCT user_id) as c FROM (
-          SELECT user_id FROM workout_logs WHERE created_at >= ${since}
-          UNION SELECT user_id FROM weight_logs WHERE created_at >= ${since}
-          UNION SELECT user_id FROM step_logs WHERE created_at >= ${since}
+          SELECT user_id FROM workout_logs WHERE logged_at >= ${since}
+          UNION SELECT user_id FROM weight_logs WHERE logged_at >= ${since}
+          UNION SELECT user_id FROM step_logs WHERE logged_at >= ${since}
         ) engaged`
       );
       const engagedCount = Number(engagedUsersQuery.rows?.[0]?.c || 0);
@@ -6672,13 +6674,13 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
         // Workouts this week
         const [wk] = await db.select({ c: count() }).from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, u.id), gte(workoutLogs.createdAt, since)));
+          .where(and(eq(workoutLogs.userId, u.id), gte(workoutLogs.loggedAt, since)));
 
         // Weight change
-        const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.createdAt })
+        const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
           .from(weightLogs)
           .where(eq(weightLogs.userId, u.id))
-          .orderBy(desc(weightLogs.createdAt))
+          .orderBy(desc(weightLogs.loggedAt))
           .limit(2);
 
         const currentWeight = weights[0]?.weight || null;
@@ -6687,7 +6689,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
         // Steps this week
         const [stps] = await db.select({ c: count() }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, u.id), gte(stepLogs.createdAt, since)));
+          .where(and(eq(stepLogs.userId, u.id), gte(stepLogs.loggedAt, since)));
 
         // Days since last message
         const daysSinceLastMsg = u.lastActiveAt
@@ -6723,7 +6725,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
             change: weightChange ? Number(weightChange.toFixed(1)) : null,
           },
           daysSinceLastMsg,
-          paymentStatus: u.paymentStatus || "unknown",
+          paymentStatus: u.subscriptionStatus || "unknown",
         });
       }
 
@@ -6766,7 +6768,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         name: users.name,
         phone: users.phoneNumber,
         goal: users.goalType,
-        payment: users.paymentStatus,
+        payment: users.subscriptionStatus,
         lastActive: users.lastActiveAt,
       }).from(users).limit(500);
 
@@ -6792,7 +6794,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       // Filter options: "all", "active", "inactive", "paying", "at_risk"
       const filterType = filter || "all";
-      let allUsers = await db.select({ id: users.id, phone: users.phoneNumber, lastActive: users.lastActiveAt, payment: users.paymentStatus }).from(users);
+      let allUsers = await db.select({ id: users.id, phone: users.phoneNumber, lastActive: users.lastActiveAt, payment: users.subscriptionStatus }).from(users);
 
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
       if (filterType === "active") {
@@ -6845,11 +6847,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       if (!client) return res.status(404).json({ error: "Client not found" });
 
       // Append note with timestamp to existing notes
-      const existingNotes = client.notes || "";
+      const existingNotes = client.profileNotes || "";
       const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
       const updated = existingNotes + `\n[${timestamp}] ${note}`;
 
-      await db.update(users).set({ notes: updated.trim() }).where(eq(users.id, client.id));
+      await db.update(users).set({ profileNotes: updated.trim() }).where(eq(users.id, client.id));
       res.json({ success: true });
     } catch (err) {
       res.status(500).json({ error: "Failed to save note" });
@@ -6860,7 +6862,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   app.get("/api/dashboard/clients/:phone/notes", requireDashboardKey, async (req, res) => {
     try {
       const phone = req.params.phone;
-      const [client] = await db.select({ notes: users.notes, name: users.name }).from(users)
+      const [client] = await db.select({ notes: users.profileNotes, name: users.name }).from(users)
         .where(eq(users.phoneNumber, phone)).limit(1);
       if (!client) return res.status(404).json({ error: "Client not found" });
       res.json({ name: client.name, notes: client.notes || "" });
@@ -6876,11 +6878,11 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   app.get("/api/dashboard/revenue", requireDashboardKey, async (req, res) => {
     try {
       const [paying] = await db.select({ c: count() }).from(users)
-        .where(eq(users.paymentStatus, "active"));
+        .where(eq(users.subscriptionStatus, "active"));
       const [trial] = await db.select({ c: count() }).from(users)
-        .where(or(eq(users.paymentStatus, "trial"), isNull(users.paymentStatus)));
+        .where(eq(users.subscriptionStatus, "trial"));
       const [cancelled] = await db.select({ c: count() }).from(users)
-        .where(eq(users.paymentStatus, "cancelled"));
+        .where(eq(users.subscriptionStatus, "inactive"));
       const [total] = await db.select({ c: count() }).from(users);
 
       const mrr = (paying.c || 0) * 99;

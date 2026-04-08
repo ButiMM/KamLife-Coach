@@ -42,6 +42,10 @@ function todaySAST(): string {
 // Keep todayUTC as alias for state-file keys (they're permanent, format doesn't matter)
 function todayUTC(): string { return todaySAST(); }
 
+function hasRunToday(key: string, dateStr: string): boolean {
+  return loadState()[key] === dateStr;
+}
+
 // Track proactive messages sent today per client — max 2 per day
 // Key format: "YYYY-MM-DD:clientId" so the map is self-expiring by day
 const dailyMessageCount = new Map<string, number>();
@@ -101,7 +105,7 @@ function resetDeliveryStatsIfNeeded() {
   }
 }
 
-async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
+export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();
   if (!FROM_NUMBER) {
     console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
@@ -2212,7 +2216,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
   // Celebrates what the client achieved this week — #1 retention driver
   // ============================================================
   cron.schedule("0 16 * * 0", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todaySAST();
     if (hasRunToday("weekly_wins", today)) return;
     saveState("weekly_wins", today);
     console.log("[SCHEDULER] Running weekly wins celebration...");
@@ -2232,7 +2236,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
             .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
           const weights = await db.select({ weight: weightLogs.weight }).from(weightLogs)
             .where(eq(weightLogs.userId, client.id))
-            .orderBy(desc(weightLogs.createdAt)).limit(2);
+            .orderBy(desc(weightLogs.loggedAt)).limit(2);
 
           const wk = workouts.c || 0;
           const st = stepDays.c || 0;
@@ -2275,7 +2279,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
   // Tuesday & Thursday 10am SAST = 8am UTC
   // ============================================================
   cron.schedule("0 8 * * 2,4", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todaySAST();
     if (hasRunToday("comeback_msg", today)) return;
     saveState("comeback_msg", today);
     console.log("[SCHEDULER] Running comeback messages...");
@@ -2319,7 +2323,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
   // Only for active clients who logged something in last 3 days
   // ============================================================
   cron.schedule("0 4 * * 1,2,3,4,5", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todaySAST();
     if (hasRunToday("daily_motivation", today)) return;
     saveState("daily_motivation", today);
     console.log("[SCHEDULER] Running morning motivation...");
@@ -2369,7 +2373,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
   // Reminds clients who haven't weighed in this week
   // ============================================================
   cron.schedule("0 5 * * 3", async () => {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todaySAST();
     if (hasRunToday("weight_reminder", today)) return;
     saveState("weight_reminder", today);
     console.log("[SCHEDULER] Running weight check-in reminder...");
@@ -2388,7 +2392,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
       for (const client of activeClients) {
         // Check if they weighed in this week
         const [recent] = await db.select({ c: count() }).from(weightLogs)
-          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.createdAt, sevenDaysAgo)));
+          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, sevenDaysAgo)));
         if ((recent.c || 0) > 0) continue; // already weighed in
 
         const name = client.name?.split(" ")[0] || "there";
@@ -2444,10 +2448,10 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
           const stepDays = sl.c || 0;
 
           // Weight change this week
-          const weights = await db.select({ weight: weightLogs.weight, createdAt: weightLogs.createdAt })
+          const weights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
             .from(weightLogs)
             .where(eq(weightLogs.userId, client.id))
-            .orderBy(desc(weightLogs.createdAt)).limit(2);
+            .orderBy(desc(weightLogs.loggedAt)).limit(2);
 
           // Calculate protein average from food logs
           let proteinTotal = 0; let proteinMeals = 0;
