@@ -2010,26 +2010,37 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
   // ---- FIX 2: CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
   // Must run BEFORE food scanner. Strips correction prefix and re-processes the corrected food.
-  const CORRECTION_PREFIX = /^(no[,\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
+  const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
   const isFoodCorrection = CORRECTION_PREFIX.test(m) &&
-    /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had)\b/i.test(m);
-  if (isFoodCorrection) {
-    // Mark the previous food log as corrected so it is excluded from today's totals
-    const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
-    try {
-      const lastFoodLog = await db.select({ id: chatHistory.id })
-        .from(chatHistory)
-        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
-        .orderBy(desc(chatHistory.createdAt))
-        .limit(1);
-      if (lastFoodLog.length > 0) {
-        await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+    /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
+
+  // Also detect reference corrections: "the eggs go with the breakfast", "I was correcting",
+  // "read it again", "that's part of the meal", "goes with the first one"
+  const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
+
+  if (isFoodCorrection || isReferenceCorrection) {
+    // If it's a reference correction (no new food info), don't create new entries — let GPT handle
+    if (isReferenceCorrection && !CORRECTION_PREFIX.test(m)) {
+      // Fall through to GPT — it has chat history context to understand what the user means
+      // Do NOT process through food scanner (this prevents phantom duplicate entries)
+    } else {
+      // Mark the previous food log as corrected so it is excluded from today's totals
+      const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
+      try {
+        const lastFoodLog = await db.select({ id: chatHistory.id })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(1);
+        if (lastFoodLog.length > 0) {
+          await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+        }
+      } catch (e) { console.warn("[non-fatal]", e); }
+      // Strip the correction prefix and process the remaining message as the actual food
+      const correctedMsg = m.replace(CORRECTION_PREFIX, "").trim();
+      if (correctedMsg && correctedMsg.length > 2 && correctedMsg !== m) {
+        return await handleMessage(phone, correctedMsg);
       }
-    } catch (e) { console.warn("[non-fatal]", e); }
-    // Strip the correction prefix and process the remaining message as the actual food
-    const correctedMsg = m.replace(CORRECTION_PREFIX, "").trim();
-    if (correctedMsg && correctedMsg.length > 2 && correctedMsg !== m) {
-      return await handleMessage(phone, correctedMsg);
     }
   }
 
@@ -2062,7 +2073,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // If user says "log it" / "sis you log it?" etc., check if the last message contained food
   // that wasn't logged, and re-process it as a food entry
   const isLogCommand =
-    /\b(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*log|can\s*you\s*log|you\s*log\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))[?!.\s]*$/i.test(m.trim());
+    /\b(lo[gn]\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*lo[gn]|can\s*you\s*lo[gn]|you\s*lo[gn]\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper)|lo[gn]\s*it)[?!.\s]*$/i.test(m.trim());
 
   if (isLogCommand) {
     // Check if the previous message had food that wasn't logged — re-process it
@@ -2127,11 +2138,14 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const isQuestion = m.includes("?") ||
     /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|where)/.test(m) ||
     /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
-  const isFrustration = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read that again|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
+  // Frustration guard — but NOT if the message also contains food correction intent
+  const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
+  // "read it again" and "read that again" are corrections, not frustration — handled by correction flow
+  const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|the above|for lunch|for dinner|for breakfast|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
   // Log triggers: words that suggest the user is REPORTING food they ate/are eating
-  // "breakfast"/"lunch"/"dinner" alone are kept because "chicken for lunch" is valid food logging
-  // BUT they are protected by isQuestion + isFrustration guards upstream
-  const hasLogTrigger = /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had)\b/.test(m);
+  // Standalone meal words (breakfast/lunch/dinner) are safe because the food logging gate
+  // at line ~2218 ALSO requires hasActualFood (scanner must find real food in the message)
+  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had)\b/.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE — SA-specific coaching ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
@@ -2241,7 +2255,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const foodsInMsg = scanForSAFoods(m);
   const hasActualFood = foodsInMsg.length > 0;
   const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
-  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 8;
+  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 15;
   if (!isQuestion && !isFrustration && hasActualFood && (hasLogTrigger || directFoodScan)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
