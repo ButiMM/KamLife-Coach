@@ -2011,8 +2011,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // ---- FIX 2: CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
   // Must run BEFORE food scanner. Strips correction prefix and re-processes the corrected food.
   const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
-  const isFoodCorrection = CORRECTION_PREFIX.test(m) &&
-    /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
+  // Detect food corrections: "No I had a burger", "Actually it was chicken"
+  // Also detect prefix + food with no trigger word: "No 3 boiled eggs" (user correcting quantity)
+  const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").trim();
+  const hasCorrectionPrefix = CORRECTION_PREFIX.test(m);
+  const hasFoodTriggerAfterPrefix = /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
+  const hasFoodAfterPrefix = hasCorrectionPrefix && correctedMsgCandidate.length > 2 && scanForSAFoods(correctedMsgCandidate).length > 0;
+  const isFoodCorrection = hasCorrectionPrefix && (hasFoodTriggerAfterPrefix || hasFoodAfterPrefix);
 
   // Also detect reference corrections: "the eggs go with the breakfast", "I was correcting",
   // "read it again", "that's part of the meal", "goes with the first one"
@@ -2020,9 +2025,12 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
   if (isFoodCorrection || isReferenceCorrection) {
     // If it's a reference correction (no new food info), don't create new entries — let GPT handle
-    if (isReferenceCorrection && !CORRECTION_PREFIX.test(m)) {
-      // Fall through to GPT — it has chat history context to understand what the user means
-      // Do NOT process through food scanner (this prevents phantom duplicate entries)
+    if (isReferenceCorrection && !hasCorrectionPrefix) {
+      // Route to GPT — it has chat history context to understand what the user means
+      // MUST return here to prevent food scanner from creating duplicate entries
+      const gptRef = await askCoachK(message, user, "The user is referencing or correcting a previous food log. Use chat history to understand what they mean and respond helpfully. Do NOT log new food.");
+      await logChat(user.id, message, gptRef, "FOOD_CORRECTION_REF");
+      return gptRef;
     } else {
       // Mark the previous food log as corrected so it is excluded from today's totals
       const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
@@ -2037,9 +2045,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         }
       } catch (e) { console.warn("[non-fatal]", e); }
       // Strip the correction prefix and process the remaining message as the actual food
-      const correctedMsg = m.replace(CORRECTION_PREFIX, "").trim();
-      if (correctedMsg && correctedMsg.length > 2 && correctedMsg !== m) {
-        return await handleMessage(phone, correctedMsg);
+      if (correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
+        return await handleMessage(phone, correctedMsgCandidate);
       }
     }
   }
@@ -2073,7 +2080,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // If user says "log it" / "sis you log it?" etc., check if the last message contained food
   // that wasn't logged, and re-process it as a food entry
   const isLogCommand =
-    /\b(lo[gn]\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*lo[gn]|can\s*you\s*lo[gn]|you\s*lo[gn]\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper)|lo[gn]\s*it)[?!.\s]*$/i.test(m.trim());
+    /\b(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|please\s*log|can\s*you\s*log|you\s*log\s*it|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper)|log\s*it)[?!.\s]*$/i.test(m.trim());
 
   if (isLogCommand) {
     // Check if the previous message had food that wasn't logged — re-process it
@@ -2328,7 +2335,10 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
         let quantity = 1;
         for (const alias of allAliases) {
-          const qtyBefore = segText.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
+          // Match "3 toast", "3 slices of toast", "2 cups of rice", "3 pieces of chicken"
+          const qtyDirect = segText.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
+          const qtyWithFiller = segText.match(new RegExp(`(\\d+)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
+          const qtyBefore = qtyDirect || qtyWithFiller;
           if (qtyBefore) {
             const userQty = parseInt(qtyBefore[1]);
             const defaultQtyMatch = f.typicalPortionDescription.match(/^(\d+)/);
