@@ -25,6 +25,7 @@ export const users = pgTable(
     phoneNumber: text("phone_number").notNull().unique(),
     email: text("email"),
     name: text("name"),
+    gender: text("gender"), // male | female
     goalType: text("goal_type"), // fat_loss | muscle_gain
     age: integer("age"),
     heightCm: integer("height_cm"),

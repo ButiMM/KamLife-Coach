@@ -998,9 +998,10 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (isDumbbell) {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-      const exercises = getGymDay(daySlot, true, false);
-      const label = daySlotLabel(daySlot, false, true);
+      const daySlot = (((day - 1) % 4) + 1);
+      const slotClamped = (daySlot <= 3 ? daySlot : 1) as 1 | 2 | 3;
+      const exercises = getGymDay(slotClamped, true, false);
+      const label = daySlot === 4 ? "Dumbbell Full Body D (Volume)" : daySlotLabel(slotClamped, false, true);
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";
@@ -1015,10 +1016,12 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (isGlutesFocus) {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      const femaleSlot = (((day - 1) % 3) + 1);
+      const femaleSlot = (((day - 1) % 4) + 1);
       if (femaleSlot === 1) return FEMALE_DAY_A;
       if (femaleSlot === 2) return FEMALE_DAY_B;
-      return FEMALE_DAY_C;
+      if (femaleSlot === 3) return FEMALE_DAY_C;
+      // Day 4 — repeat Day A focus (glutes) with higher volume
+      return FEMALE_DAY_A;
     }
     return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
   }
@@ -1034,9 +1037,11 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
 
   if (todayOnly) {
     const day = user.programmeDayInWeek || 1;
-    const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-    const exercises = getGymDay(daySlot, false, false);
-    const label = daySlotLabel(daySlot, false, false);
+    const daySlot = (((day - 1) % 4) + 1);
+    // 4-day rotation: A, B, C, then repeat A for volume
+    const slotClamped = (daySlot <= 3 ? daySlot : 1) as 1 | 2 | 3;
+    const exercises = getGymDay(slotClamped, false, false);
+    const label = daySlot === 4 ? "Full Body D (Volume)" : daySlotLabel(slotClamped, false, false);
     const phase = user.programmePhase || 1;
     const multiplier = getPhaseMultiplier(phase);
     const phaseName = getPhaseNames()[phase] || "Foundation";

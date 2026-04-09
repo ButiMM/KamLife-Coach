@@ -6,6 +6,8 @@ import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { generateVoiceNote } from "./tts";
+import { getKamlifeProgramme } from "./programme";
+import { getShoppingList, formatShoppingList } from "./shopping-lists";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -317,16 +319,29 @@ async function runMorningCheckin(): Promise<void> {
       } catch { /* non-critical */ }
 
       // End with one specific action — include training nudge if today is a training day
-      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
       const isTodayTrainingDay = schedule.includes(todayDOW);
+      const stepsTarget = client.stepsTarget || 10000;
 
-      if (foodLogs.length === 0) {
-        parts.push(isTodayTrainingDay ? `Send me breakfast now — then reply "today" for your workout.` : `Send me breakfast now.`);
-      } else if (isTodayTrainingDay) {
-        parts.push(`Training day today. Reply "today" after your first meal to get your session.`);
+      // Walking target — mandatory every day
+      parts.push(`\n\n*Walking today: ${stepsTarget.toLocaleString()} steps.* Send a screenshot or tell me your count.`);
+
+      if (isTodayTrainingDay) {
+        // Get today's workout preview
+        try {
+          const todayWorkout = getKamlifeProgramme(client, true);
+          // Just show the first 3 lines as a preview, not the full workout
+          const previewLines = todayWorkout.split("\n").slice(0, 5).join("\n");
+          parts.push(`\n*Today's workout (Day ${client.programmeDayInWeek || 1}):*\n${previewLines}\n\nReply *1* for the full workout.`);
+        } catch {
+          parts.push(`\nTraining day. Reply *1* for your workout.`);
+        }
       } else {
-        parts.push(`Rest day today. Stay on food and steps.`);
+        parts.push(`\nRest day — no training. Stay on food and steps.`);
       }
+
+      // Food prompt
+      parts.push(`\nWhat's for breakfast?`);
 
       // Append one-tap repeat suggestion if available
       if (repeatSuggestion) parts.push(repeatSuggestion);
@@ -354,31 +369,85 @@ cron.schedule("0 4 * * *", async () => {
 async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
   const clients = await getActiveClients();
+  const todayStart = dayStart(0);
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
       const name = client.name || "there";
+      const phone = client.phoneNumber;
       const todayLogs = await getTodayLogs(client.id);
 
       if (todayLogs.length === 0) {
         if (canSendProactive(client.id)) {
-          // First-workout activation nudge: if 0 workouts ever and signed up > 6h ago
           const isNewClient = !client.totalWorkoutsCompleted && client.createdAt &&
             (Date.now() - new Date(client.createdAt).getTime()) > 6 * 3_600_000 &&
             (Date.now() - new Date(client.createdAt).getTime()) < 48 * 3_600_000;
           if (isNewClient) {
-            await sendWhatsApp(client.phoneNumber,
+            await sendWhatsApp(phone,
               `${name}, your programme is loaded and ready. Reply *1* to see today's workout — it takes 20 minutes. The first session is always the hardest. Get it done tonight.`
             );
           } else {
-            await sendWhatsApp(client.phoneNumber,
-              `${name}, it is 7pm and I have not heard from you today. No judgment. Just tell me one thing — did you train today, yes or no.`
+            await sendWhatsApp(phone,
+              `${name}, it's 7pm and I haven't heard from you today. No judgment. Just tell me one thing — did you move today?`
             );
           }
           recordProactiveSend(client.id);
         }
+        continue;
       }
+
+      // Build daily summary for active users
+      if (!canSendProactive(client.id)) continue;
+
+      const parts: string[] = [`${name}, day's winding down.`];
+
+      // Food summary
+      const calTarget = client.calorieTarget || 1800;
+      const protTarget = client.proteinTarget || 130;
+      const todayCal = client.todayCalories || 0;
+      const todayProt = client.todayProteinG || 0;
+      const calDate = client.todayCaloriesDate;
+      const today = todaySAST();
+      if (calDate === today && todayCal > 0) {
+        parts.push(`\n*Food:* ${todayCal} kcal | ${todayProt}g protein (target: ${calTarget} kcal | ${protTarget}g)`);
+      } else {
+        parts.push(`\n*Food:* No meals logged today.`);
+      }
+
+      // Workout check
+      const todayWorkouts = await db.select({ id: workoutLogs.id })
+        .from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+        .limit(1);
+      if (todayWorkouts.length > 0) {
+        parts.push(`*Workout:* ✅ Done`);
+      } else {
+        const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
+        const dow = new Date().getDay();
+        if (schedule.includes(dow)) {
+          parts.push(`*Workout:* ❌ Not logged — still time tonight.`);
+        } else {
+          parts.push(`*Workout:* Rest day`);
+        }
+      }
+
+      // Steps check — this is the walking accountability
+      const todaySteps = await db.select({ steps: stepLogs.steps })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
+        .limit(1);
+      const stepsTarget = client.stepsTarget || 10000;
+      if (todaySteps.length > 0) {
+        const s = todaySteps[0].steps;
+        const pct = Math.round((s / stepsTarget) * 100);
+        parts.push(`*Walking:* ${s.toLocaleString()} steps (${pct}% of ${stepsTarget.toLocaleString()} target)${s >= stepsTarget ? " ✅" : ""}`);
+      } else {
+        parts.push(`*Walking:* ❓ No steps logged. Did you walk today? Send your count or a screenshot.`);
+      }
+
+      await sendWhatsApp(phone, parts.join("\n"));
+      recordProactiveSend(client.id);
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }
@@ -758,6 +827,27 @@ cron.schedule("0 6 * * 0", async () => {
       }
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+
+      // Send shopping list for next week — 30 seconds after report
+      try {
+        const budgetTier = client.weeklyFoodBudget || "100_300";
+        const list = getShoppingList(budgetTier, weekNum + 1);
+        const shoppingMsg = formatShoppingList(list, name);
+        await sendWhatsApp(client.phoneNumber, shoppingMsg);
+      } catch (shopErr) {
+        console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr);
+      }
+
+      // Advance programme day for next week
+      try {
+        const newDay = ((client.programmeDayInWeek || 1) % 4) + 1;
+        const newWeek = newDay === 1 ? (weekNum + 1) : weekNum;
+        await db.update(users).set({
+          programmeDayInWeek: newDay,
+          programmeWeek: newWeek,
+        }).where(eq(users.id, client.id));
+      } catch { /* non-critical */ }
+
     } catch (err) {
       console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
     }

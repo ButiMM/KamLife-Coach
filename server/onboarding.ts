@@ -423,8 +423,22 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Just your first name — what do people call you?`;
     }
     const name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
-    await db.update(users).set({ name, onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
-    return `Sharp ${name}. What's your email address? (Used as a backup if WhatsApp ever has issues — type *skip* if you'd rather not.)`;
+    await db.update(users).set({ name, onboardingState: "ASK_GENDER" }).where(eq(users.phoneNumber, phone));
+    return `Sharp ${name}. Male or female?`;
+  }
+
+  // ---- ASK_GENDER ----
+  if (state === "ASK_GENDER") {
+    const lower = msg.toLowerCase().trim();
+    const isMale = lower === "male" || lower === "m" || lower === "1" || lower === "guy" || lower === "man" || lower === "bro" || lower === "indoda";
+    const isFemale = lower === "female" || lower === "f" || lower === "2" || lower === "woman" || lower === "lady" || lower === "girl" || lower === "sis" || lower === "intombi";
+    if (!isMale && !isFemale) {
+      return `Male or female?`;
+    }
+    const gender = isMale ? "male" : "female";
+    const focusArea = gender === "female" ? "glutes_legs" : null;
+    await db.update(users).set({ gender, ...(focusArea ? { primaryFocusArea: focusArea } : {}), onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
+    return `What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
   }
 
   // ---- ASK_EMAIL — optional, backup contact ----
@@ -455,13 +469,15 @@ export async function handleOnboarding(user: any, message: string, phone: string
     return `Gym or home training?`;
   }
 
-  // ---- ASK_EQUIPMENT — gym or home, then go straight to COMPLETE ----
+  // ---- ASK_EQUIPMENT — gym or home ----
   if (state === "ASK_EQUIPMENT") {
     const lower = msg.toLowerCase();
     let mode = "home";
     let gymName: string | null = null;
 
-    if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym)\b/i.test(lower)) {
+    if (/\b(walk|walking|walk only|no gym|no equipment|just walk)\b/i.test(lower)) {
+      mode = "walk_only";
+    } else if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym)\b/i.test(lower)) {
       mode = "gym_dumbbell";
       gymName = "Basic Gym";
     } else if (/\bgym\b/i.test(lower) || lower.includes("virgin") || lower.includes("planet fitness") || lower.includes("curves")) {
@@ -472,53 +488,74 @@ export async function handleOnboarding(user: any, message: string, phone: string
       else if (/\bgym\b/i.test(lower)) gymName = "Gym";
     }
 
-    // Female glute focus detection
-    const primaryFocusArea = /\b(glutes?|bum|booty|legs? and glutes?|lower body|hips?)\b/i.test(lower) ? "glutes_legs" : null;
-
-    // Set defaults for everything — collected progressively through coaching
-    const defaultDays = 3;
-    const defaultExp = "beginner";
-    const defaultGoal = user.goalType || "fat_loss";
-    const defaultWeight = 75;
-    const defaultBudget = "100_300";
-
-    const { calorieTarget, proteinTarget } = calculateTargets(
-      defaultWeight, defaultGoal, "office", defaultDays
-    );
-
     await db.update(users).set({
       trainingMode: mode,
       gymName: gymName || null,
-      trainingDaysPerWeek: defaultDays,
-      trainingExperience: defaultExp,
-      weeklyFoodBudget: defaultBudget,
-      budgetLevel: "medium",
+      onboardingState: "ASK_BUDGET",
+    }).where(eq(users.phoneNumber, phone));
+
+    return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+  }
+
+  // ---- ASK_BUDGET — grocery budget tier, then COMPLETE ----
+  if (state === "ASK_BUDGET") {
+    const lower = msg.toLowerCase();
+    let budget = "100_300";
+    let budgetLevel = "medium";
+    if (msg.includes("1") || lower.includes("under") || lower.includes("1500") || lower.includes("1,500") || lower.includes("budget") || lower.includes("tight")) {
+      budget = "under_100"; budgetLevel = "low";
+    } else if (msg.includes("2") || lower.includes("3000") || lower.includes("3,000") || lower.includes("medium")) {
+      budget = "100_300"; budgetLevel = "medium";
+    } else if (msg.includes("3") || lower.includes("5000") || lower.includes("5,000")) {
+      budget = "300_600"; budgetLevel = "high";
+    } else if (msg.includes("4") || lower.includes("over") || lower.includes("premium") || lower.includes("no limit")) {
+      budget = "over_600"; budgetLevel = "premium";
+    }
+
+    const defaultGoal = user.goalType || "fat_loss";
+    const defaultWeight = 75;
+    const trainingDays = 4; // 4 days/week training, walking is daily on top
+
+    const { calorieTarget, proteinTarget } = calculateTargets(
+      defaultWeight, defaultGoal, "office", trainingDays
+    );
+
+    // Auto-set female focus area based on gender
+    const isFemale = user.gender === "female";
+
+    await db.update(users).set({
+      trainingDaysPerWeek: trainingDays,
+      trainingExperience: "beginner",
+      weeklyFoodBudget: budget,
+      budgetLevel,
       lifeSituation: "office",
       workSchedule: "standard",
       calorieTarget,
       proteinTarget,
-      stepsTarget: 8500,
+      stepsTarget: 10000,
       programmePhase: 1,
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
       subscriptionStatus: "inactive",
       onboardingState: "COMPLETE",
-      popiConsent: true,
-      popiConsentAt: new Date(),
-      ...(primaryFocusArea ? { primaryFocusArea } : {}),
+      ...(isFemale && !user.primaryFocusArea ? { primaryFocusArea: "glutes_legs" } : {}),
     }).where(eq(users.phoneNumber, phone));
 
     const goalLabel: Record<string, string> = {
       fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Recomposition",
     };
-    const modeLabel = mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
+    const mode = user.trainingMode || "home";
+    const gymName = user.gymName;
+    const modeLabel = mode === "walk_only" ? "Walking + bodyweight" : mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
 
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 3 days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Daily workouts, food coaching, SA meal plans, weekly progress reports — all in WhatsApp. No app needed.\n\nPay now and Day 1 drops immediately.`;
+    const budgetLabels: Record<string, string> = { under_100: "Under R1,500", "100_300": "R1,500–R3,000", "300_600": "R3,000–R5,000", over_600: "R5,000+" };
+
+    return `Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 4 days/week\n*Walking:* Daily — 8,000-12,000 steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month\n\nYou'll get:\n• Daily workout + walking target every morning\n• Food logging — tell me what you ate\n• Weekly shopping list for your budget\n• Weekly progress report\n• Real accountability — I check on you\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Pay now and Day 1 drops immediately.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----

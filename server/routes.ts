@@ -14,6 +14,7 @@ import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlife
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
+import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
@@ -903,24 +904,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- SHOPPING LIST command ----
   if (m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
     const budget = user.weeklyFoodBudget || "100_300";
-    const goal = user.goalType || "fat_loss";
-    const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
-    const noPeanuts = otherNotes.includes("peanut");
-    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("tuna");
-    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
-    const noGluten = otherNotes.includes("gluten") || otherNotes.includes("coeliac") || otherNotes.includes("wheat");
-    const milkItem = goal === "muscle_gain" && !noDairy ? "Full cream milk 1L — R22" : !noDairy ? "Low fat milk 1L — R20" : null;
-
-    if (budget === "under_100") {
-      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\n${noFish ? "Eggs extra 6 pack — R25" : "Pilchards 3 tins — R36"}\nSugar beans 500g — R20\nCabbage 1 head — R8\nSpinach 1 bunch — R10\nOnions bag — R8\nPap/maize meal 2kg — R15\nSunflower oil 500ml — R10\n\nEstimated total: ≈R152\n\n🛒 Pro tip: Cook a big pot of beans Sunday — feeds you 3 days at under R7 per serving. Add 1 egg per bowl for complete protein.`;
-    }
-    if (budget === "100_300") {
-      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nFrozen chicken portions 1kg — R40\n${noFish ? "" : "Pilchards 3 tins — R36\n"}Oats 500g — R15\n${noGluten ? "" : "Brown bread 1 loaf — R14\n"}Sweet potato 1kg — R12\nCabbage — R8\nSpinach — R10\nOnions + tomatoes — R23\nGarlic — R8\nSunflower oil — R10\n\nEstimated total: ≈R221\n\n🛒 Pro tip: Buy a whole frozen chicken, cut it yourself — saves R15–R20 per kg vs portions.`;
-    }
-    if (budget === "300_600") {
-      return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nFrozen chicken 1.5kg — R60\nBeef mince 500g — R60\n${noFish ? "" : "Pilchards 2 tins — R24\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 1.5kg — R18\nBanana bunch — R15\n${milkItem ? milkItem + "\n" : ""}${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Spinach — R10\nCabbage — R8\nTomatoes 500g — R15\n${noDairy ? "" : "Cottage cheese 250g — R20\n"}Garlic + lemon — R13\n\nEstimated total: ≈R378\n\n🛒 Pro tip: Brown 500g mince Sunday, split into 3 — that's 3 dinners sorted in one 20-min cook.`;
-    }
-    return `*🛒 Your Weekly Shopping List — Shoprite or Boxer*\nEggs 12 pack — R45\nChicken breast 1kg — R80\n${noFish ? "" : "Salmon 400g ×2 — R160\n"}Beef mince 500g — R60\n${noDairy ? "" : "Low fat Greek yoghurt 500g — R35\n"}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 2kg — R24\nBanana bunch — R15\n${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Broccoli — R20\nSpinach — R10\n${noDairy ? "" : "Low fat milk 1L — R20\n"}Almonds 100g — R40\nOlive oil 250ml — R40\n\nEstimated total: ≈R619\n\n🛒 Pro tip: Salmon goes on special at Shoprite most Fridays — buy two packs and freeze immediately.`;
+    const weekNum = user.programmeWeek || 1;
+    const list = getShoppingList(budget, weekNum);
+    const reply = formatShoppingList(list, user.name || undefined);
+    await logChat(user.id, message, reply, "SHOPPING_LIST");
+    return reply;
   }
 
   // ---- MEAL PREP PLAN — "meal prep" / "prep" / "sunday cook" ----
@@ -1183,6 +1171,48 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
         const clientName = user.name || "there";
         const goal = user.goalType || "fat_loss";
+
+        // ---- STEP SCREENSHOT DETECTION ----
+        // If caption mentions steps/walking/pedometer, use GPT Vision to read the number
+        const isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app)\b/i.test(message)
+          || (user.awaitingInputType === "steps");
+        if (isStepScreenshot) {
+          try {
+            const stepVisionResponse = await openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              max_tokens: 50,
+              messages: [
+                { role: "system", content: "Extract the step count number from this screenshot. Reply with ONLY the number. If you cannot find a step count, reply UNKNOWN." },
+                { role: "user", content: [
+                  { type: "text", text: "What is the step count shown in this screenshot?" },
+                  { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                ] },
+              ],
+            });
+            const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
+            const extractedSteps = parseInt(stepText.replace(/[^0-9]/g, ""));
+            if (!isNaN(extractedSteps) && extractedSteps >= 100 && extractedSteps < 100000) {
+              const target = user.stepsTarget || 10000;
+              const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+              const existingStep = await db.select({ id: stepLogs.id })
+                .from(stepLogs)
+                .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
+                .limit(1);
+              if (existingStep.length > 0) {
+                await db.update(stepLogs).set({ steps: extractedSteps }).where(eq(stepLogs.id, existingStep[0].id));
+              } else {
+                await db.insert(stepLogs).values({ userId: user.id, steps: extractedSteps });
+              }
+              await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+              const stepReply = getStepResponse(extractedSteps, target);
+              const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+              const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
+              await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
+              return stepReply + streakNote + (perfectDay || "");
+            }
+          } catch (e) { console.warn("[step-vision]", e); }
+          // If extraction failed, fall through to food photo handler
+        }
 
         // ---- PROGRESS PHOTO DETECTION ----
         // If the message contains progress-related keywords, store and optionally compare
