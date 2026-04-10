@@ -47,8 +47,38 @@ export function buildContext(user: any): string {
     ? `\nMEDICAL NOTE: This client has: ${medicalConditions}. When giving condition-specific advice (diet, exercise modification, medication timing), ALWAYS end with a one-sentence reminder to consult their doctor or healthcare provider for personalised medical guidance. Never diagnose, never contraindicate prescribed medication, never tell them to stop medication.`
     : "";
 
+  // Age-derived coaching tone and safety flags
+  const daysOnProgramme = Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000);
+  const weeksOnProgramme = Math.max(1, Math.floor(daysOnProgramme / 7));
+  const isYouth = age < 18;
+  const isElderly = age >= 60;
+  const gender = user.gender || "unknown";
+
+  // Coaching maturity — how Coach K talks to this client based on how long they've been around
+  let coachingTone = "";
+  if (daysOnProgramme <= 7) {
+    coachingTone = "NEW CLIENT (week 1): Be encouraging, explain everything simply, celebrate small wins. Don't overwhelm. This person is building trust with you.";
+  } else if (daysOnProgramme <= 21) {
+    coachingTone = "BUILDING PHASE (weeks 2-3): The danger zone. Motivation drops. Be direct, acknowledge it's hard, but remind them WHY they started. Reference any progress.";
+  } else if (daysOnProgramme <= 56) {
+    coachingTone = "HABIT FORMING (weeks 4-8): Habits are setting in. Push harder. Challenge them. Start expecting more. Reference their streak and consistency.";
+  } else {
+    coachingTone = "VETERAN (8+ weeks): This client is committed. Talk to them as a peer. Set bigger goals. Reference their journey. They've earned real coaching.";
+  }
+
+  // Age-specific coaching guidelines
+  let ageGuidelines = "";
+  if (isYouth) {
+    ageGuidelines = "YOUTH CLIENT (under 18): Use energetic, fun language. No heavy 1RM lifts — focus on form, bodyweight, and building habits. Celebrate effort over results. Never body-shame. Frame everything as 'getting stronger' not 'losing weight'. Use slang naturally (sharp, eish, let's go).";
+  } else if (isElderly) {
+    ageGuidelines = "SENIOR CLIENT (60+): Respectful but not patronizing. Joint-friendly alternatives for every exercise. Emphasize mobility, balance, and independence. Lower impact cardio. Always remind to listen to their body. Never push through pain. Warm-up is mandatory, not optional.";
+  } else if (age >= 40) {
+    ageGuidelines = "40+ CLIENT: Recovery matters more. Warm-ups are essential. Mention joint care when relevant. Don't assume they can't perform — many are at their strongest. Respect their time constraints.";
+  }
+
   return `CLIENT PROFILE:
 Name: ${name}
+Gender: ${gender}
 Goal: ${goal}
 Age: ${age}
 Phase: ${phase} — ${phaseName}
@@ -65,12 +95,15 @@ Injuries: ${injuries}
 Medical conditions: ${medicalConditions}
 Experience: ${experience}
 Water today: ${water}L
-Days on programme: ${Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86400000)}
+Days on programme: ${daysOnProgramme} (week ${weeksOnProgramme})
 Compliance level: ${user.complianceLevel || 'RESET'}
 Workout streak: ${user.workoutStreak || 0} consecutive sessions
 Total sessions completed: ${user.totalWorkoutsCompleted || 0}
 Programme week: ${user.programmeWeek || 1}
-Subscription status: ${user.subscriptionStatus || 'inactive'}${medicalDisclaimer}`;
+Subscription status: ${user.subscriptionStatus || 'inactive'}
+
+${coachingTone}
+${ageGuidelines}${medicalDisclaimer}`;
 }
 
 // ============================================================
@@ -134,7 +167,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
   try {
     // ---- Parallel DB queries ----
-    const [recentChats, recentWeights, olderWeights] = await Promise.all([
+    const [recentChats, recentWeights, olderWeights, recentSteps] = await Promise.all([
       db.select().from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
         .orderBy(desc(chatHistory.createdAt))
@@ -151,6 +184,10 @@ export async function buildPatternSummary(user: any): Promise<string> {
         ))
         .orderBy(desc(weightLogs.loggedAt))
         .limit(1),
+      db.select().from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
+        .orderBy(desc(stepLogs.loggedAt))
+        .limit(7),
     ]);
 
     // ---- Days logged vs silent ----
@@ -241,6 +278,43 @@ export async function buildPatternSummary(user: any): Promise<string> {
     }
 
     parts.push(weightTrend);
+
+    // ---- Step compliance ----
+    const stepsTarget = user.stepsTarget || 10000;
+    if (recentSteps.length > 0) {
+      const avgSteps = Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length);
+      const hitTarget = recentSteps.filter(s => s.steps >= stepsTarget).length;
+      parts.push(`Steps: avg ${avgSteps.toLocaleString()}/day (${hitTarget}/${recentSteps.length} days hit ${stepsTarget.toLocaleString()} target).`);
+      if (avgSteps < stepsTarget * 0.6) {
+        parts.push("Walking is significantly below target — needs direct accountability.");
+      }
+    } else {
+      parts.push("No step data logged this week.");
+    }
+
+    // ---- Weekend pattern detection ----
+    const weekendChats = recentChats.filter(c => {
+      const day = new Date(c.createdAt || "").getDay();
+      return day === 0 || day === 6; // Sun or Sat
+    });
+    const weekdayChats = recentChats.filter(c => {
+      const day = new Date(c.createdAt || "").getDay();
+      return day >= 1 && day <= 5;
+    });
+    if (weekdayChats.length > 3 && weekendChats.length === 0) {
+      parts.push("Pattern: Active on weekdays, silent on weekends — weekend accountability needed.");
+    }
+
+    // ---- Food logging consistency ----
+    const foodLogDays = new Set(
+      recentChats.filter(c => c.intent === "FOOD_LOG").map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
+    ).size;
+    if (foodLogDays >= 5) {
+      parts.push("Food logging is consistent this week — solid habit.");
+    } else if (foodLogDays <= 1) {
+      parts.push("Almost no food logged this week — needs encouragement to track.");
+    }
+
     if (programmeWeek === 3) parts.push("Currently in week 3 of the programme — the danger zone.");
     if (today.getDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
 

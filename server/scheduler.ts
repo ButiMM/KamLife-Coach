@@ -215,9 +215,32 @@ async function runMorningCheckin(): Promise<void> {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
-    // Only send to clients active in the last 3 days — don't spam silent users
-    const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
-    if (client.lastActiveAt && new Date(client.lastActiveAt) < threeDaysAgo) continue;
+    // Smart re-engagement: silent clients get a different message, not silence
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+
+    // More than 7 days silent — stop messaging (save WhatsApp costs)
+    if (daysSilent > 7) continue;
+
+    // 3-7 days silent — send a short re-engagement, not the full check-in
+    if (daysSilent >= 3) {
+      if (canSendProactive(client.id)) {
+        const name = client.name || "there";
+        const daysOnProgramme = Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
+        let reEngageMsg = "";
+        if (daysOnProgramme <= 14) {
+          // New client ghosting early — warm, no guilt
+          reEngageMsg = `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`;
+        } else {
+          // Established client — direct accountability
+          reEngageMsg = `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
+        }
+        await sendWhatsApp(client.phoneNumber, reEngageMsg);
+        recordProactiveSend(client.id);
+      }
+      continue;
+    }
     try {
       const name = client.name || "there";
       const phone = client.phoneNumber;
@@ -444,6 +467,22 @@ async function runEveningAccountability(): Promise<void> {
         parts.push(`*Walking:* ${s.toLocaleString()} steps (${pct}% of ${stepsTarget.toLocaleString()} target)${s >= stepsTarget ? " ✅" : ""}`);
       } else {
         parts.push(`*Walking:* ❓ No steps logged. Did you walk today? Send your count or a screenshot.`);
+      }
+
+      // Adaptive closing — tone matches how the day went
+      const hadFood = calDate === today && (client.todayCalories || 0) > 0;
+      const hadWorkout = todayWorkouts.length > 0;
+      const hadSteps = todaySteps.length > 0 && todaySteps[0].steps >= stepsTarget;
+
+      const score = (hadFood ? 1 : 0) + (hadWorkout ? 1 : 0) + (hadSteps ? 1 : 0);
+      if (score === 3) {
+        parts.push(`\n💪 All three boxes checked. That's what a champion day looks like.`);
+      } else if (score === 2) {
+        parts.push(`\nSolid day. One gap to close tomorrow — you know which one.`);
+      } else if (score === 1) {
+        parts.push(`\nTomorrow, aim to hit 2 out of 3: food + workout + steps. One day at a time.`);
+      } else {
+        parts.push(`\nTomorrow is a fresh start. One meal logged. That's all I'm asking.`);
       }
 
       await sendWhatsApp(phone, parts.join("\n"));

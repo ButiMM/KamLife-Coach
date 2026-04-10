@@ -989,11 +989,50 @@ const HOME_DAYS: Record<number, HomeEx[]> = {
 export function getKamlifeProgramme(user: any, todayOnly = false): string {
   const mode = user.trainingMode || "home";
   const exp = (user.trainingExperience || "beginner").toLowerCase();
+  const age = user.age || 30;
+  const programmeWeek = user.programmeWeek || 1;
+  const isYouth = age < 18;
+  const isElderly = age >= 60;
 
-  if (mode !== "gym" && mode !== "gym_dumbbell") return HOME_PROGRAMME_GUIDE;
+  // Progressive walking target — ramps up over weeks, not static from day 1
+  const baseSteps = user.stepsTarget || 10000;
+  let progressiveSteps = baseSteps;
+  if (programmeWeek <= 2) {
+    progressiveSteps = Math.round(baseSteps * 0.7); // Week 1-2: 70%
+  } else if (programmeWeek <= 4) {
+    progressiveSteps = Math.round(baseSteps * 0.85); // Week 3-4: 85%
+  }
+  // Week 5+: full target
+
+  // Age-aware prefix
+  let prefix = "";
+  if (isElderly && todayOnly) {
+    prefix = `*Warm-up first (5 min):* Light walk or march in place. Arm circles. Gentle leg swings. Ankle rotations.\n\n`;
+  }
+  if (isYouth && todayOnly) {
+    prefix = `*Quick warm-up:* 30 star jumps, 10 high knees each side, arm swings.\n\n`;
+  }
+
+  // Walking target footer for today's workout
+  let walkingFooter = "";
+  if (todayOnly) {
+    walkingFooter = `\n\n*Walking today:* ${progressiveSteps.toLocaleString()} steps${programmeWeek <= 4 ? ` (building up — full target is ${baseSteps.toLocaleString()})` : ""}. Send a screenshot or tell me your count.`;
+  }
+
+  if (mode !== "gym" && mode !== "gym_dumbbell") return prefix + HOME_PROGRAMME_GUIDE + walkingFooter;
 
   const isDumbbell = mode === "gym_dumbbell";
   const isGlutesFocus = user.primaryFocusArea === "glutes_legs";
+
+  // Elderly safety note appended to every todayOnly workout
+  const elderlyNote = isElderly && todayOnly
+    ? `\n\n_💡 Senior tip: Use lighter weights with higher reps (12-15). If any movement causes joint pain, skip it and do the modification instead. Rest as long as you need between sets._`
+    : "";
+  // Youth safety note
+  const youthNote = isYouth && todayOnly
+    ? `\n\n_💡 Focus on form, not weight. No maxing out. If you can't do the full reps with good form, go lighter. Building habits now = gains for life._`
+    : "";
+  const safetyNote = elderlyNote || youthNote;
 
   if (isDumbbell) {
     if (todayOnly) {
@@ -1005,7 +1044,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier) + safetyNote + walkingFooter;
     }
     const dayA = formatGymDay(GYM_DUMBBELL_DAY_A, "Dumbbell Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));
     const dayB = formatGymDay(GYM_DUMBBELL_DAY_B, "Dumbbell Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1));
@@ -1017,11 +1056,11 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
       const femaleSlot = (((day - 1) % 4) + 1);
-      if (femaleSlot === 1) return FEMALE_DAY_A;
-      if (femaleSlot === 2) return FEMALE_DAY_B;
-      if (femaleSlot === 3) return FEMALE_DAY_C;
+      let workout = FEMALE_DAY_A;
+      if (femaleSlot === 2) workout = FEMALE_DAY_B;
+      else if (femaleSlot === 3) workout = FEMALE_DAY_C;
       // Day 4 — repeat Day A focus (glutes) with higher volume
-      return FEMALE_DAY_A;
+      return prefix + workout + safetyNote + walkingFooter;
     }
     return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
   }
@@ -1030,7 +1069,8 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (exp === "intermediate" || exp === "advanced") {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      return day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
+      const workout = day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
+      return prefix + workout + safetyNote + walkingFooter;
     }
     return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
   }
@@ -1045,7 +1085,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     const phase = user.programmePhase || 1;
     const multiplier = getPhaseMultiplier(phase);
     const phaseName = getPhaseNames()[phase] || "Foundation";
-    return formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier);
+    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier) + safetyNote + walkingFooter;
   }
 
   const dayA = formatGymDay(GYM_FULL_DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));

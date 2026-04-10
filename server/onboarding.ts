@@ -437,8 +437,35 @@ export async function handleOnboarding(user: any, message: string, phone: string
     }
     const gender = isMale ? "male" : "female";
     const focusArea = gender === "female" ? "glutes_legs" : null;
-    await db.update(users).set({ gender, ...(focusArea ? { primaryFocusArea: focusArea } : {}), onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
-    return `What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
+    await db.update(users).set({ gender, ...(focusArea ? { primaryFocusArea: focusArea } : {}), onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+    return `How old are you?`;
+  }
+
+  // ---- ASK_AGE_NEW — age drives workout safety, intensity, and tone ----
+  if (state === "ASK_AGE_NEW") {
+    const age = parseInt(msg.replace(/[^0-9]/g, ""));
+    if (isNaN(age) || age < 10 || age > 110) {
+      return `Just your age — for example: 28`;
+    }
+    if (age < 14) {
+      return `Coach K is designed for ages 14 and up. Chat to a parent or guardian about getting started together.`;
+    }
+    const isElderly = age >= 60;
+    const isYouth = age < 18;
+    await db.update(users).set({
+      age,
+      elderlyClient: isElderly,
+      onboardingState: "ASK_EMAIL",
+    }).where(eq(users.phoneNumber, phone));
+
+    // Age-appropriate response
+    if (isYouth) {
+      return `${age} — sharp, young legend. 💪 What's your email address? (Type *skip* to continue without one.)`;
+    }
+    if (isElderly) {
+      return `${age} — respect. I'll make sure your programme is joint-friendly and safe. What's your email? (Type *skip* to continue without one.)`;
+    }
+    return `Got it. What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
   }
 
   // ---- ASK_EMAIL — optional, backup contact ----
@@ -514,25 +541,37 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
     const defaultGoal = user.goalType || "fat_loss";
     const defaultWeight = 75;
-    const trainingDays = 4; // 4 days/week training, walking is daily on top
+    const age = user.age || 30;
+    const isYouth = age < 18;
+    const isElderly = age >= 60;
+
+    // Age-appropriate training days: youth and elderly start at 3, standard at 4
+    const trainingDays = (isYouth || isElderly) ? 3 : 4;
 
     const { calorieTarget, proteinTarget } = calculateTargets(
       defaultWeight, defaultGoal, "office", trainingDays
     );
+
+    // Age-appropriate step targets:
+    // Youth (14-17): 10,000 (they move naturally, but set a target)
+    // Standard (18-59): 10,000
+    // Active seniors (60-69): 8,000
+    // Elderly (70+): 6,000
+    const stepsTarget = age >= 70 ? 6000 : isElderly ? 8000 : 10000;
 
     // Auto-set female focus area based on gender
     const isFemale = user.gender === "female";
 
     await db.update(users).set({
       trainingDaysPerWeek: trainingDays,
-      trainingExperience: "beginner",
+      trainingExperience: isYouth ? "beginner" : isElderly ? "beginner" : "beginner",
       weeklyFoodBudget: budget,
       budgetLevel,
       lifeSituation: "office",
       workSchedule: "standard",
       calorieTarget,
       proteinTarget,
-      stepsTarget: 10000,
+      stepsTarget,
       programmePhase: 1,
       programmeWeek: 1,
       programmeDayInWeek: 1,
@@ -555,7 +594,16 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
     const budgetLabels: Record<string, string> = { under_100: "Under R1,500", "100_300": "R1,500–R3,000", "300_600": "R3,000–R5,000", over_600: "R5,000+" };
 
-    return `Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · 4 days/week\n*Walking:* Daily — 8,000-12,000 steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month\n\nYou'll get:\n• Daily workout + walking target every morning\n• Food logging — tell me what you ate\n• Weekly shopping list for your budget\n• Weekly progress report\n• Real accountability — I check on you\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Pay now and Day 1 drops immediately.`;
+    // Age-appropriate completion message
+    const ageNote = isYouth
+      ? `\n\n_Note for under-18s: Your programme is designed to be safe and fun. No heavy maximal lifts — we focus on movement, form, and building healthy habits for life._`
+      : isElderly
+        ? `\n\n_Your programme is joint-friendly with lower-impact alternatives. We focus on mobility, strength maintenance, and keeping you active and independent. Always listen to your body._`
+        : "";
+
+    const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
+
+    return `Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month\n\nYou'll get:\n• Daily workout + walking target every morning\n• Food logging — tell me what you ate\n• Weekly shopping list for your budget\n• Weekly progress report\n• Real accountability — I check on you${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Pay now and Day 1 drops immediately.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
