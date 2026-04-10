@@ -4,6 +4,7 @@ import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets } from "./targets";
 import { askCoachK } from "./gpt";
+import { getShoppingList, formatShoppingList } from "./shopping-lists";
 
 // ============================================================
 // MENU TEXT — context-aware
@@ -576,7 +577,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      subscriptionStatus: "inactive",
+      subscriptionStatus: "trial",
+      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000), // 7-day free trial
       onboardingState: "COMPLETE",
       ...(isFemale && !user.primaryFocusArea ? { primaryFocusArea: "glutes_legs" } : {}),
     }).where(eq(users.phoneNumber, phone));
@@ -588,9 +590,6 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const gymName = user.gymName;
     const modeLabel = mode === "walk_only" ? "Walking + bodyweight" : mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-    const merchantId = process.env.PAYFAST_MERCHANT_ID;
-    const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-    const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
 
     const budgetLabels: Record<string, string> = { under_100: "Under R1,500", "100_300": "R1,500–R3,000", "300_600": "R3,000–R5,000", over_600: "R5,000+" };
 
@@ -603,7 +602,16 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
     const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
 
-    return `Your programme is built.\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month\n\nYou'll get:\n• Daily workout + walking target every morning\n• Food logging — tell me what you ate\n• Weekly shopping list for your budget\n• Weekly progress report\n• Real accountability — I check on you${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Pay now and Day 1 drops immediately.`;
+    // Immediately build today's workout so they get value NOW
+    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: isFemale ? "glutes_legs" : user.primaryFocusArea };
+    const firstWorkout = getKamlifeProgramme(updatedUser, true);
+    const workoutPreview = firstWorkout.split("\n").slice(0, 8).join("\n");
+
+    // Get first shopping list
+    const weekOneList = getShoppingList(budget, 1);
+    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined);
+
+    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\nReply *1* for the full workout with form videos.\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
@@ -787,7 +795,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R99/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R149/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
   }
 
   return await getMenuText(user);

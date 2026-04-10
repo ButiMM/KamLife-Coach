@@ -1874,15 +1874,16 @@ cron.schedule("0 9 * * *", async () => {
       const cancelled = client.cancelledAt ? new Date(client.cancelledAt) : null;
 
       if (isNewSignup && created) {
-        // New signup who hasn't paid yet — nudge on day 1 and day 3
+        // Trial user approaching trial end — nudge on day 5 and day 7
         const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
-        if (daysSince === 1) {
+        const workouts = client.totalWorkoutsCompleted || 0;
+        if (daysSince === 5 && client.subscriptionStatus === "trial") {
           await sendWhatsApp(client.phoneNumber,
-            `${name} — your programme is still waiting.\n\nGoal set. Training mode set. Calorie targets calculated. All that is left is the first session.\n\n*Activate for R99/month:*\n${payLink}\n\nDay 1 drops the moment you pay. Less than a KFC streetwise.`
+            `${name}, 2 days left on your free trial.${workouts > 0 ? ` You've done ${workouts} session${workouts > 1 ? "s" : ""} — that's real progress.` : ""}\n\nKeep everything — workouts, food coaching, daily accountability.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Less than a KFC streetwise.`
           );
-        } else if (daysSince === 3) {
+        } else if (daysSince === 7 && client.subscriptionStatus === "trial") {
           await sendWhatsApp(client.phoneNumber,
-            `${name} — Coach K here. You set up your profile 3 days ago.\n\nMost people who don't start within 48 hours never start at all. You're still in the window.\n\nR99/month. Day 1 sent immediately on payment:\n${payLink}`
+            `${name} — last day of your trial. Tomorrow coaching stops unless you subscribe.\n\nYour programme, targets, and progress are saved. Pay now and nothing changes — Day ${(client.programmeDayInWeek || 1) + 1} drops tomorrow morning.\n\n*R149/month:*\n${payLink}`
           );
         }
 
@@ -1893,15 +1894,15 @@ cron.schedule("0 9 * * *", async () => {
 
         if (daysSinceCancelled === 3) {
           await sendWhatsApp(client.phoneNumber,
-            `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R99/month:*\n${payLink}`
+            `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R149/month:*\n${payLink}`
           );
         } else if (daysSinceCancelled === 7) {
           await sendWhatsApp(client.phoneNumber,
-            `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR99/month. Your data is here:\n${payLink}`
+            `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR149/month. Your data is here:\n${payLink}`
           );
         } else if (daysSinceCancelled === 30) {
           await sendWhatsApp(client.phoneNumber,
-            `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR99/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`
+            `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR149/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`
           );
         }
       }
@@ -2719,7 +2720,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
   // ============================================================
   // JOB: PAYDAY MEAL PREP SEQUENCE (18th, 19th, 20th of month)
   // 3-message sequence: shopping list → prep instructions → daily breakdown
-  // The feature that makes R99 pay for itself
+  // The feature that makes R149 pay for itself
   // ============================================================
 
   // Day 1: Shopping list (18th, 9am SAST = 7am UTC)
@@ -2813,7 +2814,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
         const calTarget = client.calorieTarget || 1800;
         const protTarget = client.proteinTarget || 120;
 
-        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n2 eggs + 1 slice toast = ~250 kcal, 14g protein\n\n*🌞 Lunch (1pm):*\nChicken + rice + veg = ~450 kcal, 35g protein\n\n*🌙 Dinner (7pm):*\nPap + pilchards OR beans = ~400 kcal, 25g protein\n\n*🍎 Snack (if needed):*\nPeanut butter on bread OR boiled egg = ~200 kcal, 8g protein\n\n*Daily total: ~1,300 kcal | ~82g protein*\n${calTarget > 1500 ? `\nYour target is ${calTarget} kcal — add bigger portions at lunch and dinner to close the gap.` : `\nYour target is ${calTarget} kcal — this keeps you in a deficit. ${goal === "fat_loss" ? "Exactly where you want to be." : ""}`}\n\nLog every meal this week. Just send what you eat — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R99 subscription. That is the goal._`;
+        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n2 eggs + 1 slice toast = ~250 kcal, 14g protein\n\n*🌞 Lunch (1pm):*\nChicken + rice + veg = ~450 kcal, 35g protein\n\n*🌙 Dinner (7pm):*\nPap + pilchards OR beans = ~400 kcal, 25g protein\n\n*🍎 Snack (if needed):*\nPeanut butter on bread OR boiled egg = ~200 kcal, 8g protein\n\n*Daily total: ~1,300 kcal | ~82g protein*\n${calTarget > 1500 ? `\nYour target is ${calTarget} kcal — add bigger portions at lunch and dinner to close the gap.` : `\nYour target is ${calTarget} kcal — this keeps you in a deficit. ${goal === "fat_loss" ? "Exactly where you want to be." : ""}`}\n\nLog every meal this week. Just send what you eat — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R149 subscription. That is the goal._`;
 
         await sendWhatsApp(client.phoneNumber, msg);
         recordProactiveSend(client.id);

@@ -676,6 +676,16 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
 
+  // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive ----
+  if (user.subscriptionStatus === "trial") {
+    const trialEnd = user.betaBypassUntil ? new Date(user.betaBypassUntil) : null;
+    if (trialEnd && trialEnd < new Date()) {
+      // Trial expired — convert to inactive
+      await db.update(users).set({ subscriptionStatus: "inactive" }).where(eq(users.phoneNumber, phone));
+      user.subscriptionStatus = "inactive";
+    }
+  }
+
   // ---- SUBSCRIPTION GATE — inactive users locked out of coaching ----
   if (user.subscriptionStatus === 'inactive') {
     const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance|hi|hello|hey|howzit|sawubona|dumela|heita|eita|status|what did i eat|food diary|food log|my food|calories today|protein today)\b/i;
@@ -687,8 +697,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const name = user.name ? `${user.name}` : "there";
       const isNewUser = !user.totalWorkoutsCompleted && !user.lastWorkoutDate;
       const gateReply = isNewUser
-        ? `Your programme is built, ${name}. Activate coaching to get Day 1 and start.\n\n*R99/month — cancel anytime:*\n${payLink}\n\nThat is R3.30 per day. Your programme, food coaching, and daily accountability — all on WhatsApp. No apps.\n\nReply *pay* to get your link again.`
-        : `${name}, your subscription is inactive.\n\nYour profile, ${user.totalWorkoutsCompleted || 0} workouts, and all your progress are saved.\n\n*Reactivate for R99/month:*\n${payLink}\n\nReply *pay* to get your link.`;
+        ? `Your programme is built, ${name}. Activate coaching to get started.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Your programme, food coaching, and daily accountability — all on WhatsApp.\n\nReply *pay* to get your link again.`
+        : `${name}, your subscription is inactive.\n\nYour profile, ${user.totalWorkoutsCompleted || 0} workouts, and all your progress are saved.\n\n*Reactivate for R149/month:*\n${payLink}\n\nReply *pay* to get your link.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
@@ -2654,7 +2664,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         const totalLine = `📊 Total sessions with Coach K: ${totalWorkoutsAll}`;
         const winsLines = [workoutLine, stepsLine, weightLine, streakLine, totalLine].filter(Boolean).join("\n");
         const refLine = user.referralCode ? `\n\nYour referral code: *${user.referralCode}* — they get month 1 for R50, you get R50 credit.` : "";
-        winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R99/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
+        winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R149/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
       }
 
       const fullReply = `${progressReply}${winsCard}`;
@@ -3046,7 +3056,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       code = `${namePrefix}${randomSuffix}`;
       await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
     }
-    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with a friend:\n\n_"I'm working with a WhatsApp fitness coach — real SA food, full workout programmes, daily accountability. From R99/month, no app needed. Use code ${code} when you sign up and we BOTH get one month free."_\n\nWhen your friend pays their first month, Coach K sends you a free month automatically. No limit on referrals — every friend earns you a free month.`;
+    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with a friend:\n\n_"I'm working with a WhatsApp fitness coach — real SA food, full workout programmes, daily accountability. From R149/month, no app needed. Use code ${code} when you sign up and we BOTH get one month free."_\n\nWhen your friend pays their first month, Coach K sends you a free month automatically. No limit on referrals — every friend earns you a free month.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;
   }
@@ -3394,7 +3404,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       `✅ ${totalWorkouts} workouts completed\n` +
       `🔥 ${streak}-session streak${weightLine}\n\n` +
       `_Coached by KamLife Coach on WhatsApp — SA's AI fitness coach._\n` +
-      `_R99/month. Real food. Real workouts. Real results._\n\n` +
+      `_R149/month. Real food. Real workouts. Real results._\n\n` +
       `Copy this and share it in your WhatsApp status or group. Show them what you are building. 💪`;
 
     await logChat(user.id, message, shareCard, "SHARE_CARD");
@@ -4459,11 +4469,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     if (merchantId && appUrl) {
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
-      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR99/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
+      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR149/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     } else {
-      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R99/month — cancel anytime.`;
+      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R149/month — cancel anytime.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     }
@@ -6041,10 +6051,10 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const allChats = await db.select().from(chatHistory).where(gte(chatHistory.createdAt, weekAgo));
       const avgMessagesPerDay = activeClients > 0 ? Math.round(allChats.length / 7 / activeClients * 10) / 10 : 0;
 
-      // Estimated MRR: count paying subscribers (active) × base price R99
+      // Estimated MRR: count paying subscribers (active) × base price R149
       // Excludes trial users; over-counts if mix of Basic/Pro/Premium tiers
       const payingClients = allComplete.filter(u => u.subscriptionStatus === "active").length;
-      const estimatedMRR = payingClients * 99;
+      const estimatedMRR = payingClients * 149;
 
       res.json({
         activeClients,
@@ -6707,8 +6717,8 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         ? Math.round(((payingUsers.c || 0) / (totalUsers.c || 1)) * 100)
         : 0;
 
-      // Revenue estimate (paying users × R99)
-      const estimatedMRR = (payingUsers.c || 0) * 99;
+      // Revenue estimate (paying users × R149)
+      const estimatedMRR = (payingUsers.c || 0) * 149;
 
       // Engagement score: % of active users who logged workout OR weight OR steps
       const engagedUsersQuery = await db.execute(
@@ -7060,7 +7070,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         .where(eq(users.subscriptionStatus, "inactive"));
       const [total] = await db.select({ c: count() }).from(users);
 
-      const mrr = (paying.c || 0) * 99;
+      const mrr = (paying.c || 0) * 149;
       const arr = mrr * 12;
       const trialConversion = (trial.c || 0) > 0
         ? Math.round(((paying.c || 0) / ((paying.c || 0) + (trial.c || 0))) * 100)
@@ -7074,7 +7084,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
 
       // Monthly projection: if trial conversion holds
       const projectedNewPaying = Math.round((trial.c || 0) * trialConversion / 100);
-      const projectedMRR = ((paying.c || 0) + projectedNewPaying) * 99;
+      const projectedMRR = ((paying.c || 0) + projectedNewPaying) * 149;
 
       res.json({
         current: {
@@ -7411,7 +7421,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const funnelFirstWorkout = allComplete.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
       const funnelPaying = allComplete.filter(u => u.subscriptionStatus === "active").length;
       const funnelActiveWeek = allComplete.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86400000).length;
-      const estimatedMRR = funnelPaying * 99;
+      const estimatedMRR = funnelPaying * 149;
       for (const u of allComplete) {
         const g = (u as any).goalType || "unknown";
         goalCounts[g] = (goalCounts[g] || 0) + 1;
