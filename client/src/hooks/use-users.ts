@@ -34,7 +34,7 @@ export function useUsers() {
   });
 }
 
-export function useUser(id: number) {
+export function useUser(id: string) {
   return useQuery({
     queryKey: [api.users.get.path, id],
     queryFn: async () => {
@@ -44,7 +44,7 @@ export function useUser(id: number) {
       if (!res.ok) throw new Error("Failed to fetch user");
       return res.json() as Promise<UserDetailResponse>;
     },
-    enabled: !!id && !isNaN(id),
+    enabled: !!id && id.length > 0,
     refetchInterval: 30_000, // auto-refresh every 30s so coach sees live data
   });
 }

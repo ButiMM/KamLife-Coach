@@ -30,7 +30,7 @@ export default function UserDetail() {
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const { data: userData, isLoading: userLoading } = useUser(userId as any);
+  const { data: userData, isLoading: userLoading } = useUser(userId);
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {

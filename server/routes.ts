@@ -15,6 +15,7 @@ import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnder
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
+import { PRICING, calculateMRR, calculateARPU, calculateTrialConversion } from "../shared/pricing";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
@@ -5659,8 +5660,9 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     if (!password || password !== key) {
       return res.status(401).json({ message: "Invalid password" });
     }
-    // Never return the raw key — return success only; client uses the password directly as the header value
-    return res.json({ success: true });
+    // Return the password back as the token — client stores it and sends as x-dashboard-key header
+    // This is safe: the client already knows the password (they just typed it). We're just confirming it's correct.
+    return res.json({ success: true, token: password });
   });
 
   // ── REST API for admin dashboard ──────────────────────────
@@ -5977,20 +5979,12 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     return res.sendFile(filePath);
   });
 
-  // ── Addition 7: Coach Dashboard API — protected by DASHBOARD_API_KEY ─────
+  // ── Addition 7: Coach Dashboard API — unified under COACH_DASHBOARD_KEY ─────
+  // NOTE: requireAdminKey was removed. All dashboard routes now use requireAdminKey
+  // (one key, one env var: COACH_DASHBOARD_KEY). This eliminates the dual-key confusion
+  // where DASHBOARD_API_KEY and COACH_DASHBOARD_KEY could be different values.
 
-  function requireDashboardKey(req: any, res: any, next: any) {
-    const key = process.env.DASHBOARD_API_KEY;
-    // Deny all access if key is not configured — never fail open
-    if (!key) return res.status(503).json({ error: "Dashboard not configured" });
-    const provided = (req.headers["x-dashboard-key"] as string) || "";
-    let match = false;
-    try { match = provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key)); } catch { match = false; }
-    if (!match) return res.status(403).json({ error: "Forbidden" });
-    next();
-  }
-
-  app.get("/api/dashboard/clients", requireDashboardKey, async (req: any, res) => {
+  app.get("/api/dashboard/clients", requireAdminKey, async (req: any, res) => {
     try {
       const page = Math.max(0, parseInt(req.query.page as string) || 0);
       const limit = 200;
@@ -6024,7 +6018,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.get("/api/dashboard/client/:phone", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/client/:phone", requireAdminKey, async (req, res) => {
     try {
       const phoneParam = decodeURIComponent(req.params.phone);
       const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
@@ -6046,7 +6040,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.get("/api/dashboard/metrics", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/metrics", requireAdminKey, async (_req, res) => {
     try {
       const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
       const now = Date.now();
@@ -6063,7 +6057,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       // Estimated MRR: count paying subscribers (active) × base price R149
       // Excludes trial users; over-counts if mix of Basic/Pro/Premium tiers
       const payingClients = allComplete.filter(u => u.subscriptionStatus === "active").length;
-      const estimatedMRR = payingClients * 149;
+      const estimatedMRR = calculateMRR(payingClients);
 
       res.json({
         activeClients,
@@ -6080,7 +6074,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ---- FUNNEL METRICS — signup → onboard → first workout → week-1 retention ----
-  app.get("/api/dashboard/funnel", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/funnel", requireAdminKey, async (_req, res) => {
     try {
       const allUsers = await db.select().from(users);
       const now = Date.now();
@@ -6149,7 +6143,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ---- ONE-CLICK INTERVENTION — send a targeted message to a specific at-risk client ----
-  app.post("/api/dashboard/intervene", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/intervene", requireAdminKey, async (req, res) => {
     try {
       const { phone, type = "checkin" } = req.body;
       if (!phone) return res.status(400).json({ error: "phone required" });
@@ -6182,7 +6176,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     }
   });
 
-  app.post("/api/dashboard/broadcast", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/broadcast", requireAdminKey, async (req, res) => {
     try {
       const { message: broadcastMsg, filter = "all" } = req.body;
       if (!broadcastMsg) return res.status(400).json({ error: "message is required" });
@@ -6215,7 +6209,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ---- CLIENT TIMELINE — full activity history for a single client ----
-  app.get("/api/dashboard/timeline/:phone", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/timeline/:phone", requireAdminKey, async (req, res) => {
     try {
       const phoneParam = decodeURIComponent(req.params.phone);
       const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
@@ -6265,7 +6259,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // ---- COHORT ANALYTICS — grouped by signup month ----
-  app.get("/api/dashboard/cohorts", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/cohorts", requireAdminKey, async (_req, res) => {
     try {
       const allUsers = await db.select({
         id: users.id,
@@ -6309,7 +6303,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // ============================================================
   // PINNED NEXT-ACTIONS — auto-generated priorities per client
   // ============================================================
-  app.get("/api/dashboard/next-actions", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/next-actions", requireAdminKey, async (_req, res) => {
     try {
       const now = Date.now();
       const twoDaysAgo = new Date(now - 2 * 86_400_000);
@@ -6385,7 +6379,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // ============================================================
   // NPS DASHBOARD — satisfaction scores summary
   // ============================================================
-  app.get("/api/dashboard/nps", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/nps", requireAdminKey, async (_req, res) => {
     try {
       const npsLogs = await db.select({ messageOut: chatHistory.messageOut, date: chatHistory.createdAt })
         .from(chatHistory)
@@ -6438,7 +6432,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // ============================================================
 
   // Create escalation (auto or manual)
-  app.post("/api/dashboard/escalations", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/escalations", requireAdminKey, async (req, res) => {
     try {
       const { phone, reason, triggerMessage, priority } = req.body;
       if (!phone || !reason) return res.status(400).json({ error: "phone and reason required" });
@@ -6461,7 +6455,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // List escalations (open/claimed/all)
-  app.get("/api/dashboard/escalations", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/escalations", requireAdminKey, async (req, res) => {
     try {
       const statusFilter = (req.query.status as string) || "open";
       const conditions = statusFilter === "all" ? [] : [eq(escalations.status, statusFilter)];
@@ -6504,7 +6498,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // Claim an escalation
-  app.post("/api/dashboard/escalations/:id/claim", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/escalations/:id/claim", requireAdminKey, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { claimedBy } = req.body;
@@ -6519,7 +6513,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // Resolve an escalation
-  app.post("/api/dashboard/escalations/:id/resolve", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/escalations/:id/resolve", requireAdminKey, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { resolution } = req.body;
@@ -6606,7 +6600,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   }
 
   // Create experiment
-  app.post("/api/dashboard/ab/experiments", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/ab/experiments", requireAdminKey, async (req, res) => {
     try {
       const { name, description, variantA, variantB, messageType } = req.body;
       if (!name || !variantA || !variantB || !messageType) return res.status(400).json({ error: "name, variantA, variantB, messageType required" });
@@ -6618,7 +6612,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // List experiments
-  app.get("/api/dashboard/ab/experiments", requireDashboardKey, async (_req, res) => {
+  app.get("/api/dashboard/ab/experiments", requireAdminKey, async (_req, res) => {
     try {
       const exps = await db.select().from(abExperiments).orderBy(desc(abExperiments.createdAt));
       // Enrich with stats
@@ -6652,7 +6646,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // Pause/complete experiment
-  app.post("/api/dashboard/ab/experiments/:id/status", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/ab/experiments/:id/status", requireAdminKey, async (req, res) => {
     try {
       const id = parseInt(req.params.id);
       const { status } = req.body; // "active" | "paused" | "completed"
@@ -6669,7 +6663,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // KPI REPORTS — business metrics dashboard API
   // ============================================================
 
-  app.get("/api/dashboard/kpis", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/kpis", requireAdminKey, async (req, res) => {
     try {
       const days = parseInt(req.query.days as string) || 30;
       const since = new Date(Date.now() - days * 86400_000);
@@ -6727,7 +6721,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         : 0;
 
       // Revenue estimate (paying users × R149)
-      const estimatedMRR = (payingUsers.c || 0) * 149;
+      const estimatedMRR = calculateMRR(payingUsers.c || 0);
 
       // Engagement score: % of active users who logged workout OR weight OR steps
       const engagedUsersQuery = await db.execute(
@@ -6793,7 +6787,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // COHORT ANALYTICS — weekly signup cohort retention
   // ============================================================
 
-  app.get("/api/dashboard/cohorts", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/cohorts/weekly", requireAdminKey, async (req, res) => {
     try {
       const weeks = parseInt(req.query.weeks as string) || 8;
       const cohorts: {
@@ -6853,7 +6847,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // WEEKLY COACH REPORT — client summary digest for coach
   // ============================================================
 
-  app.get("/api/dashboard/weekly-report", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/weekly-report", requireAdminKey, async (req, res) => {
     try {
       const since = new Date(Date.now() - 7 * 86400_000);
 
@@ -6952,7 +6946,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // CLIENT SEARCH — quick search by name or phone
   // ============================================================
 
-  app.get("/api/dashboard/search", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/search", requireAdminKey, async (req, res) => {
     try {
       const q = (req.query.q as string || "").trim().toLowerCase();
       if (!q || q.length < 2) return res.json({ results: [] });
@@ -6981,7 +6975,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // BULK MESSAGE — send WhatsApp to multiple clients
   // ============================================================
 
-  app.post("/api/dashboard/bulk-message", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/bulk-message", requireAdminKey, async (req, res) => {
     try {
       const { message, filter } = req.body;
       if (!message) return res.status(400).json({ error: "message required" });
@@ -7031,7 +7025,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // CLIENT NOTES — coach can add notes to a client profile
   // ============================================================
 
-  app.post("/api/dashboard/clients/:phone/notes", requireDashboardKey, async (req, res) => {
+  app.post("/api/dashboard/clients/:phone/notes", requireAdminKey, async (req, res) => {
     try {
       const phone = req.params.phone;
       const { note } = req.body;
@@ -7053,7 +7047,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   });
 
   // Get client notes
-  app.get("/api/dashboard/clients/:phone/notes", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/clients/:phone/notes", requireAdminKey, async (req, res) => {
     try {
       const phone = req.params.phone;
       const [client] = await db.select({ notes: users.profileNotes, name: users.name }).from(users)
@@ -7069,7 +7063,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // REVENUE DASHBOARD — payment tracking & forecasting
   // ============================================================
 
-  app.get("/api/dashboard/revenue", requireDashboardKey, async (req, res) => {
+  app.get("/api/dashboard/revenue", requireAdminKey, async (req, res) => {
     try {
       const [paying] = await db.select({ c: count() }).from(users)
         .where(eq(users.subscriptionStatus, "active"));
@@ -7079,21 +7073,21 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         .where(eq(users.subscriptionStatus, "inactive"));
       const [total] = await db.select({ c: count() }).from(users);
 
-      const mrr = (paying.c || 0) * 149;
+      const mrr = calculateMRR(paying.c || 0);
       const arr = mrr * 12;
       const trialConversion = (trial.c || 0) > 0
         ? Math.round(((paying.c || 0) / ((paying.c || 0) + (trial.c || 0))) * 100)
         : 0;
 
       // ARPU (Average Revenue Per User — paying only)
-      const arpu = (paying.c || 0) > 0 ? 99 : 0;
+      const arpu = calculateARPU(paying.c || 0);
 
       // LTV estimate (ARPU × avg months retained, assume 6 months avg)
       const estimatedLTV = arpu * 6;
 
       // Monthly projection: if trial conversion holds
       const projectedNewPaying = Math.round((trial.c || 0) * trialConversion / 100);
-      const projectedMRR = ((paying.c || 0) + projectedNewPaying) * 149;
+      const projectedMRR = calculateMRR((paying.c || 0) + projectedNewPaying);
 
       res.json({
         current: {
@@ -7331,7 +7325,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // Returns a PayFast payment page URL for a given user.
   // Use this to send a payment link to new or lapsed clients.
   // ============================================================
-  app.get("/api/payfast/link", requireDashboardKey, async (req: any, res: any) => {
+  app.get("/api/payfast/link", requireAdminKey, async (req: any, res: any) => {
     try {
       const phone = decodeURIComponent(req.query.phone as string || "");
       if (!phone) return res.status(400).json({ error: "phone required" });
@@ -7430,7 +7424,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const funnelFirstWorkout = allComplete.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
       const funnelPaying = allComplete.filter(u => u.subscriptionStatus === "active").length;
       const funnelActiveWeek = allComplete.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86400000).length;
-      const estimatedMRR = funnelPaying * 149;
+      const estimatedMRR = calculateMRR(funnelPaying);
       for (const u of allComplete) {
         const g = (u as any).goalType || "unknown";
         goalCounts[g] = (goalCounts[g] || 0) + 1;

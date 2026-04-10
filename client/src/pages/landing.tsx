@@ -80,7 +80,7 @@ export default function LandingPage() {
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-5 h-5 mr-2" />
-                Start Free Trial — from R99/month
+                Start Free Trial — from R149/month
               </a>
             </Button>
             <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-base border-2" asChild>
@@ -92,7 +92,7 @@ export default function LandingPage() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            From R99/month · Cancel anytime · Day 1 sent immediately on payment
+            From R149/month · Cancel anytime · Day 1 sent immediately on payment
           </p>
         </motion.div>
 
@@ -198,7 +198,7 @@ export default function LandingPage() {
             <div className="bg-card rounded-3xl border border-border p-8 relative overflow-hidden text-left">
               <div className="text-sm font-semibold text-muted-foreground mb-2">Basic</div>
               <div className="flex items-end gap-1 mb-1">
-                <span className="text-5xl font-bold font-display">R99</span>
+                <span className="text-5xl font-bold font-display">R149</span>
                 <span className="text-muted-foreground mb-2">/month</span>
               </div>
               <p className="text-muted-foreground text-sm mb-6">R3.30/day — less than a taxi fare</p>
@@ -340,7 +340,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto">
           <h2 className="text-4xl font-bold font-display mb-4">Start today. Results in week one.</h2>
           <p className="text-primary-foreground/80 text-lg mb-8">
-            3 questions and your programme is built. Day 1 delivered the moment you pay. From R99/month.
+            3 questions and your programme is built. Day 1 delivered the moment you pay. From R149/month.
           </p>
           <Button size="lg" variant="secondary" className="h-14 px-10 rounded-2xl text-base font-bold" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
@@ -348,7 +348,7 @@ export default function LandingPage() {
               Start Coaching on WhatsApp
             </a>
           </Button>
-          <p className="text-primary-foreground/60 text-sm mt-4">From R99/month · Cancel anytime · No app needed</p>
+          <p className="text-primary-foreground/60 text-sm mt-4">From R149/month · Cancel anytime · No app needed</p>
         </div>
       </section>
 
@@ -361,7 +361,7 @@ export default function LandingPage() {
             </div>
             <span className="font-semibold text-foreground">KamLife Coach</span>
           </div>
-          <p>Built for South Africa 🇿🇦 · POPIA compliant · From R99/month</p>
+          <p>Built for South Africa 🇿🇦 · POPIA compliant · From R149/month</p>
           <Link href="/login" className="hover:text-foreground transition-colors">Coach Login</Link>
         </div>
       </footer>

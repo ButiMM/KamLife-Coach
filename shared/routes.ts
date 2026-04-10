@@ -55,7 +55,7 @@ export const api = {
   webhooks: {
     whatsapp: {
         method: 'POST' as const,
-        path: '/api/webhooks/whatsapp' as const,
+        path: '/twilio/whatsapp' as const, // actual Twilio webhook endpoint
         input: z.any(),
         responses: {
             200: z.string(),
@@ -63,7 +63,15 @@ export const api = {
     },
     payfast: {
         method: 'POST' as const,
-        path: '/api/webhooks/payfast' as const,
+        path: '/webhook/payfast' as const, // actual PayFast ITN endpoint
+        input: z.any(),
+        responses: {
+            200: z.void(),
+        }
+    },
+    twilioStatus: {
+        method: 'POST' as const,
+        path: '/webhook/status' as const, // Twilio delivery status callback
         input: z.any(),
         responses: {
             200: z.void(),
