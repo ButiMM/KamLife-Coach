@@ -49,37 +49,39 @@ export async function getMenuText(user: any): Promise<string> {
 
   const statusParts = [workoutStatus, stepStatus].filter(Boolean).join(" · ");
 
+  // Trial countdown
+  let trialLine = "";
+  if (user.subscriptionStatus === "trial" && user.betaBypassUntil) {
+    const daysLeft = Math.max(0, Math.ceil((new Date(user.betaBypassUntil).getTime() - Date.now()) / 86_400_000));
+    if (daysLeft <= 3) {
+      trialLine = `\n⏰ *${daysLeft} day${daysLeft !== 1 ? "s" : ""} left on free trial* — reply *pay* to keep coaching`;
+    } else {
+      trialLine = `\n_Free trial: ${daysLeft} days remaining_`;
+    }
+  }
+
   const headerLine = name
-    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}`
-    : `*KamLife Coach* 💪`;
+    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}${trialLine}`
+    : `*KamLife Coach* 💪${trialLine}`;
 
   return `${headerLine}
 
-What do you need?
+*Training:*
 1️⃣ Today's workout
-2️⃣ Food coaching
-3️⃣ Log steps
-4️⃣ Log sleep
-5️⃣ Log weight
+2️⃣ Log steps / send screenshot
+
+*Nutrition:*
+3️⃣ Log food (or just tell me what you ate)
+4️⃣ Shopping list
+5️⃣ Meal prep plan
+
+*Track progress:*
 6️⃣ Weekly report
-7️⃣ Measurements check-in
-8️⃣ Non-scale victory check-in
-9️⃣ Step leaderboard
+7️⃣ Log weight
 
-*Quick commands:*
-• _shopping list_ — budget grocery list
-• _my grocery list_ — personalized from your meals
-• _meal prep_ — batch cooking plan
-• _same as yesterday_ — re-log last meal
-• _my sleep_ — sleep report & trends
-• _my water_ — water intake report
-• _supplements_ — supplement guide
-• _badges_ — your achievements
-• _monthly report_ — 30-day transformation
-• _calendar_ — habit streak calendar
-• _rate_ — give feedback
+*More:* _supplements_ · _badges_ · _my sleep_ · _my water_ · _monthly report_ · _referral_ · _rate_
 
-Or just tell me what you ate, how training went, your steps, or anything on your mind.`;
+Or just talk to me — food, training, life. I'm here.`;
 }
 
 // ============================================================

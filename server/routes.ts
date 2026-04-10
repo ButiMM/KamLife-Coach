@@ -676,13 +676,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
 
-  // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive ----
+  // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive with a clear message ----
   if (user.subscriptionStatus === "trial") {
     const trialEnd = user.betaBypassUntil ? new Date(user.betaBypassUntil) : null;
     if (trialEnd && trialEnd < new Date()) {
-      // Trial expired — convert to inactive
+      // Trial expired — convert to inactive and tell the user
       await db.update(users).set({ subscriptionStatus: "inactive" }).where(eq(users.phoneNumber, phone));
       user.subscriptionStatus = "inactive";
+      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+      const merchantId = process.env.PAYFAST_MERCHANT_ID;
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      const name = user.name || "there";
+      const workouts = user.totalWorkoutsCompleted || 0;
+      const trialEndReply = `${name}, your 7-day free trial has ended.${workouts > 0 ? `\n\nYou completed ${workouts} workout${workouts > 1 ? "s" : ""} — that's real momentum.` : ""}\n\nEverything is saved — your programme, progress, and targets. Subscribe to keep coaching going.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Reply *pay* anytime to get your link.`;
+      await logChat(user.id, message, trialEndReply, "TRIAL_EXPIRED");
+      return trialEndReply;
     }
   }
 
@@ -695,10 +704,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       const name = user.name ? `${user.name}` : "there";
-      const isNewUser = !user.totalWorkoutsCompleted && !user.lastWorkoutDate;
-      const gateReply = isNewUser
-        ? `Your programme is built, ${name}. Activate coaching to get started.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nThat's R5 per day for a personal coach in your pocket. Your programme, food coaching, and daily accountability — all on WhatsApp.\n\nReply *pay* to get your link again.`
-        : `${name}, your subscription is inactive.\n\nYour profile, ${user.totalWorkoutsCompleted || 0} workouts, and all your progress are saved.\n\n*Reactivate for R149/month:*\n${payLink}\n\nReply *pay* to get your link.`;
+      const workouts = user.totalWorkoutsCompleted || 0;
+      const gateReply = workouts === 0
+        ? `Your programme is built, ${name}. Subscribe to start.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day for a personal coach in your pocket. Reply *pay* to get your link.`
+        : `${name}, your subscription is inactive.\n\nYour ${workouts} workout${workouts > 1 ? "s" : ""} and all progress are saved.\n\n*Reactivate for R149/month:*\n${payLink}\n\nReply *pay* to get your link.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
@@ -912,7 +921,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- SHOPPING LIST command ----
-  if (m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
+  if (m === "4" || m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
     const list = getShoppingList(budget, weekNum);
@@ -1043,7 +1052,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- MEAL PREP PLAN — "meal prep" / "prep" / "sunday cook" ----
-  if (m === "meal prep" || m === "prep" || m === "sunday cook" || m === "batch cook" || m === "food prep" || /\b(meal prep|food prep|batch cook|sunday cook|cook for the week|prep for the week)\b/i.test(m)) {
+  if (m === "5" || m === "meal prep" || m === "prep" || m === "sunday cook" || m === "batch cook" || m === "food prep" || /\b(meal prep|food prep|batch cook|sunday cook|cook for the week|prep for the week)\b/i.test(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
     const goal = user.goalType || "fat_loss";
     const cal = user.calorieTarget || 1800;
@@ -3895,19 +3904,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- MENU NUMBER SHORTCUTS ----
-  if (m === "2" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
+  if (m === "3" || m === "food" || m === "food coaching" || m === "log food" || m === "food log") {
     return `Send me what you ate and I will give you the calories and protein instantly.\n\nExamples:\n• "I had pap and pilchards"\n• "2 eggs and brown bread"\n• "KFC original piece"\n• "Oats for breakfast"\n\nI have ${SA_FOODS_SEED.length} SA foods in my database. Just tell me what you ate.`;
   }
-  if (m === "3" || m === "log steps" || m === "step log") {
+  if (m === "2" || m === "log steps" || m === "step log") {
     return `Send me your step count and I will log it.\n\nExamples:\n• "8500 steps"\n• "I walked 5km"\n• "10,000 steps done"\n\nYour daily target: ${(user.stepsTarget || 8500).toLocaleString()} steps.`;
   }
-  if (m === "4" || m === "log sleep" || m === "sleep log") {
+  if (m === "log sleep" || m === "sleep log") {
     return `Send me how many hours you slept.\n\nExamples:\n• "I slept 6 hours"\n• "7 hours sleep"\n• "bad sleep, maybe 5 hours"\n\nTarget: 7–9 hours for full recovery and fat loss.`;
   }
-  if (m === "5" || m === "log weight" || m === "weight log") {
+  if (m === "7" || m === "log weight" || m === "weight log") {
     return `Send me your weight and I will log it.\n\nExamples:\n• "84.5kg"\n• "I weigh 91kg"\n• "weighed in at 78kg this morning"\n\nWeigh in first thing in the morning, after toilet, before food. Same conditions every time.`;
   }
-  if (m === "7" || m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
+  if (m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
     return `*Measurements Check-In*\n\nSend me your current measurements in this format:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nMeasure first thing in morning, relaxed (not flexed). Same spot every time. The tape does not lie even when the scale does.`;
   }
 
