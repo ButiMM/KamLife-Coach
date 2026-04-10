@@ -911,6 +911,127 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return reply;
   }
 
+  // ---- CLIENT SENDS THEIR OWN SHOPPING LIST — "adjust my list", "here's what I buy", "fix my groceries" ----
+  const isClientList = /\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
+    && /\b(list|buy|shop|grocery|groceries|shopping|trolley|basket)\b/i.test(m)
+    && m.split(/\s+/).length >= 5; // must be a meaningful list, not just "my list"
+  if (isClientList) {
+    const clientName = user.name?.split(" ")[0] || "there";
+    const goal = user.goalType || "fat_loss";
+    const pTarget = user.proteinTarget || 120;
+    const cTarget = user.calorieTarget || 1800;
+    const adjustReply = await askCoachK(message, user,
+      `The client just sent you their personal shopping/grocery list. Analyze it as Coach K. Be specific and SA-focused:\n\n1. What's GOOD about their list (acknowledge what they're doing right)\n2. What's MISSING for their ${goal} goal (especially protein sources — they need ${pTarget}g/day)\n3. What to SWAP (not remove — replace with a better option at similar price)\n4. What to REMOVE (only if genuinely harmful to their goal)\n5. End with a specific weekly total estimate in ZAR\n\nKeep it direct, no fluff. Use SA product names and prices. Max 4 bullet points per section. Their calorie target is ${cTarget} kcal/day.`
+    );
+    await logChat(user.id, message, adjustReply, "SHOPPING_LIST_ADJUST");
+    return adjustReply;
+  }
+
+  // ---- RESTAURANT SURVIVAL GUIDE — "eating at Nando's", "what to order at KFC" ----
+  const restaurantMatch = m.match(/\b(nando.?s|kfc|mcdonald.?s|mcdonalds|burger king|spur|steers|wimpy|ocean basket|debonairs|roman.?s|romans|galito.?s|galitos|hungry lion|fish aways|fishaways|chicken licken|barcelos)\b/i);
+  const isRestaurantQ = restaurantMatch && /\b(order|eat|have|get|menu|what.*should|best|healthy|smartest|good choice|low cal|protein)\b/i.test(m);
+  if (isRestaurantQ && restaurantMatch) {
+    const restaurant = restaurantMatch[1];
+    const goal = user.goalType || "fat_loss";
+    const pTarget = user.proteinTarget || 120;
+    const cTarget = user.calorieTarget || 1800;
+
+    const RESTAURANT_GUIDES: Record<string, string> = {
+      "nando's": `*Nando's Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* 1/4 chicken (breast, flame-grilled, no skin) + corn on the cob + side salad\n~420 kcal | ~45g protein\n\n🔸 *Decent:* Chicken wrap (grilled, not crispy) — ~480 kcal | ~35g protein\n\n❌ *Avoid:* Espetada (butter-loaded), creamy mashed potato, extra-large chips\n\n💡 *Pro tip:* Ask for peri-peri sauce on the side. Lemon & herb is the lowest calorie option. Skip the garlic bread — it's 400 kcal you won't feel.`,
+      "kfc": `*KFC Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Streetwise 2-piece (remove skin) + coleslaw\n~380 kcal | ~35g protein (without skin)\n\n🔸 *Decent:* Zinger burger (no mayo) — ~450 kcal | ~28g protein\n\n❌ *Avoid:* Dunked wings, anything "loaded", large chips, Krusher drinks\n\n💡 *Pro tip:* KFC skin = 150 extra kcal per piece. Remove it. The chicken underneath is solid protein.`,
+      "steers": `*Steers Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Classic burger (single patty, no cheese, extra salad) — ~450 kcal | ~30g protein\n\n🔸 *Decent:* Wacky Wednesday single — ~400 kcal | ~25g protein\n\n❌ *Avoid:* King Steer, anything double/triple, ribs combo, milkshakes\n\n💡 *Pro tip:* Skip the chips. Get a side salad or just the burger alone. A King Steer combo is 1,800 kcal — that's your entire day.`,
+      "spur": `*Spur Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* 300g rump steak + baked potato + garden salad — ~550 kcal | ~55g protein\n\n🔸 *Decent:* Chicken breast with veg — ~400 kcal | ~40g protein\n\n❌ *Avoid:* Ribs combo, cheese sauce, nachos starter, Spur burger with everything\n\n💡 *Pro tip:* Ask for sauce on the side. Their sauces add 200-400 kcal. The steak itself is excellent protein.`,
+      "wimpy": `*Wimpy Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Grilled chicken + rice + salad — ~450 kcal | ~40g protein\n\n🔸 *Decent:* Dagwood single — ~500 kcal | ~28g protein\n\n❌ *Avoid:* Double thick shake, cheese and bacon burger, onion rings\n\n💡 *Pro tip:* Wimpy breakfast (skip toast and sausage) = eggs + bacon + tomato = solid 30g protein for R85.`,
+      "mcdonald's": `*McDonald's Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Grilled chicken wrap — ~380 kcal | ~27g protein\n\n🔸 *Decent:* Big Mac (no sauce) — ~430 kcal | ~25g protein\n\n❌ *Avoid:* Large McFlurry (600 kcal), large fries (450 kcal), Grand anything\n\n💡 *Pro tip:* Ask for no mayo on any burger — saves 100-150 kcal instantly. Water not Coke saves another 200 kcal.`,
+    };
+
+    const key = Object.keys(RESTAURANT_GUIDES).find(k => restaurant.toLowerCase().includes(k.replace(/[^a-z]/g, "")));
+    if (key) {
+      const guide = RESTAURANT_GUIDES[key];
+      await logChat(user.id, message, guide, "RESTAURANT_GUIDE");
+      return guide;
+    }
+    // For restaurants not in the guide, use GPT
+    const gptRestaurant = await askCoachK(message, user,
+      `Client is asking what to eat at ${restaurant}. Give a SA-focused restaurant guide:\n- Best option (calories + protein)\n- Decent option\n- What to avoid\n- One pro tip\nTheir goal is ${goal}, protein target ${pTarget}g/day, calorie target ${cTarget}/day. Max 6 lines. Be specific about menu items.`
+    );
+    await logChat(user.id, message, gptRestaurant, "RESTAURANT_GUIDE");
+    return gptRestaurant;
+  }
+
+  // ---- ALCOHOL AWARENESS — "had 3 beers", "wine tonight", "drinks at the braai" ----
+  const alcoholMatch = /\b(\d+)?\s*(beers?|wines?|glasses?\s*(?:of\s*)?wine|brandies?|brandy|whiskey|whisky|vodka|gin|rum|ciders?|savanna|hunters|castle|black label|heineken|windhoek|amstel|stellenbosch|nederburg|four cousins|robertson|4th street|smirnoff|jameson|jack daniel|gordons|captain morgan)\b/i.test(m);
+  const isAlcoholLog = alcoholMatch && /\b(had|drank|drinking|having|drinks?|tonight|last night|yesterday|at the braai|at the party|weekend)\b/i.test(m);
+  if (isAlcoholLog) {
+    // Extract drink count
+    const qtyMatch = m.match(/(\d+)\s*(?:beers?|wines?|glasses?|brandies?|ciders?|shots?|doubles?|bottles?)/i);
+    const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
+
+    const isBeer = /\b(beers?|castle|black label|heineken|windhoek|amstel|lager|hansa)\b/i.test(m);
+    const isWine = /\b(wines?|glass.*wine|nederburg|four cousins|robertson|4th street|stellenbosch|sauvignon|merlot|pinotage|chenin)\b/i.test(m);
+    const isCider = /\b(ciders?|savanna|hunters)\b/i.test(m);
+    const isSpirits = /\b(brandies?|brandy|whiskey|whisky|vodka|gin|rum|smirnoff|jameson|jack|gordons|captain morgan|shots?|doubles?)\b/i.test(m);
+
+    let calPerDrink = 150; let drinkName = "drink";
+    if (isBeer) { calPerDrink = 200; drinkName = "beer"; }
+    else if (isWine) { calPerDrink = 130; drinkName = "glass of wine"; }
+    else if (isCider) { calPerDrink = 220; drinkName = "cider"; }
+    else if (isSpirits) { calPerDrink = 100; drinkName = "shot"; }
+
+    const totalCal = calPerDrink * qty;
+    const calTarget = user.calorieTarget || 1800;
+    const pctOfDay = Math.round((totalCal / calTarget) * 100);
+
+    let alcoholReply = `${qty} ${drinkName}${qty > 1 ? "s" : ""} = ~${totalCal} kcal. That's ${pctOfDay}% of your daily target.\n\n`;
+
+    if (totalCal > 600) {
+      alcoholReply += `That's a full meal's worth of calories with zero protein and zero nutrition. Your body also stops burning fat while it processes alcohol — so the food you eat WITH alcohol is more likely to be stored as fat.\n\n`;
+      alcoholReply += `*Damage control:* High protein meals tomorrow. Extra water tonight (1 glass per drink). Walk 30 min extra tomorrow.`;
+    } else if (totalCal > 300) {
+      alcoholReply += `Not ideal, but manageable. Cut one carb serving from dinner to balance it out. Drink water between rounds.\n\n`;
+      alcoholReply += `*Tomorrow:* Extra protein at breakfast. Get your walk in.`;
+    } else {
+      alcoholReply += `Manageable. Stay hydrated — 1 glass of water per drink. Don't let it become 3 more.`;
+    }
+
+    await logChat(user.id, message, alcoholReply, "ALCOHOL_LOG");
+    return alcoholReply;
+  }
+
+  // ---- FOOD SWAP — "I don't like pilchards", "what can I have instead of", "swap", "replace" ----
+  const isSwapRequest = /\b(don.?t like|hate|can.?t eat|swap|replace|instead of|alternative|substitute|other option|something else|what else|switch)\b/i.test(m)
+    && scanForSAFoods(m).length > 0;
+  if (isSwapRequest) {
+    const foods = scanForSAFoods(m);
+    const foodName = foods[0].name;
+    const category = foods[0].category;
+    const budget = user.weeklyFoodBudget || "100_300";
+    const goal = user.goalType || "fat_loss";
+
+    // Find same-category alternatives from the SA food database
+    const alternatives = SA_FOODS_SEED.filter(f =>
+      f.category === category &&
+      f.name !== foodName &&
+      f.budgetTier <= (budget === "under_100" ? 1 : budget === "100_300" ? 2 : 3)
+    ).sort((a, b) => b.proteinPer100g - a.proteinPer100g).slice(0, 4);
+
+    if (alternatives.length > 0) {
+      let swapReply = `*Swaps for ${foodName}:*\n\n`;
+      for (const alt of alternatives) {
+        swapReply += `• *${alt.name}* — ${alt.typicalPortionCalories} kcal | ${alt.typicalPortionProtein}g protein (${alt.typicalPortionDescription})\n`;
+      }
+      swapReply += `\nPick whichever one you enjoy — consistency beats perfection. I'll update your plan.`;
+      await logChat(user.id, message, swapReply, "FOOD_SWAP");
+      return swapReply;
+    }
+    // If no swap found in DB, use GPT
+    const gptSwap = await askCoachK(message, user,
+      `Client doesn't want ${foodName} (${category}). Suggest 3-4 SA alternatives in the same category at a ${budget} budget. Include calories and protein per portion. Their goal is ${goal}. Be specific.`
+    );
+    await logChat(user.id, message, gptSwap, "FOOD_SWAP");
+    return gptSwap;
+  }
+
   // ---- MEAL PREP PLAN — "meal prep" / "prep" / "sunday cook" ----
   if (m === "meal prep" || m === "prep" || m === "sunday cook" || m === "batch cook" || m === "food prep" || /\b(meal prep|food prep|batch cook|sunday cook|cook for the week|prep for the week)\b/i.test(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
