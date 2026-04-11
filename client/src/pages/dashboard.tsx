@@ -31,8 +31,8 @@ export default function Dashboard() {
 
   const totalUsers = users?.length || 0;
   const activeUsers = users?.filter(u => u.subscriptionStatus === 'active').length || 0;
-  const trialUsers = users?.filter(u => u.subscriptionStatus === 'trial').length || 0;
-  const mrr = metrics?.estimatedMRR ?? (activeUsers * 99);
+  const trialUsers = metrics?.trialClients ?? users?.filter(u => u.subscriptionStatus === 'trial').length ?? 0;
+  const mrr = metrics?.estimatedMRR ?? (activeUsers * (metrics?.pricePerUser ?? 149));
 
   const displayedFlagged = (flaggedUsers || [])
     .filter(u => flagFilter === "all" || u.flagReason === flagFilter)
@@ -53,9 +53,16 @@ export default function Dashboard() {
             <h2 className="text-3xl font-bold font-display tracking-tight">Dashboard</h2>
             <p className="text-muted-foreground mt-1">Overview of your coaching business</p>
           </div>
-          <div className="flex gap-2 text-sm text-muted-foreground bg-white dark:bg-card px-4 py-2 rounded-full border border-border shadow-sm">
-            <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse my-auto"></span>
-            System Online
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex gap-2 text-sm text-muted-foreground bg-white dark:bg-card px-4 py-2 rounded-full border border-border shadow-sm">
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse my-auto"></span>
+              System Online
+            </div>
+            {metrics?.computedAt && (
+              <span className="text-xs text-muted-foreground">
+                Data as of {new Date(metrics.computedAt).toLocaleTimeString()}
+              </span>
+            )}
           </div>
         </div>
 

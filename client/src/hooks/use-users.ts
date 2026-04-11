@@ -61,6 +61,92 @@ export function useFlaggedUsers() {
   });
 }
 
+export function useRevenue() {
+  return useQuery({
+    queryKey: ["/api/dashboard/revenue"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/revenue", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch revenue");
+      return res.json() as Promise<{
+        computedAt: string;
+        currency: string;
+        pricePerUser: number;
+        current: {
+          mrr: number;
+          mrrDisplay: string;
+          arr: number;
+          arrDisplay: string;
+          payingUsers: number;
+          trialUsers: number;
+          cancelledUsers: number;
+          totalUsers: number;
+        };
+        unitEconomics: {
+          arpu: number;
+          estimatedLTV: number;
+          estimatedMonthlyChurn: number;
+          estimatedCostPerUser: number;
+          grossProfit: number;
+          grossMargin: string;
+        };
+        rates: {
+          trialConversion: string;
+          trialConversionRaw: number;
+        };
+        forecast: {
+          projectedNewPaying: number;
+          projectedMRR: number;
+          projectedMRRDisplay: string;
+        };
+      }>;
+    },
+    refetchInterval: 60_000,
+  });
+}
+
+export function useFunnel() {
+  return useQuery({
+    queryKey: ["/api/dashboard/funnel"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/funnel", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch funnel");
+      return res.json() as Promise<{
+        computedAt: string;
+        funnel: {
+          totalSignups: number;
+          onboardingComplete: number;
+          firstFoodLogged: number;
+          firstWorkoutDone: number;
+          activeWeek1: number;
+          signupsWithWeek1Data: number;
+        };
+        subscriptions: {
+          trial: number;
+          paying: number;
+          inactive: number;
+          churned: number;
+        };
+        conversionRates: {
+          signupToOnboard: number;
+          onboardToFirstWorkout: number;
+          firstWorkoutToWeek1: number;
+          trialToPaid: number;
+        };
+        retention: {
+          d1: { eligible: number; retained: number; rate: number };
+          d7: { eligible: number; retained: number; rate: number };
+          d30: { eligible: number; retained: number; rate: number };
+        };
+        engagement: {
+          avgWorkoutsPerWeek: number;
+          avgMessagesPerDay: number;
+        };
+      }>;
+    },
+    refetchInterval: 120_000,
+  });
+}
+
 export function useMetrics() {
   return useQuery({
     queryKey: ["/api/dashboard/metrics"],
@@ -68,13 +154,16 @@ export function useMetrics() {
       const res = await fetch("/api/dashboard/metrics", { headers: authHeaders() });
       if (!res.ok) throw new Error("Failed to fetch metrics");
       return res.json() as Promise<{
+        computedAt: string;
         activeClients: number;
         payingClients: number;
+        trialClients: number;
         newThisWeek: number;
         churnedThisWeek: number;
         avgMessagesPerClientPerDay: number;
         estimatedMRR: number;
         currency: string;
+        pricePerUser: number;
       }>;
     },
     refetchInterval: 60_000,

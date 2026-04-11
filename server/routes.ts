@@ -15,7 +15,7 @@ import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnder
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { PRICING, calculateMRR, calculateARPU, calculateTrialConversion } from "../shared/pricing";
+import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../shared/pricing";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
@@ -6059,14 +6059,19 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
       const payingClients = allComplete.filter(u => u.subscriptionStatus === "active").length;
       const estimatedMRR = calculateMRR(payingClients);
 
+      const trialClients = allComplete.filter(u => u.subscriptionStatus === "trial").length;
+
       res.json({
+        computedAt: new Date().toISOString(),
         activeClients,
         payingClients,
+        trialClients,
         newThisWeek,
         churnedThisWeek,
         avgMessagesPerClientPerDay: avgMessagesPerDay,
         estimatedMRR,
-        currency: "ZAR",
+        currency: PRICING.currency,
+        pricePerUser: PRICING.monthlyPriceZAR,
       });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch metrics" });
@@ -6115,19 +6120,41 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         ? Math.round(totalWorkoutsActiveClients / activeClients.length / Math.max(1, activeClients.reduce((sum, u) => sum + Math.max(1, Math.floor((now - new Date(u.createdAt!).getTime()) / sevenDays)), 0) / activeClients.length) * 10) / 10
         : 0;
 
+      // Trial / subscription breakdown
+      const trialUsers = allUsers.filter(u => u.subscriptionStatus === "trial").length;
+      const inactiveUsers = allUsers.filter(u => u.subscriptionStatus === "inactive").length;
+
+      // First food log — key activation event
+      const firstFoodLogged = allUsers.filter(u => (u.todayCalories || 0) > 0 || (u.totalWorkoutsCompleted || 0) >= 1).length;
+
+      // Churn — users who were active (paid or trial with activity) but haven't logged in 14+ days
+      const churned = allUsers.filter(u =>
+        u.onboardingState === "COMPLETE" &&
+        u.subscriptionStatus === "inactive" &&
+        u.cancelledAt
+      ).length;
+
       res.json({
+        computedAt: new Date().toISOString(),
         funnel: {
           totalSignups,
           onboardingComplete,
+          firstFoodLogged,
           firstWorkoutDone,
           activeWeek1,
           signupsWithWeek1Data: signupsWithWeek1,
+        },
+        subscriptions: {
+          trial: trialUsers,
+          paying: payingClients,
+          inactive: inactiveUsers,
+          churned,
         },
         conversionRates: {
           signupToOnboard: totalSignups > 0 ? Math.round(onboardingComplete / totalSignups * 100) : 0,
           onboardToFirstWorkout: onboardingComplete > 0 ? Math.round(firstWorkoutDone / onboardingComplete * 100) : 0,
           firstWorkoutToWeek1: signupsWithWeek1 > 0 ? Math.round(activeWeek1 / signupsWithWeek1 * 100) : 0,
-          trialToPaid,
+          trialToPaid: calculateTrialConversion(trialUsers, payingClients),
         },
         retention: {
           d1: { eligible: d1Eligible.length, retained: d1Retained.length, rate: d1Eligible.length > 0 ? Math.round(d1Retained.length / d1Eligible.length * 100) : 0 },
@@ -7073,39 +7100,62 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         .where(eq(users.subscriptionStatus, "inactive"));
       const [total] = await db.select({ c: count() }).from(users);
 
-      const mrr = calculateMRR(paying.c || 0);
+      const payingCount = paying.c || 0;
+      const trialCount = trial.c || 0;
+      const cancelledCount = cancelled.c || 0;
+      const totalCount = total.c || 0;
+
+      const mrr = calculateMRR(payingCount);
       const arr = mrr * 12;
-      const trialConversion = (trial.c || 0) > 0
-        ? Math.round(((paying.c || 0) / ((paying.c || 0) + (trial.c || 0))) * 100)
-        : 0;
+      const trialConversion = calculateTrialConversion(trialCount, payingCount);
+      const arpu = calculateARPU(payingCount);
 
-      // ARPU (Average Revenue Per User — paying only)
-      const arpu = calculateARPU(paying.c || 0);
-
-      // LTV estimate (ARPU × avg months retained, assume 6 months avg)
-      const estimatedLTV = arpu * 6;
+      // Churn-based LTV — estimate monthly churn from cancelled vs total active history
+      // For early-stage: assume ~15% monthly churn until we have real cohort data
+      const estimatedMonthlyChurn = totalCount > 0
+        ? Math.max(0.05, cancelledCount / Math.max(1, cancelledCount + payingCount))
+        : 0.15;
+      const estimatedLTV = calculateLTV(estimatedMonthlyChurn);
 
       // Monthly projection: if trial conversion holds
-      const projectedNewPaying = Math.round((trial.c || 0) * trialConversion / 100);
-      const projectedMRR = calculateMRR((paying.c || 0) + projectedNewPaying);
+      const projectedNewPaying = Math.round(trialCount * trialConversion / 100);
+      const projectedMRR = calculateMRR(payingCount + projectedNewPaying);
+
+      // Gross profit estimate (per-user cost: ~R43/mo WhatsApp + AI)
+      const estimatedCostPerUser = 43;
+      const grossProfit = mrr - (payingCount * estimatedCostPerUser);
+      const grossMargin = mrr > 0 ? Math.round((grossProfit / mrr) * 100) : 0;
 
       res.json({
+        computedAt: new Date().toISOString(),
+        currency: PRICING.currency,
+        pricePerUser: PRICING.monthlyPriceZAR,
         current: {
-          mrr: `R${mrr.toLocaleString()}`,
-          arr: `R${arr.toLocaleString()}`,
-          payingUsers: paying.c || 0,
-          trialUsers: trial.c || 0,
-          cancelledUsers: cancelled.c || 0,
-          totalUsers: total.c || 0,
+          mrr,
+          mrrDisplay: `R${mrr.toLocaleString()}`,
+          arr,
+          arrDisplay: `R${arr.toLocaleString()}`,
+          payingUsers: payingCount,
+          trialUsers: trialCount,
+          cancelledUsers: cancelledCount,
+          totalUsers: totalCount,
+        },
+        unitEconomics: {
+          arpu: PRICING.monthlyPriceZAR,
+          estimatedLTV: Math.round(estimatedLTV),
+          estimatedMonthlyChurn: Math.round(estimatedMonthlyChurn * 100),
+          estimatedCostPerUser,
+          grossProfit,
+          grossMargin: `${grossMargin}%`,
         },
         rates: {
           trialConversion: `${trialConversion}%`,
-          arpu: `R${arpu}`,
-          estimatedLTV: `R${estimatedLTV}`,
+          trialConversionRaw: trialConversion,
         },
         forecast: {
           projectedNewPaying,
-          projectedMRR: `R${projectedMRR.toLocaleString()}`,
+          projectedMRR,
+          projectedMRRDisplay: `R${projectedMRR.toLocaleString()}`,
         },
       });
     } catch (err) {
