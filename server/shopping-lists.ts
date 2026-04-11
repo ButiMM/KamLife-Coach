@@ -235,8 +235,8 @@ const TIER_4_WEEK_A: ShoppingList = {
 const ALL_LISTS: Record<string, ShoppingList[]> = {
   under_100: [TIER_1_WEEK_A, TIER_1_WEEK_B],
   "100_300": [TIER_2_WEEK_A, TIER_2_WEEK_B],
-  "300_600": [TIER_3_WEEK_A, TIER_3_WEEK_A], // will add week B later
-  over_600: [TIER_4_WEEK_A, TIER_4_WEEK_A],
+  "300_600": [TIER_3_WEEK_A], // TODO: add TIER_3_WEEK_B for weekly variety
+  over_600: [TIER_4_WEEK_A],  // TODO: add TIER_4_WEEK_B for weekly variety
 };
 
 export function getShoppingList(budgetTier: string, weekNumber: number): ShoppingList {

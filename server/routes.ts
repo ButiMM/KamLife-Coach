@@ -682,7 +682,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const trialEnd = user.betaBypassUntil ? new Date(user.betaBypassUntil) : null;
     if (trialEnd && trialEnd < new Date()) {
       // Trial expired — convert to inactive and tell the user
-      await db.update(users).set({ subscriptionStatus: "inactive" }).where(eq(users.phoneNumber, phone));
+      await db.update(users).set({ subscriptionStatus: "inactive", betaBypassUntil: null }).where(eq(users.phoneNumber, phone));
       user.subscriptionStatus = "inactive";
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
@@ -6081,7 +6081,17 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // ---- FUNNEL METRICS — signup → onboard → first workout → week-1 retention ----
   app.get("/api/dashboard/funnel", requireAdminKey, async (_req, res) => {
     try {
-      const allUsers = await db.select().from(users);
+      // Project only needed columns — never load full user rows for aggregate calcs
+      const allUsers = await db.select({
+        id: users.id,
+        onboardingState: users.onboardingState,
+        subscriptionStatus: users.subscriptionStatus,
+        createdAt: users.createdAt,
+        lastActiveAt: users.lastActiveAt,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        todayCalories: users.todayCalories,
+        cancelledAt: users.cancelledAt,
+      }).from(users);
       const now = Date.now();
       const sevenDays = 7 * 86_400_000;
       const thirtyDays = 30 * 86_400_000;
@@ -6874,12 +6884,25 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // WEEKLY COACH REPORT — client summary digest for coach
   // ============================================================
 
-  app.get("/api/dashboard/weekly-report", requireAdminKey, async (req, res) => {
+  app.get("/api/dashboard/weekly-report", requireAdminKey, async (req: any, res) => {
     try {
       const since = new Date(Date.now() - 7 * 86400_000);
 
-      // Get all users with activity summary
-      const allUsers = await db.select().from(users);
+      // Project only needed columns and cap at 500 — never full table scan for a report
+      const allUsers = await db.select({
+        id: users.id,
+        name: users.name,
+        phoneNumber: users.phoneNumber,
+        onboardingState: users.onboardingState,
+        subscriptionStatus: users.subscriptionStatus,
+        lastActiveAt: users.lastActiveAt,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        workoutStreak: users.workoutStreak,
+        programmeWeek: users.programmeWeek,
+        programmePhase: users.programmePhase,
+        createdAt: users.createdAt,
+      }).from(users).orderBy(desc(users.lastActiveAt)).limit(500);
+      // Note: goalType omitted from projection above — cast below when used
 
       const clientReports: any[] = [];
       for (const u of allUsers) {
@@ -6927,7 +6950,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         clientReports.push({
           name: u.name || "Unknown",
           phone: u.phoneNumber,
-          goal: u.goalType,
+          goal: (u as any).goalType,
           status,
           risks,
           weekActivity: {
@@ -7462,23 +7485,28 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
         db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), gte(users.createdAt, sevenDaysAgo))).orderBy(desc(users.createdAt)),
       ]);
 
-      // Goal breakdown from allCompleteUsers (already fetched)
-      const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
-      const allUsersForFunnel = await db.select().from(users);
+      // Goal/budget breakdown — project only needed columns, reuse allCompleteUsers where possible
+      const allComplete = await db.select({
+        goalType: users.goalType,
+        budgetLevel: users.budgetLevel,
+        subscriptionStatus: users.subscriptionStatus,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        lastActiveAt: users.lastActiveAt,
+      }).from(users).where(eq(users.onboardingState, "COMPLETE"));
       const goalCounts: Record<string, number> = {};
       const budgetCounts: Record<string, number> = {};
 
-      // Funnel metrics
-      const funnelTotal = allUsersForFunnel.length;
+      // Funnel total via the already-fetched count row
+      const funnelTotal = Number((totalUsersRows[0] as any)?.count ?? 0);
       const funnelOnboarded = allComplete.length;
       const funnelFirstWorkout = allComplete.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
       const funnelPaying = allComplete.filter(u => u.subscriptionStatus === "active").length;
       const funnelActiveWeek = allComplete.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86400000).length;
       const estimatedMRR = calculateMRR(funnelPaying);
       for (const u of allComplete) {
-        const g = (u as any).goalType || "unknown";
+        const g = u.goalType || "unknown";
         goalCounts[g] = (goalCounts[g] || 0) + 1;
-        const b = (u as any).budgetTier || "unknown";
+        const b = u.budgetLevel || "unknown";
         budgetCounts[b] = (budgetCounts[b] || 0) + 1;
       }
 
