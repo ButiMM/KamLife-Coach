@@ -50,6 +50,11 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories NUMERIC DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories_date TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_protein_g NUMERIC DEFAULT 0`,
+    // Gender (male/female), age, and buddy system — added for intelligence layer
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS age INTEGER`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS buddy_id UUID`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS buddy_paired_at TIMESTAMP`,
     // Bump all existing users from old 7000 default to new 8500 — only updates those still at 7000
     `UPDATE users SET steps_target = 8500 WHERE steps_target = 7000 OR steps_target IS NULL`,
     // Clear any stuck awaitingProgrammeAnswers flags older than 24 hours
