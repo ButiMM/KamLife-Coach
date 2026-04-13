@@ -28,6 +28,47 @@ export function registerHealthRoutes(app: Express) {
     }
   });
 
+  // ── Temporary diagnostic (no auth — remove after Railway debug) ──
+  app.get("/api/diagnostic", async (_req, res) => {
+    const results: Record<string, any> = { timestamp: new Date().toISOString() };
+    // 1. Check DATABASE_URL is set
+    results.dbUrlSet = !!process.env.DATABASE_URL;
+    // 2. Check OpenAI key
+    results.openaiKeySet = !!(process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY);
+    results.openaiKeyPrefix = (process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "").slice(0, 10);
+    // 3. Check Twilio vars
+    results.twilioSid = !!(process.env.TWILIO_ACCOUNT_SID);
+    results.twilioToken = !!(process.env.TWILIO_AUTH_TOKEN);
+    results.twilioNumber = process.env.TWILIO_WHATSAPP_NUMBER || "NOT SET";
+    // 4. Try DB connection
+    try {
+      const { pool } = await import("../db");
+      const r = await pool.query("SELECT 1 as test");
+      results.dbConnection = "ok";
+    } catch (e: any) {
+      results.dbConnection = `FAIL: ${e.message}`;
+    }
+    // 5. Check if users table exists
+    try {
+      const { pool } = await import("../db");
+      const r = await pool.query("SELECT count(*) FROM users");
+      results.usersTable = `ok — ${r.rows[0].count} rows`;
+    } catch (e: any) {
+      results.usersTable = `FAIL: ${e.message}`;
+    }
+    // 6. Check if chat_history table exists
+    try {
+      const { pool } = await import("../db");
+      const r = await pool.query("SELECT count(*) FROM chat_history");
+      results.chatHistoryTable = `ok — ${r.rows[0].count} rows`;
+    } catch (e: any) {
+      results.chatHistoryTable = `FAIL: ${e.message}`;
+    }
+    // 7. NODE_ENV
+    results.nodeEnv = process.env.NODE_ENV || "NOT SET";
+    res.json(results);
+  });
+
   // ── Detailed health check for dashboard status panel ──
   app.get("/api/health", requireAdminKey, async (_req, res) => {
     const checks: Record<string, { status: "online" | "offline"; detail?: string }> = {};
