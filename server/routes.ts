@@ -22,8 +22,7 @@ import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
 });
 
 // SA timezone helper — South Africa is UTC+2 year-round (no DST)
