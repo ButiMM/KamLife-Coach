@@ -354,6 +354,24 @@ function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: numbe
   return null;
 }
 
+function sanitizeCoachReply(reply: string, userMessage: string): string {
+  const trimmed = (reply || "").trim();
+  if (!trimmed) {
+    return "I had a glitch. Send your last message again and I will respond properly.";
+  }
+  // Hard-ban low-quality generic fallback we observed in production.
+  if (/^what happened\??$/i.test(trimmed)) {
+    if (/\b(screenshot|step|steps|walk)\b/i.test(userMessage)) {
+      return "I did not read the screenshot clearly. Send it again with this caption: \"steps screenshot\".";
+    }
+    if (/\b(voice|audio|note)\b/i.test(userMessage)) {
+      return "I did not process that voice note fully. Please resend it, or type the message.";
+    }
+    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+  }
+  return trimmed;
+}
+
 async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
@@ -718,6 +736,35 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   const user = await getOrCreateUser(phone);
+
+  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
+  // Prevent vague GPT responses after a media upload by resolving against recent media events.
+  const asksAboutSentMedia = /\b(i sent|i have sent|did you get|you got|check|look at).{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
+  if (asksAboutSentMedia && !mediaUrl) {
+    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(12);
+    const lastMediaEvent = recentMedia.find(row =>
+      (row.messageIn || "").includes("[Photo]") ||
+      (row.messageIn || "").includes("[Step Screenshot") ||
+      (row.intent || "").includes("PROGRESS_PHOTO")
+    );
+    if (lastMediaEvent) {
+      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
+        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
+      }
+      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
+        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
+      }
+      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
+    }
+    if (/\b(voice|audio|note)\b/i.test(m)) {
+      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
+    }
+    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
+  }
 
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
@@ -1435,8 +1482,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
         // ---- STEP SCREENSHOT DETECTION ----
         // If caption mentions steps/walking/pedometer, use GPT Vision to read the number
-        const isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app)\b/i.test(message)
-          || (user.awaitingInputType === "steps");
+        const noCaption = !message || message.trim().length === 0;
+        const isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
+          || (user.awaitingInputType === "steps")
+          || noCaption;
         if (isStepScreenshot) {
           try {
             const stepVisionResponse = await openai.chat.completions.create({
@@ -1452,7 +1501,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             });
             const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
             const extractedSteps = parseInt(stepText.replace(/[^0-9]/g, ""));
-            if (!isNaN(extractedSteps) && extractedSteps >= 100 && extractedSteps < 100000) {
+            // Guard against random OCR numbers from food labels/photos:
+            // accept low numbers only when user explicitly indicated steps.
+            const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
+            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps < 100000;
+            const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
+            if (!isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
               const target = user.stepsTarget || 10000;
               const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
               const existingStep = await db.select({ id: stepLogs.id })
@@ -5564,7 +5618,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
       const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
-      const shortReply = await askCoachK(message, user, shortReplyContext, memoryContext);
+      const shortReply = sanitizeCoachReply(await askCoachK(message, user, shortReplyContext, memoryContext), message);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }
@@ -5586,7 +5640,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastIntent = lastBotMsg[0]?.intent || "";
       const name = user.name ? ` ${user.name}` : "";
       const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course — give a better, more specific answer to what they originally needed. If you cannot tell what they needed, ask directly: "What do you need from me right now?" SA voice. Direct. No fluff.`;
-      const frustReply = await askCoachK(message, user, frustContext);
+      const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
     } catch (e) { console.warn("[fall-through-gpt]", e); }
@@ -5629,7 +5683,7 @@ CRITICAL RULES — these are non-negotiable:
     gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
   }
 
-  const finalReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
+  const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message);
 
   // ---- MEMORY: store important facts for future sessions ----
   try {
