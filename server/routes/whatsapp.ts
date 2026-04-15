@@ -80,8 +80,14 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
 
       const rawPhone = phoneKey;
       const rawMsg = ((req.body.Body || "") as string).trim();
-      const mediaUrl = req.body.MediaUrl0 || null;
-      const mediaType = req.body.MediaContentType0 || null;
+      const numMedia = Number(req.body.NumMedia || 0);
+      const mediaItems = Array.from({ length: Math.max(0, numMedia) }, (_, idx) => ({
+        url: (req.body[`MediaUrl${idx}`] || "") as string,
+        type: (req.body[`MediaContentType${idx}`] || "") as string,
+      })).filter(item => item.url);
+      const selectedMedia = mediaItems.find(item => /^(image|audio|video)\//i.test(item.type)) || mediaItems[0] || null;
+      const mediaUrl = selectedMedia?.url || null;
+      const mediaType = selectedMedia?.type || null;
 
       let message = rawMsg;
       if (!rawMsg && mediaUrl) {
@@ -91,7 +97,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
 
-      const reply = await handleMessage(rawPhone, message);
+      const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined);
       const parts = splitMessage(reply);
 
       if (parts.length <= 1) {
