@@ -8,6 +8,7 @@
     "build": "tsx script/build.ts",
     "start": "cross-env NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "test:golden": "tsx script/golden-regression.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {

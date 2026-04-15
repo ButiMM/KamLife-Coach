@@ -20,6 +20,7 @@ import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgen
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
+import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -354,7 +355,7 @@ function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: numbe
   return null;
 }
 
-function sanitizeCoachReply(reply: string, userMessage: string): string {
+function sanitizeCoachReply(reply: string, userMessage: string, budgetTier?: string | null, injuries?: string | null): string {
   const trimmed = (reply || "").trim();
   if (!trimmed) {
     return "I had a glitch. Send your last message again and I will respond properly.";
@@ -369,7 +370,8 @@ function sanitizeCoachReply(reply: string, userMessage: string): string {
     }
     return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
   }
-  return trimmed;
+  const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
+  return guarded.reply;
 }
 
 function buildMediaTrace(phone: string, mediaType: string): string {
@@ -388,6 +390,15 @@ async function withTimeout<T>(label: string, ms: number, run: () => Promise<T>):
     ]);
   } finally {
     if (timer) clearTimeout(timer);
+  }
+}
+
+async function logMediaFailure(userId: string, stage: string, rawError?: unknown): Promise<void> {
+  const code = classifyMediaFailure(stage, rawError);
+  try {
+    await logChat(userId, `[MEDIA_FAIL:${stage}]`, code, "MEDIA_FAILURE");
+  } catch (e) {
+    console.warn("[media-failure-log]", e);
   }
 }
 
@@ -1493,6 +1504,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         }));
         if (!imageResponse.ok) {
           console.error(`[MEDIA][${mediaTrace}] image_download_failed ${imageResponse.status} ${imageResponse.statusText}`);
+          await logMediaFailure(user.id, "image_download", `${imageResponse.status}`);
           return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
         }
         const imageLen = parseInt(imageResponse.headers.get("content-length") || "0", 10);
@@ -1556,8 +1568,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
               return stepReply + streakNote + (perfectDay || "");
             }
-          } catch (e) { console.warn("[step-vision]", e); }
+          } catch (e) {
+            console.warn("[step-vision]", e);
+            await logMediaFailure(user.id, "step_vision", e);
+          }
           console.warn(`[MEDIA][${mediaTrace}] step_extract_failed`);
+          await logMediaFailure(user.id, "step_extract", "unknown_or_low_confidence");
           return "I could not read the step number clearly from that screenshot. Please resend and crop to the step count only, or type: steps 7421.";
         }
 
@@ -1693,6 +1709,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
         console.error(`[MEDIA][${mediaTrace}] vision_error:`, err);
+        await logMediaFailure(user.id, "vision", err);
         return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
       }
     }
@@ -1717,6 +1734,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
         if (!audioResponse.ok) {
           console.error(`[VOICE] Twilio download failed after retry: ${audioResponse.status} ${audioResponse.statusText}`);
+          await logMediaFailure(user.id, "audio_download", `${audioResponse.status}`);
           return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
         }
 
@@ -1798,6 +1816,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
       } catch (err) {
         console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
+        await logMediaFailure(user.id, `voice_${voiceStage}`, err);
         // Part 4 — always return, never fall through to text handler
         if (voiceStage === "transcribe") {
           return "I received your voice note but could not transcribe it clearly. Try again in a quieter spot, or type your message.";
@@ -5687,7 +5706,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
       const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
-      const shortReply = sanitizeCoachReply(await askCoachK(message, user, shortReplyContext, memoryContext), message);
+      const shortReply = sanitizeCoachReply(await askCoachK(message, user, shortReplyContext, memoryContext), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }
@@ -5723,7 +5742,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastIntent = lastBotMsg[0]?.intent || "";
       const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
       const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
-      const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message);
+      const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
     } catch (e) { console.warn("[fall-through-gpt]", e); }
@@ -5766,7 +5785,7 @@ CRITICAL RULES — these are non-negotiable:
     gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
   }
 
-  const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message);
+  const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message, user.weeklyFoodBudget, user.injuries);
 
   // ---- MEMORY: store important facts for future sessions ----
   try {
