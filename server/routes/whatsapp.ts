@@ -89,11 +89,9 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       const mediaUrl = selectedMedia?.url || null;
       const mediaType = selectedMedia?.type || null;
 
-      let message = rawMsg;
-      if (!rawMsg && mediaUrl) {
-        message = mediaType?.startsWith("image/") ? "[photo]" : "[media]";
-      }
-      if (!message) {
+      const message = rawMsg;
+      // Allow empty text when media exists so downstream handler can detect "no caption" correctly.
+      if (!message && !mediaUrl) {
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
 

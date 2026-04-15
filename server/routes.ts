@@ -1732,8 +1732,22 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         }
         voiceStage = "transcribe";
 
-        // Part 2 — WhatsApp voice notes are always ogg/opus; use fixed mime type for Whisper
-        const audioFile = new File([audioBuffer], "audio.ogg", { type: "audio/ogg" });
+        // Part 2 — preserve Twilio content type when available to avoid codec/mime mismatch.
+        const sourceAudioType = (audioResponse.headers.get("content-type") || ctype || "audio/ogg").split(";")[0].trim().toLowerCase();
+        const extMap: Record<string, string> = {
+          "audio/ogg": "ogg",
+          "audio/opus": "ogg",
+          "audio/mpeg": "mp3",
+          "audio/mp3": "mp3",
+          "audio/mp4": "mp4",
+          "audio/aac": "aac",
+          "audio/wav": "wav",
+          "audio/x-wav": "wav",
+          "audio/webm": "webm",
+          "audio/amr": "amr",
+        };
+        const audioExt = extMap[sourceAudioType] || "ogg";
+        const audioFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
 
         // Detect language from user's stored preference for better Whisper accuracy
         const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
@@ -2841,14 +2855,22 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
       // Smart protein suggestion based on remaining protein target
       let proteinTip = "";
+      const budgetTier = user.weeklyFoodBudget || "100_300";
       const protRemaining = (user.proteinTarget || 120) - runningProtein;
       if (protRemaining > 40 && calRemaining > 200) {
-        const suggestions = [
-          `Add pilchards (22g protein, R12) to your next meal.`,
-          `2 boiled eggs = 12g protein. Quick win.`,
-          `Tin of tuna = 25g protein. Easy add.`,
-          `Greek yogurt = 10g protein. Good snack option.`,
-        ];
+        const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
+        const suggestions = lowBudget
+          ? [
+            `Add pilchards (22g protein, about R12) to your next meal.`,
+            `2 boiled eggs = 12g protein. Quick win.`,
+            `Add 1/2 tin sugar beans (7g protein) with your next meal.`,
+          ]
+          : [
+            `Add pilchards (22g protein, R12) to your next meal.`,
+            `2 boiled eggs = 12g protein. Quick win.`,
+            `Tin of tuna = 25g protein. Easy add.`,
+            `Low-fat yoghurt = 10g protein. Good snack option.`,
+          ];
         proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
       } else if (protRemaining <= 0) {
         proteinTip = `\n\nProtein target hit. ✅`;
@@ -4989,6 +5011,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         if (calMatch) mCal = parseInt(calMatch[1]);
         if (protMatch) mProt = parseInt(protMatch[1]);
       }
+      const isRawPhoto = msgIn === "[Photo]";
+      if (isRawPhoto && mCal === 0) {
+        mealLines.push(`• Food photo logged — waiting for a clearer photo or caption for calories/protein`);
+        continue;
+      }
       totalCal += mCal; totalProt += mProt;
       if (matched.length > 0) {
         const label = matched.map((f: any) => f.name).join(", ");
@@ -5007,7 +5034,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const protTarget = user.proteinTarget || 130;
     const calRemaining = calTarget - totalCal;
     const diaryLines = [
-      `*Today's food log (${mealLogs.length} ${mealLogs.length === 1 ? "meal" : "meals"}):*`,
+      `*Today's food log (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
       ...mealLines,
       ``,
       `*Running total:* ~${totalCal} kcal | ${totalProt}g protein`,
@@ -5667,6 +5694,20 @@ CRITICAL RULES — these are non-negotiable:
   }
 
   // ---- FRUSTRATION HANDLER — client venting after a bad bot response ----
+  const severeServiceRiskComplaint =
+    /\b(kill|killed|hospital|unsafe|dangerous|harm)\b/i.test(m) &&
+    /\b(this|service|app|bot|coach|you)\b/i.test(m);
+
+  if (severeServiceRiskComplaint) {
+    const name = user.name || "there";
+    const injuryCtx = user.injuries && user.injuries !== "none"
+      ? ` I still have your injury noted: ${user.injuries}.`
+      : "";
+    const safetyReply = `${name}, you are right to call that out.${injuryCtx} I will keep responses specific and safety-first from here. Immediate action: if your pain is active today, skip loading that area and do a pain-free session only.`;
+    await logChat(user.id, message, safetyReply, "SAFETY_COMPLAINT");
+    return safetyReply;
+  }
+
   const isFrustrated =
     /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|jesus|wtf|what the hell|this is useless|pathetic|terrible|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked|not worth|waste of money|waste of time|cancel|refund|unsubscribe|this is bad|this is shit|this sucks|useless|rubbish|garbage|disappointed|i.?m done|giving up on this|doesn.?t work|broken|stupid)\b/i.test(m) ||
     (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo|omg|oh my god|yoh)\s*[!?.]*$/i.test(m));
@@ -5680,8 +5721,8 @@ CRITICAL RULES — these are non-negotiable:
         .limit(1);
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
-      const name = user.name ? ` ${user.name}` : "";
-      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course — give a better, more specific answer to what they originally needed. If you cannot tell what they needed, ask directly: "What do you need from me right now?" SA voice. Direct. No fluff.`;
+      const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
+      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
       const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
