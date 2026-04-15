@@ -1,11 +1,12 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory } from "../../shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, gte, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
 import { requireAdminKey } from "./auth";
 import type { RouteDeps } from "./types";
+import { sendWhatsApp } from "../scheduler";
 
 export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "logChat">) {
   const { handleMessage, logChat } = deps;
@@ -133,6 +134,52 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     } catch (err: any) {
       logs.push(`Error: ${err.message}`);
       res.json({ success: false, logs });
+    }
+  });
+
+  // ── Admin: trigger daily nudges (dry-run by default) ──
+  app.post("/api/admin/trigger-daily", requireAdminKey, async (req, res) => {
+    try {
+      const liveMode = Boolean(req.body?.liveMode);
+      const activeCutoff = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+
+      const candidates = await db
+        .select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber })
+        .from(users)
+        .where(
+          and(
+            eq(users.onboardingState, "COMPLETE"),
+            gte(users.lastActiveAt, activeCutoff),
+            or(eq(users.subscriptionStatus, "active"), eq(users.subscriptionStatus, "trial")),
+          ),
+        )
+        .limit(250);
+
+      const messageFor = (name?: string | null) =>
+        `Coach K check-in 💪 ${name || "Champion"} — quick one: reply with today's steps, water, and meals so I can adjust your targets.`;
+
+      let sent = 0;
+      let failed = 0;
+
+      if (liveMode) {
+        for (const user of candidates) {
+          try {
+            await sendWhatsApp(user.phoneNumber, messageFor(user.name));
+            sent++;
+          } catch {
+            failed++;
+          }
+        }
+      }
+
+      return res.json({
+        success: true,
+        count: liveMode ? sent : candidates.length,
+        liveMode,
+        failed,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ success: false, message: err.message || "Failed to trigger daily messages" });
     }
   });
 }

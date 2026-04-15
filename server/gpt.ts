@@ -14,7 +14,8 @@ function getDisplayName(user: any): string {
 }
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+  // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 export function buildContext(user: any): string {

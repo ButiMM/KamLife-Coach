@@ -41,11 +41,11 @@ export default function AdminTest() {
   const triggerMutation = useMutation({
     mutationFn: async () => {
       console.log("Trigger Daily Messages clicked");
-      // Use the specified endpoint
-      const response = await fetch("/functions/v1/admin-actions?action=trigger_daily", {
+      // Hit the shared API contract path
+      const response = await fetch(api.admin.triggerDaily.path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+        body: JSON.stringify({ liveMode }),
       });
       
       console.log("Response:", response);

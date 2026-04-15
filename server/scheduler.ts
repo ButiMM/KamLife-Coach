@@ -8,6 +8,7 @@ import { join } from "path";
 import { generateVoiceNote } from "./tts";
 import { getKamlifeProgramme } from "./programme";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
+import { PRICING } from "../shared/pricing";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -2163,7 +2164,7 @@ export function initScheduler(): void {
         return lastActivity < twoDaysAgo;
       }).length;
 
-      const mrr = paying * 99;
+      const mrr = paying * PRICING.monthlyPriceZAR;
 
       const report = `*📊 KamLife Weekly Report*
 _${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_

@@ -39,9 +39,9 @@ export function registerHealthRoutes(app: Express) {
       checks.database = { status: "offline", detail: e.message };
     }
 
-    checks.openai = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
+    checks.openai = (process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY)
       ? { status: "online" }
-      : { status: "offline", detail: "AI_INTEGRATIONS_OPENAI_API_KEY not set" };
+      : { status: "offline", detail: "OpenAI key not set (AI_INTEGRATIONS_OPENAI_API_KEY/OPENAI_API_KEY)" };
 
     checks.whatsapp = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER)
       ? { status: "online" }

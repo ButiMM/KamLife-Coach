@@ -495,8 +495,69 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let goal = "fat_loss";
     if (msg.includes("2") || lower.includes("build") || lower.includes("muscle") || lower.includes("gain")) goal = "muscle_gain";
     else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
-    await db.update(users).set({ goalType: goal, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
-    return `Gym or home training?`;
+    await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
+    return `Before I set your targets: what's your current weight and height?\n\nExample: *78kg, 1.72m*\n\nIf you don't know, reply *skip*.`;
+  }
+
+  // ---- ASK_WEIGHT_HEIGHT_FAST — keep fast flow but avoid generic targets ----
+  if (state === "ASK_WEIGHT_HEIGHT_FAST") {
+    const lower = msg.toLowerCase().trim();
+    const isSkip = lower === "skip" || lower === "not sure" || lower === "dont know" || lower === "don't know" || lower === "unknown";
+
+    if (isSkip) {
+      const fallbackWeight = user.gender === "female" ? 65 : 75;
+      await db.update(users).set({
+        currentWeight: fallbackWeight.toString(),
+        heightCm: null,
+        bmi: null,
+        proteinTarget: Math.round(fallbackWeight * 2),
+        onboardingState: "ASK_EQUIPMENT",
+      }).where(eq(users.phoneNumber, phone));
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nGym or home training?`;
+    }
+
+    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    if (!weightMatch) {
+      return `I need weight in kg to personalise targets.\n\nExample: *78kg, 1.72m* (or reply *skip*)`;
+    }
+
+    const weight = parseFloat(weightMatch[1]);
+    if (weight < 30 || weight > 350) {
+      return `That weight looks off. Please send it like: *78kg, 1.72m*`;
+    }
+
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g)/i);
+    const heightCmMatch = msg.match(/(\d{3})\s*cm/i);
+    let heightCmVal: number | null = null;
+    let bmiVal: string | null = null;
+
+    if (heightMMatch) {
+      const heightM = parseFloat(heightMMatch[1]);
+      if (heightM >= 1.2 && heightM <= 2.4) {
+        heightCmVal = Math.round(heightM * 100);
+      }
+    } else if (heightCmMatch) {
+      const parsedCm = parseInt(heightCmMatch[1], 10);
+      if (parsedCm >= 120 && parsedCm <= 240) {
+        heightCmVal = parsedCm;
+      }
+    }
+
+    if (heightCmVal) {
+      const hM = heightCmVal / 100;
+      const bmi = Math.round((weight / (hM * hM)) * 10) / 10;
+      bmiVal = bmi.toString();
+    }
+
+    await db.update(users).set({
+      currentWeight: weight.toString(),
+      heightCm: heightCmVal,
+      bmi: bmiVal,
+      proteinTarget: Math.round(weight * 2),
+      onboardingState: "ASK_EQUIPMENT",
+    }).where(eq(users.phoneNumber, phone));
+
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?`;
   }
 
   // ---- ASK_EQUIPMENT — gym or home ----
@@ -543,7 +604,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     }
 
     const defaultGoal = user.goalType || "fat_loss";
-    const defaultWeight = 75;
+    const defaultWeight = parseFloat(user.currentWeight || "75");
     const age = user.age || 30;
     const isYouth = age < 18;
     const isElderly = age >= 60;

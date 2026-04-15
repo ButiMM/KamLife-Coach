@@ -22,7 +22,7 @@ import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 // SA timezone helper — South Africa is UTC+2 year-round (no DST)
@@ -321,7 +321,67 @@ function scanForSAFoods(msg: string): SAFood[] {
     return matched.filter(f => !toRemove.has(f.name));
   }
 
-  return matched;
+  // PASS 4: Alias collision cleanup — keep the most specific item only
+  // Prevents double-counting like "chicken breast" + "chicken thigh" or duplicate peanut butter variants.
+  const names = new Set(matched.map(f => f.name));
+  let cleaned = [...matched];
+
+  // Peanut butter appears as multiple catalog entries with shared aliases.
+  if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
+    cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
+  }
+
+  // "Eggs" and "Whole egg (boiled)" can both hit for the same phrase.
+  if (names.has("Eggs") && names.has("Whole egg (boiled)")) {
+    cleaned = cleaned.filter(f => f.name !== "Whole egg (boiled)");
+  }
+
+  // If a specific chicken cut was matched, drop generic chicken piece aliases.
+  if (names.has("Chicken breast") && names.has("Chicken thigh")) {
+    const prefersBreast = /\b(breast|fillet|fillet[s]?)\b/i.test(lower);
+    cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
+  }
+
+  return cleaned;
+}
+
+function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {
+  if (!messageOut) return null;
+  const totalLine = messageOut.match(/\*(?:Meal|Day) total:\s*~?(\d+)\s*kcal\s*\|\s*~?(\d+)g\s*protein\*/i);
+  if (totalLine) {
+    return { calories: parseInt(totalLine[1], 10), protein: parseInt(totalLine[2], 10) };
+  }
+  return null;
+}
+
+async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const logs = await db.select({
+    messageIn: chatHistory.messageIn,
+    messageOut: chatHistory.messageOut,
+  }).from(chatHistory).where(and(
+    eq(chatHistory.userId, userId),
+    eq(chatHistory.intent, "FOOD_LOG"),
+    gte(chatHistory.createdAt, todayStart),
+  ));
+
+  let calories = 0;
+  let protein = 0;
+  for (const log of logs) {
+    const parsed = parseFoodLogTotalsFromMessageOut(log.messageOut || "");
+    if (parsed) {
+      calories += parsed.calories;
+      protein += parsed.protein;
+      continue;
+    }
+    // Fallback for legacy logs that may not have structured totals.
+    const matched = scanForSAFoods(log.messageIn || "");
+    calories += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+    protein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+  }
+  return { calories, protein };
 }
 
 // ============================================================
@@ -746,6 +806,67 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
     } catch (e) { console.warn("[non-fatal] clear food log:", e); }
     return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
+  }
+
+  // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
+  if (/^(no\s+)?(remove|delete|undo)\s+(it|that|last|last one|last meal)$/i.test(m.trim())) {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const lastFoodLog = await db.select({ id: chatHistory.id })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(1);
+
+    if (lastFoodLog.length === 0) {
+      return `No meal logged yet today to remove.`;
+    }
+
+    await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+    const recomputed = await recomputeTodayFoodTotals(user.id);
+    await db.update(users).set({
+      todayCalories: recomputed.calories,
+      todayProteinG: recomputed.protein,
+      todayCaloriesDate: sastToday(),
+    }).where(eq(users.id, user.id));
+
+    return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
+  }
+
+  // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
+  if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const logs = await db.select({
+      messageIn: chatHistory.messageIn,
+      messageOut: chatHistory.messageOut,
+      createdAt: chatHistory.createdAt,
+    }).from(chatHistory).where(and(
+      eq(chatHistory.userId, user.id),
+      eq(chatHistory.intent, "FOOD_LOG"),
+      gte(chatHistory.createdAt, todayStart),
+    )).orderBy(asc(chatHistory.createdAt)).limit(20);
+
+    if (logs.length === 0) {
+      return `No food logged yet today. Send your meal and I will track it.`;
+    }
+
+    const lines: string[] = [];
+    let totalCals = 0;
+    let totalProtein = 0;
+    for (const l of logs) {
+      const parsed = parseFoodLogTotalsFromMessageOut(l.messageOut || "");
+      if (parsed) {
+        totalCals += parsed.calories;
+        totalProtein += parsed.protein;
+      } else {
+        const matched = scanForSAFoods(l.messageIn || "");
+        totalCals += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+        totalProtein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+      }
+      const time = l.createdAt ? new Date(l.createdAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "--:--";
+      lines.push(`${time} — ${(l.messageIn || "[photo]").slice(0, 80)}`);
+    }
+
+    return `*Today's meal log (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total so far:* ~${totalCals} kcal | ~${totalProtein}g protein`;
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
@@ -1493,6 +1614,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     // ---- VOICE NOTE ----
     // Exclusive: if audio, always return — never falls through to text handler
     if (ctype.startsWith("audio/")) {
+      let voiceStage = "download";
       try {
         // Part 1 — Twilio media requires basic auth (ACCOUNT_SID:AUTH_TOKEN)
         const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
@@ -1513,6 +1635,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         }
 
         const audioBuffer = await audioResponse.arrayBuffer();
+        voiceStage = "transcribe";
 
         // Part 2 — WhatsApp voice notes are always ogg/opus; use fixed mime type for Whisper
         const audioFile = new File([audioBuffer], "audio.ogg", { type: "audio/ogg" });
@@ -1558,13 +1681,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
         console.log(`[VOICE] Transcribed (${whisperLang || "auto"}): "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
 
+        voiceStage = "coach_reply";
         const voiceReply = await handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""));
         // Part 4 — explicit return, no fall-through
         return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
 
       } catch (err) {
-        console.error("[VOICE] Transcription error:", err);
+        console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
         // Part 4 — always return, never fall through to text handler
+        if (voiceStage === "transcribe") {
+          return "I received your voice note but could not transcribe it clearly. Try again in a quieter spot, or type your message.";
+        }
+        if (voiceStage === "coach_reply") {
+          return "I heard your voice note but could not generate the coaching reply right now. Send it once more, or type your message.";
+        }
         return "I got your voice note but could not process it right now. Please send it again, or type your message and I will respond immediately.";
       }
     }
@@ -2212,6 +2342,12 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           .limit(1);
         if (lastFoodLog.length > 0) {
           await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+          const recomputed = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({
+            todayCalories: recomputed.calories,
+            todayProteinG: recomputed.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id));
         }
       } catch (e) { console.warn("[non-fatal]", e); }
       // Strip the correction prefix and process the remaining message as the actual food
@@ -2566,18 +2702,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         ).join("\n");
       }
 
-      // Daily accumulation — atomic SQL increment prevents race condition on concurrent food logs
+      // Daily accumulation — recompute from existing logs to avoid drift after corrections.
       const todayStr = sastToday();
-      let runningCals = 0;
-      let runningProtein = 0;
+      let runningCals = totalCals;
+      let runningProtein = Math.round(totalProtein);
       try {
-        const updated = await db.update(users).set({
-          todayCalories: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_calories, 0) + ${totalCals} ELSE ${totalCals} END`,
-          todayProteinG: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_protein_g, 0) + ${Math.round(totalProtein)} ELSE ${Math.round(totalProtein)} END`,
+        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        runningCals = existingTotals.calories + totalCals;
+        runningProtein = existingTotals.protein + Math.round(totalProtein);
+        await db.update(users).set({
+          todayCalories: runningCals,
+          todayProteinG: runningProtein,
           todayCaloriesDate: todayStr,
-        }).where(eq(users.phoneNumber, phone)).returning({ cal: users.todayCalories, prot: users.todayProteinG });
-        runningCals = Number(updated[0]?.cal) || 0;
-        runningProtein = Number(updated[0]?.prot) || 0;
+        }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.warn("[non-fatal] calorie update:", e); }
       const prevCals = Math.max(0, runningCals - totalCals);
 
