@@ -239,13 +239,33 @@ function scanForSAFoods(msg: string): SAFood[] {
   const matched: SAFood[] = [];
 
   // PASS 1: Exact word-boundary matching (fast, preferred)
+  // Track which alias matched so we can prefer longer (more specific) matches
+  const matchedWithAlias: { food: SAFood; alias: string }[] = [];
   for (const food of SA_FOODS_SEED) {
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
-    const hit = allAliases.some(alias => {
+    let longestHit = "";
+    for (const alias of allAliases) {
       const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
-      return re.test(lower);
-    });
-    if (hit && !matched.find(f => f.name === food.name)) matched.push(food);
+      if (re.test(lower) && alias.length > longestHit.length) {
+        longestHit = alias;
+      }
+    }
+    if (longestHit && !matchedWithAlias.find(m => m.food.name === food.name)) {
+      matchedWithAlias.push({ food, alias: longestHit });
+    }
+  }
+
+  // DEDUP: If "chicken breast" matched AND "chicken thigh" also matched via a shorter
+  // alias that is a substring of the longer alias, drop the shorter one.
+  // E.g. "chicken" (6 chars) is substring of "chicken breast" (14 chars) — drop chicken thigh.
+  for (const entry of matchedWithAlias) {
+    const dominated = matchedWithAlias.some(other =>
+      other.food.name !== entry.food.name &&
+      other.alias.length > entry.alias.length &&
+      other.alias.includes(entry.alias) &&
+      other.food.category === entry.food.category
+    );
+    if (!dominated) matched.push(entry.food);
   }
 
   // PASS 2: Fuzzy matching for misspellings (only if exact didn't catch anything)
