@@ -761,6 +761,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0) {
       const uid = existing[0].id;
+      // Delete ALL FK-dependent tables before deleting user row
       await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
       await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
       await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
@@ -768,6 +769,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
       await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
       await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+      await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
       await db.delete(users).where(eq(users.id, uid));
     }
     await db.insert(users).values({
