@@ -480,8 +480,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Just your email address, or type *skip* to continue without one.`;
     }
     const emailVal = isSkip ? null : msg.trim().toLowerCase();
-    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `${emailVal ? "Got it." : "No problem."} What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
+    return `${emailVal ? "Got it." : "No problem."} What's your weight and height?\n\nExample: *78kg, 1.72m*`;
   }
 
   // ---- ASK_GOAL ----
@@ -604,8 +604,10 @@ export async function handleOnboarding(user: any, message: string, phone: string
     }
 
     const defaultGoal = user.goalType || "fat_loss";
-    const defaultWeight = parseFloat(user.currentWeight || "75");
+    const actualWeight = parseFloat(user.currentWeight || "75");
     const age = user.age || 30;
+    const gender = user.gender || "male";
+    const heightCm = user.heightCm || 170;
     const isYouth = age < 18;
     const isElderly = age >= 60;
 
@@ -613,7 +615,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const trainingDays = (isYouth || isElderly) ? 3 : 4;
 
     const { calorieTarget, proteinTarget } = calculateTargets(
-      defaultWeight, defaultGoal, "office", trainingDays
+      actualWeight, defaultGoal, "office", trainingDays, gender, age, heightCm
     );
 
     // Age-appropriate step targets:
@@ -668,13 +670,18 @@ export async function handleOnboarding(user: any, message: string, phone: string
     // Immediately build today's workout so they get value NOW
     const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: isFemale ? "glutes_legs" : user.primaryFocusArea };
     const firstWorkout = getKamlifeProgramme(updatedUser, true);
-    const workoutPreview = firstWorkout.split("\n").slice(0, 8).join("\n");
+    // Show the full Day 1 workout — truncating to 2 exercises makes us look amateur
+    const workoutPreview = firstWorkout;
 
     // Get first shopping list
     const weekOneList = getShoppingList(budget, 1);
     const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined);
 
-    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\nReply *1* for the full workout with form videos.\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
+    const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
+    const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
+    const bmiDisplay = user.bmi ? ` · BMI ${user.bmi}` : "";
+
+    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
@@ -690,18 +697,47 @@ export async function handleOnboarding(user: any, message: string, phone: string
   }
 
   if (state === "ASK_WEIGHT_HEIGHT") {
-    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
-    if (!weightMatch) return `Weight and height please. Example: 78kg, 1.72m`;
+    // Accept: "78kg 1.72m", "78 kg", "78", "78kg, 172cm", "78 1.72", etc.
+    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)?/i);
+    if (!weightMatch) return `Your weight and height. Example: *78kg, 1.72m*`;
     const weight = parseFloat(weightMatch[1]);
-    if (weight < 30 || weight > 350) return `That weight doesn't look right. Example: 78kg`;
-    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g)/i);
-    const heightCmMatch = msg.match(/(\d{3})\s*cm/i);
-    let heightM = 1.7; let heightCmVal = 170;
-    if (heightMMatch) { heightM = parseFloat(heightMMatch[1]); heightCmVal = Math.round(heightM * 100); }
-    else if (heightCmMatch) { heightCmVal = parseInt(heightCmMatch[1]); heightM = heightCmVal / 100; }
+    if (weight < 30 || weight > 300) return `That doesn't look right. Example: *78kg, 1.72m*`;
+
+    // Parse height — multiple formats
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g|i)/i);          // 1.72m
+    const heightCmMatch = msg.match(/(\d{3})\s*(?:cm)?/i);              // 172cm or 172
+    const heightFtMatch = msg.match(/(\d)[''`]?\s*(\d{1,2})/);          // 5'8 or 5 8
+    let heightM = 0; let heightCmVal = 0;
+
+    if (heightMMatch) {
+      heightM = parseFloat(heightMMatch[1]);
+      heightCmVal = Math.round(heightM * 100);
+    } else if (heightCmMatch) {
+      heightCmVal = parseInt(heightCmMatch[1]);
+      heightM = heightCmVal / 100;
+    } else if (heightFtMatch) {
+      const ft = parseInt(heightFtMatch[1]);
+      const inches = parseInt(heightFtMatch[2]);
+      heightCmVal = Math.round((ft * 30.48) + (inches * 2.54));
+      heightM = heightCmVal / 100;
+    }
+
+    // If no height provided, ask for it separately
+    if (heightCmVal < 100 || heightCmVal > 230) {
+      // Save weight now, ask height next
+      await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
+      // Stay in same state but try to get height
+      return `Got it — ${weight}kg. What's your height? Example: *1.72m* or *172cm*`;
+    }
+
     const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
-    await db.update(users).set({ currentWeight: weight.toString(), heightCm: heightCmVal, bmi: bmi.toString(), proteinTarget: Math.round(weight * 2), onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    await db.update(users).set({
+      currentWeight: weight.toString(),
+      heightCm: heightCmVal,
+      bmi: bmi.toString(),
+      onboardingState: "ASK_GOAL",
+    }).where(eq(users.phoneNumber, phone));
+    return `${weight}kg, ${heightCmVal}cm — got it. Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
   }
 
   if (state === "ASK_SITUATION") {
@@ -818,7 +854,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const exp = u.trainingExperience || "beginner";
 
     const { calorieTarget, proteinTarget } = calculateTargets(
-      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3
+      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3,
+      u.gender || "male", u.age || 30, u.heightCm || 170
     );
 
     const stepsTarget = exp === "beginner" ? 8500 : 10000;

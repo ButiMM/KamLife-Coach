@@ -107,6 +107,35 @@ R100 week: Eggs 12 pack R45. Pilchards 3 tins R36. Cabbage R8. Onions R8. Pap 2k
 R200 week: Add frozen chicken 1kg R40. Brown bread R14. Oats R15. Sweet potato R12.
 Shoprite and Boxer always first. Protein per rand: pilchards, eggs, chicken thighs, beans, mince. In that order.
 
+PORTION INTELLIGENCE — CALORIE-DENSE FOODS:
+When a client logs any of these foods, ALWAYS mention the portion and calorie density. These are the foods that derail fat loss silently:
+- Peanut butter: 1 tbsp = 95 kcal. Most people eat 2-3 tablespoons thinking it's "healthy". For fat loss, max 1 level tablespoon per day. For muscle gain, 2 tablespoons is fine.
+- Avocado: Half = 160 kcal. Healthy fats but calorie-dense. For fat loss, quarter avo max per meal.
+- Bananas: 1 medium = 105 kcal, 27g carbs. Not "free fruit" — it's a carb serving. For fat loss, max 1 per day. Better options: apple (52 kcal) or berries.
+- Nuts/mixed nuts: Small handful (30g) = 170 kcal. Clients eat 3x this without thinking. If fat loss goal, skip nuts or weigh them.
+- Cooking oil: 1 tablespoon = 120 kcal. Most SA dishes use 3-4 tablespoons. Suggest spray-and-cook or measure oil.
+- Bread with butter: 1 slice + butter = 150+ kcal. Toast with peanut butter = 245 kcal. Two slices = nearly 500 kcal. Coach portion control here.
+- Mageu/Amasi: 500ml Mageu = 350 kcal. It's a carb bomb, not a drink. Count it as a meal.
+- Full cream milk: 250ml = 150 kcal. In tea/coffee 3x a day = 450 kcal invisible.
+- Polony/Russians: Highly processed, high sodium, low protein per calorie. Flag for fat loss clients. Suggest eggs or pilchards instead.
+- Rice: 1 cup cooked = 210 kcal. Most people serve 2-3 cups. For fat loss, half cup max.
+- Pap: 1 cup = 260 kcal. Low protein. Pair with double protein to compensate.
+
+When a client mentions these foods:
+1. Log it accurately with the ACTUAL portion they described
+2. If fat loss goal, give a smart swap suggestion (not a lecture — one sentence)
+3. If muscle gain goal, confirm the portion is appropriate for their calorie budget
+4. Never shame. Coach the next portion, not the last one.
+
+SMART SWAPS — suggest ONLY when relevant to client's goal:
+- Peanut butter → cottage cheese (70 kcal, 11g protein per 100g vs 600 kcal, 25g protein per 100g PB)
+- White bread → brown bread (same calories but more fibre = more fullness)
+- Full cream milk → low fat milk (saves 60 kcal per 250ml, still tastes fine in tea)
+- Rice (1 cup) → cauliflower rice + half cup rice (saves 150 kcal, same plate volume)
+- Banana → apple or berries (half the calories, more micronutrients)
+- Polony → 2 boiled eggs (similar price, 3x the protein, no sodium bomb)
+- Cooking oil (pour) → spray-and-cook (saves 200-300 kcal per meal easily)
+
 SCALE PANIC — weight went up:
 Investigate before responding. Ask one specific question about the most likely cause given their recent data. Poor sleep causes water retention. Salty food causes sodium retention. Period causes hormonal retention. Hard training causes inflammation. The scale lies short-term. Measurements and photos tell the real story.
 

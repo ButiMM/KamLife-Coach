@@ -2142,7 +2142,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (isExplicitWeight && explicitKgMatch) {
     const newKg = parseFloat(explicitKgMatch[1]);
     if (newKg >= 35 && newKg <= 250) {
-      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(newKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(newKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
       const prevKg = parseFloat(user.currentWeight || "0");
       const prevCals = user.calorieTarget || newCals;
       const prevProtein = user.proteinTarget || newProtein;
@@ -2209,7 +2209,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const mentionedKg = parseFloat(weightInMsg[1]);
     const storedKg = parseFloat(user.currentWeight || "0");
     if (mentionedKg >= 35 && mentionedKg <= 250 && Math.abs(mentionedKg - storedKg) > 0.4) {
-      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
       await db.update(users).set({ currentWeight: mentionedKg.toString(), proteinTarget: newProtein, calorieTarget: newCals }).where(eq(users.phoneNumber, phone));
       user.currentWeight = mentionedKg.toString();
       user.proteinTarget = newProtein;
@@ -3281,7 +3281,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (["programme", "program", "my programme", "my program"].includes(m)) {
     return getKamlifeProgramme(user);
   }
-  if (["meal plan", "meals", "my meals", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan"].includes(m)) {
+  if (["meal plan", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan", "my meal plan"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
   if (["progress", "my progress", "how am i doing"].includes(m)) {
@@ -5002,7 +5002,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals)\b/i.test(m)) {
+  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     const todayLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
       .from(chatHistory)
