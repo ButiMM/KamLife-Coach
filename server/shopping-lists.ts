@@ -230,6 +230,67 @@ const TIER_4_WEEK_A: ShoppingList = {
   ],
 };
 
+// ── GOAL-BASED ITEM SWAPS ──
+// Fat loss: cut calorie-dense items, add volume foods
+// Muscle gain: add protein, keep calorie-dense items, bigger portions
+
+const FAT_LOSS_SWAPS: Record<string, ShoppingItem | null> = {
+  "Peanut butter (400g)": { item: "Cottage cheese (250g)", qty: "250g", price: "R25", category: "protein" },
+  "Cooking oil (750ml)": { item: "Spray-and-cook + lemon", qty: "1 each", price: "R30", category: "pantry" },
+  "Full cream milk (1L)": { item: "Low fat milk (1L)", qty: "1L", price: "R18", category: "dairy" },
+  "Full cream milk (2L)": { item: "Low fat milk (2L)", qty: "2L", price: "R30", category: "dairy" },
+  "Polony (500g)": null, // remove entirely — processed, calorie-dense, no value
+  "Bananas (6)": { item: "Apples (6)", qty: "6", price: "R18", category: "fruit" },
+  "Avo (3)": { item: "Avo (1) + cucumber (2)", qty: "3", price: "R25", category: "veg" },
+  "Avo (4)": { item: "Avo (2) + cucumber (2)", qty: "4", price: "R35", category: "veg" },
+  "Mixed nuts (200g)": { item: "Mixed nuts (100g)", qty: "100g", price: "R25", category: "pantry" },
+  "Mixed nuts (300g)": { item: "Mixed nuts (150g)", qty: "150g", price: "R35", category: "pantry" },
+};
+
+const FAT_LOSS_EXTRAS: ShoppingItem[] = [
+  { item: "Extra spinach/cabbage", qty: "1 bunch", price: "R10", category: "veg" },
+];
+
+const MUSCLE_GAIN_EXTRAS: ShoppingItem[] = [
+  { item: "Extra eggs (6 pack)", qty: "6", price: "R20", category: "protein" },
+  { item: "Full cream milk (1L extra)", qty: "1L", price: "R20", category: "dairy" },
+];
+
+function applyGoalModifications(list: ShoppingList, goalType: string): ShoppingList {
+  if (goalType !== "fat_loss" && goalType !== "muscle_gain") return list;
+
+  let items = [...list.items];
+  let mealIdeas = [...list.mealIdeas];
+
+  if (goalType === "fat_loss") {
+    // Apply swaps
+    items = items.map(item => {
+      const swap = FAT_LOSS_SWAPS[item.item];
+      if (swap === null) return null; // remove
+      if (swap) return swap;
+      return item;
+    }).filter((item): item is ShoppingItem => item !== null);
+
+    // Add volume foods
+    items.push(...FAT_LOSS_EXTRAS);
+
+    // Swap meal ideas for fat-loss focus
+    mealIdeas = mealIdeas.map(idea => {
+      return idea
+        .replace(/Peanut butter on bread/i, "Cottage cheese on toast")
+        .replace(/peanut butter/i, "cottage cheese")
+        .replace(/Greek yoghurt \+ banana/i, "Greek yoghurt + berries (if budget)");
+    });
+  }
+
+  if (goalType === "muscle_gain") {
+    items.push(...MUSCLE_GAIN_EXTRAS);
+    mealIdeas.push("Extra: Milk + peanut butter shake between meals — R8");
+  }
+
+  return { ...list, items, mealIdeas };
+}
+
 // ── LOOKUP ──
 
 const ALL_LISTS: Record<string, ShoppingList[]> = {
@@ -239,14 +300,26 @@ const ALL_LISTS: Record<string, ShoppingList[]> = {
   over_600: [TIER_4_WEEK_A, TIER_4_WEEK_A],
 };
 
-export function getShoppingList(budgetTier: string, weekNumber: number): ShoppingList {
+export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string): ShoppingList {
   const lists = ALL_LISTS[budgetTier] || ALL_LISTS["100_300"];
   const idx = (weekNumber - 1) % lists.length;
-  return lists[idx];
+  const base = lists[idx];
+  return goalType ? applyGoalModifications(base, goalType) : base;
 }
 
-export function formatShoppingList(list: ShoppingList, userName?: string): string {
+export function formatShoppingList(list: ShoppingList, userName?: string, goalType?: string): string {
   const greeting = userName ? `${userName}, here's` : "Here's";
+
+  // Goal-specific header
+  const goalHeaders: Record<string, string> = {
+    fat_loss: "🎯 _Fat loss focus — high protein, lower carbs, big on veggies_",
+    muscle_gain: "💪 _Muscle gain focus — extra protein, calorie-dense staples_",
+    recomposition: "🔄 _Body recomp — balanced protein & carbs_",
+    general: "",
+    health_condition: "",
+  };
+  const goalHeader = goalType ? goalHeaders[goalType] || "" : "";
+
   const grouped: Record<string, ShoppingItem[]> = {};
   for (const item of list.items) {
     if (!grouped[item.category]) grouped[item.category] = [];
@@ -276,5 +349,12 @@ export function formatShoppingList(list: ShoppingList, userName?: string): strin
 
   const ideas = list.mealIdeas.map(m => `• ${m}`).join("\n");
 
-  return `${greeting} your shopping list for the week.\n*Budget: ${list.budgetLabel}*\n${body}\n*Est. total: ${list.estimatedTotal}* (covers ${list.coversDays} days)\n\n*Meal ideas this week:*\n${ideas}\n\n_Tick off as you buy. Send me a photo of your groceries when you're done!_`;
+  // Goal-specific tips at the bottom
+  const goalTips: Record<string, string> = {
+    fat_loss: "\n\n⚠️ _Portion control is everything. Weigh your carbs. Fill half your plate with veg before anything else._",
+    muscle_gain: "\n\n💡 _Eat every 3 hours. Never skip a meal. If you're not gaining, add an extra egg or PB toast._",
+  };
+  const tipLine = goalType ? goalTips[goalType] || "" : "";
+
+  return `${greeting} your shopping list for the week.\n*Budget: ${list.budgetLabel}*${goalHeader ? "\n" + goalHeader : ""}\n${body}\n*Est. total: ${list.estimatedTotal}* (covers ${list.coversDays} days)\n\n*Meal ideas this week:*\n${ideas}${tipLine}\n\n_Tick off as you buy. Send me a photo of your groceries when you're done!_`;
 }

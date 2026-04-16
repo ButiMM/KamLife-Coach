@@ -1147,8 +1147,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (m === "4" || m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
-    const list = getShoppingList(budget, weekNum);
-    const reply = formatShoppingList(list, user.name || undefined);
+    const goal = user.goalType || "fat_loss";
+    const list = getShoppingList(budget, weekNum, goal);
+    const reply = formatShoppingList(list, user.name || undefined, goal);
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
   }
@@ -4733,17 +4734,38 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (/\b(restart|reset|start over|start again|stuck|help me start|beginning|begin again|onboard again)\b/i.test(m) ||
       m === "restart" || m === "reset" || m === "start over") {
     const currentState = user.onboardingState;
-    // Only allow reset for non-COMPLETE users OR users explicitly requesting restart
     const wantsFullReset = /start over|start again|begin again|onboard again/i.test(m);
+
     if (currentState !== "COMPLETE" || wantsFullReset) {
-      await db.update(users).set({
+      // Full data wipe — delete all FK-dependent rows then nuke + recreate user
+      const uid = user.id;
+      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
+      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
+      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+      await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
+      await db.delete(users).where(eq(users.id, uid));
+
+      await db.insert(users).values({
+        phoneNumber: phone,
+        subscriptionStatus: "inactive",
         onboardingState: "WELCOME",
-        awaitingInputType: null,
-        awaitingProgrammeAnswers: false,
-      }).where(eq(users.phoneNumber, phone));
-      const rescueReply = `Fresh start. What is your name?`;
-      await logChat(user.id, message, rescueReply, "RESCUE");
-      return rescueReply;
+        programmePhase: 1,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        trainingMode: "home",
+        stepsTarget: 8500,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
+
+      return "Fresh start. What is your name?";
     }
     // COMPLETE users asking "restart" — probably want workout/menu, not full reset
     return await getMenuText(user);
@@ -5090,25 +5112,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return diaryReply;
   }
 
-  // ---- SHOPPING LIST GENERATOR — no GPT ----
+  // ---- SHOPPING LIST GENERATOR — unified with shopping-lists.ts templates ----
   if (/\b(shopping list|shop.*this week|what.*to buy|what.*buy.*week|buy.*groceries|grocery list|my list.*week|food.*list|week.*groceries)\b/i.test(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
-    const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 130;
+    const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
-    const goalNote = goal === "fat_loss" ? "high protein, lower carbs, big on vegetables" : "high protein, moderate carbs, whole foods";
-    let shoppingReply = "";
-    if (budget === "under_50") {
-      shoppingReply = `*Emergency Week Shopping — Under R50*\n\nEggs 6 pack — R22-28\nPilchards in tomato sauce 2 tins — R24-28\n\nTotal: ~R48\n\nThis covers protein for 3-4 days. Pair with pap from home. Buy at Shoprite or a tuck shop.`;
-    } else if (budget === "50_100") {
-      shoppingReply = `*Budget Week Shopping — R50-R100*\n\nEggs 12 pack — R40-48\nPilchards 3 tins — R36-42\nCabbage — R8-10\n\nTotal: ~R90\n\nBuy at Shoprite. Protein covered for 5 days. Cook eggs and pilchards in bulk. One pot on Sunday covers the week.`;
-    } else if (budget === "100_300") {
-      shoppingReply = `*Standard Week Shopping — R100-R300*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nEggs 18 pack — R65-75\nChicken thighs 1kg — R60-70\nPilchards 3 tins — R36-42\nSugar beans 500g — R18-22\nCabbage — R8-10\nOats 500g — R15-18\nSpinach bunch — R8-10\nOnions 3 pack — R10-14\nMaize meal 2kg — R18-22\n\nTotal: ~R240-280\n\nShop at Shoprite or Boxer. Cook Sunday. Chicken + beans is your go-to meal — 35g protein per portion.`;
-    } else if (budget === "300_500") {
-      shoppingReply = `*Mid-Range Week Shopping — R300-R500*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nChicken breasts 1.5kg — R110-130\nEggs 30 pack — R90-100\nGreek yoghurt 1kg — R55-70\nOats 1kg — R28-35\nSweet potato 1kg — R22-28\nFrozen hake 1kg — R55-70\nSpinach 2 bunches — R16-20\nTomatoes — R15-20\nOnions — R12-15\nCottage cheese 250g — R20-25\n\nTotal: ~R430-510\n\nShop at Checkers or PnP. Meal prep chicken and sweet potato Sunday. Oats + yoghurt for breakfast every day.`;
-    } else {
-      shoppingReply = `*Premium Week Shopping — R500+*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nChicken breasts 2kg — R150-180\nEggs 30 pack — R90-100\nGreek yoghurt 2x1kg — R110-140\nOats 1kg — R28-35\nSweet potato 2kg — R40-50\nSalmon or tuna steaks — R80-120\nBroccoli — R25-35\nSpinach — R16-20\nAvocados 4 pack — R40-60\nCottage cheese 500g — R40-50\nQuinoa 500g — R55-70\n\nTotal: ~R680-850\n\nShop at Checkers, PnP, or Woolworths. Quality matters here — fresh over frozen where possible.`;
-    }
+    const list = getShoppingList(budget, weekNum, goal);
+    const shoppingReply = formatShoppingList(list, user.name || undefined, goal);
     await logChat(user.id, message, shoppingReply, "SHOPPING_LIST");
     return shoppingReply;
   }

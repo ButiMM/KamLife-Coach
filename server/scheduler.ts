@@ -871,8 +871,9 @@ cron.schedule("0 6 * * 0", async () => {
       // Send shopping list for next week — 30 seconds after report
       try {
         const budgetTier = client.weeklyFoodBudget || "100_300";
-        const list = getShoppingList(budgetTier, weekNum + 1);
-        const shoppingMsg = formatShoppingList(list, name);
+        const clientGoal = client.goalType || "fat_loss";
+        const list = getShoppingList(budgetTier, weekNum + 1, clientGoal);
+        const shoppingMsg = formatShoppingList(list, name, clientGoal);
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) {
         console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr);
