@@ -147,6 +147,31 @@ export function useFunnel() {
   });
 }
 
+export function useCohorts() {
+  return useQuery({
+    queryKey: ["/api/dashboard/cohorts"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/cohorts", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch cohorts");
+      return res.json() as Promise<{
+        cohorts: Array<{
+          month: string;
+          signups: number;
+          onboarded: number;
+          paying: number;
+          onboardRate: number;
+          payRate: number;
+          week1RetentionRate: number;
+          week2RetentionRate: number;
+          retentionRate: number;
+          avgWorkouts: number;
+        }>;
+      }>;
+    },
+    refetchInterval: 300_000,
+  });
+}
+
 export function useMetrics() {
   return useQuery({
     queryKey: ["/api/dashboard/metrics"],

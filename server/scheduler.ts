@@ -2579,11 +2579,17 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
             .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
           const stepDays = sl.c || 0;
 
-          // Weight change this week
+          // Weight change this week (most recent 2 logs)
           const weights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
             .from(weightLogs)
             .where(eq(weightLogs.userId, client.id))
             .orderBy(desc(weightLogs.loggedAt)).limit(2);
+
+          // All-time weight change — first log vs most recent
+          const firstWeightLog = await db.select({ weight: weightLogs.weight })
+            .from(weightLogs)
+            .where(eq(weightLogs.userId, client.id))
+            .orderBy(asc(weightLogs.loggedAt)).limit(1);
 
           // Calculate protein average from food logs
           let proteinTotal = 0; let proteinMeals = 0;
@@ -2617,16 +2623,37 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
             lines.push(`🚶 Steps logged ${stepDays} days — keep the movement up.`);
           }
 
-          // Line 2: Weight progress (if available)
+          // Line 2: Weight progress — this week AND all-time if meaningful
           if (weights.length >= 2) {
             const diff = Number(weights[0].weight) - Number(weights[1].weight);
             const goal = client.goalType || "fat_loss";
+            const mostRecentKg = Number(weights[0].weight);
+            const startKg = firstWeightLog.length > 0 ? Number(firstWeightLog[0].weight) : null;
+            const totalDiff = startKg !== null ? mostRecentKg - startKg : null;
+
             if (diff < -0.3 && (goal === "fat_loss" || goal === "recomp")) {
-              lines.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg. Moving in the right direction.`);
+              const allTimeNote = totalDiff !== null && totalDiff < -1.5
+                ? ` (${Math.abs(totalDiff).toFixed(1)}kg total since you started)`
+                : "";
+              lines.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg this week.${allTimeNote} Moving in the right direction.`);
             } else if (diff > 0.3 && goal === "muscle_gain") {
               lines.push(`⚖️ Up ${diff.toFixed(1)}kg — good for muscle gain. Track lifts to confirm strength is going up.`);
             } else if (diff > 0.5 && goal === "fat_loss") {
               lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week. Not a disaster — check water, sodium, and food volume.`);
+            } else if (Math.abs(diff) <= 0.3 && totalDiff !== null && totalDiff < -2) {
+              // Scale not moving this week but overall progress is real — surface it
+              lines.push(`⚖️ Scale held steady this week — but you are ${Math.abs(totalDiff).toFixed(1)}kg down since day one. The work is showing.`);
+            }
+          } else if (firstWeightLog.length > 0 && weights.length >= 1) {
+            // Only one recent log — compare to start if meaningful
+            const startKg = Number(firstWeightLog[0].weight);
+            const nowKg = Number(weights[0].weight);
+            const totalDiff = nowKg - startKg;
+            const goal = client.goalType || "fat_loss";
+            if (totalDiff < -2 && (goal === "fat_loss" || goal === "recomp")) {
+              lines.push(`⚖️ ${Math.abs(totalDiff).toFixed(1)}kg down since you started. Real change.`);
+            } else if (totalDiff > 2 && goal === "muscle_gain") {
+              lines.push(`⚖️ Up ${totalDiff.toFixed(1)}kg since day one — the programme is building mass.`);
             }
           }
 
