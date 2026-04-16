@@ -628,6 +628,17 @@ export async function handleOnboarding(user: any, message: string, phone: string
     // Auto-set female focus area based on gender
     const isFemale = user.gender === "female";
 
+    // Generate referral code at onboarding — every user gets one from day 1
+    let referralCode: string | undefined;
+    {
+      const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
+        const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
+        if (existing.length === 0) { referralCode = candidate; break; }
+      }
+    }
+
     await db.update(users).set({
       trainingDaysPerWeek: trainingDays,
       trainingExperience: isYouth ? "beginner" : isElderly ? "beginner" : "beginner",
@@ -645,6 +656,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       subscriptionStatus: "trial",
       betaBypassUntil: new Date(Date.now() + 7 * 86_400_000), // 7-day free trial
       onboardingState: "COMPLETE",
+      ...(referralCode && !user.referralCode ? { referralCode } : {}),
       ...(isFemale && !user.primaryFocusArea ? { primaryFocusArea: "glutes_legs" } : {}),
     }).where(eq(users.phoneNumber, phone));
 
@@ -674,14 +686,15 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const workoutPreview = firstWorkout;
 
     // Get first shopping list
-    const weekOneList = getShoppingList(budget, 1);
-    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined);
+    const weekOneList = getShoppingList(budget, 1, defaultGoal);
+    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined, defaultGoal);
 
     const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
     const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
     const bmiDisplay = user.bmi ? ` · BMI ${user.bmi}` : "";
 
-    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
+    const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share with friends. They get 50% off month 1. You get R50 credit when they subscribe.` : "";
+    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}${refCodeLine}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----

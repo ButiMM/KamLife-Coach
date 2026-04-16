@@ -981,6 +981,55 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
   }
 
+  // ---- REMOVE SPECIFIC FOOD FROM LOG — "remove the viennas", "I didn't have the eggs" ----
+  // Catches: "remove viennas", "didn't have eggs", "take out the bread", "no viennas in my log"
+  const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|didn.?t have|did not have|i didn.?t eat|i did not eat|no )\s+(the\s+)?(.{2,30}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
+  const isRemoveSpecific = !!removeSpecificMatch && !/(last|that|it|this|meal|log)$/.test((removeSpecificMatch[2] || "").trim());
+  if (isRemoveSpecific && removeSpecificMatch) {
+    const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
+    if (foodToRemove.length >= 2) {
+      try {
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayLogs = await db.select({ id: chatHistory.id, messageIn: chatHistory.messageIn })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(15);
+
+        // Find the log entry that contains the food to remove
+        const targetLog = todayLogs.find(l => (l.messageIn || "").toLowerCase().includes(foodToRemove));
+        if (!targetLog) {
+          return `I don't see "${foodToRemove}" in today's food log. Send "my meals" to see what's logged.`;
+        }
+
+        // Strip the food mention from the stored message and re-save
+        // This way recomputeTodayFoodTotals will exclude it
+        const updatedMsg = (targetLog.messageIn || "")
+          .replace(new RegExp(`\\b${foodToRemove.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "gi"), "")
+          .replace(/,\s*,/g, ",").replace(/^,\s*|,\s*$/g, "").replace(/\s{2,}/g, " ").trim();
+
+        if (!updatedMsg || updatedMsg.length < 3) {
+          // Removing this food empties the entire log entry — mark as corrected
+          await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, targetLog.id));
+        } else {
+          await db.update(chatHistory).set({ messageIn: updatedMsg }).where(eq(chatHistory.id, targetLog.id));
+        }
+
+        const recomputed = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({
+          todayCalories: recomputed.calories,
+          todayProteinG: recomputed.protein,
+          todayCaloriesDate: sastToday(),
+        }).where(eq(users.id, user.id));
+
+        return `Removed ${foodToRemove} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${(user.calorieTarget || 1800) - recomputed.calories} kcal | ~${(user.proteinTarget || 120) - recomputed.protein}g protein still to go.`;
+      } catch (removeErr) {
+        console.error("[REMOVE_FOOD]", removeErr);
+        return `Could not update your log right now. Try "remove last meal" or send "my meals" to see what's logged.`;
+      }
+    }
+  }
+
   // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
   if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);

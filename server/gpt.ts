@@ -400,6 +400,60 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
 
+  // ── TODAY'S FOOD LOG — injected so GPT knows exactly what they've eaten today ──
+  // Without this, GPT suggests dinner without knowing 1,767 kcal was already consumed.
+  let todayFoodContext = "";
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(and(
+        eq(chatHistory.userId, user.id),
+        eq(chatHistory.intent, "FOOD_LOG"),
+        gte(chatHistory.createdAt, todayStart),
+      ))
+      .orderBy(chatHistory.createdAt)
+      .limit(10);
+
+    if (todayFoodLogs.length > 0) {
+      // Extract calorie/protein totals from the running total line in each bot response
+      let totalCalToday = 0;
+      let totalProtToday = 0;
+      const mealSummaries: string[] = [];
+
+      for (const log of todayFoodLogs) {
+        const msgIn = log.messageIn || "";
+        const msgOut = log.messageOut || "";
+        // Try to get running total from bot response
+        const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*\|\s*(\d{2,3})g/i);
+        const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*\|\s*~?(\d{2,3})g/i);
+        if (runningMatch) {
+          totalCalToday = parseInt(runningMatch[1]);
+          totalProtToday = parseInt(runningMatch[2]);
+        } else if (mealTotalMatch && !totalCalToday) {
+          totalCalToday += parseInt(mealTotalMatch[1]);
+          totalProtToday += parseInt(mealTotalMatch[2]);
+        }
+        if (msgIn && msgIn.length > 3) mealSummaries.push(msgIn.slice(0, 80));
+      }
+
+      const calTarget = user.calorieTarget || 1800;
+      const protTarget = user.proteinTarget || 120;
+      const calRemaining = calTarget - totalCalToday;
+      const protRemaining = protTarget - totalProtToday;
+
+      todayFoodContext = `\n\nTODAY'S FOOD LOG (use these exact numbers — NEVER ignore them):
+Meals logged today: ${mealSummaries.join(" | ")}
+Running total: ${totalCalToday} kcal | ${totalProtToday}g protein
+Calorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}
+Protein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}
+CRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
+    }
+  } catch (foodErr) {
+    console.warn("[GPT] Could not fetch today's food context:", foodErr);
+  }
+
   // Inject recent lift data so GPT can reference real numbers (never fabricate)
   let liftContext = "";
   try {
@@ -428,7 +482,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
 
   // Assemble system prompt and enforce hard character ceiling (~10k chars)
-  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
+  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const MAX_SYSTEM_CHARS = 10_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
     console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
