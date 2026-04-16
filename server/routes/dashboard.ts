@@ -318,27 +318,65 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       }).from(users);
 
       const now = Date.now();
-      const cohorts: Record<string, { month: string; signups: number; onboarded: number; paying: number; retained: number; avgWorkouts: number }> = {};
+      type CohortEntry = {
+        month: string; signups: number; onboarded: number; paying: number;
+        week1Active: number; week2Active: number; avgWorkouts: number;
+      };
+      const cohorts: Record<string, CohortEntry> = {};
+
+      // For each user we need their chat activity — fetch all IDs with recent chat activity
+      const sevenDaysActivity = new Map<string, boolean>();
+      const fourteenDaysActivity = new Map<string, boolean>();
+      try {
+        const sevenAgo = new Date(now - 7 * 86_400_000);
+        const fourteenAgo = new Date(now - 14 * 86_400_000);
+        const recentActive = await db.select({ userId: chatHistory.userId, createdAt: chatHistory.createdAt })
+          .from(chatHistory).where(gte(chatHistory.createdAt, fourteenAgo));
+        for (const row of recentActive) {
+          const uid = row.userId;
+          const ms = new Date(row.createdAt || 0).getTime();
+          if (ms >= sevenAgo.getTime()) sevenDaysActivity.set(uid, true);
+          fourteenDaysActivity.set(uid, true);
+        }
+      } catch { /* non-fatal */ }
 
       for (const u of allUsers) {
         if (!u.createdAt) continue;
         const d = new Date(u.createdAt);
+        const signupMs = d.getTime();
         const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        if (!cohorts[key]) cohorts[key] = { month: key, signups: 0, onboarded: 0, paying: 0, retained: 0, avgWorkouts: 0 };
+        if (!cohorts[key]) cohorts[key] = { month: key, signups: 0, onboarded: 0, paying: 0, week1Active: 0, week2Active: 0, avgWorkouts: 0 };
         cohorts[key].signups++;
         if (u.onboardingState === "COMPLETE") cohorts[key].onboarded++;
         if (u.subscriptionStatus === "active") cohorts[key].paying++;
-        if (u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000) cohorts[key].retained++;
         cohorts[key].avgWorkouts += u.totalWorkoutsCompleted || 0;
+
+        // Week-1 retention: was this user active within 7 days of signup?
+        // (use lastActiveAt as a proxy — more reliable than chat query per user)
+        const lastActiveMs = u.lastActiveAt ? new Date(u.lastActiveAt).getTime() : 0;
+        const daysSinceSignup = (now - signupMs) / 86_400_000;
+        const daysSinceActive = lastActiveMs ? (now - lastActiveMs) / 86_400_000 : 999;
+
+        // Only count users who've had at least 7 days to be "week 1"
+        if (daysSinceSignup >= 7 && daysSinceActive <= 7) cohorts[key].week1Active++;
+        // Week-2 retention: active within 14 days but signup was at least 14 days ago
+        if (daysSinceSignup >= 14 && daysSinceActive <= 14) cohorts[key].week2Active++;
       }
 
-      const result = Object.values(cohorts).map(c => ({
-        ...c,
-        avgWorkouts: c.signups > 0 ? Math.round(c.avgWorkouts / c.signups * 10) / 10 : 0,
-        onboardRate: c.signups > 0 ? Math.round(c.onboarded / c.signups * 100) : 0,
-        payRate: c.signups > 0 ? Math.round(c.paying / c.signups * 100) : 0,
-        retentionRate: c.onboarded > 0 ? Math.round(c.retained / c.onboarded * 100) : 0,
-      })).sort((a, b) => a.month.localeCompare(b.month));
+      const result = Object.values(cohorts).map(c => {
+        const eligible7 = Math.max(1, c.signups); // total who could have hit week 1
+        const eligible14 = Math.max(1, c.signups);
+        return {
+          ...c,
+          avgWorkouts: c.signups > 0 ? Math.round(c.avgWorkouts / c.signups * 10) / 10 : 0,
+          onboardRate: c.signups > 0 ? Math.round(c.onboarded / c.signups * 100) : 0,
+          payRate: c.signups > 0 ? Math.round(c.paying / c.signups * 100) : 0,
+          week1RetentionRate: Math.round(c.week1Active / eligible7 * 100),
+          week2RetentionRate: Math.round(c.week2Active / eligible14 * 100),
+          // Legacy field — active in last 14 days (rolling)
+          retentionRate: c.onboarded > 0 ? Math.round((c.week1Active + c.week2Active) / 2 / c.onboarded * 100) : 0,
+        };
+      }).sort((a, b) => a.month.localeCompare(b.month));
 
       res.json({ cohorts: result });
     } catch (err) {

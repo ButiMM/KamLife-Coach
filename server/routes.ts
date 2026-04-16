@@ -389,19 +389,51 @@ function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: numbe
 
 function sanitizeCoachReply(reply: string, userMessage: string, budgetTier?: string | null, injuries?: string | null): string {
   const trimmed = (reply || "").trim();
+  const umLower = userMessage.toLowerCase();
+
+  // --- context flags for smarter fallbacks ---
+  const looksFoodLog = /\b(ate|had|have|having|eating|i had|i ate|breakfast|lunch|dinner|supper|snack|just had|just ate|meal was|food was)\b/i.test(userMessage);
+  const looksSteps = /\b(screenshot|step|steps|walk|walked|km|miles)\b/i.test(userMessage);
+  const looksVoice = /\b(voice|audio|note)\b/i.test(userMessage);
+
   if (!trimmed) {
+    if (looksFoodLog) {
+      return "I could not calculate that meal. Log it like this: \"I had 2 eggs and pap for breakfast\" and I will give you the exact kcal and protein breakdown.";
+    }
+    if (looksSteps) {
+      return "I did not catch your steps. Send a screenshot with the caption \"steps screenshot\" or type the number — \"8500 steps\".";
+    }
     return "I had a glitch. Send your last message again and I will respond properly.";
   }
+
   // Hard-ban low-quality generic fallback we observed in production.
   if (/^what happened\??$/i.test(trimmed)) {
-    if (/\b(screenshot|step|steps|walk)\b/i.test(userMessage)) {
+    if (looksSteps) {
       return "I did not read the screenshot clearly. Send it again with this caption: \"steps screenshot\".";
     }
-    if (/\b(voice|audio|note)\b/i.test(userMessage)) {
+    if (looksVoice) {
       return "I did not process that voice note fully. Please resend it, or type the message.";
+    }
+    if (looksFoodLog) {
+      return "I could not log that meal. Format: \"I had 2 eggs, pap, and cabbage for lunch\" — I will log the kcal and protein instantly.";
     }
     return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
   }
+
+  // Detect food-log reply with no nutritional numbers — GPT dodged the question
+  if (looksFoodLog && trimmed.length < 60 && !/\d+\s*(kcal|cal|calories|protein|g\s*protein|kj)/i.test(trimmed) && !/food logged|logged ✅|meal total|day total/i.test(trimmed)) {
+    // GPT returned something too short and number-free for a food message — give concrete retry guide
+    return "I could not log that automatically. Type your meal like this:\n\n\"I had 2 eggs and brown bread for breakfast\"\n\"Chicken and rice for lunch\"\n\nI will give you the full kcal and protein breakdown.";
+  }
+
+  // Generic "I understand" / "Great" / empty opener with no content
+  if (/^(i understand\.?|understood\.?|great\.?|noted\.?|got it\.?|sure\.?|ok\.?|okay\.?)$/i.test(trimmed)) {
+    if (looksFoodLog) {
+      return "Tell me exactly what you ate — food name, rough quantity, and which meal — and I will log the calories and protein.";
+    }
+    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+  }
+
   const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
   return guarded.reply;
 }
@@ -869,21 +901,34 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
   }
 
-  // ---- SUBSCRIPTION GATE — inactive users locked out of coaching ----
+  // ---- SUBSCRIPTION GATE — inactive users get free basic tier, premium features gated ----
+  // FREE (always available): food logging, step tracking, water, weight, basic Q&A, meal diary
+  // PREMIUM (requires subscription): workout programmes, shopping lists, full coaching, meal plans
   if (user.subscriptionStatus === 'inactive') {
-    const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance|hi|hello|hey|howzit|sawubona|dumela|heita|eita|status|what did i eat|food diary|food log|my food|calories today|protein today)\b/i;
-    if (!gateBypass.test(m)) {
-      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const name = user.name ? `${user.name}` : "there";
+    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const merchantId = process.env.PAYFAST_MERCHANT_ID;
+    const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+    const name = user.name?.split(" ")[0] || "there";
+
+    // Premium features that need subscription
+    const isPremiumRequest =
+      /\b(workout|programme|program|training plan|gym plan|my plan|day 1|day 2|day 3|shopping list|shop|meal plan|full coaching|next session|lift|sets|reps)\b/i.test(m) &&
+      !/\b(food|eat|ate|had|log|steps|walked|weight|water|calories|protein|diary|my meals|remove|delete)\b/i.test(m);
+
+    if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
       const gateReply = workouts === 0
-        ? `Your programme is built, ${name}. Subscribe to start.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day for a personal coach in your pocket. Reply *pay* to get your link.`
-        : `${name}, your subscription is inactive.\n\nYour ${workouts} workout${workouts > 1 ? "s" : ""} and all progress are saved.\n\n*Reactivate for R149/month:*\n${payLink}\n\nReply *pay* to get your link.`;
+        ? `Your programme is built, ${name} — subscribe to unlock it.\n\nFood tracking is free forever. Workouts, shopping lists, and full coaching are *R149/month*.\n\n${payLink}`
+        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month:* ${payLink}\n\nFood tracking and steps stay free.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
+    }
+
+    // Crisis and safety always bypass
+    const isSafety = /\b(chest pain|can.?t breathe|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
+    if (isSafety) {
+      // Fall through to crisis handler above
     }
   }
 
@@ -5640,6 +5685,27 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return plateReply;
   }
 
+  // ---- FOOD FORMAT RECOVERY — message looked like food logging but SA scanner found nothing ----
+  // Fires only when: (a) clear food-log trigger word present, (b) SA database found no foods,
+  // (c) not a question/frustration, (d) not already handled by water/steps/braai/restaurant/etc.
+  // Provide instant format guidance instead of sending to GPT (which may return generic advice).
+  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration;
+  if (seemsFoodLogAttempt) {
+    // Compute candidate word count — if very short we can't do much
+    const wordCount = m.split(/\s+/).length;
+    // Only intercept if message has enough content to warrant format guidance
+    // (single word like "yes" is handled by SHORT_REPLIES; "I had nothing" is ok to fall through)
+    const hasNothingEaten = /\b(nothing|not.*eat|didn.?t eat|skipped|no food|fasted|fasting|no meals?)\b/i.test(m);
+    if (!hasNothingEaten && wordCount >= 3) {
+      // Try to extract what they mentioned as a food item for a personalised reply
+      const firstNoun = m.replace(/\b(i had|i ate|just had|just ate|ate|had|having|i have|having|breakfast was|lunch was|dinner was|breakfast|lunch|dinner|supper|snack|brunch|for|at|with|and|the|a|an|some|my)\b/gi, " ").trim().split(/\s+/).filter(w => w.length > 2)[0] || "";
+      const foodHint = firstNoun ? ` (like "${firstNoun}")` : "";
+      const formatReply = `I did not recognise that food${foodHint} in my database. Log it like this:\n\n"I had 2 eggs and pap for breakfast"\n"Chicken thigh, sweet potato and spinach for lunch"\n\nInclude: the food name, rough amount, and which meal. I will give you the kcal and protein instantly.`;
+      await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
+      return formatReply;
+    }
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
@@ -5692,7 +5758,8 @@ STEPS LOGGED (number + "steps" / "walked" / "km"):
   Respond based on their step target of ${user.stepsTarget || 8500}. If below — push them. If at or above — celebrate and give next action.
 
 FOOD / MEAL LOGGED (any food item or meal described):
-  Coach specifically on THAT exact food. Use the SA food database. Estimate SA portion calories and protein. If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
+  Coach specifically on THAT exact food. ALWAYS include the estimated calories (kcal) and protein (g) — this is NON-NEGOTIABLE. Format: "That is roughly X kcal and Xg protein." If you cannot estimate a specific number, use a range. Never give a food response without numbers. Never say "I cannot estimate" — always give a best estimate based on standard portions.
+  If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
   CRITICAL — If the meal contains ANY of: chicken, beef, mince, fish, tuna, hake, salmon, eggs, pilchards, beans, lentils, pork, lamb, cottage cheese, Greek yoghurt, biltong — DO NOT suggest adding protein or swapping to pilchards. The client is ALREADY eating protein. Celebrate the choice. Budget suggestions (pilchards, eggs, sugar beans) ONLY fire when the client explicitly says they have no money or their stored budget tier is "under_100". Never suggest budget swaps after a quality meal unprompted.
 
 BROKE / BUDGET / MONTH-END / NO MONEY:

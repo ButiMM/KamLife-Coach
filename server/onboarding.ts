@@ -710,16 +710,53 @@ export async function handleOnboarding(user: any, message: string, phone: string
   }
 
   if (state === "ASK_WEIGHT_HEIGHT") {
-    // Accept: "78kg 1.72m", "78 kg", "78", "78kg, 172cm", "78 1.72", etc.
+    const lowerMsg = msg.toLowerCase().trim();
+    const isFemale = user.gender === "female";
+
+    // ── HEIGHT ESTIMATE PATH — user already gave weight, now picking height estimate ──
+    // Triggered when they have weight saved but no height, and send short/average/tall/1/2/3
+    if (user.currentWeight && !user.heightCm) {
+      const shortH = isFemale ? 155 : 163;
+      const avgH   = isFemale ? 163 : 172;
+      const tallH  = isFemale ? 172 : 181;
+      let estimatedCm = 0;
+      if (/^\s*1\s*$/.test(msg) || /\b(short|shorter|petite|small)\b/i.test(lowerMsg)) estimatedCm = shortH;
+      else if (/^\s*2\s*$/.test(msg) || /\b(average|avg|medium|normal|middle)\b/i.test(lowerMsg)) estimatedCm = avgH;
+      else if (/^\s*3\s*$/.test(msg) || /\b(tall|taller|big|large|above)\b/i.test(lowerMsg)) estimatedCm = tallH;
+
+      if (estimatedCm > 0) {
+        const savedWeight = parseFloat(user.currentWeight);
+        const hM = estimatedCm / 100;
+        const bmi = Math.round((savedWeight / (hM * hM)) * 10) / 10;
+        await db.update(users).set({
+          heightCm: estimatedCm,
+          bmi: bmi.toString(),
+          onboardingState: "ASK_GOAL",
+        }).where(eq(users.phoneNumber, phone));
+        return `Using ~${estimatedCm}cm as an estimate — I'll adjust if you measure later.\n\nMain goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+      }
+    }
+
+    // ── "I DON'T KNOW MY HEIGHT" detection ──
+    const heightUnknown = /\b(don.?t know|dont know|no idea|not sure|unknown|skip|idk|have no idea|can.?t remember|cannot remember|never measured)\b/i.test(lowerMsg)
+      || (lowerMsg.includes("height") && /\b(no|not|don.?t|unsure)\b/i.test(lowerMsg));
+
+    // ── Parse weight from message ──
     const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)?/i);
-    if (!weightMatch) return `Your weight and height. Example: *78kg, 1.72m*`;
-    const weight = parseFloat(weightMatch[1]);
+    if (!weightMatch && !heightUnknown) return `Your weight and height. Example: *78kg, 1.72m*`;
+
+    // If they said "don't know height" without giving weight yet, use saved weight or ask weight first
+    if (heightUnknown && !weightMatch && !user.currentWeight) {
+      return `No problem on height — I'll estimate it. What's your weight? Example: *78kg*`;
+    }
+
+    const weight = weightMatch ? parseFloat(weightMatch[1]) : parseFloat(user.currentWeight || "70");
     if (weight < 30 || weight > 300) return `That doesn't look right. Example: *78kg, 1.72m*`;
 
-    // Parse height — multiple formats
-    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g|i)/i);          // 1.72m
-    const heightCmMatch = msg.match(/(\d{3})\s*(?:cm)?/i);              // 172cm or 172
-    const heightFtMatch = msg.match(/(\d)[''`]?\s*(\d{1,2})/);          // 5'8 or 5 8
+    // Parse height — multiple formats: 1.72m, 172cm, 5'8, bare 3-digit number
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g|i)/i);
+    const heightCmMatch = msg.match(/(\d{3})\s*(?:cm)?/i);
+    const heightFtMatch = msg.match(/(\d)[''`]?\s*(\d{1,2})/);
     let heightM = 0; let heightCmVal = 0;
 
     if (heightMMatch) {
@@ -735,12 +772,13 @@ export async function handleOnboarding(user: any, message: string, phone: string
       heightM = heightCmVal / 100;
     }
 
-    // If no height provided, ask for it separately
+    // No height provided OR "don't know" — save weight and offer estimate options
     if (heightCmVal < 100 || heightCmVal > 230) {
-      // Save weight now, ask height next
       await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
-      // Stay in same state but try to get height
-      return `Got it — ${weight}kg. What's your height? Example: *1.72m* or *172cm*`;
+      const shortLabel = isFemale ? "Short (under 160cm)" : "Short (under 165cm)";
+      const avgLabel   = isFemale ? "Average (163cm)"     : "Average (172cm)";
+      const tallLabel  = isFemale ? "Tall (172cm+)"       : "Tall (181cm+)";
+      return `Got it — ${weight}kg.\n\nWhat's your height? If you're not sure, pick the closest:\n\n1️⃣ ${shortLabel}\n2️⃣ ${avgLabel}\n3️⃣ ${tallLabel}\n\nOr type it: *1.72m* or *172cm*`;
     }
 
     const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
