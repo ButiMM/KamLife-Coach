@@ -255,11 +255,23 @@ function scanForSAFoods(msg: string): SAFood[] {
     }
   }
 
-  // DEDUP: If "chicken breast" matched AND "chicken thigh" also matched via a shorter
+  // DEDUP PASS 1: If two foods matched with the exact same alias string (e.g. both
+  // "Chicken livers" and "Chicken liver" match alias "chicken livers"), keep only the first
+  // one encountered in SA_FOODS_SEED — eliminates plural/singular duplicate entries.
+  const seenAliases = new Set<string>();
+  const deduped: { food: SAFood; alias: string }[] = [];
+  for (const entry of matchedWithAlias) {
+    if (!seenAliases.has(entry.alias)) {
+      seenAliases.add(entry.alias);
+      deduped.push(entry);
+    }
+  }
+
+  // DEDUP PASS 2: If "chicken breast" matched AND "chicken thigh" also matched via a shorter
   // alias that is a substring of the longer alias, drop the shorter one.
   // E.g. "chicken" (6 chars) is substring of "chicken breast" (14 chars) — drop chicken thigh.
-  for (const entry of matchedWithAlias) {
-    const dominated = matchedWithAlias.some(other =>
+  for (const entry of deduped) {
+    const dominated = deduped.some(other =>
       other.food.name !== entry.food.name &&
       other.alias.length > entry.alias.length &&
       other.alias.includes(entry.alias) &&
@@ -895,6 +907,41 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     await db.update(users).set({ doctorClearanceRequired: false }).where(eq(users.phoneNumber, phone));
     const name = user.name || "there";
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
+  }
+
+  // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
+  // Catches multi-signal frustration messages like "this is all useless... shut down... I'm done"
+  // so that the bot does NOT respond with a workout programme or food log
+  const frustrationSignalCount = [
+    /\b(useless|useless(ly)?)\b/i.test(m),
+    /\b(terrible|pathetic|garbage|rubbish|broken|nothing works)\b/i.test(m),
+    /\b(i.?m done|i am done|giving up|shut down|shut it down|i.?m out)\b/i.test(m),
+    /\b(not paying|won.?t pay|i won.?t pay|i.?m not paying|nobody.?s paying|not worth)\b/i.test(m),
+    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic)\b/i.test(m),
+    /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
+  ].filter(Boolean).length;
+
+  if (frustrationSignalCount >= 2) {
+    const firstName = user.name?.split(" ")[0] || "";
+    const namePrefix = firstName ? `${firstName}, ` : "";
+    const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(3);
+    const lastIntent = lastBotMsgs[0]?.intent || "";
+    const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
+    const profileCtx = `CRITICAL PROFILE: Goal=${user.goalType}, Budget=${user.weeklyFoodBudget}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}.`;
+    const severeCtx = `The client is severely frustrated. They are ready to quit. Message: "${message}". Last bot response (${lastIntent}): "${lastOut}". ${profileCtx}\n\nRULES: 1) Do NOT apologise generically. 2) Do NOT ask what happened — you know what happened: the bot failed them. 3) Acknowledge the SPECIFIC failure. 4) Tell them ONE specific thing that still works or IS personalised to their profile. 5) Give them a direct, concrete action for TODAY only. 6) Maximum 4 sentences. SA voice. Human, direct, no corporate speak.`;
+    try {
+      const severeReply = await askCoachK(message, user, severeCtx);
+      await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
+      return severeReply;
+    } catch (e) {
+      const fallback = `${namePrefix}I hear you — that wasn't good enough. Your calorie target is ${user.calorieTarget || 1800} kcal and protein target is ${user.proteinTarget || 120}g today. Log what you eat and I will track it accurately. Nothing else.`;
+      await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
+      return fallback;
+    }
   }
 
   // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
@@ -1774,6 +1821,11 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           console.warn(`[MEDIA][${mediaTrace}] audio_buffer_too_large bytes=${audioBuffer.byteLength}`);
           return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
         }
+        // Reject clips that are too short for Whisper to process (<1KB ≈ ~0.5s of audio)
+        if (audioBuffer.byteLength < 1000) {
+          return "That voice note was too short for me to pick up. Hold the mic button for at least 2-3 seconds, then send again — or just type your message.";
+        }
+
         voiceStage = "transcribe";
 
         // Part 2 — preserve Twilio content type when available to avoid codec/mime mismatch.
@@ -2670,45 +2722,65 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
-  // ---- QUICK RE-LOG — "same as yesterday", "repeat meal", "same breakfast" ----
-  const isRepeatMeal = /\b(same as yesterday|same meal|repeat meal|same as last|same again|same food|same breakfast|same lunch|same dinner|repeat breakfast|repeat lunch|repeat dinner|yesterday.?s meal|yesterday.?s food)\b/i.test(m);
+  // ---- QUICK RE-LOG — "same as yesterday", "same as lunch", "had the same for dinner" ----
+  // Catches: "same as lunch", "same as my lunch", "had the same for dinner as my lunch",
+  //          "same meal again for dinner", "repeat meal", "same as yesterday"
+  const isRepeatMeal = /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food))\b/i.test(m);
   if (isRepeatMeal) {
     try {
-      // Find the most recent food log (yesterday or last logged)
-      const yesterdayStart = new Date(Date.now() - 48 * 3600_000); // up to 2 days back
-      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+      // Which meal are they referencing? Prefer the one they mention after "as" / "as my"
+      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again)\b/i.test(m);
+      const refDinner = /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again)\b/i.test(m);
+      const refBreakfast = /\b(same as (my )?breakfast|breakfast again)\b/i.test(m);
+      const refYesterday = /yesterday/i.test(m);
+
+      // Search window: today first, then last 48h for "same as yesterday"
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const windowStart = refYesterday
+        ? new Date(Date.now() - 48 * 3600_000)
+        : todayStart;
+
+      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
         .from(chatHistory)
         .where(and(
           eq(chatHistory.userId, user.id),
           eq(chatHistory.intent, "FOOD_LOG"),
-          gte(chatHistory.createdAt, yesterdayStart),
+          gte(chatHistory.createdAt, windowStart),
         ))
         .orderBy(desc(chatHistory.createdAt))
-        .limit(5);
+        .limit(10);
 
-      // Filter to find one with actual food content
-      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s)/i;
-      const validLogs = recentFoodLogs.filter(l => l.messageIn && !LOG_CMD_RE2.test(l.messageIn.trim()) && l.messageIn.length > 5);
+      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s|yes|ok|sure)/i;
+      const validLogs = recentFoodLogs.filter(l =>
+        l.messageIn &&
+        !LOG_CMD_RE2.test(l.messageIn.trim()) &&
+        l.messageIn.length > 5 &&
+        scanForSAFoods(l.messageIn).length > 0  // must have actual food in it
+      );
 
       if (validLogs.length === 0) {
-        return `No recent meals to repeat. Tell me what you had — for example: "2 eggs and toast for breakfast".`;
+        return `No recent meals found to repeat. Tell me what you had — for example: "2 eggs and toast".`;
       }
-
-      // Which meal to repeat? Check if user specified
-      const wantBreakfast = /breakfast|morning/i.test(m);
-      const wantLunch = /lunch|afternoon/i.test(m);
-      const wantDinner = /dinner|supper|evening/i.test(m);
 
       let toRepeat = validLogs[0].messageIn!;
-      if (wantBreakfast || wantLunch || wantDinner) {
-        const keyword = wantBreakfast ? "breakfast" : wantLunch ? "lunch" : "dinner";
-        const match = validLogs.find(l => l.messageIn!.toLowerCase().includes(keyword));
-        if (match) toRepeat = match.messageIn!;
+
+      // Try to find the specific meal type they referenced
+      if (refLunch) {
+        const lunchLog = validLogs.find(l => /lunch|afternoon/i.test(l.messageIn || ""));
+        if (lunchLog) toRepeat = lunchLog.messageIn!;
+        else toRepeat = validLogs[0].messageIn!; // fall back to most recent
+      } else if (refDinner) {
+        const dinnerLog = validLogs.find(l => /dinner|supper|evening/i.test(l.messageIn || ""));
+        if (dinnerLog) toRepeat = dinnerLog.messageIn!;
+      } else if (refBreakfast) {
+        const breakfastLog = validLogs.find(l => /breakfast|morning/i.test(l.messageIn || ""));
+        if (breakfastLog) toRepeat = breakfastLog.messageIn!;
       }
 
-      // Re-process through the food scanner by calling handleMessage recursively
+      // Re-process through the food scanner — exact same logic as original log
       const repeatReply = await handleMessage(phone, toRepeat);
-      return `♻️ Re-logging: "${toRepeat.slice(0, 60)}"\n\n${repeatReply}`;
+      return `♻️ Same meal logged: "${toRepeat.slice(0, 80)}"\n\n${repeatReply}`;
     } catch (err) {
       console.error("[REPEAT MEAL]", err);
       return `Could not find a recent meal to repeat. Tell me what you had.`;
