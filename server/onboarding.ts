@@ -495,6 +495,20 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let goal = "fat_loss";
     if (msg.includes("2") || lower.includes("build") || lower.includes("muscle") || lower.includes("gain")) goal = "muscle_gain";
     else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
+
+    // If weight already captured (e.g., from ASK_WEIGHT_HEIGHT flow), skip the duplicate re-ask and set protein target now.
+    const hasWeight = !!user.currentWeight;
+    if (hasWeight) {
+      const w = parseFloat(user.currentWeight!);
+      await db.update(users).set({
+        goalType: goal,
+        proteinTarget: Math.round(w * 2),
+        onboardingState: "ASK_EQUIPMENT",
+      }).where(eq(users.phoneNumber, phone));
+      const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
+      return `Goal locked in: *${goalLabel}*.\n\nGym or home training?`;
+    }
+
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
     return `Before I set your targets: what's your current weight and height?\n\nExample: *78kg, 1.72m*\n\nIf you don't know, reply *skip*.`;
   }
