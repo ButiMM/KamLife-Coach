@@ -3,7 +3,7 @@ import { type Server } from "http";
 import crypto from "crypto";
 import path from "path";
 import { db, pool } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments } from "../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments, mealLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
@@ -2511,20 +2511,21 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   const wordCount_prog = m.split(/\s+/).length;
   const hasComplaintAboutProgram = /\b(you gave|you give|you sent|giving me|gave me|sending me|i got|i received|got a|received a)\b.{0,25}\b(programme|program|workout|plan)\b/i.test(m)
     || /\b(that|the|your|this)\s+(programme|program|workout|plan)\b.{0,30}\b(useless|wrong|bad|terrible|generic|not right|not what|didn't|didn.?t)\b/i.test(m);
-  const hasFrustrationSignal_prog = /\b(no no|that.?s not|not true|not right|wrong|terrible|rubbish|nonsense|what the hell|useless|crap|ridiculous|useless|terrible|garbage|stupid|shut down|pathetic)\b/i.test(m);
-  const hasFoodLogSignal_prog = /\b(ate|had|have|having|eating|breakfast|lunch|dinner|supper|snack|for breakfast|for lunch|for dinner|pre.?workout|post.?workout)\b/.test(m);
+  const hasFrustrationSignal_prog = /\b(no no|that.?s not|not true|not right|wrong|terrible|rubbish|nonsense|what the hell|useless|crap|ridiculous|garbage|stupid|shut down|pathetic)\b/i.test(m);
+  // Extended food-log signal — must suppress programme when user mentions food OR context around training/gym
+  const hasFoodLogSignal_prog = /\b(ate|had|have|having|eating|breakfast|lunch|dinner|supper|snack|for breakfast|for lunch|for dinner|pre.?workout|post.?workout|before\s+(gym|training|workout)|after\s+(gym|training|workout))\b/.test(m);
+  // Word-boundary match — prevents "programmer", "programmed", etc. from triggering
+  const wordMatchesWorkout = /\b(workout|workouts|programme|program|training\s+plan|workout\s+plan|exercise\s+plan|full\s+body|exercise|training)\b/.test(m);
   const isWorkoutRelated =
-    !hasComplaintAboutProgram && // Never fire when user is complaining about a programme
-    wordCount_prog <= 25 && // Long messages are rarely programme requests — cap at 25 words
+    !hasComplaintAboutProgram && // Never fire when complaining about a programme
+    wordCount_prog <= 25 && // Long messages are rarely programme requests
     !hasFrustrationSignal_prog && // Never fire on frustration messages
-    !hasFoodLogSignal_prog && // Never fire if message has a food log trigger
+    !hasFoodLogSignal_prog && // Never fire when message has food context
     (
       m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
-      m.includes("workout") || m.includes("program") || m.includes("programme") ||
-      m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
-      m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
-      m.includes("exercise") || m.includes("train") ||
-      (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")))
+      /\b\d\s*day\b/.test(m) ||
+      wordMatchesWorkout ||
+      (m.includes("gym") && /\b(need|want|give|plan|programme|program)\b/.test(m))
     );
 
   // ---- ELDERLY / SERIOUS INJURY — skip questions, give immediate safety programme ----
@@ -3155,6 +3156,38 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       }
 
       const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}`;
+
+      // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
+      try {
+        const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f) => {
+          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+          return s + (grams * (f.carbsPer100g || 0) / 100);
+        }, 0));
+        const totalFat = Math.round(allAdjustedFoods.reduce((s, f) => {
+          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+          return s + (grams * (f.fatPer100g || 0) / 100);
+        }, 0));
+        const items = allAdjustedFoods.map(f => ({
+          name: f.name,
+          grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+          kcal: f.adjustedCalories,
+          protein: f.adjustedProtein,
+          category: f.category,
+        }));
+        const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: message.slice(0, 1000),
+          source: "sa_scanner",
+          kcalInt: totalCals,
+          proteinInt: Math.round(totalProtein),
+          carbsInt: totalCarbs,
+          fatInt: totalFat,
+          items,
+          mealLabel: firstSegLabel,
+        });
+      } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
+
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
       // If steps were also logged from same message, combine both replies

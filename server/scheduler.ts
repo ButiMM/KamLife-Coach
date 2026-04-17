@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
-import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -264,23 +264,23 @@ async function runMorningCheckin(): Promise<void> {
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
       const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
-      // Extract protein from the LAST food log's running total
-      // (last protein number in the most recent food log response = end-of-day running total)
+      // Read yesterday's protein from structured meal_logs — no more regex text-parsing.
+      // Falls back to 0 if nothing logged. meal_logs populated from 2026-04-17 onward;
+      // older rows pre-date the table and will legitimately show 0.
       let totalProtLogged = 0;
-      if (foodLogs.length > 0) {
-        const sortedLogs = [...foodLogs].sort((a, b) =>
-          new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
-        );
-        for (const log of sortedLogs) {
-          const out = log.messageOut || "";
-          const allMatches = [...out.matchAll(/\b(\d{1,4})\s*g(?:rams?)?\s*(?:of\s+)?protein/gi)];
-          if (allMatches.length > 0) {
-            totalProtLogged = parseInt(allMatches[allMatches.length - 1][1]);
-            break;
-          }
-          const fallback = out.match(/\bprotein[:\s]+(\d{1,4})\s*g?/i);
-          if (fallback) { totalProtLogged = parseInt(fallback[1]); break; }
-        }
+      try {
+        const yStart = dayStart(-1);
+        const yEnd = dayStart(0);
+        const rows = await db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+        }).from(mealLogs).where(and(
+          eq(mealLogs.userId, client.id),
+          gte(mealLogs.loggedAt, yStart),
+          lt(mealLogs.loggedAt, yEnd),
+        ));
+        totalProtLogged = rows[0]?.totalProt || 0;
+      } catch (e) {
+        console.warn("[scheduler] meal_logs protein sum failed, defaulting to 0:", e);
       }
 
       // Extract steps logged from step log messages

@@ -714,13 +714,14 @@ export async function handleOnboarding(user: any, message: string, phone: string
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
   // These handle clients who started onboarding before the 3-question rewrite
 
+  // Legacy ASK_AGE — route into the new 3-question flow so stranded users converge.
   if (state === "ASK_AGE") {
     const age = parseInt(msg.replace(/[^0-9]/g, ""));
     if (isNaN(age) || age < 10 || age > 110) return `Just your age. For example: 28`;
-    if (age < 16) return `I coach from age 16 upward.`;
-    const isElderly = age >= 65;
-    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
-    return `Weight and height? Example: 78kg, 1.72m`;
+    if (age < 14) return `Coach K is designed for ages 14 and up.`;
+    const isElderly = age >= 60;
+    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
+    return `Got it. What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
   }
 
   if (state === "ASK_WEIGHT_HEIGHT") {
@@ -872,26 +873,13 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let exp = "beginner";
     if (msg.includes("3") || lower.includes("intermediate")) exp = "intermediate";
     else if (msg.includes("4") || lower.includes("advanced")) exp = "advanced";
+    // Legacy ASK_EXPERIENCE path — transition into main flow's ASK_BUDGET (line ~606),
+    // not the former duplicate ASK_BUDGET handler (deleted — it was unreachable and
+    // routed into ASK_WORK_SCHEDULE which has no main-flow predecessor).
     await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
-    return `Weekly food budget?\n\n1️⃣ Under R100\n2️⃣ R100–R300\n3️⃣ R300–R600\n4️⃣ Over R600`;
+    return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
   }
-
-  if (state === "ASK_BUDGET") {
-    const lower = msg.toLowerCase();
-    let budget = "100_300";
-    if (/^\s*1\s*$/.test(msg) || lower.includes("under") || lower.includes("tight")) budget = "under_100";
-    else if (/^\s*2\s*$/.test(msg)) budget = "100_300";
-    else if (/^\s*3\s*$/.test(msg) || lower.includes("average")) budget = "300_600";
-    else if (/^\s*4\s*$/.test(msg) || lower.includes("flexible") || lower.includes("over")) budget = "over_600";
-    const randMatch = msg.match(/R\s*(\d+)/i);
-    if (randMatch) {
-      const r = parseInt(randMatch[1]);
-      budget = r < 100 ? "under_100" : r <= 300 ? "100_300" : r <= 600 ? "300_600" : "over_600";
-    }
-    const budgetLevel = budget === "under_100" ? "low" : budget === "over_600" ? "high" : "medium";
-    await db.update(users).set({ weeklyFoodBudget: budget, budgetLevel, onboardingState: "ASK_WORK_SCHEDULE" }).where(eq(users.phoneNumber, phone));
-    return `Last one. Work schedule?\n\n1️⃣ Standard (8am–5pm)\n2️⃣ Early shift\n3️⃣ Night shift\n4️⃣ Irregular\n5️⃣ Work from home`;
-  }
+  // Duplicate ASK_BUDGET handler removed — it was dead code shadowed by main handler at line ~606.
 
   // ---- ASK_WORK_SCHEDULE → COMPLETE ----
   if (state === "ASK_WORK_SCHEDULE") {

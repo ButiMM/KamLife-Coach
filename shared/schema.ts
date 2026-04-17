@@ -8,6 +8,7 @@ import {
   numeric,
   date,
   uuid,
+  jsonb,
   index,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
@@ -159,6 +160,36 @@ export const stepLogs = pgTable(
   (table) => {
     return {
       userStepIdx: index("step_logs_user_idx").on(table.userId),
+    };
+  },
+);
+
+// Structured meal log — numeric columns replace regex-parsing bot chat text.
+// Every food log goes here (SA scanner + GPT-fallback + photo). Readers SUM columns.
+export const mealLogs = pgTable(
+  "meal_logs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    loggedAt: timestamp("logged_at").defaultNow().notNull(),
+    rawMessage: text("raw_message"),            // what user sent
+    source: text("source").notNull(),           // 'sa_scanner' | 'gpt_fallback' | 'photo' | 'retro'
+    kcalInt: integer("kcal_int").notNull().default(0),
+    proteinInt: integer("protein_int").notNull().default(0),
+    carbsInt: integer("carbs_int").notNull().default(0),
+    fatInt: integer("fat_int").notNull().default(0),
+    // items: array of { name, grams?, kcal, protein, carbs?, fat? }
+    items: jsonb("items"),
+    mealLabel: text("meal_label"),              // 'breakfast' | 'lunch' | 'dinner' | 'snack' | null
+    corrected: boolean("corrected").notNull().default(false),
+  },
+  (table) => {
+    return {
+      userDateIdx: index("meal_logs_user_date_idx").on(table.userId, table.loggedAt),
     };
   },
 );

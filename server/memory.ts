@@ -28,6 +28,35 @@ export async function initMemoryTable(): Promise<void> {
   }
 }
 
+// Structured meal log — replaces regex text-parsing of chat history.
+// Idempotent: CREATE TABLE IF NOT EXISTS.
+export async function initMealLogsTable(): Promise<void> {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS meal_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id),
+        logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        raw_message TEXT,
+        source TEXT NOT NULL,
+        kcal_int INTEGER NOT NULL DEFAULT 0,
+        protein_int INTEGER NOT NULL DEFAULT 0,
+        carbs_int INTEGER NOT NULL DEFAULT 0,
+        fat_int INTEGER NOT NULL DEFAULT 0,
+        items JSONB,
+        meal_label TEXT,
+        corrected BOOLEAN NOT NULL DEFAULT FALSE
+      );
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS meal_logs_user_date_idx ON meal_logs(user_id, logged_at);
+    `);
+    console.log("[MEAL_LOGS] Table ready");
+  } catch (err) {
+    console.error("[MEAL_LOGS] Init failed:", err);
+  }
+}
+
 const IMPORTANCE: Record<string, number> = {
   medical: 5, milestone: 5, preference: 4,
   training: 3, nutrition: 3, mindset: 2,

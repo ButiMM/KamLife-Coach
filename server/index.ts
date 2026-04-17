@@ -4,7 +4,7 @@ import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initScheduler } from "./scheduler";
-import { initMemoryTable } from "./memory";
+import { initMemoryTable, initMealLogsTable } from "./memory";
 import { initFoodsTable } from "./foods";
 import { pool } from "./db";
 
@@ -440,6 +440,7 @@ app.use((req, res, next) => {
       initScheduler();
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
+      initMealLogsTable().catch(e => console.error("[STARTUP] Meal logs init failed:", e));
     },
   );
 })();
