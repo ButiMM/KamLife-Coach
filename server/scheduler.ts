@@ -67,13 +67,39 @@ function recordProactiveSend(clientId: string): void {
   dailyMessageCount.set(key, (dailyMessageCount.get(key) || 0) + 1);
 }
 
+// Per-message-key dedupe. The 2/day quota above is a budget; this stops the same
+// named message (e.g. "friday_weekend") from firing twice if a cron run restarts
+// mid-loop. Scoped to the ISO week of the send so it rolls over naturally.
+//
+// Note: this is in-memory only. A process restart wipes it, so a crash + respawn
+// during a long proactive loop can still cause a double-send. The DB-backed
+// sent_proactive table (roadmap) is the durable fix; this closes the common case.
+const weeklyKeyedSent = new Map<string, true>();
+
+function weeklyKeyedKey(clientId: string, messageKey: string): string {
+  return `${thisWeekUTC()}:${clientId}:${messageKey}`;
+}
+
+function hasSentKeyedThisWeek(clientId: string, messageKey: string): boolean {
+  return weeklyKeyedSent.has(weeklyKeyedKey(clientId, messageKey));
+}
+
+function markKeyedSent(clientId: string, messageKey: string): void {
+  weeklyKeyedSent.set(weeklyKeyedKey(clientId, messageKey), true);
+}
+
 // Purge stale keys at midnight SAST (22:00 UTC) — prevents unbounded Map growth
 cron.schedule("0 22 * * *", () => {
   const today = todayUTC();
   for (const key of dailyMessageCount.keys()) {
     if (!key.startsWith(today)) dailyMessageCount.delete(key);
   }
-  console.log("[SCHEDULER] dailyMessageCount purged — entries remaining:", dailyMessageCount.size);
+  // Purge last week's keyed dedupe entries (anything not starting with the current ISO week)
+  const thisWeek = thisWeekUTC();
+  for (const key of weeklyKeyedSent.keys()) {
+    if (!key.startsWith(thisWeek)) weeklyKeyedSent.delete(key);
+  }
+  console.log("[SCHEDULER] dedupe maps purged — daily:", dailyMessageCount.size, "keyed:", weeklyKeyedSent.size);
 }, { timezone: "UTC" });
 
 function thisWeekUTC(): string {
@@ -723,21 +749,40 @@ cron.schedule("0 4,16 * * *", async () => {
 cron.schedule("0 14 * * 5", async () => {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
   const clients = await getActiveClients();
+  const MESSAGE_KEY = "friday_weekend";
+  let sent = 0, skippedPaused = 0, skippedSilent = 0, skippedDup = 0, skippedBudget = 0;
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client)) { skippedPaused++; continue; }
+
+    // Skip silent clients — they already get targeted re-engagement from the
+    // silence-detection job (2/7/14/30 day windows). The weekend nudge is
+    // noise for someone who has not messaged in over a week and is likely to
+    // push them toward BLOCK rather than re-engage.
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
+    if (daysSilent > 10) { skippedSilent++; continue; }
+
+    // Per-message dedupe — prevents double-send on cron restart mid-loop
+    if (hasSentKeyedThisWeek(client.id, MESSAGE_KEY)) { skippedDup++; continue; }
+
+    // Daily budget (2 proactive msgs/day across all jobs)
+    if (!canSendProactive(client.id)) { skippedBudget++; continue; }
+
     try {
       const name = client.name || "there";
-      if (canSendProactive(client.id)) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
-        );
-        recordProactiveSend(client.id);
-      }
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
+      );
+      recordProactiveSend(client.id);
+      markKeyedSent(client.id, MESSAGE_KEY);
+      sent++;
     } catch (err) {
       console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err);
     }
   }
+  console.log(`[SCHEDULER] Friday weekend — sent:${sent} paused:${skippedPaused} silent:${skippedSilent} dup:${skippedDup} budget:${skippedBudget}`);
 }, { timezone: "UTC" });
 
 // ============================================================
