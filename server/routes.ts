@@ -2036,6 +2036,61 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
 
+  // ---- GYM WORKOUT LOG — "DAY 3 — UPPER / LOWER" with exercise list ----
+  // Recognizes when user pastes their workout log (exercises, sets×reps, optional emojis)
+  // Format: "DAY X — TYPE\nExercise — SxR\n..."
+  const gymLogMatch = m.match(/^(?:day\s*\d+\s*[—\-–:]+\s*)?(upper|lower|push|pull|legs?|full body|back|chest|arms?|shoulders?)\b/i);
+  const hasMultipleExerciseLines = (m.match(/\n.*[×x]\d|\n.*\d+\s*[×x]\s*\d|shoulder|lat pull|bench|squat|deadlift|row|press|curl|extension|fly|crunch|plank/gi) || []).length >= 2;
+  const looksLikeGymLog = gymLogMatch && hasMultipleExerciseLines && m.split("\n").length >= 3;
+
+  if (looksLikeGymLog) {
+    const name = user.name?.split(" ")[0] || "";
+    const sessionType = gymLogMatch[1].charAt(0).toUpperCase() + gymLogMatch[1].slice(1).toLowerCase();
+    // Count how many exercises were listed (lines with exercise names or set/rep notation)
+    const exerciseLines = m.split("\n").filter(l => /[×x]\d|\d+\s*[×x]|sets?|reps?/i.test(l) || /shoulder|lat|bench|squat|deadlift|row|press|curl|extension|fly/i.test(l));
+    const exCount = exerciseLines.length;
+    // Detect failed sets (🔴 emoji or "failed")
+    const failedCount = (m.match(/🔴|failed|couldn.?t|could not|did not complete/gi) || []).length;
+    const warningCount = (m.match(/⚠️|warning|struggled|nearly/gi) || []).length;
+
+    // Log the workout
+    const todayStartGym = new Date(); todayStartGym.setHours(0, 0, 0, 0);
+    const alreadyLogged = await db.select({ id: workoutLogs.id })
+      .from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStartGym)))
+      .limit(1);
+
+    let gymLogReply = "";
+    if (alreadyLogged.length === 0) {
+      const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+      let newDay = (user.programmeDayInWeek || 1) + 1;
+      let newWeek = user.programmeWeek || 1;
+      const daysPerWeek = user.trainingDaysPerWeek || 3;
+      if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
+      let newPhase = user.programmePhase || 1;
+      if (newWeek > 4) { newWeek = 1; newPhase = Math.min(newPhase + 1, 4); }
+      await db.update(users).set({
+        totalWorkoutsCompleted: newTotal,
+        programmeDayInWeek: newDay,
+        programmeWeek: newWeek,
+        programmePhase: newPhase,
+        lastWorkoutDate: new Date(),
+      }).where(eq(users.phoneNumber, phone));
+      await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+
+      const failNote = failedCount > 0
+        ? ` ${failedCount} exercise${failedCount > 1 ? "s" : ""} you couldn't complete — reduce weight by 10% next session and build back up. That is progressive overload working correctly.`
+        : warningCount > 0
+          ? ` Watch the exercises you struggled with — form first, then add weight.`
+          : "";
+      gymLogReply = `${sessionType} session logged ✅${name ? ` — ${name}` : ""}. ${exCount} exercises done. Total sessions: ${newTotal}.${failNote}\n\nEat protein within 60 minutes — chicken, eggs, pilchards. Recovery starts now.`;
+    } else {
+      gymLogReply = `${sessionType} session already logged today. Keep the log — it shows your real numbers. Come back tomorrow.`;
+    }
+    await logChat(user.id, message, gymLogReply, "WORKOUT_LOG");
+    return gymLogReply;
+  }
+
   // ---- DONE — workout complete (direct) ----
   if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
     // Guard: prevent double-logging on the same calendar day (race condition + accidental re-send)
@@ -2452,13 +2507,25 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
+  // STRICT guards: must be a SHORT command-style message, NOT a food message, NOT a rant
+  const wordCount_prog = m.split(/\s+/).length;
+  const hasComplaintAboutProgram = /\b(you gave|you give|you sent|giving me|gave me|sending me|i got|i received|got a|received a)\b.{0,25}\b(programme|program|workout|plan)\b/i.test(m)
+    || /\b(that|the|your|this)\s+(programme|program|workout|plan)\b.{0,30}\b(useless|wrong|bad|terrible|generic|not right|not what|didn't|didn.?t)\b/i.test(m);
+  const hasFrustrationSignal_prog = /\b(no no|that.?s not|not true|not right|wrong|terrible|rubbish|nonsense|what the hell|useless|crap|ridiculous|useless|terrible|garbage|stupid|shut down|pathetic)\b/i.test(m);
+  const hasFoodLogSignal_prog = /\b(ate|had|have|having|eating|breakfast|lunch|dinner|supper|snack|for breakfast|for lunch|for dinner|pre.?workout|post.?workout)\b/.test(m);
   const isWorkoutRelated =
-    m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
-    m.includes("workout") || m.includes("program") || m.includes("programme") ||
-    m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
-    m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
-    m.includes("exercise") || m.includes("train") ||
-    (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")));
+    !hasComplaintAboutProgram && // Never fire when user is complaining about a programme
+    wordCount_prog <= 25 && // Long messages are rarely programme requests — cap at 25 words
+    !hasFrustrationSignal_prog && // Never fire on frustration messages
+    !hasFoodLogSignal_prog && // Never fire if message has a food log trigger
+    (
+      m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
+      m.includes("workout") || m.includes("program") || m.includes("programme") ||
+      m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
+      m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
+      m.includes("exercise") || m.includes("train") ||
+      (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")))
+    );
 
   // ---- ELDERLY / SERIOUS INJURY — skip questions, give immediate safety programme ----
   const elderlyAge = m.match(/\bi'?m\s+(6[0-9]|7[0-9]|8[0-9]|9[0-9])\b/i) ||
@@ -2759,7 +2826,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // Log triggers: words that suggest the user is REPORTING food they ate/are eating
   // Standalone meal words (breakfast/lunch/dinner) are safe because the food logging gate
   // at line ~2218 ALSO requires hasActualFood (scanner must find real food in the message)
-  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had)\b/.test(m);
+  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training)\b/.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE — SA-specific coaching ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
@@ -5265,6 +5332,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 130;
     const calRemaining = calTarget - totalCal;
+    const hour = new Date().getHours();
+    const isLateEnough = hour >= 16; // After 4pm, low intake is a real problem
+
+    // Coaching note based on intake vs target
+    let diaryCoachNote = "";
+    if (totalCal > 0 && totalCal < calTarget * 0.45 && isLateEnough) {
+      diaryCoachNote = `\n\n⚠️ *Under-eating alert:* ${totalCal} kcal at this time of day is too low. You are ${calRemaining} kcal short. Eat a proper meal tonight — protein and carbs. Starving is not a fat loss strategy, it is a metabolism killer.`;
+    } else if (totalCal > 0 && calRemaining > 500 && !isLateEnough) {
+      diaryCoachNote = `\n\n${calRemaining} kcal still to go. Spread it across your remaining meals — do not leave it all for dinner.`;
+    } else if (totalCal > calTarget * 1.1) {
+      diaryCoachNote = `\n\nOver target by ${Math.abs(calRemaining)} kcal. Keep the next meal protein-only — eggs, pilchards, chicken — and skip the starch.`;
+    }
+
     const diaryLines = [
       `*Today's food log (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
       ...mealLines,
@@ -5273,7 +5353,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       `*Target:* ${calTarget} kcal | ${protTarget}g protein`,
       calRemaining > 0 ? `*Remaining:* ~${calRemaining} kcal` : `*Status:* Over target by ~${Math.abs(calRemaining)} kcal`,
     ];
-    const diaryReply = diaryLines.join("\n");
+    const diaryReply = diaryLines.join("\n") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");
     return diaryReply;
   }
