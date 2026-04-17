@@ -21,6 +21,7 @@ import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
 import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
+import { detectEscalation, escalationSLA } from "./safety-detection";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -82,25 +83,7 @@ function getDisplayName(user: any): string {
   return user.name;
 }
 
-function escalationSLA(priority: string): Date {
-  const hours: Record<string, number> = { urgent: 1, high: 4, normal: 12, low: 48 };
-  return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
-}
-
-function detectEscalation(message: string): { should: boolean; reason: string; priority: string } {
-  const m = message.toLowerCase();
-  if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)\b/i.test(m))
-    return { should: true, reason: "injury", priority: "urgent" };
-  if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
-    return { should: true, reason: "billing", priority: "high" };
-  if (/\b(doctor|hospital|surgery|medication|diabete|blood pressure|heart|pregnant|pregnanc|asthma|epilep)\b/i.test(m))
-    return { should: true, reason: "medical", priority: "high" };
-  if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
-    return { should: true, reason: "frustrated", priority: "high" };
-  if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
-    return { should: true, reason: "human_requested", priority: "normal" };
-  return { should: false, reason: "", priority: "normal" };
-}
+// detectEscalation + escalationSLA now live in ./safety-detection for unit testing
 
 
 
@@ -1690,11 +1673,50 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const goal = user.goalType || "fat_loss";
 
         // ---- STEP SCREENSHOT DETECTION ----
-        // If caption mentions steps/walking/pedometer, use GPT Vision to read the number
+        // Triggered ONLY by explicit keywords or awaiting state.
+        // Historical bug: uncaptioned images were defaulting to step OCR, causing
+        // gym selfies to be mis-reported as failed step screenshots.
         const noCaption = !message || message.trim().length === 0;
-        const isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
-          || (user.awaitingInputType === "steps")
-          || noCaption;
+        let isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
+          || (user.awaitingInputType === "steps");
+
+        // ---- UNCAPTIONED IMAGE PRE-CLASSIFIER ----
+        // For captionless images, a tiny vision call decides: food / steps /
+        // exercise / progress / other. Prevents the old "everything is a step
+        // screenshot" default. Failure is non-fatal — falls through to food vision.
+        let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
+        if (noCaption && !isStepScreenshot) {
+          try {
+            const classifyResp = await withTimeout("image_classify", 8000, () => openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              max_tokens: 8,
+              temperature: 0,
+              messages: [
+                { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | other.\n- food: plate of food, drink, snack\n- steps: screenshot showing a step/pedometer count\n- exercise: person performing an exercise, gym equipment, workout selfie\n- progress: body/transformation photo (front/side/back pose, no gym equipment)\n- other: none of the above" },
+                { role: "user", content: [
+                  { type: "text", text: "What is this photo?" },
+                  { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                ] },
+              ],
+            }));
+            const raw = (classifyResp.choices[0]?.message?.content || "").trim().toLowerCase();
+            if (raw.includes("food")) uncaptionedType = "food";
+            else if (raw.includes("steps") || raw.includes("step")) uncaptionedType = "steps";
+            else if (raw.includes("exercise")) uncaptionedType = "exercise";
+            else if (raw.includes("progress")) uncaptionedType = "progress";
+            else uncaptionedType = "other";
+            console.log(`[MEDIA][${mediaTrace}] uncaptioned_classified=${uncaptionedType}`);
+            if (uncaptionedType === "steps") isStepScreenshot = true;
+            if (uncaptionedType === "exercise") {
+              const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
+              await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
+              return exReply;
+            }
+          } catch (e) {
+            console.warn(`[MEDIA][${mediaTrace}] uncaptioned_classify_failed:`, e);
+            // fall through — food vision is a reasonable default
+          }
+        }
         if (isStepScreenshot) {
           try {
             const stepVisionResponse = await withTimeout("step_vision", 18000, () => openai.chat.completions.create({
@@ -2504,6 +2526,37 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       console.error("[WORKOUTS_VIEW]", e);
       return "Send *programme* to see your full workout plan.";
     }
+  }
+
+  // ---- PHOTO CORRECTION / CLARIFICATION — must run BEFORE workout classifier ----
+  // User sends a photo, bot misclassifies, user replies "It's a photo of an exercise!!!"
+  // The word "exercise" would otherwise fire PROGRAMME_DELIVERY via wordMatchesWorkout.
+  // Catch the clarification first and respond with category-appropriate guidance.
+  const photoCorrectionMatch =
+    /\b(?:it'?s|that'?s|this\s+is|that\s+was|it\s+was)\s+(?:just\s+)?(?:a|an|the|my)?\s*(?:photo|pic|picture|image|snap|screenshot|shot)\s+(?:of|showing|is|was)\b/i.test(m)
+    || /\b(?:it'?s|that'?s|this\s+is)\s+(?:a|an|my)\s+[a-z]+\s+(?:photo|pic|picture|image)\b/i.test(m)
+    || /\b(?:photo|pic|picture|image)\s+(?:shows?|showing|of)\s+(?:an?\s+|my\s+|the\s+)?(?:exercise|workout|gym|food|meal|steps?|progress)\b/i.test(m);
+
+  if (photoCorrectionMatch) {
+    const isExercisePhoto = /\b(exercise|workout|gym|training|lift(?:ing)?|squat|bench|deadlift|press|curl|row|form)\b/.test(m);
+    const isFoodPhoto = /\b(food|meal|breakfast|lunch|dinner|supper|snack|plate|eating)\b/.test(m);
+    const isStepsPhoto = /\b(steps?|pedometer|fitbit|fitness\s*tracker|step\s*count)\b/.test(m);
+    const isProgressPhoto = /\b(progress|mirror|scale|transformation|body\s*shot)\b/.test(m);
+
+    let correctionReply = "";
+    if (isExercisePhoto) {
+      correctionReply = `Got you — an exercise photo. I cannot give form feedback from a still shot (need a short video for that), but I can help you:\n\n• Log the lift: e.g. "bench 80kg 3x10"\n• Log the session: send *done* when finished\n• See today's session: text *today*`;
+    } else if (isFoodPhoto) {
+      correctionReply = `Got it — a food photo. Re-send it with a quick caption so I know what to log, e.g. "lunch — chicken and rice". That way I can count kilojoules properly.`;
+    } else if (isStepsPhoto) {
+      correctionReply = `Sharp — a steps photo. Just text me the number, e.g. "8500 steps" and I will log it straight away.`;
+    } else if (isProgressPhoto) {
+      correctionReply = `Got you — progress photo noted. Keep them coming weekly, same angle, same lighting. Send *progress* anytime to see your trend.`;
+    } else {
+      correctionReply = `Got it — thanks for the heads-up. Can you re-send the photo with a short caption so I know how to log it? E.g. "lunch", "8500 steps", "squat form".`;
+    }
+    await logChat(user.id, message, correctionReply, "PHOTO_CORRECTION");
+    return correctionReply;
   }
 
   // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
@@ -5037,6 +5090,35 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return await getMenuText(user);
   }
 
+  // ---- STOP (WhatsApp Business / POPIA opt-out) ----
+  // Bare "stop" is the industry-standard opt-out keyword. Must be respected
+  // even when the user hasn't cancelled — sets a 1-year messaging pause.
+  if (m === "stop" || m === "stop all" || m === "opt out" || m === "opt-out") {
+    const name = user.name || "there";
+    const pauseUntil = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
+    const existingNotes = user.profileNotes || "";
+    const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
+    const updatedNotes = `${cleanedNotes ? cleanedNotes + " | " : ""}paused_until:${pauseUntil}`;
+    await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.phoneNumber, phone));
+    const stopReply = `Done${name !== "there" ? `, ${name}` : ""}. No more messages from me. Your data is saved.\n\nReply *START* anytime to resume coaching.`;
+    await logChat(user.id, message, stopReply, "OPT_OUT");
+    return stopReply;
+  }
+
+  // ---- START (WhatsApp Business / POPIA opt-in / resume) ----
+  if (m === "start" || m === "unstop" || m === "opt in" || m === "opt-in") {
+    const existingNotes = user.profileNotes || "";
+    const wasPaused = /paused_until:\d{4}-\d{2}-\d{2}/.test(existingNotes);
+    if (wasPaused) {
+      const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
+      await db.update(users).set({ profileNotes: cleanedNotes || null }).where(eq(users.phoneNumber, phone));
+      const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
+      await logChat(user.id, message, resumeReply, "OPT_IN");
+      return resumeReply;
+    }
+    // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
+  }
+
   // ---- CANCEL SUBSCRIPTION ----
   if (m === "cancel" || m === "cancel subscription" || m === "unsubscribe" || m === "stop coaching" || m === "stop subscription") {
     const alreadyInactive = user.subscriptionStatus === "inactive";
@@ -6224,6 +6306,26 @@ async function logChat(userId: string, messageIn: string, messageOut: string, in
             slaDeadline: escalationSLA(esc.priority),
           });
           console.log(`[ESCALATION] Auto-created: ${esc.reason} (${esc.priority}) for user ${userId}`);
+
+          // Founder WhatsApp alert on urgent/high — inbox alone is insufficient for time-critical cases
+          if ((esc.priority === "urgent" || esc.priority === "high") && process.env.COACH_ALERT_PHONE && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER) {
+            try {
+              const [client] = await db.select({ name: users.name, phoneNumber: users.phoneNumber }).from(users).where(eq(users.id, userId)).limit(1);
+              const clientName = client?.name || "Client";
+              const clientPhone = client?.phoneNumber || "unknown";
+              const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+              const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+              const emoji = esc.priority === "urgent" ? "🚨" : "⚠️";
+              await alertClient.messages.create({
+                from: fromNum,
+                to: `whatsapp:${process.env.COACH_ALERT_PHONE}`,
+                body: `${emoji} ${esc.priority.toUpperCase()} ESCALATION\nReason: ${esc.reason}\nClient: ${clientName} (${clientPhone})\nMessage: "${messageIn.slice(0, 200)}"\n\nOpen the dashboard inbox to claim and respond.`,
+              });
+              console.log(`[ESCALATION] Founder alert sent (${esc.priority}/${esc.reason})`);
+            } catch (alertErr) {
+              console.error(`[ESCALATION] ⚠️ Founder alert send FAILED (${esc.priority}/${esc.reason}) — inbox still has the record:`, alertErr);
+            }
+          }
         }
       }
     }
