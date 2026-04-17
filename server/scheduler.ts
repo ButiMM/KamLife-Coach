@@ -264,16 +264,23 @@ async function runMorningCheckin(): Promise<void> {
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
       const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
-      // Extract protein logged from GPT responses
-      // Matches: "35g protein", "protein: 120g", "protein 8g", "total protein 45g", "1200g protein"
+      // Extract protein from the LAST food log's running total
+      // (last protein number in the most recent food log response = end-of-day running total)
       let totalProtLogged = 0;
-      for (const log of foodLogs) {
-        const out = log.messageOut || "";
-        // Try "Xg protein" or "X grams protein" (protein after value)
-        let pm = out.match(/\b(\d{1,4})\s*g(?:rams?)?\s*(?:of\s+)?protein/i);
-        // Fallback: "protein: Xg" or "protein Xg" (protein before value)
-        if (!pm) pm = out.match(/\bprotein[:\s]+(\d{1,4})\s*g?/i);
-        if (pm) totalProtLogged += parseInt(pm[1]);
+      if (foodLogs.length > 0) {
+        const sortedLogs = [...foodLogs].sort((a, b) =>
+          new Date(b.createdAt!).getTime() - new Date(a.createdAt!).getTime()
+        );
+        for (const log of sortedLogs) {
+          const out = log.messageOut || "";
+          const allMatches = [...out.matchAll(/\b(\d{1,4})\s*g(?:rams?)?\s*(?:of\s+)?protein/gi)];
+          if (allMatches.length > 0) {
+            totalProtLogged = parseInt(allMatches[allMatches.length - 1][1]);
+            break;
+          }
+          const fallback = out.match(/\bprotein[:\s]+(\d{1,4})\s*g?/i);
+          if (fallback) { totalProtLogged = parseInt(fallback[1]); break; }
+        }
       }
 
       // Extract steps logged from step log messages
@@ -283,7 +290,17 @@ async function runMorningCheckin(): Promise<void> {
         if (sm) stepsLogged = parseInt(sm[1].replace(/,/g, ""));
       }
 
-      const parts: string[] = [`Morning ${name}.`];
+      // Day-specific opener (replaces the removed daily motivation job)
+      const DOW_OPENERS: Record<number, string> = {
+        1: `New week. Clean slate.`,
+        2: `Day 2. Consistency beats intensity.`,
+        3: `Halfway through the week.`,
+        4: `Body is adapting. Do not stop.`,
+        5: `Friday. The weekend does not mean the plan stops.`,
+        6: `Saturday. One session before tonight.`,
+      };
+      const dowOpener = DOW_OPENERS[todayDOW] ? ` ${DOW_OPENERS[todayDOW]}` : "";
+      const parts: string[] = [`Morning ${name}.${dowOpener}`];
 
       // Protein — be specific about the number and the gap
       if (foodLogs.length === 0) {
@@ -1973,28 +1990,8 @@ export function initScheduler(): void {
   }
   schedulerInitialised = true;
 
-  // ---- Catch up any daily jobs missed due to server restart ----
-  (async () => {
-    try {
-      const state = loadState();
-      const today = todayUTC();
-      const nowUTC = new Date().getUTCHours();
-
-      // Morning job runs at 4am UTC (6am SAST) — only catch up within a 3-hour window (4am-7am UTC)
-      if (nowUTC >= 4 && nowUTC <= 7 && state["morning_checkin"] !== today) {
-        console.log("[SCHEDULER] ⚡ Catch-up: running missed morning check-in");
-        await runMorningCheckin();
-      }
-
-      // Evening job runs at 5pm UTC (7pm SAST) — only catch up within a 2-hour window (5pm-7pm UTC)
-      if (nowUTC >= 17 && nowUTC <= 19 && state["evening_accountability"] !== today) {
-        console.log("[SCHEDULER] ⚡ Catch-up: running missed evening accountability");
-        await runEveningAccountability();
-      }
-    } catch (e) {
-      console.error("[SCHEDULER] Catch-up error:", e);
-    }
-  })();
+  // Catch-up removed: Railway filesystem is ephemeral — state file lost on every deploy
+  // caused double morning messages. Cron handles scheduling reliably without catch-up.
 
   console.log("[SCHEDULER] Proactive coaching jobs active:");
   console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
@@ -2450,55 +2447,8 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
     }
   }, { timezone: "UTC" });
 
-  // ============================================================
-  // JOB: DAILY MOTIVATION — morning kickstart (6am SAST = 4am UTC)
-  // Only for active clients who logged something in last 3 days
-  // ============================================================
-  cron.schedule("0 4 * * 1,2,3,4,5", async () => {
-    const today = todaySAST();
-    if (hasRunToday("daily_motivation", today)) return;
-    saveState("daily_motivation", today);
-    console.log("[SCHEDULER] Running morning motivation...");
-    try {
-      const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
-      const activeClients = await db.select().from(users)
-        .where(and(
-          eq(users.onboardingState, "COMPLETE"),
-          gte(users.lastActiveAt, threeDaysAgo)
-        ));
-
-      const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon, etc
-      const messages = [
-        [], // Sun — not scheduled
-        // Monday
-        [(name: string) => `Good morning ${name}. New week. Clean slate.\n\nYour only job today: hit your protein target and move your body. Everything else is noise.\n\nReply *menu* for today's workout.`],
-        // Tuesday
-        [(name: string) => `Morning ${name}. Day 2 of the week.\n\nConsistency beats intensity. A moderate workout done > a perfect workout skipped.\n\nWhat are you training today?`],
-        // Wednesday
-        [(name: string) => `Halfway through the week ${name}.\n\nLog what you eat today — every meal. Awareness is the first step to control.\n\nReply *menu* for your workout.`],
-        // Thursday
-        [(name: string) => `${name}, Thursday.\n\nYour body is adapting right now. The soreness, the hunger changes, the energy shifts — that is adaptation. Do not stop when the process is working.\n\nWhat is your plan for today?`],
-        // Friday
-        [(name: string) => `Friday ${name}. The weekend does not mean the plan stops.\n\nGet your workout in before tonight. Log everything you eat — even if it is braai and beers.\n\nOwnership > perfection.`],
-      ];
-
-      if (!messages[dayOfWeek] || messages[dayOfWeek].length === 0) return;
-
-      let sent = 0;
-      for (const client of activeClients) {
-        const name = client.name?.split(" ")[0] || "Champ";
-        const msgFn = messages[dayOfWeek][0];
-        const msg = msgFn(name);
-        await sendWhatsApp(client.phoneNumber, msg);
-        sent++;
-        await new Promise(r => setTimeout(r, 150));
-        if (sent >= 200) break;
-      }
-      console.log(`[SCHEDULER] Morning motivation sent: ${sent}`);
-    } catch (err) {
-      console.error("[SCHEDULER] Morning motivation error:", err);
-    }
-  }, { timezone: "UTC" });
+  // Daily motivation job REMOVED — it fired at same time as morning check-in (both 4am UTC),
+  // causing two messages every weekday morning. Day-specific context is now part of morning check-in.
 
   // ============================================================
   // JOB: WEIGHT CHECK-IN REMINDER (Wednesday 7am SAST = 5am UTC)
