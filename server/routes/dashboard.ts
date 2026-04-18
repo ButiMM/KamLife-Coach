@@ -8,6 +8,7 @@ import { calculateTargets } from "../targets";
 import { getDayType } from "../programme";
 import { requireAdminKey } from "./auth";
 import type { RouteDeps } from "./types";
+import { getOrAssignVariant } from "../ab";
 
 export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "logChat">) {
   const { logChat } = deps;
@@ -603,6 +604,30 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       res.json({ experiments: enriched });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch experiments" });
+    }
+  });
+
+  // Bulk pre-assign all active users to an experiment (so stats are available day 1)
+  app.post("/api/dashboard/ab/experiments/:id/assign", requireAdminKey, async (req, res) => {
+    try {
+      const expId = parseInt(req.params.id);
+      const [exp] = await db.select().from(abExperiments).where(eq(abExperiments.id, expId)).limit(1);
+      if (!exp) return res.status(404).json({ error: "Experiment not found" });
+
+      const activeUsers = await db
+        .select({ id: users.id })
+        .from(users)
+        .where(and(eq(users.onboardingState, "COMPLETE"), eq(users.subscriptionStatus, "active")));
+
+      let assigned = 0;
+      let skipped = 0;
+      for (const u of activeUsers) {
+        const result = await getOrAssignVariant(u.id, expId);
+        if (result) assigned++; else skipped++;
+      }
+      res.json({ success: true, assigned, skipped, total: activeUsers.length });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to assign users to experiment" });
     }
   });
 

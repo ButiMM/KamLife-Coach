@@ -9,6 +9,7 @@ import { generateVoiceNote } from "./tts";
 import { getKamlifeProgramme } from "./programme";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { PRICING } from "../shared/pricing";
+import { selectVariantMessage, recordDelivery } from "./ab";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -280,15 +281,16 @@ async function runMorningCheckin(): Promise<void> {
       if (canSendProactive(client.id)) {
         const name = client.name || "there";
         const daysOnProgramme = Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
-        let reEngageMsg = "";
-        if (daysOnProgramme <= 14) {
-          // New client ghosting early — warm, no guilt
-          reEngageMsg = `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`;
-        } else {
-          // Established client — direct accountability
-          reEngageMsg = `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
-        }
+        const defaultReEngageMsg = daysOnProgramme <= 14
+          ? `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`
+          : `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
+
+        // A/B: if an active re_engagement experiment exists, use the variant template
+        const { text: reEngageMsg, assignmentId } = await selectVariantMessage(
+          client.id, "re_engagement", defaultReEngageMsg
+        );
         await sendWhatsApp(client.phoneNumber, reEngageMsg);
+        if (assignmentId !== null) await recordDelivery(assignmentId);
         recordProactiveSend(client.id);
       }
       continue;

@@ -20,6 +20,7 @@ import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgen
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
+import { recordConversion } from "./ab";
 import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
 import { detectEscalation, escalationSLA } from "./safety-detection";
 
@@ -980,6 +981,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
       return fallback;
     }
+  }
+
+  // ---- A/B CONVERSION ATTRIBUTION — fire-and-forget, never blocks message handling ----
+  // Any inbound message from an onboarded user that reaches this point counts as a
+  // "response" to the most recent unresponded A/B delivery within 24h.
+  // action = most likely intent (best-effort based on message text — not routed yet).
+  if (user.id) {
+    const abAction = /\b(ate|had|food|meal|breakfast|lunch|dinner)\b/i.test(m) ? "food_logged"
+      : /\b(done|finished|workout|session|trained|gym)\b/i.test(m) ? "workout_done"
+      : /\b(steps?|walked|walking)\b/i.test(m) ? "steps_logged"
+      : "replied";
+    recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
 
   // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
