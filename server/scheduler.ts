@@ -2237,6 +2237,46 @@ export function initScheduler(): void {
 
       const mrr = paying * PRICING.monthlyPriceZAR;
 
+      // ── Food tracking metrics ──
+      const [weekFoodLogs] = await db.select({ c: count() }).from(mealLogs)
+        .where(gte(mealLogs.loggedAt, sevenDaysAgo));
+      const weekFoodLogsCount = weekFoodLogs?.c || 0;
+
+      // GPT fallback usage — foods the SA scanner couldn't identify
+      const [gptFallbackLogs] = await db.execute(
+        sql`SELECT COUNT(*) as c FROM meal_logs WHERE source = 'gpt_fallback' AND logged_at >= ${sevenDaysAgo}`
+      ) as any;
+      const gptFallbackCount = Number(gptFallbackLogs?.rows?.[0]?.c || 0);
+      const fallbackPct = weekFoodLogsCount > 0 ? Math.round((gptFallbackCount / weekFoodLogsCount) * 100) : 0;
+
+      // ── A/B experiment results ──
+      let abSection = "";
+      try {
+        const { abExperiments: abExp, abAssignments: abAsgn } = await import("../shared/schema");
+        const activeExps = await db.select().from(abExp).where(eq(abExp.status, "active"));
+        if (activeExps.length > 0) {
+          const abLines: string[] = [];
+          for (const exp of activeExps.slice(0, 3)) { // max 3 in the report
+            const assignments = await db.select({
+              variant: abAsgn.variant,
+              delivered: abAsgn.delivered,
+              responded: abAsgn.responded,
+            }).from(abAsgn).where(eq(abAsgn.experimentId, exp.id));
+            const a = assignments.filter(x => x.variant === "A");
+            const b = assignments.filter(x => x.variant === "B");
+            const rateA = a.filter(x => x.delivered).length > 0
+              ? Math.round(a.filter(x => x.responded).length / a.filter(x => x.delivered).length * 100) : 0;
+            const rateB = b.filter(x => x.delivered).length > 0
+              ? Math.round(b.filter(x => x.responded).length / b.filter(x => x.delivered).length * 100) : 0;
+            const winner = rateA > rateB ? "A leads" : rateB > rateA ? "B leads" : "tied";
+            abLines.push(`  ${exp.name}: A ${rateA}% vs B ${rateB}% (${winner}, n=${assignments.length})`);
+          }
+          abSection = `\n\n*A/B Tests*\n${abLines.join("\n")}`;
+        }
+      } catch (e) {
+        console.warn("[KPI] A/B section error:", e);
+      }
+
       const report = `*📊 KamLife Weekly Report*
 _${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_
 
@@ -2247,6 +2287,7 @@ New this week: ${newThisWeek}
 *Engagement*
 Workouts: ${weekWorkouts?.c || 0}
 Step logs: ${weekSteps?.c || 0}
+Food logs: ${weekFoodLogsCount} (GPT fallback: ${gptFallbackCount} = ${fallbackPct}%)
 Messages: ${weekMessages?.c || 0}
 
 *Health*
@@ -2255,7 +2296,7 @@ At-risk (48h+ silent): ${atRisk}
 Churn risk (14d+): ${churned}
 
 *Delivery*
-Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
+Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
 
       await sendWhatsApp(`whatsapp:${coachPhone}`, report);
       console.log(`[KPI] Weekly report sent to coach`);
