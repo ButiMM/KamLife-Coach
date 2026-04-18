@@ -63,6 +63,8 @@ const SA_FOOD_CALORIES: Record<string, number> = {
   "green tea": 2, rooibos: 2, "latte": 250, "giant latte": 400,
   creatine: 0, "protein shake": 120,
   "stew": 280, "fatty": 350, "pork": 300,
+  // Wraps — single-item compound names to prevent GPT splitting them
+  "steak wrap": 520, "beef wrap": 520, "chicken wrap": 420, "tuna wrap": 380, "veggie wrap": 300,
 };
 
 function estimateCalories(message: string): number {

@@ -556,7 +556,16 @@ export async function gptFoodFallback(
       messages: [
         {
           role: "system",
-          content: `You extract nutritional data from South African WhatsApp fitness coaching messages. Use realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — do not round to nearest 100.`,
+          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
+
+CRITICAL RULES for compound food names:
+- "steak wrap" = ONE item: a wrap/tortilla filled with beef steak. NOT "beef steak" + "chicken wrap". Log it as "steak wrap (beef)" ~450-550 kcal.
+- "chicken wrap" = ONE item: a tortilla with chicken filling
+- "X wrap" means the wrap is filled with X — never split into two items
+- "chicken rice" = ONE meal: chicken served with rice (not two separate items)
+- Only split at commas, "and", "plus", "with" when clearly listing separate dishes
+
+Use realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — never round to nearest 100.`,
         },
         {
           role: "user",
