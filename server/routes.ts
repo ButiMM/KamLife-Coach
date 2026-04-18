@@ -1937,8 +1937,15 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           console.warn(`[MEDIA][${mediaTrace}] audio_buffer_too_large bytes=${audioBuffer.byteLength}`);
           return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
         }
-        // Reject clips that are too short for Whisper to process (<1KB ≈ ~0.5s of audio)
-        if (audioBuffer.byteLength < 1000) {
+        // Reject clips too short for Whisper to process reliably.
+        // 2KB ≈ ~1.5s of Opus audio; below this Whisper returns garbage or nothing.
+        // Uses the failure-counter so 3 short clips in 30 min escalates to "please type".
+        if (audioBuffer.byteLength < 2000) {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return "I keep missing your voice notes — they're coming through too short to transcribe. Please type your message and I'll reply straight away.";
+          }
           return "That voice note was too short for me to pick up. Hold the mic button for at least 2-3 seconds, then send again — or just type your message.";
         }
 
@@ -1966,23 +1973,50 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
         const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
 
-        const transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
-          file: audioFile,
-          model: "whisper-1",
-          ...(whisperLang ? { language: whisperLang } : {}),
-        }));
+        // Attempt 1: with language hint (if we have one). Attempt 2 (on failure):
+        // no hint + re-created File. Whisper sometimes returns 400 when the stated
+        // language conflicts with what it actually hears — dropping the hint fixes
+        // it more often than retrying the same request.
+        let transcription;
+        try {
+          transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
+            file: audioFile,
+            model: "whisper-1",
+            ...(whisperLang ? { language: whisperLang } : {}),
+          }));
+        } catch (transErr) {
+          console.warn(`[VOICE] transcribe attempt 1 failed (lang=${whisperLang || "auto"}), retrying without hint:`, transErr);
+          const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+          transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
+            file: retryFile,
+            model: "whisper-1",
+          }));
+        }
 
         const transcribedText = transcription.text?.trim();
 
         // Part 3 — Handle result
         if (!transcribedText) {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return "I keep struggling with your voice notes — the audio is not coming through clearly. Please type your message and I'll get you a detailed reply straight away.";
+          }
           return "I could not hear that clearly. Try sending a voice note in a quieter spot, or type your message.";
         }
 
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
         if (wordCount < 3) {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return `I keep only picking up a few words — "${transcribedText}". Please type your message — I'll reply properly.`;
+          }
           return `I only caught a few words — "${transcribedText}". Send again or type your message.`;
         }
+
+        // Transcription succeeded — reset failure counter so future hiccups restart the window
+        clearVoiceFailure(user.id);
 
         // Language detection — includes Tswana and Tsonga alongside Zulu, Sotho, Xhosa, Afrikaans
         const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
@@ -2011,8 +2045,15 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       } catch (err) {
         console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
         await logMediaFailure(user.id, `voice_${voiceStage}`, err);
-        // Part 4 — always return, never fall through to text handler
+        // Part 4 — always return, never fall through to text handler.
+        // Count transcribe failures toward the 3-strike escalation — an API error
+        // has the same user impact as a bad transcription.
         if (voiceStage === "transcribe") {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return "I am having trouble transcribing your voice notes — this is on my side. Please type your message and I will reply straight away.";
+          }
           return "I received your voice note but could not transcribe it clearly. Try again in a quieter spot, or type your message.";
         }
         if (voiceStage === "coach_reply") {
@@ -6345,6 +6386,33 @@ setInterval(() => {
     if (now > val.resetAt) rateLimitMap.delete(key);
   }
 }, 5 * 60 * 1000);
+
+// ============================================================
+// VOICE NOTE FAILURE TRACKER — escalate to "please type" after 3 failures
+// in a 30-min window. Prevents the "client sends 5 bad voice notes and
+// gives up" loop. Keyed by userId. Reset on first successful transcription.
+// ============================================================
+
+const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
+const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of voiceFailureMap.entries()) {
+    if (now - val.lastAt > VOICE_FAILURE_RESET_MS) voiceFailureMap.delete(key);
+  }
+}, 15 * 60 * 1000);
+
+export function bumpVoiceFailure(userId: string): number {
+  const now = Date.now();
+  const prev = voiceFailureMap.get(userId);
+  const count = prev && (now - prev.lastAt) < VOICE_FAILURE_RESET_MS ? prev.count + 1 : 1;
+  voiceFailureMap.set(userId, { count, lastAt: now });
+  return count;
+}
+
+export function clearVoiceFailure(userId: string): void {
+  voiceFailureMap.delete(userId);
+}
 
 function checkRateLimit(phone: string): boolean {
   const now = Date.now();
