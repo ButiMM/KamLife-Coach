@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
-import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs } from "../shared/schema";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -69,23 +69,48 @@ function recordProactiveSend(clientId: string): void {
 
 // Per-message-key dedupe. The 2/day quota above is a budget; this stops the same
 // named message (e.g. "friday_weekend") from firing twice if a cron run restarts
-// mid-loop. Scoped to the ISO week of the send so it rolls over naturally.
-//
-// Note: this is in-memory only. A process restart wipes it, so a crash + respawn
-// during a long proactive loop can still cause a double-send. The DB-backed
-// sent_proactive table (roadmap) is the durable fix; this closes the common case.
+// mid-loop. An in-memory cache acts as a fast path; the durable source of truth
+// is the sent_proactive table (schema.ts) with a unique index on
+// (user_id, message_key, dedupe_window). Process restarts no longer cause
+// double-sends.
 const weeklyKeyedSent = new Map<string, true>();
 
-function weeklyKeyedKey(clientId: string, messageKey: string): string {
-  return `${thisWeekUTC()}:${clientId}:${messageKey}`;
+function weeklyKeyedKey(clientId: string, messageKey: string, window: string): string {
+  return `${window}:${clientId}:${messageKey}`;
 }
 
-function hasSentKeyedThisWeek(clientId: string, messageKey: string): boolean {
-  return weeklyKeyedSent.has(weeklyKeyedKey(clientId, messageKey));
-}
+/**
+ * Attempt to claim a proactive send for (userId, messageKey, dedupeWindow).
+ * Returns true iff we got the claim and the caller should now send.
+ *
+ * dedupeWindow is caller-defined: use thisWeekUTC() for weekly jobs, a YYYY-MM-DD
+ * string for daily jobs, a YYYY-MM string for monthly. Same window + key + user
+ * can only succeed once — the unique index in sent_proactive enforces it.
+ *
+ * Fail-open on DB error: we'd rather occasionally double-send than silently drop
+ * the whole cohort's messages when Postgres is flaky. The in-memory cache still
+ * prevents repeats within a single process, so the worst case is one duplicate
+ * per process-per-user-per-window, not N.
+ */
+async function claimProactive(userId: string, messageKey: string, dedupeWindow: string): Promise<boolean> {
+  const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
+  if (weeklyKeyedSent.has(inMemKey)) return false;
 
-function markKeyedSent(clientId: string, messageKey: string): void {
-  weeklyKeyedSent.set(weeklyKeyedKey(clientId, messageKey), true);
+  try {
+    const inserted = await db.insert(sentProactive)
+      .values({ userId, messageKey, dedupeWindow })
+      .onConflictDoNothing()
+      .returning({ id: sentProactive.id });
+
+    weeklyKeyedSent.set(inMemKey, true);
+    // inserted.length === 0 means the unique constraint swallowed us — another
+    // run (or a previous process) already claimed this send.
+    return inserted.length > 0;
+  } catch (e) {
+    console.warn(`[claimProactive] DB error for ${messageKey}/${userId}:`, e);
+    weeklyKeyedSent.set(inMemKey, true);
+    return true; // fail open
+  }
 }
 
 // Purge stale keys at midnight SAST (22:00 UTC) — prevents unbounded Map growth
@@ -750,6 +775,7 @@ cron.schedule("0 14 * * 5", async () => {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
   const clients = await getActiveClients();
   const MESSAGE_KEY = "friday_weekend";
+  const dedupeWindow = thisWeekUTC(); // Monday date — rolls every 7 days
   let sent = 0, skippedPaused = 0, skippedSilent = 0, skippedDup = 0, skippedBudget = 0;
 
   for (const client of clients) {
@@ -764,11 +790,12 @@ cron.schedule("0 14 * * 5", async () => {
       : Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
     if (daysSilent > 10) { skippedSilent++; continue; }
 
-    // Per-message dedupe — prevents double-send on cron restart mid-loop
-    if (hasSentKeyedThisWeek(client.id, MESSAGE_KEY)) { skippedDup++; continue; }
-
-    // Daily budget (2 proactive msgs/day across all jobs)
+    // Daily budget (2 proactive msgs/day across all jobs) — cheap in-memory check first
     if (!canSendProactive(client.id)) { skippedBudget++; continue; }
+
+    // Durable per-message dedupe — DB-backed, survives process restart
+    const claimed = await claimProactive(client.id, MESSAGE_KEY, dedupeWindow);
+    if (!claimed) { skippedDup++; continue; }
 
     try {
       const name = client.name || "there";
@@ -776,7 +803,6 @@ cron.schedule("0 14 * * 5", async () => {
         `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
       );
       recordProactiveSend(client.id);
-      markKeyedSent(client.id, MESSAGE_KEY);
       sent++;
     } catch (err) {
       console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err);

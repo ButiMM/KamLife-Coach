@@ -10,6 +10,7 @@ import {
   uuid,
   jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -329,6 +330,30 @@ export const escalations = pgTable("escalations", {
 
 export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
+}));
+
+// === SENT PROACTIVE — durable dedupe for scheduled messages ===
+// Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
+// The unique index below guarantees the same (user, messageKey, window) can only
+// be claimed once, so a process restart mid-cron cannot double-send.
+//
+// dedupeWindow is caller-defined — use the ISO week "2026-W16" for weekly jobs,
+// "2026-04-18" (YYYY-MM-DD) for daily jobs, month for monthly. The unique key
+// is the triple, so different windows for the same message are fine.
+export const sentProactive = pgTable("sent_proactive", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  messageKey: text("message_key").notNull(),
+  dedupeWindow: text("dedupe_window").notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqIdx: uniqueIndex("sent_proactive_uniq_idx").on(table.userId, table.messageKey, table.dedupeWindow),
+  userIdx: index("sent_proactive_user_idx").on(table.userId),
+  sentAtIdx: index("sent_proactive_sent_at_idx").on(table.sentAt),
+}));
+
+export const sentProactiveRelations = relations(sentProactive, ({ one }) => ({
+  user: one(users, { fields: [sentProactive.userId], references: [users.id] }),
 }));
 
 // === A/B TEST EXPERIMENTS — message template testing engine ===
