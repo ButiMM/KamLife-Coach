@@ -657,19 +657,29 @@ async function getProgressiveOverloadContext(userId: string): Promise<string> {
 // PERFECT DAY DETECTION
 // ============================================================
 
-async function checkPerfectDay(userId: string): Promise<string | null> {
+async function checkPerfectDay(userId: string, proteinTarget: number = 130): Promise<string | null> {
   try {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const [todayWorkouts, todaySteps, todayFood] = await Promise.all([
+    // "Food tracked" must mean the PROTEIN TARGET was hit, not merely "a food
+    // row exists". Before this, checkPerfectDay read chatHistory.FOOD_LOG while
+    // the morning scheduler summed mealLogs.proteinInt — so the evening could
+    // call "Perfect day! Food tracked" and the morning could call the same
+    // user "122g short of your 165g target". Same source of truth now.
+    const [todayWorkouts, todaySteps, proteinRow] = await Promise.all([
       db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, todayStart))).limit(1),
       db.select().from(stepLogs).where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, todayStart))).limit(1),
-      db.select().from(chatHistory).where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).limit(1),
+      db.select({
+        totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs).where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, todayStart))),
     ]);
 
-    if (todayWorkouts.length > 0 && todaySteps.length > 0 && todayFood.length > 0) {
-      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Food tracked. This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
+    const totalProt = Number(proteinRow[0]?.totalProt || 0);
+    const proteinHit = totalProt >= proteinTarget * 0.9; // same 90% threshold as the morning job
+
+    if (todayWorkouts.length > 0 && todaySteps.length > 0 && proteinHit) {
+      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Protein target hit (${totalProt}g / ${proteinTarget}g). This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
     }
     return null;
   } catch (e) {
@@ -1139,7 +1149,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), sugar beans (8g per 100g cooked).`;
   }
 
-  if (/\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m)) {
+  // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak".
+  // Only fire the workout-streak report when the message looks like a genuine progress
+  // question (no food-log trigger words, no SA-food matches). The morning after a
+  // braai a lot of people will type "steak and pap" — must not be intercepted here.
+  const mentionsStreakWord = /\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m);
+  const looksLikeFoodLogMsg = /\b(had|ate|eaten|eating|having|for\s+(breakfast|lunch|dinner|supper|snack)|wrap|fries|burger|chips|bun)\b/i.test(m)
+    || scanForSAFoods(m).length > 0;
+  if (mentionsStreakWord && !looksLikeFoodLogMsg) {
     const streak = user.workoutStreak || 0;
     const total = user.totalWorkoutsCompleted || 0;
     const target = user.trainingDaysPerWeek || 3;
@@ -1751,7 +1768,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               }
               await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
               const stepReply = getStepResponse(extractedSteps, target);
-              const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+              const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
               const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
               await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
               console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
@@ -1874,7 +1891,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
-        const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
+        const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
         // Append daily running total
         let photoDailyTotal = "";
         try {
@@ -2214,7 +2231,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
     const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
     const celebration = celebrationFn(newTotal, newDay);
-    const perfectDay = await checkPerfectDay(user.id);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
 
     // Auto-generate referral code at first milestone if not set — retry on collision
     if (!user.referralCode && [10, 25, 50].includes(newTotal)) {
@@ -2690,7 +2707,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       const stepReply = getStepResponse(steps, target);
-      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
       const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
       stepReplyPart = stepReply + streakNote + (perfectDay || "");
 
@@ -3283,7 +3300,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
       await logChat(user.id, message, reply, "FOOD_LOG");
-      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
+      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
       // If steps were also logged from same message, combine both replies
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
       return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
@@ -6284,7 +6301,7 @@ CRITICAL RULES — these are non-negotiable:
   const isFoodLog = !isLogCommand && !isQuestion && !isFrustration && hasLogTrigger && gptFoodMatch.length > 0;
   if (isFoodLog) {
     const pattern = await checkFoodPatterns(user.id);
-    const perfectDay = await checkPerfectDay(user.id);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
