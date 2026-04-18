@@ -1311,6 +1311,62 @@ cron.schedule("0 5 * * *", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 11B — MIDDAY ACTIVATION NUDGE
+// Runs 1pm SAST (11am UTC), Monday–Saturday.
+// Targets active clients who haven't logged ANYTHING today — no food,
+// no steps, no workout. These are morning-message readers who didn't
+// reply. One short nudge at 1pm catches them before the day is lost.
+// Skips users who are 3+ days silent (handled by re-engagement flow).
+// ============================================================
+
+cron.schedule("0 11 * * 1-6", async () => {
+  console.log("[SCHEDULER] JOB: Midday activation nudge");
+  const clients = await getActiveClients();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+
+    // Skip re-engagement track (3+ days silent) — they get a different flow
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (daysSilent >= 3) continue;
+
+    try {
+      // Check if they've logged anything today (food, steps, or workout)
+      const [todayFoodLog, todayStepLog, todayWorkoutLog] = await Promise.all([
+        db.select({ id: chatHistory.id }).from(chatHistory)
+          .where(and(
+            eq(chatHistory.userId, client.id),
+            gte(chatHistory.createdAt, todayStart),
+            sql`${chatHistory.intent} IN ('FOOD_LOG', 'STEP_LOG', 'WORKOUT_LOG')`,
+          )).limit(1),
+        db.select({ id: stepLogs.id }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart))).limit(1),
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart))).limit(1),
+      ]);
+
+      // Only nudge if NOTHING at all has been logged today
+      if (todayFoodLog.length > 0 || todayStepLog.length > 0 || todayWorkoutLog.length > 0) continue;
+
+      const name = client.name?.split(" ")[0] || "there";
+      await sendWhatsApp(client.phoneNumber,
+        `${name}. It's afternoon and nothing logged today.\n\nTell me what you had for breakfast or lunch — one message keeps the day alive.`
+      );
+      recordProactiveSend(client.id);
+      sent++;
+    } catch (err) {
+      console.error(`[SCHEDULER] Midday nudge error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Midday nudge: ${sent} sent`);
+}, { timezone: "UTC" });
+
+// ============================================================
 // JOB 12 — 14-DAY AND 30-DAY SILENCE ESCALATION
 // Runs every 12 hours alongside silence detection
 // ============================================================
@@ -1621,7 +1677,14 @@ cron.schedule("0 17 * * 0", async () => {
           ? `Solid week, ${name}. ${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done. Next week — go for ${targetGoal}.`
           : `${name}. Nothing logged this week. That stops now. Tomorrow is Day 1.`;
 
-      const msg = `*📊 Your Week in Review*\n\n${wins.join("\n")}\n\n${close}\n\nReply *menu* for Monday's plan.`;
+      // Monday teaser: prime them mentally for the week ahead
+      const progDays = programmeDaysSince(client.programmeStartDate);
+      const weekNum = client.programmeWeek || 1;
+      const nextWeekHint = progDays > 0
+        ? `\n\n*Week ${weekNum} starts Monday.* Reply *1* when you're ready to train.`
+        : `\n\nReply *menu* for Monday's plan.`;
+
+      const msg = `*📊 Your Week in Review*\n\n${wins.join("\n")}\n\n${close}${nextWeekHint}`;
       await sendWhatsApp(client.phoneNumber, msg);
       recordProactiveSend(client.id);
       sent++;
@@ -1691,7 +1754,12 @@ cron.schedule("0 * * * *", async () => {
         const workerStreak = worker.workoutStreak || 1;
         const streakAdd = workerStreak >= 3 ? ` That's a ${workerStreak}-session streak.` : "";
 
-        if (!canSendProactive(worker.buddyId)) continue;
+        // claimProactive with daily dedupe key prevents the same workout notification
+        // from firing multiple times within the same day (hourly cron without this
+        // would fire repeatedly until the in-memory budget runs out).
+        const claimed = await claimProactive(worker.buddyId, `buddy_workout_${worker.id}`, todaySAST());
+        if (!claimed) continue;
+
         await sendWhatsApp(buddy.phoneNumber,
           `🏋️ *${workerFirst} just logged a session.* Don't let them get ahead.${streakAdd}\n\nReply *done* when you finish yours.`
         );
@@ -1727,12 +1795,15 @@ cron.schedule("0 * * * *", async () => {
         }).from(users).where(eq(users.id, silentBuddy.buddyId)).limit(1);
 
         if (!partner || partner.subscriptionStatus !== "active") continue;
-        if (!canSendProactive(partner.id)) continue;
 
         const silentFirst = silentBuddy.name?.split(" ")[0] || "Your buddy";
         const daysSilent = silentBuddy.lastActiveAt
           ? Math.floor((Date.now() - new Date(silentBuddy.lastActiveAt).getTime()) / 86_400_000)
           : 2;
+
+        // Daily dedupe: one buddy-silence notification per silent buddy per day
+        const claimed = await claimProactive(partner.id, `buddy_silence_${silentBuddy.id}`, todaySAST());
+        if (!claimed) continue;
 
         await sendWhatsApp(partner.phoneNumber,
           `👀 *${silentFirst} hasn't logged in ${daysSilent} days.*\n\nYou're pulling ahead — but having an active buddy keeps you both sharper. If you know them, give them a nudge.`
