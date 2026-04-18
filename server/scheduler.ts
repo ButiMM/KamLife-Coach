@@ -317,24 +317,32 @@ async function runMorningCheckin(): Promise<void> {
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
       const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
-      // Read yesterday's protein from structured meal_logs — no more regex text-parsing.
-      // Falls back to 0 if nothing logged. meal_logs populated from 2026-04-17 onward;
-      // older rows pre-date the table and will legitimately show 0.
-      let totalProtLogged = 0;
-      try {
-        const yStart = dayStart(-1);
-        const yEnd = dayStart(0);
-        const rows = await db.select({
+      // Run protein sum + step streak in parallel — both needed for the morning message.
+      // Previously serial awaits; Promise.all cuts latency ~50% per client.
+      const yStart = dayStart(-1);
+      const yEnd = dayStart(0);
+      const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
+
+      const [proteinRows, recentStepLogs] = await Promise.all([
+        db.select({
           totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
         }).from(mealLogs).where(and(
           eq(mealLogs.userId, client.id),
           gte(mealLogs.loggedAt, yStart),
           lt(mealLogs.loggedAt, yEnd),
-        ));
-        totalProtLogged = rows[0]?.totalProt || 0;
-      } catch (e) {
-        console.warn("[scheduler] meal_logs protein sum failed, defaulting to 0:", e);
-      }
+        )).catch((e: Error) => { console.warn("[scheduler] meal_logs protein sum failed:", e); return [{ totalProt: 0 }]; }),
+
+        db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
+          .orderBy(desc(stepLogs.loggedAt))
+          .catch((_e: Error) => [] as { loggedAt: Date | null }[]),
+      ]);
+
+      // Read yesterday's protein from structured meal_logs — no more regex text-parsing.
+      // Falls back to 0 if nothing logged. meal_logs populated from 2026-04-17 onward;
+      // older rows pre-date the table and will legitimately show 0.
+      const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
 
       // Extract steps logged from step log messages
       let stepsLogged = 0;
@@ -372,16 +380,11 @@ async function runMorningCheckin(): Promise<void> {
       // (slot-machine psychology — predictable praise loses impact).
       const wStreak = client.workoutStreak || 0;
 
-      // Compute step streak from yesterday's logs (morning cron — today not logged yet)
+      // Compute step streak from already-fetched recentStepLogs (parallel query above)
       let stepStreakCount = 0;
-      try {
-        const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
-        const recentStepLogs = await db.select({ loggedAt: stepLogs.loggedAt })
-          .from(stepLogs)
-          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
-          .orderBy(desc(stepLogs.loggedAt));
+      {
         const stepDays = new Set<string>();
-        for (const l of recentStepLogs) {
+        for (const l of recentStepLogs as { loggedAt: Date | null }[]) {
           if (!l.loggedAt) continue;
           const d = new Date(l.loggedAt);
           stepDays.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
@@ -393,7 +396,7 @@ async function runMorningCheckin(): Promise<void> {
           stepStreakCount++;
           stepCheck.setDate(stepCheck.getDate() - 1);
         }
-      } catch { /* non-fatal */ }
+      }
 
       const streakParts: string[] = [];
       if (wStreak >= 5 && wStreak % 5 === 0) streakParts.push(`🔥 *${wStreak}-session workout streak*`);
@@ -1457,9 +1460,26 @@ cron.schedule("0 19 * * *", async () => {
     return streak;
   }
 
+  // Rate cap: never send more than 150 streak alerts per run — prevents
+  // a WhatsApp cost bomb if client count scales unexpectedly.
+  let streakAlertsSent = 0;
+  const STREAK_ALERT_CAP = 150;
+
   for (const client of clients) {
+    if (streakAlertsSent >= STREAK_ALERT_CAP) {
+      console.warn(`[SCHEDULER] Streak-at-risk cap (${STREAK_ALERT_CAP}) reached — stopping early`);
+      break;
+    }
     if (isPaused(client)) continue;
     if (!canSendProactive(client.id)) continue;
+
+    // Skip users who are already disengaged — they need re-engagement, not streak pressure.
+    // daysSilent > 2 means they already got a re-engagement message this morning.
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (daysSilent > 2) continue;
+
     try {
       const name = client.name || "there";
 
@@ -1478,6 +1498,7 @@ cron.schedule("0 19 * * *", async () => {
             `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`
           );
           recordProactiveSend(client.id);
+          streakAlertsSent++;
           continue; // one message per night
         }
       }
@@ -1498,6 +1519,7 @@ cron.schedule("0 19 * * *", async () => {
             `🚶 ${name}, your *${stepStreak}-day step streak* ends at midnight.\n\nLog your steps now — even if it's only 3,000. Reply with a number or send a screenshot.`
           );
           recordProactiveSend(client.id);
+          streakAlertsSent++;
           continue;
         }
       }
@@ -1519,12 +1541,14 @@ cron.schedule("0 19 * * *", async () => {
             `📋 ${name}, your *${foodStreak}-day food logging streak* ends at midnight.\n\nTell me one thing you ate today — even "pap and chicken" is enough to keep it alive.`
           );
           recordProactiveSend(client.id);
+          streakAlertsSent++;
         }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);
     }
   }
+  console.log(`[SCHEDULER] Streak-at-risk: ${streakAlertsSent} alerts sent`);
 }, { timezone: "UTC" });
 
 // ============================================================

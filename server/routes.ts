@@ -1287,6 +1287,21 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const modeLabel = trainingMode === "gym" ? "Gym" : "Home";
     const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
+
+    // Day 1 progress photo challenge — fires immediately after programme delivery.
+    // Don't wait for the 10am cron. The user is engaged RIGHT NOW and more likely
+    // to send a photo when they're still in the setup flow than hours later.
+    // 3-second delay so the programme message lands first, then the follow-up.
+    const firstName = (user.name || "").split(" ")[0] || "there";
+    setTimeout(async () => {
+      try {
+        await sendWhatsApp(phone,
+          `One more thing — *send me a before photo right now.*\n\nFront-facing, in fitted clothes or underwear. Good lighting. This is your Day 0 progress shot.\n\nIn 4 weeks I will compare it to your new photo and show you the exact difference. Without today's photo, we have nothing to compare later.\n\n*Send it now before you forget.*`
+        );
+        await logChat(user.id, "[auto]", "[Day 0 photo challenge sent]", "PHOTO_CHALLENGE_PROMPT");
+      } catch { /* non-fatal */ }
+    }, 3_000);
+
     return reply;
     } // end else (not an obvious non-programme message)
   }
