@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -1785,7 +1785,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
         // ---- PROGRESS PHOTO DETECTION ----
         // If the message contains progress-related keywords, store and optionally compare
-        const isProgressPhoto = /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message);
+        const isProgressPhoto = /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message)
+          && (uncaptionedType === null || uncaptionedType === "progress");
         if (isProgressPhoto) {
           // Get existing progress photos for this client (most recent first)
           const existingPhotos = await db.select()
@@ -1812,9 +1813,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             const daysBetween = Math.round(
               (Date.now() - new Date(firstPhoto.loggedAt || "").getTime()) / 86_400_000
             );
+            const progressDecision = selectVisionModel("progress_compare", user.subscriptionStatus);
+            console.log(`[VISION][${mediaTrace}] progress model=${progressDecision.model} tier=${user.subscriptionStatus}`);
             const comparisonResponse = await openai.chat.completions.create({
-              model: "gpt-4o",
-              max_tokens: 400,
+              model: progressDecision.model,
+              max_tokens: progressDecision.maxTokens,
               messages: [
                 {
                   role: "system",
@@ -1827,12 +1830,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
                       type: "text",
                       text: `Compare these two progress photos. Photo 1 was taken ${daysBetween} days ago (${Math.round(daysBetween / 7)} weeks). Photo 2 is today. Describe specifically what has changed in the body. Focus on: body composition, posture, visible muscle, waist and hip shape. Be honest — if nothing has changed say so and say why. If it has — describe exactly what you see.`,
                     },
-                    { type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}` } },
-                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                    { type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}`, detail: progressDecision.detail } },
+                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } },
                   ],
                 },
               ],
             });
+            const progressTokens = comparisonResponse.usage?.completion_tokens || 0;
+            console.log(`[COST][${mediaTrace}] progress_compare ~$${estimateVisionCostUSD(progressDecision, progressTokens).toFixed(5)} (${progressDecision.reason})`);
             const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
               || "I can see both photos but could not compare them clearly. Send them in better lighting.";
             await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
@@ -1857,9 +1862,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
         );
+        // ── Tier-gated vision — inactive users don't burn API budget ──
+        const foodVisionDecision = selectVisionModel("food_photo", user.subscriptionStatus);
+        if (!foodVisionDecision.allowed) {
+          return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
+        }
+        console.log(`[VISION][${mediaTrace}] food model=${foodVisionDecision.model} tier=${user.subscriptionStatus}`);
         const visionResponse = await withTimeout("food_vision", 22000, () => openai.chat.completions.create({
-          model: "gpt-4o",
-          max_tokens: 400,
+          model: foodVisionDecision.model,
+          max_tokens: foodVisionDecision.maxTokens,
           messages: [
             {
               role: "system",
@@ -1880,11 +1891,13 @@ COACHING: One sentence on whether this meal works for their ${goal} goal. If goo
 
 UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this to help identify the food.` : ""}`,
                 },
-                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
               ],
             },
           ],
         }));
+        const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
+        console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} (${foodVisionDecision.reason})`);
 
         const visionReply = visionResponse.choices[0]?.message?.content?.trim();
         if (!visionReply || visionReply.length < 10) {
