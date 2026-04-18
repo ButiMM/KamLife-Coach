@@ -353,7 +353,55 @@ async function runMorningCheckin(): Promise<void> {
         6: `Saturday. One session before tonight.`,
       };
       const dowOpener = DOW_OPENERS[todayDOW] ? ` ${DOW_OPENERS[todayDOW]}` : "";
-      const parts: string[] = [`Morning ${name}.${dowOpener}`];
+
+      // Identity formation: day-count-based statements that shift self-image.
+      // Research: identity ("I'm the kind of person who…") is a stronger
+      // retention driver than outcome goals ("I want to lose weight").
+      const progDays = programmeDaysSince(client.programmeStartDate);
+      let identityLine = "";
+      if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
+      else if (progDays === 14) identityLine = " Two weeks consistent. You're building something real.";
+      else if (progDays === 21) identityLine = " Three weeks in. The habit is forming — your body knows the routine now.";
+      else if (progDays === 30) identityLine = " A month. You are now the kind of person who trains for a month straight.";
+      else if (progDays === 60) identityLine = " 60 days. Two months of showing up. That's rare.";
+      else if (progDays === 90) identityLine = " 90 days. You are not the same person who started this.";
+
+      // Streak display — show BOTH workout and step streaks in the opener
+      // so users are protecting two streaks at once (higher motivation).
+      // Variable reinforcement: call out workout streak every 5th day only
+      // (slot-machine psychology — predictable praise loses impact).
+      const wStreak = client.workoutStreak || 0;
+
+      // Compute step streak from yesterday's logs (morning cron — today not logged yet)
+      let stepStreakCount = 0;
+      try {
+        const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
+        const recentStepLogs = await db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
+          .orderBy(desc(stepLogs.loggedAt));
+        const stepDays = new Set<string>();
+        for (const l of recentStepLogs) {
+          if (!l.loggedAt) continue;
+          const d = new Date(l.loggedAt);
+          stepDays.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+        const stepCheck = new Date(); stepCheck.setDate(stepCheck.getDate() - 1);
+        while (true) {
+          const key = `${stepCheck.getFullYear()}-${stepCheck.getMonth()}-${stepCheck.getDate()}`;
+          if (!stepDays.has(key)) break;
+          stepStreakCount++;
+          stepCheck.setDate(stepCheck.getDate() - 1);
+        }
+      } catch { /* non-fatal */ }
+
+      const streakParts: string[] = [];
+      if (wStreak >= 5 && wStreak % 5 === 0) streakParts.push(`🔥 *${wStreak}-session workout streak*`);
+      else if (wStreak >= 10) streakParts.push(`🔥 ${wStreak} sessions straight`);
+      if (stepStreakCount >= 3) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
+
+      const parts: string[] = [`Morning ${name}.${dowOpener}${identityLine}${streakLine}`];
 
       // Protein — be specific about the number and the gap
       if (foodLogs.length === 0) {
@@ -672,7 +720,14 @@ function buildDayMilestoneMessage(name: string, days: number, workouts: number, 
 }
 
 // Workout count milestones — celebrate real numbers with voice note
+// Early milestones (1, 3, 5) are the most important for retention:
+// the first 7 days determine whether someone stays. Fire these inline
+// via checkWorkoutMilestone() in routes.ts (not the cron, which runs at 6am
+// and would be too late for same-day celebration).
 const WORKOUT_MILESTONES: Record<number, (name: string) => string> = {
+  1:   (n) => `${n} — first session done. 🎉 That's the hardest one. Every session from here is proof you're not just talking about it.`,
+  3:   (n) => `${n}, 3 sessions in. The habit is starting. Most people who make it to 3 make it to 10. Keep going.`,
+  5:   (n) => `${n}, 5 sessions. 🔥 High five. You've officially started. Some people joined the same day as you and have already quit — you haven't.`,
   10:  (n) => `${n}, 10 sessions done. That is the first real milestone — most people never get here. The habit is forming. Keep going.`,
   25:  (n) => `${n}, 25 workouts. A quarter century of sessions. You are not talking about fitness anymore. You are doing it.`,
   50:  (n) => `${n}, 50 sessions. Fifty times you showed up when you could have stayed home. That is not motivation — that is discipline. Lekker work.`,
@@ -1368,56 +1423,103 @@ cron.schedule("0 9 * * *", async () => {
 // Runs 8pm SAST (6pm UTC) daily — warns if 3+ streak but no log today
 // ============================================================
 
-cron.schedule("0 18 * * *", async () => {
-  console.log("[SCHEDULER] JOB: Streak-at-risk alert");
+// ============================================================
+// STREAK-AT-RISK ALERT — 9pm SAST (7pm UTC)
+// Loss aversion: "your streak breaks tonight" is more powerful than
+// "log your steps". Fires once per night, one message per client
+// (highest-priority streak wins: workout > steps > food).
+//
+// BUG FIXED: was reading waterStreak instead of actual step streak.
+// TIMING FIXED: was 8pm SAST, now 9pm SAST = 1h before midnight.
+// ============================================================
+cron.schedule("0 19 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Streak-at-risk alert (9pm SAST)");
   const clients = await getActiveClients();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayDOW = new Date().getDay(); // 0=Sun
+
+  // Helper: compute consecutive-day streak from a list of loggedAt timestamps
+  function computeStreakFromLogs(logs: { loggedAt: Date | null }[]): number {
+    const days = new Set<string>();
+    for (const l of logs) {
+      if (!l.loggedAt) continue;
+      const d = new Date(l.loggedAt);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    }
+    let streak = 0;
+    const cur = new Date(); cur.setDate(cur.getDate() - 1); // start yesterday
+    while (true) {
+      const key = `${cur.getFullYear()}-${cur.getMonth()}-${cur.getDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    return streak;
+  }
 
   for (const client of clients) {
     if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
     try {
-      // Only alert clients with a meaningful step streak
-      const streak = client.waterStreak || 0; // reuse step streak concept
-      // Check if they have logged steps today
-      const todaySteps = await db.select().from(stepLogs)
+      const name = client.name || "there";
+
+      // ── 1. Workout streak at risk ──
+      // Only on training days when user hasn't logged a session yet
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const isTodayTrainingDay = schedule.includes(todayDOW);
+      const wStreak = client.workoutStreak || 0;
+      if (isTodayTrainingDay && wStreak >= 2) {
+        const todayWorkout = await db.select({ id: workoutLogs.id })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+          .limit(1);
+        if (todayWorkout.length === 0) {
+          await sendWhatsApp(client.phoneNumber,
+            `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`
+          );
+          recordProactiveSend(client.id);
+          continue; // one message per night
+        }
+      }
+
+      // ── 2. Step streak at risk ──
+      const todaySteps = await db.select({ id: stepLogs.id })
+        .from(stepLogs)
         .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
         .limit(1);
-
-      if (todaySteps.length > 0) continue; // Already logged — no alert needed
-
-      // Get their step streak from recent logs
-      const recentStepLogs = await db.select({ loggedAt: stepLogs.loggedAt })
-        .from(stepLogs)
-        .where(eq(stepLogs.userId, client.id))
-        .orderBy(desc(stepLogs.loggedAt))
-        .limit(14);
-
-      if (recentStepLogs.length < 3) continue; // No streak to protect
-
-      // Check consecutive days
-      const days = new Set<string>();
-      for (const log of recentStepLogs) {
-        const d = new Date(log.loggedAt!);
-        days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-      }
-      let streakCount = 0;
-      const checkDate = new Date();
-      checkDate.setDate(checkDate.getDate() - 1); // Start from yesterday
-      while (true) {
-        const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
-        if (!days.has(key)) break;
-        streakCount++;
-        checkDate.setDate(checkDate.getDate() - 1);
+      if (todaySteps.length === 0) {
+        const recentSteps = await db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 14 * 86400_000))))
+          .orderBy(desc(stepLogs.loggedAt));
+        const stepStreak = computeStreakFromLogs(recentSteps);
+        if (stepStreak >= 2) {
+          await sendWhatsApp(client.phoneNumber,
+            `🚶 ${name}, your *${stepStreak}-day step streak* ends at midnight.\n\nLog your steps now — even if it's only 3,000. Reply with a number or send a screenshot.`
+          );
+          recordProactiveSend(client.id);
+          continue;
+        }
       }
 
-      if (streakCount >= 3) {
-        if (!canSendProactive(client.id)) continue;
-        const name = client.name || "there";
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
-        );
-        recordProactiveSend(client.id);
+      // ── 3. Food log streak at risk ──
+      const todayFood = await db.select({ id: mealLogs.id })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)))
+        .limit(1);
+      if (todayFood.length === 0) {
+        // Compute food log streak from mealLogs
+        const recentMeals = await db.select({ loggedAt: mealLogs.loggedAt })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, new Date(Date.now() - 14 * 86400_000))))
+          .orderBy(desc(mealLogs.loggedAt));
+        const foodStreak = computeStreakFromLogs(recentMeals);
+        if (foodStreak >= 3) {
+          await sendWhatsApp(client.phoneNumber,
+            `📋 ${name}, your *${foodStreak}-day food logging streak* ends at midnight.\n\nTell me one thing you ate today — even "pap and chicken" is enough to keep it alive.`
+          );
+          recordProactiveSend(client.id);
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);

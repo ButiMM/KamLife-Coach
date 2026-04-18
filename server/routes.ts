@@ -2286,16 +2286,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     };
 
     const milestoneNote = newTotal === 1
-      ? "\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this."
-      : newTotal === 10
-        ? `\n\n🔥 *10 sessions with Coach K.* You are past the hardest part.${refCode ? ` Share code *${refCode}* with someone who needs to start — they get their first month for R50.` : " Send this to someone who said you would quit."}`
-        : newTotal === 25
-          ? `\n\n💪 *25 sessions completed.* A month of real work. This is a lifestyle now.${refCode ? ` Your referral code is *${refCode}* — share it with one person today.` : " Share your progress — you earned it."}`
-          : newTotal === 50
-            ? `\n\n🏆 *50 workouts done.* Half a century of sessions.${refCode ? ` Code *${refCode}* — put this number and your code in your family WhatsApp group.` : " Put this in your family WhatsApp group. Genuinely rare."}`
-            : newTotal === 100
-              ? "\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this."
-              : "";
+      ? `\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this.`
+      : newTotal === 3
+        ? `\n\n🎯 *3 sessions in.* The research says: people who make it to 3 are 4× more likely to hit 30. You're on track.`
+        : newTotal === 5
+          ? `\n\n🔥 *5 workouts done.* High five. Some people joined the same day as you and have already quit. You haven't.`
+          : newTotal === 10
+            ? `\n\n🔥 *10 sessions with Coach K.* You are past the hardest part.${refCode ? ` Share code *${refCode}* with someone who needs to start — they get their first month for R50.` : " Send this to someone who said you would quit."}`
+            : newTotal === 25
+              ? `\n\n💪 *25 sessions completed.* A month of real work. This is a lifestyle now.${refCode ? ` Your referral code is *${refCode}* — share it with one person today.` : " Share your progress — you earned it."}`
+              : newTotal === 50
+                ? `\n\n🏆 *50 workouts done.* Half a century of sessions.${refCode ? ` Code *${refCode}* — put this number and your code in your family WhatsApp group.` : " Put this in your family WhatsApp group. Genuinely rare."}`
+                : newTotal === 100
+                  ? `\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this.`
+                  : "";
 
     // Send voice note for major milestones — fire and forget, does not block the text response
     const voiceText = milestoneVoiceTexts[newTotal];
@@ -3292,7 +3296,27 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         proteinTip = `\n\nProtein target hit. ✅`;
       }
 
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}`;
+      // Variable reinforcement — fires ~15% of the time (1-in-7 logs).
+      // Slot machine psychology: unpredictable reward > predictable reward.
+      // These messages appear randomly, feel personal, build identity.
+      const variantRoll = Math.random();
+      let variableReinforcement = "";
+      if (variantRoll < 0.15) {
+        const firstName = (user.name || "").split(" ")[0] || "Sharp";
+        const daysSinceStart = user.programmeStartDate
+          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+          : 0;
+        const SURPRISE_NOTES = [
+          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+          `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
+          `\n\n🎯 _${firstName}, the consistency you're building right now is worth more than any single perfect meal._`,
+          `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
+          `\n\n🔒 _${firstName}, locking in the habit. Keep it exactly like this._`,
+        ];
+        variableReinforcement = SURPRISE_NOTES[Math.floor(Math.random() * SURPRISE_NOTES.length)];
+      }
+
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}${variableReinforcement}`;
 
       // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
       try {
@@ -3358,7 +3382,13 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
         const calRemaining = calorieTarget - runningCals;
         const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
-        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}`;
+        const fbVarRoll = Math.random();
+        const fbSurprise = fbVarRoll < 0.15 ? (() => {
+          const fn = (user.name || "").split(" ")[0] || "Sharp";
+          const NOTES = [`\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`, `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`, `\n\n🎯 _Clients who log every day lose 3× more than those who don't — you're doing the right thing._`];
+          return NOTES[Math.floor(Math.random() * NOTES.length)];
+        })() : "";
+        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fbSurprise}`;
         try {
           const items = gptFallbackResult.foods.map(f => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
