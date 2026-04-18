@@ -3359,7 +3359,8 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
     // e.g. user sent "I had a steak wrap and chips" — scanner found the words but
     // they mapped to zero calories. Fall through to GPT extraction.
-    if (hasLogTrigger && hasActualFood) {
+    // Guard: skip questions ("what should I eat?") even if they contain food words.
+    if (!isQuestion && hasLogTrigger && hasActualFood) {
       const gptFallbackResult = await gptFoodFallback(message, user);
       if (gptFallbackResult) {
         const calorieTarget = user.calorieTarget || 2000;
