@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, gptFoodFallback } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -3317,6 +3317,104 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       // If steps were also logged from same message, combine both replies
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
       return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
+    }
+
+    // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
+    // e.g. user sent "I had a steak wrap and chips" — scanner found the words but
+    // they mapped to zero calories. Fall through to GPT extraction.
+    if (hasLogTrigger && hasActualFood) {
+      const gptFallbackResult = await gptFoodFallback(message, user);
+      if (gptFallbackResult) {
+        const calorieTarget = user.calorieTarget || 2000;
+        const proteinTarget = user.proteinTarget || 120;
+        const foodLines = gptFallbackResult.foods.map(f =>
+          `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
+        ).join("\n");
+        const todayStr = sastToday();
+        let runningCals = gptFallbackResult.totalKcal;
+        let runningProtein = gptFallbackResult.totalProtein;
+        try {
+          const existingTotals = await recomputeTodayFoodTotals(user.id);
+          runningCals = existingTotals.calories + gptFallbackResult.totalKcal;
+          runningProtein = existingTotals.protein + gptFallbackResult.totalProtein;
+          await db.update(users).set({
+            todayCalories: runningCals,
+            todayProteinG: runningProtein,
+            todayCaloriesDate: todayStr,
+          }).where(eq(users.phoneNumber, phone));
+        } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+        const calRemaining = calorieTarget - runningCals;
+        const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
+        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}`;
+        try {
+          const items = gptFallbackResult.foods.map(f => ({
+            name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
+          }));
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message.slice(0, 1000),
+            source: "gpt_fallback",
+            kcalInt: gptFallbackResult.totalKcal,
+            proteinInt: gptFallbackResult.totalProtein,
+            carbsInt: gptFallbackResult.foods.reduce((s, f) => s + f.carbs_g, 0),
+            fatInt: gptFallbackResult.foods.reduce((s, f) => s + f.fat_g, 0),
+            items,
+            mealLabel: null,
+          });
+        } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+        await logChat(user.id, message, fallbackReply, "FOOD_LOG");
+        const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+        console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map(f => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+      }
+    }
+  }
+
+  // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
+  // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
+  if (!isQuestion && hasLogTrigger && !hasActualFood) {
+    const gptFallbackResult = await gptFoodFallback(message, user);
+    if (gptFallbackResult) {
+      const calorieTarget = user.calorieTarget || 2000;
+      const foodLines = gptFallbackResult.foods.map(f =>
+        `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
+      ).join("\n");
+      let runningCals = gptFallbackResult.totalKcal;
+      let runningProtein = gptFallbackResult.totalProtein;
+      const todayStr = sastToday();
+      try {
+        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        runningCals = existingTotals.calories + gptFallbackResult.totalKcal;
+        runningProtein = existingTotals.protein + gptFallbackResult.totalProtein;
+        await db.update(users).set({
+          todayCalories: runningCals,
+          todayProteinG: runningProtein,
+          todayCaloriesDate: todayStr,
+        }).where(eq(users.phoneNumber, phone));
+      } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+      const calRemaining = calorieTarget - runningCals;
+      const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
+      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}`;
+      try {
+        const items = gptFallbackResult.foods.map(f => ({
+          name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
+        }));
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: message.slice(0, 1000),
+          source: "gpt_fallback",
+          kcalInt: gptFallbackResult.totalKcal,
+          proteinInt: gptFallbackResult.totalProtein,
+          carbsInt: gptFallbackResult.foods.reduce((s, f) => s + f.carbs_g, 0),
+          fatInt: gptFallbackResult.foods.reduce((s, f) => s + f.fat_g, 0),
+          items,
+          mealLabel: null,
+        });
+      } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+      await logChat(user.id, message, fallbackReply, "FOOD_LOG");
+      const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map(f => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
     }
   }
 

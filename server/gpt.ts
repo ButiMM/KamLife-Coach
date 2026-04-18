@@ -452,6 +452,162 @@ export function estimateVisionCostUSD(decision: VisionModelDecision, completionT
   return (promptTok * 5 + completionTokens * 15) / 1_000_000;
 }
 
+// ============================================================
+// GPT FOOD FALLBACK — function-calling nutritional extraction
+// ============================================================
+//
+// Triggered when the SA food scanner finds no matches for a user message
+// that clearly contains food intent ("I had avocado toast", "steak wrap
+// and chips", "nandos half chicken"). The scanner covers ~400 common SA
+// foods but misses branded items, international foods, and novel combos.
+//
+// This fallback uses gpt-4o-mini with a typed function call so the response
+// is always structured — never free-form text we have to parse. On failure
+// it returns null and the caller falls through to the coaching-LLM path
+// (which will acknowledge the food but not produce structured calorie data).
+//
+// Call cost: ~$0.0003 per invocation. Budget: acceptable for food-log
+// messages that the SA scanner missed.
+
+export interface GptFoodItem {
+  name: string;          // SA name if applicable
+  kcal: number;          // whole number
+  protein_g: number;     // whole number
+  carbs_g: number;
+  fat_g: number;
+  portion_desc: string;  // e.g. "1 half chicken (~380g)"
+  category: "protein" | "carb" | "fat" | "vegetable" | "junk" | "dairy" | "beverage" | "other";
+}
+
+export interface GptFoodFallbackResult {
+  foods: GptFoodItem[];
+  totalKcal: number;
+  totalProtein: number;
+  coachNote: string;   // 1-sentence coaching comment Coach K would give
+  fromCache: boolean;
+}
+
+// Simple in-memory cache keyed by normalised message text — prevents burning
+// budget on identical messages (e.g. user resending the same meal).
+// Evicted after 60 minutes.
+const foodFallbackCache = new Map<string, { result: GptFoodFallbackResult; expiresAt: number }>();
+const FOOD_CACHE_TTL_MS = 60 * 60_000;
+
+function normaliseFoodCacheKey(msg: string): string {
+  return msg.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+export async function gptFoodFallback(
+  message: string,
+  user: { goalType?: string | null; calorieTarget?: number | null; proteinTarget?: number | null },
+): Promise<GptFoodFallbackResult | null> {
+  const cacheKey = normaliseFoodCacheKey(message);
+  const cached = foodFallbackCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.result, fromCache: true };
+  }
+
+  try {
+    const goal = user.goalType || "fat_loss";
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 130;
+
+    const resp = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 400,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "log_food",
+            description: "Extract nutritional data from a user's food description. Use South African food names where applicable.",
+            parameters: {
+              type: "object",
+              properties: {
+                foods: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string", description: "Food name (SA name preferred: pap not polenta, pilchards not sardines)" },
+                      kcal: { type: "integer", description: "Calories for the described portion" },
+                      protein_g: { type: "integer", description: "Protein grams for the described portion" },
+                      carbs_g: { type: "integer", description: "Carbohydrate grams" },
+                      fat_g: { type: "integer", description: "Fat grams" },
+                      portion_desc: { type: "string", description: "What the portion is, e.g. '1 half chicken (~380g)'" },
+                      category: { type: "string", enum: ["protein", "carb", "fat", "vegetable", "junk", "dairy", "beverage", "other"] },
+                    },
+                    required: ["name", "kcal", "protein_g", "carbs_g", "fat_g", "portion_desc", "category"],
+                  },
+                  minItems: 1,
+                },
+                coach_note: {
+                  type: "string",
+                  description: `One direct sentence Coach K would say about this meal for a ${goal} goal (calorie target ${calTarget} kcal, protein target ${protTarget}g). Direct, SA voice. No filler. No 'great job'.`,
+                },
+              },
+              required: ["foods", "coach_note"],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "log_food" } },
+      messages: [
+        {
+          role: "system",
+          content: `You extract nutritional data from South African WhatsApp fitness coaching messages. Use realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — do not round to nearest 100.`,
+        },
+        {
+          role: "user",
+          content: message.slice(0, 500),
+        },
+      ],
+    });
+
+    const toolCall = resp.choices[0]?.message?.tool_calls?.[0];
+    // Narrow to function-type tool call — OpenAI SDK union includes custom tool calls
+    if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
+
+    const parsed = JSON.parse(toolCall.function.arguments);
+    const foods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
+      name: String(f.name || "food"),
+      kcal: Math.max(0, parseInt(f.kcal) || 0),
+      protein_g: Math.max(0, parseInt(f.protein_g) || 0),
+      carbs_g: Math.max(0, parseInt(f.carbs_g) || 0),
+      fat_g: Math.max(0, parseInt(f.fat_g) || 0),
+      portion_desc: String(f.portion_desc || ""),
+      category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
+    }));
+
+    if (foods.length === 0) return null;
+
+    const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
+    const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
+    const result: GptFoodFallbackResult = {
+      foods,
+      totalKcal,
+      totalProtein,
+      coachNote: String(parsed.coach_note || ""),
+      fromCache: false,
+    };
+
+    foodFallbackCache.set(cacheKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
+    return result;
+  } catch (err) {
+    console.warn("[gptFoodFallback] error:", err);
+    return null;
+  }
+}
+
+// Prune stale cache entries — called lazily at module level
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of foodFallbackCache) {
+    if (v.expiresAt <= now) foodFallbackCache.delete(k);
+  }
+}, 15 * 60_000);
+
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
