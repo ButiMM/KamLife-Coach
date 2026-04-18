@@ -315,7 +315,6 @@ async function runMorningCheckin(): Promise<void> {
 
       const foodLogs = yesterdayLogs.filter(l => l.intent === "FOOD_LOG");
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
-      const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
       // Run protein sum + step streak in parallel — both needed for the morning message.
       // Previously serial awaits; Promise.all cuts latency ~50% per client.
@@ -323,7 +322,7 @@ async function runMorningCheckin(): Promise<void> {
       const yEnd = dayStart(0);
       const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
 
-      const [proteinRows, recentStepLogs] = await Promise.all([
+      const [proteinRows, recentStepLogs, yesterdayStepRows] = await Promise.all([
         db.select({
           totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
         }).from(mealLogs).where(and(
@@ -337,6 +336,14 @@ async function runMorningCheckin(): Promise<void> {
           .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
           .orderBy(desc(stepLogs.loggedAt))
           .catch((_e: Error) => [] as { loggedAt: Date | null }[]),
+
+        // Read yesterday's step total from step_logs directly — more reliable than
+        // text-parsing chat_history (screenshot logs store "[Step Screenshot: 12000]"
+        // not "12000 steps", so the old regex missed them).
+        db.select({ steps: stepLogs.steps })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, yStart), lt(stepLogs.loggedAt, yEnd)))
+          .catch((_e: Error) => [] as { steps: number | null }[]),
       ]);
 
       // Read yesterday's protein from structured meal_logs — no more regex text-parsing.
@@ -344,12 +351,8 @@ async function runMorningCheckin(): Promise<void> {
       // older rows pre-date the table and will legitimately show 0.
       const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
 
-      // Extract steps logged from step log messages
-      let stepsLogged = 0;
-      if (stepsLog) {
-        const sm = (stepsLog.messageIn || "").match(/\b([\d,]+)\s*steps?\b/i);
-        if (sm) stepsLogged = parseInt(sm[1].replace(/,/g, ""));
-      }
+      // Steps: sum all step_logs rows for yesterday (one per logging event)
+      const stepsLogged = (yesterdayStepRows as { steps: number | null }[]).reduce((s, r) => s + (r.steps || 0), 0);
 
       // Day-specific opener (replaces the removed daily motivation job)
       const DOW_OPENERS: Record<number, string> = {
@@ -1552,6 +1555,198 @@ cron.schedule("0 19 * * *", async () => {
 }, { timezone: "UTC" });
 
 // ============================================================
+// JOB 16A — WEEKLY WINS SUMMARY TO CLIENTS
+// Runs Sunday 7pm SAST (5pm UTC) — each paying client gets their
+// week's highlights so they end the week feeling good and come
+// back Monday motivated. This is the client-facing equivalent of
+// the coach KPI report (which only goes to the founder).
+// ============================================================
+
+cron.schedule("0 17 * * 0", async () => {
+  console.log("[SCHEDULER] JOB: Weekly wins summary to clients");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+    try {
+      const name = client.name?.split(" ")[0] || "there";
+      const stepsTarget = client.stepsTarget || 8500;
+      const proteinTarget = client.proteinTarget || 120;
+
+      const [workoutRows, stepRows, foodRows] = await Promise.all([
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+        db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+          logDays: sql<number>`COUNT(DISTINCT DATE(${mealLogs.loggedAt}))::int`,
+        }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+      ]);
+
+      const workoutsDone = workoutRows.length;
+      const totalSteps = stepRows.reduce((s, r) => s + (r.steps || 0), 0);
+      const avgSteps = stepRows.length > 0 ? Math.round(totalSteps / 7) : 0;
+      const stepsAboveTarget = stepRows.filter(r => (r.steps || 0) >= stepsTarget).length;
+      const totalProtWeek = (foodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
+      const foodLogDays = (foodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
+      const targetGoal = client.trainingDaysPerWeek || 3;
+
+      // Build a concise wins summary — only include categories where they did something
+      const wins: string[] = [];
+      if (workoutsDone > 0) {
+        wins.push(`💪 *${workoutsDone}/${targetGoal} sessions* — ${workoutsDone >= targetGoal ? "full week ✅" : `${targetGoal - workoutsDone} short`}`);
+      } else {
+        wins.push(`💪 *0 sessions logged this week.* Start fresh tomorrow.`);
+      }
+      if (avgSteps > 0) {
+        wins.push(`🚶 *${avgSteps.toLocaleString()} avg daily steps* — ${stepsAboveTarget} days above ${stepsTarget.toLocaleString()} target`);
+      }
+      if (foodLogDays > 0) {
+        const avgProt = Math.round(totalProtWeek / 7);
+        wins.push(`🍽 *${foodLogDays}/7 days food logged* — avg ${avgProt}g protein/day${avgProt >= proteinTarget * 0.9 ? " ✅" : ` (target: ${proteinTarget}g)`}`);
+      }
+
+      const wStreak = client.workoutStreak || 0;
+      if (wStreak >= 3) wins.push(`🔥 *${wStreak}-session streak going into next week*`);
+
+      // Motivational close based on performance
+      const close = workoutsDone >= targetGoal
+        ? `Perfect week, ${name}. Full sessions logged. That's the standard now.`
+        : workoutsDone > 0
+          ? `Solid week, ${name}. ${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done. Next week — go for ${targetGoal}.`
+          : `${name}. Nothing logged this week. That stops now. Tomorrow is Day 1.`;
+
+      const msg = `*📊 Your Week in Review*\n\n${wins.join("\n")}\n\n${close}\n\nReply *menu* for Monday's plan.`;
+      await sendWhatsApp(client.phoneNumber, msg);
+      recordProactiveSend(client.id);
+      sent++;
+    } catch (err) {
+      console.error(`[SCHEDULER] Weekly wins error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Weekly wins summary: ${sent} sent`);
+}, { timezone: "UTC" });
+
+// ============================================================
+// JOB 16B — BUDDY ACCOUNTABILITY NOTIFICATIONS
+// Runs hourly — checks for buddy workout completions in the last
+// hour and sends social proof nudge to their partner. Also flags
+// buddies who have gone 48h+ silent (streak-break social pressure).
+// Limited to 2 notifications per buddy pair per day via dedupe.
+// ============================================================
+
+cron.schedule("0 * * * *", async () => {
+  const now = new Date();
+  const hourAgo = new Date(now.getTime() - 3_600_000);
+  const twoDaysAgo = new Date(now.getTime() - 2 * 86_400_000);
+  const eighteenHours = new Date(now.getTime() - 18 * 3_600_000); // don't notify late at night
+
+  // Only run between 7am and 9pm SAST (5am–7pm UTC)
+  const hourUTC = now.getUTCHours();
+  if (hourUTC < 5 || hourUTC > 19) return;
+
+  try {
+    // Find users who have a buddy AND completed a workout in the last hour
+    const recentWorkouts = await db.select({
+      userId: workoutLogs.userId,
+      loggedAt: workoutLogs.loggedAt,
+    }).from(workoutLogs)
+      .where(gte(workoutLogs.loggedAt, hourAgo))
+      .orderBy(desc(workoutLogs.loggedAt));
+
+    const notifiedPairs = new Set<string>();
+
+    for (const w of recentWorkouts) {
+      try {
+        const [worker] = await db.select({
+          id: users.id,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          buddyId: users.buddyId,
+          workoutStreak: users.workoutStreak,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, w.userId)).limit(1);
+
+        if (!worker || !worker.buddyId || worker.subscriptionStatus !== "active") continue;
+
+        // Dedupe: only one workout notification per pair per day
+        const pairKey = [worker.id, worker.buddyId].sort().join(":");
+        if (notifiedPairs.has(pairKey)) continue;
+        notifiedPairs.add(pairKey);
+
+        const [buddy] = await db.select({
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, worker.buddyId)).limit(1);
+
+        if (!buddy || buddy.subscriptionStatus !== "active") continue;
+
+        const workerFirst = worker.name?.split(" ")[0] || "Your buddy";
+        const workerStreak = worker.workoutStreak || 1;
+        const streakAdd = workerStreak >= 3 ? ` That's a ${workerStreak}-session streak.` : "";
+
+        if (!canSendProactive(worker.buddyId)) continue;
+        await sendWhatsApp(buddy.phoneNumber,
+          `🏋️ *${workerFirst} just logged a session.* Don't let them get ahead.${streakAdd}\n\nReply *done* when you finish yours.`
+        );
+        recordProactiveSend(worker.buddyId);
+        console.log(`[BUDDY] Notified ${buddy.name} that ${workerFirst} just trained`);
+      } catch { /* skip this pair */ }
+    }
+
+    // ── Buddy silence alert: if your buddy has gone 48h+ silent, nudge you ──
+    const pairedUsers = await db.select({
+      id: users.id,
+      name: users.name,
+      phoneNumber: users.phoneNumber,
+      buddyId: users.buddyId,
+      lastActiveAt: users.lastActiveAt,
+      subscriptionStatus: users.subscriptionStatus,
+    }).from(users)
+      .where(and(
+        eq(users.subscriptionStatus, "active"),
+        sql`${users.buddyId} IS NOT NULL`,
+        lt(users.lastActiveAt, twoDaysAgo),
+      ))
+      .limit(50); // cap
+
+    for (const silentBuddy of pairedUsers) {
+      try {
+        if (!silentBuddy.buddyId) continue;
+        const [partner] = await db.select({
+          id: users.id,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, silentBuddy.buddyId)).limit(1);
+
+        if (!partner || partner.subscriptionStatus !== "active") continue;
+        if (!canSendProactive(partner.id)) continue;
+
+        const silentFirst = silentBuddy.name?.split(" ")[0] || "Your buddy";
+        const daysSilent = silentBuddy.lastActiveAt
+          ? Math.floor((Date.now() - new Date(silentBuddy.lastActiveAt).getTime()) / 86_400_000)
+          : 2;
+
+        await sendWhatsApp(partner.phoneNumber,
+          `👀 *${silentFirst} hasn't logged in ${daysSilent} days.*\n\nYou're pulling ahead — but having an active buddy keeps you both sharper. If you know them, give them a nudge.`
+        );
+        recordProactiveSend(partner.id);
+        console.log(`[BUDDY] Nudged ${partner.name} about silent buddy ${silentFirst}`);
+      } catch { /* skip */ }
+    }
+  } catch (err) {
+    console.error("[SCHEDULER] Buddy accountability error:", err);
+  }
+});
+
+// ============================================================
 // JOB 16 — WOMEN'S MONTH (August — every Monday)
 // Runs Monday 7am SAST (5am UTC), August only
 // ============================================================
@@ -2343,9 +2538,11 @@ export function initScheduler(): void {
       const paying = allClients.filter(c => c.subscriptionStatus === "active").length;
       const newThisWeek = allClients.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length;
 
+      // Churned = subscriptions that were active but are now inactive/cancelled.
+      // Previously wrongly counted active paying clients who hadn't worked out in 14 days —
+      // those are "at-risk", not churned. Churn = actually lost revenue.
       const churned = allClients.filter(c =>
-        c.subscriptionStatus === "active" &&
-        (!c.lastWorkoutDate || new Date(c.lastWorkoutDate) < fourteenDaysAgo)
+        c.subscriptionStatus === "inactive" || c.subscriptionStatus === "cancelled"
       ).length;
 
       const [weekWorkouts] = await db.select({ c: count() }).from(workoutLogs)

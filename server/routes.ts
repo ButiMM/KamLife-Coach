@@ -1292,7 +1292,6 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     // Don't wait for the 10am cron. The user is engaged RIGHT NOW and more likely
     // to send a photo when they're still in the setup flow than hours later.
     // 3-second delay so the programme message lands first, then the follow-up.
-    const firstName = (user.name || "").split(" ")[0] || "there";
     setTimeout(async () => {
       try {
         await sendWhatsApp(phone,
@@ -2340,7 +2339,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       : newTotal === 1
       ? `\n\n💡 *Next session — log your weights* after each exercise: "bench 60kg 3x10". I track your progress week to week.`
       : "";
-    let doneReply = `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
+    // Variable-ratio reinforcement on workout completion — 15% chance of a surprise
+    // extra line. Same slot-machine mechanic as food logs: unpredictable > predictable.
+    const WORKOUT_SURPRISES = [
+      "\n\n🌟 That session is in the bank. Nothing can take it back.",
+      "\n\n⚡ You showed up. That's the whole game.",
+      "\n\n🔑 Consistency > intensity. You're living proof.",
+      "\n\n🏆 No one else did it for you. That was all you.",
+      "\n\n💡 The body you're building is being built right now — session by session.",
+    ];
+    const workoutSurprise = Math.random() < 0.15 && !milestoneNote
+      ? WORKOUT_SURPRISES[Math.floor(Math.random() * WORKOUT_SURPRISES.length)]
+      : "";
+
+    let doneReply = `${celebration}${milestoneNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
 
     // Progressive programme delivery — unlock next day's workout after completing each session
     try {
@@ -3096,7 +3108,60 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         if (breakfastLog) toRepeat = breakfastLog.messageIn!;
       }
 
-      // Re-process through the food scanner — exact same logic as original log
+      // First: try to find and copy the structured mealLogs entry (fastest path —
+      // works for both SA scanner logs AND GPT fallback logs, identified by kcalInt > 0)
+      const yesterdayMealRows = await db.select({
+        kcalInt: mealLogs.kcalInt,
+        proteinInt: mealLogs.proteinInt,
+        carbsInt: mealLogs.carbsInt,
+        fatInt: mealLogs.fatInt,
+        rawMessage: mealLogs.rawMessage,
+        source: mealLogs.source,
+        items: mealLogs.items,
+      }).from(mealLogs).where(and(
+        eq(mealLogs.userId, user.id),
+        gte(mealLogs.loggedAt, new Date(Date.now() - 48 * 3600_000)),
+        lt(mealLogs.loggedAt, new Date()),
+      )).orderBy(desc(mealLogs.loggedAt)).limit(5);
+
+      const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
+      if (usableMeals.length > 0) {
+        let totalCals = 0; let totalProt = 0;
+        const labels: string[] = [];
+        for (const row of usableMeals) {
+          totalCals += row.kcalInt || 0;
+          totalProt += row.proteinInt || 0;
+          if (row.rawMessage) labels.push(row.rawMessage.slice(0, 50));
+          // Re-insert to today with quick_relog source
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: row.rawMessage || toRepeat,
+            source: "quick_relog",
+            kcalInt: row.kcalInt,
+            proteinInt: row.proteinInt,
+            carbsInt: row.carbsInt,
+            fatInt: row.fatInt,
+            items: row.items,
+          }).catch(() => {});
+        }
+        const calorieTarget = user.calorieTarget || 2000;
+        const proteinTarget = user.proteinTarget || 120;
+        // Update today's running totals
+        const todayStr = sastToday();
+        const updTodayCals = (user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0) + totalCals;
+        const updTodayProt = (user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0) + totalProt;
+        await db.update(users).set({
+          todayCalories: updTodayCals,
+          todayProteinG: updTodayProt,
+          todayCaloriesDate: todayStr,
+        }).where(eq(users.phoneNumber, phone));
+        const remaining = calorieTarget - updTodayCals;
+        const protGap = proteinTarget - updTodayProt;
+        await logChat(user.id, message, `Quick relog: ${labels.join(", ")}`, "FOOD_LOG");
+        return `♻️ Copied from yesterday:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
+      }
+
+      // Fallback: re-process through the food scanner — for older logs without meal_logs entries
       const repeatReply = await handleMessage(phone, toRepeat);
       return `♻️ Same meal logged: "${toRepeat.slice(0, 80)}"\n\n${repeatReply}`;
     } catch (err) {
