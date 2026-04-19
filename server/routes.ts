@@ -1967,7 +1967,7 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this to help identify the food.` : ""}`,
+BEST GUESS RULE: Always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if you genuinely cannot tell whether the image is food at all (e.g. it is completely dark, blurry beyond recognition, or clearly not food) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
                 },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
               ],
@@ -1982,25 +1982,36 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
+
+        // Write to mealLogs so photo meals appear in "my meals" and count in daily totals
+        try {
+          const photoKcalMatch = visionReply.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || visionReply.match(/\b(\d{2,4})\s*kcal/i);
+          const photoProtMatch = visionReply.match(/\b(\d{1,3})\s*g\s*protein/i);
+          const photoKcal = photoKcalMatch ? parseInt(photoKcalMatch[1].replace(/,/g, ""), 10) : 0;
+          const photoProt = photoProtMatch ? parseInt(photoProtMatch[1], 10) : 0;
+          if (photoKcal > 0 || photoProt > 0) {
+            await db.insert(mealLogs).values({
+              userId: user.id,
+              rawMessage: message || "[Photo]",
+              source: "photo",
+              kcalInt: photoKcal,
+              proteinInt: photoProt,
+              carbsInt: 0,
+              fatInt: 0,
+            }).catch(e => console.warn("[photo mealLogs write]", e));
+          }
+        } catch (e) { console.warn("[photo mealLogs non-fatal]", e); }
+
         const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
-        // Append daily running total
+        // Daily total from mealLogs (source of truth — includes this photo)
         let photoDailyTotal = "";
         try {
-          const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-          const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn })
-            .from(chatHistory)
-            .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-          let totalCal = 0; let totalProt = 0;
-          for (const log of todayFoodLogs) {
-            const matched = scanForSAFoods(log.messageIn || "");
-            totalCal += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-            totalProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-          }
+          const totals = await recomputeTodayFoodTotals(user.id);
           const calTarget = user.calorieTarget || 1800;
           const protTarget = user.proteinTarget || 130;
-          if (totalCal > 0) {
-            const remaining = calTarget - totalCal;
-            photoDailyTotal = `\n\n_Today so far: ~${totalCal} kcal | ${totalProt}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
+          if (totals.calories > 0) {
+            const remaining = calTarget - totals.calories;
+            photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
           }
         } catch (e) { console.warn("[non-fatal]", e); }
         return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
