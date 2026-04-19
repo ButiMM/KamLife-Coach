@@ -3581,7 +3581,21 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
       const calRemaining = calorieTarget - runningCals;
       const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
-      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}`;
+      const fb2VarRoll = Math.random();
+      const fb2Surprise = fb2VarRoll < 0.15 ? (() => {
+        const fn = (user.name || "").split(" ")[0] || "Sharp";
+        const daysSince = user.programmeStartDate
+          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+          : 0;
+        const NOTES = [
+          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+          `\n\n⚡ _Most people at day ${daysSince || "?"} have already stopped logging. You haven't. That matters._`,
+          `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
+          `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
+        ];
+        return NOTES[Math.floor(Math.random() * NOTES.length)];
+      })() : "";
+      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fb2Surprise}`;
       try {
         const items = gptFallbackResult.foods.map(f => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,

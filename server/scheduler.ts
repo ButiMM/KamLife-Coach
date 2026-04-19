@@ -492,9 +492,11 @@ async function runMorningCheckin(): Promise<void> {
       }
 
       const streakParts: string[] = [];
-      if (wStreak >= 5 && wStreak % 5 === 0) streakParts.push(`🔥 *${wStreak}-session workout streak*`);
-      else if (wStreak >= 10) streakParts.push(`🔥 ${wStreak} sessions straight`);
-      if (stepStreakCount >= 3) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      // Show workout streak for any streak >= 2 — loss aversion is strongest when the
+      // stake is visible every day, not just on 5-session milestones.
+      if (wStreak >= 2) streakParts.push(`🔥 *${wStreak}-session streak*`);
+      // Step streak for >= 2 consecutive days
+      if (stepStreakCount >= 2) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
       const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
       const parts: string[] = [`Morning ${name}.${dowOpener}${identityLine}${streakLine}`];
@@ -516,8 +518,21 @@ async function runMorningCheckin(): Promise<void> {
         parts.push(`Food was logged but protein not tracked.`);
       }
 
-      // Workout
-      if (workoutLogged) parts.push(`Session done yesterday. Sharp.`);
+      // Workout — milestone-aware messages at 1, 3, 5, 10, 25, 50, 100 sessions
+      if (workoutLogged) {
+        const totalW = client.totalWorkoutsCompleted || 0;
+        const workoutMsg =
+          totalW === 1  ? `First session in the books. That's the hardest one.` :
+          totalW === 3  ? `Three sessions done. The habit is starting.` :
+          totalW === 5  ? `Five sessions. You're past the point where most people quit.` :
+          totalW === 10 ? `Ten sessions. You've made this a real part of your life.` :
+          totalW === 25 ? `25 sessions. A quarter of a hundred. This is real now.` :
+          totalW === 50 ? `50 sessions. Halfway to a hundred. You've earned every one.` :
+          totalW === 100 ? `100 sessions. 💯 That's elite consistency.` :
+          (totalW % 10 === 0 && totalW > 0) ? `${totalW} sessions. Keep that momentum.` :
+          `Session done yesterday. Sharp.`;
+        parts.push(workoutMsg);
+      }
 
       // Steps — specific number vs target
       if (stepsLogged > 0) {
