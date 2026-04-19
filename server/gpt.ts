@@ -521,10 +521,14 @@ export async function gptFoodFallback(
           type: "function",
           function: {
             name: "log_food",
-            description: "Extract nutritional data from a user's food description. Use South African food names where applicable.",
+            description: "Extract nutritional data from a user's food description. Use South African food names where applicable. If the message is NOT about food at all, set is_food to false and leave foods empty.",
             parameters: {
               type: "object",
               properties: {
+                is_food: {
+                  type: "boolean",
+                  description: "true if the user is logging food they ate. false if the message is about something else entirely (social events, emotions, workout, questions, etc.).",
+                },
                 foods: {
                   type: "array",
                   items: {
@@ -540,14 +544,13 @@ export async function gptFoodFallback(
                     },
                     required: ["name", "kcal", "protein_g", "carbs_g", "fat_g", "portion_desc", "category"],
                   },
-                  minItems: 1,
                 },
                 coach_note: {
                   type: "string",
                   description: `One direct sentence Coach K would say about this meal for a ${goal} goal (calorie target ${calTarget} kcal, protein target ${protTarget}g). Direct, SA voice. No filler. No 'great job'.`,
                 },
               },
-              required: ["foods", "coach_note"],
+              required: ["is_food"],
             },
           },
         },
@@ -579,6 +582,13 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
     if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
 
     const parsed = JSON.parse(toolCall.function.arguments);
+
+    // Model signals this message is NOT a food log — don't force-log non-food messages
+    if (parsed.is_food === false) {
+      console.log("[gptFoodFallback] model says not food — skipping");
+      return null;
+    }
+
     const foods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
       name: String(f.name || "food"),
       kcal: Math.max(0, parseInt(f.kcal) || 0),
