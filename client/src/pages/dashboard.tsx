@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useUsers, useFlaggedUsers, useMetrics } from "@/hooks/use-users";
+import { useUsers, useFlaggedUsers, useMetrics, useNextActions } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ export default function Dashboard() {
   const { data: users, isLoading: usersLoading } = useUsers();
   const { data: flaggedUsers, isLoading: flaggedLoading } = useFlaggedUsers();
   const { data: metrics } = useMetrics();
+  const { data: nextActionsData } = useNextActions();
   const [flagFilter, setFlagFilter] = useState<"all" | "inactive_7_days" | "plateau_2_weeks">("all");
   const [flagSort, setFlagSort] = useState<"lastActive" | "name">("lastActive");
 
@@ -111,6 +112,32 @@ export default function Dashboard() {
             color="text-rose-600 bg-rose-100 dark:bg-rose-900/20"
           />
         </div>
+
+        {/* Pinned Next Actions */}
+        {nextActionsData && nextActionsData.actions.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold font-display">📌 Next Actions <span className="text-base font-normal text-muted-foreground ml-2">({nextActionsData.total} total)</span></h3>
+            </div>
+            <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+              <div className="divide-y divide-border">
+                {nextActionsData.actions.slice(0, 8).map((item, i) => {
+                  const priorityColor = item.priority === "urgent" ? "text-red-600 bg-red-50 border-red-200" : item.priority === "high" ? "text-orange-600 bg-orange-50 border-orange-200" : item.priority === "medium" ? "text-amber-600 bg-amber-50 border-amber-200" : "text-blue-600 bg-blue-50 border-blue-200";
+                  return (
+                    <div key={i} className="flex items-center gap-4 p-4 hover:bg-muted/20 transition-colors">
+                      <span className={`text-xs font-bold px-2 py-1 rounded-full border shrink-0 ${priorityColor}`}>{item.priority.toUpperCase()}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-semibold text-sm">{item.name}</span>
+                        <span className="text-sm text-muted-foreground ml-2">{item.action}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded shrink-0">{item.category}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Flagged Users List - Takes up 2 cols */}

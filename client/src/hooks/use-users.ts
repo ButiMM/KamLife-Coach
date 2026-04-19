@@ -186,6 +186,26 @@ export function useCohorts() {
   });
 }
 
+export interface NextAction {
+  phone: string;
+  name: string;
+  action: string;
+  priority: "urgent" | "high" | "medium" | "low";
+  category: string;
+}
+
+export function useNextActions() {
+  return useQuery({
+    queryKey: ["/api/dashboard/next-actions"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/next-actions", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch next actions");
+      return res.json() as Promise<{ actions: NextAction[]; total: number }>;
+    },
+    refetchInterval: 120_000,
+  });
+}
+
 export function useMetrics() {
   return useQuery({
     queryKey: ["/api/dashboard/metrics"],
