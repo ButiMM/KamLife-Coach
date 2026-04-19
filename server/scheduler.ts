@@ -50,23 +50,106 @@ function hasRunToday(key: string, dateStr: string): boolean {
   return loadState()[key] === dateStr;
 }
 
-// Track proactive messages sent today per client — max 2 per day
-// Key format: "YYYY-MM-DD:clientId" so the map is self-expiring by day
-const dailyMessageCount = new Map<string, number>();
+// ── DB-BACKED DAILY PROACTIVE BUDGET ─────────────────────────────────────────
+// MAX 1 proactive message per client per calendar day (SAST).
+// Previously in-memory only — a server restart wiped the counter and multiple
+// crons would all fire back-to-back on the same client. Now the cap is stored
+// in the sent_proactive table and survives restarts.
+//
+// Usage: replace canSendProactive(id) + recordProactiveSend(id) with:
+//   const ok = await claimDailySlot(id, "job_key");
+//   if (ok) { await sendWhatsApp(...); }
+// ─────────────────────────────────────────────────────────────────────────────
+
+// In-memory fast-path (avoids a DB round-trip when the same cron loop
+// already sent to this client earlier in the same run).
+const dailySentThisProcess = new Set<string>();
 
 function dailyKey(clientId: string): string {
-  return `${todayUTC()}:${clientId}`;
+  return `${todaySAST()}:${clientId}`;
 }
 
+/**
+ * Atomically claim the daily proactive slot for (clientId, jobKey).
+ * Returns true iff the caller should send — false means skip.
+ *
+ * Enforces TWO things:
+ *  1. This specific jobKey can only fire once per day per client (per-message dedupe)
+ *  2. At most 1 proactive per client per calendar day (global daily cap)
+ *
+ * Fail-open on DB error: we'd rather one extra message than silently dropping
+ * everyone's messages when Postgres is flaky.
+ */
+async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean> {
+  const today = todaySAST();
+
+  // Fast-path: already sent something to this client this process run
+  if (dailySentThisProcess.has(dailyKey(clientId))) return false;
+
+  try {
+    // 1. Check global daily cap — has ANY proactive been sent today?
+    const existing = await db
+      .select({ id: sentProactive.id })
+      .from(sentProactive)
+      .where(and(
+        eq(sentProactive.userId, clientId),
+        eq(sentProactive.dedupeWindow, today),
+      ))
+      .limit(1);
+    if (existing.length > 0) return false; // already got one today
+
+    // 2. Try to claim this specific job slot (unique index prevents races)
+    const inserted = await db
+      .insert(sentProactive)
+      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
+      .onConflictDoNothing()
+      .returning({ id: sentProactive.id });
+    if (!inserted.length) return false; // race: someone else claimed it
+
+    // 3. Mark in-memory so the same process doesn't double-send
+    dailySentThisProcess.add(dailyKey(clientId));
+    return true;
+  } catch (err) {
+    console.warn(`[claimDailySlot] DB error (${jobKey}/${clientId.slice(0,8)}):`, err);
+    // Fail-open: if in-memory says not sent yet, allow it
+    if (dailySentThisProcess.has(dailyKey(clientId))) return false;
+    dailySentThisProcess.add(dailyKey(clientId));
+    return true;
+  }
+}
+
+// ── Sync helpers used by all cron jobs ────────────────────────────────────────
 function canSendProactive(clientId: string): boolean {
-  const count = dailyMessageCount.get(dailyKey(clientId)) || 0;
-  return count < 2;
+  return !dailySentThisProcess.has(dailyKey(clientId));
 }
 
-function recordProactiveSend(clientId: string): void {
-  const key = dailyKey(clientId);
-  dailyMessageCount.set(key, (dailyMessageCount.get(key) || 0) + 1);
+// Fire-and-forget DB write — non-blocking so all call sites stay synchronous.
+// At process start we reload today's sent set from DB, so restarts don't wipe the cap.
+function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
+  dailySentThisProcess.add(dailyKey(clientId));
+  db.insert(sentProactive)
+    .values({ userId: clientId, messageKey: jobKey, dedupeWindow: todaySAST() })
+    .onConflictDoNothing()
+    .catch(e => console.warn("[recordProactiveSend] DB write failed (non-fatal):", e));
 }
+
+// ── Startup hydration — repopulate the in-memory set from today's DB records ──
+// Without this, a server restart wipes dailySentThisProcess and all crons re-fire.
+(async () => {
+  try {
+    const today = todaySAST();
+    const sentToday = await db
+      .select({ userId: sentProactive.userId })
+      .from(sentProactive)
+      .where(eq(sentProactive.dedupeWindow, today));
+    for (const row of sentToday) {
+      dailySentThisProcess.add(dailyKey(row.userId));
+    }
+    console.log(`[SCHEDULER] Daily budget hydrated: ${sentToday.length} clients already sent today`);
+  } catch (e) {
+    console.warn("[SCHEDULER] Budget hydration failed (non-fatal):", e);
+  }
+})();
 
 // Per-message-key dedupe. The 2/day quota above is a budget; this stops the same
 // named message (e.g. "friday_weekend") from firing twice if a cron run restarts
@@ -114,18 +197,25 @@ async function claimProactive(userId: string, messageKey: string, dedupeWindow: 
   }
 }
 
-// Purge stale keys at midnight SAST (22:00 UTC) — prevents unbounded Map growth
-cron.schedule("0 22 * * *", () => {
-  const today = todayUTC();
-  for (const key of dailyMessageCount.keys()) {
-    if (!key.startsWith(today)) dailyMessageCount.delete(key);
+// Purge stale in-memory entries at midnight SAST (22:00 UTC) — prevents unbounded growth.
+// Also prunes sentProactive DB rows older than 30 days (keep DB lean).
+cron.schedule("0 22 * * *", async () => {
+  const today = todaySAST();
+  // Clear yesterday's daily budget entries from the Set
+  for (const key of dailySentThisProcess.values()) {
+    if (!key.startsWith(today)) dailySentThisProcess.delete(key);
   }
-  // Purge last week's keyed dedupe entries (anything not starting with the current ISO week)
+  // Purge last week's keyed dedupe entries
   const thisWeek = thisWeekUTC();
   for (const key of weeklyKeyedSent.keys()) {
     if (!key.startsWith(thisWeek)) weeklyKeyedSent.delete(key);
   }
-  console.log("[SCHEDULER] dedupe maps purged — daily:", dailyMessageCount.size, "keyed:", weeklyKeyedSent.size);
+  // DB cleanup: delete sentProactive rows older than 30 days
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as any, thirtyDaysAgo));
+  } catch { /* non-fatal */ }
+  console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size, "keyed:", weeklyKeyedSent.size);
 }, { timezone: "UTC" });
 
 function thisWeekUTC(): string {
