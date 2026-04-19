@@ -3,12 +3,18 @@ import { useUsers, useFlaggedUsers, useMetrics, useNextActions } from "@/hooks/u
 import { DashboardLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/status-badge";
 import { Users, UserX, Activity, TrendingUp, AlertCircle, ArrowRight, DollarSign, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
-import { authHeaders } from "@/lib/queryClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { authHeaders, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function Dashboard() {
   const { data: users, isLoading: usersLoading } = useUsers();
@@ -17,6 +23,27 @@ export default function Dashboard() {
   const { data: nextActionsData } = useNextActions();
   const [flagFilter, setFlagFilter] = useState<"all" | "inactive_7_days" | "plateau_2_weeks">("all");
   const [flagSort, setFlagSort] = useState<"lastActive" | "name">("lastActive");
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastPending, setBroadcastPending] = useState(false);
+  const { toast } = useToast();
+
+  const broadcastMutation = useMutation({
+    mutationFn: async (message: string) => {
+      const res = await apiRequest("POST", "/api/dashboard/broadcast", { message, filter: "active" });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setBroadcastMsg("");
+      setBroadcastOpen(false);
+      setBroadcastPending(false);
+      toast({ title: "Broadcast sent", description: `Delivered to ${data.sent ?? "?"} clients` });
+    },
+    onError: () => {
+      setBroadcastPending(false);
+      toast({ title: "Broadcast failed", description: "Check Twilio config", variant: "destructive" });
+    },
+  });
 
   // Live health check — polls every 60s
   const { data: health } = useQuery({
@@ -218,13 +245,25 @@ export default function Dashboard() {
           <div className="space-y-6">
             <h3 className="text-xl font-bold font-display">Quick Actions</h3>
             <div className="grid gap-4">
-                <Button className="w-full justify-between h-auto py-4 px-6 text-left rounded-xl bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-white shadow-lg shadow-primary/20">
-                    <div>
-                        <span className="block font-bold">Broadcast Message</span>
-                        <span className="text-primary-foreground/80 text-sm font-normal">Send to all active users</span>
-                    </div>
-                    <MessageCircle className="w-5 h-5 opacity-80" />
-                </Button>
+                {/* Broadcast compose */}
+                <div className="bg-card rounded-2xl border border-border p-4 shadow-sm space-y-3">
+                  <h4 className="font-semibold text-sm flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-primary" /> Broadcast Message
+                  </h4>
+                  <Textarea
+                    placeholder="Type a message to send to all active clients..."
+                    value={broadcastMsg}
+                    onChange={e => setBroadcastMsg(e.target.value)}
+                    className="resize-none min-h-[80px] text-sm"
+                  />
+                  <Button
+                    className="w-full"
+                    disabled={!broadcastMsg.trim() || broadcastMutation.isPending}
+                    onClick={() => setBroadcastPending(true)}
+                  >
+                    {broadcastMutation.isPending ? "Sending..." : `Send to ${metrics?.payingClients ?? activeUsers} active clients`}
+                  </Button>
+                </div>
                 
                 <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
                     <h4 className="font-semibold mb-4 text-sm text-muted-foreground uppercase tracking-wider">System Status</h4>
@@ -240,6 +279,24 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Broadcast confirmation dialog */}
+      <AlertDialog open={broadcastPending} onOpenChange={open => { if (!open) setBroadcastPending(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send broadcast to all active clients?</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap break-words">
+              "{broadcastMsg}"
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => broadcastMutation.mutate(broadcastMsg)}>
+              Send via WhatsApp
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
