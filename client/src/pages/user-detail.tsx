@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { format } from "date-fns";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare } from "lucide-react";
+import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare, UtensilsCrossed, Camera, Mic } from "lucide-react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -264,6 +264,71 @@ export default function UserDetail() {
             </div>
           )}
         </Card>
+
+        {/* Food Log History */}
+        {(userData?.mealLogs?.length ?? 0) > 0 && (
+          <Card className="p-6 border-border/50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-emerald-100 text-emerald-600 rounded-xl">
+                <UtensilsCrossed className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold font-display">Food Log (last 14 days)</h3>
+                <p className="text-sm text-muted-foreground">{userData!.mealLogs.length} meals logged</p>
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-96 space-y-2 custom-scrollbar">
+              {userData!.mealLogs.map((log) => {
+                const label = log.mealLabel ? `${log.mealLabel.charAt(0).toUpperCase()}${log.mealLabel.slice(1)}` : "Meal";
+                const sourceIcon = log.source === "photo" ? <Camera className="w-3 h-3" /> : log.source === "voice" ? <Mic className="w-3 h-3" /> : null;
+                const display = log.rawMessage && log.rawMessage !== "[Photo]" ? log.rawMessage.slice(0, 60) : (log.items && log.items.length > 0 ? log.items.map(i => i.name).join(", ") : log.rawMessage || "Food logged");
+                return (
+                  <div key={log.id} className="flex items-center justify-between p-3 rounded-xl bg-secondary/40 border border-border/40 text-sm gap-3">
+                    <div className="flex items-center gap-2 min-w-0">
+                      {sourceIcon && <span className="text-muted-foreground shrink-0">{sourceIcon}</span>}
+                      <span className="text-xs text-muted-foreground shrink-0">{log.loggedAt ? format(new Date(log.loggedAt), "MMM d, HH:mm") : "-"}</span>
+                      <span className="font-medium truncate">{display}</span>
+                      {log.mealLabel && <span className="text-xs bg-primary/10 text-primary px-2 py-0.5 rounded-full shrink-0">{label}</span>}
+                    </div>
+                    <div className="flex items-center gap-3 shrink-0 text-right">
+                      {log.kcalInt > 0 && <span className="font-semibold text-amber-600">{log.kcalInt} kcal</span>}
+                      {log.proteinInt > 0 && <span className="text-emerald-600">{log.proteinInt}g prot</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </Card>
+        )}
+
+        {/* Recent Chat Messages */}
+        {(userData?.chatHistory?.length ?? 0) > 0 && (
+          <Card className="p-6 border-border/50">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-blue-100 text-blue-600 rounded-xl">
+                <MessageSquare className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold font-display">Recent Messages</h3>
+                <p className="text-sm text-muted-foreground">Last {Math.min(userData!.chatHistory.length, 20)} exchanges</p>
+              </div>
+            </div>
+            <div className="overflow-y-auto max-h-[500px] space-y-3 custom-scrollbar">
+              {userData!.chatHistory.slice(0, 20).map((chat, i) => (
+                <div key={i} className="rounded-xl border border-border/40 text-sm overflow-hidden">
+                  <div className="px-3 py-2 bg-secondary/40 flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground truncate">{chat.messageIn || "(media)"}</span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-xs px-2 py-0.5 rounded-full bg-primary/10 text-primary">{chat.intent || "?"}</span>
+                      <span className="text-xs text-muted-foreground">{chat.createdAt ? format(new Date(chat.createdAt), "MMM d, HH:mm") : ""}</span>
+                    </div>
+                  </div>
+                  <div className="px-3 py-2 text-muted-foreground whitespace-pre-wrap">{chat.messageOut?.slice(0, 200) || "(no reply)"}{(chat.messageOut?.length ?? 0) > 200 ? "…" : ""}</div>
+                </div>
+              ))}
+            </div>
+          </Card>
+        )}
       </div>
 
       {/* Send confirmation dialog */}

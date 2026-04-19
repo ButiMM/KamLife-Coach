@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, escalations, abExperiments, abAssignments } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, escalations, abExperiments, abAssignments, mealLogs } from "../../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../../shared/pricing";
@@ -56,16 +56,17 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       if (!client) return res.status(404).json({ error: "Client not found" });
 
       const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
-      const [weights, steps, workouts, chats] = await Promise.all([
+      const [weights, steps, workouts, chats, meals] = await Promise.all([
         db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
         db.select().from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(workoutLogs.loggedAt)),
         db.select().from(chatHistory).where(eq(chatHistory.userId, client.id)).orderBy(desc(chatHistory.createdAt)).limit(100),
+        db.select().from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(mealLogs.loggedAt)).limit(100),
       ]);
       const liveTargets = calculateTargets(parseFloat(client.currentWeight || "75"), client.goalType || "fat_loss", client.lifeSituation || "office", client.trainingDaysPerWeek || 3);
       const programmeDays = client.programmeStartDate ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86400000) : 0;
 
-      res.json({ client, weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, liveTargets, programmeDays });
+      res.json({ client, weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals, liveTargets, programmeDays });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch client" });
     }
@@ -945,6 +946,55 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
     } catch (err) {
       console.error("[REVENUE] Error:", err);
       res.status(500).json({ error: "Failed to compute revenue" });
+    }
+  });
+
+  // ── Observability feed — last N bot exchanges across all clients ──
+  // Shows intent, raw input, kcal/protein from mealLogs, timestamp, phone.
+  // Used to spot systemic bugs without waiting for screenshots.
+  app.get("/api/dashboard/observability", requireAdminKey, async (req: any, res) => {
+    try {
+      const limitParam = Math.min(parseInt(req.query.limit as string) || 100, 500);
+      const rows = await db
+        .select({
+          id: chatHistory.id,
+          userId: chatHistory.userId,
+          intent: chatHistory.intent,
+          messageIn: chatHistory.messageIn,
+          messageOut: chatHistory.messageOut,
+          createdAt: chatHistory.createdAt,
+          phone: users.phoneNumber,
+          name: users.name,
+        })
+        .from(chatHistory)
+        .innerJoin(users, eq(chatHistory.userId, users.id))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(limitParam);
+
+      // For FOOD_LOG rows, join the nearest mealLogs entry (within 30s)
+      const enriched = await Promise.all(rows.map(async (row) => {
+        if (row.intent !== "FOOD_LOG") return { ...row, kcal: null, protein: null, source: null };
+        try {
+          const ts = row.createdAt ? new Date(row.createdAt) : new Date();
+          const windowStart = new Date(ts.getTime() - 30_000);
+          const windowEnd   = new Date(ts.getTime() + 30_000);
+          const [meal] = await db
+            .select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, source: mealLogs.source })
+            .from(mealLogs)
+            .where(and(
+              eq(mealLogs.userId, row.userId),
+              gte(mealLogs.loggedAt, windowStart),
+              lt(mealLogs.loggedAt, windowEnd),
+            ))
+            .limit(1);
+          return { ...row, kcal: meal?.kcalInt ?? null, protein: meal?.proteinInt ?? null, source: meal?.source ?? null };
+        } catch { return { ...row, kcal: null, protein: null, source: null }; }
+      }));
+
+      res.json({ rows: enriched, fetchedAt: new Date().toISOString() });
+    } catch (err) {
+      console.error("[OBSERVABILITY] Error:", err);
+      res.status(500).json({ error: "Failed to fetch observability feed" });
     }
   });
 }

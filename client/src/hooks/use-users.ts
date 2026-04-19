@@ -3,12 +3,26 @@ import { api, buildUrl } from "@shared/routes";
 import type { User, FlaggedUser, WeightLog } from "@shared/schema";
 import { authHeaders } from "@/lib/queryClient";
 
+export interface MealLogEntry {
+  id: string;
+  loggedAt: string;
+  rawMessage: string | null;
+  source: string;
+  kcalInt: number;
+  proteinInt: number;
+  carbsInt: number;
+  fatInt: number;
+  mealLabel: string | null;
+  items: Array<{ name: string; kcal: number; protein: number }> | null;
+}
+
 export interface UserDetailResponse {
   user: User;
   weightLogs: WeightLog[];
   stepLogs: { steps: number; loggedAt: string }[];
   workoutLogs: { completed: boolean; loggedAt: string }[];
   chatHistory: { messageIn: string; messageOut: string; intent: string; createdAt: string }[];
+  mealLogs: MealLogEntry[];
 }
 
 function parseWithLogging<T>(schema: any, data: unknown, label: string): T {
