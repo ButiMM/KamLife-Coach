@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Users, BarChart3, MessageSquare, Activity, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Users, BarChart3, MessageSquare, Activity, ShieldAlert, LogOut, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 
@@ -12,6 +12,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
     { href: "/users", label: "Users", icon: Users },
     { href: "/observability", label: "Message Feed", icon: Activity },
+    { href: "/escalations", label: "Escalations", icon: ShieldAlert },
   ];
 
   const NavContent = () => (
