@@ -3267,11 +3267,18 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
         const name = client.name?.split(" ")[0] || "there";
         const budget = client.weeklyFoodBudget || "100_300";
 
+        const calTarget = client.calorieTarget || 1800;
+        const protTarget = client.proteinTarget || 120;
         let msg = "";
         if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
-          msg = `*${name}, Batch Cook Plan — 1 hour, 5 days sorted* 🍳\n\n*Step 1 (10 min):* Boil 6 eggs. Store in fridge.\n*Step 2 (5 min):* Open 2 tins pilchards, portion into 2 containers.\n*Step 3 (15 min):* Cook sugar beans — soak overnight, boil 1 hour (or use pressure cooker 20 min). Portion into 3 containers.\n*Step 4 (20 min):* Cook pap for 2 days. Store covered.\n\n*Daily plan:*\n🌅 Breakfast: 2 boiled eggs + slice bread\n🌞 Lunch: Pap + pilchards\n🌙 Dinner: Pap + sugar beans + fried onion\n\n*~1,200 kcal | ~75g protein per day*\n\nNot fancy. But it works. Tomorrow I send the day-by-day breakdown.`;
+          // Base plan = ~1,050 kcal / ~82g protein. Tell clients how to scale to their target.
+          const calGap = calTarget - 1050;
+          const scalingNote = calGap > 300
+            ? `Your target is ${calTarget} kcal — double your sugar bean portion at dinner and add an extra egg at breakfast to close the gap.`
+            : `This base plan hits ~1,050 kcal. Add a spoon of peanut butter with breakfast to reach your ${calTarget} kcal target.`;
+          msg = `*${name}, Batch Cook Plan — 1 hour, 5 days sorted* 🍳\n\n*Step 1 (10 min):* Boil 12 eggs. Store in fridge.\n*Step 2 (5 min):* Open 3 tins pilchards, portion into 3 containers.\n*Step 3 (15 min):* Cook sugar beans — soak overnight, boil 1 hour (or pressure cooker 20 min). Portion into 5 containers.\n*Step 4 (20 min):* Cook pap for 3 days. Store covered.\n\n*Daily plan:*\n🌅 Breakfast: 2–3 boiled eggs + pap\n🌞 Lunch: Pap + pilchards (1 tin)\n🌙 Dinner: Pap + sugar beans + fried onion\n\n*~1,050 kcal | ~85g protein per day (base)*\n${scalingNote}\n\nTomorrow I send your full day-by-day breakdown.`;
         } else {
-          msg = `*${name}, Sunday Batch Cook — 1.5 hours, done for the week* 🍳\n\n*Step 1 (40 min):* Season chicken with Aromat + paprika. Bake at 180°C for 40 min. Portion into 5-6 meals.\n*Step 2 (20 min):* Cook 2 cups dry rice. Portion into 5 containers.\n*Step 3 (10 min):* Steam frozen mixed veg. Add to each container.\n*Step 4 (10 min):* Boil 6 eggs for grab-and-go snacks.\n*Step 5 (5 min):* Portion sugar beans into 3 containers for dinners.\n\n*Daily plan:*\n🌅 Breakfast: 2 eggs + toast OR oats with milk\n🌞 Lunch: Chicken + rice + veg (prepped container)\n🌙 Dinner: Pilchards/beans + pap + spinach\n🍎 Snack: Boiled egg or peanut butter on bread\n\n*~1,600-1,800 kcal | ~120g protein per day*\n\nPrep once. Eat clean all week. Tomorrow I send the exact daily breakdown.`;
+          msg = `*${name}, Sunday Batch Cook — 1.5 hours, done for the week* 🍳\n\n*Step 1 (40 min):* Season chicken with Aromat + paprika. Bake at 180°C for 40 min. Portion into 5–6 meals.\n*Step 2 (20 min):* Cook 2 cups dry rice. Portion into 5 containers.\n*Step 3 (10 min):* Steam frozen mixed veg. Add to each container.\n*Step 4 (10 min):* Boil 12 eggs for grab-and-go snacks.\n*Step 5 (5 min):* Portion sugar beans into 3 containers for dinners.\n\n*Daily plan:*\n🌅 Breakfast: 2 eggs + toast OR oats\n🌞 Lunch: Chicken + rice + veg (your prepped container)\n🌙 Dinner: Pilchards/beans + pap + spinach\n🍎 Snack: Boiled egg or peanut butter on bread\n\n*~${calTarget} kcal | ~${protTarget}g protein per day*\n\nPrep once. Eat clean all week. Tomorrow I send the exact daily breakdown.`;
         }
 
         await sendWhatsApp(client.phoneNumber, msg);
@@ -3304,7 +3311,26 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
         const calTarget = client.calorieTarget || 1800;
         const protTarget = client.proteinTarget || 120;
 
-        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n2 eggs + 1 slice toast = ~250 kcal, 14g protein\n\n*🌞 Lunch (1pm):*\nChicken + rice + veg = ~450 kcal, 35g protein\n\n*🌙 Dinner (7pm):*\nPap + pilchards OR beans = ~400 kcal, 25g protein\n\n*🍎 Snack (if needed):*\nPeanut butter on bread OR boiled egg = ~200 kcal, 8g protein\n\n*Daily total: ~1,300 kcal | ~82g protein*\n${calTarget > 1500 ? `\nYour target is ${calTarget} kcal — add bigger portions at lunch and dinner to close the gap.` : `\nYour target is ${calTarget} kcal — this keeps you in a deficit. ${goal === "fat_loss" ? "Exactly where you want to be." : ""}`}\n\nLog every meal this week. Just send what you eat — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R149 subscription. That is the goal._`;
+        // Build a realistic daily plan that actually hits the client's personal targets.
+        const isLowBudget = (client.weeklyFoodBudget || "100_300") === "under_100"
+          || (client.weeklyFoodBudget || "") === "50_100"
+          || (client.weeklyFoodBudget || "") === "under_50";
+
+        // Portion sizes scale with calTarget so the numbers add up correctly.
+        const breakfastKcal = isLowBudget ? 250 : 300;
+        const breakfastProt = isLowBudget ? 14 : 18;
+        const lunchKcal = isLowBudget ? Math.round(calTarget * 0.33) : Math.round(calTarget * 0.35);
+        const lunchProt = Math.round(protTarget * 0.33);
+        const dinnerKcal = isLowBudget ? Math.round(calTarget * 0.30) : Math.round(calTarget * 0.32);
+        const dinnerProt = Math.round(protTarget * 0.35);
+        const snackKcal = calTarget - breakfastKcal - lunchKcal - dinnerKcal;
+        const snackProt = protTarget - breakfastProt - lunchProt - dinnerProt;
+
+        const lunchFood = isLowBudget ? "Pap + pilchards + onion" : "Chicken + rice + veg (your prepped container)";
+        const dinnerFood = isLowBudget ? "Sugar beans + pap + fried onion" : "Pilchards or beans + pap + spinach";
+        const snackFood = isLowBudget ? "1–2 boiled eggs" : "Peanut butter on bread OR boiled egg";
+
+        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n${isLowBudget ? "2 eggs + pap" : "2 eggs + toast OR oats"} = ~${breakfastKcal} kcal, ${breakfastProt}g protein\n\n*🌞 Lunch (1pm):*\n${lunchFood} = ~${lunchKcal} kcal, ~${lunchProt}g protein\n\n*🌙 Dinner (7pm):*\n${dinnerFood} = ~${dinnerKcal} kcal, ~${dinnerProt}g protein\n\n*🍎 Snack (if needed):*\n${snackFood} = ~${Math.max(snackKcal, 150)} kcal, ~${Math.max(snackProt, 8)}g protein\n\n*Daily target: ${calTarget} kcal | ${protTarget}g protein*\n${goal === "fat_loss" ? `This keeps you in a deficit. Stay on the plan — do not skip meals.` : `Eat every meal. You need the fuel to build.`}\n\nLog every meal this week. Just send what you ate — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R149 subscription. That is the goal._`;
 
         await sendWhatsApp(client.phoneNumber, msg);
         recordProactiveSend(client.id);
