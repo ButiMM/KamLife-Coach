@@ -3177,35 +3177,36 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
       const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
       if (usableMeals.length > 0) {
-        let totalCals = 0; let totalProt = 0;
-        const labels: string[] = [];
-        for (const row of usableMeals) {
-          totalCals += row.kcalInt || 0;
-          totalProt += row.proteinInt || 0;
-          if (row.rawMessage) labels.push(row.rawMessage.slice(0, 50));
-          // Re-insert to today with quick_relog source
-          await db.insert(mealLogs).values({
-            userId: user.id,
-            rawMessage: row.rawMessage || toRepeat,
-            source: "quick_relog",
-            kcalInt: row.kcalInt,
-            proteinInt: row.proteinInt,
-            carbsInt: row.carbsInt,
-            fatInt: row.fatInt,
-            items: row.items,
-          }).catch(() => {});
-        }
+        // Match on the specific meal the user referenced (prefer rawMessage match, then most recent)
+        const matchedMeal = usableMeals.find(r =>
+          r.rawMessage && toRepeat && r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase())
+        ) || usableMeals[0];
+
+        const totalCals = matchedMeal.kcalInt || 0;
+        const totalProt = matchedMeal.proteinInt || 0;
+        const labels: string[] = matchedMeal.rawMessage ? [matchedMeal.rawMessage.slice(0, 50)] : [];
+        // Re-insert single meal to today with quick_relog source
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: matchedMeal.rawMessage || toRepeat,
+          source: "quick_relog",
+          kcalInt: matchedMeal.kcalInt,
+          proteinInt: matchedMeal.proteinInt,
+          carbsInt: matchedMeal.carbsInt,
+          fatInt: matchedMeal.fatInt,
+          items: matchedMeal.items,
+        }).catch(() => {});
         const calorieTarget = user.calorieTarget || 2000;
         const proteinTarget = user.proteinTarget || 120;
-        // Update today's running totals
-        const todayStr = sastToday();
-        const updTodayCals = (user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0) + totalCals;
-        const updTodayProt = (user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0) + totalProt;
+        // Recompute from mealLogs (includes the newly inserted quick_relog row)
+        const relogged = await recomputeTodayFoodTotals(user.id);
         await db.update(users).set({
-          todayCalories: updTodayCals,
-          todayProteinG: updTodayProt,
-          todayCaloriesDate: todayStr,
+          todayCalories: relogged.calories,
+          todayProteinG: relogged.protein,
+          todayCaloriesDate: sastToday(),
         }).where(eq(users.phoneNumber, phone));
+        const updTodayCals = relogged.calories;
+        const updTodayProt = relogged.protein;
         const remaining = calorieTarget - updTodayCals;
         const protGap = proteinTarget - updTodayProt;
         await logChat(user.id, message, `Quick relog: ${labels.join(", ")}`, "FOOD_LOG");
