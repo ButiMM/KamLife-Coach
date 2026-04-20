@@ -821,3 +821,93 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
     return "Eish Coach K had a moment. Try that again.";
   }
 }
+
+// ============================================================
+// INTENT CLASSIFIER — structural reset plan item #2
+// One cheap gpt-4o-mini call per text message to label intent.
+// Used to augment keyword routing and tag chatHistory accurately.
+// Cost: ~$0.0001/call. Fast-path avoids GPT for obvious cases.
+// Falls back to { intent: "OTHER", confidence: 0 } on any error.
+// ============================================================
+
+export type ClassifiedIntent =
+  | "FOOD_LOG" | "WORKOUT_LOG" | "STEPS" | "WEIGHT"
+  | "QUESTION" | "RANT" | "GREETING" | "MENU_REQUEST" | "OTHER";
+
+export interface IntentClassification {
+  intent: ClassifiedIntent;
+  confidence: number; // 0–1
+}
+
+// Regex fast-paths to skip the GPT call for single-signal messages
+const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
+  [/^(hi|hey|hello|howzit|sawubona|dumelang|ekse|yo|sup|gm|good\s*morning|good\s*afternoon|good\s*evening|good\s*night)[\s!?.]*$/i, "GREETING"],
+  [/^(menu|help|options|start|\*menu\*|\*help\*)[\s?]*$/i, "MENU_REQUEST"],
+  [/^(\d{4,6})\s*(steps?|step|km|k|miles?)?\s*$/i, "STEPS"],
+  [/^(\d{2,3}(?:\.\d+)?)\s*kg\s*$/i, "WEIGHT"],
+  [/^(done|finished|completed|session done|workout done|trained today|went to gym|gym done|just finished|just trained)[\s!.]*$/i, "WORKOUT_LOG"],
+];
+
+const VALID_INTENTS = new Set<ClassifiedIntent>([
+  "FOOD_LOG", "WORKOUT_LOG", "STEPS", "WEIGHT",
+  "QUESTION", "RANT", "GREETING", "MENU_REQUEST", "OTHER",
+]);
+
+export async function classifyIntent(message: string, userId?: string): Promise<IntentClassification> {
+  const m = message.trim();
+  if (m.length < 2) return { intent: "OTHER", confidence: 0.95 };
+
+  // Fast-path: skip GPT for obvious single-signal messages
+  for (const [pattern, intent] of INTENT_FAST_PATHS) {
+    if (pattern.test(m)) return { intent, confidence: 0.95 };
+  }
+
+  // Skip GPT for very long messages — SA food scanner / existing routing handles these
+  if (m.length > 500) return { intent: "OTHER", confidence: 0 };
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 20,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content: `Classify this WhatsApp message from a South African fitness app user. Respond ONLY with JSON: {"intent":"X","confidence":0.0}
+
+X must be exactly one of:
+FOOD_LOG   - reporting food/drinks eaten (e.g. "I had pap and eggs", "just ate chicken")
+WORKOUT_LOG- reporting completed exercise/session (e.g. "done", "trained today")
+STEPS      - logging steps walked (e.g. "8500 steps", "walked 6km today")
+WEIGHT     - logging body weight (e.g. "I'm 85kg now", "weighed 78 this morning")
+QUESTION   - asking about fitness, nutrition, or health
+RANT       - venting frustration or emotion (not asking for information)
+GREETING   - purely social opener (hi/hello/morning only)
+MENU_REQUEST - wants menu, options, or help list
+OTHER      - everything else`,
+        },
+        { role: "user", content: m.slice(0, 300) },
+      ],
+    });
+
+    const raw = (response.choices[0]?.message?.content || "{}").trim();
+    const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };
+    const intent: ClassifiedIntent = VALID_INTENTS.has(parsed.intent as ClassifiedIntent)
+      ? (parsed.intent as ClassifiedIntent)
+      : "OTHER";
+    const confidence = typeof parsed.confidence === "number"
+      ? Math.min(1, Math.max(0, parsed.confidence))
+      : 0.5;
+
+    if (response.usage && userId) {
+      const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
+      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%) tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
+    }
+
+    return { intent, confidence };
+  } catch (err) {
+    // Non-fatal — routing gracefully falls back to keyword matching
+    console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
+    return { intent: "OTHER", confidence: 0 };
+  }
+}

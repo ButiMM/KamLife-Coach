@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, gptFoodFallback } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, gptFoodFallback, classifyIntent, type ClassifiedIntent } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -844,6 +844,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   const user = await getOrCreateUser(phone);
+
+  // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
+  // Fire early as a background Promise. Text messages only (not photo/voice).
+  // Awaited just before the final GPT routing (line ~6590) — by then it's complete.
+  // On any error, returns { intent: "OTHER", confidence: 0 } — never blocks.
+  const intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> =
+    (!mediaUrl && message.length >= 2 && message.length <= 500)
+      ? classifyIntent(message, user.id).catch(() => ({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }))
+      : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
 
   // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
   // Prevent vague GPT responses after a media upload by resolving against recent media events.
@@ -2013,6 +2022,12 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
             const remaining = calTarget - totals.calories;
             photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
           }
+          // Keep denormalized columns in sync for any remaining edge-case consumers
+          await db.update(users).set({
+            todayCalories: totals.calories,
+            todayProteinG: totals.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id)).catch(e => console.warn("[photo todayCalories sync]", e));
         } catch (e) { console.warn("[non-fatal]", e); }
         return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
@@ -3008,41 +3023,39 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
             parts.push(`${food.name} — ${food.typicalPortionCalories} kcal | ${food.typicalPortionProtein}g protein`);
           }
           await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
-          // Update daily totals
-          const todayStr3 = sastToday();
-          const prevCals = user.todayCaloriesDate === todayStr3 ? (user.todayCalories || 0) : 0;
-          const prevProt = user.todayCaloriesDate === todayStr3 ? (user.todayProteinG || 0) : 0;
+          // Write to mealLogs as source of truth
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: lastUnloggedFood.messageIn || "",
+            source: "text",
+            kcalInt: totalCals,
+            proteinInt: totalProt2,
+            carbsInt: 0,
+            fatInt: 0,
+          }).catch(e => console.warn("[smart-log mealLogs write]", e));
+          // Recompute from mealLogs and sync denormalized columns
+          const recomputed3 = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({
-            todayCalories: prevCals + totalCals,
-            todayProteinG: prevProt + totalProt2,
-            todayCaloriesDate: todayStr3,
-          }).where(eq(users.phoneNumber, phone));
-          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${prevCals + totalCals} kcal | ${prevProt + totalProt2}g protein_`;
+            todayCalories: recomputed3.calories,
+            todayProteinG: recomputed3.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id)).catch(e => console.warn("[smart-log todayCalories sync]", e));
+          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${recomputed3.calories} kcal | ${recomputed3.protein}g protein_`;
         }
       }
     } catch { /* non-fatal — fall through to summary */ }
 
-    const todayStart2 = new Date(); todayStart2.setHours(0, 0, 0, 0);
-    const todayLogs = await db.select({ messageIn: chatHistory.messageIn })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart2)));
-    if (todayLogs.length === 0) {
-      return `Nothing logged yet today. Tell me what you ate — "I had pap and eggs" or "chicken and sweet potato" — and I will log the calories and protein.`;
-    }
+    // Use mealLogs as source of truth for today's summary
+    const summaryTotals = await recomputeTodayFoodTotals(user.id);
     const name = user.name ? ` ${user.name}` : "";
-    let totalCal = 0; let totalProt = 0;
-    for (const log of todayLogs) {
-      const matched = scanForSAFoods(log.messageIn || "");
-      totalCal += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
-      totalProt += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+    if (summaryTotals.calories === 0 && summaryTotals.protein === 0) {
+      return `Nothing logged yet today. Tell me what you ate — "I had pap and eggs" or "chicken and sweet potato" — and I will log the calories and protein.`;
     }
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
-    const remaining = calTarget - totalCal;
-    const protRemaining = protTarget - totalProt;
-    const summary = totalCal > 0
-      ? `Today so far:${name} *${totalCal} kcal | ${totalProt}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`
-      : `${todayLogs.length} meal${todayLogs.length > 1 ? "s" : ""} logged today. Keep sending what you eat and I track the running total.`;
+    const remaining = calTarget - summaryTotals.calories;
+    const protRemaining = protTarget - summaryTotals.protein;
+    const summary = `Today so far:${name} *${summaryTotals.calories} kcal | ${summaryTotals.protein}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`;
     return summary;
   }
 
@@ -6583,7 +6596,20 @@ CRITICAL RULES — these are non-negotiable:
   }
 
   // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----
-  const agentType = routeToAgent(message);
+  // Await classifier here — by now it has had 0.5-2s to complete across all the handlers above.
+  const intentResult = await intentPromise;
+  const classifiedIntent = intentResult.intent;
+  const intentConfidence = intentResult.confidence;
+
+  // Determine effective agent type:
+  // 1. RANT with high confidence → mindset agent (empathetic, doesn't lecture on nutrition)
+  // 2. Otherwise use keyword-based routing as before
+  let agentType = routeToAgent(message);
+  if (classifiedIntent === "RANT" && intentConfidence >= 0.75) {
+    agentType = "mindset";
+    console.log(`[INTENT] RANT override → mindset agent (${Math.round(intentConfidence * 100)}% confidence)`);
+  }
+
   let gptReply: string;
   const AGENT_ERROR = "Eish Coach K had a moment. Try that again.";
 
@@ -6680,6 +6706,13 @@ CRITICAL RULES — these are non-negotiable:
     await logChat(user.id, message, fullReply, "FOOD_LOG");
     return fullReply;
   }
+
+  // Log the GPT catchall with the classifier's intent label so the observability
+  // dashboard shows accurate intent tags for messages that fell through all handlers.
+  const gptIntentLabel = (classifiedIntent !== "OTHER" && intentConfidence >= 0.6)
+    ? classifiedIntent
+    : (agentType === "mindset" ? "MINDSET" : agentType === "nutrition" ? "NUTRITION" : agentType === "programming" ? "PROGRAMME" : "GENERAL");
+  await logChat(user.id, message, finalReply, gptIntentLabel).catch(e => console.warn("[non-fatal logChat]", e));
 
   return finalReply;
 
