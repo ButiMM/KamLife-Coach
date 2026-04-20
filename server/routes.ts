@@ -3623,10 +3623,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress") || m === "this week" || m === "week" || m === "week summary" || m === "my week" || m === "weekly summary" || m === "6" || m === "weekly report" || m === "report" || m.includes("how was my week") || m.includes("this weeks progress")) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
-      const [recentSteps, recentWorkouts, recentWeights] = await Promise.all([
+      const [recentSteps, recentWorkouts, recentWeights, weekFoodRows] = await Promise.all([
         db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))).orderBy(desc(stepLogs.loggedAt)),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
         db.select().from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+          logDays: sql<number>`COUNT(DISTINCT DATE(${mealLogs.loggedAt}))::int`,
+        }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
       ]);
       const liveT = calculateTargets(parseFloat(user.currentWeight || "75"), user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
       const plannedSessions = user.trainingDaysPerWeek || 3;
@@ -3636,12 +3640,19 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const weightChange = recentWeights.length >= 2
         ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
         : null;
+      const weekFoodLogDays = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
+      const weekTotalProt = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
+      const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / 7) : 0;
+      const protTarget = user.proteinTarget || 120;
       const sessionSentence = `Training: ${completedSessions} of ${plannedSessions} planned sessions done this week.`;
       const stepSentence = avgSteps > 0 ? `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.` : `Steps: no step logs this week — start logging daily.`;
       const weightSentence = weightChange !== null ? (parseFloat(weightChange) < 0 ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.` : parseFloat(weightChange) > 0 ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.` : `Weight: holding steady this week.`) : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
+      const foodSentence = weekFoodLogDays > 0
+        ? `Food: logged ${weekFoodLogDays}/7 days — avg ${avgDailyProt}g protein/day${avgDailyProt >= protTarget * 0.9 ? " ✅" : ` (target ${protTarget}g — ${protTarget - avgDailyProt}g gap)`}`
+        : `Food: no meals logged this week — consistency here is what drives results.`;
       const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
       const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Hey"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
-      const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${verdictSentence}`;
+      const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
 
       // Build shareable weekly wins card for good weeks
       let winsCard = "";
