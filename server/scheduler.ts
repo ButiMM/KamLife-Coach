@@ -655,14 +655,16 @@ async function runEveningAccountability(): Promise<void> {
 
       const parts: string[] = [`${name}, day's winding down.`];
 
-      // Food summary
+      // Food summary — read from mealLogs (source of truth, includes photo/voice logs)
       const calTarget = client.calorieTarget || 1800;
       const protTarget = client.proteinTarget || 130;
-      const todayCal = client.todayCalories || 0;
-      const todayProt = client.todayProteinG || 0;
-      const calDate = client.todayCaloriesDate;
-      const today = todaySAST();
-      if (calDate === today && todayCal > 0) {
+      const [mealSum] = await db.select({
+        todayCal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+        todayProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)));
+      const todayCal = mealSum?.todayCal || 0;
+      const todayProt = mealSum?.todayProt || 0;
+      if (todayCal > 0) {
         parts.push(`\n*Food:* ${todayCal} kcal | ${todayProt}g protein (target: ${calTarget} kcal | ${protTarget}g)`);
       } else {
         parts.push(`\n*Food:* No meals logged today.`);
@@ -700,7 +702,7 @@ async function runEveningAccountability(): Promise<void> {
       }
 
       // Adaptive closing — tone matches how the day went
-      const hadFood = calDate === today && (client.todayCalories || 0) > 0;
+      const hadFood = todayCal > 0;
       const hadWorkout = todayWorkouts.length > 0;
       const hadSteps = todaySteps.length > 0 && todaySteps[0].steps >= stepsTarget;
 
