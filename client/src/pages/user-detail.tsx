@@ -1,17 +1,19 @@
 import { useState } from "react";
-import { useUser } from "@/hooks/use-users";
+import { useUser, useClientTimeline, type ClientAction } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { StatusBadge } from "@/components/status-badge";
 import { useRoute } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { format } from "date-fns";
+import { Input } from "@/components/ui/input";
+import { format, formatDistanceToNow } from "date-fns";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare, UtensilsCrossed, Camera, Mic } from "lucide-react";
-import { useMutation } from "@tanstack/react-query";
+import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare, UtensilsCrossed, Camera, Mic, ClipboardList, Check, Trash2, Plus, Activity, ShieldAlert, Utensils } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { authHeaders } from "@/lib/queryClient";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,9 +30,13 @@ export default function UserDetail() {
   const userId = params?.id ? params.id : "";
   const [coachMessage, setCoachMessage] = useState("");
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [newAction, setNewAction] = useState("");
+  const [showTimeline, setShowTimeline] = useState(false);
   const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const { data: userData, isLoading: userLoading } = useUser(userId);
+  const { data: timelineData } = useClientTimeline(userId);
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
@@ -45,6 +51,48 @@ export default function UserDetail() {
     onError: (err: any) => {
       toast({ title: "Failed to send", description: err.message || "Check Twilio configuration", variant: "destructive" });
     },
+  });
+
+  const addActionMutation = useMutation({
+    mutationFn: async (content: string) => {
+      const res = await fetch(`/api/users/${userId}/actions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ content }),
+      });
+      if (!res.ok) throw new Error("Failed to add action");
+      return res.json();
+    },
+    onSuccess: () => {
+      setNewAction("");
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] });
+    },
+    onError: () => toast({ title: "Failed to add action", variant: "destructive" }),
+  });
+
+  const toggleActionMutation = useMutation({
+    mutationFn: async ({ actionId, completed }: { actionId: number; completed: boolean }) => {
+      const res = await fetch(`/api/users/${userId}/actions/${actionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({ completed }),
+      });
+      if (!res.ok) throw new Error("Failed to update action");
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] }),
+  });
+
+  const deleteActionMutation = useMutation({
+    mutationFn: async (actionId: number) => {
+      const res = await fetch(`/api/users/${userId}/actions/${actionId}`, {
+        method: "DELETE",
+        headers: authHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to delete action");
+      return res.json();
+    },
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] }),
   });
 
   const user = userData?.user;
@@ -261,6 +309,135 @@ export default function UserDetail() {
             <div className="mt-3 flex items-center gap-2 text-sm text-destructive">
               <AlertTriangle className="w-4 h-4" />
               <span>Twilio must be configured to send messages to clients.</span>
+            </div>
+          )}
+        </Card>
+
+        {/* Pinned Actions */}
+        <Card className="p-6 border-border/50">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-violet-100 text-violet-600 rounded-xl">
+                <ClipboardList className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold font-display">Pinned Actions</h3>
+                <p className="text-sm text-muted-foreground">Coach-defined follow-ups for this client</p>
+              </div>
+            </div>
+            <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded-full">
+              {(userData?.actions || []).filter(a => !a.completedAt).length} open
+            </span>
+          </div>
+
+          {/* Add new action */}
+          <div className="flex gap-2 mb-4">
+            <Input
+              placeholder="Add a follow-up action..."
+              value={newAction}
+              onChange={(e) => setNewAction(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && newAction.trim()) { addActionMutation.mutate(newAction.trim()); } }}
+              className="flex-1"
+            />
+            <Button
+              size="sm"
+              onClick={() => newAction.trim() && addActionMutation.mutate(newAction.trim())}
+              disabled={!newAction.trim() || addActionMutation.isPending}
+              className="gap-1.5"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              Add
+            </Button>
+          </div>
+
+          {/* Action list */}
+          {(userData?.actions || []).length === 0 ? (
+            <p className="text-sm text-muted-foreground text-center py-4">No actions yet. Add one above.</p>
+          ) : (
+            <div className="space-y-2">
+              {[...(userData?.actions || [])].sort((a, b) => {
+                // Open first, then by createdAt
+                const aOpen = !a.completedAt ? 0 : 1;
+                const bOpen = !b.completedAt ? 0 : 1;
+                return aOpen - bOpen;
+              }).map((action: ClientAction) => (
+                <div key={action.id} className={`flex items-center gap-3 p-3 rounded-xl border text-sm ${action.completedAt ? "bg-secondary/30 border-border/30 opacity-60" : "bg-secondary/50 border-border/50"}`}>
+                  <button
+                    onClick={() => toggleActionMutation.mutate({ actionId: action.id, completed: !action.completedAt })}
+                    className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 transition-colors ${action.completedAt ? "bg-emerald-500 border-emerald-500 text-white" : "border-muted-foreground/40 hover:border-primary"}`}
+                  >
+                    {action.completedAt && <Check className="w-3 h-3" />}
+                  </button>
+                  <span className={`flex-1 ${action.completedAt ? "line-through text-muted-foreground" : ""}`}>{action.content}</span>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {action.createdAt && (
+                      <span className="text-xs text-muted-foreground">{formatDistanceToNow(new Date(action.createdAt), { addSuffix: true })}</span>
+                    )}
+                    <button
+                      onClick={() => deleteActionMutation.mutate(action.id)}
+                      className="text-muted-foreground/50 hover:text-destructive transition-colors"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </Card>
+
+        {/* Activity Timeline */}
+        <Card className="p-6 border-border/50">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-amber-100 text-amber-600 rounded-xl">
+                <Activity className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold font-display">Activity Timeline</h3>
+                <p className="text-sm text-muted-foreground">Last 30 days — all events</p>
+              </div>
+            </div>
+            <Button variant="ghost" size="sm" onClick={() => setShowTimeline(v => !v)} className="text-xs">
+              {showTimeline ? "Collapse" : `Show ${timelineData?.events?.length ?? 0} events`}
+            </Button>
+          </div>
+
+          {showTimeline && (
+            <div className="overflow-y-auto max-h-[500px] custom-scrollbar">
+              {!timelineData?.events?.length ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No events in the last 30 days.</p>
+              ) : (
+                <div className="relative pl-6 border-l-2 border-border space-y-1">
+                  {(timelineData?.events || []).map((event, i) => {
+                    const icon =
+                      event.type === "weight" ? <Scale className="w-3.5 h-3.5" /> :
+                      event.type === "steps" ? <Footprints className="w-3.5 h-3.5" /> :
+                      event.type === "workout" ? <Dumbbell className="w-3.5 h-3.5" /> :
+                      event.type === "food" ? <Utensils className="w-3.5 h-3.5" /> :
+                      event.type === "escalation" ? <ShieldAlert className="w-3.5 h-3.5" /> :
+                      <MessageSquare className="w-3.5 h-3.5" />;
+                    const color =
+                      event.type === "weight" ? "bg-blue-100 text-blue-600" :
+                      event.type === "steps" ? "bg-emerald-100 text-emerald-600" :
+                      event.type === "workout" ? "bg-violet-100 text-violet-600" :
+                      event.type === "food" ? "bg-amber-100 text-amber-600" :
+                      event.type === "escalation" ? "bg-red-100 text-red-600" :
+                      "bg-slate-100 text-slate-600";
+                    return (
+                      <div key={i} className="flex items-start gap-3 py-2 group">
+                        <div className={`absolute -left-2.5 w-5 h-5 rounded-full flex items-center justify-center ${color} border-2 border-background`}>
+                          {icon}
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm truncate">{event.detail}</p>
+                          <p className="text-xs text-muted-foreground">{format(new Date(event.date), "MMM d, HH:mm")}</p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           )}
         </Card>

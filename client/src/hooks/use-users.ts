@@ -16,6 +16,22 @@ export interface MealLogEntry {
   items: Array<{ name: string; kcal: number; protein: number }> | null;
 }
 
+export interface ClientAction {
+  id: number;
+  userId: string;
+  content: string;
+  dueAt: string | null;
+  completedAt: string | null;
+  createdAt: string | null;
+}
+
+export interface TimelineEvent {
+  date: string;
+  type: "weight" | "steps" | "workout" | "food" | "escalation" | "chat";
+  detail: string;
+  meta?: Record<string, unknown>;
+}
+
 export interface UserDetailResponse {
   user: User;
   weightLogs: WeightLog[];
@@ -23,6 +39,7 @@ export interface UserDetailResponse {
   workoutLogs: { completed: boolean; loggedAt: string }[];
   chatHistory: { messageIn: string; messageOut: string; intent: string; createdAt: string }[];
   mealLogs: MealLogEntry[];
+  actions: ClientAction[];
 }
 
 function parseWithLogging<T>(schema: any, data: unknown, label: string): T {
@@ -225,6 +242,19 @@ export function useMetrics() {
         pricePerUser: number;
       }>;
     },
+    refetchInterval: 60_000,
+  });
+}
+
+export function useClientTimeline(userId: string) {
+  return useQuery({
+    queryKey: [`/api/users/${userId}/timeline`],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/timeline`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch timeline");
+      return res.json() as Promise<{ events: TimelineEvent[] }>;
+    },
+    enabled: !!userId,
     refetchInterval: 60_000,
   });
 }

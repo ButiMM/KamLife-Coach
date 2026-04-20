@@ -221,6 +221,16 @@ async function runMigrations(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS ab_assignments_exp_user_idx ON ab_assignments(experiment_id, user_id)`,
     `CREATE INDEX IF NOT EXISTS ab_assignments_exp_idx ON ab_assignments(experiment_id)`,
 
+    `CREATE TABLE IF NOT EXISTS client_actions (
+      id SERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      content TEXT NOT NULL,
+      due_at TIMESTAMP,
+      completed_at TIMESTAMP,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS client_actions_user_idx ON client_actions(user_id)`,
+
     `CREATE TABLE IF NOT EXISTS conversations (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,

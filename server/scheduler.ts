@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
-import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive } from "../shared/schema";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -2750,6 +2750,29 @@ export function initScheduler(): void {
       const gptFallbackCount = Number(gptFallbackLogs?.rows?.[0]?.c || 0);
       const fallbackPct = weekFoodLogsCount > 0 ? Math.round((gptFallbackCount / weekFoodLogsCount) * 100) : 0;
 
+      // ── Escalation metrics ──
+      const [escNewRow] = await db.select({ c: count() }).from(escalations)
+        .where(gte(escalations.createdAt, sevenDaysAgo));
+      const escNew = escNewRow?.c || 0;
+
+      const [escOpenRow] = await db.select({ c: count() }).from(escalations)
+        .where(eq(escalations.status, "open"));
+      const escOpen = escOpenRow?.c || 0;
+
+      const [escResolvedRow] = await db.select({ c: count() }).from(escalations)
+        .where(and(eq(escalations.status, "resolved"), gte(escalations.resolvedAt, sevenDaysAgo)));
+      const escResolved = escResolvedRow?.c || 0;
+
+      const [escUrgentRow] = await db.select({ c: count() }).from(escalations)
+        .where(and(eq(escalations.priority, "urgent"), eq(escalations.status, "open")));
+      const escUrgent = escUrgentRow?.c || 0;
+
+      // ── Food log source breakdown ──
+      const foodSourceRows = await db.execute(
+        sql`SELECT source, COUNT(*) as c FROM meal_logs WHERE logged_at >= ${sevenDaysAgo} GROUP BY source ORDER BY c DESC`
+      ) as any;
+      const foodSources: string[] = (foodSourceRows?.rows || []).map((r: any) => `${r.source || "unknown"}: ${r.c}`);
+
       // ── A/B experiment results ──
       let abSection = "";
       try {
@@ -2778,6 +2801,12 @@ export function initScheduler(): void {
         console.warn("[KPI] A/B section error:", e);
       }
 
+      const escSection = `\n\n*Escalations*\nNew this week: ${escNew} | Resolved: ${escResolved}\nOpen: ${escOpen}${escUrgent > 0 ? ` ⚠️ ${escUrgent} URGENT` : ""}`;
+
+      const foodSourceSection = foodSources.length > 0
+        ? `\nSources: ${foodSources.join(", ")}`
+        : "";
+
       const report = `*📊 KamLife Weekly Report*
 _${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_
 
@@ -2788,13 +2817,13 @@ New this week: ${newThisWeek}
 *Engagement*
 Workouts: ${weekWorkouts?.c || 0}
 Step logs: ${weekSteps?.c || 0}
-Food logs: ${weekFoodLogsCount} (GPT fallback: ${gptFallbackCount} = ${fallbackPct}%)
+Food logs: ${weekFoodLogsCount} (fallback: ${fallbackPct}%)${foodSourceSection}
 Messages: ${weekMessages?.c || 0}
 
 *Health*
 Total clients: ${totalClients}
 At-risk (48h+ silent): ${atRisk}
-Churn risk (14d+): ${churned}
+Churn risk (14d+): ${churned}${escSection}
 
 *Delivery*
 Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;

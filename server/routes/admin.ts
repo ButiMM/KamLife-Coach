@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs } from "../../shared/schema";
-import { eq, desc, and, gte, or } from "drizzle-orm";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions } from "../../shared/schema";
+import { eq, desc, asc, and, gte, isNull, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
 import { requireAdminKey } from "./auth";
@@ -58,17 +58,107 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       if (!user.length) return res.status(404).json({ message: "User not found" });
 
       const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
-      const [weights, steps, workouts, chats, meals] = await Promise.all([
+      const [weights, steps, workouts, chats, meals, actions] = await Promise.all([
         db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30),
         db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30),
         db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30),
         db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50),
         db.select().from(mealLogs).where(and(eq(mealLogs.userId, req.params.id), gte(mealLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(mealLogs.loggedAt)).limit(100),
+        db.select().from(clientActions).where(eq(clientActions.userId, req.params.id)).orderBy(asc(clientActions.createdAt)).limit(50),
       ]);
 
-      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals });
+      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals, actions });
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch user" });
+    }
+  });
+
+  // ── Client pinned actions — CRUD ──
+  app.get("/api/users/:id/actions", requireAdminKey, async (req, res) => {
+    try {
+      const rows = await db.select().from(clientActions)
+        .where(eq(clientActions.userId, req.params.id))
+        .orderBy(asc(clientActions.createdAt));
+      res.json({ actions: rows });
+    } catch { res.status(500).json({ error: "Failed to fetch actions" }); }
+  });
+
+  app.post("/api/users/:id/actions", requireAdminKey, async (req, res) => {
+    try {
+      const { content, dueAt } = req.body as { content?: string; dueAt?: string };
+      if (!content?.trim()) return res.status(400).json({ error: "content is required" });
+      const [row] = await db.insert(clientActions).values({
+        userId: req.params.id,
+        content: content.trim(),
+        dueAt: dueAt ? new Date(dueAt) : undefined,
+      }).returning();
+      res.json({ action: row });
+    } catch { res.status(500).json({ error: "Failed to create action" }); }
+  });
+
+  app.patch("/api/users/:id/actions/:actionId", requireAdminKey, async (req, res) => {
+    try {
+      const actionId = parseInt(req.params.actionId);
+      const { completed } = req.body as { completed?: boolean };
+      const [row] = await db.update(clientActions)
+        .set({ completedAt: completed ? new Date() : null })
+        .where(and(eq(clientActions.id, actionId), eq(clientActions.userId, req.params.id)))
+        .returning();
+      if (!row) return res.status(404).json({ error: "Action not found" });
+      res.json({ action: row });
+    } catch { res.status(500).json({ error: "Failed to update action" }); }
+  });
+
+  app.delete("/api/users/:id/actions/:actionId", requireAdminKey, async (req, res) => {
+    try {
+      const actionId = parseInt(req.params.actionId);
+      await db.delete(clientActions)
+        .where(and(eq(clientActions.id, actionId), eq(clientActions.userId, req.params.id)));
+      res.json({ success: true });
+    } catch { res.status(500).json({ error: "Failed to delete action" }); }
+  });
+
+  // ── Client activity timeline by UUID ──
+  app.get("/api/users/:id/timeline", requireAdminKey, async (req, res) => {
+    try {
+      const userId = req.params.id;
+      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+
+      const [weights, steps, workouts, meals, escs, chats] = await Promise.all([
+        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
+          .where(and(eq(weightLogs.userId, userId), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(desc(weightLogs.loggedAt)),
+        db.select({ steps: stepLogs.steps, date: stepLogs.loggedAt }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, thirtyDaysAgo))).orderBy(desc(stepLogs.loggedAt)),
+        db.select({ date: workoutLogs.loggedAt }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, thirtyDaysAgo))).orderBy(desc(workoutLogs.loggedAt)),
+        db.select({ kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt, raw: mealLogs.rawMessage, source: mealLogs.source, date: mealLogs.loggedAt }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, thirtyDaysAgo))).orderBy(desc(mealLogs.loggedAt)).limit(100),
+        db.select({ reason: escalations.reason, status: escalations.status, priority: escalations.priority, date: escalations.createdAt }).from(escalations)
+          .where(and(eq(escalations.userId, userId), gte(escalations.createdAt, thirtyDaysAgo))).orderBy(desc(escalations.createdAt)),
+        db.select({ intent: chatHistory.intent, msgIn: chatHistory.messageIn, date: chatHistory.createdAt }).from(chatHistory)
+          .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, thirtyDaysAgo))).orderBy(desc(chatHistory.createdAt)).limit(50),
+      ]);
+
+      type TEvent = { date: string; type: string; detail: string; meta?: Record<string, unknown> };
+      const events: TEvent[] = [];
+
+      for (const w of weights) events.push({ date: new Date(w.date!).toISOString(), type: "weight", detail: `${w.weight} kg` });
+      for (const s of steps) events.push({ date: new Date(s.date!).toISOString(), type: "steps", detail: `${s.steps?.toLocaleString()} steps`, meta: { steps: s.steps } });
+      for (const wo of workouts) events.push({ date: new Date(wo.date!).toISOString(), type: "workout", detail: "Completed workout" });
+      for (const m of meals) {
+        const label = m.raw && m.raw !== "[Photo]" ? m.raw.slice(0, 60) : `${m.source} meal`;
+        events.push({ date: new Date(m.date!).toISOString(), type: "food", detail: label, meta: { kcal: m.kcal, protein: m.protein, source: m.source } });
+      }
+      for (const e of escs) events.push({ date: new Date(e.date!).toISOString(), type: "escalation", detail: `${e.priority?.toUpperCase()} escalation: ${e.reason} (${e.status})` });
+      for (const c of chats) {
+        if (!c.intent || c.intent === "GENERAL" || !c.msgIn) continue; // skip noise
+        events.push({ date: new Date(c.date!).toISOString(), type: "chat", detail: `[${c.intent}] ${c.msgIn.slice(0, 70)}` });
+      }
+
+      events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+      res.json({ events: events.slice(0, 150) });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch timeline" });
     }
   });
 

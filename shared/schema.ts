@@ -414,6 +414,25 @@ export const messages = pgTable("messages", {
     .notNull(),
 });
 
+// === CLIENT PINNED ACTIONS ===
+// Coach-defined per-client tasks: "Call to check injury", "Review programme week 4", etc.
+export const clientActions = pgTable("client_actions", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  content: text("content").notNull(),
+  dueAt: timestamp("due_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userIdx: index("client_actions_user_idx").on(table.userId),
+}));
+
+export type ClientAction = typeof clientActions.$inferSelect;
+
+export const clientActionsRelations = relations(clientActions, ({ one }) => ({
+  user: one(users, { fields: [clientActions.userId], references: [users.id] }),
+}));
+
 // === RELATIONS ===
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -426,6 +445,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   bodyMeasurements: many(bodyMeasurements),
   progressPhotos: many(progressPhotos),
   escalations: many(escalations),
+  clientActions: many(clientActions),
 }));
 
 export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({
