@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, desc, and, gte, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
@@ -57,12 +57,16 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       const user = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
       if (!user.length) return res.status(404).json({ message: "User not found" });
 
-      const weights = await db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30);
-      const steps = await db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30);
-      const workouts = await db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30);
-      const chats = await db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50);
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
+      const [weights, steps, workouts, chats, meals] = await Promise.all([
+        db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30),
+        db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30),
+        db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30),
+        db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50),
+        db.select().from(mealLogs).where(and(eq(mealLogs.userId, req.params.id), gte(mealLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(mealLogs.loggedAt)).limit(100),
+      ]);
 
-      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats });
+      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals });
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
