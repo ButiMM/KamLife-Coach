@@ -4,7 +4,6 @@ import { users, chatHistory } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
-import { requireAdminKey } from "./auth";
 
 export function registerPaymentRoutes(app: Express) {
 
@@ -184,7 +183,9 @@ export function registerPaymentRoutes(app: Express) {
   });
 
   // ── PayFast payment link generator ──
-  app.get("/api/payfast/link", requireAdminKey, async (req: any, res: any) => {
+  // No admin gate — users hit this when clicking their pay link from WhatsApp.
+  // Security: PayFast validates the signature on the ITN; this endpoint only builds a URL.
+  app.get("/api/payfast/link", async (req: any, res: any) => {
     try {
       const phone = decodeURIComponent(req.query.phone as string || "");
       if (!phone) return res.status(400).json({ error: "phone required" });

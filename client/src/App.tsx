@@ -14,6 +14,8 @@ import AdminTest from "@/pages/admin/test";
 import Observability from "@/pages/observability";
 import Escalations from "@/pages/escalations";
 import ABTests from "@/pages/ab-tests";
+import PaymentSuccess from "@/pages/payment-success";
+import PaymentCancel from "@/pages/payment-cancel";
 import Login from "@/pages/login";
 import { isAuthenticated } from "@/lib/auth";
 
@@ -27,6 +29,8 @@ function Router() {
     <Switch>
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={Login} />
+      <Route path="/payment-success" component={PaymentSuccess} />
+      <Route path="/payment-cancel" component={PaymentCancel} />
       <Route path="/dashboard">{() => <AuthGuard component={Dashboard} />}</Route>
       <Route path="/analytics">{() => <AuthGuard component={Analytics} />}</Route>
       <Route path="/users">{() => <AuthGuard component={UsersList} />}</Route>
