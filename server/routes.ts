@@ -710,7 +710,7 @@ async function checkPerfectDay(userId: string, proteinTarget: number = 130): Pro
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string): Promise<string> {
+async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
   const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
 
@@ -1735,6 +1735,65 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? `3 eggs scrambled + 1 cup oats + banana` : `${isLowGI ? "samp and beans ½ cup" : "½ cup oats"} + 2 boiled eggs`} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${noFish ? "2 eggs + cabbage" : "½ tin pilchards + cabbage"} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
   }
 
+  // ============================================================
+  // SA LIFE EVENTS — load shedding, illness, month-end, funerals
+  // These must fire before the main routing so clients feel heard,
+  // not handed a workout programme when they've just had a hard day.
+  // ============================================================
+  const capName = user.name?.split(" ")[0] || "there";
+  const daysSilent = user.lastActiveAt
+    ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
+    : 0;
+  const isReturning = daysSilent >= 2;
+
+  // ---- LOAD SHEDDING ----
+  const isLoadShedding = /\b(load.?shed|loadshed|eskom|no.?electricity|no.?power|stage\s*[1-8]|power.?cut|power.?out|blackout|no.?lights|lights.?out|inverter.?dead|battery.?dead|no.?signal.*load|generator.*off)\b/i.test(m);
+  if (isLoadShedding) {
+    const lsReply = `${capName}, load shedding is real — it messes with routines, meals, and everything else. No blame.\n\nHere's what you can still do with zero power:\n- Home workout: 3 rounds of 15 squats, 10 push-ups, 20 jumping jacks, 30-sec plank. No equipment, no electricity needed.\n- Eating: cold food counts. Bread + peanut butter, fruit, biltong, yoghurt if still cold — log it.\n- Steps: even 20 minutes walking outside counts. Send me the count when you're back.\n\nWhen power's back, pick up where you left off. One missed session never killed progress — giving up does.`;
+    await logChat(user.id, message, lsReply, "LOAD_SHEDDING");
+    return lsReply;
+  }
+
+  // ---- SICK / ILL ----
+  const isSick = /\b(sick|ill|flu|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine)\b/i.test(m)
+    && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal)\b/i.test(m);
+  if (isSick) {
+    const sickReply = `${capName}, rest is training. Your body is fighting something — pushing through will make it worse and set you back further.\n\nWhat to do right now:\n- *Eat something, even if small.* Your body needs fuel to recover. Soft foods: pap, egg, toast, yoghurt, soup.\n- *Drink water.* A lot of it. Illness dehydrates fast.\n- *No workout today* — sleep is more anabolic than any gym session when you're ill.\n\nMessage me when you're feeling better and we pick up exactly where you left off. Your programme is saved. Rest well.`;
+    await logChat(user.id, message, sickReply, "SICK_DAY");
+    return sickReply;
+  }
+
+  // ---- FUNERAL / BEREAVEMENT ----
+  const isBereaved = /\b(funeral|passed away|someone.*died|died.*someone|lost.*loved one|loved one.*lost|in mourning|family.*death|death.*family|my (mom|dad|mother|father|brother|sister|uncle|aunt|gogo|ouma|oupa|gran|grandma|grandfather|grandmother|friend).*died|died.*(mom|dad|mother|father|brother|sister|uncle|aunt|gran)|umngcwabo|ukufa|silahlekelwe)\b/i.test(m);
+  if (isBereaved) {
+    const bereavReply = `${capName}, I'm sorry for your loss. Take all the time you need — the programme will wait.\n\nFunerals mean long days, different food, no routine. That's okay. Eat what's there, stay hydrated, walk if you can. Don't stress about the plan right now.\n\nWhen you're ready to come back — even if it's weeks from now — just message me and I'll reset your programme from that day. There's no guilt here. Rest, mourn, be with your family.`;
+    await logChat(user.id, message, bereavReply, "BEREAVEMENT");
+    return bereavReply;
+  }
+
+  // ---- MONTH-END / FINANCIAL STRESS ----
+  const isMonthEnd = /\b(month.?end|end of month|no.?money|broke|short on cash|can.?t afford|salary.?not|waiting for.?(salary|pay|payday)|payday.*friday|payday.*next|no.?budget|empty|flat.?broke|nothing (left|to eat)|no.?food|can.?t buy|no.?groceries|no.?airtime|airtime.?finished)\b/i.test(m);
+  if (isMonthEnd) {
+    const meReply = `${capName}, month-end is tough for everyone in SA. No shame in it.\n\nHere's how to keep it going on zero budget:\n- *Protein:* eggs (cheapest protein there is), pilchards, beans, lentils\n- *Carbs:* pap, brown bread, oats, rice, sweet potato\n- *Vegetables:* cabbage, spinach, frozen veg — all cheap and good\n\nType *cheap meals* and I'll send you a full day of eating under R30. Fitness doesn't stop when the money runs out — your body still needs fuel to change.`;
+    await logChat(user.id, message, meReply, "MONTH_END");
+    return meReply;
+  }
+
+  // ---- COMEBACK AFTER SILENCE (2+ days) ----
+  // Detect when a client returns with an excuse/explanation after going quiet.
+  // Respond with empathy and a clean restart plan — not a workout delivered cold.
+  const isComeback = isReturning && (
+    /\b(i.?m back|i am back|back now|returning|i.?m here|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|reset|fresh start|new week|new day|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m)
+    || m.length < 30 // short message after silence = returning check-in
+  );
+
+  if (isComeback) {
+    const daysText = daysSilent === 2 ? "2 days" : daysSilent <= 7 ? `${daysSilent} days` : daysSilent <= 14 ? "a week" : "a while";
+    const comingBackReply = `${capName}, welcome back. ${daysText} away — everyone has those stretches.\n\nWe don't restart from zero. Your programme, targets, and logs are all still here. Today is just Day 1 of the next streak.\n\n*Here's what to do right now:*\n1. Tell me what you ate today (even if it wasn't perfect)\n2. Log your steps if you walked\n3. Reply *menu* for today's workout\n\nNo catching up. No guilt. Just today. Let's go.`;
+    await logChat(user.id, message, comingBackReply, "COMEBACK");
+    return comingBackReply;
+  }
+
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
     const ctype = mediaContentType || "";
@@ -1993,23 +2052,68 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
 
         // Write to mealLogs so photo meals appear in "my meals" and count in daily totals
-        try {
-          const photoKcalMatch = visionReply.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || visionReply.match(/\b(\d{2,4})\s*kcal/i);
-          const photoProtMatch = visionReply.match(/\b(\d{1,3})\s*g\s*protein/i);
-          const photoKcal = photoKcalMatch ? parseInt(photoKcalMatch[1].replace(/,/g, ""), 10) : 0;
-          const photoProt = photoProtMatch ? parseInt(photoProtMatch[1], 10) : 0;
-          if (photoKcal > 0 || photoProt > 0) {
-            await db.insert(mealLogs).values({
-              userId: user.id,
-              rawMessage: message || "[Photo]",
-              source: "photo",
-              kcalInt: photoKcal,
-              proteinInt: photoProt,
-              carbsInt: 0,
-              fatInt: 0,
-            }).catch(e => console.warn("[photo mealLogs write]", e));
+        const extractKcal = (text: string) => {
+          const m = text.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || text.match(/\b(\d{2,4})\s*kcal/i);
+          return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+        };
+        const extractProt = (text: string) => {
+          const m = text.match(/\b(\d{1,3})\s*g\s*protein/i);
+          return m ? parseInt(m[1], 10) : 0;
+        };
+
+        let totalPhotoKcal = extractKcal(visionReply);
+        let totalPhotoProt = extractProt(visionReply);
+
+        // ── MULTI-PHOTO: process any extra images sent in the same message ──
+        // Clients frequently send collages (e.g. 3 meal photos in one message).
+        // We already processed mediaUrl (the first image). Now handle the rest.
+        const extraImageUrls = (allMediaUrls || []).filter(u => u !== mediaUrl);
+        const extraReplies: string[] = [];
+        if (extraImageUrls.length > 0) {
+          const twilioSidExtra = process.env.TWILIO_ACCOUNT_SID || "";
+          const twilioTokenExtra = process.env.TWILIO_AUTH_TOKEN || "";
+          const imgAuthHeaderExtra = "Basic " + Buffer.from(`${twilioSidExtra}:${twilioTokenExtra}`).toString("base64");
+          for (const extraUrl of extraImageUrls.slice(0, 3)) { // max 3 extra images
+            try {
+              const extraResp = await withTimeout("image_download_extra", 10000, () => fetch(extraUrl, { headers: { Authorization: imgAuthHeaderExtra } }));
+              if (!extraResp.ok) continue;
+              const extraBuf = await extraResp.arrayBuffer();
+              if (extraBuf.byteLength > 10 * 1024 * 1024) continue;
+              const extraB64 = Buffer.from(extraBuf).toString("base64");
+              const extraCtype = extraResp.headers.get("content-type") || "image/jpeg";
+              const extraVision = await withTimeout("food_vision_extra", 18000, () => openai.chat.completions.create({
+                model: foodVisionDecision.model,
+                max_tokens: Math.min(foodVisionDecision.maxTokens, 200),
+                messages: [
+                  { role: "system", content: `You are Coach K, a South African fitness coach. Client: ${clientName}. Give calories and protein only for this food photo. Format: "Photo X: [food name] — roughly Y kcal and Zg protein." One sentence max.` },
+                  { role: "user", content: [
+                    { type: "text", text: "Estimate calories and protein in this food photo." },
+                    { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "low" } },
+                  ]},
+                ],
+              }));
+              const extraText = extraVision.choices[0]?.message?.content?.trim() || "";
+              if (extraText && extraText.length > 5) {
+                extraReplies.push(extraText);
+                totalPhotoKcal += extractKcal(extraText);
+                totalPhotoProt += extractProt(extraText);
+                await logChat(user.id, "[Photo]", extraText, "FOOD_LOG");
+              }
+            } catch (e) { console.warn("[multi-photo extra vision]", e); }
           }
-        } catch (e) { console.warn("[photo mealLogs non-fatal]", e); }
+        }
+
+        if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message || "[Photo]",
+            source: "photo",
+            kcalInt: totalPhotoKcal,
+            proteinInt: totalPhotoProt,
+            carbsInt: 0,
+            fatInt: 0,
+          }).catch(e => console.warn("[photo mealLogs write]", e));
+        }
 
         const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
         // Daily total from mealLogs (source of truth — includes this photo)
@@ -2029,7 +2133,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
             todayCaloriesDate: sastToday(),
           }).where(eq(users.id, user.id)).catch(e => console.warn("[photo todayCalories sync]", e));
         } catch (e) { console.warn("[non-fatal]", e); }
-        return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+
+        // Combine main reply with any extra photo analyses
+        const extraSection = extraReplies.length > 0 ? `\n\n${extraReplies.join("\n")}` : "";
+        const multiPhotoNote = extraReplies.length > 0 ? `\n_${extraReplies.length + 1} photos logged — total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+        return `${visionReply}${extraSection}${multiPhotoNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
         console.error(`[MEDIA][${mediaTrace}] vision_error:`, err);
         await logMediaFailure(user.id, "vision", err);

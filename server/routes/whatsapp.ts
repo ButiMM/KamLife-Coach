@@ -85,9 +85,21 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         url: (req.body[`MediaUrl${idx}`] || "") as string,
         type: (req.body[`MediaContentType${idx}`] || "") as string,
       })).filter(item => item.url);
-      const selectedMedia = mediaItems.find(item => /^(image|audio|video)\//i.test(item.type)) || mediaItems[0] || null;
+
+      // Prefer audio/video first (voice note takes priority), then first image
+      const audioMedia = mediaItems.find(item => /^audio\//i.test(item.type));
+      const selectedMedia = audioMedia
+        || mediaItems.find(item => /^(image|video)\//i.test(item.type))
+        || mediaItems[0]
+        || null;
       const mediaUrl = selectedMedia?.url || null;
       const mediaType = selectedMedia?.type || null;
+
+      // Collect ALL image URLs for multi-photo handling (collages, meal albums)
+      // Audio/video items are excluded — only food/step/progress images need multi-processing
+      const allImageUrls = !audioMedia
+        ? mediaItems.filter(item => /^image\//i.test(item.type)).map(item => item.url)
+        : [];
 
       const message = rawMsg;
       // Allow empty text when media exists so downstream handler can detect "no caption" correctly.
@@ -95,7 +107,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
 
-      const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined);
+      const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
       const parts = splitMessage(reply);
 
       if (parts.length <= 1) {

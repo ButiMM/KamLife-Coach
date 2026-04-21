@@ -6,7 +6,7 @@ import type { Express } from "express";
  */
 export interface RouteDeps {
   requireAdminKey: (req: any, res: any, next: any) => void;
-  handleMessage: (phone: string, message: string, mediaUrl?: string, mediaContentType?: string) => Promise<string>;
+  handleMessage: (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
   logChat: (userId: string, messageIn: string, messageOut: string, intent: string) => Promise<void>;
   checkRateLimit: (phone: string) => boolean;
 }
