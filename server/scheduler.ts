@@ -915,10 +915,16 @@ cron.schedule("0 4,16 * * *", async () => {
           `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
         );
         try {
-          await db.update(users).set({ lastActiveAt: client.lastActiveAt }).where(eq(users.id, client.id));
-          console.log(`[SCHEDULER] 14-day silence — flagged for manual review: ${client.phoneNumber}`);
+          await db.insert(escalations).values({
+            userId: client.id,
+            reason: "14_day_silence",
+            status: "open",
+            priority: "urgent",
+            slaDeadline: new Date(Date.now() + 48 * HOUR),
+          });
+          console.log(`[SCHEDULER] 14-day silence — escalation created: ${client.phoneNumber}`);
         } catch (flagErr) {
-          console.error(`[SCHEDULER] Failed to flag 14-day silent user ${client.phoneNumber}:`, flagErr);
+          console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
         }
       } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
         // 7-day silence: use workout data to pull them back

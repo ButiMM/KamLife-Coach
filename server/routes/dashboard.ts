@@ -745,7 +745,13 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
   app.get("/api/dashboard/weekly-report", requireAdminKey, async (req, res) => {
     try {
       const since = new Date(Date.now() - 7 * 86400_000);
-      const allUsers = await db.select().from(users);
+      const allUsers = await db.select({
+        id: users.id, name: users.name, phoneNumber: users.phoneNumber,
+        lastActiveAt: users.lastActiveAt, goalType: users.goalType,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        programmeWeek: users.programmeWeek, onboardingState: users.onboardingState,
+        subscriptionStatus: users.subscriptionStatus,
+      }).from(users).limit(500);
 
       const clientReports: any[] = [];
       for (const u of allUsers) {
