@@ -439,8 +439,23 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Male or female?`;
     }
     const gender = isMale ? "male" : "female";
-    const focusArea = gender === "female" ? "glutes_legs" : null;
-    await db.update(users).set({ gender, ...(focusArea ? { primaryFocusArea: focusArea } : {}), onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+    if (isFemale) {
+      await db.update(users).set({ gender, onboardingState: "ASK_FEMALE_FOCUS" }).where(eq(users.phoneNumber, phone));
+      return `Got it. What's your main training focus?\n\n1️⃣ *Full body* — tone and strengthen everything\n2️⃣ *Glutes & legs* — build and sculpt the lower body`;
+    }
+    await db.update(users).set({ gender, onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+    return `How old are you?`;
+  }
+
+  // ---- ASK_FEMALE_FOCUS ----
+  if (state === "ASK_FEMALE_FOCUS") {
+    const lower = msg.toLowerCase().trim();
+    const isGlutes = msg.includes("2") || lower.includes("glute") || lower.includes("bum") || lower.includes("butt") || lower.includes("leg") || lower.includes("lower") || lower.includes("booty");
+    const focusArea = isGlutes ? "glutes_legs" : null;
+    await db.update(users).set({
+      ...(focusArea ? { primaryFocusArea: focusArea } : { primaryFocusArea: null }),
+      onboardingState: "ASK_AGE_NEW",
+    }).where(eq(users.phoneNumber, phone));
     return `How old are you?`;
   }
 
@@ -671,7 +686,6 @@ export async function handleOnboarding(user: any, message: string, phone: string
       betaBypassUntil: new Date(Date.now() + 7 * 86_400_000), // 7-day free trial
       onboardingState: "COMPLETE",
       ...(referralCode && !user.referralCode ? { referralCode } : {}),
-      ...(isFemale && !user.primaryFocusArea ? { primaryFocusArea: "glutes_legs" } : {}),
     }).where(eq(users.phoneNumber, phone));
 
     const goalLabel: Record<string, string> = {
@@ -694,7 +708,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
 
     // Immediately build today's workout so they get value NOW
-    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: isFemale ? "glutes_legs" : user.primaryFocusArea };
+    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: user.primaryFocusArea };
     const firstWorkout = getKamlifeProgramme(updatedUser, true);
     // Show the full Day 1 workout — truncating to 2 exercises makes us look amateur
     const workoutPreview = firstWorkout;
