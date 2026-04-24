@@ -79,7 +79,7 @@ export async function getMenuText(user: any): Promise<string> {
 6️⃣ Weekly report
 7️⃣ Log weight
 
-*More:* _supplements_ · _badges_ · _my sleep_ · _my water_ · _monthly report_ · _referral_ · _rate_
+*More:* _supplements_ · _badges_ · _my sleep_ · _my water_ · _monthly report_ · _referral_ · _rate_ · _find buddy_
 
 Or just talk to me — food, training, life. I'm here.`;
 }

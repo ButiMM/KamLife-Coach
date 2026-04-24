@@ -798,8 +798,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
         await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
         await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-        // Nullify PII rather than delete user row (preserves compliance log)
+        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
+        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+        await tx.delete(escalations).where(eq(escalations.userId, uid));
+        // Nullify PII and anonymize phone number — row kept for compliance audit trail only
         await tx.update(users).set({
+          phoneNumber: `[deleted-${uid}]`,
           name: null,
           onboardingState: null,
           popiConsent: false,
@@ -807,12 +811,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           currentWeight: null,
           heightCm: null,
           age: null,
+          gender: null,
           medicalConditions: null,
           injuries: null,
           otherMedicalNotes: null,
           profileNotes: null,
+          lastActiveAt: null,
           cancelledAt: new Date(),
-        }).where(eq(users.phoneNumber, phone));
+        }).where(eq(users.id, uid));
       });
       console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
       return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
