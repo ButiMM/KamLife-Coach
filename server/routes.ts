@@ -6980,10 +6980,10 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // See server/routes/index.ts for the registry.
 
   // ============================================================
-  // COACH ADMIN DASHBOARD — GET /coach?key=COACH_DASHBOARD_KEY
+  // COACH ADMIN DASHBOARD — GET /coach (auth via x-dashboard-key header only)
   // ============================================================
   app.get("/coach", async (req: any, res: any) => {
-    const key = req.query.key as string || "";
+    const key = (req.headers["x-dashboard-key"] as string) || "";
     const dashKey = process.env.COACH_DASHBOARD_KEY;
     if (!dashKey) return res.status(503).send("<h1>Dashboard not configured — set COACH_DASHBOARD_KEY</h1>");
     let authorized = false;

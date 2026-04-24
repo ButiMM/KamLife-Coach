@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import twilio from "twilio";
 import type { RouteDeps } from "./types";
+import { requireAdminKey } from "./auth";
 
 // ── WhatsApp message splitting ──
 
@@ -67,8 +68,11 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
           console.warn(`[SECURITY] Twilio signature validation failed from ${req.ip}`);
           return res.status(403).end();
         }
+      } else if (process.env.NODE_ENV === "production") {
+        console.error("[SECURITY] TWILIO_AUTH_TOKEN not set in production — rejecting request");
+        return res.status(503).end();
       } else {
-        console.warn("[SECURITY] TWILIO_AUTH_TOKEN not set — signature validation skipped. Set this env var in production!");
+        console.warn("[SECURITY] TWILIO_AUTH_TOKEN not set — signature validation skipped (dev only)");
       }
 
       // Rate limiter
@@ -138,8 +142,8 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
     }
   });
 
-  // ── Test webhook (no Twilio validation) ──
-  app.post("/api/admin/test-webhook", async (req, res) => {
+  // ── Test webhook — admin only ──
+  app.post("/api/admin/test-webhook", requireAdminKey, async (req, res) => {
     try {
       const { phone, message } = req.body;
       if (!phone || !message) return res.status(400).json({ error: "phone and message required" });
