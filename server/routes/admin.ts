@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos } from "../../shared/schema";
 import { eq, desc, asc, and, gte, isNull, or } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
@@ -58,16 +58,17 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       if (!user.length) return res.status(404).json({ message: "User not found" });
 
       const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
-      const [weights, steps, workouts, chats, meals, actions] = await Promise.all([
+      const [weights, steps, workouts, chats, meals, actions, photos] = await Promise.all([
         db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30),
         db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30),
         db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30),
         db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50),
         db.select().from(mealLogs).where(and(eq(mealLogs.userId, req.params.id), gte(mealLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(mealLogs.loggedAt)).limit(100),
         db.select().from(clientActions).where(eq(clientActions.userId, req.params.id)).orderBy(asc(clientActions.createdAt)).limit(50),
+        db.select({ id: progressPhotos.id, photoNumber: progressPhotos.photoNumber, contentType: progressPhotos.contentType, loggedAt: progressPhotos.loggedAt }).from(progressPhotos).where(eq(progressPhotos.userId, req.params.id)).orderBy(desc(progressPhotos.loggedAt)).limit(20),
       ]);
 
-      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals, actions });
+      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, mealLogs: meals, actions, progressPhotos: photos });
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch user" });
     }
@@ -116,6 +117,61 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
         .where(and(eq(clientActions.id, actionId), eq(clientActions.userId, req.params.id)));
       res.json({ success: true });
     } catch { res.status(500).json({ error: "Failed to delete action" }); }
+  });
+
+  // ── Progress photos — list (base64 omitted for list view) ──
+  app.get("/api/users/:id/progress-photos", requireAdminKey, async (req, res) => {
+    try {
+      const photos = await db.select({ id: progressPhotos.id, photoNumber: progressPhotos.photoNumber, contentType: progressPhotos.contentType, loggedAt: progressPhotos.loggedAt })
+        .from(progressPhotos).where(eq(progressPhotos.userId, req.params.id)).orderBy(desc(progressPhotos.loggedAt)).limit(50);
+      res.json({ photos });
+    } catch { res.status(500).json({ error: "Failed to fetch photos" }); }
+  });
+
+  // ── Progress photo — fetch single (with base64) ──
+  app.get("/api/users/:id/progress-photos/:photoId", requireAdminKey, async (req, res) => {
+    try {
+      const [photo] = await db.select().from(progressPhotos)
+        .where(and(eq(progressPhotos.id, req.params.photoId), eq(progressPhotos.userId, req.params.id))).limit(1);
+      if (!photo) return res.status(404).json({ error: "Photo not found" });
+      res.json({ photo });
+    } catch { res.status(500).json({ error: "Failed to fetch photo" }); }
+  });
+
+  // ── Progress photo — upload ──
+  app.post("/api/users/:id/progress-photos", requireAdminKey, async (req, res) => {
+    try {
+      const { base64, contentType = "image/jpeg" } = req.body as { base64?: string; contentType?: string };
+      if (!base64) return res.status(400).json({ error: "base64 image data is required" });
+
+      // Strip data URI prefix if present
+      const cleaned = base64.replace(/^data:[^;]+;base64,/, "");
+      const sizeBytes = Buffer.byteLength(cleaned, "base64");
+      if (sizeBytes > 8 * 1024 * 1024) return res.status(413).json({ error: "Image must be under 8MB" });
+
+      const [userRow] = await db.select({ id: users.id }).from(users).where(eq(users.id, req.params.id)).limit(1);
+      if (!userRow) return res.status(404).json({ error: "User not found" });
+
+      const [lastPhoto] = await db.select({ photoNumber: progressPhotos.photoNumber })
+        .from(progressPhotos).where(eq(progressPhotos.userId, req.params.id)).orderBy(desc(progressPhotos.photoNumber)).limit(1);
+      const nextNumber = (lastPhoto?.photoNumber ?? 0) + 1;
+
+      const [inserted] = await db.insert(progressPhotos).values({
+        userId: req.params.id,
+        photoNumber: nextNumber,
+        photoBase64: cleaned,
+        contentType,
+      }).returning({ id: progressPhotos.id, photoNumber: progressPhotos.photoNumber, loggedAt: progressPhotos.loggedAt });
+
+      await db.insert(chatHistory).values({
+        userId: req.params.id,
+        messageIn: `[admin_upload] progress photo #${nextNumber}`,
+        messageOut: "",
+        intent: "PROGRESS_PHOTO_UPLOAD",
+      }).catch(() => {});
+
+      res.status(201).json({ photo: inserted });
+    } catch { res.status(500).json({ error: "Failed to upload photo" }); }
   });
 
   // ── Client activity timeline by UUID ──

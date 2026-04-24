@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useUser, useClientTimeline, type ClientAction } from "@/hooks/use-users";
+import { useUser, useClientTimeline, useUploadProgressPhoto, useProgressPhotoUrl, type ClientAction, type ProgressPhotoEntry } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { StatusBadge } from "@/components/status-badge";
 import { useRoute } from "wouter";
@@ -24,6 +24,59 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+
+function PhotoThumbnail({ userId, photo }: { userId: string; photo: ProgressPhotoEntry }) {
+  const { data: src } = useProgressPhotoUrl(userId, photo.id);
+  if (!src) return <div className="w-24 h-24 rounded-lg bg-muted animate-pulse" />;
+  return (
+    <a href={src} target="_blank" rel="noopener noreferrer">
+      <img src={src} alt={`Progress #${photo.photoNumber}`} className="w-24 h-24 object-cover rounded-lg border border-border hover:opacity-80 transition-opacity" />
+    </a>
+  );
+}
+
+function ProgressPhotoSection({ userId, photos }: { userId: string; photos: ProgressPhotoEntry[] }) {
+  const upload = useUploadProgressPhoto(userId);
+  const [error, setError] = useState<string | null>(null);
+
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setError(null);
+    upload.mutate(file, { onError: (err) => setError(err.message) });
+    e.target.value = "";
+  }
+
+  return (
+    <Card className="p-6 border-border/50">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-purple-100 text-purple-600 rounded-xl">
+            <span className="text-lg">📸</span>
+          </div>
+          <div>
+            <h3 className="font-semibold">Progress Photos</h3>
+            <p className="text-sm text-muted-foreground">{photos.length} photo{photos.length !== 1 ? "s" : ""}</p>
+          </div>
+        </div>
+        <label className="cursor-pointer">
+          <Button variant="outline" size="sm" asChild>
+            <span>{upload.isPending ? "Uploading…" : "Upload photo"}</span>
+          </Button>
+          <input type="file" accept="image/*" className="hidden" onChange={handleFile} disabled={upload.isPending} />
+        </label>
+      </div>
+      {error && <p className="text-sm text-destructive mb-3">{error}</p>}
+      {photos.length === 0 ? (
+        <p className="text-sm text-muted-foreground text-center py-4">No progress photos yet.</p>
+      ) : (
+        <div className="flex flex-wrap gap-3">
+          {photos.map((p) => <PhotoThumbnail key={p.id} userId={userId} photo={p} />)}
+        </div>
+      )}
+    </Card>
+  );
+}
 
 export default function UserDetail() {
   const [, params] = useRoute("/users/:id");
@@ -477,6 +530,9 @@ export default function UserDetail() {
             </div>
           </Card>
         )}
+
+        {/* Progress Photos */}
+        <ProgressPhotoSection userId={userId} photos={userData?.progressPhotos ?? []} />
 
         {/* Recent Chat Messages */}
         {(userData?.chatHistory?.length ?? 0) > 0 && (

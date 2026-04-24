@@ -65,7 +65,7 @@ export function registerAudioRoutes(app: Express): void {
   // Send voice message and get streaming audio response
   // Auto-detects audio format and converts WebM/MP4/OGG to WAV
   // Uses gpt-4o-mini-transcribe for STT, gpt-audio for voice response
-  app.post("/api/conversations/:id/messages", audioBodyParser, async (req: Request, res: Response) => {
+  app.post("/api/voice-conversations/:id/messages", audioBodyParser, async (req: Request, res: Response) => {
     try {
       const conversationId = parseRouteId(req.params.id);
       const { audio, voice = "alloy" } = req.body;

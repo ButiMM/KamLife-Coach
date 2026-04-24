@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { api, buildUrl } from "@shared/routes";
 import type { User, FlaggedUser, WeightLog } from "@shared/schema";
 import { authHeaders } from "@/lib/queryClient";
@@ -32,6 +32,13 @@ export interface TimelineEvent {
   meta?: Record<string, unknown>;
 }
 
+export interface ProgressPhotoEntry {
+  id: string;
+  photoNumber: number;
+  contentType: string;
+  loggedAt: string;
+}
+
 export interface UserDetailResponse {
   user: User;
   weightLogs: WeightLog[];
@@ -40,6 +47,7 @@ export interface UserDetailResponse {
   chatHistory: { messageIn: string; messageOut: string; intent: string; createdAt: string }[];
   mealLogs: MealLogEntry[];
   actions: ClientAction[];
+  progressPhotos: ProgressPhotoEntry[];
 }
 
 function parseWithLogging<T>(schema: any, data: unknown, label: string): T {
@@ -256,5 +264,44 @@ export function useClientTimeline(userId: string) {
     },
     enabled: !!userId,
     refetchInterval: 60_000,
+  });
+}
+
+export function useUploadProgressPhoto(userId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (file: File) => {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+      const res = await fetch(`/api/users/${userId}/progress-photos`, {
+        method: "POST",
+        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ base64, contentType: file.type || "image/jpeg" }),
+      });
+      if (res.status === 413) throw new Error("Image must be under 8MB");
+      if (!res.ok) throw new Error("Upload failed");
+      return res.json() as Promise<{ photo: ProgressPhotoEntry }>;
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["/api/users/", userId] });
+    },
+  });
+}
+
+export function useProgressPhotoUrl(userId: string, photoId: string) {
+  return useQuery({
+    queryKey: [`/api/users/${userId}/progress-photos/${photoId}`],
+    queryFn: async () => {
+      const res = await fetch(`/api/users/${userId}/progress-photos/${photoId}`, { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch photo");
+      const data = await res.json() as { photo: { photoBase64: string; contentType: string } };
+      return `data:${data.photo.contentType};base64,${data.photo.photoBase64}`;
+    },
+    enabled: !!photoId,
+    staleTime: Infinity,
   });
 }
