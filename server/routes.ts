@@ -910,6 +910,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
 
+  // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
+  const coachPhone = (process.env.COACH_ALERT_PHONE || "").replace(/\D/g, "");
+  const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+  const isCoach = coachPhone && userPhone === coachPhone;
+  if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
+    await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.phoneNumber, phone));
+    user.subscriptionStatus = "active";
+  }
+
   // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive with a clear message ----
   if (user.subscriptionStatus === "trial") {
     const trialEnd = user.betaBypassUntil ? new Date(user.betaBypassUntil) : null;
