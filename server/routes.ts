@@ -2257,7 +2257,26 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           }));
         }
 
-        const transcribedText = transcription.text?.trim();
+        let transcribedText = transcription.text?.trim();
+
+        // Retry with forced English if first attempt returned empty — Whisper sometimes
+        // needs a language anchor to produce output on short SA clips
+        if (!transcribedText) {
+          try {
+            const retryFile2 = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+            const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
+              openai.audio.transcriptions.create({
+                file: retryFile2,
+                model: "whisper-1",
+                language: "en",
+                prompt: whisperPrompt,
+              })
+            );
+            transcribedText = retryTranscription.text?.trim() || "";
+          } catch (retryErr) {
+            console.warn("[VOICE] English-forced retry also failed:", retryErr);
+          }
+        }
 
         // Part 3 — Handle result
         if (!transcribedText) {
