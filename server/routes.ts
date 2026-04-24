@@ -601,9 +601,19 @@ async function checkFoodPatterns(userId: string): Promise<string | null> {
       return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
     }
 
-    const noProteinStreak = last3.filter(msg => !PROTEIN_WORDS.some(w => msg.includes(w))).length;
-    if (noProteinStreak >= 3) {
-      return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting ${" "}your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+    // Use mealLogs.proteinInt for the protein streak check — text-based detection
+    // misses photo meals where messageIn is "[Photo]" even if the image had chicken/eggs.
+    const recentMealLogs = await db.select({ proteinInt: mealLogs.proteinInt })
+      .from(mealLogs)
+      .where(eq(mealLogs.userId, userId))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(3);
+
+    if (recentMealLogs.length >= 3) {
+      const noProteinStreak = recentMealLogs.filter(r => (r.proteinInt || 0) === 0).length;
+      if (noProteinStreak >= 3) {
+        return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+      }
     }
 
     return null;
@@ -1855,7 +1865,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               max_tokens: 8,
               temperature: 0,
               messages: [
-                { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | other.\n- food: plate of food, drink, snack\n- steps: screenshot showing a step/pedometer count\n- exercise: person performing an exercise, gym equipment, workout selfie\n- progress: body/transformation photo (front/side/back pose, no gym equipment)\n- other: none of the above" },
+                { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | other.\n- food: plate of food, drink, snack, meal\n- steps: screenshot showing a step count or pedometer reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise." },
                 { role: "user", content: [
                   { type: "text", text: "What is this photo?" },
                   { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -1930,9 +1940,13 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         }
 
         // ---- PROGRESS PHOTO DETECTION ----
-        // If the message contains progress-related keywords, store and optionally compare
-        const isProgressPhoto = /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message)
-          && (uncaptionedType === null || uncaptionedType === "progress");
+        // Triggers when: classifier says "progress", OR message has progress keywords with
+        // no contradicting classification. Classifier alone is sufficient — no caption needed.
+        const isProgressPhoto = uncaptionedType === "progress"
+          || (
+            /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message)
+            && (uncaptionedType === null || uncaptionedType === "progress")
+          );
         if (isProgressPhoto) {
           // Get existing progress photos for this client (most recent first)
           const existingPhotos = await db.select()
@@ -2180,15 +2194,15 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
         }
         // Reject clips too short for Whisper to process reliably.
-        // 2KB ≈ ~1.5s of Opus audio; below this Whisper returns garbage or nothing.
+        // ~6KB ≈ 3 seconds of Opus audio — Whisper needs at least 3s to return anything useful.
         // Uses the failure-counter so 3 short clips in 30 min escalates to "please type".
-        if (audioBuffer.byteLength < 2000) {
+        if (audioBuffer.byteLength < 6000) {
           const failCount = bumpVoiceFailure(user.id);
           if (failCount >= 3) {
             clearVoiceFailure(user.id);
-            return "I keep missing your voice notes — they're coming through too short to transcribe. Please type your message and I'll reply straight away.";
+            return "I keep getting very short voice notes — please hold the mic button for at least 5 seconds or just type your message and I'll reply straight away.";
           }
-          return "That voice note was too short for me to pick up. Hold the mic button for at least 2-3 seconds, then send again — or just type your message.";
+          return "That voice note was too short to transcribe — hold the mic button for at least 5 seconds and resend, or just type your message.";
         }
 
         voiceStage = "transcribe";
@@ -2242,9 +2256,9 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           const failCount = bumpVoiceFailure(user.id);
           if (failCount >= 3) {
             clearVoiceFailure(user.id);
-            return "I keep struggling with your voice notes — the audio is not coming through clearly. Please type your message and I'll get you a detailed reply straight away.";
+            return "I keep struggling to pick up your voice notes. Please type your message and I'll get you a detailed reply straight away.";
           }
-          return "I could not hear that clearly. Try sending a voice note in a quieter spot, or type your message.";
+          return "I received your voice note but it was too short or too quiet to transcribe. Hold the mic for at least 5 seconds, speak clearly, and resend — or just type your message.";
         }
 
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
