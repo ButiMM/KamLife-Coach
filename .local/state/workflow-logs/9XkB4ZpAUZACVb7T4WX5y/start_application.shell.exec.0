@@ -1,0 +1,33 @@
+[1G[0K⠙[1G[0K
+> rest-express@1.0.0 dev
+> NODE_ENV=development tsx server/index.ts
+
+[1G[0K⠙[1G[0K[MIGRATION] Done — 38/38 columns ensured
+[STARTUP] ⚠️  Missing env var: COACH_DASHBOARD_KEY — Dashboard using insecure default key 'kamlife2024' — set this env var immediately
+8:29:05 PM [express] serving on port 5000
+[SCHEDULER] Proactive coaching jobs active:
+[SCHEDULER]   Morning check-in    — daily 6am SAST
+[SCHEDULER]   Evening accountability — daily 7pm SAST
+[SCHEDULER]   Week 3 intervention — Monday 6am SAST
+[SCHEDULER]   Month-end budget     — 20th each month (budget-tier aware)
+[SCHEDULER]   Milestone check      — daily 8am SAST
+[SCHEDULER]   Silence detection    — every 12 hours
+[SCHEDULER]   Friday strategy      — Friday 4pm SAST
+[SCHEDULER]   Sunday weekly report — Sunday 8am SAST
+[SCHEDULER]   Days 1-3 onboarding  — daily 10am SAST
+[SCHEDULER]   Monthly measurements  — 1st of each month 9am SAST
+[SCHEDULER]   SA cultural calendar  — Heritage Day, Women's Day, New Year, etc.
+[SCHEDULER]   14/30-day silence    — escalating re-engagement
+[SCHEDULER]   Referral nudge        — day 7/30/60/90 milestones
+[SCHEDULER]   Goal reassessment     — day 30/60/90 weight + goal check
+[SCHEDULER]   Streak-at-risk        — 8pm alert if streak endangered
+[SCHEDULER]   Women's Month         — August Mondays
+[SCHEDULER]   Phase advancement     — auto-advance on 75% compliance
+[SCHEDULER]   Goal check / review   — Monday 7am UTC at weeks 4/8/12/16/20/24
+[SCHEDULER]   Injury follow-up      — Wednesday check on injured clients
+[SCHEDULER]   New Year reset        — January 2nd continuation message
+[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)
+[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)
+[SCHEDULER]   Ramadan mode         — inactive
+[FOODS] Seeded 0 new foods — total now 397
+[MEMORY] Table ready with pgvector

@@ -1,5 +1,5 @@
 import { DashboardLayout } from "@/components/layout";
-import { useRevenue, useFunnel } from "@/hooks/use-users";
+import { useRevenue, useFunnel, useCohorts } from "@/hooks/use-users";
 import { Card } from "@/components/ui/card";
 import {
   DollarSign,
@@ -10,11 +10,13 @@ import {
   Target,
   BarChart3,
   Clock,
+  CalendarDays,
 } from "lucide-react";
 
 export default function Analytics() {
   const { data: revenue, isLoading: revLoading } = useRevenue();
   const { data: funnel, isLoading: funnelLoading } = useFunnel();
+  const { data: cohortData } = useCohorts();
 
   const loading = revLoading || funnelLoading;
 
@@ -176,6 +178,62 @@ export default function Analytics() {
                 />
               </div>
             </section>
+
+            {/* Cohort Retention Table */}
+            {cohortData?.cohorts && cohortData.cohorts.length > 0 && (
+              <section className="space-y-4">
+                <h3 className="text-lg font-bold font-display flex items-center gap-2">
+                  <CalendarDays className="w-5 h-5 text-violet-600" /> Cohort Retention
+                </h3>
+                <Card className="border-border/50 shadow-sm overflow-hidden">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/40">
+                          <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Month</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Signups</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Onboarded</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Wk-1 Retained</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Wk-2 Retained</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Paying</th>
+                          <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Avg Workouts</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...cohortData.cohorts].reverse().map((c) => (
+                          <tr key={c.month} className="border-b border-border/50 hover:bg-muted/20 transition-colors">
+                            <td className="px-4 py-3 font-medium">{c.month}</td>
+                            <td className="px-4 py-3 text-right">{c.signups}</td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={c.onboardRate >= 70 ? "text-green-600 font-semibold" : c.onboardRate >= 40 ? "text-amber-600" : "text-rose-600"}>
+                                {c.onboardRate}%
+                              </span>
+                              <span className="text-muted-foreground ml-1 text-xs">({c.onboarded})</span>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <RetentionPill rate={c.week1RetentionRate} />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <RetentionPill rate={c.week2RetentionRate} />
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={c.payRate >= 30 ? "text-green-600 font-semibold" : c.payRate >= 15 ? "text-amber-600" : "text-muted-foreground"}>
+                                {c.payRate}%
+                              </span>
+                              <span className="text-muted-foreground ml-1 text-xs">({c.paying})</span>
+                            </td>
+                            <td className="px-4 py-3 text-right text-muted-foreground">{c.avgWorkouts}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="text-xs text-muted-foreground px-4 py-3 border-t border-border/50">
+                    Wk-1: active within 7 days of signup. Wk-2: active within 14 days. Target: Wk-1 ≥ 60%, Wk-2 ≥ 40%.
+                  </p>
+                </Card>
+              </section>
+            )}
           </>
         )}
       </div>
@@ -262,6 +320,17 @@ function RetentionCard({ label, rate, retained, eligible }: { label: string; rat
         <div className={`h-full rounded-full ${bgColor} transition-all duration-700`} style={{ width: `${displayRate}%` }} />
       </div>
     </Card>
+  );
+}
+
+function RetentionPill({ rate }: { rate: number }) {
+  const color = rate >= 60 ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
+    : rate >= 35 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+    : "bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-400";
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded-full text-xs font-semibold ${color}`}>
+      {rate}%
+    </span>
   );
 }
 

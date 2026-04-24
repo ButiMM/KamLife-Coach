@@ -8,7 +8,9 @@ import {
   numeric,
   date,
   uuid,
+  jsonb,
   index,
+  uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
@@ -163,6 +165,36 @@ export const stepLogs = pgTable(
   },
 );
 
+// Structured meal log — numeric columns replace regex-parsing bot chat text.
+// Every food log goes here (SA scanner + GPT-fallback + photo). Readers SUM columns.
+export const mealLogs = pgTable(
+  "meal_logs",
+  {
+    id: uuid("id")
+      .primaryKey()
+      .default(sql`gen_random_uuid()`),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id),
+    loggedAt: timestamp("logged_at").defaultNow().notNull(),
+    rawMessage: text("raw_message"),            // what user sent
+    source: text("source").notNull(),           // 'sa_scanner' | 'gpt_fallback' | 'photo' | 'retro'
+    kcalInt: integer("kcal_int").notNull().default(0),
+    proteinInt: integer("protein_int").notNull().default(0),
+    carbsInt: integer("carbs_int").notNull().default(0),
+    fatInt: integer("fat_int").notNull().default(0),
+    // items: array of { name, grams?, kcal, protein, carbs?, fat? }
+    items: jsonb("items"),
+    mealLabel: text("meal_label"),              // 'breakfast' | 'lunch' | 'dinner' | 'snack' | null
+    corrected: boolean("corrected").notNull().default(false),
+  },
+  (table) => {
+    return {
+      userDateIdx: index("meal_logs_user_date_idx").on(table.userId, table.loggedAt),
+    };
+  },
+);
+
 export const weeklyCheckins = pgTable(
   "weekly_checkins",
   {
@@ -300,6 +332,30 @@ export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
 }));
 
+// === SENT PROACTIVE — durable dedupe for scheduled messages ===
+// Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
+// The unique index below guarantees the same (user, messageKey, window) can only
+// be claimed once, so a process restart mid-cron cannot double-send.
+//
+// dedupeWindow is caller-defined — use the ISO week "2026-W16" for weekly jobs,
+// "2026-04-18" (YYYY-MM-DD) for daily jobs, month for monthly. The unique key
+// is the triple, so different windows for the same message are fine.
+export const sentProactive = pgTable("sent_proactive", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  messageKey: text("message_key").notNull(),
+  dedupeWindow: text("dedupe_window").notNull(),
+  sentAt: timestamp("sent_at").defaultNow().notNull(),
+}, (table) => ({
+  uniqIdx: uniqueIndex("sent_proactive_uniq_idx").on(table.userId, table.messageKey, table.dedupeWindow),
+  userIdx: index("sent_proactive_user_idx").on(table.userId),
+  sentAtIdx: index("sent_proactive_sent_at_idx").on(table.sentAt),
+}));
+
+export const sentProactiveRelations = relations(sentProactive, ({ one }) => ({
+  user: one(users, { fields: [sentProactive.userId], references: [users.id] }),
+}));
+
 // === A/B TEST EXPERIMENTS — message template testing engine ===
 export const abExperiments = pgTable("ab_experiments", {
   id: serial("id").primaryKey(),
@@ -358,6 +414,25 @@ export const messages = pgTable("messages", {
     .notNull(),
 });
 
+// === CLIENT PINNED ACTIONS ===
+// Coach-defined per-client tasks: "Call to check injury", "Review programme week 4", etc.
+export const clientActions = pgTable("client_actions", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  content: text("content").notNull(),
+  dueAt: timestamp("due_at"),
+  completedAt: timestamp("completed_at"),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userIdx: index("client_actions_user_idx").on(table.userId),
+}));
+
+export type ClientAction = typeof clientActions.$inferSelect;
+
+export const clientActionsRelations = relations(clientActions, ({ one }) => ({
+  user: one(users, { fields: [clientActions.userId], references: [users.id] }),
+}));
+
 // === RELATIONS ===
 
 export const usersRelations = relations(users, ({ many }) => ({
@@ -370,6 +445,7 @@ export const usersRelations = relations(users, ({ many }) => ({
   bodyMeasurements: many(bodyMeasurements),
   progressPhotos: many(progressPhotos),
   escalations: many(escalations),
+  clientActions: many(clientActions),
 }));
 
 export const chatHistoryRelations = relations(chatHistory, ({ one }) => ({

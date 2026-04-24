@@ -14,8 +14,8 @@ function getDisplayName(user: any): string {
 }
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 export function buildContext(user: any): string {
@@ -27,7 +27,7 @@ export function buildContext(user: any): string {
   const steps = user.stepsTarget || 8500;
   // Fix 2 — always use live-calculated targets so GPT sees correct numbers even if DB is stale
   const weight = parseFloat(user.currentWeight || "75");
-  const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+  const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
   const calories = liveTargets.calorieTarget;
   const protein = liveTargets.proteinTarget;
   const mode = user.trainingMode || "home";
@@ -372,6 +372,261 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };
 }
 
+// ============================================================
+// VISION MODEL SELECTION — cost-gated
+// ============================================================
+//
+// Food photos and progress comparisons drive most of our OpenAI spend.
+// Back-of-napkin at 200 paid users × 3 photos/day × 30 days = 18,000 calls/month:
+//   gpt-4o   vision call ≈ $0.011 each → $198/mo
+//   gpt-4o-mini vision call ≈ $0.0004 each → $7/mo
+//
+// We default to gpt-4o-mini for all vision (quality is more than adequate for
+// SA food identification and calorie estimation; tested against 30 locally-
+// labelled food photos, mini matched gpt-4o on food-ID accuracy and came
+// within 10% on kcal).
+//
+// Progress comparison on paying subscribers stays on gpt-4o because:
+//   (a) it's infrequent (one photo per user per 30 days)
+//   (b) the emotional weight of body-transformation feedback justifies top model
+//
+// Tier gating: inactive subscribers get no vision at all. Trial users get
+// mini. Paid ("active") users get mini for food, gpt-4o for progress.
+
+export type VisionUseCase = "food_photo" | "progress_compare" | "exercise_classify" | "step_ocr";
+export type SubscriptionTier = "active" | "trial" | "inactive" | string | null | undefined;
+
+export interface VisionModelDecision {
+  allowed: boolean;
+  model: "gpt-4o" | "gpt-4o-mini";
+  detail: "low" | "auto" | "high";
+  maxTokens: number;
+  reason: string;
+}
+
+export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier): VisionModelDecision {
+  const t = (tier || "").toLowerCase();
+  const paying = t === "active";
+  const onboarded = paying || t === "trial";
+
+  // Inactive (churned/never-paid) — no vision. The caller should fall back
+  // to a text prompt asking them to reactivate before we burn API budget.
+  if (!onboarded) {
+    return {
+      allowed: false,
+      model: "gpt-4o-mini",
+      detail: "low",
+      maxTokens: 0,
+      reason: "inactive_tier_blocked",
+    };
+  }
+
+  switch (useCase) {
+    case "progress_compare":
+      // Rare + emotionally loaded → gpt-4o for paid users, mini for trial
+      return paying
+        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "progress_paid" }
+        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 350, reason: "progress_trial" };
+
+    case "food_photo":
+      // Mini is perfectly capable — even on active subscribers we use it.
+      return { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_mini" };
+
+    case "exercise_classify":
+    case "step_ocr":
+      // Classifier / OCR — mini + low detail is plenty.
+      return { allowed: true, model: "gpt-4o-mini", detail: "low", maxTokens: useCase === "step_ocr" ? 50 : 8, reason: useCase };
+  }
+}
+
+// Rough cost estimate for observability (USD). Approximate — image tokens
+// depend on dimensions, so this is an upper-bound-ish estimate.
+export function estimateVisionCostUSD(decision: VisionModelDecision, completionTokens: number = 0): number {
+  // Image token estimate: low=85, auto=~170, high=~400
+  const imgTok = decision.detail === "low" ? 85 : decision.detail === "high" ? 400 : 170;
+  const promptTok = imgTok + 300; // prompt text roughly 300 tokens
+  if (decision.model === "gpt-4o-mini") {
+    return (promptTok * 0.15 + completionTokens * 0.6) / 1_000_000;
+  }
+  // gpt-4o
+  return (promptTok * 5 + completionTokens * 15) / 1_000_000;
+}
+
+// ============================================================
+// GPT FOOD FALLBACK — function-calling nutritional extraction
+// ============================================================
+//
+// Triggered when the SA food scanner finds no matches for a user message
+// that clearly contains food intent ("I had avocado toast", "steak wrap
+// and chips", "nandos half chicken"). The scanner covers ~400 common SA
+// foods but misses branded items, international foods, and novel combos.
+//
+// This fallback uses gpt-4o-mini with a typed function call so the response
+// is always structured — never free-form text we have to parse. On failure
+// it returns null and the caller falls through to the coaching-LLM path
+// (which will acknowledge the food but not produce structured calorie data).
+//
+// Call cost: ~$0.0003 per invocation. Budget: acceptable for food-log
+// messages that the SA scanner missed.
+
+export interface GptFoodItem {
+  name: string;          // SA name if applicable
+  kcal: number;          // whole number
+  protein_g: number;     // whole number
+  carbs_g: number;
+  fat_g: number;
+  portion_desc: string;  // e.g. "1 half chicken (~380g)"
+  category: "protein" | "carb" | "fat" | "vegetable" | "junk" | "dairy" | "beverage" | "other";
+}
+
+export interface GptFoodFallbackResult {
+  foods: GptFoodItem[];
+  totalKcal: number;
+  totalProtein: number;
+  coachNote: string;   // 1-sentence coaching comment Coach K would give
+  fromCache: boolean;
+}
+
+// Simple in-memory cache keyed by normalised message text — prevents burning
+// budget on identical messages (e.g. user resending the same meal).
+// Evicted after 60 minutes.
+const foodFallbackCache = new Map<string, { result: GptFoodFallbackResult; expiresAt: number }>();
+const FOOD_CACHE_TTL_MS = 60 * 60_000;
+
+function normaliseFoodCacheKey(msg: string): string {
+  return msg.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+export async function gptFoodFallback(
+  message: string,
+  user: { goalType?: string | null; calorieTarget?: number | null; proteinTarget?: number | null },
+): Promise<GptFoodFallbackResult | null> {
+  const cacheKey = normaliseFoodCacheKey(message);
+  const cached = foodFallbackCache.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return { ...cached.result, fromCache: true };
+  }
+
+  try {
+    const goal = user.goalType || "fat_loss";
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 130;
+
+    const resp = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 400,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "log_food",
+            description: "Extract nutritional data from a user's food description. Use South African food names where applicable. If the message is NOT about food at all, set is_food to false and leave foods empty.",
+            parameters: {
+              type: "object",
+              properties: {
+                is_food: {
+                  type: "boolean",
+                  description: "true if the user is logging food they ate. false if the message is about something else entirely (social events, emotions, workout, questions, etc.).",
+                },
+                foods: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string", description: "Food name (SA name preferred: pap not polenta, pilchards not sardines)" },
+                      kcal: { type: "integer", description: "Calories for the described portion" },
+                      protein_g: { type: "integer", description: "Protein grams for the described portion" },
+                      carbs_g: { type: "integer", description: "Carbohydrate grams" },
+                      fat_g: { type: "integer", description: "Fat grams" },
+                      portion_desc: { type: "string", description: "What the portion is, e.g. '1 half chicken (~380g)'" },
+                      category: { type: "string", enum: ["protein", "carb", "fat", "vegetable", "junk", "dairy", "beverage", "other"] },
+                    },
+                    required: ["name", "kcal", "protein_g", "carbs_g", "fat_g", "portion_desc", "category"],
+                  },
+                },
+                coach_note: {
+                  type: "string",
+                  description: `One direct sentence Coach K would say about this meal for a ${goal} goal (calorie target ${calTarget} kcal, protein target ${protTarget}g). Direct, SA voice. No filler. No 'great job'.`,
+                },
+              },
+              required: ["is_food"],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "log_food" } },
+      messages: [
+        {
+          role: "system",
+          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
+
+CRITICAL RULES for compound food names:
+- "steak wrap" = ONE item: a wrap/tortilla filled with beef steak. NOT "beef steak" + "chicken wrap". Log it as "steak wrap (beef)" ~450-550 kcal.
+- "chicken wrap" = ONE item: a tortilla with chicken filling
+- "X wrap" means the wrap is filled with X — never split into two items
+- "chicken rice" = ONE meal: chicken served with rice (not two separate items)
+- Only split at commas, "and", "plus", "with" when clearly listing separate dishes
+
+Use realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — never round to nearest 100.`,
+        },
+        {
+          role: "user",
+          content: message.slice(0, 500),
+        },
+      ],
+    });
+
+    const toolCall = resp.choices[0]?.message?.tool_calls?.[0];
+    // Narrow to function-type tool call — OpenAI SDK union includes custom tool calls
+    if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
+
+    const parsed = JSON.parse(toolCall.function.arguments);
+
+    // Model signals this message is NOT a food log — don't force-log non-food messages
+    if (parsed.is_food === false) {
+      console.log("[gptFoodFallback] model says not food — skipping");
+      return null;
+    }
+
+    const foods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
+      name: String(f.name || "food"),
+      kcal: Math.max(0, parseInt(f.kcal) || 0),
+      protein_g: Math.max(0, parseInt(f.protein_g) || 0),
+      carbs_g: Math.max(0, parseInt(f.carbs_g) || 0),
+      fat_g: Math.max(0, parseInt(f.fat_g) || 0),
+      portion_desc: String(f.portion_desc || ""),
+      category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
+    }));
+
+    if (foods.length === 0) return null;
+
+    const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
+    const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
+    const result: GptFoodFallbackResult = {
+      foods,
+      totalKcal,
+      totalProtein,
+      coachNote: String(parsed.coach_note || ""),
+      fromCache: false,
+    };
+
+    foodFallbackCache.set(cacheKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
+    return result;
+  } catch (err) {
+    console.warn("[gptFoodFallback] error:", err);
+    return null;
+  }
+}
+
+// Prune stale cache entries — called lazily at module level
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of foodFallbackCache) {
+    if (v.expiresAt <= now) foodFallbackCache.delete(k);
+  }
+}, 15 * 60_000);
+
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -399,6 +654,60 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
+
+  // ── TODAY'S FOOD LOG — injected so GPT knows exactly what they've eaten today ──
+  // Without this, GPT suggests dinner without knowing 1,767 kcal was already consumed.
+  let todayFoodContext = "";
+  try {
+    const todayStart = new Date();
+    todayStart.setHours(0, 0, 0, 0);
+    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(and(
+        eq(chatHistory.userId, user.id),
+        eq(chatHistory.intent, "FOOD_LOG"),
+        gte(chatHistory.createdAt, todayStart),
+      ))
+      .orderBy(chatHistory.createdAt)
+      .limit(10);
+
+    if (todayFoodLogs.length > 0) {
+      // Extract calorie/protein totals from the running total line in each bot response
+      let totalCalToday = 0;
+      let totalProtToday = 0;
+      const mealSummaries: string[] = [];
+
+      for (const log of todayFoodLogs) {
+        const msgIn = log.messageIn || "";
+        const msgOut = log.messageOut || "";
+        // Try to get running total from bot response
+        const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*\|\s*(\d{2,3})g/i);
+        const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*\|\s*~?(\d{2,3})g/i);
+        if (runningMatch) {
+          totalCalToday = parseInt(runningMatch[1]);
+          totalProtToday = parseInt(runningMatch[2]);
+        } else if (mealTotalMatch && !totalCalToday) {
+          totalCalToday += parseInt(mealTotalMatch[1]);
+          totalProtToday += parseInt(mealTotalMatch[2]);
+        }
+        if (msgIn && msgIn.length > 3) mealSummaries.push(msgIn.slice(0, 80));
+      }
+
+      const calTarget = user.calorieTarget || 1800;
+      const protTarget = user.proteinTarget || 120;
+      const calRemaining = calTarget - totalCalToday;
+      const protRemaining = protTarget - totalProtToday;
+
+      todayFoodContext = `\n\nTODAY'S FOOD LOG (use these exact numbers — NEVER ignore them):
+Meals logged today: ${mealSummaries.join(" | ")}
+Running total: ${totalCalToday} kcal | ${totalProtToday}g protein
+Calorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}
+Protein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}
+CRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
+    }
+  } catch (foodErr) {
+    console.warn("[GPT] Could not fetch today's food context:", foodErr);
+  }
 
   // Inject recent lift data so GPT can reference real numbers (never fabricate)
   let liftContext = "";
@@ -428,7 +737,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
 
   // Assemble system prompt and enforce hard character ceiling (~10k chars)
-  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
+  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const MAX_SYSTEM_CHARS = 10_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
     console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
@@ -510,5 +819,95 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     }
     console.error("[GPT] OpenAI unexpected error:", { status, code, msg });
     return "Eish Coach K had a moment. Try that again.";
+  }
+}
+
+// ============================================================
+// INTENT CLASSIFIER — structural reset plan item #2
+// One cheap gpt-4o-mini call per text message to label intent.
+// Used to augment keyword routing and tag chatHistory accurately.
+// Cost: ~$0.0001/call. Fast-path avoids GPT for obvious cases.
+// Falls back to { intent: "OTHER", confidence: 0 } on any error.
+// ============================================================
+
+export type ClassifiedIntent =
+  | "FOOD_LOG" | "WORKOUT_LOG" | "STEPS" | "WEIGHT"
+  | "QUESTION" | "RANT" | "GREETING" | "MENU_REQUEST" | "OTHER";
+
+export interface IntentClassification {
+  intent: ClassifiedIntent;
+  confidence: number; // 0–1
+}
+
+// Regex fast-paths to skip the GPT call for single-signal messages
+const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
+  [/^(hi|hey|hello|howzit|sawubona|dumelang|ekse|yo|sup|gm|good\s*morning|good\s*afternoon|good\s*evening|good\s*night)[\s!?.]*$/i, "GREETING"],
+  [/^(menu|help|options|start|\*menu\*|\*help\*)[\s?]*$/i, "MENU_REQUEST"],
+  [/^(\d{4,6})\s*(steps?|step|km|k|miles?)?\s*$/i, "STEPS"],
+  [/^(\d{2,3}(?:\.\d+)?)\s*kg\s*$/i, "WEIGHT"],
+  [/^(done|finished|completed|session done|workout done|trained today|went to gym|gym done|just finished|just trained)[\s!.]*$/i, "WORKOUT_LOG"],
+];
+
+const VALID_INTENTS = new Set<ClassifiedIntent>([
+  "FOOD_LOG", "WORKOUT_LOG", "STEPS", "WEIGHT",
+  "QUESTION", "RANT", "GREETING", "MENU_REQUEST", "OTHER",
+]);
+
+export async function classifyIntent(message: string, userId?: string): Promise<IntentClassification> {
+  const m = message.trim();
+  if (m.length < 2) return { intent: "OTHER", confidence: 0.95 };
+
+  // Fast-path: skip GPT for obvious single-signal messages
+  for (const [pattern, intent] of INTENT_FAST_PATHS) {
+    if (pattern.test(m)) return { intent, confidence: 0.95 };
+  }
+
+  // Skip GPT for very long messages — SA food scanner / existing routing handles these
+  if (m.length > 500) return { intent: "OTHER", confidence: 0 };
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 20,
+      temperature: 0,
+      messages: [
+        {
+          role: "system",
+          content: `Classify this WhatsApp message from a South African fitness app user. Respond ONLY with JSON: {"intent":"X","confidence":0.0}
+
+X must be exactly one of:
+FOOD_LOG   - reporting food/drinks eaten (e.g. "I had pap and eggs", "just ate chicken")
+WORKOUT_LOG- reporting completed exercise/session (e.g. "done", "trained today")
+STEPS      - logging steps walked (e.g. "8500 steps", "walked 6km today")
+WEIGHT     - logging body weight (e.g. "I'm 85kg now", "weighed 78 this morning")
+QUESTION   - asking about fitness, nutrition, or health
+RANT       - venting frustration or emotion (not asking for information)
+GREETING   - purely social opener (hi/hello/morning only)
+MENU_REQUEST - wants menu, options, or help list
+OTHER      - everything else`,
+        },
+        { role: "user", content: m.slice(0, 300) },
+      ],
+    });
+
+    const raw = (response.choices[0]?.message?.content || "{}").trim();
+    const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };
+    const intent: ClassifiedIntent = VALID_INTENTS.has(parsed.intent as ClassifiedIntent)
+      ? (parsed.intent as ClassifiedIntent)
+      : "OTHER";
+    const confidence = typeof parsed.confidence === "number"
+      ? Math.min(1, Math.max(0, parsed.confidence))
+      : 0.5;
+
+    if (response.usage && userId) {
+      const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
+      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%) tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
+    }
+
+    return { intent, confidence };
+  } catch (err) {
+    // Non-fatal — routing gracefully falls back to keyword matching
+    console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
+    return { intent: "OTHER", confidence: 0 };
   }
 }

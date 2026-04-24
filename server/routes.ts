@@ -3,7 +3,7 @@ import { type Server } from "http";
 import crypto from "crypto";
 import path from "path";
 import { db, pool } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments } from "../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments, mealLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import twilio from "twilio";
@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, gptFoodFallback, classifyIntent, type ClassifiedIntent } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -20,10 +20,12 @@ import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgen
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { deliveryStats, sendWhatsApp } from "./scheduler";
+import { recordConversion } from "./ab";
+import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
+import { detectEscalation, escalationSLA } from "./safety-detection";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 // SA timezone helper — South Africa is UTC+2 year-round (no DST)
@@ -61,6 +63,8 @@ const SA_FOOD_CALORIES: Record<string, number> = {
   "green tea": 2, rooibos: 2, "latte": 250, "giant latte": 400,
   creatine: 0, "protein shake": 120,
   "stew": 280, "fatty": 350, "pork": 300,
+  // Wraps — single-item compound names to prevent GPT splitting them
+  "steak wrap": 520, "beef wrap": 520, "chicken wrap": 420, "tuna wrap": 380, "veggie wrap": 300,
 };
 
 function estimateCalories(message: string): number {
@@ -82,25 +86,7 @@ function getDisplayName(user: any): string {
   return user.name;
 }
 
-function escalationSLA(priority: string): Date {
-  const hours: Record<string, number> = { urgent: 1, high: 4, normal: 12, low: 48 };
-  return new Date(Date.now() + (hours[priority] || 12) * 3600_000);
-}
-
-function detectEscalation(message: string): { should: boolean; reason: string; priority: string } {
-  const m = message.toLowerCase();
-  if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)\b/i.test(m))
-    return { should: true, reason: "injury", priority: "urgent" };
-  if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
-    return { should: true, reason: "billing", priority: "high" };
-  if (/\b(doctor|hospital|surgery|medication|diabete|blood pressure|heart|pregnant|pregnanc|asthma|epilep)\b/i.test(m))
-    return { should: true, reason: "medical", priority: "high" };
-  if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
-    return { should: true, reason: "frustrated", priority: "high" };
-  if (/\b(speak.*human|real person|talk.*someone|manager|complain|complaint)\b/i.test(m))
-    return { should: true, reason: "human_requested", priority: "normal" };
-  return { should: false, reason: "", priority: "normal" };
-}
+// detectEscalation + escalationSLA now live in ./safety-detection for unit testing
 
 
 
@@ -239,13 +225,45 @@ function scanForSAFoods(msg: string): SAFood[] {
   const matched: SAFood[] = [];
 
   // PASS 1: Exact word-boundary matching (fast, preferred)
+  // Track which alias matched so we can prefer longer (more specific) matches
+  const matchedWithAlias: { food: SAFood; alias: string }[] = [];
   for (const food of SA_FOODS_SEED) {
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
-    const hit = allAliases.some(alias => {
+    let longestHit = "";
+    for (const alias of allAliases) {
       const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
-      return re.test(lower);
-    });
-    if (hit && !matched.find(f => f.name === food.name)) matched.push(food);
+      if (re.test(lower) && alias.length > longestHit.length) {
+        longestHit = alias;
+      }
+    }
+    if (longestHit && !matchedWithAlias.find(m => m.food.name === food.name)) {
+      matchedWithAlias.push({ food, alias: longestHit });
+    }
+  }
+
+  // DEDUP PASS 1: If two foods matched with the exact same alias string (e.g. both
+  // "Chicken livers" and "Chicken liver" match alias "chicken livers"), keep only the first
+  // one encountered in SA_FOODS_SEED — eliminates plural/singular duplicate entries.
+  const seenAliases = new Set<string>();
+  const deduped: { food: SAFood; alias: string }[] = [];
+  for (const entry of matchedWithAlias) {
+    if (!seenAliases.has(entry.alias)) {
+      seenAliases.add(entry.alias);
+      deduped.push(entry);
+    }
+  }
+
+  // DEDUP PASS 2: If "chicken breast" matched AND "chicken thigh" also matched via a shorter
+  // alias that is a substring of the longer alias, drop the shorter one.
+  // E.g. "chicken" (6 chars) is substring of "chicken breast" (14 chars) — drop chicken thigh.
+  for (const entry of deduped) {
+    const dominated = deduped.some(other =>
+      other.food.name !== entry.food.name &&
+      other.alias.length > entry.alias.length &&
+      other.alias.includes(entry.alias) &&
+      other.food.category === entry.food.category
+    );
+    if (!dominated) matched.push(entry.food);
   }
 
   // PASS 2: Fuzzy matching for misspellings (only if exact didn't catch anything)
@@ -322,7 +340,159 @@ function scanForSAFoods(msg: string): SAFood[] {
     return matched.filter(f => !toRemove.has(f.name));
   }
 
-  return matched;
+  // PASS 4: Alias collision cleanup — keep the most specific item only
+  // Prevents double-counting like "chicken breast" + "chicken thigh" or duplicate peanut butter variants.
+  const names = new Set(matched.map(f => f.name));
+  let cleaned = [...matched];
+
+  // Peanut butter appears as multiple catalog entries with shared aliases.
+  if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
+    cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
+  }
+
+  // "Eggs" and "Whole egg (boiled)" can both hit for the same phrase.
+  if (names.has("Eggs") && names.has("Whole egg (boiled)")) {
+    cleaned = cleaned.filter(f => f.name !== "Whole egg (boiled)");
+  }
+
+  // If a specific chicken cut was matched, drop generic chicken piece aliases.
+  if (names.has("Chicken breast") && names.has("Chicken thigh")) {
+    const prefersBreast = /\b(breast|fillet|fillet[s]?)\b/i.test(lower);
+    cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
+  }
+
+  return cleaned;
+}
+
+function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {
+  if (!messageOut) return null;
+  const totalLine = messageOut.match(/\*(?:Meal|Day) total:\s*~?(\d+)\s*kcal\s*\|\s*~?(\d+)g\s*protein\*/i);
+  if (totalLine) {
+    return { calories: parseInt(totalLine[1], 10), protein: parseInt(totalLine[2], 10) };
+  }
+  return null;
+}
+
+function sanitizeCoachReply(reply: string, userMessage: string, budgetTier?: string | null, injuries?: string | null): string {
+  const trimmed = (reply || "").trim();
+  const umLower = userMessage.toLowerCase();
+
+  // --- context flags for smarter fallbacks ---
+  const looksFoodLog = /\b(ate|had|have|having|eating|i had|i ate|breakfast|lunch|dinner|supper|snack|just had|just ate|meal was|food was)\b/i.test(userMessage);
+  const looksSteps = /\b(screenshot|step|steps|walk|walked|km|miles)\b/i.test(userMessage);
+  const looksVoice = /\b(voice|audio|note)\b/i.test(userMessage);
+
+  if (!trimmed) {
+    if (looksFoodLog) {
+      return "I could not calculate that meal. Log it like this: \"I had 2 eggs and pap for breakfast\" and I will give you the exact kcal and protein breakdown.";
+    }
+    if (looksSteps) {
+      return "I did not catch your steps. Send a screenshot with the caption \"steps screenshot\" or type the number — \"8500 steps\".";
+    }
+    return "I had a glitch. Send your last message again and I will respond properly.";
+  }
+
+  // Hard-ban low-quality generic fallback we observed in production.
+  if (/^what happened\??$/i.test(trimmed)) {
+    if (looksSteps) {
+      return "I did not read the screenshot clearly. Send it again with this caption: \"steps screenshot\".";
+    }
+    if (looksVoice) {
+      return "I did not process that voice note fully. Please resend it, or type the message.";
+    }
+    if (looksFoodLog) {
+      return "I could not log that meal. Format: \"I had 2 eggs, pap, and cabbage for lunch\" — I will log the kcal and protein instantly.";
+    }
+    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+  }
+
+  // Detect food-log reply with no nutritional numbers — GPT dodged the question
+  if (looksFoodLog && trimmed.length < 60 && !/\d+\s*(kcal|cal|calories|protein|g\s*protein|kj)/i.test(trimmed) && !/food logged|logged ✅|meal total|day total/i.test(trimmed)) {
+    // GPT returned something too short and number-free for a food message — give concrete retry guide
+    return "I could not log that automatically. Type your meal like this:\n\n\"I had 2 eggs and brown bread for breakfast\"\n\"Chicken and rice for lunch\"\n\nI will give you the full kcal and protein breakdown.";
+  }
+
+  // Generic "I understand" / "Great" / empty opener with no content
+  if (/^(i understand\.?|understood\.?|great\.?|noted\.?|got it\.?|sure\.?|ok\.?|okay\.?)$/i.test(trimmed)) {
+    if (looksFoodLog) {
+      return "Tell me exactly what you ate — food name, rough quantity, and which meal — and I will log the calories and protein.";
+    }
+    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+  }
+
+  const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
+  return guarded.reply;
+}
+
+function buildMediaTrace(phone: string, mediaType: string): string {
+  const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "").slice(-6) || "unknown";
+  return `m_${Date.now().toString(36)}_${cleanPhone}_${(mediaType || "unknown").replace(/[^\w]/g, "").slice(0, 12)}`;
+}
+
+async function withTimeout<T>(label: string, ms: number, run: () => Promise<T>): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      run(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}_timeout_${ms}ms`)), ms);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function logMediaFailure(userId: string, stage: string, rawError?: unknown): Promise<void> {
+  const code = classifyMediaFailure(stage, rawError);
+  try {
+    await logChat(userId, `[MEDIA_FAIL:${stage}]`, code, "MEDIA_FAILURE");
+  } catch (e) {
+    console.warn("[media-failure-log]", e);
+  }
+}
+
+async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  // Primary: sum kcalInt + proteinInt from meal_logs table — written at log time, no re-parsing.
+  const [mealLogSum] = await db.select({
+    calories: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+    protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+  }).from(mealLogs).where(and(
+    eq(mealLogs.userId, userId),
+    gte(mealLogs.loggedAt, todayStart),
+  ));
+
+  if (mealLogSum && (mealLogSum.calories > 0 || mealLogSum.protein > 0)) {
+    return { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
+  }
+
+  // Fallback: legacy chatHistory scanning (users onboarded before meal_logs table existed)
+  const logs = await db.select({
+    messageIn: chatHistory.messageIn,
+    messageOut: chatHistory.messageOut,
+  }).from(chatHistory).where(and(
+    eq(chatHistory.userId, userId),
+    eq(chatHistory.intent, "FOOD_LOG"),
+    gte(chatHistory.createdAt, todayStart),
+  ));
+
+  let calories = 0;
+  let protein = 0;
+  for (const log of logs) {
+    const parsed = parseFoodLogTotalsFromMessageOut(log.messageOut || "");
+    if (parsed) {
+      calories += parsed.calories;
+      protein += parsed.protein;
+      continue;
+    }
+    const matched = scanForSAFoods(log.messageIn || "");
+    calories += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+    protein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+  }
+  return { calories, protein };
 }
 
 // ============================================================
@@ -431,9 +601,19 @@ async function checkFoodPatterns(userId: string): Promise<string | null> {
       return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
     }
 
-    const noProteinStreak = last3.filter(msg => !PROTEIN_WORDS.some(w => msg.includes(w))).length;
-    if (noProteinStreak >= 3) {
-      return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting ${" "}your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+    // Use mealLogs.proteinInt for the protein streak check — text-based detection
+    // misses photo meals where messageIn is "[Photo]" even if the image had chicken/eggs.
+    const recentMealLogs = await db.select({ proteinInt: mealLogs.proteinInt })
+      .from(mealLogs)
+      .where(eq(mealLogs.userId, userId))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(3);
+
+    if (recentMealLogs.length >= 3) {
+      const noProteinStreak = recentMealLogs.filter(r => (r.proteinInt || 0) === 0).length;
+      if (noProteinStreak >= 3) {
+        return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+      }
     }
 
     return null;
@@ -503,19 +683,29 @@ async function getProgressiveOverloadContext(userId: string): Promise<string> {
 // PERFECT DAY DETECTION
 // ============================================================
 
-async function checkPerfectDay(userId: string): Promise<string | null> {
+async function checkPerfectDay(userId: string, proteinTarget: number = 130): Promise<string | null> {
   try {
     const todayStart = new Date();
     todayStart.setHours(0, 0, 0, 0);
 
-    const [todayWorkouts, todaySteps, todayFood] = await Promise.all([
+    // "Food tracked" must mean the PROTEIN TARGET was hit, not merely "a food
+    // row exists". Before this, checkPerfectDay read chatHistory.FOOD_LOG while
+    // the morning scheduler summed mealLogs.proteinInt — so the evening could
+    // call "Perfect day! Food tracked" and the morning could call the same
+    // user "122g short of your 165g target". Same source of truth now.
+    const [todayWorkouts, todaySteps, proteinRow] = await Promise.all([
       db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, todayStart))).limit(1),
       db.select().from(stepLogs).where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, todayStart))).limit(1),
-      db.select().from(chatHistory).where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).limit(1),
+      db.select({
+        totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs).where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, todayStart))),
     ]);
 
-    if (todayWorkouts.length > 0 && todaySteps.length > 0 && todayFood.length > 0) {
-      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Food tracked. This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
+    const totalProt = Number(proteinRow[0]?.totalProt || 0);
+    const proteinHit = totalProt >= proteinTarget * 0.9; // same 90% threshold as the morning job
+
+    if (todayWorkouts.length > 0 && todaySteps.length > 0 && proteinHit) {
+      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Protein target hit (${totalProt}g / ${proteinTarget}g). This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
     }
     return null;
   } catch (e) {
@@ -530,7 +720,7 @@ async function checkPerfectDay(userId: string): Promise<string | null> {
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string): Promise<string> {
+async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
   const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
 
@@ -634,6 +824,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     if (existing.length > 0) {
       const uid = existing[0].id;
+      // Delete ALL FK-dependent tables before deleting user row
       await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
       await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
       await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
@@ -641,6 +832,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
       await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
       await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+      await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
       await db.delete(users).where(eq(users.id, uid));
     }
     await db.insert(users).values({
@@ -660,6 +855,44 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   const user = await getOrCreateUser(phone);
 
+  // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
+  // Fire early as a background Promise. Text messages only (not photo/voice).
+  // Awaited just before the final GPT routing (line ~6590) — by then it's complete.
+  // On any error, returns { intent: "OTHER", confidence: 0 } — never blocks.
+  const intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> =
+    (!mediaUrl && message.length >= 2 && message.length <= 500)
+      ? classifyIntent(message, user.id).catch(() => ({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }))
+      : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
+
+  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
+  // Prevent vague GPT responses after a media upload by resolving against recent media events.
+  const asksAboutSentMedia = /\b(i sent|i have sent|did you get|you got|check|look at).{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
+  if (asksAboutSentMedia && !mediaUrl) {
+    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(12);
+    const lastMediaEvent = recentMedia.find(row =>
+      (row.messageIn || "").includes("[Photo]") ||
+      (row.messageIn || "").includes("[Step Screenshot") ||
+      (row.intent || "").includes("PROGRESS_PHOTO")
+    );
+    if (lastMediaEvent) {
+      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
+        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
+      }
+      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
+        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
+      }
+      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
+    }
+    if (/\b(voice|audio|note)\b/i.test(m)) {
+      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
+    }
+    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
+  }
+
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
   if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
@@ -675,6 +908,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
+  }
+
+  // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
+  const coachPhone = (process.env.COACH_ALERT_PHONE || "").replace(/\D/g, "");
+  const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+  const isCoach = coachPhone && userPhone === coachPhone;
+  if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
+    await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.phoneNumber, phone));
+    user.subscriptionStatus = "active";
   }
 
   // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive with a clear message ----
@@ -696,21 +938,34 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
   }
 
-  // ---- SUBSCRIPTION GATE — inactive users locked out of coaching ----
+  // ---- SUBSCRIPTION GATE — inactive users get free basic tier, premium features gated ----
+  // FREE (always available): food logging, step tracking, water, weight, basic Q&A, meal diary
+  // PREMIUM (requires subscription): workout programmes, shopping lists, full coaching, meal plans
   if (user.subscriptionStatus === 'inactive') {
-    const gateBypass = /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal|help|menu|delete|my data|chest pain|can.?t breathe|emergency|hospital|ambulance|hi|hello|hey|howzit|sawubona|dumela|heita|eita|status|what did i eat|food diary|food log|my food|calories today|protein today)\b/i;
-    if (!gateBypass.test(m)) {
-      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const name = user.name ? `${user.name}` : "there";
+    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const merchantId = process.env.PAYFAST_MERCHANT_ID;
+    const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+    const name = user.name?.split(" ")[0] || "there";
+
+    // Premium features that need subscription
+    const isPremiumRequest =
+      /\b(workout|programme|program|training plan|gym plan|my plan|day 1|day 2|day 3|shopping list|shop|meal plan|full coaching|next session|lift|sets|reps)\b/i.test(m) &&
+      !/\b(food|eat|ate|had|log|steps|walked|weight|water|calories|protein|diary|my meals|remove|delete)\b/i.test(m);
+
+    if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
       const gateReply = workouts === 0
-        ? `Your programme is built, ${name}. Subscribe to start.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day for a personal coach in your pocket. Reply *pay* to get your link.`
-        : `${name}, your subscription is inactive.\n\nYour ${workouts} workout${workouts > 1 ? "s" : ""} and all progress are saved.\n\n*Reactivate for R149/month:*\n${payLink}\n\nReply *pay* to get your link.`;
+        ? `Your programme is built, ${name} — subscribe to unlock it.\n\nFood tracking is free forever. Workouts, shopping lists, and full coaching are *R149/month*.\n\n${payLink}`
+        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month:* ${payLink}\n\nFood tracking and steps stay free.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
+    }
+
+    // Crisis and safety always bypass
+    const isSafety = /\b(chest pain|can.?t breathe|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
+    if (isSafety) {
+      // Fall through to crisis handler above
     }
   }
 
@@ -736,17 +991,210 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
   }
 
+  // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
+  // Catches multi-signal frustration messages like "this is all useless... shut down... I'm done"
+  // so that the bot does NOT respond with a workout programme or food log
+  const frustrationSignalCount = [
+    /\b(useless|useless(ly)?)\b/i.test(m),
+    /\b(terrible|pathetic|garbage|rubbish|broken|nothing works)\b/i.test(m),
+    /\b(i.?m done|i am done|giving up|shut down|shut it down|i.?m out)\b/i.test(m),
+    /\b(not paying|won.?t pay|i won.?t pay|i.?m not paying|nobody.?s paying|not worth)\b/i.test(m),
+    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic)\b/i.test(m),
+    /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
+  ].filter(Boolean).length;
+
+  if (frustrationSignalCount >= 2) {
+    const firstName = user.name?.split(" ")[0] || "";
+    const namePrefix = firstName ? `${firstName}, ` : "";
+    const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(3);
+    const lastIntent = lastBotMsgs[0]?.intent || "";
+    const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
+    const profileCtx = `CRITICAL PROFILE: Goal=${user.goalType}, Budget=${user.weeklyFoodBudget}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}.`;
+    const severeCtx = `The client is severely frustrated. They are ready to quit. Message: "${message}". Last bot response (${lastIntent}): "${lastOut}". ${profileCtx}\n\nRULES: 1) Do NOT apologise generically. 2) Do NOT ask what happened — you know what happened: the bot failed them. 3) Acknowledge the SPECIFIC failure. 4) Tell them ONE specific thing that still works or IS personalised to their profile. 5) Give them a direct, concrete action for TODAY only. 6) Maximum 4 sentences. SA voice. Human, direct, no corporate speak.`;
+    try {
+      const severeReply = await askCoachK(message, user, severeCtx);
+      await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
+      return severeReply;
+    } catch (e) {
+      const fallback = `${namePrefix}I hear you — that wasn't good enough. Your calorie target is ${user.calorieTarget || 1800} kcal and protein target is ${user.proteinTarget || 120}g today. Log what you eat and I will track it accurately. Nothing else.`;
+      await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
+      return fallback;
+    }
+  }
+
+  // ---- A/B CONVERSION ATTRIBUTION — fire-and-forget, never blocks message handling ----
+  // Any inbound message from an onboarded user that reaches this point counts as a
+  // "response" to the most recent unresponded A/B delivery within 24h.
+  // action = most likely intent (best-effort based on message text — not routed yet).
+  if (user.id) {
+    const abAction = /\b(ate|had|food|meal|breakfast|lunch|dinner)\b/i.test(m) ? "food_logged"
+      : /\b(done|finished|workout|session|trained|gym)\b/i.test(m) ? "workout_done"
+      : /\b(steps?|walked|walking)\b/i.test(m) ? "steps_logged"
+      : "replied";
+    recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
+  }
+
   // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today)\b/i.test(m)) {
-    // Reset the stored counter
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-    // Also delete today's FOOD_LOG entries from chat_history to prevent phantom re-counts
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    try {
-      await db.delete(chatHistory)
-        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-    } catch (e) { console.warn("[non-fatal] clear food log:", e); }
+    // Delete from both mealLogs (primary) and chatHistory (legacy)
+    await Promise.all([
+      db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
+      db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).catch(e => console.warn("[non-fatal] clear chat food log:", e)),
+    ]);
     return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
+  }
+
+  // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
+  if (/^(no\s+)?(remove|delete|undo)\s+(it|that|last|last one|last meal)$/i.test(m.trim())) {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+
+    // Primary: delete most recent mealLogs row
+    const lastMealLog = await db.select({ id: mealLogs.id })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(1);
+
+    if (lastMealLog.length > 0) {
+      await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLog[0].id));
+    } else {
+      // Legacy fallback: mark chatHistory entry corrected
+      const lastFoodLog = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      if (lastFoodLog.length === 0) return `No meal logged yet today to remove.`;
+      await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+    }
+
+    const recomputed = await recomputeTodayFoodTotals(user.id);
+    await db.update(users).set({
+      todayCalories: recomputed.calories,
+      todayProteinG: recomputed.protein,
+      todayCaloriesDate: sastToday(),
+    }).where(eq(users.id, user.id));
+
+    return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
+  }
+
+  // ---- REMOVE SPECIFIC FOOD FROM LOG — "remove the viennas", "I didn't have the eggs" ----
+  // Catches: "remove viennas", "didn't have eggs", "take out the bread", "no viennas in my log"
+  const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|didn.?t have|did not have|i didn.?t eat|i did not eat|no )\s+(the\s+)?(.{2,30}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
+  const isRemoveSpecific = !!removeSpecificMatch && !/(last|that|it|this|meal|log)$/.test((removeSpecificMatch[2] || "").trim());
+  if (isRemoveSpecific && removeSpecificMatch) {
+    const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
+    if (foodToRemove.length >= 2) {
+      try {
+        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+
+        // Primary: search mealLogs table (SA scanner + GPT fallback + photo logs all write here)
+        const mealLogRows = await db.select({
+          id: mealLogs.id,
+          rawMessage: mealLogs.rawMessage,
+          items: mealLogs.items,
+        }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+          .orderBy(desc(mealLogs.loggedAt))
+          .limit(15);
+
+        const targetMealLog = mealLogRows.find(l => {
+          if ((l.rawMessage || "").toLowerCase().includes(foodToRemove)) return true;
+          const logItems = l.items as Array<{ name?: string; foodName?: string }> | null;
+          return Array.isArray(logItems) && logItems.some(i =>
+            (i.name || i.foodName || "").toLowerCase().includes(foodToRemove)
+          );
+        });
+
+        if (targetMealLog) {
+          await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
+          const recomputed = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({
+            todayCalories: recomputed.calories,
+            todayProteinG: recomputed.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id));
+          return `Removed ${foodToRemove} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${(user.calorieTarget || 1800) - recomputed.calories} kcal | ~${(user.proteinTarget || 120) - recomputed.protein}g protein still to go.`;
+        }
+
+        // Fallback: search legacy chatHistory logs
+        const todayLogs = await db.select({ id: chatHistory.id, messageIn: chatHistory.messageIn })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(15);
+
+        const targetLog = todayLogs.find(l => (l.messageIn || "").toLowerCase().includes(foodToRemove));
+        if (!targetLog) {
+          return `I don't see "${foodToRemove}" in today's food log. Send "my meals" to see what's logged.`;
+        }
+
+        const updatedMsg = (targetLog.messageIn || "")
+          .replace(new RegExp(`\\b${foodToRemove.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "gi"), "")
+          .replace(/,\s*,/g, ",").replace(/^,\s*|,\s*$/g, "").replace(/\s{2,}/g, " ").trim();
+
+        if (!updatedMsg || updatedMsg.length < 3) {
+          await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, targetLog.id));
+        } else {
+          await db.update(chatHistory).set({ messageIn: updatedMsg }).where(eq(chatHistory.id, targetLog.id));
+        }
+
+        const recomputed = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({
+          todayCalories: recomputed.calories,
+          todayProteinG: recomputed.protein,
+          todayCaloriesDate: sastToday(),
+        }).where(eq(users.id, user.id));
+
+        return `Removed ${foodToRemove} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${(user.calorieTarget || 1800) - recomputed.calories} kcal | ~${(user.proteinTarget || 120) - recomputed.protein}g protein still to go.`;
+      } catch (removeErr) {
+        console.error("[REMOVE_FOOD]", removeErr);
+        return `Could not update your log right now. Try "remove last meal" or send "my meals" to see what's logged.`;
+      }
+    }
+  }
+
+  // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
+  if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
+    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const logs = await db.select({
+      messageIn: chatHistory.messageIn,
+      messageOut: chatHistory.messageOut,
+      createdAt: chatHistory.createdAt,
+    }).from(chatHistory).where(and(
+      eq(chatHistory.userId, user.id),
+      eq(chatHistory.intent, "FOOD_LOG"),
+      gte(chatHistory.createdAt, todayStart),
+    )).orderBy(asc(chatHistory.createdAt)).limit(20);
+
+    if (logs.length === 0) {
+      return `No food logged yet today. Send your meal and I will track it.`;
+    }
+
+    const lines: string[] = [];
+    let totalCals = 0;
+    let totalProtein = 0;
+    for (const l of logs) {
+      const parsed = parseFoodLogTotalsFromMessageOut(l.messageOut || "");
+      if (parsed) {
+        totalCals += parsed.calories;
+        totalProtein += parsed.protein;
+      } else {
+        const matched = scanForSAFoods(l.messageIn || "");
+        totalCals += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+        totalProtein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+      }
+      const time = l.createdAt ? new Date(l.createdAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "--:--";
+      lines.push(`${time} — ${(l.messageIn || "[photo]").slice(0, 80)}`);
+    }
+
+    return `*Today's meal log (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total so far:* ~${totalCals} kcal | ~${totalProtein}g protein`;
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
@@ -793,7 +1241,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), sugar beans (8g per 100g cooked).`;
   }
 
-  if (/\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m)) {
+  // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak".
+  // Only fire the workout-streak report when the message looks like a genuine progress
+  // question (no food-log trigger words, no SA-food matches). The morning after a
+  // braai a lot of people will type "steak and pap" — must not be intercepted here.
+  const mentionsStreakWord = /\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m);
+  const looksLikeFoodLogMsg = /\b(had|ate|eaten|eating|having|for\s+(breakfast|lunch|dinner|supper|snack)|wrap|fries|burger|chips|bun)\b/i.test(m)
+    || scanForSAFoods(m).length > 0;
+  if (mentionsStreakWord && !looksLikeFoodLogMsg) {
     const streak = user.workoutStreak || 0;
     const total = user.totalWorkoutsCompleted || 0;
     const target = user.trainingDaysPerWeek || 3;
@@ -911,6 +1366,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const modeLabel = trainingMode === "gym" ? "Gym" : "Home";
     const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
+
+    // Day 1 progress photo challenge — fires immediately after programme delivery.
+    // Don't wait for the 10am cron. The user is engaged RIGHT NOW and more likely
+    // to send a photo when they're still in the setup flow than hours later.
+    // 3-second delay so the programme message lands first, then the follow-up.
+    setTimeout(async () => {
+      try {
+        await sendWhatsApp(phone,
+          `One more thing — *send me a before photo right now.*\n\nFront-facing, in fitted clothes or underwear. Good lighting. This is your Day 0 progress shot.\n\nIn 4 weeks I will compare it to your new photo and show you the exact difference. Without today's photo, we have nothing to compare later.\n\n*Send it now before you forget.*`
+        );
+        await logChat(user.id, "[auto]", "[Day 0 photo challenge sent]", "PHOTO_CHALLENGE_PROMPT");
+      } catch { /* non-fatal */ }
+    }, 3_000);
+
     return reply;
     } // end else (not an obvious non-programme message)
   }
@@ -925,8 +1394,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (m === "4" || m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
-    const list = getShoppingList(budget, weekNum);
-    const reply = formatShoppingList(list, user.name || undefined);
+    const goal = user.goalType || "fat_loss";
+    const list = getShoppingList(budget, weekNum, goal);
+    const reply = formatShoppingList(list, user.name || undefined, goal);
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
   }
@@ -1284,9 +1754,70 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? `3 eggs scrambled + 1 cup oats + banana` : `${isLowGI ? "samp and beans ½ cup" : "½ cup oats"} + 2 boiled eggs`} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${noFish ? "2 eggs + cabbage" : "½ tin pilchards + cabbage"} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
   }
 
+  // ============================================================
+  // SA LIFE EVENTS — load shedding, illness, month-end, funerals
+  // These must fire before the main routing so clients feel heard,
+  // not handed a workout programme when they've just had a hard day.
+  // ============================================================
+  const capName = user.name?.split(" ")[0] || "there";
+  const daysSilent = user.lastActiveAt
+    ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
+    : 0;
+  const isReturning = daysSilent >= 2;
+
+  // ---- LOAD SHEDDING ----
+  const isLoadShedding = /\b(load.?shed|loadshed|eskom|no.?electricity|no.?power|stage\s*[1-8]|power.?cut|power.?out|blackout|no.?lights|lights.?out|inverter.?dead|battery.?dead|no.?signal.*load|generator.*off)\b/i.test(m);
+  if (isLoadShedding) {
+    const lsReply = `${capName}, load shedding is real — it messes with routines, meals, and everything else. No blame.\n\nHere's what you can still do with zero power:\n- Home workout: 3 rounds of 15 squats, 10 push-ups, 20 jumping jacks, 30-sec plank. No equipment, no electricity needed.\n- Eating: cold food counts. Bread + peanut butter, fruit, biltong, yoghurt if still cold — log it.\n- Steps: even 20 minutes walking outside counts. Send me the count when you're back.\n\nWhen power's back, pick up where you left off. One missed session never killed progress — giving up does.`;
+    await logChat(user.id, message, lsReply, "LOAD_SHEDDING");
+    return lsReply;
+  }
+
+  // ---- SICK / ILL ----
+  const isSick = /\b(sick|ill|flu|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine)\b/i.test(m)
+    && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal)\b/i.test(m);
+  if (isSick) {
+    const sickReply = `${capName}, rest is training. Your body is fighting something — pushing through will make it worse and set you back further.\n\nWhat to do right now:\n- *Eat something, even if small.* Your body needs fuel to recover. Soft foods: pap, egg, toast, yoghurt, soup.\n- *Drink water.* A lot of it. Illness dehydrates fast.\n- *No workout today* — sleep is more anabolic than any gym session when you're ill.\n\nMessage me when you're feeling better and we pick up exactly where you left off. Your programme is saved. Rest well.`;
+    await logChat(user.id, message, sickReply, "SICK_DAY");
+    return sickReply;
+  }
+
+  // ---- FUNERAL / BEREAVEMENT ----
+  const isBereaved = /\b(funeral|passed away|someone.*died|died.*someone|lost.*loved one|loved one.*lost|in mourning|family.*death|death.*family|my (mom|dad|mother|father|brother|sister|uncle|aunt|gogo|ouma|oupa|gran|grandma|grandfather|grandmother|friend).*died|died.*(mom|dad|mother|father|brother|sister|uncle|aunt|gran)|umngcwabo|ukufa|silahlekelwe)\b/i.test(m);
+  if (isBereaved) {
+    const bereavReply = `${capName}, I'm sorry for your loss. Take all the time you need — the programme will wait.\n\nFunerals mean long days, different food, no routine. That's okay. Eat what's there, stay hydrated, walk if you can. Don't stress about the plan right now.\n\nWhen you're ready to come back — even if it's weeks from now — just message me and I'll reset your programme from that day. There's no guilt here. Rest, mourn, be with your family.`;
+    await logChat(user.id, message, bereavReply, "BEREAVEMENT");
+    return bereavReply;
+  }
+
+  // ---- MONTH-END / FINANCIAL STRESS ----
+  const isMonthEnd = /\b(month.?end|end of month|no.?money|broke|short on cash|can.?t afford|salary.?not|waiting for.?(salary|pay|payday)|payday.*friday|payday.*next|no.?budget|empty|flat.?broke|nothing (left|to eat)|no.?food|can.?t buy|no.?groceries|no.?airtime|airtime.?finished)\b/i.test(m);
+  if (isMonthEnd) {
+    const meReply = `${capName}, month-end is tough for everyone in SA. No shame in it.\n\nHere's how to keep it going on zero budget:\n- *Protein:* eggs (cheapest protein there is), pilchards, beans, lentils\n- *Carbs:* pap, brown bread, oats, rice, sweet potato\n- *Vegetables:* cabbage, spinach, frozen veg — all cheap and good\n\nType *cheap meals* and I'll send you a full day of eating under R30. Fitness doesn't stop when the money runs out — your body still needs fuel to change.`;
+    await logChat(user.id, message, meReply, "MONTH_END");
+    return meReply;
+  }
+
+  // ---- COMEBACK AFTER SILENCE (2+ days) ----
+  // Detect when a client returns with an excuse/explanation after going quiet.
+  // Respond with empathy and a clean restart plan — not a workout delivered cold.
+  const isComeback = isReturning && (
+    /\b(i.?m back|i am back|back now|returning|i.?m here|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|reset|fresh start|new week|new day|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m)
+    || m.length < 30 // short message after silence = returning check-in
+  );
+
+  if (isComeback) {
+    const daysText = daysSilent === 2 ? "2 days" : daysSilent <= 7 ? `${daysSilent} days` : daysSilent <= 14 ? "a week" : "a while";
+    const comingBackReply = `${capName}, welcome back. ${daysText} away — everyone has those stretches.\n\nWe don't restart from zero. Your programme, targets, and logs are all still here. Today is just Day 1 of the next streak.\n\n*Here's what to do right now:*\n1. Tell me what you ate today (even if it wasn't perfect)\n2. Log your steps if you walked\n3. Reply *menu* for today's workout\n\nNo catching up. No guilt. Just today. Let's go.`;
+    await logChat(user.id, message, comingBackReply, "COMEBACK");
+    return comingBackReply;
+  }
+
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
     const ctype = mediaContentType || "";
+    const mediaTrace = buildMediaTrace(phone, ctype);
+    console.log(`[MEDIA][${mediaTrace}] start type=${ctype || "unknown"} hasCaption=${Boolean(message && message.trim())}`);
 
     // ---- STICKER DETECTION — skip stickers (image/webp with no caption) ----
     if (ctype === "image/webp" && !message) {
@@ -1300,26 +1831,77 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
         const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
         const imgAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
-        const imageResponse = await fetch(mediaUrl, {
+        const imageResponse = await withTimeout("image_download", 12000, () => fetch(mediaUrl, {
           headers: { Authorization: imgAuthHeader },
-        });
+        }));
         if (!imageResponse.ok) {
-          console.error(`[VISION] Twilio image fetch failed: ${imageResponse.status} ${imageResponse.statusText}`);
+          console.error(`[MEDIA][${mediaTrace}] image_download_failed ${imageResponse.status} ${imageResponse.statusText}`);
+          await logMediaFailure(user.id, "image_download", `${imageResponse.status}`);
           return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
         }
+        const imageLen = parseInt(imageResponse.headers.get("content-length") || "0", 10);
+        if (imageLen > 8 * 1024 * 1024) {
+          console.warn(`[MEDIA][${mediaTrace}] image_too_large content_length=${imageLen}`);
+          return "That image is too large for reliable processing. Please resend a smaller screenshot or crop it tighter.";
+        }
         const buffer = await imageResponse.arrayBuffer();
+        if (buffer.byteLength > 10 * 1024 * 1024) {
+          console.warn(`[MEDIA][${mediaTrace}] image_buffer_too_large bytes=${buffer.byteLength}`);
+          return "That image is too large for reliable processing. Please resend a smaller screenshot or crop it tighter.";
+        }
         const base64 = Buffer.from(buffer).toString("base64");
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
         const clientName = user.name || "there";
         const goal = user.goalType || "fat_loss";
 
         // ---- STEP SCREENSHOT DETECTION ----
-        // If caption mentions steps/walking/pedometer, use GPT Vision to read the number
-        const isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app)\b/i.test(message)
+        // Triggered ONLY by explicit keywords or awaiting state.
+        // Historical bug: uncaptioned images were defaulting to step OCR, causing
+        // gym selfies to be mis-reported as failed step screenshots.
+        const noCaption = !message || message.trim().length === 0;
+        let isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
           || (user.awaitingInputType === "steps");
+
+        // ---- UNCAPTIONED IMAGE PRE-CLASSIFIER ----
+        // For captionless images, a tiny vision call decides: food / steps /
+        // exercise / progress / other. Prevents the old "everything is a step
+        // screenshot" default. Failure is non-fatal — falls through to food vision.
+        let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
+        if (noCaption && !isStepScreenshot) {
+          try {
+            const classifyResp = await withTimeout("image_classify", 8000, () => openai.chat.completions.create({
+              model: "gpt-4o-mini",
+              max_tokens: 8,
+              temperature: 0,
+              messages: [
+                { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | other.\n- food: plate of food, drink, snack, meal\n- steps: screenshot showing a step count or pedometer reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise." },
+                { role: "user", content: [
+                  { type: "text", text: "What is this photo?" },
+                  { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                ] },
+              ],
+            }));
+            const raw = (classifyResp.choices[0]?.message?.content || "").trim().toLowerCase();
+            if (raw.includes("food")) uncaptionedType = "food";
+            else if (raw.includes("steps") || raw.includes("step")) uncaptionedType = "steps";
+            else if (raw.includes("exercise")) uncaptionedType = "exercise";
+            else if (raw.includes("progress")) uncaptionedType = "progress";
+            else uncaptionedType = "other";
+            console.log(`[MEDIA][${mediaTrace}] uncaptioned_classified=${uncaptionedType}`);
+            if (uncaptionedType === "steps") isStepScreenshot = true;
+            if (uncaptionedType === "exercise") {
+              const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
+              await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
+              return exReply;
+            }
+          } catch (e) {
+            console.warn(`[MEDIA][${mediaTrace}] uncaptioned_classify_failed:`, e);
+            // fall through — food vision is a reasonable default
+          }
+        }
         if (isStepScreenshot) {
           try {
-            const stepVisionResponse = await openai.chat.completions.create({
+            const stepVisionResponse = await withTimeout("step_vision", 18000, () => openai.chat.completions.create({
               model: "gpt-4o-mini",
               max_tokens: 50,
               messages: [
@@ -1329,10 +1911,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
                   { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
                 ] },
               ],
-            });
+            }));
             const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
             const extractedSteps = parseInt(stepText.replace(/[^0-9]/g, ""));
-            if (!isNaN(extractedSteps) && extractedSteps >= 100 && extractedSteps < 100000) {
+            // Guard against random OCR numbers from food labels/photos:
+            // accept low numbers only when user explicitly indicated steps.
+            const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
+            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps < 100000;
+            const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
+            if (!isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
               const target = user.stepsTarget || 10000;
               const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
               const existingStep = await db.select({ id: stepLogs.id })
@@ -1346,18 +1933,29 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               }
               await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
               const stepReply = getStepResponse(extractedSteps, target);
-              const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+              const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
               const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
               await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
+              console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
               return stepReply + streakNote + (perfectDay || "");
             }
-          } catch (e) { console.warn("[step-vision]", e); }
-          // If extraction failed, fall through to food photo handler
+          } catch (e) {
+            console.warn("[step-vision]", e);
+            await logMediaFailure(user.id, "step_vision", e);
+          }
+          console.warn(`[MEDIA][${mediaTrace}] step_extract_failed`);
+          await logMediaFailure(user.id, "step_extract", "unknown_or_low_confidence");
+          return "I could not read the step number clearly from that screenshot. Please resend and crop to the step count only, or type: steps 7421.";
         }
 
         // ---- PROGRESS PHOTO DETECTION ----
-        // If the message contains progress-related keywords, store and optionally compare
-        const isProgressPhoto = /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message);
+        // Triggers when: classifier says "progress", OR message has progress keywords with
+        // no contradicting classification. Classifier alone is sufficient — no caption needed.
+        const isProgressPhoto = uncaptionedType === "progress"
+          || (
+            /\b(progress|transformation|check.?in|monthly|before|after|month \d|week \d+)\b/i.test(message)
+            && uncaptionedType === null
+          );
         if (isProgressPhoto) {
           // Get existing progress photos for this client (most recent first)
           const existingPhotos = await db.select()
@@ -1384,9 +1982,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             const daysBetween = Math.round(
               (Date.now() - new Date(firstPhoto.loggedAt || "").getTime()) / 86_400_000
             );
+            const progressDecision = selectVisionModel("progress_compare", user.subscriptionStatus);
+            console.log(`[VISION][${mediaTrace}] progress model=${progressDecision.model} tier=${user.subscriptionStatus}`);
             const comparisonResponse = await openai.chat.completions.create({
-              model: "gpt-4o",
-              max_tokens: 400,
+              model: progressDecision.model,
+              max_tokens: progressDecision.maxTokens,
               messages: [
                 {
                   role: "system",
@@ -1399,12 +1999,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
                       type: "text",
                       text: `Compare these two progress photos. Photo 1 was taken ${daysBetween} days ago (${Math.round(daysBetween / 7)} weeks). Photo 2 is today. Describe specifically what has changed in the body. Focus on: body composition, posture, visible muscle, waist and hip shape. Be honest — if nothing has changed say so and say why. If it has — describe exactly what you see.`,
                     },
-                    { type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}` } },
-                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                    { type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}`, detail: progressDecision.detail } },
+                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } },
                   ],
                 },
               ],
             });
+            const progressTokens = comparisonResponse.usage?.completion_tokens || 0;
+            console.log(`[COST][${mediaTrace}] progress_compare ~$${estimateVisionCostUSD(progressDecision, progressTokens).toFixed(5)} (${progressDecision.reason})`);
             const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
               || "I can see both photos but could not compare them clearly. Send them in better lighting.";
             await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
@@ -1429,9 +2031,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
         );
-        const visionResponse = await openai.chat.completions.create({
-          model: "gpt-4o",
-          max_tokens: 400,
+        // ── Tier-gated vision — inactive users don't burn API budget ──
+        const foodVisionDecision = selectVisionModel("food_photo", user.subscriptionStatus);
+        if (!foodVisionDecision.allowed) {
+          return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
+        }
+        console.log(`[VISION][${mediaTrace}] food model=${foodVisionDecision.model} tier=${user.subscriptionStatus}`);
+        const visionResponse = await withTimeout("food_vision", 22000, () => openai.chat.completions.create({
+          model: foodVisionDecision.model,
+          max_tokens: foodVisionDecision.maxTokens,
           messages: [
             {
               role: "system",
@@ -1450,43 +2058,112 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-UNKNOWN FOOD: If you cannot identify the food in the image — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this to help identify the food.` : ""}`,
+BEST GUESS RULE: Always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if you genuinely cannot tell whether the image is food at all (e.g. it is completely dark, blurry beyond recognition, or clearly not food) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
                 },
-                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
+                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
               ],
             },
           ],
-        });
+        }));
+        const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
+        console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} (${foodVisionDecision.reason})`);
 
         const visionReply = visionResponse.choices[0]?.message?.content?.trim();
         if (!visionReply || visionReply.length < 10) {
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
-        const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
-        // Append daily running total
+
+        // Write to mealLogs so photo meals appear in "my meals" and count in daily totals
+        const extractKcal = (text: string) => {
+          const m = text.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || text.match(/\b(\d{2,4})\s*kcal/i);
+          return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+        };
+        const extractProt = (text: string) => {
+          const m = text.match(/\b(\d{1,3})\s*g\s*protein/i);
+          return m ? parseInt(m[1], 10) : 0;
+        };
+
+        let totalPhotoKcal = extractKcal(visionReply);
+        let totalPhotoProt = extractProt(visionReply);
+
+        // ── MULTI-PHOTO: process any extra images sent in the same message ──
+        // Clients frequently send collages (e.g. 3 meal photos in one message).
+        // We already processed mediaUrl (the first image). Now handle the rest.
+        const extraImageUrls = (allMediaUrls || []).filter(u => u !== mediaUrl);
+        const extraReplies: string[] = [];
+        if (extraImageUrls.length > 0) {
+          const twilioSidExtra = process.env.TWILIO_ACCOUNT_SID || "";
+          const twilioTokenExtra = process.env.TWILIO_AUTH_TOKEN || "";
+          const imgAuthHeaderExtra = "Basic " + Buffer.from(`${twilioSidExtra}:${twilioTokenExtra}`).toString("base64");
+          for (const extraUrl of extraImageUrls.slice(0, 3)) { // max 3 extra images
+            try {
+              const extraResp = await withTimeout("image_download_extra", 10000, () => fetch(extraUrl, { headers: { Authorization: imgAuthHeaderExtra } }));
+              if (!extraResp.ok) continue;
+              const extraBuf = await extraResp.arrayBuffer();
+              if (extraBuf.byteLength > 10 * 1024 * 1024) continue;
+              const extraB64 = Buffer.from(extraBuf).toString("base64");
+              const extraCtype = extraResp.headers.get("content-type") || "image/jpeg";
+              const extraVision = await withTimeout("food_vision_extra", 18000, () => openai.chat.completions.create({
+                model: foodVisionDecision.model,
+                max_tokens: Math.min(foodVisionDecision.maxTokens, 200),
+                messages: [
+                  { role: "system", content: `You are Coach K, a South African fitness coach. Client: ${clientName}. Give calories and protein only for this food photo. Format: "Photo X: [food name] — roughly Y kcal and Zg protein." One sentence max.` },
+                  { role: "user", content: [
+                    { type: "text", text: "Estimate calories and protein in this food photo." },
+                    { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "low" } },
+                  ]},
+                ],
+              }));
+              const extraText = extraVision.choices[0]?.message?.content?.trim() || "";
+              if (extraText && extraText.length > 5) {
+                extraReplies.push(extraText);
+                totalPhotoKcal += extractKcal(extraText);
+                totalPhotoProt += extractProt(extraText);
+                await logChat(user.id, "[Photo]", extraText, "FOOD_LOG");
+              }
+            } catch (e) { console.warn("[multi-photo extra vision]", e); }
+          }
+        }
+
+        if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message || "[Photo]",
+            source: "photo",
+            kcalInt: totalPhotoKcal,
+            proteinInt: totalPhotoProt,
+            carbsInt: 0,
+            fatInt: 0,
+          }).catch(e => console.warn("[photo mealLogs write]", e));
+        }
+
+        const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+        // Daily total from mealLogs (source of truth — includes this photo)
         let photoDailyTotal = "";
         try {
-          const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-          const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn })
-            .from(chatHistory)
-            .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-          let totalCal = 0; let totalProt = 0;
-          for (const log of todayFoodLogs) {
-            const matched = scanForSAFoods(log.messageIn || "");
-            totalCal += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-            totalProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-          }
+          const totals = await recomputeTodayFoodTotals(user.id);
           const calTarget = user.calorieTarget || 1800;
           const protTarget = user.proteinTarget || 130;
-          if (totalCal > 0) {
-            const remaining = calTarget - totalCal;
-            photoDailyTotal = `\n\n_Today so far: ~${totalCal} kcal | ${totalProt}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
+          if (totals.calories > 0) {
+            const remaining = calTarget - totals.calories;
+            photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
           }
+          // Keep denormalized columns in sync for any remaining edge-case consumers
+          await db.update(users).set({
+            todayCalories: totals.calories,
+            todayProteinG: totals.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id)).catch(e => console.warn("[photo todayCalories sync]", e));
         } catch (e) { console.warn("[non-fatal]", e); }
-        return `${visionReply}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+
+        // Combine main reply with any extra photo analyses
+        const extraSection = extraReplies.length > 0 ? `\n\n${extraReplies.join("\n")}` : "";
+        const multiPhotoNote = extraReplies.length > 0 ? `\n_${extraReplies.length + 1} photos logged — total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+        return `${visionReply}${extraSection}${multiPhotoNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
-        console.error("Vision error:", err);
+        console.error(`[MEDIA][${mediaTrace}] vision_error:`, err);
+        await logMediaFailure(user.id, "vision", err);
         return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
       }
     }
@@ -1494,6 +2171,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     // ---- VOICE NOTE ----
     // Exclusive: if audio, always return — never falls through to text handler
     if (ctype.startsWith("audio/")) {
+      let voiceStage = "download";
       try {
         // Part 1 — Twilio media requires basic auth (ACCOUNT_SID:AUTH_TOKEN)
         const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
@@ -1501,45 +2179,127 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
 
         // Retry once if Twilio download fails (intermittent 5xx errors)
-        let audioResponse = await fetch(mediaUrl, { headers: { Authorization: authHeader } });
+        let audioResponse = await withTimeout("audio_download_1", 12000, () => fetch(mediaUrl, { headers: { Authorization: authHeader } }));
         if (!audioResponse.ok) {
           console.warn(`[VOICE] Twilio download attempt 1 failed: ${audioResponse.status}. Retrying...`);
           await new Promise(r => setTimeout(r, 1500));
-          audioResponse = await fetch(mediaUrl, { headers: { Authorization: authHeader } });
+          audioResponse = await withTimeout("audio_download_2", 12000, () => fetch(mediaUrl, { headers: { Authorization: authHeader } }));
         }
 
         if (!audioResponse.ok) {
           console.error(`[VOICE] Twilio download failed after retry: ${audioResponse.status} ${audioResponse.statusText}`);
+          await logMediaFailure(user.id, "audio_download", `${audioResponse.status}`);
           return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
         }
 
+        const audioLen = parseInt(audioResponse.headers.get("content-length") || "0", 10);
+        if (audioLen > 16 * 1024 * 1024) {
+          console.warn(`[MEDIA][${mediaTrace}] audio_too_large content_length=${audioLen}`);
+          return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
+        }
         const audioBuffer = await audioResponse.arrayBuffer();
+        if (audioBuffer.byteLength > 16 * 1024 * 1024) {
+          console.warn(`[MEDIA][${mediaTrace}] audio_buffer_too_large bytes=${audioBuffer.byteLength}`);
+          return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
+        }
+        // Reject clips too short for Whisper to process reliably.
+        // ~6KB ≈ 3 seconds of Opus audio — Whisper needs at least 3s to return anything useful.
+        // Uses the failure-counter so 3 short clips in 30 min escalates to "please type".
+        if (audioBuffer.byteLength < 6000) {
+          return "That voice note was too short to transcribe — hold the mic button for at least 5 seconds and resend, or just type your message.";
+        }
 
-        // Part 2 — WhatsApp voice notes are always ogg/opus; use fixed mime type for Whisper
-        const audioFile = new File([audioBuffer], "audio.ogg", { type: "audio/ogg" });
+        voiceStage = "transcribe";
+
+        // Part 2 — preserve Twilio content type when available to avoid codec/mime mismatch.
+        const sourceAudioType = (audioResponse.headers.get("content-type") || ctype || "audio/ogg").split(";")[0].trim().toLowerCase();
+        const extMap: Record<string, string> = {
+          "audio/ogg": "ogg",
+          "audio/opus": "ogg",
+          "audio/mpeg": "mp3",
+          "audio/mp3": "mp3",
+          "audio/mp4": "mp4",
+          "audio/aac": "aac",
+          "audio/wav": "wav",
+          "audio/x-wav": "wav",
+          "audio/webm": "webm",
+          "audio/amr": "amr",
+        };
+        const audioExt = extMap[sourceAudioType] || "ogg";
+        const audioFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
 
         // Detect language from user's stored preference for better Whisper accuracy
         const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
         const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
         const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
 
-        const transcription = await openai.audio.transcriptions.create({
-          file: audioFile,
-          model: "whisper-1",
-          ...(whisperLang ? { language: whisperLang } : {}),
-        });
+        // Attempt 1: with language hint (if we have one). Attempt 2 (on failure):
+        // no hint + re-created File. Whisper sometimes returns 400 when the stated
+        // language conflicts with what it actually hears — dropping the hint fixes
+        // it more often than retrying the same request.
+        // SA fitness coaching context helps Whisper handle accents and code-switching
+        const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
+        let transcription;
+        try {
+          transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
+            file: audioFile,
+            model: "whisper-1",
+            prompt: whisperPrompt,
+            ...(whisperLang ? { language: whisperLang } : {}),
+          }));
+        } catch (transErr) {
+          console.warn(`[VOICE] transcribe attempt 1 failed (lang=${whisperLang || "auto"}), retrying without hint:`, transErr);
+          const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+          transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
+            file: retryFile,
+            model: "whisper-1",
+            prompt: whisperPrompt,
+          }));
+        }
 
-        const transcribedText = transcription.text?.trim();
+        let transcribedText = transcription.text?.trim();
+
+        // Retry with forced English if first attempt returned empty — Whisper sometimes
+        // needs a language anchor to produce output on short SA clips
+        if (!transcribedText) {
+          try {
+            const retryFile2 = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+            const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
+              openai.audio.transcriptions.create({
+                file: retryFile2,
+                model: "whisper-1",
+                language: "en",
+                prompt: whisperPrompt,
+              })
+            );
+            transcribedText = retryTranscription.text?.trim() || "";
+          } catch (retryErr) {
+            console.warn("[VOICE] English-forced retry also failed:", retryErr);
+          }
+        }
 
         // Part 3 — Handle result
         if (!transcribedText) {
-          return "I could not hear that clearly. Try sending a voice note in a quieter spot, or type your message.";
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return "I keep struggling to pick up your voice notes. Please type your message and I'll get you a detailed reply straight away.";
+          }
+          return "I received your voice note but it was too short or too quiet to transcribe. Hold the mic for at least 5 seconds, speak clearly, and resend — or just type your message.";
         }
 
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
         if (wordCount < 3) {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return `I keep only picking up a few words — "${transcribedText}". Please type your message — I'll reply properly.`;
+          }
           return `I only caught a few words — "${transcribedText}". Send again or type your message.`;
         }
+
+        // Transcription succeeded — reset failure counter so future hiccups restart the window
+        clearVoiceFailure(user.id);
 
         // Language detection — includes Tswana and Tsonga alongside Zulu, Sotho, Xhosa, Afrikaans
         const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
@@ -1559,13 +2319,29 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
         console.log(`[VOICE] Transcribed (${whisperLang || "auto"}): "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
 
-        const voiceReply = await handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""));
+        voiceStage = "coach_reply";
+        const voiceReply = await withTimeout("voice_coach_reply", 20000, () => handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : "")));
         // Part 4 — explicit return, no fall-through
+        console.log(`[MEDIA][${mediaTrace}] voice_processed words=${wordCount}`);
         return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
 
       } catch (err) {
-        console.error("[VOICE] Transcription error:", err);
-        // Part 4 — always return, never fall through to text handler
+        console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
+        await logMediaFailure(user.id, `voice_${voiceStage}`, err);
+        // Part 4 — always return, never fall through to text handler.
+        // Count transcribe failures toward the 3-strike escalation — an API error
+        // has the same user impact as a bad transcription.
+        if (voiceStage === "transcribe") {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return "I am having trouble transcribing your voice notes — this is on my side. Please type your message and I will reply straight away.";
+          }
+          return "I received your voice note but could not transcribe it clearly. Try again in a quieter spot, or type your message.";
+        }
+        if (voiceStage === "coach_reply") {
+          return "I heard your voice note but could not generate the coaching reply right now. Send it once more, or type your message.";
+        }
         return "I got your voice note but could not process it right now. Please send it again, or type your message and I will respond immediately.";
       }
     }
@@ -1605,6 +2381,61 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return "I received your file but I can only process voice notes and food photos. Send those or type your message.";
   }
 
+
+  // ---- GYM WORKOUT LOG — "DAY 3 — UPPER / LOWER" with exercise list ----
+  // Recognizes when user pastes their workout log (exercises, sets×reps, optional emojis)
+  // Format: "DAY X — TYPE\nExercise — SxR\n..."
+  const gymLogMatch = m.match(/^(?:day\s*\d+\s*[—\-–:]+\s*)?(upper|lower|push|pull|legs?|full body|back|chest|arms?|shoulders?)\b/i);
+  const hasMultipleExerciseLines = (m.match(/\n.*[×x]\d|\n.*\d+\s*[×x]\s*\d|shoulder|lat pull|bench|squat|deadlift|row|press|curl|extension|fly|crunch|plank/gi) || []).length >= 2;
+  const looksLikeGymLog = gymLogMatch && hasMultipleExerciseLines && m.split("\n").length >= 3;
+
+  if (looksLikeGymLog) {
+    const name = user.name?.split(" ")[0] || "";
+    const sessionType = gymLogMatch[1].charAt(0).toUpperCase() + gymLogMatch[1].slice(1).toLowerCase();
+    // Count how many exercises were listed (lines with exercise names or set/rep notation)
+    const exerciseLines = m.split("\n").filter(l => /[×x]\d|\d+\s*[×x]|sets?|reps?/i.test(l) || /shoulder|lat|bench|squat|deadlift|row|press|curl|extension|fly/i.test(l));
+    const exCount = exerciseLines.length;
+    // Detect failed sets (🔴 emoji or "failed")
+    const failedCount = (m.match(/🔴|failed|couldn.?t|could not|did not complete/gi) || []).length;
+    const warningCount = (m.match(/⚠️|warning|struggled|nearly/gi) || []).length;
+
+    // Log the workout
+    const todayStartGym = new Date(); todayStartGym.setHours(0, 0, 0, 0);
+    const alreadyLogged = await db.select({ id: workoutLogs.id })
+      .from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStartGym)))
+      .limit(1);
+
+    let gymLogReply = "";
+    if (alreadyLogged.length === 0) {
+      const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+      let newDay = (user.programmeDayInWeek || 1) + 1;
+      let newWeek = user.programmeWeek || 1;
+      const daysPerWeek = user.trainingDaysPerWeek || 3;
+      if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
+      let newPhase = user.programmePhase || 1;
+      if (newWeek > 4) { newWeek = 1; newPhase = Math.min(newPhase + 1, 4); }
+      await db.update(users).set({
+        totalWorkoutsCompleted: newTotal,
+        programmeDayInWeek: newDay,
+        programmeWeek: newWeek,
+        programmePhase: newPhase,
+        lastWorkoutDate: new Date(),
+      }).where(eq(users.phoneNumber, phone));
+      await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+
+      const failNote = failedCount > 0
+        ? ` ${failedCount} exercise${failedCount > 1 ? "s" : ""} you couldn't complete — reduce weight by 10% next session and build back up. That is progressive overload working correctly.`
+        : warningCount > 0
+          ? ` Watch the exercises you struggled with — form first, then add weight.`
+          : "";
+      gymLogReply = `${sessionType} session logged ✅${name ? ` — ${name}` : ""}. ${exCount} exercises done. Total sessions: ${newTotal}.${failNote}\n\nEat protein within 60 minutes — chicken, eggs, pilchards. Recovery starts now.`;
+    } else {
+      gymLogReply = `${sessionType} session already logged today. Keep the log — it shows your real numbers. Come back tomorrow.`;
+    }
+    await logChat(user.id, message, gymLogReply, "WORKOUT_LOG");
+    return gymLogReply;
+  }
 
   // ---- DONE — workout complete (direct) ----
   if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
@@ -1666,7 +2497,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
 
     const celebrationFn = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length];
     const celebration = celebrationFn(newTotal, newDay);
-    const perfectDay = await checkPerfectDay(user.id);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
 
     // Auto-generate referral code at first milestone if not set — retry on collision
     if (!user.referralCode && [10, 25, 50].includes(newTotal)) {
@@ -1695,16 +2526,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     };
 
     const milestoneNote = newTotal === 1
-      ? "\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this."
-      : newTotal === 10
-        ? `\n\n🔥 *10 sessions with Coach K.* You are past the hardest part.${refCode ? ` Share code *${refCode}* with someone who needs to start — they get their first month for R50.` : " Send this to someone who said you would quit."}`
-        : newTotal === 25
-          ? `\n\n💪 *25 sessions completed.* A month of real work. This is a lifestyle now.${refCode ? ` Your referral code is *${refCode}* — share it with one person today.` : " Share your progress — you earned it."}`
-          : newTotal === 50
-            ? `\n\n🏆 *50 workouts done.* Half a century of sessions.${refCode ? ` Code *${refCode}* — put this number and your code in your family WhatsApp group.` : " Put this in your family WhatsApp group. Genuinely rare."}`
-            : newTotal === 100
-              ? "\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this."
-              : "";
+      ? `\n\n🏆 *First workout done.* Most people only talk about starting. You started. Screenshot this.`
+      : newTotal === 3
+        ? `\n\n🎯 *3 sessions in.* The research says: people who make it to 3 are 4× more likely to hit 30. You're on track.`
+        : newTotal === 5
+          ? `\n\n🔥 *5 workouts done.* High five. Some people joined the same day as you and have already quit. You haven't.`
+          : newTotal === 10
+            ? `\n\n🔥 *10 sessions with Coach K.* You are past the hardest part.${refCode ? ` Share code *${refCode}* with someone who needs to start — they get their first month for R50.` : " Send this to someone who said you would quit."}`
+            : newTotal === 25
+              ? `\n\n💪 *25 sessions completed.* A month of real work. This is a lifestyle now.${refCode ? ` Your referral code is *${refCode}* — share it with one person today.` : " Share your progress — you earned it."}`
+              : newTotal === 50
+                ? `\n\n🏆 *50 workouts done.* Half a century of sessions.${refCode ? ` Code *${refCode}* — put this number and your code in your family WhatsApp group.` : " Put this in your family WhatsApp group. Genuinely rare."}`
+                : newTotal === 100
+                  ? `\n\n🎯 *100 SESSIONS WITH COACH K.* Most people never reach 10. You hit 100. Share this.`
+                  : "";
 
     // Send voice note for major milestones — fire and forget, does not block the text response
     const voiceText = milestoneVoiceTexts[newTotal];
@@ -1730,7 +2565,20 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       : newTotal === 1
       ? `\n\n💡 *Next session — log your weights* after each exercise: "bench 60kg 3x10". I track your progress week to week.`
       : "";
-    let doneReply = `${celebration}${milestoneNote}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
+    // Variable-ratio reinforcement on workout completion — 15% chance of a surprise
+    // extra line. Same slot-machine mechanic as food logs: unpredictable > predictable.
+    const WORKOUT_SURPRISES = [
+      "\n\n🌟 That session is in the bank. Nothing can take it back.",
+      "\n\n⚡ You showed up. That's the whole game.",
+      "\n\n🔑 Consistency > intensity. You're living proof.",
+      "\n\n🏆 No one else did it for you. That was all you.",
+      "\n\n💡 The body you're building is being built right now — session by session.",
+    ];
+    const workoutSurprise = Math.random() < 0.15 && !milestoneNote
+      ? WORKOUT_SURPRISES[Math.floor(Math.random() * WORKOUT_SURPRISES.length)]
+      : "";
+
+    let doneReply = `${celebration}${milestoneNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
 
     // Progressive programme delivery — unlock next day's workout after completing each session
     try {
@@ -1884,7 +2732,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (isExplicitWeight && explicitKgMatch) {
     const newKg = parseFloat(explicitKgMatch[1]);
     if (newKg >= 35 && newKg <= 250) {
-      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(newKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(newKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
       const prevKg = parseFloat(user.currentWeight || "0");
       const prevCals = user.calorieTarget || newCals;
       const prevProtein = user.proteinTarget || newProtein;
@@ -1951,7 +2799,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     const mentionedKg = parseFloat(weightInMsg[1]);
     const storedKg = parseFloat(user.currentWeight || "0");
     if (mentionedKg >= 35 && mentionedKg <= 250 && Math.abs(mentionedKg - storedKg) > 0.4) {
-      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
+      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
       await db.update(users).set({ currentWeight: mentionedKg.toString(), proteinTarget: newProtein, calorieTarget: newCals }).where(eq(users.phoneNumber, phone));
       user.currentWeight = mentionedKg.toString();
       user.proteinTarget = newProtein;
@@ -2021,14 +2869,58 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
+  // ---- PHOTO CORRECTION / CLARIFICATION — must run BEFORE workout classifier ----
+  // User sends a photo, bot misclassifies, user replies "It's a photo of an exercise!!!"
+  // The word "exercise" would otherwise fire PROGRAMME_DELIVERY via wordMatchesWorkout.
+  // Catch the clarification first and respond with category-appropriate guidance.
+  const photoCorrectionMatch =
+    /\b(?:it'?s|that'?s|this\s+is|that\s+was|it\s+was)\s+(?:just\s+)?(?:a|an|the|my)?\s*(?:photo|pic|picture|image|snap|screenshot|shot)\s+(?:of|showing|is|was)\b/i.test(m)
+    || /\b(?:it'?s|that'?s|this\s+is)\s+(?:a|an|my)\s+[a-z]+\s+(?:photo|pic|picture|image)\b/i.test(m)
+    || /\b(?:photo|pic|picture|image)\s+(?:shows?|showing|of)\s+(?:an?\s+|my\s+|the\s+)?(?:exercise|workout|gym|food|meal|steps?|progress)\b/i.test(m);
+
+  if (photoCorrectionMatch) {
+    const isExercisePhoto = /\b(exercise|workout|gym|training|lift(?:ing)?|squat|bench|deadlift|press|curl|row|form)\b/.test(m);
+    const isFoodPhoto = /\b(food|meal|breakfast|lunch|dinner|supper|snack|plate|eating)\b/.test(m);
+    const isStepsPhoto = /\b(steps?|pedometer|fitbit|fitness\s*tracker|step\s*count)\b/.test(m);
+    const isProgressPhoto = /\b(progress|mirror|scale|transformation|body\s*shot)\b/.test(m);
+
+    let correctionReply = "";
+    if (isExercisePhoto) {
+      correctionReply = `Got you — an exercise photo. I cannot give form feedback from a still shot (need a short video for that), but I can help you:\n\n• Log the lift: e.g. "bench 80kg 3x10"\n• Log the session: send *done* when finished\n• See today's session: text *today*`;
+    } else if (isFoodPhoto) {
+      correctionReply = `Got it — a food photo. Re-send it with a quick caption so I know what to log, e.g. "lunch — chicken and rice". That way I can count kilojoules properly.`;
+    } else if (isStepsPhoto) {
+      correctionReply = `Sharp — a steps photo. Just text me the number, e.g. "8500 steps" and I will log it straight away.`;
+    } else if (isProgressPhoto) {
+      correctionReply = `Got you — progress photo noted. Keep them coming weekly, same angle, same lighting. Send *progress* anytime to see your trend.`;
+    } else {
+      correctionReply = `Got it — thanks for the heads-up. Can you re-send the photo with a short caption so I know how to log it? E.g. "lunch", "8500 steps", "squat form".`;
+    }
+    await logChat(user.id, message, correctionReply, "PHOTO_CORRECTION");
+    return correctionReply;
+  }
+
   // ---- PROGRAMME REQUEST WITHOUT PROFILE — check for elderly/injury first ----
+  // STRICT guards: must be a SHORT command-style message, NOT a food message, NOT a rant
+  const wordCount_prog = m.split(/\s+/).length;
+  const hasComplaintAboutProgram = /\b(you gave|you give|you sent|giving me|gave me|sending me|i got|i received|got a|received a)\b.{0,25}\b(programme|program|workout|plan)\b/i.test(m)
+    || /\b(that|the|your|this)\s+(programme|program|workout|plan)\b.{0,30}\b(useless|wrong|bad|terrible|generic|not right|not what|didn't|didn.?t)\b/i.test(m);
+  const hasFrustrationSignal_prog = /\b(no no|that.?s not|not true|not right|wrong|terrible|rubbish|nonsense|what the hell|useless|crap|ridiculous|garbage|stupid|shut down|pathetic)\b/i.test(m);
+  // Extended food-log signal — must suppress programme when user mentions food OR context around training/gym
+  const hasFoodLogSignal_prog = /\b(ate|had|have|having|eating|breakfast|lunch|dinner|supper|snack|for breakfast|for lunch|for dinner|pre.?workout|post.?workout|before\s+(gym|training|workout)|after\s+(gym|training|workout))\b/.test(m);
+  // Word-boundary match — prevents "programmer", "programmed", etc. from triggering
+  const wordMatchesWorkout = /\b(workout|workouts|programme|program|training\s+plan|workout\s+plan|exercise\s+plan|full\s+body|exercise|training)\b/.test(m);
   const isWorkoutRelated =
-    m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
-    m.includes("workout") || m.includes("program") || m.includes("programme") ||
-    m.includes("training plan") || m.includes("workout plan") || m.includes("exercise plan") ||
-    m.includes("full body") || m.includes("3 day") || m.includes("4 day") || m.includes("5 day") ||
-    m.includes("exercise") || m.includes("train") ||
-    (m.includes("gym") && (m.includes("need") || m.includes("want") || m.includes("give") || m.includes("plan")));
+    !hasComplaintAboutProgram && // Never fire when complaining about a programme
+    wordCount_prog <= 25 && // Long messages are rarely programme requests
+    !hasFrustrationSignal_prog && // Never fire on frustration messages
+    !hasFoodLogSignal_prog && // Never fire when message has food context
+    (
+      m === "1" || m === "2" || m === "gym" || m === "workout" || m === "workouts" ||
+      /\b\d\s*day\b/.test(m) ||
+      wordMatchesWorkout ||
+      (m.includes("gym") && /\b(need|want|give|plan|programme|program)\b/.test(m))
+    );
 
   // ---- ELDERLY / SERIOUS INJURY — skip questions, give immediate safety programme ----
   const elderlyAge = m.match(/\bi'?m\s+(6[0-9]|7[0-9]|8[0-9]|9[0-9])\b/i) ||
@@ -2098,7 +2990,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       const stepReply = getStepResponse(steps, target);
-      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id), getStepStreak(user.id)]);
+      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
       const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
       stepReplyPart = stepReply + streakNote + (perfectDay || "");
 
@@ -2213,6 +3105,12 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
           .limit(1);
         if (lastFoodLog.length > 0) {
           await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+          const recomputed = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({
+            todayCalories: recomputed.calories,
+            todayProteinG: recomputed.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id));
         }
       } catch (e) { console.warn("[non-fatal]", e); }
       // Strip the correction prefix and process the remaining message as the actual food
@@ -2274,41 +3172,39 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
             parts.push(`${food.name} — ${food.typicalPortionCalories} kcal | ${food.typicalPortionProtein}g protein`);
           }
           await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
-          // Update daily totals
-          const todayStr3 = sastToday();
-          const prevCals = user.todayCaloriesDate === todayStr3 ? (user.todayCalories || 0) : 0;
-          const prevProt = user.todayCaloriesDate === todayStr3 ? (user.todayProteinG || 0) : 0;
+          // Write to mealLogs as source of truth
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: lastUnloggedFood.messageIn || "",
+            source: "text",
+            kcalInt: totalCals,
+            proteinInt: totalProt2,
+            carbsInt: 0,
+            fatInt: 0,
+          }).catch(e => console.warn("[smart-log mealLogs write]", e));
+          // Recompute from mealLogs and sync denormalized columns
+          const recomputed3 = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({
-            todayCalories: prevCals + totalCals,
-            todayProteinG: prevProt + totalProt2,
-            todayCaloriesDate: todayStr3,
-          }).where(eq(users.phoneNumber, phone));
-          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${prevCals + totalCals} kcal | ${prevProt + totalProt2}g protein_`;
+            todayCalories: recomputed3.calories,
+            todayProteinG: recomputed3.protein,
+            todayCaloriesDate: sastToday(),
+          }).where(eq(users.id, user.id)).catch(e => console.warn("[smart-log todayCalories sync]", e));
+          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${recomputed3.calories} kcal | ${recomputed3.protein}g protein_`;
         }
       }
     } catch { /* non-fatal — fall through to summary */ }
 
-    const todayStart2 = new Date(); todayStart2.setHours(0, 0, 0, 0);
-    const todayLogs = await db.select({ messageIn: chatHistory.messageIn })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart2)));
-    if (todayLogs.length === 0) {
-      return `Nothing logged yet today. Tell me what you ate — "I had pap and eggs" or "chicken and sweet potato" — and I will log the calories and protein.`;
-    }
+    // Use mealLogs as source of truth for today's summary
+    const summaryTotals = await recomputeTodayFoodTotals(user.id);
     const name = user.name ? ` ${user.name}` : "";
-    let totalCal = 0; let totalProt = 0;
-    for (const log of todayLogs) {
-      const matched = scanForSAFoods(log.messageIn || "");
-      totalCal += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
-      totalProt += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+    if (summaryTotals.calories === 0 && summaryTotals.protein === 0) {
+      return `Nothing logged yet today. Tell me what you ate — "I had pap and eggs" or "chicken and sweet potato" — and I will log the calories and protein.`;
     }
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
-    const remaining = calTarget - totalCal;
-    const protRemaining = protTarget - totalProt;
-    const summary = totalCal > 0
-      ? `Today so far:${name} *${totalCal} kcal | ${totalProt}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`
-      : `${todayLogs.length} meal${todayLogs.length > 1 ? "s" : ""} logged today. Keep sending what you eat and I track the running total.`;
+    const remaining = calTarget - summaryTotals.calories;
+    const protRemaining = protTarget - summaryTotals.protein;
+    const summary = `Today so far:${name} *${summaryTotals.calories} kcal | ${summaryTotals.protein}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`;
     return summary;
   }
 
@@ -2323,7 +3219,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   // Log triggers: words that suggest the user is REPORTING food they ate/are eating
   // Standalone meal words (breakfast/lunch/dinner) are safe because the food logging gate
   // at line ~2218 ALSO requires hasActualFood (scanner must find real food in the message)
-  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had)\b/.test(m);
+  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training)\b/.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE — SA-specific coaching ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
@@ -2380,45 +3276,119 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     }
   }
 
-  // ---- QUICK RE-LOG — "same as yesterday", "repeat meal", "same breakfast" ----
-  const isRepeatMeal = /\b(same as yesterday|same meal|repeat meal|same as last|same again|same food|same breakfast|same lunch|same dinner|repeat breakfast|repeat lunch|repeat dinner|yesterday.?s meal|yesterday.?s food)\b/i.test(m);
+  // ---- QUICK RE-LOG — "same as yesterday", "same as lunch", "had the same for dinner" ----
+  // Catches: "same as lunch", "same as my lunch", "had the same for dinner as my lunch",
+  //          "same meal again for dinner", "repeat meal", "same as yesterday"
+  const isRepeatMeal = /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food))\b/i.test(m);
   if (isRepeatMeal) {
     try {
-      // Find the most recent food log (yesterday or last logged)
-      const yesterdayStart = new Date(Date.now() - 48 * 3600_000); // up to 2 days back
-      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+      // Which meal are they referencing? Prefer the one they mention after "as" / "as my"
+      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again)\b/i.test(m);
+      const refDinner = /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again)\b/i.test(m);
+      const refBreakfast = /\b(same as (my )?breakfast|breakfast again)\b/i.test(m);
+      const refYesterday = /yesterday/i.test(m);
+
+      // Search window: today first, then last 48h for "same as yesterday"
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
+      const windowStart = refYesterday
+        ? new Date(Date.now() - 48 * 3600_000)
+        : todayStart;
+
+      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
         .from(chatHistory)
         .where(and(
           eq(chatHistory.userId, user.id),
           eq(chatHistory.intent, "FOOD_LOG"),
-          gte(chatHistory.createdAt, yesterdayStart),
+          gte(chatHistory.createdAt, windowStart),
         ))
         .orderBy(desc(chatHistory.createdAt))
-        .limit(5);
+        .limit(10);
 
-      // Filter to find one with actual food content
-      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s)/i;
-      const validLogs = recentFoodLogs.filter(l => l.messageIn && !LOG_CMD_RE2.test(l.messageIn.trim()) && l.messageIn.length > 5);
+      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s|yes|ok|sure)/i;
+      const validLogs = recentFoodLogs.filter(l =>
+        l.messageIn &&
+        !LOG_CMD_RE2.test(l.messageIn.trim()) &&
+        l.messageIn.length > 5 &&
+        scanForSAFoods(l.messageIn).length > 0  // must have actual food in it
+      );
 
       if (validLogs.length === 0) {
-        return `No recent meals to repeat. Tell me what you had — for example: "2 eggs and toast for breakfast".`;
+        return `No recent meals found to repeat. Tell me what you had — for example: "2 eggs and toast".`;
       }
-
-      // Which meal to repeat? Check if user specified
-      const wantBreakfast = /breakfast|morning/i.test(m);
-      const wantLunch = /lunch|afternoon/i.test(m);
-      const wantDinner = /dinner|supper|evening/i.test(m);
 
       let toRepeat = validLogs[0].messageIn!;
-      if (wantBreakfast || wantLunch || wantDinner) {
-        const keyword = wantBreakfast ? "breakfast" : wantLunch ? "lunch" : "dinner";
-        const match = validLogs.find(l => l.messageIn!.toLowerCase().includes(keyword));
-        if (match) toRepeat = match.messageIn!;
+
+      // Try to find the specific meal type they referenced
+      if (refLunch) {
+        const lunchLog = validLogs.find(l => /lunch|afternoon/i.test(l.messageIn || ""));
+        if (lunchLog) toRepeat = lunchLog.messageIn!;
+        else toRepeat = validLogs[0].messageIn!; // fall back to most recent
+      } else if (refDinner) {
+        const dinnerLog = validLogs.find(l => /dinner|supper|evening/i.test(l.messageIn || ""));
+        if (dinnerLog) toRepeat = dinnerLog.messageIn!;
+      } else if (refBreakfast) {
+        const breakfastLog = validLogs.find(l => /breakfast|morning/i.test(l.messageIn || ""));
+        if (breakfastLog) toRepeat = breakfastLog.messageIn!;
       }
 
-      // Re-process through the food scanner by calling handleMessage recursively
+      // First: try to find and copy the structured mealLogs entry (fastest path —
+      // works for both SA scanner logs AND GPT fallback logs, identified by kcalInt > 0)
+      const yesterdayMealRows = await db.select({
+        kcalInt: mealLogs.kcalInt,
+        proteinInt: mealLogs.proteinInt,
+        carbsInt: mealLogs.carbsInt,
+        fatInt: mealLogs.fatInt,
+        rawMessage: mealLogs.rawMessage,
+        source: mealLogs.source,
+        items: mealLogs.items,
+      }).from(mealLogs).where(and(
+        eq(mealLogs.userId, user.id),
+        gte(mealLogs.loggedAt, new Date(Date.now() - 48 * 3600_000)),
+        lt(mealLogs.loggedAt, new Date()),
+      )).orderBy(desc(mealLogs.loggedAt)).limit(5);
+
+      const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
+      if (usableMeals.length > 0) {
+        // Match on the specific meal the user referenced (prefer rawMessage match, then most recent)
+        const matchedMeal = usableMeals.find(r =>
+          r.rawMessage && toRepeat && r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase())
+        ) || usableMeals[0];
+
+        const totalCals = matchedMeal.kcalInt || 0;
+        const totalProt = matchedMeal.proteinInt || 0;
+        const labels: string[] = matchedMeal.rawMessage ? [matchedMeal.rawMessage.slice(0, 50)] : [];
+        // Re-insert single meal to today with quick_relog source
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: matchedMeal.rawMessage || toRepeat,
+          source: "quick_relog",
+          kcalInt: matchedMeal.kcalInt,
+          proteinInt: matchedMeal.proteinInt,
+          carbsInt: matchedMeal.carbsInt,
+          fatInt: matchedMeal.fatInt,
+          items: matchedMeal.items,
+        }).catch(() => {});
+        const calorieTarget = user.calorieTarget || 2000;
+        const proteinTarget = user.proteinTarget || 120;
+        // Recompute from mealLogs (includes the newly inserted quick_relog row)
+        const relogged = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({
+          todayCalories: relogged.calories,
+          todayProteinG: relogged.protein,
+          todayCaloriesDate: sastToday(),
+        }).where(eq(users.phoneNumber, phone));
+        const updTodayCals = relogged.calories;
+        const updTodayProt = relogged.protein;
+        const remaining = calorieTarget - updTodayCals;
+        const protGap = proteinTarget - updTodayProt;
+        await logChat(user.id, message, `Quick relog: ${labels.join(", ")}`, "FOOD_LOG");
+        return `♻️ Copied from yesterday:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
+      }
+
+      // Fallback: re-process through the food scanner — for older logs without meal_logs entries
       const repeatReply = await handleMessage(phone, toRepeat);
-      return `♻️ Re-logging: "${toRepeat.slice(0, 60)}"\n\n${repeatReply}`;
+      return `♻️ Same meal logged: "${toRepeat.slice(0, 80)}"\n\n${repeatReply}`;
     } catch (err) {
       console.error("[REPEAT MEAL]", err);
       return `Could not find a recent meal to repeat. Tell me what you had.`;
@@ -2567,18 +3537,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
         ).join("\n");
       }
 
-      // Daily accumulation — atomic SQL increment prevents race condition on concurrent food logs
+      // Daily accumulation — recompute from existing logs to avoid drift after corrections.
       const todayStr = sastToday();
-      let runningCals = 0;
-      let runningProtein = 0;
+      let runningCals = totalCals;
+      let runningProtein = Math.round(totalProtein);
       try {
-        const updated = await db.update(users).set({
-          todayCalories: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_calories, 0) + ${totalCals} ELSE ${totalCals} END`,
-          todayProteinG: sql`CASE WHEN today_calories_date = ${todayStr} THEN COALESCE(today_protein_g, 0) + ${Math.round(totalProtein)} ELSE ${Math.round(totalProtein)} END`,
+        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        runningCals = existingTotals.calories + totalCals;
+        runningProtein = existingTotals.protein + Math.round(totalProtein);
+        await db.update(users).set({
+          todayCalories: runningCals,
+          todayProteinG: runningProtein,
           todayCaloriesDate: todayStr,
-        }).where(eq(users.phoneNumber, phone)).returning({ cal: users.todayCalories, prot: users.todayProteinG });
-        runningCals = Number(updated[0]?.cal) || 0;
-        runningProtein = Number(updated[0]?.prot) || 0;
+        }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.warn("[non-fatal] calorie update:", e); }
       const prevCals = Math.max(0, runningCals - totalCals);
 
@@ -2609,25 +3580,204 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
       // Smart protein suggestion based on remaining protein target
       let proteinTip = "";
+      const budgetTier = user.weeklyFoodBudget || "100_300";
       const protRemaining = (user.proteinTarget || 120) - runningProtein;
       if (protRemaining > 40 && calRemaining > 200) {
-        const suggestions = [
-          `Add pilchards (22g protein, R12) to your next meal.`,
-          `2 boiled eggs = 12g protein. Quick win.`,
-          `Tin of tuna = 25g protein. Easy add.`,
-          `Greek yogurt = 10g protein. Good snack option.`,
-        ];
+        const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
+        const suggestions = lowBudget
+          ? [
+            `Add pilchards (22g protein, about R12) to your next meal.`,
+            `2 boiled eggs = 12g protein. Quick win.`,
+            `Add 1/2 tin sugar beans (7g protein) with your next meal.`,
+          ]
+          : [
+            `Add pilchards (22g protein, R12) to your next meal.`,
+            `2 boiled eggs = 12g protein. Quick win.`,
+            `Tin of tuna = 25g protein. Easy add.`,
+            `Low-fat yoghurt = 10g protein. Good snack option.`,
+          ];
         proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
       } else if (protRemaining <= 0) {
         proteinTip = `\n\nProtein target hit. ✅`;
       }
 
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}`;
+      // Variable reinforcement — fires ~15% of the time (1-in-7 logs).
+      // Slot machine psychology: unpredictable reward > predictable reward.
+      // These messages appear randomly, feel personal, build identity.
+      const variantRoll = Math.random();
+      let variableReinforcement = "";
+      if (variantRoll < 0.15) {
+        const firstName = (user.name || "").split(" ")[0] || "Sharp";
+        const daysSinceStart = user.programmeStartDate
+          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+          : 0;
+        const SURPRISE_NOTES = [
+          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+          `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
+          `\n\n🎯 _${firstName}, the consistency you're building right now is worth more than any single perfect meal._`,
+          `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
+          `\n\n🔒 _${firstName}, locking in the habit. Keep it exactly like this._`,
+        ];
+        variableReinforcement = SURPRISE_NOTES[Math.floor(Math.random() * SURPRISE_NOTES.length)];
+      }
+
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}${variableReinforcement}`;
+
+      // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
+      try {
+        const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f) => {
+          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+          return s + (grams * (f.carbsPer100g || 0) / 100);
+        }, 0));
+        const totalFat = Math.round(allAdjustedFoods.reduce((s, f) => {
+          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+          return s + (grams * (f.fatPer100g || 0) / 100);
+        }, 0));
+        const items = allAdjustedFoods.map(f => ({
+          name: f.name,
+          grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+          kcal: f.adjustedCalories,
+          protein: f.adjustedProtein,
+          category: f.category,
+        }));
+        const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: message.slice(0, 1000),
+          source: "sa_scanner",
+          kcalInt: totalCals,
+          proteinInt: Math.round(totalProtein),
+          carbsInt: totalCarbs,
+          fatInt: totalFat,
+          items,
+          mealLabel: firstSegLabel,
+        });
+      } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
+
       await logChat(user.id, message, reply, "FOOD_LOG");
-      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id)]);
+      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
       // If steps were also logged from same message, combine both replies
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
       return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
+    }
+
+    // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
+    // e.g. user sent "I had a steak wrap and chips" — scanner found the words but
+    // they mapped to zero calories. Fall through to GPT extraction.
+    // Guard: skip questions ("what should I eat?") even if they contain food words.
+    if (!isQuestion && hasLogTrigger && hasActualFood) {
+      const gptFallbackResult = await gptFoodFallback(message, user);
+      if (gptFallbackResult) {
+        const calorieTarget = user.calorieTarget || 2000;
+        const proteinTarget = user.proteinTarget || 120;
+        const foodLines = gptFallbackResult.foods.map(f =>
+          `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
+        ).join("\n");
+        const todayStr = sastToday();
+        let runningCals = gptFallbackResult.totalKcal;
+        let runningProtein = gptFallbackResult.totalProtein;
+        try {
+          const existingTotals = await recomputeTodayFoodTotals(user.id);
+          runningCals = existingTotals.calories + gptFallbackResult.totalKcal;
+          runningProtein = existingTotals.protein + gptFallbackResult.totalProtein;
+          await db.update(users).set({
+            todayCalories: runningCals,
+            todayProteinG: runningProtein,
+            todayCaloriesDate: todayStr,
+          }).where(eq(users.phoneNumber, phone));
+        } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+        const calRemaining = calorieTarget - runningCals;
+        const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
+        const fbVarRoll = Math.random();
+        const fbSurprise = fbVarRoll < 0.15 ? (() => {
+          const fn = (user.name || "").split(" ")[0] || "Sharp";
+          const NOTES = [`\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`, `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`, `\n\n🎯 _Clients who log every day lose 3× more than those who don't — you're doing the right thing._`];
+          return NOTES[Math.floor(Math.random() * NOTES.length)];
+        })() : "";
+        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fbSurprise}`;
+        try {
+          const items = gptFallbackResult.foods.map(f => ({
+            name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
+          }));
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message.slice(0, 1000),
+            source: "gpt_fallback",
+            kcalInt: gptFallbackResult.totalKcal,
+            proteinInt: gptFallbackResult.totalProtein,
+            carbsInt: gptFallbackResult.foods.reduce((s, f) => s + f.carbs_g, 0),
+            fatInt: gptFallbackResult.foods.reduce((s, f) => s + f.fat_g, 0),
+            items,
+            mealLabel: null,
+          });
+        } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+        await logChat(user.id, message, fallbackReply, "FOOD_LOG");
+        const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+        console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map(f => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+      }
+    }
+  }
+
+  // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
+  // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
+  if (!isQuestion && hasLogTrigger && !hasActualFood) {
+    const gptFallbackResult = await gptFoodFallback(message, user);
+    if (gptFallbackResult) {
+      const calorieTarget = user.calorieTarget || 2000;
+      const foodLines = gptFallbackResult.foods.map(f =>
+        `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
+      ).join("\n");
+      let runningCals = gptFallbackResult.totalKcal;
+      let runningProtein = gptFallbackResult.totalProtein;
+      const todayStr = sastToday();
+      try {
+        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        runningCals = existingTotals.calories + gptFallbackResult.totalKcal;
+        runningProtein = existingTotals.protein + gptFallbackResult.totalProtein;
+        await db.update(users).set({
+          todayCalories: runningCals,
+          todayProteinG: runningProtein,
+          todayCaloriesDate: todayStr,
+        }).where(eq(users.phoneNumber, phone));
+      } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+      const calRemaining = calorieTarget - runningCals;
+      const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
+      const fb2VarRoll = Math.random();
+      const fb2Surprise = fb2VarRoll < 0.15 ? (() => {
+        const fn = (user.name || "").split(" ")[0] || "Sharp";
+        const daysSince = user.programmeStartDate
+          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+          : 0;
+        const NOTES = [
+          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+          `\n\n⚡ _Most people at day ${daysSince || "?"} have already stopped logging. You haven't. That matters._`,
+          `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
+          `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
+        ];
+        return NOTES[Math.floor(Math.random() * NOTES.length)];
+      })() : "";
+      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fb2Surprise}`;
+      try {
+        const items = gptFallbackResult.foods.map(f => ({
+          name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
+        }));
+        await db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: message.slice(0, 1000),
+          source: "gpt_fallback",
+          kcalInt: gptFallbackResult.totalKcal,
+          proteinInt: gptFallbackResult.totalProtein,
+          carbsInt: gptFallbackResult.foods.reduce((s, f) => s + f.carbs_g, 0),
+          fatInt: gptFallbackResult.foods.reduce((s, f) => s + f.fat_g, 0),
+          items,
+          mealLabel: null,
+        });
+      } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+      await logChat(user.id, message, fallbackReply, "FOOD_LOG");
+      const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map(f => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
     }
   }
 
@@ -2635,10 +3785,14 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (m.includes("how am i doing") || m.includes("my progress") || m.includes("am i on track") || m.includes("how have i done") || m.includes("check my progress") || m === "this week" || m === "week" || m === "week summary" || m === "my week" || m === "weekly summary" || m === "6" || m === "weekly report" || m === "report" || m.includes("how was my week") || m.includes("this weeks progress")) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86400000);
-      const [recentSteps, recentWorkouts, recentWeights] = await Promise.all([
+      const [recentSteps, recentWorkouts, recentWeights, weekFoodRows] = await Promise.all([
         db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))).orderBy(desc(stepLogs.loggedAt)),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
         db.select().from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, sevenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+          logDays: sql<number>`COUNT(DISTINCT DATE(${mealLogs.loggedAt}))::int`,
+        }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
       ]);
       const liveT = calculateTargets(parseFloat(user.currentWeight || "75"), user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3);
       const plannedSessions = user.trainingDaysPerWeek || 3;
@@ -2648,12 +3802,19 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
       const weightChange = recentWeights.length >= 2
         ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
         : null;
+      const weekFoodLogDays = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
+      const weekTotalProt = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
+      const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / 7) : 0;
+      const protTarget = user.proteinTarget || 120;
       const sessionSentence = `Training: ${completedSessions} of ${plannedSessions} planned sessions done this week.`;
       const stepSentence = avgSteps > 0 ? `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.` : `Steps: no step logs this week — start logging daily.`;
       const weightSentence = weightChange !== null ? (parseFloat(weightChange) < 0 ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.` : parseFloat(weightChange) > 0 ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.` : `Weight: holding steady this week.`) : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
+      const foodSentence = weekFoodLogDays > 0
+        ? `Food: logged ${weekFoodLogDays}/7 days — avg ${avgDailyProt}g protein/day${avgDailyProt >= protTarget * 0.9 ? " ✅" : ` (target ${protTarget}g — ${protTarget - avgDailyProt}g gap)`}`
+        : `Food: no meals logged this week — consistency here is what drives results.`;
       const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
       const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Hey"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
-      const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${verdictSentence}`;
+      const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
 
       // Build shareable weekly wins card for good weeks
       let winsCard = "";
@@ -2725,7 +3886,9 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
-  if (m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me")) {
+  const isHardQuit = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
+  const isSoftStruggle = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m);
+  if (isHardQuit || isSoftStruggle) {
     try {
       const [recentW, recentS] = await Promise.all([
         db.select().from(workoutLogs).where(eq(workoutLogs.userId, user.id)).orderBy(desc(workoutLogs.loggedAt)).limit(10),
@@ -3008,7 +4171,7 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (["programme", "program", "my programme", "my program"].includes(m)) {
     return getKamlifeProgramme(user);
   }
-  if (["meal plan", "meals", "my meals", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan"].includes(m)) {
+  if (["meal plan", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan", "my meal plan"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
   if (["progress", "my progress", "how am i doing"].includes(m)) {
@@ -4435,20 +5598,70 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   if (/\b(restart|reset|start over|start again|stuck|help me start|beginning|begin again|onboard again)\b/i.test(m) ||
       m === "restart" || m === "reset" || m === "start over") {
     const currentState = user.onboardingState;
-    // Only allow reset for non-COMPLETE users OR users explicitly requesting restart
     const wantsFullReset = /start over|start again|begin again|onboard again/i.test(m);
+
     if (currentState !== "COMPLETE" || wantsFullReset) {
-      await db.update(users).set({
+      // Full data wipe — delete all FK-dependent rows then nuke + recreate user
+      const uid = user.id;
+      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
+      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
+      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+      await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
+      await db.delete(users).where(eq(users.id, uid));
+
+      await db.insert(users).values({
+        phoneNumber: phone,
+        subscriptionStatus: "inactive",
         onboardingState: "WELCOME",
-        awaitingInputType: null,
-        awaitingProgrammeAnswers: false,
-      }).where(eq(users.phoneNumber, phone));
-      const rescueReply = `Fresh start. What is your name?`;
-      await logChat(user.id, message, rescueReply, "RESCUE");
-      return rescueReply;
+        programmePhase: 1,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        trainingMode: "home",
+        stepsTarget: 8500,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
+
+      return "Fresh start. What is your name?";
     }
     // COMPLETE users asking "restart" — probably want workout/menu, not full reset
     return await getMenuText(user);
+  }
+
+  // ---- STOP (WhatsApp Business / POPIA opt-out) ----
+  // Bare "stop" is the industry-standard opt-out keyword. Must be respected
+  // even when the user hasn't cancelled — sets a 1-year messaging pause.
+  if (m === "stop" || m === "stop all" || m === "opt out" || m === "opt-out") {
+    const name = user.name || "there";
+    const pauseUntil = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
+    const existingNotes = user.profileNotes || "";
+    const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
+    const updatedNotes = `${cleanedNotes ? cleanedNotes + " | " : ""}paused_until:${pauseUntil}`;
+    await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.phoneNumber, phone));
+    const stopReply = `Done${name !== "there" ? `, ${name}` : ""}. No more messages from me. Your data is saved.\n\nReply *START* anytime to resume coaching.`;
+    await logChat(user.id, message, stopReply, "OPT_OUT");
+    return stopReply;
+  }
+
+  // ---- START (WhatsApp Business / POPIA opt-in / resume) ----
+  if (m === "start" || m === "unstop" || m === "opt in" || m === "opt-in") {
+    const existingNotes = user.profileNotes || "";
+    const wasPaused = /paused_until:\d{4}-\d{2}-\d{2}/.test(existingNotes);
+    if (wasPaused) {
+      const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
+      await db.update(users).set({ profileNotes: cleanedNotes || null }).where(eq(users.phoneNumber, phone));
+      const resumeReply = `Welcome back. Coaching is resumed. Tell me what you ate today and we pick up from there.`;
+      await logChat(user.id, message, resumeReply, "OPT_IN");
+      return resumeReply;
+    }
+    // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
   }
 
   // ---- CANCEL SUBSCRIPTION ----
@@ -4729,83 +5942,116 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
   }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals)\b/i.test(m)) {
+  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-    // Filter out log-command entries (e.g. "log the meal", "save this") — those are commands, not food
-    const LOG_CMD_RE = /^(log\s*(the\s*)?(meal|this|it|food)|save\s*(the\s*)?(meal|this|food)|record\s*(the\s*)?(meal|this)|add\s*(the\s*)?(meal|this)|done logging|finished logging|that.?s it for (today|now|this meal)|that.?s my (meal|food|breakfast|lunch|dinner|supper))$/i;
-    const mealLogs = todayLogs.filter(l => !LOG_CMD_RE.test((l.messageIn || "").trim()));
-    if (mealLogs.length === 0) {
-      const diaryReply = `No meals logged yet today. Log your first meal by describing what you ate — for example: "had 2 eggs and pap for breakfast".`;
-      await logChat(user.id, message, diaryReply, "FOOD_DIARY");
-      return diaryReply;
+
+    // Primary: read from structured mealLogs table — stores SA scanner + GPT fallback + photo logs.
+    // This is authoritative: we wrote to it at log time, no re-parsing needed.
+    const structuredLogs = await db.select({
+      kcalInt: mealLogs.kcalInt,
+      proteinInt: mealLogs.proteinInt,
+      rawMessage: mealLogs.rawMessage,
+      source: mealLogs.source,
+      items: mealLogs.items,
+      mealLabel: mealLogs.mealLabel,
+    }).from(mealLogs).where(and(
+      eq(mealLogs.userId, user.id),
+      gte(mealLogs.loggedAt, todayStart),
+    )).orderBy(asc(mealLogs.loggedAt));
+
+    if (structuredLogs.length === 0) {
+      // Fallback to chatHistory for legacy logs (pre-meal_logs table or photo-only logs)
+      const chatLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
+      if (chatLogs.length === 0) {
+        const diaryReply = `No meals logged yet today. Log your first meal by describing what you ate — for example: "had 2 eggs and pap for breakfast".`;
+        await logChat(user.id, message, diaryReply, "FOOD_DIARY");
+        return diaryReply;
+      }
+      // Legacy path: extract from text
+      let totalCal = 0; let totalProt = 0;
+      const mealLinesFallback: string[] = [];
+      for (const log of chatLogs) {
+        const msgIn = log.messageIn || "";
+        const calMatch = (log.messageOut || "").match(/(\d{3,4})\s*kcal/i);
+        const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
+        if (calMatch) totalCal += parseInt(calMatch[1]);
+        if (protMatch) totalProt += parseInt(protMatch[1]);
+        if (msgIn && msgIn !== "[Photo]") mealLinesFallback.push(`• ${msgIn.slice(0, 60)}`);
+      }
+      const legacyReply = `*Today's meals:*\n${mealLinesFallback.join("\n") || "• Food photo(s) logged"}\n\n*Total: ~${totalCal} kcal | ~${totalProt}g protein*`;
+      await logChat(user.id, message, legacyReply, "FOOD_DIARY");
+      return legacyReply;
     }
+
     let totalCal = 0; let totalProt = 0;
     const mealLines: string[] = [];
-    for (const log of mealLogs) {
-      const msgIn = log.messageIn || "";
-      const matched = scanForSAFoods(msgIn);
-      let mCal = matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-      let mProt = matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-      // If scan matched foods but got 0 kcal (e.g. unrecognised aliases), or scan found nothing,
-      // fall back to numbers extracted from GPT response
-      if (mCal === 0) {
-        const calMatch = (log.messageOut || "").match(/(\d+)\s*kcal/i);
-        const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
-        if (calMatch) mCal = parseInt(calMatch[1]);
-        if (protMatch) mProt = parseInt(protMatch[1]);
-      }
+    for (const log of structuredLogs) {
+      const mCal = log.kcalInt || 0;
+      const mProt = log.proteinInt || 0;
       totalCal += mCal; totalProt += mProt;
-      if (matched.length > 0) {
-        const label = matched.map((f: any) => f.name).join(", ");
+      const label = log.mealLabel ? `${log.mealLabel}: ` : "";
+      const isPhoto = log.source === "photo";
+      if (isPhoto && mCal === 0) {
+        mealLines.push(`• Food photo logged — caption needed for calories`);
+        continue;
+      }
+      // Derive display name: prefer structured items array, then rawMessage text
+      const logItems = log.items as Array<{ name?: string; foodName?: string }> | null;
+      const itemNames = Array.isArray(logItems) && logItems.length > 0
+        ? logItems.map((i: any) => i.name || i.foodName || "").filter(Boolean).join(", ")
+        : null;
+      const rawMsg = log.rawMessage || "";
+      const displayName = itemNames
+        || (rawMsg && rawMsg !== "[Photo]" ? rawMsg.slice(0, 60) : null)
+        || "Food logged";
+      if (isPhoto) {
         mealLines.push(mCal > 0
-          ? `• ${label} — ~${mCal} kcal, ${mProt}g protein`
-          : `• ${label}`);
-      } else if (msgIn && msgIn !== "[Photo]") {
+          ? `• ${label}Food photo — ~${mCal} kcal, ${mProt}g protein`
+          : `• ${label}Food photo logged`);
+      } else {
         mealLines.push(mCal > 0
-          ? `• ${msgIn.slice(0, 60)} — ~${mCal} kcal, ${mProt}g protein`
-          : `• ${msgIn.slice(0, 60)}`);
-      } else if (msgIn === "[Photo]") {
-        mealLines.push(mCal > 0 ? `• Food photo — ~${mCal} kcal, ${mProt}g protein` : `• Food photo logged`);
+          ? `• ${label}${displayName} — ~${mCal} kcal, ${mProt}g protein`
+          : `• ${label}${displayName}`);
       }
     }
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 130;
     const calRemaining = calTarget - totalCal;
+    const hour = new Date().getHours();
+    const isLateEnough = hour >= 16; // After 4pm, low intake is a real problem
+
+    // Coaching note based on intake vs target
+    let diaryCoachNote = "";
+    if (totalCal > 0 && totalCal < calTarget * 0.45 && isLateEnough) {
+      diaryCoachNote = `\n\n⚠️ *Under-eating alert:* ${totalCal} kcal at this time of day is too low. You are ${calRemaining} kcal short. Eat a proper meal tonight — protein and carbs. Starving is not a fat loss strategy, it is a metabolism killer.`;
+    } else if (totalCal > 0 && calRemaining > 500 && !isLateEnough) {
+      diaryCoachNote = `\n\n${calRemaining} kcal still to go. Spread it across your remaining meals — do not leave it all for dinner.`;
+    } else if (totalCal > calTarget * 1.1) {
+      diaryCoachNote = `\n\nOver target by ${Math.abs(calRemaining)} kcal. Keep the next meal protein-only — eggs, pilchards, chicken — and skip the starch.`;
+    }
+
     const diaryLines = [
-      `*Today's food log (${mealLogs.length} ${mealLogs.length === 1 ? "meal" : "meals"}):*`,
+      `*Today's food log (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
       ...mealLines,
       ``,
       `*Running total:* ~${totalCal} kcal | ${totalProt}g protein`,
       `*Target:* ${calTarget} kcal | ${protTarget}g protein`,
       calRemaining > 0 ? `*Remaining:* ~${calRemaining} kcal` : `*Status:* Over target by ~${Math.abs(calRemaining)} kcal`,
     ];
-    const diaryReply = diaryLines.join("\n");
+    const diaryReply = diaryLines.join("\n") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");
     return diaryReply;
   }
 
-  // ---- SHOPPING LIST GENERATOR — no GPT ----
+  // ---- SHOPPING LIST GENERATOR — unified with shopping-lists.ts templates ----
   if (/\b(shopping list|shop.*this week|what.*to buy|what.*buy.*week|buy.*groceries|grocery list|my list.*week|food.*list|week.*groceries)\b/i.test(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
-    const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 130;
+    const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
-    const goalNote = goal === "fat_loss" ? "high protein, lower carbs, big on vegetables" : "high protein, moderate carbs, whole foods";
-    let shoppingReply = "";
-    if (budget === "under_50") {
-      shoppingReply = `*Emergency Week Shopping — Under R50*\n\nEggs 6 pack — R22-28\nPilchards in tomato sauce 2 tins — R24-28\n\nTotal: ~R48\n\nThis covers protein for 3-4 days. Pair with pap from home. Buy at Shoprite or a tuck shop.`;
-    } else if (budget === "50_100") {
-      shoppingReply = `*Budget Week Shopping — R50-R100*\n\nEggs 12 pack — R40-48\nPilchards 3 tins — R36-42\nCabbage — R8-10\n\nTotal: ~R90\n\nBuy at Shoprite. Protein covered for 5 days. Cook eggs and pilchards in bulk. One pot on Sunday covers the week.`;
-    } else if (budget === "100_300") {
-      shoppingReply = `*Standard Week Shopping — R100-R300*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nEggs 18 pack — R65-75\nChicken thighs 1kg — R60-70\nPilchards 3 tins — R36-42\nSugar beans 500g — R18-22\nCabbage — R8-10\nOats 500g — R15-18\nSpinach bunch — R8-10\nOnions 3 pack — R10-14\nMaize meal 2kg — R18-22\n\nTotal: ~R240-280\n\nShop at Shoprite or Boxer. Cook Sunday. Chicken + beans is your go-to meal — 35g protein per portion.`;
-    } else if (budget === "300_500") {
-      shoppingReply = `*Mid-Range Week Shopping — R300-R500*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nChicken breasts 1.5kg — R110-130\nEggs 30 pack — R90-100\nGreek yoghurt 1kg — R55-70\nOats 1kg — R28-35\nSweet potato 1kg — R22-28\nFrozen hake 1kg — R55-70\nSpinach 2 bunches — R16-20\nTomatoes — R15-20\nOnions — R12-15\nCottage cheese 250g — R20-25\n\nTotal: ~R430-510\n\nShop at Checkers or PnP. Meal prep chicken and sweet potato Sunday. Oats + yoghurt for breakfast every day.`;
-    } else {
-      shoppingReply = `*Premium Week Shopping — R500+*\nTarget: ${protTarget}g protein/day | ${goalNote}\n\nChicken breasts 2kg — R150-180\nEggs 30 pack — R90-100\nGreek yoghurt 2x1kg — R110-140\nOats 1kg — R28-35\nSweet potato 2kg — R40-50\nSalmon or tuna steaks — R80-120\nBroccoli — R25-35\nSpinach — R16-20\nAvocados 4 pack — R40-60\nCottage cheese 500g — R40-50\nQuinoa 500g — R55-70\n\nTotal: ~R680-850\n\nShop at Checkers, PnP, or Woolworths. Quality matters here — fresh over frozen where possible.`;
-    }
+    const list = getShoppingList(budget, weekNum, goal);
+    const shoppingReply = formatShoppingList(list, user.name || undefined, goal);
     await logChat(user.id, message, shoppingReply, "SHOPPING_LIST");
     return shoppingReply;
   }
@@ -5206,6 +6452,27 @@ UNKNOWN FOOD: If you cannot identify the food in the image — respond only with
     return plateReply;
   }
 
+  // ---- FOOD FORMAT RECOVERY — message looked like food logging but SA scanner found nothing ----
+  // Fires only when: (a) clear food-log trigger word present, (b) SA database found no foods,
+  // (c) not a question/frustration, (d) not already handled by water/steps/braai/restaurant/etc.
+  // Provide instant format guidance instead of sending to GPT (which may return generic advice).
+  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration;
+  if (seemsFoodLogAttempt) {
+    // Compute candidate word count — if very short we can't do much
+    const wordCount = m.split(/\s+/).length;
+    // Only intercept if message has enough content to warrant format guidance
+    // (single word like "yes" is handled by SHORT_REPLIES; "I had nothing" is ok to fall through)
+    const hasNothingEaten = /\b(nothing|not.*eat|didn.?t eat|skipped|no food|fasted|fasting|no meals?)\b/i.test(m);
+    if (!hasNothingEaten && wordCount >= 3) {
+      // Try to extract what they mentioned as a food item for a personalised reply
+      const firstNoun = m.replace(/\b(i had|i ate|just had|just ate|ate|had|having|i have|having|breakfast was|lunch was|dinner was|breakfast|lunch|dinner|supper|snack|brunch|for|at|with|and|the|a|an|some|my)\b/gi, " ").trim().split(/\s+/).filter(w => w.length > 2)[0] || "";
+      const foodHint = firstNoun ? ` (like "${firstNoun}")` : "";
+      const formatReply = `I did not recognise that food${foodHint} in my database. Log it like this:\n\n"I had 2 eggs and pap for breakfast"\n"Chicken thigh, sweet potato and spinach for lunch"\n\nInclude: the food name, rough amount, and which meal. I will give you the kcal and protein instantly.`;
+      await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
+      return formatReply;
+    }
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
@@ -5258,7 +6525,8 @@ STEPS LOGGED (number + "steps" / "walked" / "km"):
   Respond based on their step target of ${user.stepsTarget || 8500}. If below — push them. If at or above — celebrate and give next action.
 
 FOOD / MEAL LOGGED (any food item or meal described):
-  Coach specifically on THAT exact food. Use the SA food database. Estimate SA portion calories and protein. If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
+  Coach specifically on THAT exact food. ALWAYS include the estimated calories (kcal) and protein (g) — this is NON-NEGOTIABLE. Format: "That is roughly X kcal and Xg protein." If you cannot estimate a specific number, use a range. Never give a food response without numbers. Never say "I cannot estimate" — always give a best estimate based on standard portions.
+  If junk — acknowledge without shaming, give one specific swap. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
   CRITICAL — If the meal contains ANY of: chicken, beef, mince, fish, tuna, hake, salmon, eggs, pilchards, beans, lentils, pork, lamb, cottage cheese, Greek yoghurt, biltong — DO NOT suggest adding protein or swapping to pilchards. The client is ALREADY eating protein. Celebrate the choice. Budget suggestions (pilchards, eggs, sugar beans) ONLY fire when the client explicitly says they have no money or their stored budget tier is "under_100". Never suggest budget swaps after a quality meal unprompted.
 
 BROKE / BUDGET / MONTH-END / NO MONEY:
@@ -5428,13 +6696,27 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
       const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
-      const shortReply = await askCoachK(message, user, shortReplyContext, memoryContext);
+      const shortReply = sanitizeCoachReply(await askCoachK(message, user, shortReplyContext, memoryContext), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }
   }
 
   // ---- FRUSTRATION HANDLER — client venting after a bad bot response ----
+  const severeServiceRiskComplaint =
+    /\b(kill|killed|hospital|unsafe|dangerous|harm)\b/i.test(m) &&
+    /\b(this|service|app|bot|coach|you)\b/i.test(m);
+
+  if (severeServiceRiskComplaint) {
+    const name = user.name || "there";
+    const injuryCtx = user.injuries && user.injuries !== "none"
+      ? ` I still have your injury noted: ${user.injuries}.`
+      : "";
+    const safetyReply = `${name}, you are right to call that out.${injuryCtx} I will keep responses specific and safety-first from here. Immediate action: if your pain is active today, skip loading that area and do a pain-free session only.`;
+    await logChat(user.id, message, safetyReply, "SAFETY_COMPLAINT");
+    return safetyReply;
+  }
+
   const isFrustrated =
     /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|jesus|wtf|what the hell|this is useless|pathetic|terrible|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked|not worth|waste of money|waste of time|cancel|refund|unsubscribe|this is bad|this is shit|this sucks|useless|rubbish|garbage|disappointed|i.?m done|giving up on this|doesn.?t work|broken|stupid)\b/i.test(m) ||
     (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo|omg|oh my god|yoh)\s*[!?.]*$/i.test(m));
@@ -5448,9 +6730,9 @@ CRITICAL RULES — these are non-negotiable:
         .limit(1);
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
-      const name = user.name ? ` ${user.name}` : "";
-      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course — give a better, more specific answer to what they originally needed. If you cannot tell what they needed, ask directly: "What do you need from me right now?" SA voice. Direct. No fluff.`;
-      const frustReply = await askCoachK(message, user, frustContext);
+      const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
+      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
+      const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
     } catch (e) { console.warn("[fall-through-gpt]", e); }
@@ -5465,7 +6747,20 @@ CRITICAL RULES — these are non-negotiable:
   }
 
   // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----
-  const agentType = routeToAgent(message);
+  // Await classifier here — by now it has had 0.5-2s to complete across all the handlers above.
+  const intentResult = await intentPromise;
+  const classifiedIntent = intentResult.intent;
+  const intentConfidence = intentResult.confidence;
+
+  // Determine effective agent type:
+  // 1. RANT with high confidence → mindset agent (empathetic, doesn't lecture on nutrition)
+  // 2. Otherwise use keyword-based routing as before
+  let agentType = routeToAgent(message);
+  if (classifiedIntent === "RANT" && intentConfidence >= 0.75) {
+    agentType = "mindset";
+    console.log(`[INTENT] RANT override → mindset agent (${Math.round(intentConfidence * 100)}% confidence)`);
+  }
+
   let gptReply: string;
   const AGENT_ERROR = "Eish Coach K had a moment. Try that again.";
 
@@ -5493,7 +6788,7 @@ CRITICAL RULES — these are non-negotiable:
     gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
   }
 
-  const finalReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
+  const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message, user.weeklyFoodBudget, user.injuries);
 
   // ---- MEMORY: store important facts for future sessions ----
   try {
@@ -5533,7 +6828,7 @@ CRITICAL RULES — these are non-negotiable:
   const isFoodLog = !isLogCommand && !isQuestion && !isFrustration && hasLogTrigger && gptFoodMatch.length > 0;
   if (isFoodLog) {
     const pattern = await checkFoodPatterns(user.id);
-    const perfectDay = await checkPerfectDay(user.id);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
@@ -5562,6 +6857,13 @@ CRITICAL RULES — these are non-negotiable:
     await logChat(user.id, message, fullReply, "FOOD_LOG");
     return fullReply;
   }
+
+  // Log the GPT catchall with the classifier's intent label so the observability
+  // dashboard shows accurate intent tags for messages that fell through all handlers.
+  const gptIntentLabel = (classifiedIntent !== "OTHER" && intentConfidence >= 0.6)
+    ? classifiedIntent
+    : (agentType === "mindset" ? "MINDSET" : agentType === "nutrition" ? "NUTRITION" : agentType === "programming" ? "PROGRAMME" : "GENERAL");
+  await logChat(user.id, message, finalReply, gptIntentLabel).catch(e => console.warn("[non-fatal logChat]", e));
 
   return finalReply;
 
@@ -5596,6 +6898,26 @@ async function logChat(userId: string, messageIn: string, messageOut: string, in
             slaDeadline: escalationSLA(esc.priority),
           });
           console.log(`[ESCALATION] Auto-created: ${esc.reason} (${esc.priority}) for user ${userId}`);
+
+          // Founder WhatsApp alert on urgent/high — inbox alone is insufficient for time-critical cases
+          if ((esc.priority === "urgent" || esc.priority === "high") && process.env.COACH_ALERT_PHONE && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER) {
+            try {
+              const [client] = await db.select({ name: users.name, phoneNumber: users.phoneNumber }).from(users).where(eq(users.id, userId)).limit(1);
+              const clientName = client?.name || "Client";
+              const clientPhone = client?.phoneNumber || "unknown";
+              const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+              const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+              const emoji = esc.priority === "urgent" ? "🚨" : "⚠️";
+              await alertClient.messages.create({
+                from: fromNum,
+                to: `whatsapp:${process.env.COACH_ALERT_PHONE}`,
+                body: `${emoji} ${esc.priority.toUpperCase()} ESCALATION\nReason: ${esc.reason}\nClient: ${clientName} (${clientPhone})\nMessage: "${messageIn.slice(0, 200)}"\n\nOpen the dashboard inbox to claim and respond.`,
+              });
+              console.log(`[ESCALATION] Founder alert sent (${esc.priority}/${esc.reason})`);
+            } catch (alertErr) {
+              console.error(`[ESCALATION] ⚠️ Founder alert send FAILED (${esc.priority}/${esc.reason}) — inbox still has the record:`, alertErr);
+            }
+          }
         }
       }
     }
@@ -5616,6 +6938,33 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
+// ============================================================
+// VOICE NOTE FAILURE TRACKER — escalate to "please type" after 3 failures
+// in a 30-min window. Prevents the "client sends 5 bad voice notes and
+// gives up" loop. Keyed by userId. Reset on first successful transcription.
+// ============================================================
+
+const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
+const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, val] of voiceFailureMap.entries()) {
+    if (now - val.lastAt > VOICE_FAILURE_RESET_MS) voiceFailureMap.delete(key);
+  }
+}, 15 * 60 * 1000);
+
+export function bumpVoiceFailure(userId: string): number {
+  const now = Date.now();
+  const prev = voiceFailureMap.get(userId);
+  const count = prev && (now - prev.lastAt) < VOICE_FAILURE_RESET_MS ? prev.count + 1 : 1;
+  voiceFailureMap.set(userId, { count, lastAt: now });
+  return count;
+}
+
+export function clearVoiceFailure(userId: string): void {
+  voiceFailureMap.delete(userId);
+}
+
 function checkRateLimit(phone: string): boolean {
   const now = Date.now();
   const window = 60 * 1000;
@@ -5635,1821 +6984,47 @@ function checkRateLimit(phone: string): boolean {
 
 export async function registerRoutes(server: Server, app: Express): Promise<void> {
 
-  // ── Admin auth ────────────────────────────────────────────
-
-  // Simple key-based auth: client sends COACH_DASHBOARD_KEY, gets back a session token
-  // stored in localStorage. All /api/* admin routes require the X-Dashboard-Key header.
-  function requireAdminKey(req: any, res: any, next: any) {
-    const key = process.env.COACH_DASHBOARD_KEY;
-    if (!key) {
-      console.error("[AUTH] COACH_DASHBOARD_KEY env var is not set — admin access blocked");
-      return res.status(503).json({ message: "Dashboard not configured" });
-    }
-    // Accept key via header only — never query string (query strings appear in logs and referers)
-    const provided = (req.headers["x-dashboard-key"] as string) || "";
-    let match = false;
-    try { match = provided.length === key.length && crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(key)); } catch { match = false; }
-    if (!match) return res.status(401).json({ message: "Unauthorized" });
-    next();
-  }
-
-  app.post("/api/auth/login", (req: any, res: any) => {
-    const key = process.env.COACH_DASHBOARD_KEY;
-    if (!key) return res.status(503).json({ message: "Dashboard not configured — set COACH_DASHBOARD_KEY env var" });
-    const { password } = req.body || {};
-    if (!password || password !== key) {
-      return res.status(401).json({ message: "Invalid password" });
-    }
-    // Return the password back as the token — client stores it and sends as x-dashboard-key header
-    // This is safe: the client already knows the password (they just typed it). We're just confirming it's correct.
-    return res.json({ success: true, token: password });
-  });
-
-  // ── REST API for admin dashboard ──────────────────────────
-
-  app.get("/api/users", requireAdminKey, async (req: any, res) => {
-    try {
-      const page = Math.max(1, parseInt(String(req.query.page || "1")));
-      const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || "50"))));
-      const offset = (page - 1) * limit;
-
-      const [all, total] = await Promise.all([
-        db.select().from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset),
-        db.select({ count: sql`count(*)` }).from(users),
-      ]);
-
-      // Audit log
-      console.log(`[ADMIN AUDIT] GET /api/users — page ${page}, limit ${limit} — ${new Date().toISOString()}`);
-
-      res.json({
-        users: all,
-        pagination: {
-          page,
-          limit,
-          total: parseInt(String(total[0]?.count || 0)),
-          pages: Math.ceil(parseInt(String(total[0]?.count || 0)) / limit),
-        },
-      });
-    } catch (err) {
-      res.status(500).json({ message: "Failed to fetch users" });
-    }
-  });
-
-  app.get("/api/users/:id", requireAdminKey, async (req, res) => {
-    try {
-      const user = await db.select().from(users).where(eq(users.id, req.params.id)).limit(1);
-      if (!user.length) return res.status(404).json({ message: "User not found" });
-
-      const weights = await db.select().from(weightLogs).where(eq(weightLogs.userId, req.params.id)).orderBy(desc(weightLogs.loggedAt)).limit(30);
-      const steps = await db.select().from(stepLogs).where(eq(stepLogs.userId, req.params.id)).orderBy(desc(stepLogs.loggedAt)).limit(30);
-      const workouts = await db.select().from(workoutLogs).where(eq(workoutLogs.userId, req.params.id)).orderBy(desc(workoutLogs.loggedAt)).limit(30);
-      const chats = await db.select().from(chatHistory).where(eq(chatHistory.userId, req.params.id)).orderBy(desc(chatHistory.createdAt)).limit(50);
-
-      res.json({ user: user[0], weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats });
-    } catch (err) {
-      res.status(500).json({ message: "Failed to fetch user" });
-    }
-  });
-
-  app.get("/api/admin/flagged", requireAdminKey, async (_req, res) => {
-    try {
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
-      const inactive = await db.select().from(users).where(
-        and(
-          eq(users.onboardingState, "COMPLETE"),
-        )
-      );
-      const flagged = inactive.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < threeDaysAgo);
-      res.json(flagged);
-    } catch (err) {
-      res.status(500).json({ message: "Failed to fetch flagged users" });
-    }
-  });
-
-  app.get("/api/admin/beta-testers", requireAdminKey, async (_req, res) => {
-    try {
-      const all = await db.select().from(users).where(eq(users.subscriptionStatus, "trial")).orderBy(desc(users.createdAt));
-      res.json(all);
-    } catch (err) {
-      res.status(500).json({ message: "Failed to fetch beta testers" });
-    }
-  });
-
-  // ── Admin: send message to client as Coach K ─────────────
-  app.post("/api/admin/send-message", requireAdminKey, async (req: any, res: any) => {
-    try {
-      const { userId, message } = req.body;
-      if (!userId || !message?.trim()) {
-        return res.status(400).json({ message: "userId and message are required" });
-      }
-
-      const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
-      if (!user) return res.status(404).json({ message: "User not found" });
-
-      const accountSid = process.env.TWILIO_ACCOUNT_SID;
-      const authToken = process.env.TWILIO_AUTH_TOKEN;
-      const whatsappFrom = process.env.TWILIO_WHATSAPP_NUMBER;
-      if (!accountSid || !authToken || !whatsappFrom) {
-        return res.status(503).json({ message: "Twilio not configured — set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_NUMBER" });
-      }
-
-      const twilioC = twilio(accountSid, authToken);
-      const fromNum = whatsappFrom.startsWith("whatsapp:") ? whatsappFrom : `whatsapp:${whatsappFrom}`;
-      const toNum = user.phoneNumber.startsWith("whatsapp:") ? user.phoneNumber : `whatsapp:${user.phoneNumber}`;
-
-      await twilioC.messages.create({ from: fromNum, to: toNum, body: message.trim() });
-      await logChat(user.id, "[admin-sent]", message.trim(), "ADMIN_MESSAGE");
-
-      console.log(`[ADMIN] Message sent to ${toNum.slice(-8)}: "${message.slice(0, 60)}"`);
-      return res.json({ success: true, sentTo: user.phoneNumber });
-    } catch (err: any) {
-      console.error("[ADMIN] send-message error:", err);
-      return res.status(500).json({ message: err.message || "Failed to send message" });
-    }
-  });
-
-  app.post("/api/admin/run-test", requireAdminKey, async (req, res) => {
-    const { testId, liveMode } = req.body;
-    const logs: string[] = [];
-    try {
-      logs.push(`Running test ${testId}...`);
-      const testPhone = "+27000000000";
-      const testMessages: Record<string, string> = {
-        A: "Hi, I want to join",
-        B: "I ate pap and chicken for lunch",
-        C: "I did 8500 steps today",
-        D: "I weigh 75kg",
-        E: "I am travelling and need a workout",
-        F: "weekly report",
-      };
-      const msg = testMessages[testId] || "Hello";
-      logs.push(`Sending: "${msg}"`);
-      const reply = await handleMessage(testPhone, msg);
-      logs.push(`Reply: ${reply}`);
-      res.json({ success: true, logs, whatsappSent: reply });
-    } catch (err: any) {
-      logs.push(`Error: ${err.message}`);
-      res.json({ success: false, logs });
-    }
-  });
-
-  // ── WhatsApp webhook ──────────────────────────────────────
-
-  function escapeXml(text: string): string {
-    return text
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&apos;");
-  }
-
-  // Fix 1 — splitMessage: split on day separators first, then char boundaries
-  function splitMessage(text: string, maxLen = 1500): string[] {
-    // Programme day separator — each day is one complete WhatsApp message
-    if (/\n\n---\n\n/.test(text)) {
-      const days = text.split(/\n\n---\n\n/);
-      const result: string[] = [];
-      for (const day of days) {
-        if (day.trim()) result.push(...splitMessage(day.trim(), maxLen));
-      }
-      return result;
-    }
-    if (text.length <= maxLen) return [text];
-    const lines = text.split("\n");
-    const chunks: string[] = [];
-    let current = "";
-    for (const line of lines) {
-      const candidate = current ? current + "\n" + line : line;
-      if (candidate.length > maxLen) {
-        if (current) chunks.push(current.trim());
-        // If single line itself is over maxLen, split at last space before limit
-        if (line.length > maxLen) {
-          let remaining = line;
-          while (remaining.length > maxLen) {
-            const cutAt = remaining.lastIndexOf(" ", maxLen);
-            const breakAt = cutAt > 0 ? cutAt : maxLen;
-            chunks.push(remaining.slice(0, breakAt).trim());
-            remaining = remaining.slice(breakAt).trim();
-          }
-          current = remaining;
-        } else {
-          current = line;
-        }
-      } else {
-        current = candidate;
-      }
-    }
-    if (current.trim()) chunks.push(current.trim());
-    return chunks.filter(Boolean);
-  }
-
-  app.post("/twilio/whatsapp", async (req, res) => {
-    try {
-      // ---- Twilio signature verification (always enabled) ----
-      const authToken = process.env.TWILIO_AUTH_TOKEN || "";
-      if (authToken) {
-        const signature = (req.headers["x-twilio-signature"] as string) || "";
-        // Use x-forwarded-proto to get the real protocol behind proxies (Replit, Render, etc.)
-        const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
-        const fullUrl = `${proto}://${req.get("host")}${req.originalUrl}`;
-        const valid = twilio.validateRequest(authToken, signature, fullUrl, req.body);
-        if (!valid) {
-          console.warn(`[SECURITY] Twilio signature validation failed from ${req.ip}`);
-          return res.status(403).end();
-        }
-      } else {
-        console.warn("[SECURITY] TWILIO_AUTH_TOKEN not set — signature validation skipped. Set this env var in production!");
-      }
-
-      // ---- Rate limiter ----
-      const rawPhoneEarly = (req.body.From || "") as string;
-      const phoneKey = rawPhoneEarly.replace(/^(whatsapp:)\s+/, "$1+");
-      if (!checkRateLimit(phoneKey)) {
-        return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Too many messages. Wait 60 seconds.</Message></Response>`);
-      }
-
-      // Twilio sometimes sends '+' as a literal '+' in form data; URL decoders
-      // convert that to a space. Normalise 'whatsapp: 27...' → 'whatsapp:+27...'
-      const rawPhone = rawPhoneEarly;
-      const phone = rawPhone.replace(/^(whatsapp:)\s+/, "$1+");
-      const message = (req.body.Body || "").trim();
-      const mediaUrl = req.body.MediaUrl0 || undefined;
-      const mediaContentType = req.body.MediaContentType0 || undefined;
-
-      if (!phone || (!message && !mediaUrl)) {
-        return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-      }
-
-      const reply = await handleMessage(phone, message, mediaUrl, mediaContentType);
-
-      const user = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      if (user.length > 0) {
-        await logChat(user[0].id, message, reply, "GPT");
-      }
-
-      // Fix 1 — split long replies into multiple TwiML messages (WhatsApp cap ~1600 chars)
-      const chunks = splitMessage(reply);
-      const messageXml = chunks.map(c => `<Message>${escapeXml(c)}</Message>`).join("");
-      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response>${messageXml}</Response>`);
-    } catch (err) {
-      console.error("Webhook error:", err);
-      return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
-    }
-  });
-
-  // ── Admin test harness webhook ────────────────────────────
-
-  app.post("/api/admin/test-webhook", requireAdminKey, async (req, res) => {
-    try {
-      const { phone, message } = req.body;
-      if (!phone || !message) return res.status(400).json({ message: "phone and message required" });
-      const reply = await handleMessage(phone, message);
-      res.json({ reply });
-    } catch (err: any) {
-      res.status(500).json({ message: err.message });
-    }
-  });
-
-  // ── Health check ──────────────────────────────────────────
-
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
-  });
-
-  // ── Public stats for landing page (no auth — aggregate only) ──────────────
-  app.get("/api/public/stats", async (_req, res) => {
-    try {
-      const [clientCount, workoutCount] = await Promise.all([
-        db.select({ count: sql`count(*)` }).from(users).where(eq(users.onboardingState, "COMPLETE")),
-        db.select({ count: sql`count(*)` }).from(workoutLogs),
-      ]);
-      res.json({
-        activeClients: parseInt(String(clientCount[0]?.count || 0)),
-        workoutsLogged: parseInt(String(workoutCount[0]?.count || 0)),
-      });
-    } catch (e) {
-      console.warn("[dashboard-stats]", e);
-      res.json({ activeClients: 200, workoutsLogged: 4800 }); // fallback
-    }
-  });
-
-  // ── Detailed health check for dashboard status panel ──────────────────────
-  app.get("/api/health", requireAdminKey, async (_req, res) => {
-    const checks: Record<string, { status: "online" | "offline"; detail?: string }> = {};
-
-    // Database
-    try {
-      await db.select({ count: sql`count(*)` }).from(users).limit(1);
-      checks.database = { status: "online" };
-    } catch (e: any) {
-      checks.database = { status: "offline", detail: e.message };
-    }
-
-    // OpenAI
-    checks.openai = process.env.AI_INTEGRATIONS_OPENAI_API_KEY
-      ? { status: "online" }
-      : { status: "offline", detail: "AI_INTEGRATIONS_OPENAI_API_KEY not set" };
-
-    // Twilio / WhatsApp
-    checks.whatsapp = (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN && process.env.TWILIO_WHATSAPP_NUMBER)
-      ? { status: "online" }
-      : { status: "offline", detail: "Twilio env vars missing" };
-
-    // PayFast
-    checks.payfast = (process.env.PAYFAST_MERCHANT_ID && process.env.PAYFAST_MERCHANT_KEY)
-      ? { status: "online" }
-      : { status: "offline", detail: "PayFast env vars missing" };
-
-    const allOnline = Object.values(checks).every(c => c.status === "online");
-    res.json({ status: allOnline ? "healthy" : "degraded", checks, timestamp: new Date().toISOString() });
-  });
-
-  // ── Voice note file serving ────────────────────────────────
-  // Serves TTS-generated MP3s for milestone voice notes
-  app.get("/voice/:id.mp3", (req, res) => {
-    const { existsSync } = require("fs");
-    // Sanitise to prevent path traversal — allow only alphanumeric, dash, underscore
-    const safeId = path.basename(req.params.id || "").replace(/[^a-zA-Z0-9_-]/g, "");
-    if (!safeId) return res.status(400).end();
-    const filePath = path.join(process.cwd(), "tmp", "voice", `${safeId}.mp3`);
-    if (!existsSync(filePath)) return res.status(404).end();
-    res.setHeader("Content-Type", "audio/mpeg");
-    res.setHeader("Cache-Control", "public, max-age=86400");
-    return res.sendFile(filePath);
-  });
-
-  // ── Addition 7: Coach Dashboard API — unified under COACH_DASHBOARD_KEY ─────
-  // NOTE: requireAdminKey was removed. All dashboard routes now use requireAdminKey
-  // (one key, one env var: COACH_DASHBOARD_KEY). This eliminates the dual-key confusion
-  // where DASHBOARD_API_KEY and COACH_DASHBOARD_KEY could be different values.
-
-  app.get("/api/dashboard/clients", requireAdminKey, async (req: any, res) => {
-    try {
-      const page = Math.max(0, parseInt(req.query.page as string) || 0);
-      const limit = 200;
-      const all = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE")).orderBy(desc(users.lastActiveAt)).limit(limit).offset(page * limit);
-      const now = Date.now();
-      const weekAgo = new Date(now - 7 * 86400000);
-
-      const result = await Promise.all(all.map(async (u) => {
-        const thisWeekLogs = await db.select().from(chatHistory)
-          .where(and(eq(chatHistory.userId, u.id), gte(chatHistory.createdAt, weekAgo)))
-          .limit(50);
-        const lastActive = u.lastActiveAt ? new Date(u.lastActiveAt).getTime() : 0;
-        const sinceLastMsg = now - lastActive;
-        const status = sinceLastMsg < 24 * 3600000 ? "green" : sinceLastMsg < 48 * 3600000 ? "yellow" : "red";
-        const programmeDays = u.programmeStartDate
-          ? Math.floor((now - new Date(u.programmeStartDate).getTime()) / 86400000) : 0;
-        return {
-          id: u.id,
-          name: u.name,
-          phone: u.phoneNumber,
-          onboardingState: u.onboardingState,
-          lastMessageAt: u.lastActiveAt,
-          programmeDays,
-          thisWeekLogCount: thisWeekLogs.length,
-          status,
-        };
-      }));
-      res.json(result);
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch clients" });
-    }
-  });
-
-  app.get("/api/dashboard/client/:phone", requireAdminKey, async (req, res) => {
-    try {
-      const phoneParam = decodeURIComponent(req.params.phone);
-      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
-      if (!client) return res.status(404).json({ error: "Client not found" });
-
-      const fourteenDaysAgo = new Date(Date.now() - 14 * 86400000);
-      const [weights, steps, workouts, chats] = await Promise.all([
-        db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
-        db.select().from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fourteenDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
-        db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, fourteenDaysAgo))).orderBy(desc(workoutLogs.loggedAt)),
-        db.select().from(chatHistory).where(eq(chatHistory.userId, client.id)).orderBy(desc(chatHistory.createdAt)).limit(100),
-      ]);
-      const liveTargets = calculateTargets(parseFloat(client.currentWeight || "75"), client.goalType || "fat_loss", client.lifeSituation || "office", client.trainingDaysPerWeek || 3);
-      const programmeDays = client.programmeStartDate ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86400000) : 0;
-
-      res.json({ client, weightLogs: weights, stepLogs: steps, workoutLogs: workouts, chatHistory: chats, liveTargets, programmeDays });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch client" });
-    }
-  });
-
-  app.get("/api/dashboard/metrics", requireAdminKey, async (_req, res) => {
-    try {
-      const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
-      const now = Date.now();
-      const weekAgo = new Date(now - 7 * 86400000);
-      const twoWeeksAgo = new Date(now - 14 * 86400000);
-
-      const activeClients = allComplete.length;
-      const newThisWeek = allComplete.filter(u => u.createdAt && new Date(u.createdAt) >= weekAgo).length;
-      const churnedThisWeek = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) < twoWeeksAgo).length;
-
-      const allChats = await db.select().from(chatHistory).where(gte(chatHistory.createdAt, weekAgo));
-      const avgMessagesPerDay = activeClients > 0 ? Math.round(allChats.length / 7 / activeClients * 10) / 10 : 0;
-
-      // Estimated MRR: count paying subscribers (active) × base price R149
-      // Excludes trial users; over-counts if mix of Basic/Pro/Premium tiers
-      const payingClients = allComplete.filter(u => u.subscriptionStatus === "active").length;
-      const estimatedMRR = calculateMRR(payingClients);
-
-      const trialClients = allComplete.filter(u => u.subscriptionStatus === "trial").length;
-
-      res.json({
-        computedAt: new Date().toISOString(),
-        activeClients,
-        payingClients,
-        trialClients,
-        newThisWeek,
-        churnedThisWeek,
-        avgMessagesPerClientPerDay: avgMessagesPerDay,
-        estimatedMRR,
-        currency: PRICING.currency,
-        pricePerUser: PRICING.monthlyPriceZAR,
-      });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch metrics" });
-    }
-  });
-
-  // ---- FUNNEL METRICS — signup → onboard → first workout → week-1 retention ----
-  app.get("/api/dashboard/funnel", requireAdminKey, async (_req, res) => {
-    try {
-      // Project only needed columns — never load full user rows for aggregate calcs
-      const allUsers = await db.select({
-        id: users.id,
-        onboardingState: users.onboardingState,
-        subscriptionStatus: users.subscriptionStatus,
-        createdAt: users.createdAt,
-        lastActiveAt: users.lastActiveAt,
-        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
-        todayCalories: users.todayCalories,
-        cancelledAt: users.cancelledAt,
-      }).from(users);
-      const now = Date.now();
-      const sevenDays = 7 * 86_400_000;
-      const thirtyDays = 30 * 86_400_000;
-
-      const totalSignups = allUsers.length;
-      const onboardingComplete = allUsers.filter(u => u.onboardingState === "COMPLETE").length;
-      const firstWorkoutDone = allUsers.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
-      const activeWeek1 = allUsers.filter(u => {
-        if (!u.createdAt) return false;
-        const age = now - new Date(u.createdAt).getTime();
-        return age >= sevenDays && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < sevenDays * 2;
-      }).length;
-      const signupsWithWeek1 = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays).length;
-
-      // Retention cohorts
-      const d1Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= 86_400_000);
-      const d1Retained = d1Eligible.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < now - new Date(u.createdAt!).getTime() + 86_400_000);
-      const d7Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays);
-      const d7Retained = d7Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + sevenDays - 86_400_000));
-      const d30Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= thirtyDays);
-      const d30Retained = d30Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + thirtyDays - sevenDays));
-
-      // At-risk breakdown
-      const atRisk48h = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 2 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 5 * 86_400_000).length;
-      const atRisk5d = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 5 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000).length;
-      const atRisk14d = allUsers.filter(u => u.onboardingState === "COMPLETE" && (!u.lastActiveAt || (now - new Date(u.lastActiveAt).getTime()) >= 14 * 86_400_000)).length;
-
-      // Conversion rates
-      const payingClients = allUsers.filter(u => u.subscriptionStatus === "active").length;
-      const trialToPaid = totalSignups > 0 ? Math.round(payingClients / totalSignups * 100) : 0;
-
-      // Avg workouts per client per week (active clients only)
-      const activeClients = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86_400_000);
-      const totalWorkoutsActiveClients = activeClients.reduce((sum, u) => sum + (u.totalWorkoutsCompleted || 0), 0);
-      const avgWorkoutsPerWeek = activeClients.length > 0
-        ? Math.round(totalWorkoutsActiveClients / activeClients.length / Math.max(1, activeClients.reduce((sum, u) => sum + Math.max(1, Math.floor((now - new Date(u.createdAt!).getTime()) / sevenDays)), 0) / activeClients.length) * 10) / 10
-        : 0;
-
-      // Trial / subscription breakdown
-      const trialUsers = allUsers.filter(u => u.subscriptionStatus === "trial").length;
-      const inactiveUsers = allUsers.filter(u => u.subscriptionStatus === "inactive").length;
-
-      // First food log — key activation event
-      const firstFoodLogged = allUsers.filter(u => (u.todayCalories || 0) > 0 || (u.totalWorkoutsCompleted || 0) >= 1).length;
-
-      // Churn — users who were active (paid or trial with activity) but haven't logged in 14+ days
-      const churned = allUsers.filter(u =>
-        u.onboardingState === "COMPLETE" &&
-        u.subscriptionStatus === "inactive" &&
-        u.cancelledAt
-      ).length;
-
-      res.json({
-        computedAt: new Date().toISOString(),
-        funnel: {
-          totalSignups,
-          onboardingComplete,
-          firstFoodLogged,
-          firstWorkoutDone,
-          activeWeek1,
-          signupsWithWeek1Data: signupsWithWeek1,
-        },
-        subscriptions: {
-          trial: trialUsers,
-          paying: payingClients,
-          inactive: inactiveUsers,
-          churned,
-        },
-        conversionRates: {
-          signupToOnboard: totalSignups > 0 ? Math.round(onboardingComplete / totalSignups * 100) : 0,
-          onboardToFirstWorkout: onboardingComplete > 0 ? Math.round(firstWorkoutDone / onboardingComplete * 100) : 0,
-          firstWorkoutToWeek1: signupsWithWeek1 > 0 ? Math.round(activeWeek1 / signupsWithWeek1 * 100) : 0,
-          trialToPaid: calculateTrialConversion(trialUsers, payingClients),
-        },
-        retention: {
-          d1: { eligible: d1Eligible.length, retained: d1Retained.length, rate: d1Eligible.length > 0 ? Math.round(d1Retained.length / d1Eligible.length * 100) : 0 },
-          d7: { eligible: d7Eligible.length, retained: d7Retained.length, rate: d7Eligible.length > 0 ? Math.round(d7Retained.length / d7Eligible.length * 100) : 0 },
-          d30: { eligible: d30Eligible.length, retained: d30Retained.length, rate: d30Eligible.length > 0 ? Math.round(d30Retained.length / d30Eligible.length * 100) : 0 },
-        },
-        atRisk: { warning48h: atRisk48h, high5d: atRisk5d, severe14d: atRisk14d },
-        engagement: { avgWorkoutsPerWeek, activeClientsThisWeek: activeClients.length, payingClients },
-      });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch funnel metrics" });
-    }
-  });
-
-  // ---- ONE-CLICK INTERVENTION — send a targeted message to a specific at-risk client ----
-  app.post("/api/dashboard/intervene", requireAdminKey, async (req, res) => {
-    try {
-      const { phone, type = "checkin" } = req.body;
-      if (!phone) return res.status(400).json({ error: "phone required" });
-
-      const targetUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      if (targetUser.length === 0) return res.status(404).json({ error: "user not found" });
-      const client = targetUser[0];
-      const name = client.name || "there";
-      const workouts = client.totalWorkoutsCompleted || 0;
-      const week = client.programmeWeek || 1;
-
-      const twilioClient2 = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
-      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
-
-      const messages: Record<string, string> = {
-        checkin: `${name}, Coach K here. Haven't heard from you in a while — everything okay? No pressure, just checking in. Reply anything and we pick up where we left off.`,
-        motivation: `${name}, ${workouts} sessions completed. Week ${week}. That is more than most people ever do. The programme is still here, your progress is saved. One session today changes the momentum.`,
-        workout: `${name}, your next workout is ready. Reply *1* to see it — takes 20 minutes. One session. That is all I am asking for today.`,
-        nutrition: `${name}, quick question — what did you eat today? Just tell me and I will give you the breakdown. No judgement. One message.`,
-      };
-
-      const msg = messages[type] || messages.checkin;
-      await twilioClient2.messages.create({ from: fromNum, to: phone, body: msg });
-      await logChat(client.id, `[COACH_INTERVENTION:${type}]`, msg, "COACH_INTERVENTION");
-
-      res.json({ success: true, type, phone: phone.slice(-4) });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to send intervention" });
-    }
-  });
-
-  app.post("/api/dashboard/broadcast", requireAdminKey, async (req, res) => {
-    try {
-      const { message: broadcastMsg, filter = "all" } = req.body;
-      if (!broadcastMsg) return res.status(400).json({ error: "message is required" });
-
-      const twilioClient2 = require("twilio")(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}` : "";
-      if (!fromNum) return res.status(500).json({ error: "TWILIO_WHATSAPP_NUMBER not configured" });
-
-      const allComplete = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
-      const now = Date.now();
-      const twoWeeksAgo = new Date(now - 14 * 86400000);
-      const twoDaysAgo = new Date(now - 48 * 3600000);
-
-      let targets = allComplete;
-      if (filter === "active") targets = allComplete.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= twoDaysAgo);
-      if (filter === "atrisk") targets = allComplete.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < twoDaysAgo);
-
-      let sent = 0;
-      let failed = 0;
-      for (const u of targets) {
-        try {
-          await twilioClient2.messages.create({ from: fromNum, to: u.phoneNumber, body: broadcastMsg });
-          sent++;
-        } catch { failed++; }
-      }
-      res.json({ sent, failed, total: targets.length });
-    } catch (err) {
-      res.status(500).json({ error: "Broadcast failed" });
-    }
-  });
-
-  // ---- CLIENT TIMELINE — full activity history for a single client ----
-  app.get("/api/dashboard/timeline/:phone", requireAdminKey, async (req, res) => {
-    try {
-      const phoneParam = decodeURIComponent(req.params.phone);
-      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phoneParam)).limit(1);
-      if (!client) return res.status(404).json({ error: "Client not found" });
-
-      const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
-      const [weights, steps, workouts, chats] = await Promise.all([
-        db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs)
-          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(weightLogs.loggedAt)),
-        db.select({ steps: stepLogs.steps, date: stepLogs.loggedAt }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(stepLogs.loggedAt)),
-        db.select({ date: workoutLogs.loggedAt }).from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, thirtyDaysAgo))).orderBy(asc(workoutLogs.loggedAt)),
-        db.select({ date: chatHistory.createdAt, intent: chatHistory.intent, msgIn: chatHistory.messageIn, msgOut: chatHistory.messageOut })
-          .from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, thirtyDaysAgo)))
-          .orderBy(desc(chatHistory.createdAt)).limit(200),
-      ]);
-
-      // Build timeline events sorted by date
-      const events: { date: string; type: string; detail: string }[] = [];
-      for (const w of weights) events.push({ date: new Date(w.date!).toISOString(), type: "weight", detail: `${w.weight}kg` });
-      for (const s of steps) events.push({ date: new Date(s.date!).toISOString(), type: "steps", detail: `${s.steps} steps` });
-      for (const wo of workouts) {
-        const workoutDate = wo.date ? new Date(wo.date) : null;
-        events.push({
-          date: workoutDate?.toISOString() || new Date().toISOString(),
-          type: "workout",
-          detail: workoutDate ? getDayType(workoutDate.getDay()) : "session",
-        });
-      }
-      for (const c of chats) events.push({ date: new Date(c.date!).toISOString(), type: "chat", detail: `[${c.intent}] ${(c.msgIn || "").slice(0, 80)}` });
-      events.sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
-
-      // Summary stats
-      const daysOnProgramme = client.programmeStartDate ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000) : 0;
-      const avgSteps = steps.length > 0 ? Math.round(steps.reduce((s, x) => s + (x.steps || 0), 0) / steps.length) : 0;
-      const weightTrend = weights.length >= 2 ? parseFloat((parseFloat(String(weights[weights.length - 1].weight)) - parseFloat(String(weights[0].weight))).toFixed(1)) : 0;
-
-      res.json({
-        client: { name: client.name, phone: client.phoneNumber, goal: client.goalType, mode: client.trainingMode, week: client.programmeWeek, totalWorkouts: client.totalWorkoutsCompleted, streak: client.workoutStreak },
-        summary: { daysOnProgramme, workoutsLast30: workouts.length, avgSteps, weightTrend, messagesLast30: chats.length },
-        events: events.slice(0, 200),
-      });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch timeline" });
-    }
-  });
-
-  // ---- COHORT ANALYTICS — grouped by signup month ----
-  app.get("/api/dashboard/cohorts", requireAdminKey, async (_req, res) => {
-    try {
-      const allUsers = await db.select({
-        id: users.id,
-        createdAt: users.createdAt,
-        subscriptionStatus: users.subscriptionStatus,
-        onboardingState: users.onboardingState,
-        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
-        lastActiveAt: users.lastActiveAt,
-      }).from(users);
-
-      const now = Date.now();
-      const cohorts: Record<string, { month: string; signups: number; onboarded: number; paying: number; retained: number; avgWorkouts: number }> = {};
-
-      for (const u of allUsers) {
-        if (!u.createdAt) continue;
-        const d = new Date(u.createdAt);
-        const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-        if (!cohorts[key]) cohorts[key] = { month: key, signups: 0, onboarded: 0, paying: 0, retained: 0, avgWorkouts: 0 };
-        cohorts[key].signups++;
-        if (u.onboardingState === "COMPLETE") cohorts[key].onboarded++;
-        if (u.subscriptionStatus === "active") cohorts[key].paying++;
-        if (u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000) cohorts[key].retained++;
-        cohorts[key].avgWorkouts += u.totalWorkoutsCompleted || 0;
-      }
-
-      // Calculate averages
-      const result = Object.values(cohorts).map(c => ({
-        ...c,
-        avgWorkouts: c.signups > 0 ? Math.round(c.avgWorkouts / c.signups * 10) / 10 : 0,
-        onboardRate: c.signups > 0 ? Math.round(c.onboarded / c.signups * 100) : 0,
-        payRate: c.signups > 0 ? Math.round(c.paying / c.signups * 100) : 0,
-        retentionRate: c.onboarded > 0 ? Math.round(c.retained / c.onboarded * 100) : 0,
-      })).sort((a, b) => a.month.localeCompare(b.month));
-
-      res.json({ cohorts: result });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch cohorts" });
-    }
-  });
+  // ── Route modules (extracted from this file for maintainability) ──
+  const {
+    registerAuthRoutes,
+    registerHealthRoutes,
+    registerAdminRoutes,
+    registerWhatsAppRoutes,
+    registerDashboardRoutes,
+    registerPaymentRoutes,
+    requireAdminKey,
+  } = await import("./routes/index");
+
+  // Deps that route modules need from this file
+  const routeDeps = { handleMessage, logChat, checkRateLimit };
+
+  // Register all modular routes
+  registerAuthRoutes(app);
+  registerHealthRoutes(app);
+  registerAdminRoutes(app, routeDeps);
+  registerWhatsAppRoutes(app, routeDeps);
+  registerDashboardRoutes(app, routeDeps);
+  registerPaymentRoutes(app);
+
+  // ══════════════════════════════════════════════════════════
+  // All API routes above are now in server/routes/*.ts modules.
+  // Only the /coach HTML dashboard remains inline below.
+  // ══════════════════════════════════════════════════════════
+
+  // OLD INLINE ROUTES REMOVED — now in:
+  //   routes/auth.ts      — /api/auth/login
+  //   routes/admin.ts     — /api/users, /api/admin/*
+  //   routes/whatsapp.ts  — /twilio/whatsapp, /api/admin/test-webhook
+  //   routes/health.ts    — /health, /api/health, /api/public/stats, /voice/*
+  //   routes/dashboard.ts — /api/dashboard/*
+  //   routes/payments.ts  — /webhook/payfast, /webhook/status, /api/payfast/link
+  // See server/routes/index.ts for the registry.
 
   // ============================================================
-  // PINNED NEXT-ACTIONS — auto-generated priorities per client
-  // ============================================================
-  app.get("/api/dashboard/next-actions", requireAdminKey, async (_req, res) => {
-    try {
-      const now = Date.now();
-      const twoDaysAgo = new Date(now - 2 * 86_400_000);
-      const sevenDaysAgo = new Date(now - 7 * 86_400_000);
-      const fourteenDaysAgo = new Date(now - 14 * 86_400_000);
-
-      const allClients = await db.select({
-        id: users.id,
-        name: users.name,
-        phoneNumber: users.phoneNumber,
-        subscriptionStatus: users.subscriptionStatus,
-        onboardingState: users.onboardingState,
-        lastActiveAt: users.lastActiveAt,
-        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
-        programmeWeek: users.programmeWeek,
-        workoutStreak: users.workoutStreak,
-        createdAt: users.createdAt,
-        goalType: users.goalType,
-        currentWeight: users.currentWeight,
-      }).from(users);
-
-      const actions: { phone: string; name: string; action: string; priority: "urgent" | "high" | "medium" | "low"; category: string }[] = [];
-
-      for (const client of allClients) {
-        const lastActive = client.lastActiveAt ? new Date(client.lastActiveAt) : null;
-        const daysOnProgramme = client.createdAt ? Math.floor((now - new Date(client.createdAt).getTime()) / 86_400_000) : 0;
-        const name = client.name || client.phoneNumber.slice(-4);
-
-        // Not onboarded after 24h
-        if (client.onboardingState !== "COMPLETE" && daysOnProgramme >= 1) {
-          actions.push({ phone: client.phoneNumber, name, action: "Hasn't completed onboarding — send welcome nudge", priority: "high", category: "onboarding" });
-          continue;
-        }
-
-        // Paying but silent 14+ days — churn risk
-        if (client.subscriptionStatus === "active" && lastActive && lastActive < fourteenDaysAgo) {
-          actions.push({ phone: client.phoneNumber, name, action: `Silent ${Math.floor((now - lastActive.getTime()) / 86_400_000)} days — high churn risk, call or send personal message`, priority: "urgent", category: "churn" });
-          continue;
-        }
-
-        // Silent 5-14 days
-        if (client.onboardingState === "COMPLETE" && lastActive && lastActive < sevenDaysAgo && lastActive >= fourteenDaysAgo) {
-          actions.push({ phone: client.phoneNumber, name, action: `Silent ${Math.floor((now - lastActive.getTime()) / 86_400_000)} days — send re-engagement`, priority: "high", category: "engagement" });
-          continue;
-        }
-
-        // Active but zero workouts — needs push
-        if (client.onboardingState === "COMPLETE" && (client.totalWorkoutsCompleted || 0) === 0 && daysOnProgramme >= 3) {
-          actions.push({ phone: client.phoneNumber, name, action: "Onboarded but zero workouts — send first workout prompt", priority: "medium", category: "activation" });
-        }
-
-        // Week 4+ milestone — check in on goals
-        if ((client.programmeWeek || 0) === 4 && (client.totalWorkoutsCompleted || 0) >= 8) {
-          actions.push({ phone: client.phoneNumber, name, action: "Hitting week 4 milestone — send progress check + measurements reminder", priority: "low", category: "milestone" });
-        }
-
-        // Lost streak — had 5+ streak, now at 0
-        if ((client.workoutStreak || 0) === 0 && (client.totalWorkoutsCompleted || 0) >= 10 && lastActive && lastActive >= twoDaysAgo) {
-          actions.push({ phone: client.phoneNumber, name, action: "Lost workout streak — motivational message to restart", priority: "medium", category: "streak" });
-        }
-      }
-
-      // Sort by priority
-      const priorityOrder = { urgent: 0, high: 1, medium: 2, low: 3 };
-      actions.sort((a, b) => priorityOrder[a.priority] - priorityOrder[b.priority]);
-
-      res.json({ actions: actions.slice(0, 50), total: actions.length });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to compute next actions" });
-    }
-  });
-
-  // ============================================================
-  // NPS DASHBOARD — satisfaction scores summary
-  // ============================================================
-  app.get("/api/dashboard/nps", requireAdminKey, async (_req, res) => {
-    try {
-      const npsLogs = await db.select({ messageOut: chatHistory.messageOut, date: chatHistory.createdAt })
-        .from(chatHistory)
-        .where(eq(chatHistory.intent, "NPS_RATING"))
-        .orderBy(desc(chatHistory.createdAt))
-        .limit(200);
-
-      let promoters = 0, passives = 0, detractors = 0;
-      const scores: number[] = [];
-      const recent: { score: number; date: string }[] = [];
-
-      for (const log of npsLogs) {
-        const scoreMatch = (log.messageOut || "").match(/NPS:\s*(\d+)/);
-        if (scoreMatch) {
-          const score = parseInt(scoreMatch[1]);
-          scores.push(score);
-          if (score >= 9) promoters++;
-          else if (score >= 7) passives++;
-          else detractors++;
-          if (recent.length < 10) {
-            recent.push({ score, date: log.date ? new Date(log.date).toLocaleDateString("en-ZA") : "" });
-          }
-        }
-      }
-
-      const totalResponses = scores.length;
-      const npsScore = totalResponses > 0
-        ? Math.round(((promoters - detractors) / totalResponses) * 100)
-        : 0;
-      const avgScore = totalResponses > 0
-        ? (scores.reduce((a, b) => a + b, 0) / totalResponses).toFixed(1)
-        : "0";
-
-      res.json({
-        npsScore,
-        avgScore: parseFloat(avgScore),
-        totalResponses,
-        promoters,
-        passives,
-        detractors,
-        recent,
-      });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch NPS data" });
-    }
-  });
-
-  // ============================================================
-  // ESCALATION INBOX — human review queue with SLA timers
-  // ============================================================
-
-  // Create escalation (auto or manual)
-  app.post("/api/dashboard/escalations", requireAdminKey, async (req, res) => {
-    try {
-      const { phone, reason, triggerMessage, priority } = req.body;
-      if (!phone || !reason) return res.status(400).json({ error: "phone and reason required" });
-      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      if (!client) return res.status(404).json({ error: "Client not found" });
-
-      const prio = priority || "normal";
-      const [esc] = await db.insert(escalations).values({
-        userId: client.id,
-        reason,
-        triggerMessage: triggerMessage || null,
-        priority: prio,
-        slaDeadline: escalationSLA(prio),
-      }).returning();
-
-      res.json({ success: true, escalation: esc });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to create escalation" });
-    }
-  });
-
-  // List escalations (open/claimed/all)
-  app.get("/api/dashboard/escalations", requireAdminKey, async (req, res) => {
-    try {
-      const statusFilter = (req.query.status as string) || "open";
-      const conditions = statusFilter === "all" ? [] : [eq(escalations.status, statusFilter)];
-
-      const rows = await db.select({
-        id: escalations.id,
-        reason: escalations.reason,
-        triggerMessage: escalations.triggerMessage,
-        status: escalations.status,
-        priority: escalations.priority,
-        claimedBy: escalations.claimedBy,
-        resolution: escalations.resolution,
-        createdAt: escalations.createdAt,
-        claimedAt: escalations.claimedAt,
-        resolvedAt: escalations.resolvedAt,
-        slaDeadline: escalations.slaDeadline,
-        userName: users.name,
-        userPhone: users.phoneNumber,
-        userGoal: users.goalType,
-      }).from(escalations)
-        .leftJoin(users, eq(escalations.userId, users.id))
-        .where(conditions.length > 0 ? conditions[0] : undefined)
-        .orderBy(desc(escalations.createdAt))
-        .limit(200);
-
-      // Mark SLA breaches
-      const now = Date.now();
-      const enriched = rows.map(r => ({
-        ...r,
-        slaBreach: r.slaDeadline && r.status === "open" && new Date(r.slaDeadline).getTime() < now,
-        slaRemaining: r.slaDeadline && r.status === "open"
-          ? Math.max(0, Math.round((new Date(r.slaDeadline).getTime() - now) / 60_000))
-          : null,
-      }));
-
-      res.json({ escalations: enriched });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch escalations" });
-    }
-  });
-
-  // Claim an escalation
-  app.post("/api/dashboard/escalations/:id/claim", requireAdminKey, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { claimedBy } = req.body;
-      const [updated] = await db.update(escalations)
-        .set({ status: "claimed", claimedBy: claimedBy || "Coach", claimedAt: new Date() })
-        .where(eq(escalations.id, id))
-        .returning();
-      res.json({ success: true, escalation: updated });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to claim escalation" });
-    }
-  });
-
-  // Resolve an escalation
-  app.post("/api/dashboard/escalations/:id/resolve", requireAdminKey, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { resolution } = req.body;
-      const [updated] = await db.update(escalations)
-        .set({ status: "resolved", resolution: resolution || "Resolved", resolvedAt: new Date() })
-        .where(eq(escalations.id, id))
-        .returning();
-      res.json({ success: true, escalation: updated });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to resolve escalation" });
-    }
-  });
-
-  // ============================================================
-  // A/B TESTING ENGINE — message template experiments
-  // ============================================================
-
-  // Helper: get A/B variant for a user in an active experiment
-  async function getABVariant(userId: string, messageType: string): Promise<{ template: string; experimentId: number; variant: string } | null> {
-    try {
-      const [experiment] = await db.select().from(abExperiments)
-        .where(and(eq(abExperiments.messageType, messageType), eq(abExperiments.status, "active")))
-        .limit(1);
-      if (!experiment) return null;
-
-      // Check existing assignment
-      const [existing] = await db.select().from(abAssignments)
-        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.userId, userId)))
-        .limit(1);
-
-      if (existing) {
-        return { template: existing.variant === "A" ? experiment.variantA : experiment.variantB, experimentId: experiment.id, variant: existing.variant };
-      }
-
-      // Assign: count current split, assign to smaller group
-      const countA = await db.select({ c: count() }).from(abAssignments)
-        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.variant, "A")));
-      const countB = await db.select({ c: count() }).from(abAssignments)
-        .where(and(eq(abAssignments.experimentId, experiment.id), eq(abAssignments.variant, "B")));
-      const variant = (countA[0]?.c || 0) <= (countB[0]?.c || 0) ? "A" : "B";
-
-      await db.insert(abAssignments).values({
-        experimentId: experiment.id,
-        userId,
-        variant,
-      });
-
-      return { template: variant === "A" ? experiment.variantA : experiment.variantB, experimentId: experiment.id, variant };
-    } catch (err) {
-      console.error("[A/B] Error getting variant:", err);
-      return null;
-    }
-  }
-
-  // Mark A/B delivery
-  async function markABDelivered(experimentId: number, userId: string): Promise<void> {
-    try {
-      await db.update(abAssignments)
-        .set({ delivered: true, deliveredAt: new Date() })
-        .where(and(eq(abAssignments.experimentId, experimentId), eq(abAssignments.userId, userId)));
-    } catch {}
-  }
-
-  // Mark A/B response
-  async function markABResponse(userId: string, action: string): Promise<void> {
-    try {
-      // Find any active experiment assignment for this user that hasn't been responded to
-      const [assignment] = await db.select({ id: abAssignments.id, experimentId: abAssignments.experimentId })
-        .from(abAssignments)
-        .innerJoin(abExperiments, eq(abAssignments.experimentId, abExperiments.id))
-        .where(and(
-          eq(abAssignments.userId, userId),
-          eq(abAssignments.delivered, true),
-          eq(abAssignments.responded, false),
-          eq(abExperiments.status, "active"),
-        ))
-        .limit(1);
-      if (assignment) {
-        await db.update(abAssignments)
-          .set({ responded: true, respondedAt: new Date(), convertedAction: action })
-          .where(eq(abAssignments.id, assignment.id));
-      }
-    } catch {}
-  }
-
-  // Create experiment
-  app.post("/api/dashboard/ab/experiments", requireAdminKey, async (req, res) => {
-    try {
-      const { name, description, variantA, variantB, messageType } = req.body;
-      if (!name || !variantA || !variantB || !messageType) return res.status(400).json({ error: "name, variantA, variantB, messageType required" });
-      const [exp] = await db.insert(abExperiments).values({ name, description, variantA, variantB, messageType }).returning();
-      res.json({ success: true, experiment: exp });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to create experiment" });
-    }
-  });
-
-  // List experiments
-  app.get("/api/dashboard/ab/experiments", requireAdminKey, async (_req, res) => {
-    try {
-      const exps = await db.select().from(abExperiments).orderBy(desc(abExperiments.createdAt));
-      // Enrich with stats
-      const enriched = await Promise.all(exps.map(async (exp) => {
-        const assignments = await db.select({
-          variant: abAssignments.variant,
-          delivered: abAssignments.delivered,
-          responded: abAssignments.responded,
-        }).from(abAssignments).where(eq(abAssignments.experimentId, exp.id));
-
-        const statsA = { sent: 0, delivered: 0, responded: 0 };
-        const statsB = { sent: 0, delivered: 0, responded: 0 };
-        for (const a of assignments) {
-          const s = a.variant === "A" ? statsA : statsB;
-          s.sent++;
-          if (a.delivered) s.delivered++;
-          if (a.responded) s.responded++;
-        }
-        return {
-          ...exp,
-          statsA,
-          statsB,
-          responseRateA: statsA.delivered > 0 ? Math.round(statsA.responded / statsA.delivered * 100) : 0,
-          responseRateB: statsB.delivered > 0 ? Math.round(statsB.responded / statsB.delivered * 100) : 0,
-        };
-      }));
-      res.json({ experiments: enriched });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to fetch experiments" });
-    }
-  });
-
-  // Pause/complete experiment
-  app.post("/api/dashboard/ab/experiments/:id/status", requireAdminKey, async (req, res) => {
-    try {
-      const id = parseInt(req.params.id);
-      const { status } = req.body; // "active" | "paused" | "completed"
-      const updates: any = { status };
-      if (status === "completed") updates.completedAt = new Date();
-      const [updated] = await db.update(abExperiments).set(updates).where(eq(abExperiments.id, id)).returning();
-      res.json({ success: true, experiment: updated });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to update experiment" });
-    }
-  });
-
-  // ============================================================
-  // KPI REPORTS — business metrics dashboard API
-  // ============================================================
-
-  app.get("/api/dashboard/kpis", requireAdminKey, async (req, res) => {
-    try {
-      const days = parseInt(req.query.days as string) || 30;
-      const since = new Date(Date.now() - days * 86400_000);
-
-      // Total & active users
-      const [totalUsers] = await db.select({ c: count() }).from(users);
-      const [activeUsers] = await db.select({ c: count() }).from(users)
-        .where(gte(users.lastActiveAt, since));
-
-      // New signups in period
-      const [newUsers] = await db.select({ c: count() }).from(users)
-        .where(gte(users.createdAt, since));
-
-      // Paying users
-      const [payingUsers] = await db.select({ c: count() }).from(users)
-        .where(eq(users.subscriptionStatus, "active"));
-
-      // Churn: users who were active before period but not during
-      const beforePeriod = new Date(since.getTime() - days * 86400_000);
-      const [churned] = await db.select({ c: count() }).from(users)
-        .where(and(
-          gte(users.lastActiveAt, beforePeriod),
-          lt(users.lastActiveAt, since)
-        ));
-
-      // Messages in period
-      const [totalMessages] = await db.select({ c: count() }).from(chatHistory)
-        .where(gte(chatHistory.createdAt, since));
-
-      // Workouts logged
-      const [totalWorkouts] = await db.select({ c: count() }).from(workoutLogs)
-        .where(gte(workoutLogs.loggedAt, since));
-
-      // Weight logs
-      const [totalWeighIns] = await db.select({ c: count() }).from(weightLogs)
-        .where(gte(weightLogs.loggedAt, since));
-
-      // Step logs
-      const [totalStepLogs] = await db.select({ c: count() }).from(stepLogs)
-        .where(gte(stepLogs.loggedAt, since));
-
-      // Average messages per active user
-      const avgMessages = (activeUsers.c || 0) > 0
-        ? Math.round((totalMessages.c || 0) / (activeUsers.c || 1))
-        : 0;
-
-      // Retention rate
-      const retentionRate = (totalUsers.c || 0) > 0
-        ? Math.round(((activeUsers.c || 0) / (totalUsers.c || 1)) * 100)
-        : 0;
-
-      // Conversion rate (paying / total)
-      const conversionRate = (totalUsers.c || 0) > 0
-        ? Math.round(((payingUsers.c || 0) / (totalUsers.c || 1)) * 100)
-        : 0;
-
-      // Revenue estimate (paying users × R149)
-      const estimatedMRR = calculateMRR(payingUsers.c || 0);
-
-      // Engagement score: % of active users who logged workout OR weight OR steps
-      const engagedUsersQuery = await db.execute(
-        sql`SELECT COUNT(DISTINCT user_id) as c FROM (
-          SELECT user_id FROM workout_logs WHERE logged_at >= ${since}
-          UNION SELECT user_id FROM weight_logs WHERE logged_at >= ${since}
-          UNION SELECT user_id FROM step_logs WHERE logged_at >= ${since}
-        ) engaged`
-      );
-      const engagedCount = Number(engagedUsersQuery.rows?.[0]?.c || 0);
-      const engagementRate = (activeUsers.c || 0) > 0
-        ? Math.round((engagedCount / (activeUsers.c || 1)) * 100)
-        : 0;
-
-      // Daily active users trend (last 14 days)
-      const dauTrend: { date: string; count: number }[] = [];
-      for (let i = 13; i >= 0; i--) {
-        const dayStart = new Date(Date.now() - i * 86400_000);
-        dayStart.setHours(0, 0, 0, 0);
-        const dayEnd = new Date(dayStart.getTime() + 86400_000);
-        const [dau] = await db.select({ c: count() }).from(chatHistory)
-          .where(and(gte(chatHistory.createdAt, dayStart), lt(chatHistory.createdAt, dayEnd)));
-        dauTrend.push({
-          date: dayStart.toISOString().slice(0, 10),
-          count: dau.c || 0,
-        });
-      }
-
-      res.json({
-        period: `${days} days`,
-        users: {
-          total: totalUsers.c || 0,
-          active: activeUsers.c || 0,
-          new: newUsers.c || 0,
-          paying: payingUsers.c || 0,
-          churned: churned.c || 0,
-        },
-        rates: {
-          retention: `${retentionRate}%`,
-          conversion: `${conversionRate}%`,
-          engagement: `${engagementRate}%`,
-        },
-        activity: {
-          messages: totalMessages.c || 0,
-          workouts: totalWorkouts.c || 0,
-          weighIns: totalWeighIns.c || 0,
-          stepLogs: totalStepLogs.c || 0,
-          avgMessagesPerUser: avgMessages,
-        },
-        revenue: {
-          estimatedMRR: `R${estimatedMRR}`,
-          payingUsers: payingUsers.c || 0,
-        },
-        dauTrend,
-      });
-    } catch (err) {
-      console.error("[KPI] Error:", err);
-      res.status(500).json({ error: "Failed to compute KPIs" });
-    }
-  });
-
-  // ============================================================
-  // COHORT ANALYTICS — weekly signup cohort retention
-  // ============================================================
-
-  app.get("/api/dashboard/cohorts/weekly", requireAdminKey, async (req, res) => {
-    try {
-      const weeks = parseInt(req.query.weeks as string) || 8;
-      const cohorts: {
-        week: string;
-        signups: number;
-        retention: number[];
-      }[] = [];
-
-      for (let w = weeks - 1; w >= 0; w--) {
-        const weekStart = new Date(Date.now() - (w + 1) * 7 * 86400_000);
-        weekStart.setHours(0, 0, 0, 0);
-        const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
-
-        // Users who signed up in this week
-        const cohortUsers = await db.select({ id: users.id, lastActive: users.lastActiveAt })
-          .from(users)
-          .where(and(gte(users.createdAt, weekStart), lt(users.createdAt, weekEnd)));
-
-        if (cohortUsers.length === 0) {
-          cohorts.push({
-            week: weekStart.toISOString().slice(0, 10),
-            signups: 0,
-            retention: [],
-          });
-          continue;
-        }
-
-        // Check how many are still active in each subsequent week
-        const retention: number[] = [];
-        for (let r = 1; r <= w + 1 && r <= 8; r++) {
-          const checkStart = new Date(weekStart.getTime() + r * 7 * 86400_000);
-          const checkEnd = new Date(checkStart.getTime() + 7 * 86400_000);
-
-          // Count cohort users who had any chat activity in week r
-          const activeInWeek = cohortUsers.filter(u =>
-            u.lastActive && new Date(u.lastActive) >= checkStart
-          ).length;
-
-          retention.push(Math.round((activeInWeek / cohortUsers.length) * 100));
-        }
-
-        cohorts.push({
-          week: weekStart.toISOString().slice(0, 10),
-          signups: cohortUsers.length,
-          retention,
-        });
-      }
-
-      res.json({ cohorts });
-    } catch (err) {
-      console.error("[COHORT] Error:", err);
-      res.status(500).json({ error: "Failed to compute cohorts" });
-    }
-  });
-
-  // ============================================================
-  // WEEKLY COACH REPORT — client summary digest for coach
-  // ============================================================
-
-  app.get("/api/dashboard/weekly-report", requireAdminKey, async (req: any, res) => {
-    try {
-      const since = new Date(Date.now() - 7 * 86400_000);
-
-      // Project only needed columns and cap at 500 — never full table scan for a report
-      const allUsers = await db.select({
-        id: users.id,
-        name: users.name,
-        phoneNumber: users.phoneNumber,
-        onboardingState: users.onboardingState,
-        subscriptionStatus: users.subscriptionStatus,
-        lastActiveAt: users.lastActiveAt,
-        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
-        workoutStreak: users.workoutStreak,
-        programmeWeek: users.programmeWeek,
-        programmePhase: users.programmePhase,
-        createdAt: users.createdAt,
-      }).from(users).orderBy(desc(users.lastActiveAt)).limit(500);
-      // Note: goalType omitted from projection above — cast below when used
-
-      const clientReports: any[] = [];
-      for (const u of allUsers) {
-        // Messages this week
-        const [msgs] = await db.select({ c: count() }).from(chatHistory)
-          .where(and(eq(chatHistory.userId, u.id), gte(chatHistory.createdAt, since)));
-
-        // Workouts this week
-        const [wk] = await db.select({ c: count() }).from(workoutLogs)
-          .where(and(eq(workoutLogs.userId, u.id), gte(workoutLogs.loggedAt, since)));
-
-        // Weight change
-        const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
-          .from(weightLogs)
-          .where(eq(weightLogs.userId, u.id))
-          .orderBy(desc(weightLogs.loggedAt))
-          .limit(2);
-
-        const currentWeight = weights[0]?.weight || null;
-        const prevWeight = weights[1]?.weight || null;
-        const weightChange = currentWeight && prevWeight ? Number(currentWeight) - Number(prevWeight) : null;
-
-        // Steps this week
-        const [stps] = await db.select({ c: count() }).from(stepLogs)
-          .where(and(eq(stepLogs.userId, u.id), gte(stepLogs.loggedAt, since)));
-
-        // Days since last message
-        const daysSinceLastMsg = u.lastActiveAt
-          ? Math.round((Date.now() - new Date(u.lastActiveAt).getTime()) / 86400_000)
-          : null;
-
-        // Risk flags
-        const risks: string[] = [];
-        if (daysSinceLastMsg !== null && daysSinceLastMsg >= 3) risks.push("inactive_3d");
-        if (daysSinceLastMsg !== null && daysSinceLastMsg >= 7) risks.push("inactive_7d");
-        if ((msgs.c || 0) === 0) risks.push("no_messages");
-        if ((wk.c || 0) === 0) risks.push("no_workouts");
-        if (weightChange !== null && weightChange > 1) risks.push("weight_gain");
-
-        // Status
-        let status = "on_track";
-        if (risks.length >= 3) status = "at_risk";
-        else if (risks.length >= 1) status = "needs_attention";
-
-        clientReports.push({
-          name: u.name || "Unknown",
-          phone: u.phoneNumber,
-          goal: (u as any).goalType,
-          status,
-          risks,
-          weekActivity: {
-            messages: msgs.c || 0,
-            workouts: wk.c || 0,
-            stepLogs: stps.c || 0,
-          },
-          weight: {
-            current: currentWeight ? Number(currentWeight) : null,
-            change: weightChange ? Number(weightChange.toFixed(1)) : null,
-          },
-          daysSinceLastMsg,
-          paymentStatus: u.subscriptionStatus || "unknown",
-        });
-      }
-
-      // Sort: at_risk first, then needs_attention, then on_track
-      const statusOrder: Record<string, number> = { at_risk: 0, needs_attention: 1, on_track: 2 };
-      clientReports.sort((a, b) => (statusOrder[a.status] || 2) - (statusOrder[b.status] || 2));
-
-      // Summary stats
-      const atRisk = clientReports.filter(c => c.status === "at_risk").length;
-      const needsAttention = clientReports.filter(c => c.status === "needs_attention").length;
-      const onTrack = clientReports.filter(c => c.status === "on_track").length;
-
-      res.json({
-        period: "Last 7 days",
-        summary: {
-          totalClients: clientReports.length,
-          atRisk,
-          needsAttention,
-          onTrack,
-        },
-        clients: clientReports,
-      });
-    } catch (err) {
-      console.error("[WEEKLY REPORT] Error:", err);
-      res.status(500).json({ error: "Failed to generate weekly report" });
-    }
-  });
-
-  // ============================================================
-  // CLIENT SEARCH — quick search by name or phone
-  // ============================================================
-
-  app.get("/api/dashboard/search", requireAdminKey, async (req, res) => {
-    try {
-      const q = (req.query.q as string || "").trim().toLowerCase();
-      if (!q || q.length < 2) return res.json({ results: [] });
-
-      const allUsers = await db.select({
-        id: users.id,
-        name: users.name,
-        phone: users.phoneNumber,
-        goal: users.goalType,
-        payment: users.subscriptionStatus,
-        lastActive: users.lastActiveAt,
-      }).from(users).limit(500);
-
-      const results = allUsers.filter(u =>
-        (u.name || "").toLowerCase().includes(q) ||
-        (u.phone || "").includes(q)
-      ).slice(0, 20);
-
-      res.json({ results });
-    } catch (err) {
-      res.status(500).json({ error: "Search failed" });
-    }
-  });
-
-  // ============================================================
-  // BULK MESSAGE — send WhatsApp to multiple clients
-  // ============================================================
-
-  app.post("/api/dashboard/bulk-message", requireAdminKey, async (req, res) => {
-    try {
-      const { message, filter } = req.body;
-      if (!message) return res.status(400).json({ error: "message required" });
-
-      // Filter options: "all", "active", "inactive", "paying", "at_risk"
-      const filterType = filter || "all";
-      let allUsers = await db.select({ id: users.id, phone: users.phoneNumber, lastActive: users.lastActiveAt, payment: users.subscriptionStatus }).from(users);
-
-      const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
-      if (filterType === "active") {
-        allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) >= sevenDaysAgo);
-      } else if (filterType === "inactive") {
-        allUsers = allUsers.filter(u => !u.lastActive || new Date(u.lastActive) < sevenDaysAgo);
-      } else if (filterType === "paying") {
-        allUsers = allUsers.filter(u => u.payment === "active");
-      } else if (filterType === "at_risk") {
-        allUsers = allUsers.filter(u => u.lastActive && new Date(u.lastActive) < sevenDaysAgo && new Date(u.lastActive) >= new Date(Date.now() - 14 * 86400_000));
-      }
-
-      const twilioClient = (await import("twilio")).default(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      let sent = 0, failed = 0;
-
-      for (const u of allUsers) {
-        if (!u.phone) continue;
-        try {
-          await twilioClient.messages.create({
-            from: `whatsapp:${process.env.TWILIO_WHATSAPP_FROM}`,
-            to: `whatsapp:${u.phone}`,
-            body: message,
-          });
-          sent++;
-          // Rate limit: 1 message per 100ms to avoid Twilio throttling
-          await new Promise(r => setTimeout(r, 100));
-        } catch {
-          failed++;
-        }
-      }
-
-      res.json({ success: true, sent, failed, total: allUsers.length });
-    } catch (err) {
-      console.error("[BULK MSG] Error:", err);
-      res.status(500).json({ error: "Bulk message failed" });
-    }
-  });
-
-  // ============================================================
-  // CLIENT NOTES — coach can add notes to a client profile
-  // ============================================================
-
-  app.post("/api/dashboard/clients/:phone/notes", requireAdminKey, async (req, res) => {
-    try {
-      const phone = req.params.phone;
-      const { note } = req.body;
-      if (!note) return res.status(400).json({ error: "note required" });
-
-      const [client] = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-      if (!client) return res.status(404).json({ error: "Client not found" });
-
-      // Append note with timestamp to existing notes
-      const existingNotes = client.profileNotes || "";
-      const timestamp = new Date().toISOString().slice(0, 16).replace("T", " ");
-      const updated = existingNotes + `\n[${timestamp}] ${note}`;
-
-      await db.update(users).set({ profileNotes: updated.trim() }).where(eq(users.id, client.id));
-      res.json({ success: true });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to save note" });
-    }
-  });
-
-  // Get client notes
-  app.get("/api/dashboard/clients/:phone/notes", requireAdminKey, async (req, res) => {
-    try {
-      const phone = req.params.phone;
-      const [client] = await db.select({ notes: users.profileNotes, name: users.name }).from(users)
-        .where(eq(users.phoneNumber, phone)).limit(1);
-      if (!client) return res.status(404).json({ error: "Client not found" });
-      res.json({ name: client.name, notes: client.notes || "" });
-    } catch (err) {
-      res.status(500).json({ error: "Failed to get notes" });
-    }
-  });
-
-  // ============================================================
-  // REVENUE DASHBOARD — payment tracking & forecasting
-  // ============================================================
-
-  app.get("/api/dashboard/revenue", requireAdminKey, async (req, res) => {
-    try {
-      const [paying] = await db.select({ c: count() }).from(users)
-        .where(eq(users.subscriptionStatus, "active"));
-      const [trial] = await db.select({ c: count() }).from(users)
-        .where(eq(users.subscriptionStatus, "trial"));
-      const [cancelled] = await db.select({ c: count() }).from(users)
-        .where(eq(users.subscriptionStatus, "inactive"));
-      const [total] = await db.select({ c: count() }).from(users);
-
-      const payingCount = paying.c || 0;
-      const trialCount = trial.c || 0;
-      const cancelledCount = cancelled.c || 0;
-      const totalCount = total.c || 0;
-
-      const mrr = calculateMRR(payingCount);
-      const arr = mrr * 12;
-      const trialConversion = calculateTrialConversion(trialCount, payingCount);
-      const arpu = calculateARPU(payingCount);
-
-      // Churn-based LTV — estimate monthly churn from cancelled vs total active history
-      // For early-stage: assume ~15% monthly churn until we have real cohort data
-      const estimatedMonthlyChurn = totalCount > 0
-        ? Math.max(0.05, cancelledCount / Math.max(1, cancelledCount + payingCount))
-        : 0.15;
-      const estimatedLTV = calculateLTV(estimatedMonthlyChurn);
-
-      // Monthly projection: if trial conversion holds
-      const projectedNewPaying = Math.round(trialCount * trialConversion / 100);
-      const projectedMRR = calculateMRR(payingCount + projectedNewPaying);
-
-      // Gross profit estimate (per-user cost: ~R43/mo WhatsApp + AI)
-      const estimatedCostPerUser = 43;
-      const grossProfit = mrr - (payingCount * estimatedCostPerUser);
-      const grossMargin = mrr > 0 ? Math.round((grossProfit / mrr) * 100) : 0;
-
-      res.json({
-        computedAt: new Date().toISOString(),
-        currency: PRICING.currency,
-        pricePerUser: PRICING.monthlyPriceZAR,
-        current: {
-          mrr,
-          mrrDisplay: `R${mrr.toLocaleString()}`,
-          arr,
-          arrDisplay: `R${arr.toLocaleString()}`,
-          payingUsers: payingCount,
-          trialUsers: trialCount,
-          cancelledUsers: cancelledCount,
-          totalUsers: totalCount,
-        },
-        unitEconomics: {
-          arpu: PRICING.monthlyPriceZAR,
-          estimatedLTV: Math.round(estimatedLTV),
-          estimatedMonthlyChurn: Math.round(estimatedMonthlyChurn * 100),
-          estimatedCostPerUser,
-          grossProfit,
-          grossMargin: `${grossMargin}%`,
-        },
-        rates: {
-          trialConversion: `${trialConversion}%`,
-          trialConversionRaw: trialConversion,
-        },
-        forecast: {
-          projectedNewPaying,
-          projectedMRR,
-          projectedMRRDisplay: `R${projectedMRR.toLocaleString()}`,
-        },
-      });
-    } catch (err) {
-      console.error("[REVENUE] Error:", err);
-      res.status(500).json({ error: "Failed to compute revenue" });
-    }
-  });
-
-  // ============================================================
-  // TWILIO DELIVERY STATUS WEBHOOK — POST /webhook/status
-  // Twilio calls this for every message to report delivery result
-  // Configure in Twilio console: Status Callback URL = https://yourdomain/webhook/status
-  // ============================================================
-  app.post("/webhook/status", (req: any, res: any) => {
-    res.sendStatus(200); // Always 200 first, then process
-    try {
-      const { MessageSid, MessageStatus, To, ErrorCode, ErrorMessage } = req.body;
-      if (MessageStatus === "failed" || MessageStatus === "undelivered") {
-        const phone = (To || "").replace(/^whatsapp:/, "");
-        console.error(`[DELIVERY FAIL] ${phone} | SID: ${MessageSid} | Status: ${MessageStatus} | Error: ${ErrorCode} — ${ErrorMessage || "no detail"}`);
-        // Update lastActiveAt to signal possible delivery problem
-        db.update(users)
-          .set({ lastActiveAt: users.lastActiveAt }) // no-op update, just for logging
-          .where(eq(users.phoneNumber, phone))
-          .catch(() => {});
-        // Log to chatHistory for dashboard visibility
-        db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1)
-          .then(rows => {
-            if (rows[0]) {
-              db.insert(chatHistory).values({
-                userId: rows[0].id,
-                messageIn: null,
-                messageOut: null,
-                intent: `DELIVERY_${MessageStatus.toUpperCase()}`,
-              }).catch(() => {});
-            }
-          }).catch(() => {});
-      } else if (MessageStatus === "delivered") {
-        const phone = (To || "").replace(/^whatsapp:/, "");
-        console.log(`[DELIVERY OK] ${phone} | SID: ${MessageSid}`);
-      }
-    } catch (e) {
-      console.error("[DELIVERY STATUS] Parse error:", e);
-    }
-  });
-
-  // ============================================================
-  // PAYFAST PAYMENT WEBHOOK — POST /webhook/payfast
-  // PayFast sends an ITN (Instant Transaction Notification) here
-  // for every payment event (success, failed, cancelled).
-  //
-  // Setup in PayFast dashboard:
-  //   Notify URL: https://yourdomain.com/webhook/payfast
-  //   Merchant ID: set PAYFAST_MERCHANT_ID env var
-  //   Merchant Key: set PAYFAST_MERCHANT_KEY env var
-  //   Passphrase: set PAYFAST_PASSPHRASE env var (if configured)
-  //
-  // Send the user's phone number as custom_str1 when creating the
-  // payment request so we can match it to their account here.
-  // ============================================================
-  app.post("/webhook/payfast", async (req: any, res: any) => {
-    // Always respond 200 immediately — PayFast requires this
-    res.sendStatus(200);
-
-    try {
-      const data = req.body as Record<string, string>;
-      const paymentStatus = data.payment_status; // COMPLETE | FAILED | CANCELLED
-      const phone = data.custom_str1;             // user phone — set when creating payment
-      const pfPaymentId = data.pf_payment_id;
-      const amountGross = parseFloat(data.amount_gross || "0");
-
-      if (!phone || !paymentStatus) {
-        console.error("[PAYFAST] Missing phone or payment_status in ITN");
-        return;
-      }
-
-      // Validate PayFast signature
-      const crypto = require("crypto");
-      const passphrase = process.env.PAYFAST_PASSPHRASE || "";
-      const paramString = Object.entries(data)
-        .filter(([k]) => k !== "signature")
-        .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, "+")}`)
-        .join("&");
-      const signatureBase = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase)}` : paramString;
-      const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
-      // Reject if signature is missing OR doesn't match — both are invalid
-      if (!data.signature || data.signature !== expectedSig) {
-        console.error(`[PAYFAST] Signature ${!data.signature ? "missing" : "mismatch"} for ${phone} — rejecting ITN`);
-        return;
-      }
-
-      // Validate merchant ID matches our account
-      const expectedMerchantId = process.env.PAYFAST_MERCHANT_ID;
-      if (expectedMerchantId && data.merchant_id !== expectedMerchantId) {
-        console.error(`[PAYFAST] Merchant ID mismatch (got ${data.merchant_id}) — rejecting ITN`);
-        return;
-      }
-
-      // Sanity-check amount — reject anything outside a reasonable subscription range (R1–R500)
-      // Prevents forged webhooks that activate subscriptions for R0.01
-      if (paymentStatus === "COMPLETE" && (amountGross < 1 || amountGross > 500)) {
-        console.error(`[PAYFAST] Amount R${amountGross} outside acceptable range — rejecting ITN`);
-        return;
-      }
-
-      // Normalise phone to whatsapp: format
-      const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
-      const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
-      if (!targetUser) {
-        console.error(`[PAYFAST] No user found for phone: ${phone}`);
-        return;
-      }
-
-      const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
-        ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
-        : "";
-
-      if (paymentStatus === "COMPLETE") {
-        // Set subscription active for 30 days from now
-        const renewsAt = new Date(Date.now() + 30 * 86_400_000);
-        await db.update(users).set({
-          subscriptionStatus: "active",
-          subscriptionRenewsAt: renewsAt,
-          paymentReference: pfPaymentId || null,
-          cancelledAt: null,
-        }).where(eq(users.phoneNumber, normalisedPhone));
-
-        console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
-
-        // ── Referral reward: first payment by a referred user → both get +30 days free ──
-        const wasInactive = targetUser.subscriptionStatus !== "active";
-        if (wasInactive && targetUser.referredBy) {
-          try {
-            const [referrer] = await db.select().from(users)
-              .where(eq(users.referralCode, targetUser.referredBy))
-              .limit(1);
-            if (referrer && referrer.subscriptionStatus === "active") {
-              // Extend referrer's subscription by 30 days
-              const referrerNewExpiry = new Date(
-                Math.max(Date.now(), new Date(referrer.subscriptionRenewsAt || Date.now()).getTime()) + 30 * 86_400_000
-              );
-              await db.update(users)
-                .set({ subscriptionRenewsAt: referrerNewExpiry })
-                .where(eq(users.id, referrer.id));
-              const twilioC2 = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-              if (fromNum) {
-                await twilioC2.messages.create({
-                  from: fromNum,
-                  to: referrer.phoneNumber.startsWith("whatsapp:") ? referrer.phoneNumber : `whatsapp:${referrer.phoneNumber}`,
-                  body: `${referrer.name || "Hey"} 🎉 Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${referrerNewExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`,
-                });
-              }
-              console.log(`[REFERRAL] Rewarded ${referrer.phoneNumber} — extended to ${referrerNewExpiry.toISOString().slice(0, 10)}`);
-            }
-          } catch (refErr) {
-            console.error("[REFERRAL] Reward error:", refErr);
-          }
-        }
-
-        // Welcome / renewal confirmation WhatsApp
-        const name = targetUser.name || "there";
-        const isRenewal = targetUser.subscriptionStatus === "active";
-
-        if (isRenewal) {
-          // Renewal — simple confirmation
-          if (fromNum) {
-            await twilioC.messages.create({
-              from: fromNum, to: normalisedPhone,
-              body: `Payment confirmed, ${name}. Subscription renewed for another month. Coach K is here — let's go.`
-            });
-          }
-        } else {
-          // New subscriber — send welcome + Day 1 workout immediately
-          if (fromNum) {
-            const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomp" };
-            const modeLabel: Record<string, string> = { gym: "Gym", gym_dumbbell: "Dumbbell gym", home: "Home", walk_only: "Walk + home" };
-            const welcomeMsg = `Payment confirmed, ${name}. Welcome to KamLife Coach.\n\nGoal: ${goalLabel[targetUser.goalType || "fat_loss"] || "fat loss"} · Mode: ${modeLabel[targetUser.trainingMode || "home"] || "Home"} · Phase 1\n\n*What to expect:*\n📍 Week 1–2: Your body adapts. Energy improves. Scale may not move yet — this is normal.\n📍 Week 3: The hard week. Mirror hasn't changed. Most people quit here. Don't.\n📍 Week 4–6: Visible changes start. This is where the work pays off.\n📍 Week 8–12: Real transformation. Clothes fit differently. Strength up.\n\nCoach K checks in every morning and evening. Log everything — meals, steps, workouts. The more you log, the better I coach you.\n\n_Coach K is AI-powered — not a human coach and not a doctor. Always consult your doctor for medical advice._\n\nYour Day 1 workout is below. Do it today and reply *done* when finished.`;
-            await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: welcomeMsg });
-
-            // Auto-deliver Day 1 workout
-            try {
-              const { buildDay1Workout } = await import("./programme");
-              const day1 = buildDay1Workout(targetUser);
-              await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: day1 });
-            } catch (e) {
-              console.error("[PAYFAST] Day 1 delivery error:", e);
-            }
-          }
-        }
-
-      } else if (paymentStatus === "FAILED" || paymentStatus === "CANCELLED") {
-        // Grace period: keep active for 3 more days, then flag
-        const graceUntil = new Date(Date.now() + 3 * 86_400_000);
-        await db.update(users).set({
-          subscriptionStatus: "inactive",
-          cancelledAt: new Date(),
-        }).where(eq(users.phoneNumber, normalisedPhone));
-
-        console.log(`[PAYFAST] Payment ${paymentStatus} — ${normalisedPhone}`);
-
-        const name = targetUser.name || "there";
-        const msg = paymentStatus === "CANCELLED"
-          ? `${name}, your KamLife Coach subscription has been cancelled. Your profile and history are saved. When you are ready to restart, go to kamlifecoach.co.za or reply *rejoin*.`
-          : `${name}, your payment did not go through. Your subscription is paused. Update your payment details at kamlifecoach.co.za or reply *pay* to get a new payment link.`;
-        if (fromNum) {
-          await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: msg });
-        }
-      }
-    } catch (err) {
-      console.error("[PAYFAST] ITN handling error:", err);
-    }
-  });
-
-  // ============================================================
-  // PAYFAST PAYMENT LINK GENERATOR — GET /api/payfast/link?phone=...
-  // Returns a PayFast payment page URL for a given user.
-  // Use this to send a payment link to new or lapsed clients.
-  // ============================================================
-  app.get("/api/payfast/link", requireAdminKey, async (req: any, res: any) => {
-    try {
-      const phone = decodeURIComponent(req.query.phone as string || "");
-      if (!phone) return res.status(400).json({ error: "phone required" });
-
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const merchantKey = process.env.PAYFAST_MERCHANT_KEY;
-      if (!merchantId || !merchantKey) {
-        return res.status(503).json({ error: "PAYFAST_MERCHANT_ID and PAYFAST_MERCHANT_KEY env vars not set" });
-      }
-
-      const [user] = await db.select().from(users).where(eq(users.phoneNumber, phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`)).limit(1);
-      const name = user?.name || "KamLife Client";
-      const isSandbox = process.env.PAYFAST_SANDBOX === "true";
-      const baseUrl = isSandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process";
-      const returnUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-success` : "https://kamlifecoach.co.za/payment-success";
-      const cancelUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-cancel` : "https://kamlifecoach.co.za/payment-cancel";
-      const notifyUrl = process.env.APP_URL ? `${process.env.APP_URL}/webhook/payfast` : "";
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-
-      const params = new URLSearchParams({
-        merchant_id: merchantId,
-        merchant_key: merchantKey,
-        return_url: returnUrl,
-        cancel_url: cancelUrl,
-        notify_url: notifyUrl,
-        name_first: name.split(" ")[0] || name,
-        name_last: name.split(" ").slice(1).join(" ") || "",
-        email_address: `${cleanPhone}@kamlife.local`,
-        m_payment_id: `KAMLIFE-${cleanPhone}-${Date.now()}`,
-        amount: "99.00",
-        item_name: "KamLife Coach — Monthly Subscription",
-        item_description: "WhatsApp fitness and nutrition coaching",
-        custom_str1: phone.replace(/^whatsapp:/, ""),
-        subscription_type: "1",
-        billing_date: new Date().toISOString().slice(0, 10),
-        recurring_amount: "99.00",
-        frequency: "3",  // Monthly
-        cycles: "0",     // 0 = indefinite
-      });
-
-      res.json({ url: `${baseUrl}?${params.toString()}`, phone, name });
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  // ============================================================
-  // COACH ADMIN DASHBOARD — GET /coach?key=COACH_DASHBOARD_KEY
+  // COACH ADMIN DASHBOARD — GET /coach (auth via x-dashboard-key header only)
   // ============================================================
   app.get("/coach", async (req: any, res: any) => {
-    const key = req.query.key as string || "";
+    const key = (req.headers["x-dashboard-key"] as string) || "";
     const dashKey = process.env.COACH_DASHBOARD_KEY;
     if (!dashKey) return res.status(503).send("<h1>Dashboard not configured — set COACH_DASHBOARD_KEY</h1>");
     let authorized = false;

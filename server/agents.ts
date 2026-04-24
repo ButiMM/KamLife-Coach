@@ -2,8 +2,7 @@ import OpenAI from "openai";
 import { queryFoodDatabase } from "./foods";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 const HARD_LIMIT = "HARD RULE: Max 3 sentences. 60 words maximum for conversational responses. Always end with one specific action. Never use bullets in conversation. Always use the client's actual name.";

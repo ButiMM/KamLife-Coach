@@ -1,13 +1,15 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { db } from "./db";
-import { users, chatHistory, stepLogs, workoutLogs, weightLogs } from "../shared/schema";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { generateVoiceNote } from "./tts";
 import { getKamlifeProgramme } from "./programme";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
+import { PRICING } from "../shared/pricing";
+import { selectVariantMessage, recordDelivery } from "./ab";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -48,31 +50,172 @@ function hasRunToday(key: string, dateStr: string): boolean {
   return loadState()[key] === dateStr;
 }
 
-// Track proactive messages sent today per client — max 2 per day
-// Key format: "YYYY-MM-DD:clientId" so the map is self-expiring by day
-const dailyMessageCount = new Map<string, number>();
+// ── DB-BACKED DAILY PROACTIVE BUDGET ─────────────────────────────────────────
+// MAX 1 proactive message per client per calendar day (SAST).
+// Previously in-memory only — a server restart wiped the counter and multiple
+// crons would all fire back-to-back on the same client. Now the cap is stored
+// in the sent_proactive table and survives restarts.
+//
+// Usage: replace canSendProactive(id) + recordProactiveSend(id) with:
+//   const ok = await claimDailySlot(id, "job_key");
+//   if (ok) { await sendWhatsApp(...); }
+// ─────────────────────────────────────────────────────────────────────────────
+
+// In-memory fast-path (avoids a DB round-trip when the same cron loop
+// already sent to this client earlier in the same run).
+const dailySentThisProcess = new Set<string>();
 
 function dailyKey(clientId: string): string {
-  return `${todayUTC()}:${clientId}`;
+  return `${todaySAST()}:${clientId}`;
 }
 
-function canSendProactive(clientId: string): boolean {
-  const count = dailyMessageCount.get(dailyKey(clientId)) || 0;
-  return count < 2;
-}
+/**
+ * Atomically claim the daily proactive slot for (clientId, jobKey).
+ * Returns true iff the caller should send — false means skip.
+ *
+ * Enforces TWO things:
+ *  1. This specific jobKey can only fire once per day per client (per-message dedupe)
+ *  2. At most 1 proactive per client per calendar day (global daily cap)
+ *
+ * Fail-open on DB error: we'd rather one extra message than silently dropping
+ * everyone's messages when Postgres is flaky.
+ */
+async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean> {
+  const today = todaySAST();
 
-function recordProactiveSend(clientId: string): void {
-  const key = dailyKey(clientId);
-  dailyMessageCount.set(key, (dailyMessageCount.get(key) || 0) + 1);
-}
+  // Fast-path: already sent something to this client this process run
+  if (dailySentThisProcess.has(dailyKey(clientId))) return false;
 
-// Purge stale keys at midnight SAST (22:00 UTC) — prevents unbounded Map growth
-cron.schedule("0 22 * * *", () => {
-  const today = todayUTC();
-  for (const key of dailyMessageCount.keys()) {
-    if (!key.startsWith(today)) dailyMessageCount.delete(key);
+  try {
+    // 1. Check global daily cap — has ANY proactive been sent today?
+    const existing = await db
+      .select({ id: sentProactive.id })
+      .from(sentProactive)
+      .where(and(
+        eq(sentProactive.userId, clientId),
+        eq(sentProactive.dedupeWindow, today),
+      ))
+      .limit(1);
+    if (existing.length > 0) return false; // already got one today
+
+    // 2. Try to claim this specific job slot (unique index prevents races)
+    const inserted = await db
+      .insert(sentProactive)
+      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
+      .onConflictDoNothing()
+      .returning({ id: sentProactive.id });
+    if (!inserted.length) return false; // race: someone else claimed it
+
+    // 3. Mark in-memory so the same process doesn't double-send
+    dailySentThisProcess.add(dailyKey(clientId));
+    return true;
+  } catch (err) {
+    console.warn(`[claimDailySlot] DB error (${jobKey}/${clientId.slice(0,8)}):`, err);
+    // Fail-open: if in-memory says not sent yet, allow it
+    if (dailySentThisProcess.has(dailyKey(clientId))) return false;
+    dailySentThisProcess.add(dailyKey(clientId));
+    return true;
   }
-  console.log("[SCHEDULER] dailyMessageCount purged — entries remaining:", dailyMessageCount.size);
+}
+
+// ── Sync helpers used by all cron jobs ────────────────────────────────────────
+function canSendProactive(clientId: string): boolean {
+  return !dailySentThisProcess.has(dailyKey(clientId));
+}
+
+// Fire-and-forget DB write — non-blocking so all call sites stay synchronous.
+// At process start we reload today's sent set from DB, so restarts don't wipe the cap.
+function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
+  dailySentThisProcess.add(dailyKey(clientId));
+  db.insert(sentProactive)
+    .values({ userId: clientId, messageKey: jobKey, dedupeWindow: todaySAST() })
+    .onConflictDoNothing()
+    .catch(e => console.warn("[recordProactiveSend] DB write failed (non-fatal):", e));
+}
+
+// ── Startup hydration — repopulate the in-memory set from today's DB records ──
+// Without this, a server restart wipes dailySentThisProcess and all crons re-fire.
+(async () => {
+  try {
+    const today = todaySAST();
+    const sentToday = await db
+      .select({ userId: sentProactive.userId })
+      .from(sentProactive)
+      .where(eq(sentProactive.dedupeWindow, today));
+    for (const row of sentToday) {
+      dailySentThisProcess.add(dailyKey(row.userId));
+    }
+    console.log(`[SCHEDULER] Daily budget hydrated: ${sentToday.length} clients already sent today`);
+  } catch (e) {
+    console.warn("[SCHEDULER] Budget hydration failed (non-fatal):", e);
+  }
+})();
+
+// Per-message-key dedupe. The 2/day quota above is a budget; this stops the same
+// named message (e.g. "friday_weekend") from firing twice if a cron run restarts
+// mid-loop. An in-memory cache acts as a fast path; the durable source of truth
+// is the sent_proactive table (schema.ts) with a unique index on
+// (user_id, message_key, dedupe_window). Process restarts no longer cause
+// double-sends.
+const weeklyKeyedSent = new Map<string, true>();
+
+function weeklyKeyedKey(clientId: string, messageKey: string, window: string): string {
+  return `${window}:${clientId}:${messageKey}`;
+}
+
+/**
+ * Attempt to claim a proactive send for (userId, messageKey, dedupeWindow).
+ * Returns true iff we got the claim and the caller should now send.
+ *
+ * dedupeWindow is caller-defined: use thisWeekUTC() for weekly jobs, a YYYY-MM-DD
+ * string for daily jobs, a YYYY-MM string for monthly. Same window + key + user
+ * can only succeed once — the unique index in sent_proactive enforces it.
+ *
+ * Fail-open on DB error: we'd rather occasionally double-send than silently drop
+ * the whole cohort's messages when Postgres is flaky. The in-memory cache still
+ * prevents repeats within a single process, so the worst case is one duplicate
+ * per process-per-user-per-window, not N.
+ */
+async function claimProactive(userId: string, messageKey: string, dedupeWindow: string): Promise<boolean> {
+  const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
+  if (weeklyKeyedSent.has(inMemKey)) return false;
+
+  try {
+    const inserted = await db.insert(sentProactive)
+      .values({ userId, messageKey, dedupeWindow })
+      .onConflictDoNothing()
+      .returning({ id: sentProactive.id });
+
+    weeklyKeyedSent.set(inMemKey, true);
+    // inserted.length === 0 means the unique constraint swallowed us — another
+    // run (or a previous process) already claimed this send.
+    return inserted.length > 0;
+  } catch (e) {
+    console.warn(`[claimProactive] DB error for ${messageKey}/${userId}:`, e);
+    weeklyKeyedSent.set(inMemKey, true);
+    return true; // fail open
+  }
+}
+
+// Purge stale in-memory entries at midnight SAST (22:00 UTC) — prevents unbounded growth.
+// Also prunes sentProactive DB rows older than 30 days (keep DB lean).
+cron.schedule("0 22 * * *", async () => {
+  const today = todaySAST();
+  // Clear yesterday's daily budget entries from the Set
+  for (const key of dailySentThisProcess.values()) {
+    if (!key.startsWith(today)) dailySentThisProcess.delete(key);
+  }
+  // Purge last week's keyed dedupe entries
+  const thisWeek = thisWeekUTC();
+  for (const key of weeklyKeyedSent.keys()) {
+    if (!key.startsWith(thisWeek)) weeklyKeyedSent.delete(key);
+  }
+  // DB cleanup: delete sentProactive rows older than 30 days
+  try {
+    const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
+    await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as any, thirtyDaysAgo));
+  } catch { /* non-fatal */ }
+  console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size, "keyed:", weeklyKeyedSent.size);
 }, { timezone: "UTC" });
 
 function thisWeekUTC(): string {
@@ -228,15 +371,16 @@ async function runMorningCheckin(): Promise<void> {
       if (canSendProactive(client.id)) {
         const name = client.name || "there";
         const daysOnProgramme = Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
-        let reEngageMsg = "";
-        if (daysOnProgramme <= 14) {
-          // New client ghosting early — warm, no guilt
-          reEngageMsg = `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`;
-        } else {
-          // Established client — direct accountability
-          reEngageMsg = `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
-        }
+        const defaultReEngageMsg = daysOnProgramme <= 14
+          ? `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`
+          : `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
+
+        // A/B: if an active re_engagement experiment exists, use the variant template
+        const { text: reEngageMsg, assignmentId } = await selectVariantMessage(
+          client.id, "re_engagement", defaultReEngageMsg
+        );
         await sendWhatsApp(client.phoneNumber, reEngageMsg);
+        if (assignmentId !== null) await recordDelivery(assignmentId);
         recordProactiveSend(client.id);
       }
       continue;
@@ -261,28 +405,101 @@ async function runMorningCheckin(): Promise<void> {
 
       const foodLogs = yesterdayLogs.filter(l => l.intent === "FOOD_LOG");
       const workoutLogged = yesterdayLogs.some(l => l.intent === "WORKOUT_LOG" || (l.messageIn || "").toLowerCase().trim() === "done");
-      const stepsLog = yesterdayLogs.find(l => l.intent === "STEP_LOG");
 
-      // Extract protein logged from GPT responses
-      // Matches: "35g protein", "protein: 120g", "protein 8g", "total protein 45g", "1200g protein"
-      let totalProtLogged = 0;
-      for (const log of foodLogs) {
-        const out = log.messageOut || "";
-        // Try "Xg protein" or "X grams protein" (protein after value)
-        let pm = out.match(/\b(\d{1,4})\s*g(?:rams?)?\s*(?:of\s+)?protein/i);
-        // Fallback: "protein: Xg" or "protein Xg" (protein before value)
-        if (!pm) pm = out.match(/\bprotein[:\s]+(\d{1,4})\s*g?/i);
-        if (pm) totalProtLogged += parseInt(pm[1]);
+      // Run protein sum + step streak in parallel — both needed for the morning message.
+      // Previously serial awaits; Promise.all cuts latency ~50% per client.
+      const yStart = dayStart(-1);
+      const yEnd = dayStart(0);
+      const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
+
+      const [proteinRows, recentStepLogs, yesterdayStepRows] = await Promise.all([
+        db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+        }).from(mealLogs).where(and(
+          eq(mealLogs.userId, client.id),
+          gte(mealLogs.loggedAt, yStart),
+          lt(mealLogs.loggedAt, yEnd),
+        )).catch((e: Error) => { console.warn("[scheduler] meal_logs protein sum failed:", e); return [{ totalProt: 0 }]; }),
+
+        db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
+          .orderBy(desc(stepLogs.loggedAt))
+          .catch((_e: Error) => [] as { loggedAt: Date | null }[]),
+
+        // Read yesterday's step total from step_logs directly — more reliable than
+        // text-parsing chat_history (screenshot logs store "[Step Screenshot: 12000]"
+        // not "12000 steps", so the old regex missed them).
+        db.select({ steps: stepLogs.steps })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, yStart), lt(stepLogs.loggedAt, yEnd)))
+          .catch((_e: Error) => [] as { steps: number | null }[]),
+      ]);
+
+      // Read yesterday's protein from structured meal_logs — no more regex text-parsing.
+      // Falls back to 0 if nothing logged. meal_logs populated from 2026-04-17 onward;
+      // older rows pre-date the table and will legitimately show 0.
+      const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
+
+      // Steps: sum all step_logs rows for yesterday (one per logging event)
+      const stepsLogged = (yesterdayStepRows as { steps: number | null }[]).reduce((s, r) => s + (r.steps || 0), 0);
+
+      // Day-specific opener (replaces the removed daily motivation job)
+      const DOW_OPENERS: Record<number, string> = {
+        1: `New week. Clean slate.`,
+        2: `Day 2. Consistency beats intensity.`,
+        3: `Halfway through the week.`,
+        4: `Body is adapting. Do not stop.`,
+        5: `Friday. The weekend does not mean the plan stops.`,
+        6: `Saturday. One session before tonight.`,
+      };
+      const dowOpener = DOW_OPENERS[todayDOW] ? ` ${DOW_OPENERS[todayDOW]}` : "";
+
+      // Identity formation: day-count-based statements that shift self-image.
+      // Research: identity ("I'm the kind of person who…") is a stronger
+      // retention driver than outcome goals ("I want to lose weight").
+      const progDays = programmeDaysSince(client.programmeStartDate);
+      let identityLine = "";
+      if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
+      else if (progDays === 14) identityLine = " Two weeks consistent. You're building something real.";
+      else if (progDays === 21) identityLine = " Three weeks in. The habit is forming — your body knows the routine now.";
+      else if (progDays === 30) identityLine = " A month. You are now the kind of person who trains for a month straight.";
+      else if (progDays === 60) identityLine = " 60 days. Two months of showing up. That's rare.";
+      else if (progDays === 90) identityLine = " 90 days. You are not the same person who started this.";
+
+      // Streak display — show BOTH workout and step streaks in the opener
+      // so users are protecting two streaks at once (higher motivation).
+      // Variable reinforcement: call out workout streak every 5th day only
+      // (slot-machine psychology — predictable praise loses impact).
+      const wStreak = client.workoutStreak || 0;
+
+      // Compute step streak from already-fetched recentStepLogs (parallel query above)
+      let stepStreakCount = 0;
+      {
+        const stepDays = new Set<string>();
+        for (const l of recentStepLogs as { loggedAt: Date | null }[]) {
+          if (!l.loggedAt) continue;
+          const d = new Date(l.loggedAt);
+          stepDays.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+        }
+        const stepCheck = new Date(); stepCheck.setDate(stepCheck.getDate() - 1);
+        while (true) {
+          const key = `${stepCheck.getFullYear()}-${stepCheck.getMonth()}-${stepCheck.getDate()}`;
+          if (!stepDays.has(key)) break;
+          stepStreakCount++;
+          stepCheck.setDate(stepCheck.getDate() - 1);
+        }
       }
 
-      // Extract steps logged from step log messages
-      let stepsLogged = 0;
-      if (stepsLog) {
-        const sm = (stepsLog.messageIn || "").match(/\b([\d,]+)\s*steps?\b/i);
-        if (sm) stepsLogged = parseInt(sm[1].replace(/,/g, ""));
-      }
+      const streakParts: string[] = [];
+      // Show workout streak for any streak >= 2 — loss aversion is strongest when the
+      // stake is visible every day, not just on 5-session milestones.
+      if (wStreak >= 2) streakParts.push(`🔥 *${wStreak}-session streak*`);
+      // Step streak for >= 2 consecutive days
+      if (stepStreakCount >= 2) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
-      const parts: string[] = [`Morning ${name}.`];
+      const parts: string[] = [`Morning ${name}.${dowOpener}${identityLine}${streakLine}`];
 
       // Protein — be specific about the number and the gap
       if (foodLogs.length === 0) {
@@ -301,8 +518,21 @@ async function runMorningCheckin(): Promise<void> {
         parts.push(`Food was logged but protein not tracked.`);
       }
 
-      // Workout
-      if (workoutLogged) parts.push(`Session done yesterday. Sharp.`);
+      // Workout — milestone-aware messages at 1, 3, 5, 10, 25, 50, 100 sessions
+      if (workoutLogged) {
+        const totalW = client.totalWorkoutsCompleted || 0;
+        const workoutMsg =
+          totalW === 1  ? `First session in the books. That's the hardest one.` :
+          totalW === 3  ? `Three sessions done. The habit is starting.` :
+          totalW === 5  ? `Five sessions. You're past the point where most people quit.` :
+          totalW === 10 ? `Ten sessions. You've made this a real part of your life.` :
+          totalW === 25 ? `25 sessions. A quarter of a hundred. This is real now.` :
+          totalW === 50 ? `50 sessions. Halfway to a hundred. You've earned every one.` :
+          totalW === 100 ? `100 sessions. 💯 That's elite consistency.` :
+          (totalW % 10 === 0 && totalW > 0) ? `${totalW} sessions. Keep that momentum.` :
+          `Session done yesterday. Sharp.`;
+        parts.push(workoutMsg);
+      }
 
       // Steps — specific number vs target
       if (stepsLogged > 0) {
@@ -425,14 +655,16 @@ async function runEveningAccountability(): Promise<void> {
 
       const parts: string[] = [`${name}, day's winding down.`];
 
-      // Food summary
+      // Food summary — read from mealLogs (source of truth, includes photo/voice logs)
       const calTarget = client.calorieTarget || 1800;
       const protTarget = client.proteinTarget || 130;
-      const todayCal = client.todayCalories || 0;
-      const todayProt = client.todayProteinG || 0;
-      const calDate = client.todayCaloriesDate;
-      const today = todaySAST();
-      if (calDate === today && todayCal > 0) {
+      const [mealSum] = await db.select({
+        todayCal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+        todayProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)));
+      const todayCal = mealSum?.todayCal || 0;
+      const todayProt = mealSum?.todayProt || 0;
+      if (todayCal > 0) {
         parts.push(`\n*Food:* ${todayCal} kcal | ${todayProt}g protein (target: ${calTarget} kcal | ${protTarget}g)`);
       } else {
         parts.push(`\n*Food:* No meals logged today.`);
@@ -470,7 +702,7 @@ async function runEveningAccountability(): Promise<void> {
       }
 
       // Adaptive closing — tone matches how the day went
-      const hadFood = calDate === today && (client.todayCalories || 0) > 0;
+      const hadFood = todayCal > 0;
       const hadWorkout = todayWorkouts.length > 0;
       const hadSteps = todaySteps.length > 0 && todaySteps[0].steps >= stepsTarget;
 
@@ -601,7 +833,14 @@ function buildDayMilestoneMessage(name: string, days: number, workouts: number, 
 }
 
 // Workout count milestones — celebrate real numbers with voice note
+// Early milestones (1, 3, 5) are the most important for retention:
+// the first 7 days determine whether someone stays. Fire these inline
+// via checkWorkoutMilestone() in routes.ts (not the cron, which runs at 6am
+// and would be too late for same-day celebration).
 const WORKOUT_MILESTONES: Record<number, (name: string) => string> = {
+  1:   (n) => `${n} — first session done. 🎉 That's the hardest one. Every session from here is proof you're not just talking about it.`,
+  3:   (n) => `${n}, 3 sessions in. The habit is starting. Most people who make it to 3 make it to 10. Keep going.`,
+  5:   (n) => `${n}, 5 sessions. 🔥 High five. You've officially started. Some people joined the same day as you and have already quit — you haven't.`,
   10:  (n) => `${n}, 10 sessions done. That is the first real milestone — most people never get here. The habit is forming. Keep going.`,
   25:  (n) => `${n}, 25 workouts. A quarter century of sessions. You are not talking about fitness anymore. You are doing it.`,
   50:  (n) => `${n}, 50 sessions. Fifty times you showed up when you could have stayed home. That is not motivation — that is discipline. Lekker work.`,
@@ -705,21 +944,41 @@ cron.schedule("0 4,16 * * *", async () => {
 cron.schedule("0 14 * * 5", async () => {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
   const clients = await getActiveClients();
+  const MESSAGE_KEY = "friday_weekend";
+  const dedupeWindow = thisWeekUTC(); // Monday date — rolls every 7 days
+  let sent = 0, skippedPaused = 0, skippedSilent = 0, skippedDup = 0, skippedBudget = 0;
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client)) { skippedPaused++; continue; }
+
+    // Skip silent clients — they already get targeted re-engagement from the
+    // silence-detection job (2/7/14/30 day windows). The weekend nudge is
+    // noise for someone who has not messaged in over a week and is likely to
+    // push them toward BLOCK rather than re-engage.
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
+    if (daysSilent > 10) { skippedSilent++; continue; }
+
+    // Daily budget (2 proactive msgs/day across all jobs) — cheap in-memory check first
+    if (!canSendProactive(client.id)) { skippedBudget++; continue; }
+
+    // Durable per-message dedupe — DB-backed, survives process restart
+    const claimed = await claimProactive(client.id, MESSAGE_KEY, dedupeWindow);
+    if (!claimed) { skippedDup++; continue; }
+
     try {
       const name = client.name || "there";
-      if (canSendProactive(client.id)) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
-        );
-        recordProactiveSend(client.id);
-      }
+      await sendWhatsApp(client.phoneNumber,
+        `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`
+      );
+      recordProactiveSend(client.id);
+      sent++;
     } catch (err) {
       console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err);
     }
   }
+  console.log(`[SCHEDULER] Friday weekend — sent:${sent} paused:${skippedPaused} silent:${skippedSilent} dup:${skippedDup} budget:${skippedBudget}`);
 }, { timezone: "UTC" });
 
 // ============================================================
@@ -870,8 +1129,9 @@ cron.schedule("0 6 * * 0", async () => {
       // Send shopping list for next week — 30 seconds after report
       try {
         const budgetTier = client.weeklyFoodBudget || "100_300";
-        const list = getShoppingList(budgetTier, weekNum + 1);
-        const shoppingMsg = formatShoppingList(list, name);
+        const clientGoal = client.goalType || "fat_loss";
+        const list = getShoppingList(budgetTier, weekNum + 1, clientGoal);
+        const shoppingMsg = formatShoppingList(list, name, clientGoal);
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) {
         console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr);
@@ -1051,7 +1311,9 @@ cron.schedule("0 7 1 * *", async () => {
 // Reminds them to eat 1–2 hours before training
 // ============================================================
 
-cron.schedule("0 10 * * 1-6", async () => {
+// DISABLED FOR LAUNCH — daily cap means this rarely fires anyway; reduces noise
+// cron.schedule("0 10 * * 1-6", async () => {
+if (false) (async () => {
   console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
   const clients = await getActiveClients();
   const todayDOW = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // SAST day-of-week
@@ -1107,7 +1369,7 @@ cron.schedule("0 10 * * 1-6", async () => {
       console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
     }
   }
-}, { timezone: "UTC" });
+})(); // DISABLED
 
 // ============================================================
 // JOB 11 — SA CULTURAL CALENDAR
@@ -1156,6 +1418,63 @@ cron.schedule("0 5 * * *", async () => {
     }
   }
 }, { timezone: "UTC" });
+
+// ============================================================
+// JOB 11B — MIDDAY ACTIVATION NUDGE
+// Runs 1pm SAST (11am UTC), Monday–Saturday.
+// Targets active clients who haven't logged ANYTHING today — no food,
+// no steps, no workout. These are morning-message readers who didn't
+// reply. One short nudge at 1pm catches them before the day is lost.
+// Skips users who are 3+ days silent (handled by re-engagement flow).
+// ============================================================
+
+// DISABLED FOR LAUNCH — daily cap blocks this after morning anyway; re-enable when engagement data justifies it
+if (false) (async () => {
+  console.log("[SCHEDULER] JOB: Midday activation nudge");
+  const clients = await getActiveClients();
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+
+    // Skip re-engagement track (3+ days silent) — they get a different flow
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (daysSilent >= 3) continue;
+
+    try {
+      // Check if they've logged anything today (food, steps, or workout)
+      const [todayFoodLog, todayStepLog, todayWorkoutLog] = await Promise.all([
+        db.select({ id: chatHistory.id }).from(chatHistory)
+          .where(and(
+            eq(chatHistory.userId, client.id),
+            gte(chatHistory.createdAt, todayStart),
+            sql`${chatHistory.intent} IN ('FOOD_LOG', 'STEP_LOG', 'WORKOUT_LOG')`,
+          )).limit(1),
+        db.select({ id: stepLogs.id }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart))).limit(1),
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart))).limit(1),
+      ]);
+
+      // Only nudge if NOTHING at all has been logged today
+      if (todayFoodLog.length > 0 || todayStepLog.length > 0 || todayWorkoutLog.length > 0) continue;
+
+      const name = client.name?.split(" ")[0] || "there";
+      await sendWhatsApp(client.phoneNumber,
+        `${name}. It's afternoon and nothing logged today.\n\nTell me what you had for breakfast or lunch — one message keeps the day alive.`
+      );
+      recordProactiveSend(client.id);
+      sent++;
+    } catch (err) {
+      console.error(`[SCHEDULER] Midday nudge error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Midday nudge: ${sent} sent`);
+})(); // DISABLED
 
 // ============================================================
 // JOB 12 — 14-DAY AND 30-DAY SILENCE ESCALATION
@@ -1276,62 +1595,338 @@ cron.schedule("0 9 * * *", async () => {
 // Runs 8pm SAST (6pm UTC) daily — warns if 3+ streak but no log today
 // ============================================================
 
-cron.schedule("0 18 * * *", async () => {
-  console.log("[SCHEDULER] JOB: Streak-at-risk alert");
+// ============================================================
+// STREAK-AT-RISK ALERT — 9pm SAST (7pm UTC)
+// Loss aversion: "your streak breaks tonight" is more powerful than
+// "log your steps". Fires once per night, one message per client
+// (highest-priority streak wins: workout > steps > food).
+//
+// BUG FIXED: was reading waterStreak instead of actual step streak.
+// TIMING FIXED: was 8pm SAST, now 9pm SAST = 1h before midnight.
+// ============================================================
+cron.schedule("0 19 * * *", async () => {
+  console.log("[SCHEDULER] JOB: Streak-at-risk alert (9pm SAST)");
   const clients = await getActiveClients();
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayDOW = new Date().getDay(); // 0=Sun
+
+  // Helper: compute consecutive-day streak from a list of loggedAt timestamps
+  function computeStreakFromLogs(logs: { loggedAt: Date | null }[]): number {
+    const days = new Set<string>();
+    for (const l of logs) {
+      if (!l.loggedAt) continue;
+      const d = new Date(l.loggedAt);
+      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+    }
+    let streak = 0;
+    const cur = new Date(); cur.setDate(cur.getDate() - 1); // start yesterday
+    while (true) {
+      const key = `${cur.getFullYear()}-${cur.getMonth()}-${cur.getDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    return streak;
+  }
+
+  // Rate cap: never send more than 150 streak alerts per run — prevents
+  // a WhatsApp cost bomb if client count scales unexpectedly.
+  let streakAlertsSent = 0;
+  const STREAK_ALERT_CAP = 150;
 
   for (const client of clients) {
+    if (streakAlertsSent >= STREAK_ALERT_CAP) {
+      console.warn(`[SCHEDULER] Streak-at-risk cap (${STREAK_ALERT_CAP}) reached — stopping early`);
+      break;
+    }
     if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+
+    // Skip users who are already disengaged — they need re-engagement, not streak pressure.
+    // daysSilent > 2 means they already got a re-engagement message this morning.
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (daysSilent > 2) continue;
+
     try {
-      // Only alert clients with a meaningful step streak
-      const streak = client.waterStreak || 0; // reuse step streak concept
-      // Check if they have logged steps today
-      const todaySteps = await db.select().from(stepLogs)
+      const name = client.name || "there";
+
+      // ── 1. Workout streak at risk ──
+      // Only on training days when user hasn't logged a session yet
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const isTodayTrainingDay = schedule.includes(todayDOW);
+      const wStreak = client.workoutStreak || 0;
+      if (isTodayTrainingDay && wStreak >= 2) {
+        const todayWorkout = await db.select({ id: workoutLogs.id })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+          .limit(1);
+        if (todayWorkout.length === 0) {
+          await sendWhatsApp(client.phoneNumber,
+            `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`
+          );
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+          continue; // one message per night
+        }
+      }
+
+      // ── 2. Step streak at risk ──
+      const todaySteps = await db.select({ id: stepLogs.id })
+        .from(stepLogs)
         .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
         .limit(1);
-
-      if (todaySteps.length > 0) continue; // Already logged — no alert needed
-
-      // Get their step streak from recent logs
-      const recentStepLogs = await db.select({ loggedAt: stepLogs.loggedAt })
-        .from(stepLogs)
-        .where(eq(stepLogs.userId, client.id))
-        .orderBy(desc(stepLogs.loggedAt))
-        .limit(14);
-
-      if (recentStepLogs.length < 3) continue; // No streak to protect
-
-      // Check consecutive days
-      const days = new Set<string>();
-      for (const log of recentStepLogs) {
-        const d = new Date(log.loggedAt!);
-        days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
-      }
-      let streakCount = 0;
-      const checkDate = new Date();
-      checkDate.setDate(checkDate.getDate() - 1); // Start from yesterday
-      while (true) {
-        const key = `${checkDate.getFullYear()}-${checkDate.getMonth()}-${checkDate.getDate()}`;
-        if (!days.has(key)) break;
-        streakCount++;
-        checkDate.setDate(checkDate.getDate() - 1);
+      if (todaySteps.length === 0) {
+        const recentSteps = await db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 14 * 86400_000))))
+          .orderBy(desc(stepLogs.loggedAt));
+        const stepStreak = computeStreakFromLogs(recentSteps);
+        if (stepStreak >= 2) {
+          await sendWhatsApp(client.phoneNumber,
+            `🚶 ${name}, your *${stepStreak}-day step streak* ends at midnight.\n\nLog your steps now — even if it's only 3,000. Reply with a number or send a screenshot.`
+          );
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+          continue;
+        }
       }
 
-      if (streakCount >= 3) {
-        if (!canSendProactive(client.id)) continue;
-        const name = client.name || "there";
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, your ${streakCount}-day step streak ends at midnight if you do not log today. Log your steps before bed — even 2,000 steps keeps the streak alive.`
-        );
-        recordProactiveSend(client.id);
+      // ── 3. Food log streak at risk ──
+      const todayFood = await db.select({ id: mealLogs.id })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)))
+        .limit(1);
+      if (todayFood.length === 0) {
+        // Compute food log streak from mealLogs
+        const recentMeals = await db.select({ loggedAt: mealLogs.loggedAt })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, new Date(Date.now() - 14 * 86400_000))))
+          .orderBy(desc(mealLogs.loggedAt));
+        const foodStreak = computeStreakFromLogs(recentMeals);
+        if (foodStreak >= 3) {
+          await sendWhatsApp(client.phoneNumber,
+            `📋 ${name}, your *${foodStreak}-day food logging streak* ends at midnight.\n\nTell me one thing you ate today — even "pap and chicken" is enough to keep it alive.`
+          );
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+        }
       }
     } catch (err) {
       console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);
     }
   }
+  console.log(`[SCHEDULER] Streak-at-risk: ${streakAlertsSent} alerts sent`);
 }, { timezone: "UTC" });
+
+// ============================================================
+// JOB 16A — WEEKLY WINS SUMMARY TO CLIENTS
+// Runs Sunday 7pm SAST (5pm UTC) — each paying client gets their
+// week's highlights so they end the week feeling good and come
+// back Monday motivated. This is the client-facing equivalent of
+// the coach KPI report (which only goes to the founder).
+// ============================================================
+
+// DISABLED — duplicate of Sunday evening check-in (same time, 0 17 * * 0); Sunday check-in has richer data
+if (false) (async () => {
+  console.log("[SCHEDULER] JOB: Weekly wins summary to clients");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+    try {
+      const name = client.name?.split(" ")[0] || "there";
+      const stepsTarget = client.stepsTarget || 8500;
+      const proteinTarget = client.proteinTarget || 120;
+
+      const [workoutRows, stepRows, foodRows] = await Promise.all([
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+        db.select({
+          totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+          logDays: sql<number>`COUNT(DISTINCT DATE(${mealLogs.loggedAt}))::int`,
+        }).from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+      ]);
+
+      const workoutsDone = workoutRows.length;
+      const totalSteps = stepRows.reduce((s, r) => s + (r.steps || 0), 0);
+      const avgSteps = stepRows.length > 0 ? Math.round(totalSteps / 7) : 0;
+      const stepsAboveTarget = stepRows.filter(r => (r.steps || 0) >= stepsTarget).length;
+      const totalProtWeek = (foodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
+      const foodLogDays = (foodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
+      const targetGoal = client.trainingDaysPerWeek || 3;
+
+      // Build a concise wins summary — only include categories where they did something
+      const wins: string[] = [];
+      if (workoutsDone > 0) {
+        wins.push(`💪 *${workoutsDone}/${targetGoal} sessions* — ${workoutsDone >= targetGoal ? "full week ✅" : `${targetGoal - workoutsDone} short`}`);
+      } else {
+        wins.push(`💪 *0 sessions logged this week.* Start fresh tomorrow.`);
+      }
+      if (avgSteps > 0) {
+        wins.push(`🚶 *${avgSteps.toLocaleString()} avg daily steps* — ${stepsAboveTarget} days above ${stepsTarget.toLocaleString()} target`);
+      }
+      if (foodLogDays > 0) {
+        const avgProt = Math.round(totalProtWeek / 7);
+        wins.push(`🍽 *${foodLogDays}/7 days food logged* — avg ${avgProt}g protein/day${avgProt >= proteinTarget * 0.9 ? " ✅" : ` (target: ${proteinTarget}g)`}`);
+      }
+
+      const wStreak = client.workoutStreak || 0;
+      if (wStreak >= 3) wins.push(`🔥 *${wStreak}-session streak going into next week*`);
+
+      // Motivational close based on performance
+      const close = workoutsDone >= targetGoal
+        ? `Perfect week, ${name}. Full sessions logged. That's the standard now.`
+        : workoutsDone > 0
+          ? `Solid week, ${name}. ${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done. Next week — go for ${targetGoal}.`
+          : `${name}. Nothing logged this week. That stops now. Tomorrow is Day 1.`;
+
+      // Monday teaser: prime them mentally for the week ahead
+      const progDays = programmeDaysSince(client.programmeStartDate);
+      const weekNum = client.programmeWeek || 1;
+      const nextWeekHint = progDays > 0
+        ? `\n\n*Week ${weekNum} starts Monday.* Reply *1* when you're ready to train.`
+        : `\n\nReply *menu* for Monday's plan.`;
+
+      const msg = `*📊 Your Week in Review*\n\n${wins.join("\n")}\n\n${close}${nextWeekHint}`;
+      await sendWhatsApp(client.phoneNumber, msg);
+      recordProactiveSend(client.id);
+      sent++;
+    } catch (err) {
+      console.error(`[SCHEDULER] Weekly wins error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Weekly wins summary: ${sent} sent`);
+})(); // DISABLED
+
+// ============================================================
+// JOB 16B — BUDDY ACCOUNTABILITY NOTIFICATIONS
+// Runs hourly — checks for buddy workout completions in the last
+// hour and sends social proof nudge to their partner. Also flags
+// buddies who have gone 48h+ silent (streak-break social pressure).
+// Limited to 2 notifications per buddy pair per day via dedupe.
+// ============================================================
+
+cron.schedule("0 * * * *", async () => {
+  const now = new Date();
+  const hourAgo = new Date(now.getTime() - 3_600_000);
+  const twoDaysAgo = new Date(now.getTime() - 2 * 86_400_000);
+  const eighteenHours = new Date(now.getTime() - 18 * 3_600_000); // don't notify late at night
+
+  // Only run between 7am and 9pm SAST (5am–7pm UTC)
+  const hourUTC = now.getUTCHours();
+  if (hourUTC < 5 || hourUTC > 19) return;
+
+  try {
+    // Find users who have a buddy AND completed a workout in the last hour
+    const recentWorkouts = await db.select({
+      userId: workoutLogs.userId,
+      loggedAt: workoutLogs.loggedAt,
+    }).from(workoutLogs)
+      .where(gte(workoutLogs.loggedAt, hourAgo))
+      .orderBy(desc(workoutLogs.loggedAt));
+
+    const notifiedPairs = new Set<string>();
+
+    for (const w of recentWorkouts) {
+      try {
+        const [worker] = await db.select({
+          id: users.id,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          buddyId: users.buddyId,
+          workoutStreak: users.workoutStreak,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, w.userId)).limit(1);
+
+        if (!worker || !worker.buddyId || worker.subscriptionStatus !== "active") continue;
+
+        // Dedupe: only one workout notification per pair per day
+        const pairKey = [worker.id, worker.buddyId].sort().join(":");
+        if (notifiedPairs.has(pairKey)) continue;
+        notifiedPairs.add(pairKey);
+
+        const [buddy] = await db.select({
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, worker.buddyId)).limit(1);
+
+        if (!buddy || buddy.subscriptionStatus !== "active") continue;
+
+        const workerFirst = worker.name?.split(" ")[0] || "Your buddy";
+        const workerStreak = worker.workoutStreak || 1;
+        const streakAdd = workerStreak >= 3 ? ` That's a ${workerStreak}-session streak.` : "";
+
+        // claimProactive with daily dedupe key prevents the same workout notification
+        // from firing multiple times within the same day (hourly cron without this
+        // would fire repeatedly until the in-memory budget runs out).
+        const claimed = await claimProactive(worker.buddyId, `buddy_workout_${worker.id}`, todaySAST());
+        if (!claimed) continue;
+
+        await sendWhatsApp(buddy.phoneNumber,
+          `🏋️ *${workerFirst} just logged a session.* Don't let them get ahead.${streakAdd}\n\nReply *done* when you finish yours.`
+        );
+        recordProactiveSend(worker.buddyId);
+        console.log(`[BUDDY] Notified ${buddy.name} that ${workerFirst} just trained`);
+      } catch { /* skip this pair */ }
+    }
+
+    // ── Buddy silence alert: if your buddy has gone 48h+ silent, nudge you ──
+    const pairedUsers = await db.select({
+      id: users.id,
+      name: users.name,
+      phoneNumber: users.phoneNumber,
+      buddyId: users.buddyId,
+      lastActiveAt: users.lastActiveAt,
+      subscriptionStatus: users.subscriptionStatus,
+    }).from(users)
+      .where(and(
+        eq(users.subscriptionStatus, "active"),
+        sql`${users.buddyId} IS NOT NULL`,
+        lt(users.lastActiveAt, twoDaysAgo),
+      ))
+      .limit(50); // cap
+
+    for (const silentBuddy of pairedUsers) {
+      try {
+        if (!silentBuddy.buddyId) continue;
+        const [partner] = await db.select({
+          id: users.id,
+          name: users.name,
+          phoneNumber: users.phoneNumber,
+          subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, silentBuddy.buddyId)).limit(1);
+
+        if (!partner || partner.subscriptionStatus !== "active") continue;
+
+        const silentFirst = silentBuddy.name?.split(" ")[0] || "Your buddy";
+        const daysSilent = silentBuddy.lastActiveAt
+          ? Math.floor((Date.now() - new Date(silentBuddy.lastActiveAt).getTime()) / 86_400_000)
+          : 2;
+
+        // Daily dedupe: one buddy-silence notification per silent buddy per day
+        const claimed = await claimProactive(partner.id, `buddy_silence_${silentBuddy.id}`, todaySAST());
+        if (!claimed) continue;
+
+        await sendWhatsApp(partner.phoneNumber,
+          `👀 *${silentFirst} hasn't logged in ${daysSilent} days.*\n\nYou're pulling ahead — but having an active buddy keeps you both sharper. If you know them, give them a nudge.`
+        );
+        recordProactiveSend(partner.id);
+        console.log(`[BUDDY] Nudged ${partner.name} about silent buddy ${silentFirst}`);
+      } catch { /* skip */ }
+    }
+  } catch (err) {
+    console.error("[SCHEDULER] Buddy accountability error:", err);
+  }
+});
 
 // ============================================================
 // JOB 16 — WOMEN'S MONTH (August — every Monday)
@@ -1971,28 +2566,8 @@ export function initScheduler(): void {
   }
   schedulerInitialised = true;
 
-  // ---- Catch up any daily jobs missed due to server restart ----
-  (async () => {
-    try {
-      const state = loadState();
-      const today = todayUTC();
-      const nowUTC = new Date().getUTCHours();
-
-      // Morning job runs at 4am UTC (6am SAST) — only catch up within a 3-hour window (4am-7am UTC)
-      if (nowUTC >= 4 && nowUTC <= 7 && state["morning_checkin"] !== today) {
-        console.log("[SCHEDULER] ⚡ Catch-up: running missed morning check-in");
-        await runMorningCheckin();
-      }
-
-      // Evening job runs at 5pm UTC (7pm SAST) — only catch up within a 2-hour window (5pm-7pm UTC)
-      if (nowUTC >= 17 && nowUTC <= 19 && state["evening_accountability"] !== today) {
-        console.log("[SCHEDULER] ⚡ Catch-up: running missed evening accountability");
-        await runEveningAccountability();
-      }
-    } catch (e) {
-      console.error("[SCHEDULER] Catch-up error:", e);
-    }
-  })();
+  // Catch-up removed: Railway filesystem is ephemeral — state file lost on every deploy
+  // caused double morning messages. Cron handles scheduling reliably without catch-up.
 
   console.log("[SCHEDULER] Proactive coaching jobs active:");
   console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
@@ -2145,9 +2720,11 @@ export function initScheduler(): void {
       const paying = allClients.filter(c => c.subscriptionStatus === "active").length;
       const newThisWeek = allClients.filter(c => c.createdAt && new Date(c.createdAt) >= sevenDaysAgo).length;
 
+      // Churned = subscriptions that were active but are now inactive/cancelled.
+      // Previously wrongly counted active paying clients who hadn't worked out in 14 days —
+      // those are "at-risk", not churned. Churn = actually lost revenue.
       const churned = allClients.filter(c =>
-        c.subscriptionStatus === "active" &&
-        (!c.lastWorkoutDate || new Date(c.lastWorkoutDate) < fourteenDaysAgo)
+        c.subscriptionStatus === "inactive" || c.subscriptionStatus === "cancelled"
       ).length;
 
       const [weekWorkouts] = await db.select({ c: count() }).from(workoutLogs)
@@ -2163,7 +2740,76 @@ export function initScheduler(): void {
         return lastActivity < twoDaysAgo;
       }).length;
 
-      const mrr = paying * 99;
+      const mrr = paying * PRICING.monthlyPriceZAR;
+
+      // ── Food tracking metrics ──
+      const [weekFoodLogs] = await db.select({ c: count() }).from(mealLogs)
+        .where(gte(mealLogs.loggedAt, sevenDaysAgo));
+      const weekFoodLogsCount = weekFoodLogs?.c || 0;
+
+      // GPT fallback usage — foods the SA scanner couldn't identify
+      const [gptFallbackLogs] = await db.execute(
+        sql`SELECT COUNT(*) as c FROM meal_logs WHERE source = 'gpt_fallback' AND logged_at >= ${sevenDaysAgo}`
+      ) as any;
+      const gptFallbackCount = Number(gptFallbackLogs?.rows?.[0]?.c || 0);
+      const fallbackPct = weekFoodLogsCount > 0 ? Math.round((gptFallbackCount / weekFoodLogsCount) * 100) : 0;
+
+      // ── Escalation metrics ──
+      const [escNewRow] = await db.select({ c: count() }).from(escalations)
+        .where(gte(escalations.createdAt, sevenDaysAgo));
+      const escNew = escNewRow?.c || 0;
+
+      const [escOpenRow] = await db.select({ c: count() }).from(escalations)
+        .where(eq(escalations.status, "open"));
+      const escOpen = escOpenRow?.c || 0;
+
+      const [escResolvedRow] = await db.select({ c: count() }).from(escalations)
+        .where(and(eq(escalations.status, "resolved"), gte(escalations.resolvedAt, sevenDaysAgo)));
+      const escResolved = escResolvedRow?.c || 0;
+
+      const [escUrgentRow] = await db.select({ c: count() }).from(escalations)
+        .where(and(eq(escalations.priority, "urgent"), eq(escalations.status, "open")));
+      const escUrgent = escUrgentRow?.c || 0;
+
+      // ── Food log source breakdown ──
+      const foodSourceRows = await db.execute(
+        sql`SELECT source, COUNT(*) as c FROM meal_logs WHERE logged_at >= ${sevenDaysAgo} GROUP BY source ORDER BY c DESC`
+      ) as any;
+      const foodSources: string[] = (foodSourceRows?.rows || []).map((r: any) => `${r.source || "unknown"}: ${r.c}`);
+
+      // ── A/B experiment results ──
+      let abSection = "";
+      try {
+        const { abExperiments: abExp, abAssignments: abAsgn } = await import("../shared/schema");
+        const activeExps = await db.select().from(abExp).where(eq(abExp.status, "active"));
+        if (activeExps.length > 0) {
+          const abLines: string[] = [];
+          for (const exp of activeExps.slice(0, 3)) { // max 3 in the report
+            const assignments = await db.select({
+              variant: abAsgn.variant,
+              delivered: abAsgn.delivered,
+              responded: abAsgn.responded,
+            }).from(abAsgn).where(eq(abAsgn.experimentId, exp.id));
+            const a = assignments.filter(x => x.variant === "A");
+            const b = assignments.filter(x => x.variant === "B");
+            const rateA = a.filter(x => x.delivered).length > 0
+              ? Math.round(a.filter(x => x.responded).length / a.filter(x => x.delivered).length * 100) : 0;
+            const rateB = b.filter(x => x.delivered).length > 0
+              ? Math.round(b.filter(x => x.responded).length / b.filter(x => x.delivered).length * 100) : 0;
+            const winner = rateA > rateB ? "A leads" : rateB > rateA ? "B leads" : "tied";
+            abLines.push(`  ${exp.name}: A ${rateA}% vs B ${rateB}% (${winner}, n=${assignments.length})`);
+          }
+          abSection = `\n\n*A/B Tests*\n${abLines.join("\n")}`;
+        }
+      } catch (e) {
+        console.warn("[KPI] A/B section error:", e);
+      }
+
+      const escSection = `\n\n*Escalations*\nNew this week: ${escNew} | Resolved: ${escResolved}\nOpen: ${escOpen}${escUrgent > 0 ? ` ⚠️ ${escUrgent} URGENT` : ""}`;
+
+      const foodSourceSection = foodSources.length > 0
+        ? `\nSources: ${foodSources.join(", ")}`
+        : "";
 
       const report = `*📊 KamLife Weekly Report*
 _${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_
@@ -2175,15 +2821,16 @@ New this week: ${newThisWeek}
 *Engagement*
 Workouts: ${weekWorkouts?.c || 0}
 Step logs: ${weekSteps?.c || 0}
+Food logs: ${weekFoodLogsCount} (fallback: ${fallbackPct}%)${foodSourceSection}
 Messages: ${weekMessages?.c || 0}
 
 *Health*
 Total clients: ${totalClients}
 At-risk (48h+ silent): ${atRisk}
-Churn risk (14d+): ${churned}
+Churn risk (14d+): ${churned}${escSection}
 
 *Delivery*
-Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
+Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
 
       await sendWhatsApp(`whatsapp:${coachPhone}`, report);
       console.log(`[KPI] Weekly report sent to coach`);
@@ -2448,55 +3095,8 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
     }
   }, { timezone: "UTC" });
 
-  // ============================================================
-  // JOB: DAILY MOTIVATION — morning kickstart (6am SAST = 4am UTC)
-  // Only for active clients who logged something in last 3 days
-  // ============================================================
-  cron.schedule("0 4 * * 1,2,3,4,5", async () => {
-    const today = todaySAST();
-    if (hasRunToday("daily_motivation", today)) return;
-    saveState("daily_motivation", today);
-    console.log("[SCHEDULER] Running morning motivation...");
-    try {
-      const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
-      const activeClients = await db.select().from(users)
-        .where(and(
-          eq(users.onboardingState, "COMPLETE"),
-          gte(users.lastActiveAt, threeDaysAgo)
-        ));
-
-      const dayOfWeek = new Date().getDay(); // 0=Sun, 1=Mon, etc
-      const messages = [
-        [], // Sun — not scheduled
-        // Monday
-        [(name: string) => `Good morning ${name}. New week. Clean slate.\n\nYour only job today: hit your protein target and move your body. Everything else is noise.\n\nReply *menu* for today's workout.`],
-        // Tuesday
-        [(name: string) => `Morning ${name}. Day 2 of the week.\n\nConsistency beats intensity. A moderate workout done > a perfect workout skipped.\n\nWhat are you training today?`],
-        // Wednesday
-        [(name: string) => `Halfway through the week ${name}.\n\nLog what you eat today — every meal. Awareness is the first step to control.\n\nReply *menu* for your workout.`],
-        // Thursday
-        [(name: string) => `${name}, Thursday.\n\nYour body is adapting right now. The soreness, the hunger changes, the energy shifts — that is adaptation. Do not stop when the process is working.\n\nWhat is your plan for today?`],
-        // Friday
-        [(name: string) => `Friday ${name}. The weekend does not mean the plan stops.\n\nGet your workout in before tonight. Log everything you eat — even if it is braai and beers.\n\nOwnership > perfection.`],
-      ];
-
-      if (!messages[dayOfWeek] || messages[dayOfWeek].length === 0) return;
-
-      let sent = 0;
-      for (const client of activeClients) {
-        const name = client.name?.split(" ")[0] || "Champ";
-        const msgFn = messages[dayOfWeek][0];
-        const msg = msgFn(name);
-        await sendWhatsApp(client.phoneNumber, msg);
-        sent++;
-        await new Promise(r => setTimeout(r, 150));
-        if (sent >= 200) break;
-      }
-      console.log(`[SCHEDULER] Morning motivation sent: ${sent}`);
-    } catch (err) {
-      console.error("[SCHEDULER] Morning motivation error:", err);
-    }
-  }, { timezone: "UTC" });
+  // Daily motivation job REMOVED — it fired at same time as morning check-in (both 4am UTC),
+  // causing two messages every weekday morning. Day-specific context is now part of morning check-in.
 
   // ============================================================
   // JOB: WEIGHT CHECK-IN REMINDER (Wednesday 7am SAST = 5am UTC)
@@ -2577,11 +3177,17 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
             .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
           const stepDays = sl.c || 0;
 
-          // Weight change this week
+          // Weight change this week (most recent 2 logs)
           const weights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
             .from(weightLogs)
             .where(eq(weightLogs.userId, client.id))
             .orderBy(desc(weightLogs.loggedAt)).limit(2);
+
+          // All-time weight change — first log vs most recent
+          const firstWeightLog = await db.select({ weight: weightLogs.weight })
+            .from(weightLogs)
+            .where(eq(weightLogs.userId, client.id))
+            .orderBy(asc(weightLogs.loggedAt)).limit(1);
 
           // Calculate protein average from food logs
           let proteinTotal = 0; let proteinMeals = 0;
@@ -2615,16 +3221,37 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
             lines.push(`🚶 Steps logged ${stepDays} days — keep the movement up.`);
           }
 
-          // Line 2: Weight progress (if available)
+          // Line 2: Weight progress — this week AND all-time if meaningful
           if (weights.length >= 2) {
             const diff = Number(weights[0].weight) - Number(weights[1].weight);
             const goal = client.goalType || "fat_loss";
+            const mostRecentKg = Number(weights[0].weight);
+            const startKg = firstWeightLog.length > 0 ? Number(firstWeightLog[0].weight) : null;
+            const totalDiff = startKg !== null ? mostRecentKg - startKg : null;
+
             if (diff < -0.3 && (goal === "fat_loss" || goal === "recomp")) {
-              lines.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg. Moving in the right direction.`);
+              const allTimeNote = totalDiff !== null && totalDiff < -1.5
+                ? ` (${Math.abs(totalDiff).toFixed(1)}kg total since you started)`
+                : "";
+              lines.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg this week.${allTimeNote} Moving in the right direction.`);
             } else if (diff > 0.3 && goal === "muscle_gain") {
               lines.push(`⚖️ Up ${diff.toFixed(1)}kg — good for muscle gain. Track lifts to confirm strength is going up.`);
             } else if (diff > 0.5 && goal === "fat_loss") {
               lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week. Not a disaster — check water, sodium, and food volume.`);
+            } else if (Math.abs(diff) <= 0.3 && totalDiff !== null && totalDiff < -2) {
+              // Scale not moving this week but overall progress is real — surface it
+              lines.push(`⚖️ Scale held steady this week — but you are ${Math.abs(totalDiff).toFixed(1)}kg down since day one. The work is showing.`);
+            }
+          } else if (firstWeightLog.length > 0 && weights.length >= 1) {
+            // Only one recent log — compare to start if meaningful
+            const startKg = Number(firstWeightLog[0].weight);
+            const nowKg = Number(weights[0].weight);
+            const totalDiff = nowKg - startKg;
+            const goal = client.goalType || "fat_loss";
+            if (totalDiff < -2 && (goal === "fat_loss" || goal === "recomp")) {
+              lines.push(`⚖️ ${Math.abs(totalDiff).toFixed(1)}kg down since you started. Real change.`);
+            } else if (totalDiff > 2 && goal === "muscle_gain") {
+              lines.push(`⚖️ Up ${totalDiff.toFixed(1)}kg since day one — the programme is building mass.`);
             }
           }
 
@@ -2740,13 +3367,16 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
         const budget = client.weeklyFoodBudget || "100_300";
         const goal = client.goalType || "fat_loss";
 
+        // Header never hardcodes a Rand figure — the total at the bottom is
+        // computed from the item prices, and a mismatch (e.g. header "R95" but
+        // total R131) destroys trust. Tier label only, total at bottom.
         let msg = "";
         if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
-          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R95 protein-first grocery list:\n\n*Proteins (buy FIRST):*\n☐ Eggs 12-pack — R45\n☐ Pilchards 3 tins — R36\n☐ Sugar beans 500g — R14\n\n*Carbs + Veg:*\n☐ Pap 2.5kg — R18\n☐ Onions 1kg — R10\n☐ Cabbage head — R8\n\n*Total: ~R131*\nThis covers protein for 7 days. ${goal === "fat_loss" ? "Eat smaller portions of pap, bigger portions of beans and eggs." : "Eat full portions — you need the fuel."}\n\n_Tomorrow I send the prep plan. Buy today or this weekend._`;
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour budget-friendly protein-first grocery list:\n\n*Proteins (buy FIRST):*\n☐ Eggs 12-pack — R45\n☐ Pilchards 3 tins — R36\n☐ Sugar beans 500g — R14\n\n*Carbs + Veg:*\n☐ Pap 2.5kg — R18\n☐ Onions 1kg — R10\n☐ Cabbage head — R8\n\n*Total: ~R131*\nThis covers protein for 7 days. ${goal === "fat_loss" ? "Eat smaller portions of pap, bigger portions of beans and eggs." : "Eat full portions — you need the fuel."}\n\n_Tomorrow I send the prep plan. Buy today or this weekend._`;
         } else if (budget === "100_300") {
-          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R250 balanced grocery list:\n\n*Proteins (buy FIRST):*\n☐ Frozen chicken quarters 2kg — R80\n☐ Eggs 18-pack — R55\n☐ Pilchards 4 tins — R48\n☐ Sugar beans 500g — R14\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Pap 2.5kg — R18\n☐ Sweet potato 1kg — R12\n☐ Brown bread — R16\n\n*Vegetables:*\n☐ Frozen mixed veg 1kg — R25\n☐ Spinach bunch — R10\n☐ Tomatoes 1kg — R15\n☐ Onions 1kg — R10\n\n*Total: ~R321*\n${goal === "muscle_gain" ? "Protein is king. Eat chicken at every main meal." : "Split chicken into 8 portions — 2 per day for 4 days."}\n\n_Tomorrow I send the batch cooking plan._`;
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour balanced protein-first grocery list:\n\n*Proteins (buy FIRST):*\n☐ Frozen chicken quarters 2kg — R80\n☐ Eggs 18-pack — R55\n☐ Pilchards 4 tins — R48\n☐ Sugar beans 500g — R14\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Pap 2.5kg — R18\n☐ Sweet potato 1kg — R12\n☐ Brown bread — R16\n\n*Vegetables:*\n☐ Frozen mixed veg 1kg — R25\n☐ Spinach bunch — R10\n☐ Tomatoes 1kg — R15\n☐ Onions 1kg — R10\n\n*Total: ~R321*\n${goal === "muscle_gain" ? "Protein is king. Eat chicken at every main meal." : "Split chicken into 8 portions — 2 per day for 4 days."}\n\n_Tomorrow I send the batch cooking plan._`;
         } else {
-          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour R400+ performance grocery list:\n\n*Proteins:*\n☐ Chicken breast 1.5kg — R120\n☐ Lean beef mince 500g — R55\n☐ Eggs 18-pack — R55\n☐ Greek yogurt 500g — R45\n☐ Tuna 3 tins — R54\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Sweet potato 2kg — R24\n☐ Oats 1kg — R25\n☐ Brown bread — R16\n\n*Vegetables + Extras:*\n☐ Broccoli 500g — R20\n☐ Spinach bunch — R10\n☐ Avocado 3-pack — R25\n☐ Banana bunch — R12\n☐ Peanut butter 400g — R32\n\n*Total: ~R511*\n\n_Tomorrow: the batch cooking plan that turns this into 20+ meals._`;
+          msg = `*${name}, Month-End Meal Prep — Shopping List* 🛒\n\nYour performance-tier grocery list:\n\n*Proteins:*\n☐ Chicken breast 1.5kg — R120\n☐ Lean beef mince 500g — R55\n☐ Eggs 18-pack — R55\n☐ Greek yogurt 500g — R45\n☐ Tuna 3 tins — R54\n\n*Carbs:*\n☐ Brown rice 1kg — R18\n☐ Sweet potato 2kg — R24\n☐ Oats 1kg — R25\n☐ Brown bread — R16\n\n*Vegetables + Extras:*\n☐ Broccoli 500g — R20\n☐ Spinach bunch — R10\n☐ Avocado 3-pack — R25\n☐ Banana bunch — R12\n☐ Peanut butter 400g — R32\n\n*Total: ~R511*\n\n_Tomorrow: the batch cooking plan that turns this into 20+ meals._`;
         }
 
         await sendWhatsApp(client.phoneNumber, msg);
@@ -2777,11 +3407,18 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
         const name = client.name?.split(" ")[0] || "there";
         const budget = client.weeklyFoodBudget || "100_300";
 
+        const calTarget = client.calorieTarget || 1800;
+        const protTarget = client.proteinTarget || 120;
         let msg = "";
         if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
-          msg = `*${name}, Batch Cook Plan — 1 hour, 5 days sorted* 🍳\n\n*Step 1 (10 min):* Boil 6 eggs. Store in fridge.\n*Step 2 (5 min):* Open 2 tins pilchards, portion into 2 containers.\n*Step 3 (15 min):* Cook sugar beans — soak overnight, boil 1 hour (or use pressure cooker 20 min). Portion into 3 containers.\n*Step 4 (20 min):* Cook pap for 2 days. Store covered.\n\n*Daily plan:*\n🌅 Breakfast: 2 boiled eggs + slice bread\n🌞 Lunch: Pap + pilchards\n🌙 Dinner: Pap + sugar beans + fried onion\n\n*~1,200 kcal | ~75g protein per day*\n\nNot fancy. But it works. Tomorrow I send the day-by-day breakdown.`;
+          // Base plan = ~1,050 kcal / ~82g protein. Tell clients how to scale to their target.
+          const calGap = calTarget - 1050;
+          const scalingNote = calGap > 300
+            ? `Your target is ${calTarget} kcal — double your sugar bean portion at dinner and add an extra egg at breakfast to close the gap.`
+            : `This base plan hits ~1,050 kcal. Add a spoon of peanut butter with breakfast to reach your ${calTarget} kcal target.`;
+          msg = `*${name}, Batch Cook Plan — 1 hour, 5 days sorted* 🍳\n\n*Step 1 (10 min):* Boil 12 eggs. Store in fridge.\n*Step 2 (5 min):* Open 3 tins pilchards, portion into 3 containers.\n*Step 3 (15 min):* Cook sugar beans — soak overnight, boil 1 hour (or pressure cooker 20 min). Portion into 5 containers.\n*Step 4 (20 min):* Cook pap for 3 days. Store covered.\n\n*Daily plan:*\n🌅 Breakfast: 2–3 boiled eggs + pap\n🌞 Lunch: Pap + pilchards (1 tin)\n🌙 Dinner: Pap + sugar beans + fried onion\n\n*~1,050 kcal | ~85g protein per day (base)*\n${scalingNote}\n\nTomorrow I send your full day-by-day breakdown.`;
         } else {
-          msg = `*${name}, Sunday Batch Cook — 1.5 hours, done for the week* 🍳\n\n*Step 1 (40 min):* Season chicken with Aromat + paprika. Bake at 180°C for 40 min. Portion into 5-6 meals.\n*Step 2 (20 min):* Cook 2 cups dry rice. Portion into 5 containers.\n*Step 3 (10 min):* Steam frozen mixed veg. Add to each container.\n*Step 4 (10 min):* Boil 6 eggs for grab-and-go snacks.\n*Step 5 (5 min):* Portion sugar beans into 3 containers for dinners.\n\n*Daily plan:*\n🌅 Breakfast: 2 eggs + toast OR oats with milk\n🌞 Lunch: Chicken + rice + veg (prepped container)\n🌙 Dinner: Pilchards/beans + pap + spinach\n🍎 Snack: Boiled egg or peanut butter on bread\n\n*~1,600-1,800 kcal | ~120g protein per day*\n\nPrep once. Eat clean all week. Tomorrow I send the exact daily breakdown.`;
+          msg = `*${name}, Sunday Batch Cook — 1.5 hours, done for the week* 🍳\n\n*Step 1 (40 min):* Season chicken with Aromat + paprika. Bake at 180°C for 40 min. Portion into 5–6 meals.\n*Step 2 (20 min):* Cook 2 cups dry rice. Portion into 5 containers.\n*Step 3 (10 min):* Steam frozen mixed veg. Add to each container.\n*Step 4 (10 min):* Boil 12 eggs for grab-and-go snacks.\n*Step 5 (5 min):* Portion sugar beans into 3 containers for dinners.\n\n*Daily plan:*\n🌅 Breakfast: 2 eggs + toast OR oats\n🌞 Lunch: Chicken + rice + veg (your prepped container)\n🌙 Dinner: Pilchards/beans + pap + spinach\n🍎 Snack: Boiled egg or peanut butter on bread\n\n*~${calTarget} kcal | ~${protTarget}g protein per day*\n\nPrep once. Eat clean all week. Tomorrow I send the exact daily breakdown.`;
         }
 
         await sendWhatsApp(client.phoneNumber, msg);
@@ -2814,7 +3451,26 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}`;
         const calTarget = client.calorieTarget || 1800;
         const protTarget = client.proteinTarget || 120;
 
-        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n2 eggs + 1 slice toast = ~250 kcal, 14g protein\n\n*🌞 Lunch (1pm):*\nChicken + rice + veg = ~450 kcal, 35g protein\n\n*🌙 Dinner (7pm):*\nPap + pilchards OR beans = ~400 kcal, 25g protein\n\n*🍎 Snack (if needed):*\nPeanut butter on bread OR boiled egg = ~200 kcal, 8g protein\n\n*Daily total: ~1,300 kcal | ~82g protein*\n${calTarget > 1500 ? `\nYour target is ${calTarget} kcal — add bigger portions at lunch and dinner to close the gap.` : `\nYour target is ${calTarget} kcal — this keeps you in a deficit. ${goal === "fat_loss" ? "Exactly where you want to be." : ""}`}\n\nLog every meal this week. Just send what you eat — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R149 subscription. That is the goal._`;
+        // Build a realistic daily plan that actually hits the client's personal targets.
+        const isLowBudget = (client.weeklyFoodBudget || "100_300") === "under_100"
+          || (client.weeklyFoodBudget || "") === "50_100"
+          || (client.weeklyFoodBudget || "") === "under_50";
+
+        // Portion sizes scale with calTarget so the numbers add up correctly.
+        const breakfastKcal = isLowBudget ? 250 : 300;
+        const breakfastProt = isLowBudget ? 14 : 18;
+        const lunchKcal = isLowBudget ? Math.round(calTarget * 0.33) : Math.round(calTarget * 0.35);
+        const lunchProt = Math.round(protTarget * 0.33);
+        const dinnerKcal = isLowBudget ? Math.round(calTarget * 0.30) : Math.round(calTarget * 0.32);
+        const dinnerProt = Math.round(protTarget * 0.35);
+        const snackKcal = calTarget - breakfastKcal - lunchKcal - dinnerKcal;
+        const snackProt = protTarget - breakfastProt - lunchProt - dinnerProt;
+
+        const lunchFood = isLowBudget ? "Pap + pilchards + onion" : "Chicken + rice + veg (your prepped container)";
+        const dinnerFood = isLowBudget ? "Sugar beans + pap + fried onion" : "Pilchards or beans + pap + spinach";
+        const snackFood = isLowBudget ? "1–2 boiled eggs" : "Peanut butter on bread OR boiled egg";
+
+        const msg = `*${name}, your daily eating plan this week:*\n\n*🌅 Breakfast (7am):*\n${isLowBudget ? "2 eggs + pap" : "2 eggs + toast OR oats"} = ~${breakfastKcal} kcal, ${breakfastProt}g protein\n\n*🌞 Lunch (1pm):*\n${lunchFood} = ~${lunchKcal} kcal, ~${lunchProt}g protein\n\n*🌙 Dinner (7pm):*\n${dinnerFood} = ~${dinnerKcal} kcal, ~${dinnerProt}g protein\n\n*🍎 Snack (if needed):*\n${snackFood} = ~${Math.max(snackKcal, 150)} kcal, ~${Math.max(snackProt, 8)}g protein\n\n*Daily target: ${calTarget} kcal | ${protTarget}g protein*\n${goal === "fat_loss" ? `This keeps you in a deficit. Stay on the plan — do not skip meals.` : `Eat every meal. You need the fuel to build.`}\n\nLog every meal this week. Just send what you ate — I track the numbers.\n\n_This 3-day plan (shopping → cooking → eating) is worth more than the R149 subscription. That is the goal._`;
 
         await sendWhatsApp(client.phoneNumber, msg);
         recordProactiveSend(client.id);

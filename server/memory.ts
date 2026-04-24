@@ -2,8 +2,7 @@ import { pool } from "./db";
 import OpenAI from "openai";
 
 const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
 export async function initMemoryTable(): Promise<void> {
@@ -26,6 +25,35 @@ export async function initMemoryTable(): Promise<void> {
     console.log("[MEMORY] Table ready with pgvector");
   } catch (err) {
     console.error("[MEMORY] Init failed:", err);
+  }
+}
+
+// Structured meal log — replaces regex text-parsing of chat history.
+// Idempotent: CREATE TABLE IF NOT EXISTS.
+export async function initMealLogsTable(): Promise<void> {
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS meal_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        user_id UUID NOT NULL REFERENCES users(id),
+        logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        raw_message TEXT,
+        source TEXT NOT NULL,
+        kcal_int INTEGER NOT NULL DEFAULT 0,
+        protein_int INTEGER NOT NULL DEFAULT 0,
+        carbs_int INTEGER NOT NULL DEFAULT 0,
+        fat_int INTEGER NOT NULL DEFAULT 0,
+        items JSONB,
+        meal_label TEXT,
+        corrected BOOLEAN NOT NULL DEFAULT FALSE
+      );
+    `);
+    await pool.query(`
+      CREATE INDEX IF NOT EXISTS meal_logs_user_date_idx ON meal_logs(user_id, logged_at);
+    `);
+    console.log("[MEAL_LOGS] Table ready");
+  } catch (err) {
+    console.error("[MEAL_LOGS] Init failed:", err);
   }
 }
 

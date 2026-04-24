@@ -11,6 +11,11 @@ import UsersList from "@/pages/users";
 import UserDetail from "@/pages/user-detail";
 import BetaTesters from "@/pages/admin/beta-testers";
 import AdminTest from "@/pages/admin/test";
+import Observability from "@/pages/observability";
+import Escalations from "@/pages/escalations";
+import ABTests from "@/pages/ab-tests";
+import PaymentSuccess from "@/pages/payment-success";
+import PaymentCancel from "@/pages/payment-cancel";
 import Login from "@/pages/login";
 import { isAuthenticated } from "@/lib/auth";
 
@@ -24,10 +29,15 @@ function Router() {
     <Switch>
       <Route path="/" component={LandingPage} />
       <Route path="/login" component={Login} />
+      <Route path="/payment-success" component={PaymentSuccess} />
+      <Route path="/payment-cancel" component={PaymentCancel} />
       <Route path="/dashboard">{() => <AuthGuard component={Dashboard} />}</Route>
       <Route path="/analytics">{() => <AuthGuard component={Analytics} />}</Route>
       <Route path="/users">{() => <AuthGuard component={UsersList} />}</Route>
       <Route path="/users/:id">{() => <AuthGuard component={UserDetail} />}</Route>
+      <Route path="/observability">{() => <AuthGuard component={Observability} />}</Route>
+      <Route path="/escalations">{() => <AuthGuard component={Escalations} />}</Route>
+      <Route path="/ab-tests">{() => <AuthGuard component={ABTests} />}</Route>
       <Route path="/admin/test">{() => <AuthGuard component={AdminTest} />}</Route>
       <Route path="/admin/beta">{() => <AuthGuard component={BetaTesters} />}</Route>
       <Route component={NotFound} />

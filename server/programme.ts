@@ -1153,34 +1153,67 @@ export function buildDayWorkout(user: any): string {
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  // Home users — rotating 3-day full body with week-based variation
+  // Home users — rotating 3-day full body with progressive week-based variation
   if (mode !== "gym" && mode !== "gym_dumbbell") {
+    // Cycle weeks 5-8 back through 1-4 base so progression repeats but at higher phase multiplier
+    const weekInCycle = ((week - 1) % 8) + 1; // 1..8 then repeats
     const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
     let allExercises = [...HOME_DAYS[daySlot]];
-    // Week-based variation: swap exercises to prevent staleness
-    // Week 1: base exercises, Week 2: swap first exercise from Day 3 pool
-    // Week 3: increase reps/tempo, Week 4: use Day 2 pool as alternate
-    if (week === 2 && daySlot === 1) {
-      // Week 2 Day 1: swap Bodyweight Squat for Jump Squat (from Day 2)
+
+    // Week-based variation: progressive overload and exercise swap
+    const cyclePhase = weekInCycle; // 1-8 within the cycle
+    if (cyclePhase === 2 && daySlot === 1) {
+      // Swap Bodyweight Squat → Jump Squat
       allExercises = allExercises.map(ex =>
         ex.name === "Bodyweight Squat" ? { ...HOME_DAYS[2][0], setsReps: "3 sets of 10 reps" } : ex
       );
-    } else if (week === 3) {
-      // Week 3: increase volume — add 2 reps to everything
+    } else if (cyclePhase === 3) {
+      // Add 2 reps to every exercise
       allExercises = allExercises.map(ex => ({
         ...ex,
         setsReps: ex.setsReps.replace(/(\d+) reps/, (_, n) => `${Math.min(parseInt(n) + 2, 20)} reps`)
           .replace(/(\d+) seconds/, (_, n) => `${parseInt(n) + 10} seconds`),
       }));
-    } else if (week === 4) {
-      // Week 4: swap middle exercises between day pools for novelty
+    } else if (cyclePhase === 4) {
+      // Swap middle exercises for novelty
       if (daySlot === 1 && HOME_DAYS[3].length > 2) {
-        allExercises[2] = HOME_DAYS[3][2]; // Swap 3rd exercise
+        allExercises[2] = HOME_DAYS[3][2];
       } else if (daySlot === 2 && HOME_DAYS[1].length > 1) {
-        allExercises[1] = HOME_DAYS[1][1]; // Swap 2nd exercise
+        allExercises[1] = HOME_DAYS[1][1];
       }
+    } else if (cyclePhase === 5) {
+      // Tempo week: slow eccentric (3 seconds down on every exercise)
+      allExercises = allExercises.map(ex => ({
+        ...ex,
+        setsReps: ex.setsReps.replace(/(\d+) reps/, (_, n) => `${n} reps (3-sec lowering)`),
+        cue: ex.cue + " Lower SLOWLY over 3 seconds — this is where the muscle builds.",
+      }));
+    } else if (cyclePhase === 6) {
+      // Volume week: 4 sets instead of 3
+      allExercises = allExercises.map(ex => ({
+        ...ex,
+        setsReps: ex.setsReps.replace(/^3 sets/, "4 sets"),
+      }));
+    } else if (cyclePhase === 7) {
+      // Advanced week: use Day 3 exercises (hardest pool) regardless of day slot
+      allExercises = [...HOME_DAYS[3]];
+    } else if (cyclePhase === 8) {
+      // Deload week: 2 sets, focus on form — important for recovery
+      allExercises = allExercises.map(ex => ({
+        ...ex,
+        setsReps: ex.setsReps.replace(/^[34] sets/, "2 sets"),
+        cue: ex.cue + " Deload week — focus on perfect form, not intensity.",
+      }));
     }
+
     const { safe: exercises, skipped } = filterInjuredExercises(allExercises, injuries);
+    const goal = user.goalType || "fat_loss";
+    const goalNote = goal === "fat_loss"
+      ? `_Fat loss tip: rest 45 seconds between sets (not 90). Higher heart rate = more calories burned._`
+      : goal === "muscle_gain"
+        ? `_Muscle tip: add reps each time — when you hit the top of the rep range easily, add a set next session._`
+        : `_Recomp tip: push all sets to near-failure. The last 2 reps should feel hard._`;
+
     let workout = `*Week ${week} — Home Day ${daySlot}*\nRest ${multiplier.rest} between sets | 40–50 min total\n\n`;
     const ytLinks: string[] = [];
     for (let i = 0; i < exercises.length; i++) {
@@ -1196,7 +1229,7 @@ export function buildDayWorkout(user: any): string {
     if (isFemaleGluteFocus && !skipped.some(s => s.toLowerCase().includes("glute"))) {
       workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
     }
-    workout += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
+    workout += `Reply *DONE* when finished.\n\n${goalNote}\n\n_Form videos:_\n${ytLinks.join("\n")}`;
     return workout;
   }
 

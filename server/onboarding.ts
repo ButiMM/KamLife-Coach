@@ -439,8 +439,23 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Male or female?`;
     }
     const gender = isMale ? "male" : "female";
-    const focusArea = gender === "female" ? "glutes_legs" : null;
-    await db.update(users).set({ gender, ...(focusArea ? { primaryFocusArea: focusArea } : {}), onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+    if (isFemale) {
+      await db.update(users).set({ gender, onboardingState: "ASK_FEMALE_FOCUS" }).where(eq(users.phoneNumber, phone));
+      return `Got it. What's your main training focus?\n\n1️⃣ *Full body* — tone and strengthen everything\n2️⃣ *Glutes & legs* — build and sculpt the lower body`;
+    }
+    await db.update(users).set({ gender, onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+    return `How old are you?`;
+  }
+
+  // ---- ASK_FEMALE_FOCUS ----
+  if (state === "ASK_FEMALE_FOCUS") {
+    const lower = msg.toLowerCase().trim();
+    const isGlutes = msg.includes("2") || lower.includes("glute") || lower.includes("bum") || lower.includes("butt") || lower.includes("leg") || lower.includes("lower") || lower.includes("booty");
+    const focusArea = isGlutes ? "glutes_legs" : null;
+    await db.update(users).set({
+      ...(focusArea ? { primaryFocusArea: focusArea } : { primaryFocusArea: null }),
+      onboardingState: "ASK_AGE_NEW",
+    }).where(eq(users.phoneNumber, phone));
     return `How old are you?`;
   }
 
@@ -480,8 +495,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
       return `Just your email address, or type *skip* to continue without one.`;
     }
     const emailVal = isSkip ? null : msg.trim().toLowerCase();
-    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `${emailVal ? "Got it." : "No problem."} What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    await db.update(users).set({ ...(emailVal ? { email: emailVal } : {}), onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
+    return `${emailVal ? "Got it." : "No problem."} What's your weight and height?\n\nExample: *78kg, 1.72m*`;
   }
 
   // ---- ASK_GOAL ----
@@ -495,8 +510,83 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let goal = "fat_loss";
     if (msg.includes("2") || lower.includes("build") || lower.includes("muscle") || lower.includes("gain")) goal = "muscle_gain";
     else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
-    await db.update(users).set({ goalType: goal, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
-    return `Gym or home training?`;
+
+    // If weight already captured (e.g., from ASK_WEIGHT_HEIGHT flow), skip the duplicate re-ask and set protein target now.
+    const hasWeight = !!user.currentWeight;
+    if (hasWeight) {
+      const w = parseFloat(user.currentWeight!);
+      await db.update(users).set({
+        goalType: goal,
+        proteinTarget: Math.round(w * 2),
+        onboardingState: "ASK_EQUIPMENT",
+      }).where(eq(users.phoneNumber, phone));
+      const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
+      return `Goal locked in: *${goalLabel}*.\n\nGym or home training?`;
+    }
+
+    await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
+    return `Before I set your targets: what's your current weight and height?\n\nExample: *78kg, 1.72m*\n\nIf you don't know, reply *skip*.`;
+  }
+
+  // ---- ASK_WEIGHT_HEIGHT_FAST — keep fast flow but avoid generic targets ----
+  if (state === "ASK_WEIGHT_HEIGHT_FAST") {
+    const lower = msg.toLowerCase().trim();
+    const isSkip = lower === "skip" || lower === "not sure" || lower === "dont know" || lower === "don't know" || lower === "unknown";
+
+    if (isSkip) {
+      const fallbackWeight = user.gender === "female" ? 65 : 75;
+      await db.update(users).set({
+        currentWeight: fallbackWeight.toString(),
+        heightCm: null,
+        bmi: null,
+        proteinTarget: Math.round(fallbackWeight * 2),
+        onboardingState: "ASK_EQUIPMENT",
+      }).where(eq(users.phoneNumber, phone));
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nGym or home training?`;
+    }
+
+    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
+    if (!weightMatch) {
+      return `I need weight in kg to personalise targets.\n\nExample: *78kg, 1.72m* (or reply *skip*)`;
+    }
+
+    const weight = parseFloat(weightMatch[1]);
+    if (weight < 30 || weight > 350) {
+      return `That weight looks off. Please send it like: *78kg, 1.72m*`;
+    }
+
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g)/i);
+    const heightCmMatch = msg.match(/(\d{3})\s*cm/i);
+    let heightCmVal: number | null = null;
+    let bmiVal: string | null = null;
+
+    if (heightMMatch) {
+      const heightM = parseFloat(heightMMatch[1]);
+      if (heightM >= 1.2 && heightM <= 2.4) {
+        heightCmVal = Math.round(heightM * 100);
+      }
+    } else if (heightCmMatch) {
+      const parsedCm = parseInt(heightCmMatch[1], 10);
+      if (parsedCm >= 120 && parsedCm <= 240) {
+        heightCmVal = parsedCm;
+      }
+    }
+
+    if (heightCmVal) {
+      const hM = heightCmVal / 100;
+      const bmi = Math.round((weight / (hM * hM)) * 10) / 10;
+      bmiVal = bmi.toString();
+    }
+
+    await db.update(users).set({
+      currentWeight: weight.toString(),
+      heightCm: heightCmVal,
+      bmi: bmiVal,
+      proteinTarget: Math.round(weight * 2),
+      onboardingState: "ASK_EQUIPMENT",
+    }).where(eq(users.phoneNumber, phone));
+
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?`;
   }
 
   // ---- ASK_EQUIPMENT — gym or home ----
@@ -543,8 +633,10 @@ export async function handleOnboarding(user: any, message: string, phone: string
     }
 
     const defaultGoal = user.goalType || "fat_loss";
-    const defaultWeight = 75;
+    const actualWeight = parseFloat(user.currentWeight || "75");
     const age = user.age || 30;
+    const gender = user.gender || "male";
+    const heightCm = user.heightCm || 170;
     const isYouth = age < 18;
     const isElderly = age >= 60;
 
@@ -552,7 +644,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const trainingDays = (isYouth || isElderly) ? 3 : 4;
 
     const { calorieTarget, proteinTarget } = calculateTargets(
-      defaultWeight, defaultGoal, "office", trainingDays
+      actualWeight, defaultGoal, "office", trainingDays, gender, age, heightCm
     );
 
     // Age-appropriate step targets:
@@ -564,6 +656,17 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
     // Auto-set female focus area based on gender
     const isFemale = user.gender === "female";
+
+    // Generate referral code at onboarding — every user gets one from day 1
+    let referralCode: string | undefined;
+    {
+      const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+      for (let attempt = 0; attempt < 5; attempt++) {
+        const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
+        const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
+        if (existing.length === 0) { referralCode = candidate; break; }
+      }
+    }
 
     await db.update(users).set({
       trainingDaysPerWeek: trainingDays,
@@ -582,7 +685,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       subscriptionStatus: "trial",
       betaBypassUntil: new Date(Date.now() + 7 * 86_400_000), // 7-day free trial
       onboardingState: "COMPLETE",
-      ...(isFemale && !user.primaryFocusArea ? { primaryFocusArea: "glutes_legs" } : {}),
+      ...(referralCode && !user.referralCode ? { referralCode } : {}),
     }).where(eq(users.phoneNumber, phone));
 
     const goalLabel: Record<string, string> = {
@@ -605,42 +708,116 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
 
     // Immediately build today's workout so they get value NOW
-    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: isFemale ? "glutes_legs" : user.primaryFocusArea };
+    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: user.primaryFocusArea };
     const firstWorkout = getKamlifeProgramme(updatedUser, true);
-    const workoutPreview = firstWorkout.split("\n").slice(0, 8).join("\n");
+    // Show the full Day 1 workout — truncating to 2 exercises makes us look amateur
+    const workoutPreview = firstWorkout;
 
     // Get first shopping list
-    const weekOneList = getShoppingList(budget, 1);
-    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined);
+    const weekOneList = getShoppingList(budget, 1, defaultGoal);
+    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined, defaultGoal);
 
-    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\nReply *1* for the full workout with form videos.\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
+    const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
+    const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
+    const bmiDisplay = user.bmi ? ` · BMI ${user.bmi}` : "";
+
+    const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share with friends. They get 50% off month 1. You get R50 credit when they subscribe.` : "";
+    return `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Walking:* Daily — ${stepsLabel} steps (mandatory)\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day\n*Grocery budget:* ${budgetLabels[budget] || budget}/month${ageNote}${refCodeLine}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\n━━━━━━━━━━━━━━━━━━━━\n*DAY 1 — YOUR FIRST WORKOUT:*\n━━━━━━━━━━━━━━━━━━━━\n${workoutPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n*YOUR SHOPPING LIST:*\n━━━━━━━━━━━━━━━━━━━━\n${shoppingPreview}\n\n━━━━━━━━━━━━━━━━━━━━\n\nTell me what you ate today and let's start coaching. After your 7-day trial, it's *R149/month* — R5/day for a personal coach in your pocket.`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
   // These handle clients who started onboarding before the 3-question rewrite
 
+  // Legacy ASK_AGE — route into the new 3-question flow so stranded users converge.
   if (state === "ASK_AGE") {
     const age = parseInt(msg.replace(/[^0-9]/g, ""));
     if (isNaN(age) || age < 10 || age > 110) return `Just your age. For example: 28`;
-    if (age < 16) return `I coach from age 16 upward.`;
-    const isElderly = age >= 65;
-    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_WEIGHT_HEIGHT" }).where(eq(users.phoneNumber, phone));
-    return `Weight and height? Example: 78kg, 1.72m`;
+    if (age < 14) return `Coach K is designed for ages 14 and up.`;
+    const isElderly = age >= 60;
+    await db.update(users).set({ age, elderlyClient: isElderly, onboardingState: "ASK_EMAIL" }).where(eq(users.phoneNumber, phone));
+    return `Got it. What's your email address? (Backup contact if WhatsApp has issues — type *skip* if you'd rather not.)`;
   }
 
   if (state === "ASK_WEIGHT_HEIGHT") {
-    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
-    if (!weightMatch) return `Weight and height please. Example: 78kg, 1.72m`;
-    const weight = parseFloat(weightMatch[1]);
-    if (weight < 30 || weight > 350) return `That weight doesn't look right. Example: 78kg`;
-    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g)/i);
-    const heightCmMatch = msg.match(/(\d{3})\s*cm/i);
-    let heightM = 1.7; let heightCmVal = 170;
-    if (heightMMatch) { heightM = parseFloat(heightMMatch[1]); heightCmVal = Math.round(heightM * 100); }
-    else if (heightCmMatch) { heightCmVal = parseInt(heightCmMatch[1]); heightM = heightCmVal / 100; }
+    const lowerMsg = msg.toLowerCase().trim();
+    const isFemale = user.gender === "female";
+
+    // ── HEIGHT ESTIMATE PATH — user already gave weight, now picking height estimate ──
+    // Triggered when they have weight saved but no height, and send short/average/tall/1/2/3
+    if (user.currentWeight && !user.heightCm) {
+      const shortH = isFemale ? 155 : 163;
+      const avgH   = isFemale ? 163 : 172;
+      const tallH  = isFemale ? 172 : 181;
+      let estimatedCm = 0;
+      if (/^\s*1\s*$/.test(msg) || /\b(short|shorter|petite|small)\b/i.test(lowerMsg)) estimatedCm = shortH;
+      else if (/^\s*2\s*$/.test(msg) || /\b(average|avg|medium|normal|middle)\b/i.test(lowerMsg)) estimatedCm = avgH;
+      else if (/^\s*3\s*$/.test(msg) || /\b(tall|taller|big|large|above)\b/i.test(lowerMsg)) estimatedCm = tallH;
+
+      if (estimatedCm > 0) {
+        const savedWeight = parseFloat(user.currentWeight);
+        const hM = estimatedCm / 100;
+        const bmi = Math.round((savedWeight / (hM * hM)) * 10) / 10;
+        await db.update(users).set({
+          heightCm: estimatedCm,
+          bmi: bmi.toString(),
+          onboardingState: "ASK_GOAL",
+        }).where(eq(users.phoneNumber, phone));
+        return `Using ~${estimatedCm}cm as an estimate — I'll adjust if you measure later.\n\nMain goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+      }
+    }
+
+    // ── "I DON'T KNOW MY HEIGHT" detection ──
+    const heightUnknown = /\b(don.?t know|dont know|no idea|not sure|unknown|skip|idk|have no idea|can.?t remember|cannot remember|never measured)\b/i.test(lowerMsg)
+      || (lowerMsg.includes("height") && /\b(no|not|don.?t|unsure)\b/i.test(lowerMsg));
+
+    // ── Parse weight from message ──
+    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)?/i);
+    if (!weightMatch && !heightUnknown) return `Your weight and height. Example: *78kg, 1.72m*`;
+
+    // If they said "don't know height" without giving weight yet, use saved weight or ask weight first
+    if (heightUnknown && !weightMatch && !user.currentWeight) {
+      return `No problem on height — I'll estimate it. What's your weight? Example: *78kg*`;
+    }
+
+    const weight = weightMatch ? parseFloat(weightMatch[1]) : parseFloat(user.currentWeight || "70");
+    if (weight < 30 || weight > 300) return `That doesn't look right. Example: *78kg, 1.72m*`;
+
+    // Parse height — multiple formats: 1.72m, 172cm, 5'8, bare 3-digit number
+    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g|i)/i);
+    const heightCmMatch = msg.match(/(\d{3})\s*(?:cm)?/i);
+    const heightFtMatch = msg.match(/(\d)[''`]?\s*(\d{1,2})/);
+    let heightM = 0; let heightCmVal = 0;
+
+    if (heightMMatch) {
+      heightM = parseFloat(heightMMatch[1]);
+      heightCmVal = Math.round(heightM * 100);
+    } else if (heightCmMatch) {
+      heightCmVal = parseInt(heightCmMatch[1]);
+      heightM = heightCmVal / 100;
+    } else if (heightFtMatch) {
+      const ft = parseInt(heightFtMatch[1]);
+      const inches = parseInt(heightFtMatch[2]);
+      heightCmVal = Math.round((ft * 30.48) + (inches * 2.54));
+      heightM = heightCmVal / 100;
+    }
+
+    // No height provided OR "don't know" — save weight and offer estimate options
+    if (heightCmVal < 100 || heightCmVal > 230) {
+      await db.update(users).set({ currentWeight: weight.toString() }).where(eq(users.phoneNumber, phone));
+      const shortLabel = isFemale ? "Short (under 160cm)" : "Short (under 165cm)";
+      const avgLabel   = isFemale ? "Average (163cm)"     : "Average (172cm)";
+      const tallLabel  = isFemale ? "Tall (172cm+)"       : "Tall (181cm+)";
+      return `Got it — ${weight}kg.\n\nWhat's your height? If you're not sure, pick the closest:\n\n1️⃣ ${shortLabel}\n2️⃣ ${avgLabel}\n3️⃣ ${tallLabel}\n\nOr type it: *1.72m* or *172cm*`;
+    }
+
     const bmi = Math.round((weight / (heightM * heightM)) * 10) / 10;
-    await db.update(users).set({ currentWeight: weight.toString(), heightCm: heightCmVal, bmi: bmi.toString(), proteinTarget: Math.round(weight * 2), onboardingState: "ASK_GOAL" }).where(eq(users.phoneNumber, phone));
-    return `Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    await db.update(users).set({
+      currentWeight: weight.toString(),
+      heightCm: heightCmVal,
+      bmi: bmi.toString(),
+      onboardingState: "ASK_GOAL",
+    }).where(eq(users.phoneNumber, phone));
+    return `${weight}kg, ${heightCmVal}cm — got it. Main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
   }
 
   if (state === "ASK_SITUATION") {
@@ -710,26 +887,13 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let exp = "beginner";
     if (msg.includes("3") || lower.includes("intermediate")) exp = "intermediate";
     else if (msg.includes("4") || lower.includes("advanced")) exp = "advanced";
+    // Legacy ASK_EXPERIENCE path — transition into main flow's ASK_BUDGET (line ~606),
+    // not the former duplicate ASK_BUDGET handler (deleted — it was unreachable and
+    // routed into ASK_WORK_SCHEDULE which has no main-flow predecessor).
     await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
-    return `Weekly food budget?\n\n1️⃣ Under R100\n2️⃣ R100–R300\n3️⃣ R300–R600\n4️⃣ Over R600`;
+    return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
   }
-
-  if (state === "ASK_BUDGET") {
-    const lower = msg.toLowerCase();
-    let budget = "100_300";
-    if (/^\s*1\s*$/.test(msg) || lower.includes("under") || lower.includes("tight")) budget = "under_100";
-    else if (/^\s*2\s*$/.test(msg)) budget = "100_300";
-    else if (/^\s*3\s*$/.test(msg) || lower.includes("average")) budget = "300_600";
-    else if (/^\s*4\s*$/.test(msg) || lower.includes("flexible") || lower.includes("over")) budget = "over_600";
-    const randMatch = msg.match(/R\s*(\d+)/i);
-    if (randMatch) {
-      const r = parseInt(randMatch[1]);
-      budget = r < 100 ? "under_100" : r <= 300 ? "100_300" : r <= 600 ? "300_600" : "over_600";
-    }
-    const budgetLevel = budget === "under_100" ? "low" : budget === "over_600" ? "high" : "medium";
-    await db.update(users).set({ weeklyFoodBudget: budget, budgetLevel, onboardingState: "ASK_WORK_SCHEDULE" }).where(eq(users.phoneNumber, phone));
-    return `Last one. Work schedule?\n\n1️⃣ Standard (8am–5pm)\n2️⃣ Early shift\n3️⃣ Night shift\n4️⃣ Irregular\n5️⃣ Work from home`;
-  }
+  // Duplicate ASK_BUDGET handler removed — it was dead code shadowed by main handler at line ~606.
 
   // ---- ASK_WORK_SCHEDULE → COMPLETE ----
   if (state === "ASK_WORK_SCHEDULE") {
@@ -757,7 +921,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const exp = u.trainingExperience || "beginner";
 
     const { calorieTarget, proteinTarget } = calculateTargets(
-      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3
+      weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3,
+      u.gender || "male", u.age || 30, u.heightCm || 170
     );
 
     const stepsTarget = exp === "beginner" ? 8500 : 10000;

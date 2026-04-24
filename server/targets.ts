@@ -1,6 +1,7 @@
 // ============================================================
 // TARGET CALCULATION
-// Harris-Benedict based calorie and protein target calculator
+// Mifflin-St Jeor BMR (gold standard) + activity + goal adjustment
+// Gender, age, height all factor in — no more one-size-fits-all
 // ============================================================
 
 export function calculateTargets(
@@ -8,32 +9,82 @@ export function calculateTargets(
   goalType: string,
   lifeSituation: string,
   trainingDaysPerWeek: number,
+  gender: string = "male",
+  age: number = 30,
+  heightCm: number = 170,
 ): { calorieTarget: number; proteinTarget: number } {
-  const bmr = weightKg * 22;
 
+  // ── Mifflin-St Jeor BMR (far more accurate than weight × 22) ──
+  // Male:   10 × weight(kg) + 6.25 × height(cm) − 5 × age − 5 + 5
+  // Female: 10 × weight(kg) + 6.25 × height(cm) − 5 × age − 161
+  const isFemale = gender === "female";
+  const bmr = isFemale
+    ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
+    : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5;
+
+  // ── Activity multiplier based on life situation ──
   const activityMult: Record<string, number> = {
-    office: 1.3, student: 1.35, unemployed: 1.25, retired: 1.2,
-    stay_home_parent: 1.3, retail_physical: 1.5,
-    "1": 1.35, "2": 1.3, "3": 1.5, "4": 1.25, "5": 1.3, "6": 1.2,
+    office: 1.3,
+    student: 1.35,
+    unemployed: 1.25,
+    retired: 1.2,
+    stay_home_parent: 1.3,
+    retail_physical: 1.5,
+    "1": 1.35,  // student
+    "2": 1.3,   // office
+    "3": 1.5,   // physical job
+    "4": 1.25,  // unemployed
+    "5": 1.3,   // stay home parent
+    "6": 1.2,   // retired
   };
   const mult = activityMult[lifeSituation] || 1.3;
 
-  const trainingAdj = Math.round((200 * Math.min(trainingDaysPerWeek, 7)) / 7);
+  // ── Training calorie addition (spread over 7 days) ──
+  // Smaller addition for females — metabolic reality
+  const calPerSession = isFemale ? 150 : 200;
+  const trainingAdj = Math.round((calPerSession * Math.min(trainingDaysPerWeek, 7)) / 7);
 
+  // ── Goal adjustment ──
+  // Fat loss deficit is smaller for females to preserve hormonal health
   const goalAdj: Record<string, number> = {
-    fat_loss: -400, muscle_gain: 400, recomposition: 0,
-    general: 100, health_condition: 0,
+    fat_loss: isFemale ? -300 : -400,
+    muscle_gain: isFemale ? 250 : 400,
+    recomposition: 0,
+    general: isFemale ? 50 : 100,
+    health_condition: 0,
   };
   const adj = goalAdj[goalType] ?? 0;
 
   let calorieTarget = Math.round(bmr * mult + trainingAdj + adj);
-  calorieTarget = Math.max(1500, Math.min(4500, calorieTarget));
 
+  // ── Safety floors by gender ──
+  const minCal = isFemale ? 1200 : 1500;
+  calorieTarget = Math.max(minCal, Math.min(4500, calorieTarget));
+
+  // ── Protein target ──
+  // Fat loss: higher protein preserves muscle
+  // Muscle gain: high protein for growth
+  // Female: slightly lower per-kg need
   const proteinMult: Record<string, number> = {
-    fat_loss: 2.0, muscle_gain: 2.4, recomposition: 2.2,
-    general: 1.8, health_condition: 2.0,
+    fat_loss: isFemale ? 1.8 : 2.0,
+    muscle_gain: isFemale ? 2.0 : 2.4,
+    recomposition: isFemale ? 1.8 : 2.2,
+    general: isFemale ? 1.6 : 1.8,
+    health_condition: isFemale ? 1.6 : 2.0,
   };
-  const proteinTarget = Math.round(weightKg * (proteinMult[goalType] || 2.0));
+  let proteinTarget = Math.round(weightKg * (proteinMult[goalType] || 2.0));
+
+  // ── Age adjustments ──
+  // Youth: don't over-restrict
+  if (age < 18) {
+    calorieTarget = Math.max(calorieTarget, isFemale ? 1600 : 1800);
+    proteinTarget = Math.min(proteinTarget, Math.round(weightKg * 1.8)); // don't overload growing bodies
+  }
+  // Elderly: preserve muscle, moderate calories
+  if (age >= 60) {
+    proteinTarget = Math.max(proteinTarget, Math.round(weightKg * 1.6)); // elderly need MORE protein not less
+    calorieTarget = Math.max(calorieTarget, isFemale ? 1400 : 1600);
+  }
 
   return { calorieTarget, proteinTarget };
 }

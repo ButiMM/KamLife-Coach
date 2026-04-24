@@ -1,21 +1,49 @@
 import { useState } from "react";
-import { useUsers, useFlaggedUsers, useMetrics } from "@/hooks/use-users";
+import { useUsers, useFlaggedUsers, useMetrics, useNextActions } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { StatusBadge } from "@/components/status-badge";
 import { Users, UserX, Activity, TrendingUp, AlertCircle, ArrowRight, DollarSign, UserPlus } from "lucide-react";
 import { Link } from "wouter";
 import { motion } from "framer-motion";
-import { useQuery } from "@tanstack/react-query";
-import { authHeaders } from "@/lib/queryClient";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { authHeaders, apiRequest } from "@/lib/queryClient";
+import { useToast } from "@/hooks/use-toast";
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 export default function Dashboard() {
   const { data: users, isLoading: usersLoading } = useUsers();
   const { data: flaggedUsers, isLoading: flaggedLoading } = useFlaggedUsers();
   const { data: metrics } = useMetrics();
+  const { data: nextActionsData } = useNextActions();
   const [flagFilter, setFlagFilter] = useState<"all" | "inactive_7_days" | "plateau_2_weeks">("all");
   const [flagSort, setFlagSort] = useState<"lastActive" | "name">("lastActive");
+  const [broadcastMsg, setBroadcastMsg] = useState("");
+  const [broadcastOpen, setBroadcastOpen] = useState(false);
+  const [broadcastPending, setBroadcastPending] = useState(false);
+  const { toast } = useToast();
+
+  const broadcastMutation = useMutation({
+    mutationFn: async (message: string) => {
+      const res = await apiRequest("POST", "/api/dashboard/broadcast", { message, filter: "active" });
+      return res.json();
+    },
+    onSuccess: (data) => {
+      setBroadcastMsg("");
+      setBroadcastOpen(false);
+      setBroadcastPending(false);
+      toast({ title: "Broadcast sent", description: `Delivered to ${data.sent ?? "?"} clients` });
+    },
+    onError: () => {
+      setBroadcastPending(false);
+      toast({ title: "Broadcast failed", description: "Check Twilio config", variant: "destructive" });
+    },
+  });
 
   // Live health check — polls every 60s
   const { data: health } = useQuery({
@@ -112,6 +140,32 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Pinned Next Actions */}
+        {nextActionsData && nextActionsData.actions.length > 0 && (
+          <div>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold font-display">📌 Next Actions <span className="text-base font-normal text-muted-foreground ml-2">({nextActionsData.total} total)</span></h3>
+            </div>
+            <div className="bg-card rounded-2xl border border-border shadow-sm overflow-hidden">
+              <div className="divide-y divide-border">
+                {nextActionsData.actions.slice(0, 8).map((item, i) => {
+                  const priorityColor = item.priority === "urgent" ? "text-red-600 bg-red-50 border-red-200" : item.priority === "high" ? "text-orange-600 bg-orange-50 border-orange-200" : item.priority === "medium" ? "text-amber-600 bg-amber-50 border-amber-200" : "text-blue-600 bg-blue-50 border-blue-200";
+                  return (
+                    <div key={i} className="flex items-center gap-4 p-4 hover:bg-muted/20 transition-colors">
+                      <span className={`text-xs font-bold px-2 py-1 rounded-full border shrink-0 ${priorityColor}`}>{item.priority.toUpperCase()}</span>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-semibold text-sm">{item.name}</span>
+                        <span className="text-sm text-muted-foreground ml-2">{item.action}</span>
+                      </div>
+                      <span className="text-xs text-muted-foreground bg-secondary px-2 py-1 rounded shrink-0">{item.category}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           {/* Flagged Users List - Takes up 2 cols */}
           <div className="lg:col-span-2 space-y-6">
@@ -191,13 +245,25 @@ export default function Dashboard() {
           <div className="space-y-6">
             <h3 className="text-xl font-bold font-display">Quick Actions</h3>
             <div className="grid gap-4">
-                <Button className="w-full justify-between h-auto py-4 px-6 text-left rounded-xl bg-gradient-to-r from-primary to-primary/90 hover:from-primary/90 hover:to-primary text-white shadow-lg shadow-primary/20">
-                    <div>
-                        <span className="block font-bold">Broadcast Message</span>
-                        <span className="text-primary-foreground/80 text-sm font-normal">Send to all active users</span>
-                    </div>
-                    <MessageCircle className="w-5 h-5 opacity-80" />
-                </Button>
+                {/* Broadcast compose */}
+                <div className="bg-card rounded-2xl border border-border p-4 shadow-sm space-y-3">
+                  <h4 className="font-semibold text-sm flex items-center gap-2">
+                    <MessageCircle className="w-4 h-4 text-primary" /> Broadcast Message
+                  </h4>
+                  <Textarea
+                    placeholder="Type a message to send to all active clients..."
+                    value={broadcastMsg}
+                    onChange={e => setBroadcastMsg(e.target.value)}
+                    className="resize-none min-h-[80px] text-sm"
+                  />
+                  <Button
+                    className="w-full"
+                    disabled={!broadcastMsg.trim() || broadcastMutation.isPending}
+                    onClick={() => setBroadcastPending(true)}
+                  >
+                    {broadcastMutation.isPending ? "Sending..." : `Send to ${metrics?.payingClients ?? activeUsers} active clients`}
+                  </Button>
+                </div>
                 
                 <div className="bg-card rounded-2xl border border-border p-6 shadow-sm">
                     <h4 className="font-semibold mb-4 text-sm text-muted-foreground uppercase tracking-wider">System Status</h4>
@@ -213,6 +279,24 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+
+      {/* Broadcast confirmation dialog */}
+      <AlertDialog open={broadcastPending} onOpenChange={open => { if (!open) setBroadcastPending(false); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Send broadcast to all active clients?</AlertDialogTitle>
+            <AlertDialogDescription className="whitespace-pre-wrap break-words">
+              "{broadcastMsg}"
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => broadcastMutation.mutate(broadcastMsg)}>
+              Send via WhatsApp
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </DashboardLayout>
   );
 }
