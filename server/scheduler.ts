@@ -1311,7 +1311,9 @@ cron.schedule("0 7 1 * *", async () => {
 // Reminds them to eat 1–2 hours before training
 // ============================================================
 
-cron.schedule("0 10 * * 1-6", async () => {
+// DISABLED FOR LAUNCH — daily cap means this rarely fires anyway; reduces noise
+// cron.schedule("0 10 * * 1-6", async () => {
+if (false) (async () => {
   console.log("[SCHEDULER] JOB: Pre-training nutrition reminder");
   const clients = await getActiveClients();
   const todayDOW = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // SAST day-of-week
@@ -1367,7 +1369,7 @@ cron.schedule("0 10 * * 1-6", async () => {
       console.error(`[SCHEDULER] Pre-training reminder error — ${client.phoneNumber}:`, err);
     }
   }
-}, { timezone: "UTC" });
+})(); // DISABLED
 
 // ============================================================
 // JOB 11 — SA CULTURAL CALENDAR
@@ -1426,7 +1428,8 @@ cron.schedule("0 5 * * *", async () => {
 // Skips users who are 3+ days silent (handled by re-engagement flow).
 // ============================================================
 
-cron.schedule("0 11 * * 1-6", async () => {
+// DISABLED FOR LAUNCH — daily cap blocks this after morning anyway; re-enable when engagement data justifies it
+if (false) (async () => {
   console.log("[SCHEDULER] JOB: Midday activation nudge");
   const clients = await getActiveClients();
   const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
@@ -1471,7 +1474,7 @@ cron.schedule("0 11 * * 1-6", async () => {
     }
   }
   console.log(`[SCHEDULER] Midday nudge: ${sent} sent`);
-}, { timezone: "UTC" });
+})(); // DISABLED
 
 // ============================================================
 // JOB 12 — 14-DAY AND 30-DAY SILENCE ESCALATION
@@ -1725,7 +1728,8 @@ cron.schedule("0 19 * * *", async () => {
 // the coach KPI report (which only goes to the founder).
 // ============================================================
 
-cron.schedule("0 17 * * 0", async () => {
+// DISABLED — duplicate of Sunday evening check-in (same time, 0 17 * * 0); Sunday check-in has richer data
+if (false) (async () => {
   console.log("[SCHEDULER] JOB: Weekly wins summary to clients");
   const clients = await getActiveClients();
   const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
@@ -1800,7 +1804,7 @@ cron.schedule("0 17 * * 0", async () => {
     }
   }
   console.log(`[SCHEDULER] Weekly wins summary: ${sent} sent`);
-}, { timezone: "UTC" });
+})(); // DISABLED
 
 // ============================================================
 // JOB 16B — BUDDY ACCOUNTABILITY NOTIFICATIONS
