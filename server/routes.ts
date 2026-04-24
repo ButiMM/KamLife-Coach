@@ -2206,11 +2206,6 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         // ~6KB ≈ 3 seconds of Opus audio — Whisper needs at least 3s to return anything useful.
         // Uses the failure-counter so 3 short clips in 30 min escalates to "please type".
         if (audioBuffer.byteLength < 6000) {
-          const failCount = bumpVoiceFailure(user.id);
-          if (failCount >= 3) {
-            clearVoiceFailure(user.id);
-            return "I keep getting very short voice notes — please hold the mic button for at least 5 seconds or just type your message and I'll reply straight away.";
-          }
           return "That voice note was too short to transcribe — hold the mic button for at least 5 seconds and resend, or just type your message.";
         }
 
@@ -2242,11 +2237,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         // no hint + re-created File. Whisper sometimes returns 400 when the stated
         // language conflicts with what it actually hears — dropping the hint fixes
         // it more often than retrying the same request.
+        // SA fitness coaching context helps Whisper handle accents and code-switching
+        const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
         let transcription;
         try {
           transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
             file: audioFile,
             model: "whisper-1",
+            prompt: whisperPrompt,
             ...(whisperLang ? { language: whisperLang } : {}),
           }));
         } catch (transErr) {
@@ -2255,6 +2253,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
             file: retryFile,
             model: "whisper-1",
+            prompt: whisperPrompt,
           }));
         }
 
