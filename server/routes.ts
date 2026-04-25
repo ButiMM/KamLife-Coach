@@ -555,15 +555,26 @@ const STEP_RESPONSES_TARGET = [
     `Target done — ${steps.toLocaleString()} steps. ✅ This is what consistency looks like. Log tomorrow and keep the streak going.`,
 ];
 
-function getStepResponse(steps: number, target: number): string {
+function getStepResponse(steps: number, target: number, weightKg = 75): string {
   const idx = Math.floor(Date.now() / 86400000) % 5;
+  // ~0.04 kcal per step per kg bodyweight (MET walking approximation)
+  const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
+  const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
+  let base: string;
   if (steps >= target) {
-    return STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
+    base = STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
   } else if (steps >= target * 0.75) {
-    return STEP_RESPONSES_GOOD[idx % STEP_RESPONSES_GOOD.length](steps, target);
+    base = STEP_RESPONSES_GOOD[idx % STEP_RESPONSES_GOOD.length](steps, target);
+  } else {
+    const remaining = target - steps;
+    base = STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
   }
-  const remaining = target - steps;
-  return STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
+  // Append calorie burn after the first sentence
+  const firstDot = base.indexOf(".");
+  if (firstDot > 0 && burnNote) {
+    return base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1);
+  }
+  return base + burnNote;
 }
 
 // ============================================================
@@ -1951,7 +1962,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
                 await db.insert(stepLogs).values({ userId: user.id, steps: extractedSteps });
               }
               await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-              const stepReply = getStepResponse(extractedSteps, target);
+              const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75);
               const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
               const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
               await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
@@ -2823,21 +2834,47 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           }
         }
       } catch (e) { console.warn("[non-fatal]", e); }
-      // Build weight change note
+      // Build weight change note vs last log
       let changeNote = "";
       if (prevKg > 0 && Math.abs(newKg - prevKg) > 0.1) {
         const diff = newKg - prevKg;
-        const direction = diff < 0 ? `down ${Math.abs(diff).toFixed(1)}kg` : `up ${diff.toFixed(1)}kg`;
+        const direction = diff < 0 ? `⬇️ down ${Math.abs(diff).toFixed(1)}kg` : `⬆️ up ${diff.toFixed(1)}kg`;
         changeNote = ` ${direction} from last log.`;
       }
+
+      // Total journey progress from very first weigh-in
+      let journeyNote = "";
+      try {
+        const [firstLog] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+          .from(weightLogs).where(eq(weightLogs.userId, user.id))
+          .orderBy(asc(weightLogs.loggedAt)).limit(1);
+        if (firstLog) {
+          const startKg = parseFloat(String(firstLog.weight));
+          const totalChange = newKg - startKg;
+          const weeksSinceStart = Math.max(1, Math.round((Date.now() - new Date(firstLog.loggedAt!).getTime()) / (7 * 86_400_000)));
+          const pacePerWeek = Math.abs(totalChange / weeksSinceStart).toFixed(2);
+          const goal = user.goalType || "fat_loss";
+          if (Math.abs(totalChange) >= 0.5) {
+            if (totalChange < 0 && goal === "fat_loss") {
+              journeyNote = `\n\n📉 Total lost: *${Math.abs(totalChange).toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.3 && parseFloat(pacePerWeek) <= 0.8 ? "right on target" : parseFloat(pacePerWeek) < 0.3 ? "slower than optimal — check protein and deficit" : "slightly fast — make sure you're eating enough protein"}.`;
+            } else if (totalChange > 0 && goal === "muscle_gain") {
+              journeyNote = `\n\n📈 Total gained: *${totalChange.toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.1 && parseFloat(pacePerWeek) <= 0.5 ? "solid lean gain rate" : parseFloat(pacePerWeek) > 0.5 ? "gaining fast — watch body fat" : "very slow — push calories slightly"}.`;
+            } else if (Math.abs(totalChange) >= 0.5) {
+              journeyNote = `\n\n${totalChange < 0 ? "📉" : "📈"} Total change: *${totalChange > 0 ? "+" : ""}${totalChange.toFixed(1)}kg* from starting weight of ${startKg}kg.`;
+            }
+          }
+        }
+      } catch { /* non-fatal */ }
+
       // Build targets change note
       let targetsNote = "";
       if (Math.abs(newCals - prevCals) > 20 || Math.abs(newProtein - prevProtein) > 2) {
-        targetsNote = `\n\nTargets updated: ${newCals} kcal/day (was ${prevCals}), ${newProtein}g protein (was ${prevProtein}g). Your targets automatically adjust as your weight changes — this keeps your results moving.`;
+        targetsNote = `\n\nTargets updated: ${newCals} kcal/day | ${newProtein}g protein. (Automatically adjusted — keeps results moving.)`;
       } else {
         targetsNote = `\n\nTargets: ${newCals} kcal/day | ${newProtein}g protein.`;
       }
-      // Check for plateau (no change >0.5kg in last 3 weeks)
+
+      // Plateau detection — no change >0.5kg in 3 weeks
       const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
       const recentWeightLogs = await db.select({ weight: weightLogs.weight })
         .from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, threeWeeksAgo)))
@@ -2847,10 +2884,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         const oldest3w = parseFloat(String(recentWeightLogs[0].weight));
         const change3w = Math.abs(newKg - oldest3w);
         if (change3w < 0.5) {
-          plateauNote = `\n\nWeight has barely moved in 3 weeks. Cut carb portions by a third this week and add a 20-minute walk daily. Reply *on track* to see your full week stats.`;
+          plateauNote = `\n\nWeight has barely moved in 3 weeks. Cut carb portions by a third this week and add a 20-minute walk daily.`;
         }
       }
-      return `Weight logged: ${newKg}kg.${changeNote}${targetsNote}${plateauNote}`;
+      return `Weight logged: *${newKg}kg.*${changeNote}${journeyNote}${targetsNote}${plateauNote}`;
     }
   }
 
@@ -3050,7 +3087,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         await db.insert(stepLogs).values({ userId: user.id, steps });
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
-      const stepReply = getStepResponse(steps, target);
+      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75);
       const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
       const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
       stepReplyPart = stepReply + streakNote + (perfectDay || "");
@@ -3652,6 +3689,27 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const runningLine = prevCals > 0
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+
+      // Day-pacing assessment — tells user if they're on track, not just the number
+      let dayAssessment = "";
+      if (prevCals > 0 && totalCals >= 100) {
+        const hourNow = new Date().getUTCHours() + 2; // SAST
+        const dayProgress = Math.min(hourNow / 20, 1); // 20:00 SAST = end of eating window
+        const expectedCals = calorieTarget * dayProgress;
+        const calPace = runningCals / Math.max(expectedCals, 1);
+        if (calRemaining <= 0) {
+          dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
+        } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
+          // Late day, undereating
+          dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
+        } else if (!earlyInDay && calPace > 1.3) {
+          // Running over
+          dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
+        } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
+          dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
+        }
+      }
+
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
       // Smart protein suggestion — only fires late in the day when it actually matters.
       // Rules: meal >= 100 kcal (not a drink), running cals >= 40% of daily target
@@ -3701,7 +3759,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         variableReinforcement = SURPRISE_NOTES[Math.floor(Math.random() * SURPRISE_NOTES.length)];
       }
 
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${coachNote}${junkNote}${proteinTip}${variableReinforcement}`;
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}`;
 
       // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
       try {
