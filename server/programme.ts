@@ -815,15 +815,32 @@ function daySlotLabel(slot: 1 | 2 | 3, isGlutesFocus: boolean, isDumbbell: boole
   return [`Full Body A`, `Full Body B`, `Full Body C`][slot - 1];
 }
 
+const PHASE_OPENERS: Record<number, string> = {
+  1: "Foundation phase. Learn the movements — weight is secondary today. Perfect form now means heavier lifts in 4 weeks.",
+  2: "Build phase. Your form is solid. Now push the weight — add even 2.5kg to every lift, every session.",
+  3: "Push phase. This gets uncomfortable. That is the point. Your body only changes when you exceed what felt hard last month.",
+  4: "Peak phase. Hardest week of the cycle. You built to this — do not run from it.",
+  5: "Deload week. Drop weight by 40%, keep every movement. Recovery IS the training this week.",
+};
+
+const GOAL_FINISH_GYM: Record<string, string> = {
+  fat_loss: "_After: protein within 60 min — eggs, chicken, pilchards. Keep carbs light if you're not training again today._",
+  muscle_gain: "_After: eat rice + protein within 30 minutes. This is the most important meal of your day — do not skip it._",
+  recomposition: "_After: protein within 60 min, moderate carbs. Sweet potato or pap + chicken. Fuel the rebuild._",
+};
+
 function formatGymDay(
   exercises: Exercise[],
   label: string,
   phase: number,
   phaseName: string,
   week: number,
-  multiplier: { sets: string; reps: string; rest: string }
+  multiplier: { sets: string; reps: string; rest: string },
+  goal = "fat_loss"
 ): string {
-  let out = `*Week ${week} — ${label}*\nRest ${multiplier.rest} between sets\n\n`;
+  const opener = PHASE_OPENERS[phase] || PHASE_OPENERS[1];
+  const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
+  let out = `*Week ${week} — ${label}*\nRest ${multiplier.rest} between sets\n\n_${opener}_\n\n`;
   const ytLinks: string[] = [];
   for (let i = 0; i < exercises.length; i++) {
     const ex = exercises[i];
@@ -834,7 +851,7 @@ function formatGymDay(
     const yt = ex.youtube || `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
     ytLinks.push(`${num}. ${ex.name}: ${yt}`);
   }
-  out += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
+  out += `Reply *DONE* when finished.\n\n${finisher}\n\n_Form videos:_\n${ytLinks.join("\n")}`;
   return out;
 }
 
@@ -1044,11 +1061,11 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier) + safetyNote + walkingFooter;
+      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
     }
-    const dayA = formatGymDay(GYM_DUMBBELL_DAY_A, "Dumbbell Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));
-    const dayB = formatGymDay(GYM_DUMBBELL_DAY_B, "Dumbbell Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1));
-    const dayC = formatGymDay(GYM_DUMBBELL_DAY_C, "Dumbbell Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1));
+    const dayA = formatGymDay(GYM_DUMBBELL_DAY_A, "Dumbbell Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const dayB = formatGymDay(GYM_DUMBBELL_DAY_B, "Dumbbell Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const dayC = formatGymDay(GYM_DUMBBELL_DAY_C, "Dumbbell Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
     return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
   }
 
@@ -1085,12 +1102,12 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     const phase = user.programmePhase || 1;
     const multiplier = getPhaseMultiplier(phase);
     const phaseName = getPhaseNames()[phase] || "Foundation";
-    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier) + safetyNote + walkingFooter;
+    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
   }
 
-  const dayA = formatGymDay(GYM_FULL_DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1));
-  const dayB = formatGymDay(GYM_FULL_DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1));
-  const dayC = formatGymDay(GYM_FULL_DAY_C, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1));
+  const dayA = formatGymDay(GYM_FULL_DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const dayB = formatGymDay(GYM_FULL_DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const dayC = formatGymDay(GYM_FULL_DAY_C, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
   return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
 }
 
@@ -1208,13 +1225,14 @@ export function buildDayWorkout(user: any): string {
 
     const { safe: exercises, skipped } = filterInjuredExercises(allExercises, injuries);
     const goal = user.goalType || "fat_loss";
+    const phaseOpener = PHASE_OPENERS[phase] || PHASE_OPENERS[1];
     const goalNote = goal === "fat_loss"
-      ? `_Fat loss tip: rest 45 seconds between sets (not 90). Higher heart rate = more calories burned._`
+      ? `_After: protein within 60 min. Eggs, chicken, pilchards. Rest 45 sec between sets — the sweat is the fat burning._`
       : goal === "muscle_gain"
-        ? `_Muscle tip: add reps each time — when you hit the top of the rep range easily, add a set next session._`
-        : `_Recomp tip: push all sets to near-failure. The last 2 reps should feel hard._`;
+        ? `_After: eat within 30 minutes — rice + protein. Push every set to near-failure. The last 2 reps are where the muscle is built._`
+        : `_After: protein within 60 min, moderate carbs. Push all sets to near-failure. Slow the eccentric — 3 seconds down builds more than explosive reps._`;
 
-    let workout = `*Week ${week} — Home Day ${daySlot}*\nRest ${multiplier.rest} between sets | 40–50 min total\n\n`;
+    let workout = `*Week ${week} — Home Day ${daySlot}*\nRest ${multiplier.rest} between sets | 40–50 min\n\n_${phaseOpener}_\n\n`;
     const ytLinks: string[] = [];
     for (let i = 0; i < exercises.length; i++) {
       const ex = exercises[i];
@@ -1255,7 +1273,7 @@ export function buildDayWorkout(user: any): string {
   const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
   const exercises = getGymDay(daySlot, isDumbbell, isFemaleGluteFocus);
   const label = daySlotLabel(daySlot, isFemaleGluteFocus, isDumbbell);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss");
 }
 
 // ============================================================
@@ -1383,4 +1401,24 @@ export const WORKOUT_DONE_RESPONSES = [
     `Workout ${total} complete. Day ${day} ticked off. No shortcuts, no excuses. That is how Coach K clients do it.`,
   (total: number, _day: number) =>
     `${total} sessions and counting. You did not feel like it and you did it anyway. That is the whole game.`,
+  (total: number, _day: number) =>
+    `Lekker work. ${total} sessions done. Your body is changing whether you feel it or not — the scale catches up later.`,
+  (total: number, day: number) =>
+    `Done — session ${total}, day ${day} logged. Protein in the next hour. Your muscles are waiting for it right now.`,
+  (total: number, _day: number) =>
+    `${total} sessions. Most people skipped today. You didn't. That is the whole edge right there.`,
+  (total: number, _day: number) =>
+    `Session ${total} banked. No one can take that from you. Eat, recover, come back and beat today's numbers.`,
+  (total: number, _day: number) =>
+    `${total} down. This version of you is stronger than the one who walked in. Remember that feeling.`,
+  (total: number, day: number) =>
+    `Day ${day} done. Session ${total} on the board. Consistency is a skill — you are getting better at it.`,
+  (total: number, _day: number) =>
+    `Trained. Logged. Done. ${total} sessions with Coach K. Small gains stacked on small gains — that is how bodies change.`,
+  (total: number, _day: number) =>
+    `${total} sessions in. You are not talking about getting fit anymore — you are actually doing it. Big difference.`,
+  (total: number, _day: number) =>
+    `Done is done. ${total} sessions. No excuses, no shortcuts — just you and the work. That is all it ever takes.`,
+  (total: number, _day: number) =>
+    `Session ${total} — logged and locked. Eat your protein, drink water, and let your body do the rest overnight.`,
 ];

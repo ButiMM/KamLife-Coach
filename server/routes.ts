@@ -1360,9 +1360,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
     // Parse gym or home (required)
     let trainingMode = user.trainingMode || "home";
-    if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym|planet fitness|virgin active basic)\b/i.test(lower)) trainingMode = "gym_dumbbell";
-    else if (/\bgym\b/i.test(lower) || /\bat gym\b/i.test(lower) || /\bthe gym\b/i.test(lower)) trainingMode = "gym";
-    else if (/\bhome\b/i.test(lower) || /\bat home\b/i.test(lower) || /\bno gym\b/i.test(lower)) trainingMode = "home";
+    if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym|planet fitness|virgin active basic|machines only|only machines|no free weights|gym machines|cables only|small gym)\b/i.test(lower)) trainingMode = "gym_dumbbell";
+    else if (/\bgym\b/i.test(lower) || /\bat gym\b/i.test(lower) || /\bthe gym\b/i.test(lower) || /\bvirgin active\b/i.test(lower) || /\bplanet fitness\b/i.test(lower) || /\blifestyle\b/i.test(lower)) trainingMode = "gym";
+    else if (/\bhome\b/i.test(lower) || /\bat home\b/i.test(lower) || /\bno gym\b/i.test(lower) || /\bno equipment\b/i.test(lower) || /\bbodyweight\b/i.test(lower)) trainingMode = "home";
 
     // Keep existing experience if set, otherwise default to beginner
     let experience = user.trainingExperience || "beginner";
@@ -2632,7 +2632,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         ? `\n\n😮‍💨 *Deload week.* Drop weights by 40%, keep the movement. Your body repairs during this week — do not skip it.`
         : "";
 
-    let doneReply = `${celebration}${milestoneNote}${cycleNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
+    const goal = user.goalType || "fat_loss";
+    const recoveryHook = goal === "muscle_gain"
+      ? `\n\n🍚 *Eat now* — rice or pap + protein (eggs, chicken, pilchards). Within 30 minutes. This is the most important meal of your day.`
+      : goal === "recomposition"
+        ? `\n\n🥩 *Eat now* — protein + moderate carbs within 60 min. Your muscles need fuel to rebuild.`
+        : `\n\n🥚 *Eat now* — protein within 60 min. Eggs, chicken, pilchards. Skip the extra carbs if you're sitting for the rest of the day.`;
+
+    let doneReply = `${celebration}${milestoneNote}${cycleNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${recoveryHook}${perfectDay || ""}${liftPrompt}`;
 
     // Progressive programme delivery — unlock next day's workout after completing each session
     try {
