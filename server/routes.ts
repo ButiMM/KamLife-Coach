@@ -5,7 +5,11 @@ import path from "path";
 import { db, pool } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments, mealLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
-import OpenAI, { toFile } from "openai";
+import OpenAI from "openai";
+import { tmpdir } from "os";
+import { writeFile, unlink } from "fs/promises";
+import { createReadStream } from "fs";
+import { join as pathJoin } from "path";
 import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
@@ -917,7 +921,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
-  const coachPhone = (process.env.COACH_ALERT_PHONE || "").replace(/\D/g, "");
+  // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)
+  const coachPhone = (process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "").replace(/\D/g, "");
   const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
   const isCoach = coachPhone && userPhone === coachPhone;
   if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
@@ -2178,6 +2183,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     // Exclusive: if audio, always return — never falls through to text handler
     if (ctype.startsWith("audio/")) {
       let voiceStage = "download";
+      let _tmpAudioCleanup: (() => void) | null = null;
       try {
         // Part 1 — Twilio media requires basic auth (ACCOUNT_SID:AUTH_TOKEN)
         const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
@@ -2235,7 +2241,12 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
         voiceStage = "transcribe";
 
-        const audioFile = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+        // Write audio to a temp file — createReadStream avoids File/Blob API entirely
+        // (toFile and new File() both require globalThis.File which is Node 20+ only)
+        const tmpAudioPath = pathJoin(tmpdir(), `voice_${crypto.randomUUID()}.${audioExt}`);
+        await writeFile(tmpAudioPath, Buffer.from(audioBuffer));
+        const cleanupTmp = () => unlink(tmpAudioPath).catch(() => {});
+        _tmpAudioCleanup = cleanupTmp;
 
         // Detect language from user's stored preference for better Whisper accuracy
         const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
@@ -2244,10 +2255,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
         const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
         let transcription;
-        console.log(`[VOICE] whisper_attempt_1 bytes=${audioFile.size} ext=${audioExt} lang=${whisperLang || "auto"}`);
+        console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
           transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
-            file: audioFile,
+            file: createReadStream(tmpAudioPath),
             model: "whisper-1",
             prompt: whisperPrompt,
             ...(whisperLang ? { language: whisperLang } : {}),
@@ -2257,9 +2268,8 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
           console.log(`[VOICE] whisper_attempt_2 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=auto`);
           try {
-            const retryFile = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
-              file: retryFile,
+              file: createReadStream(tmpAudioPath),
               model: "whisper-1",
               prompt: whisperPrompt,
             }));
@@ -2276,10 +2286,9 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         if (!transcribedText) {
           console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
           try {
-            const retryFile2 = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
               openai.audio.transcriptions.create({
-                file: retryFile2,
+                file: createReadStream(tmpAudioPath),
                 model: "whisper-1",
                 language: "en",
                 prompt: whisperPrompt,
@@ -2341,9 +2350,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         const voiceReply = await withTimeout("voice_coach_reply", 20000, () => handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : "")));
         // Part 4 — explicit return, no fall-through
         console.log(`[MEDIA][${mediaTrace}] voice_processed words=${wordCount}`);
+        await cleanupTmp();
         return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
 
       } catch (err) {
+        if (_tmpAudioCleanup) _tmpAudioCleanup();
         console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
         await logMediaFailure(user.id, `voice_${voiceStage}`, err);
         // Part 4 — always return, never fall through to text handler.

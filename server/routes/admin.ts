@@ -591,4 +591,33 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       return res.status(500).json({ success: false, message: err.message || "Failed to trigger daily messages" });
     }
   });
+
+  // ── Admin: manually set subscription status for a phone number ──
+  // Use to activate coach/owner account or override for testing.
+  // POST /api/admin/set-subscription  { phone: "+27...", status: "active"|"trial"|"inactive" }
+  app.post("/api/admin/set-subscription", requireAdminKey, async (req, res) => {
+    try {
+      const { phone, status } = req.body || {};
+      if (!phone || !status) return res.status(400).json({ error: "phone and status required" });
+      const allowed = ["active", "trial", "inactive"];
+      if (!allowed.includes(status)) return res.status(400).json({ error: `status must be one of: ${allowed.join(", ")}` });
+
+      // Normalise phone to whatsapp: format for DB lookup
+      const normalised = phone.startsWith("whatsapp:") ? phone : `whatsapp:+${phone.replace(/\D/g, "")}`;
+      const result = await db
+        .update(users)
+        .set({ subscriptionStatus: status })
+        .where(eq(users.phoneNumber, normalised))
+        .returning({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus });
+
+      if (!result.length) {
+        return res.status(404).json({ error: `No user found with phone ${normalised}` });
+      }
+
+      console.log(`[ADMIN] set-subscription phone=${normalised} status=${status} by admin`);
+      return res.json({ success: true, user: result[0] });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to update subscription" });
+    }
+  });
 }
