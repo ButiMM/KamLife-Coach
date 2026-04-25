@@ -2208,14 +2208,6 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           console.warn(`[MEDIA][${mediaTrace}] audio_buffer_too_large bytes=${audioBuffer.byteLength}`);
           return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
         }
-        // Reject clips too short for Whisper to process reliably.
-        // ~6KB ≈ 3 seconds of Opus audio — Whisper needs at least 3s to return anything useful.
-        // Uses the failure-counter so 3 short clips in 30 min escalates to "please type".
-        if (audioBuffer.byteLength < 6000) {
-          return "That voice note was too short to transcribe — hold the mic button for at least 5 seconds and resend, or just type your message.";
-        }
-
-        voiceStage = "transcribe";
 
         // Part 2 — preserve Twilio content type when available to avoid codec/mime mismatch.
         const sourceAudioType = (audioResponse.headers.get("content-type") || ctype || "audio/ogg").split(";")[0].trim().toLowerCase();
@@ -2232,6 +2224,17 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           "audio/amr": "amr",
         };
         const audioExt = extMap[sourceAudioType] || "ogg";
+
+        // Threshold: 2KB (~1s of Opus). Anything under this is silence/noise — not speech.
+        // WhatsApp Opus at 12kbps = ~1,500 bytes/sec, so 2KB ≈ 1.3s minimum.
+        console.log(`[VOICE] audio_ready bytes=${audioBuffer.byteLength} type=${sourceAudioType} ext=${audioExt}`);
+        if (audioBuffer.byteLength < 2000) {
+          console.warn(`[VOICE] audio_too_short bytes=${audioBuffer.byteLength} — rejecting`);
+          return "That voice note was too short to transcribe — hold the mic button for at least 3 seconds and resend, or just type your message.";
+        }
+
+        voiceStage = "transcribe";
+
         const audioFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
 
         // Detect language from user's stored preference for better Whisper accuracy
@@ -2239,13 +2242,9 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
         const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
 
-        // Attempt 1: with language hint (if we have one). Attempt 2 (on failure):
-        // no hint + re-created File. Whisper sometimes returns 400 when the stated
-        // language conflicts with what it actually hears — dropping the hint fixes
-        // it more often than retrying the same request.
-        // SA fitness coaching context helps Whisper handle accents and code-switching
         const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
         let transcription;
+        console.log(`[VOICE] whisper_attempt_1 bytes=${audioFile.size} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
           transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
             file: audioFile,
@@ -2253,8 +2252,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
             prompt: whisperPrompt,
             ...(whisperLang ? { language: whisperLang } : {}),
           }));
-        } catch (transErr) {
-          console.warn(`[VOICE] transcribe attempt 1 failed (lang=${whisperLang || "auto"}), retrying without hint:`, transErr);
+          console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
+        } catch (transErr: any) {
+          console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
+          console.log(`[VOICE] whisper_attempt_2 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=auto`);
           try {
             const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
@@ -2262,19 +2263,18 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
               model: "whisper-1",
               prompt: whisperPrompt,
             }));
-          } catch (retryErr) {
-            // Both attempts failed — fall through to empty-text handling below so
-            // failure counter increments and the 3-strike escalation fires correctly
-            console.warn("[VOICE] transcribe attempt 2 also failed:", retryErr);
+            console.log(`[VOICE] whisper_attempt_2_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
+          } catch (retryErr: any) {
+            console.warn(`[VOICE] whisper_attempt_2_failed error=${retryErr?.message || retryErr}`);
             transcription = { text: "" };
           }
         }
 
         let transcribedText = transcription.text?.trim();
 
-        // Retry with forced English if first attempt returned empty — Whisper sometimes
-        // needs a language anchor to produce output on short SA clips
+        // Retry with forced English if empty — Whisper sometimes needs a language anchor for SA clips
         if (!transcribedText) {
+          console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
           try {
             const retryFile2 = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
@@ -2286,8 +2286,9 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
               })
             );
             transcribedText = retryTranscription.text?.trim() || "";
-          } catch (retryErr) {
-            console.warn("[VOICE] English-forced retry also failed:", retryErr);
+            console.log(`[VOICE] whisper_attempt_3_result text="${transcribedText.slice(0, 80)}" len=${transcribedText.length}`);
+          } catch (retryErr: any) {
+            console.warn(`[VOICE] whisper_attempt_3_failed error=${retryErr?.message || retryErr}`);
           }
         }
 
