@@ -1,5 +1,8 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { enforceCoachGuardrails } from "../coach-guardrails";
+import { db } from "../db";
+import { mealLogs, chatHistory } from "../../shared/schema";
+import { eq, and, gte, sql } from "drizzle-orm";
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -229,4 +232,48 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 
   const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
   return guarded.reply;
+}
+
+export async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const [mealLogSum, legacyLogs] = await Promise.all([
+    db.select({
+      calories: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+      protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+    }).from(mealLogs).where(and(
+      eq(mealLogs.userId, userId),
+      gte(mealLogs.loggedAt, todayStart),
+    )).then(r => r[0]),
+
+    db.select({
+      messageIn: chatHistory.messageIn,
+      messageOut: chatHistory.messageOut,
+    }).from(chatHistory).where(and(
+      eq(chatHistory.userId, userId),
+      eq(chatHistory.intent, "FOOD_LOG"),
+      gte(chatHistory.createdAt, todayStart),
+    )),
+  ]);
+
+  if (mealLogSum && (mealLogSum.calories > 0 || mealLogSum.protein > 0)) {
+    return { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
+  }
+
+  // Fallback: legacy chatHistory scanning (pre-meal_logs users)
+  let calories = 0;
+  let protein = 0;
+  for (const log of legacyLogs) {
+    const parsed = parseFoodLogTotalsFromMessageOut(log.messageOut || "");
+    if (parsed) {
+      calories += parsed.calories;
+      protein += parsed.protein;
+      continue;
+    }
+    const matched = scanForSAFoods(log.messageIn || "");
+    calories += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
+    protein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
+  }
+  return { calories, protein };
 }
