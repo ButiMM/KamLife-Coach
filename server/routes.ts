@@ -975,8 +975,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
       const gateReply = workouts === 0
-        ? `Your programme is built, ${name} — subscribe to unlock it.\n\nFood tracking is free forever. Workouts, shopping lists, and full coaching are *R149/month*.\n\n${payLink}`
-        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month:* ${payLink}\n\nFood tracking and steps stay free.`;
+        ? `Your programme is built, ${name} — subscribe to unlock it.\n\nFood tracking is free forever. Workouts, shopping lists, and full coaching are *R149/month — cancel anytime.*\n\n${payLink}\n\n_POPIA protected. Data never sold. Cancel by replying *cancel*._`
+        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:* ${payLink}\n\nFood tracking and steps stay free. Data saved for 90 days.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }

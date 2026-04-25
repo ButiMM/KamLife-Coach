@@ -403,7 +403,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
   // ---- START — POPIA consent combined with introduction ----
   if (state === "START") {
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here — your AI-powered SA fitness and nutrition coach. Real programmes, real food advice, real accountability.\n\n⚠️ *Important:* Coach K is an AI coaching tool, not a human coach and not a medical professional. Always consult your doctor before starting any new exercise or nutrition programme, especially if you have a medical condition.\n\nI store your health and fitness data to coach you personally (POPIA protected, never sold, deleted on request).\n\nReply *yes* to start. Three questions and your programme is ready.`;
+    return `Coach K here — your AI-powered SA fitness and nutrition coach. Real programmes, real food advice, real accountability.\n\n⚠️ *Important:* Coach K is an AI tool — not a human coach, not a doctor, not a dietitian. Always consult your doctor before starting a new exercise or nutrition programme, especially if you have diabetes, hypertension, HIV/ARVs, a heart condition, or any other health condition.\n\n🔒 *Your data:* Stored securely under POPIA. Used only for your coaching. Never sold. Deleted on request — reply *delete my data* at any time.\n\n💳 *Subscription:* 7-day free trial, then R149/month. Cancel anytime by replying *cancel*.\n\nReply *yes* to start.`;
   }
 
   // ---- ASK_POPIA ----
@@ -837,6 +837,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
     if (msg.includes("5") || lower.includes("pcos")) conditions.push("pcos");
     const hasDiabetes = conditions.includes("diabetes");
     const hasHeart = conditions.includes("heart_condition");
+    const hasHIV = conditions.includes("hiv_arvs");
+    const hasHighRiskCondition = hasHeart || hasDiabetes || hasHIV;
     await db.update(users).set({
       medicalConditions: conditions.length > 0 ? conditions.join(",") : "none",
       nutritionProtocol: hasDiabetes ? "LOW_GI" : null,
@@ -844,6 +846,18 @@ export async function handleOnboarding(user: any, message: string, phone: string
       doctorClearanceRequired: hasHeart,
       onboardingState: "ASK_INJURIES",
     }).where(eq(users.phoneNumber, phone));
+
+    // For heart, diabetes, and HIV/ARV users — explicit medical liability disclaimer
+    // before proceeding. Coach K adjusts their programme but is not a substitute for
+    // their treating doctor or dietitian.
+    if (hasHighRiskCondition) {
+      const conditionNames = conditions
+        .filter(c => ["heart_condition", "diabetes", "hiv_arvs"].includes(c))
+        .map(c => c === "heart_condition" ? "heart condition" : c === "hiv_arvs" ? "HIV/ARVs" : "diabetes")
+        .join(" and ");
+      return `Got it — ${conditionNames} noted.\n\n⚠️ *Medical note:* Coach K will adjust your programme and nutrition for your condition, but is not a substitute for your doctor or dietitian. Please make sure your doctor knows you are starting a new exercise and eating plan.\n\nCoach K will never tell you to stop or change your medication. If any recommendation conflicts with what your doctor told you — follow your doctor.\n\nAny injuries? Bad knees, back, shoulder? Or say None.`;
+    }
+
     return `Any injuries? Bad knees, back, shoulder? Or say None.`;
   }
 
