@@ -5,7 +5,7 @@ import path from "path";
 import { db, pool } from "./db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments, mealLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
-import OpenAI from "openai";
+import OpenAI, { toFile } from "openai";
 import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
@@ -2235,7 +2235,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
         voiceStage = "transcribe";
 
-        const audioFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+        const audioFile = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
 
         // Detect language from user's stored preference for better Whisper accuracy
         const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
@@ -2257,7 +2257,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
           console.log(`[VOICE] whisper_attempt_2 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=auto`);
           try {
-            const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+            const retryFile = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
               file: retryFile,
               model: "whisper-1",
@@ -2276,7 +2276,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         if (!transcribedText) {
           console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
           try {
-            const retryFile2 = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+            const retryFile2 = await toFile(Buffer.from(audioBuffer), `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
             const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
               openai.audio.transcriptions.create({
                 file: retryFile2,
