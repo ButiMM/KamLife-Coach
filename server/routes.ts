@@ -3587,14 +3587,17 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const proteinRemaining = proteinTarget - runningProtein;
       const msgHasProtein = PROTEIN_WORDS.some(w => m.includes(w));
       let coachNote = "";
-      if (goodProteins.length > 0 || msgHasProtein) {
-        if (totalProtein >= 20 || msgHasProtein) {
-          coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+      // Only add coaching notes for real meals (>= 100 kcal) — not for drinks/water/black coffee
+      if (totalCals >= 100) {
+        if (goodProteins.length > 0 || msgHasProtein) {
+          if (totalProtein >= 20 || msgHasProtein) {
+            coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+          }
+        } else if (junkFoods.length > 0) {
+          coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
+        } else if (allAdjustedFoods.some(f => f.category === "carb")) {
+          coachNote = `\n\nCarbs without protein — add a protein source. Eggs, pilchards, or beans work.`;
         }
-      } else if (junkFoods.length > 0) {
-        coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
-      } else if (allAdjustedFoods.some(f => f.category === "carb")) {
-        coachNote = `\n\nCarbs without protein — add a protein source. Eggs, pilchards, or beans work.`;
       }
       let junkNote = "";
       if (junkFoods.length > 0) {
@@ -3609,10 +3612,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
       // Smart protein suggestion based on remaining protein target
+      // Skip for drinks/tiny items (< 100 kcal) — logging morning coffee shouldn't trigger a pilchards nag
       let proteinTip = "";
       const budgetTier = user.weeklyFoodBudget || "100_300";
       const protRemaining = (user.proteinTarget || 120) - runningProtein;
-      if (protRemaining > 40 && calRemaining > 200) {
+      if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100) {
         const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
         const suggestions = lowBudget
           ? [
