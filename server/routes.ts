@@ -23,6 +23,9 @@ import { deliveryStats, sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
 import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
 import { detectEscalation, escalationSLA } from "./safety-detection";
+import { getDisplayName, checkGptRateLimit } from "./utils";
+import { SCHEDULER_LIMITS } from "./constants";
+import { logger } from "./logger";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -76,15 +79,7 @@ function estimateCalories(message: string): number {
   return total || 400;
 }
 
-// ============================================================
-// DISPLAY NAME HELPER
-// ============================================================
-
-function getDisplayName(user: any): string {
-  const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-  if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
-  return user.name;
-}
+// getDisplayName imported from ./utils — single source of truth
 
 // detectEscalation + escalationSLA now live in ./safety-detection for unit testing
 
@@ -6765,6 +6760,12 @@ CRITICAL RULES — these are non-negotiable:
     } catch (e) { console.warn("[fall-through-gpt]", e); }
   }
 
+  // Per-minute rate limit — prevents burst GPT spend (max SCHEDULER_LIMITS.GPT_RATE_LIMIT_PER_MIN calls/min)
+  const rateCheck = checkGptRateLimit(user.id);
+  if (!rateCheck.allowed) {
+    return "You're sending messages very fast. Give me 60 seconds and try again.";
+  }
+
   // Daily GPT call cap — prevents runaway costs from heavy users
   const underLimit = await isUnderGPTCallLimit(user.id);
   if (!underLimit) {
@@ -6811,7 +6812,7 @@ CRITICAL RULES — these are non-negotiable:
       gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
     }
   } catch (e) {
-    console.warn("[agent-routing]", e);
+    logger.warn("routes", "agent-routing error", e);
     gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
   }
 

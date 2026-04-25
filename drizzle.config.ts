@@ -27,5 +27,8 @@ export default defineConfig({
     "ab_assignments",
     "conversations",
     "messages",
+    "meal_logs",
+    "sent_proactive",
+    "client_actions",
   ],
 });

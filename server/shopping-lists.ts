@@ -230,6 +230,86 @@ const TIER_4_WEEK_A: ShoppingList = {
   ],
 };
 
+// ── TIER 3: Week B (variety rotation) ──
+const TIER_3_WEEK_B: ShoppingList = {
+  tier: "300_600",
+  budgetLabel: "R3,000–R5,000/month",
+  estimatedTotal: "~R920",
+  coversDays: 7,
+  items: [
+    { item: "Eggs (18 pack)", qty: "18", price: "R40", category: "protein" },
+    { item: "Chicken thighs (1kg)", qty: "1kg", price: "R75", category: "protein" },
+    { item: "Hake fillets (500g)", qty: "500g", price: "R70", category: "protein" },
+    { item: "Tuna (4 tins)", qty: "4", price: "R60", category: "protein" },
+    { item: "Cottage cheese (500g)", qty: "500g", price: "R55", category: "protein" },
+    { item: "Chicken livers (500g)", qty: "500g", price: "R30", category: "protein" },
+    { item: "Sweet potatoes (1kg)", qty: "1kg", price: "R18", category: "carb" },
+    { item: "Oats (500g)", qty: "500g", price: "R25", category: "carb" },
+    { item: "Brown rice (1kg)", qty: "1kg", price: "R20", category: "carb" },
+    { item: "Whole wheat bread (1 loaf)", qty: "1", price: "R20", category: "carb" },
+    { item: "Spinach (2 bunches)", qty: "2", price: "R20", category: "veg" },
+    { item: "Broccoli (1 head)", qty: "1", price: "R20", category: "veg" },
+    { item: "Avo (2)", qty: "2", price: "R20", category: "veg" },
+    { item: "Frozen mixed veg (1kg)", qty: "1kg", price: "R25", category: "veg" },
+    { item: "Tomatoes (6)", qty: "6", price: "R15", category: "veg" },
+    { item: "Bananas (6)", qty: "6", price: "R12", category: "fruit" },
+    { item: "Apples (6)", qty: "6", price: "R18", category: "fruit" },
+    { item: "Greek yoghurt (500g)", qty: "500g", price: "R35", category: "dairy" },
+    { item: "Full cream milk (1L)", qty: "1L", price: "R20", category: "dairy" },
+    { item: "Peanut butter (400g)", qty: "400g", price: "R35", category: "pantry" },
+    { item: "Olive oil (250ml)", qty: "250ml", price: "R30", category: "pantry" },
+    { item: "Protein powder (if using)", qty: "10 servings", price: "R150", category: "supplement" },
+  ],
+  mealIdeas: [
+    "Breakfast: Oats + banana + Greek yoghurt — R12",
+    "Lunch: Chicken thigh + rice + spinach — R30",
+    "Dinner: Hake fillet + sweet potato + broccoli — R40",
+    "Snack: Cottage cheese + apple — R15",
+  ],
+};
+
+// ── TIER 4: Week B (variety rotation) ──
+const TIER_4_WEEK_B: ShoppingList = {
+  tier: "over_600",
+  budgetLabel: "R5,000+/month",
+  estimatedTotal: "~R1,350",
+  coversDays: 7,
+  items: [
+    { item: "Free-range eggs (18)", qty: "18", price: "R65", category: "protein" },
+    { item: "Chicken breast fillet (1kg)", qty: "1kg", price: "R90", category: "protein" },
+    { item: "Tuna steaks (400g)", qty: "400g", price: "R90", category: "protein" },
+    { item: "Lean beef mince (500g)", qty: "500g", price: "R75", category: "protein" },
+    { item: "Chicken thighs (1kg)", qty: "1kg", price: "R75", category: "protein" },
+    { item: "Biltong (200g)", qty: "200g", price: "R80", category: "protein" },
+    { item: "Cottage cheese (500g)", qty: "500g", price: "R55", category: "protein" },
+    { item: "Sweet potatoes (1kg)", qty: "1kg", price: "R18", category: "carb" },
+    { item: "Basmati rice (1kg)", qty: "1kg", price: "R30", category: "carb" },
+    { item: "Sourdough bread", qty: "1 loaf", price: "R40", category: "carb" },
+    { item: "Oats (500g)", qty: "500g", price: "R25", category: "carb" },
+    { item: "Baby spinach (200g)", qty: "200g", price: "R25", category: "veg" },
+    { item: "Broccoli (2 heads)", qty: "2", price: "R40", category: "veg" },
+    { item: "Avo (4)", qty: "4", price: "R40", category: "veg" },
+    { item: "Woolworths stir-fry veg", qty: "400g", price: "R35", category: "veg" },
+    { item: "Cherry tomatoes", qty: "1 punnet", price: "R20", category: "veg" },
+    { item: "Mushrooms (250g)", qty: "250g", price: "R20", category: "veg" },
+    { item: "Mixed berries", qty: "300g", price: "R45", category: "fruit" },
+    { item: "Bananas (6)", qty: "6", price: "R12", category: "fruit" },
+    { item: "Oranges (6)", qty: "6", price: "R18", category: "fruit" },
+    { item: "Greek yoghurt (1kg)", qty: "1kg", price: "R55", category: "dairy" },
+    { item: "Feta cheese (200g)", qty: "200g", price: "R35", category: "dairy" },
+    { item: "Almond milk (1L)", qty: "1L", price: "R40", category: "dairy" },
+    { item: "Mixed nuts (300g)", qty: "300g", price: "R60", category: "pantry" },
+    { item: "Extra virgin olive oil (500ml)", qty: "500ml", price: "R70", category: "pantry" },
+    { item: "Whey protein (if using)", qty: "10 servings", price: "R180", category: "supplement" },
+  ],
+  mealIdeas: [
+    "Breakfast: Oats + mixed berries + Greek yoghurt — R25",
+    "Lunch: Chicken breast + rice + avo + spinach salad — R40",
+    "Dinner: Beef mince bolognaise + sweet potato — R45",
+    "Snack: Biltong + cottage cheese — R25",
+  ],
+};
+
 // ── GOAL-BASED ITEM SWAPS ──
 // Fat loss: cut calorie-dense items, add volume foods
 // Muscle gain: add protein, keep calorie-dense items, bigger portions
@@ -296,8 +376,8 @@ function applyGoalModifications(list: ShoppingList, goalType: string): ShoppingL
 const ALL_LISTS: Record<string, ShoppingList[]> = {
   under_100: [TIER_1_WEEK_A, TIER_1_WEEK_B],
   "100_300": [TIER_2_WEEK_A, TIER_2_WEEK_B],
-  "300_600": [TIER_3_WEEK_A], // TODO: add TIER_3_WEEK_B for weekly variety
-  over_600: [TIER_4_WEEK_A],  // TODO: add TIER_4_WEEK_B for weekly variety
+  "300_600": [TIER_3_WEEK_A, TIER_3_WEEK_B],
+  over_600: [TIER_4_WEEK_A, TIER_4_WEEK_B],
 };
 
 export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string): ShoppingList {

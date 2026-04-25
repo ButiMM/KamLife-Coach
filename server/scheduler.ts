@@ -10,6 +10,9 @@ import { getKamlifeProgramme } from "./programme";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { PRICING } from "../shared/pricing";
 import { selectVariantMessage, recordDelivery } from "./ab";
+import { SCHEDULER_LIMITS } from "./constants";
+import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure } from "./utils";
+import { logger } from "./logger";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -32,7 +35,7 @@ function saveState(key: string, dateStr: string): void {
     state[key] = dateStr;
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
   } catch (e) {
-    console.error("[SCHEDULER] State save error:", e);
+    logger.error("scheduler", "State save error", e);
   }
 }
 
@@ -110,7 +113,7 @@ async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean
     dailySentThisProcess.add(dailyKey(clientId));
     return true;
   } catch (err) {
-    console.warn(`[claimDailySlot] DB error (${jobKey}/${clientId.slice(0,8)}):`, err);
+    logger.warn("scheduler", `claimDailySlot DB error (${jobKey}/${clientId.slice(0,8)})`, err);
     // Fail-open: if in-memory says not sent yet, allow it
     if (dailySentThisProcess.has(dailyKey(clientId))) return false;
     dailySentThisProcess.add(dailyKey(clientId));
@@ -130,7 +133,7 @@ function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
   db.insert(sentProactive)
     .values({ userId: clientId, messageKey: jobKey, dedupeWindow: todaySAST() })
     .onConflictDoNothing()
-    .catch(e => console.warn("[recordProactiveSend] DB write failed (non-fatal):", e));
+    .catch(e => logger.warn("scheduler", `recordProactiveSend DB write failed for ${clientId.slice(-6)}/${jobKey}`, e));
 }
 
 // ── Startup hydration — repopulate the in-memory set from today's DB records ──
@@ -145,9 +148,9 @@ function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
     for (const row of sentToday) {
       dailySentThisProcess.add(dailyKey(row.userId));
     }
-    console.log(`[SCHEDULER] Daily budget hydrated: ${sentToday.length} clients already sent today`);
+    logger.info("scheduler", `Daily budget hydrated: ${sentToday.length} clients already sent today`);
   } catch (e) {
-    console.warn("[SCHEDULER] Budget hydration failed (non-fatal):", e);
+    logger.warn("scheduler", "Budget hydration failed (non-fatal)", e);
   }
 })();
 
@@ -180,6 +183,17 @@ async function claimProactive(userId: string, messageKey: string, dedupeWindow: 
   const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
   if (weeklyKeyedSent.has(inMemKey)) return false;
 
+  // Memory leak guard: evict oldest half of entries when Map grows too large
+  if (weeklyKeyedSent.size >= SCHEDULER_LIMITS.WEEKLY_KEYED_MAX_SIZE) {
+    const evictCount = Math.floor(SCHEDULER_LIMITS.WEEKLY_KEYED_MAX_SIZE / 2);
+    let i = 0;
+    for (const key of weeklyKeyedSent.keys()) {
+      if (i++ >= evictCount) break;
+      weeklyKeyedSent.delete(key);
+    }
+    logger.warn("scheduler", `weeklyKeyedSent evicted ${evictCount} entries (size was ${SCHEDULER_LIMITS.WEEKLY_KEYED_MAX_SIZE})`);
+  }
+
   try {
     const inserted = await db.insert(sentProactive)
       .values({ userId, messageKey, dedupeWindow })
@@ -191,7 +205,7 @@ async function claimProactive(userId: string, messageKey: string, dedupeWindow: 
     // run (or a previous process) already claimed this send.
     return inserted.length > 0;
   } catch (e) {
-    console.warn(`[claimProactive] DB error for ${messageKey}/${userId}:`, e);
+    logger.warn("scheduler", `claimProactive DB error for ${messageKey}/${userId.slice(-6)}`, e);
     weeklyKeyedSent.set(inMemKey, true);
     return true; // fail open
   }
@@ -215,7 +229,7 @@ cron.schedule("0 22 * * *", async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as any, thirtyDaysAgo));
   } catch { /* non-fatal */ }
-  console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size, "keyed:", weeklyKeyedSent.size);
+  logger.info("scheduler", `dedupe purged — daily set size: ${dailySentThisProcess.size} keyed: ${weeklyKeyedSent.size}`);
 }, { timezone: "UTC" });
 
 function thisWeekUTC(): string {
@@ -253,19 +267,29 @@ function resetDeliveryStatsIfNeeded() {
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();
   if (!FROM_NUMBER) {
-    console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
+    logger.warn("scheduler", "TWILIO_WHATSAPP_NUMBER not set — skipping send");
     deliveryStats.failed++;
     return;
   }
+
+  // Circuit breaker: skip send if Twilio is known to be failing
+  if (isTwilioCircuitOpen()) {
+    logger.warn("scheduler", `Twilio circuit OPEN — skipping send to ${to.slice(-8)}`);
+    deliveryStats.failed++;
+    return;
+  }
+
   try {
     const params: any = { from: FROM_NUMBER, to, body };
     if (mediaUrl) params.mediaUrl = [mediaUrl];
     await twilioClient.messages.create(params);
+    recordTwilioSuccess();
     deliveryStats.sent++;
-    console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
+    logger.info("scheduler", `→ ${to.slice(-8)}: ${body.slice(0, 80)}…`);
   } catch (err) {
+    recordTwilioFailure();
     deliveryStats.failed++;
-    console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)}:`, err);
+    logger.error("scheduler", `✗ Failed to send to ${to.slice(-8)}`, err);
     throw err; // re-throw so callers can handle
   }
 }
@@ -345,12 +369,12 @@ function programmeDaysSince(startDate: Date | null | undefined): number {
 // ============================================================
 
 async function runMorningCheckin(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Morning check-in");
+  logger.info("scheduler", "JOB: Morning check-in");
 
   // Skip Sunday — rest-day comms handled by Sunday evening check-in
   const todayDOW = new Date().getDay(); // 0=Sun
   if (todayDOW === 0) {
-    console.log("[SCHEDULER] Morning check-in — skipping Sunday");
+    logger.info("scheduler", "Morning check-in — skipping Sunday");
     return;
   }
 
@@ -620,7 +644,7 @@ cron.schedule("0 4 * * *", async () => {
 // ============================================================
 
 async function runEveningAccountability(): Promise<void> {
-  console.log("[SCHEDULER] JOB: Evening accountability");
+  logger.info("scheduler", "JOB: Evening accountability");
   const clients = await getActiveClients();
   const todayStart = dayStart(0);
 
@@ -2567,7 +2591,7 @@ let schedulerInitialised = false;
 
 export function initScheduler(): void {
   if (schedulerInitialised) {
-    console.log("[SCHEDULER] Already initialised — skipping duplicate registration");
+    logger.info("scheduler", "Already initialised — skipping duplicate registration");
     return;
   }
   schedulerInitialised = true;
@@ -2575,36 +2599,7 @@ export function initScheduler(): void {
   // Catch-up removed: Railway filesystem is ephemeral — state file lost on every deploy
   // caused double morning messages. Cron handles scheduling reliably without catch-up.
 
-  console.log("[SCHEDULER] Proactive coaching jobs active:");
-  console.log("[SCHEDULER]   Morning check-in    — daily 6am SAST");
-  console.log("[SCHEDULER]   Evening accountability — daily 7pm SAST");
-  console.log("[SCHEDULER]   Week 3 intervention — Monday 6am SAST");
-  console.log("[SCHEDULER]   Month-end budget     — 20th each month (budget-tier aware)");
-  console.log("[SCHEDULER]   Milestone check      — daily 8am SAST");
-  console.log("[SCHEDULER]   Silence detection    — every 12 hours");
-  console.log("[SCHEDULER]   Friday strategy      — Friday 4pm SAST");
-  console.log("[SCHEDULER]   Sunday weekly report — Sunday 8am SAST");
-  console.log("[SCHEDULER]   Days 1-3 onboarding  — daily 10am SAST");
-  console.log("[SCHEDULER]   Monthly measurements  — 1st of each month 9am SAST");
-  console.log("[SCHEDULER]   SA cultural calendar  — Heritage Day, Women's Day, New Year, etc.");
-  console.log("[SCHEDULER]   14/30-day silence    — escalating re-engagement");
-  console.log("[SCHEDULER]   Referral nudge        — day 7/30/60/90 milestones");
-  console.log("[SCHEDULER]   Goal reassessment     — day 30/60/90 weight + goal check");
-  console.log("[SCHEDULER]   Streak-at-risk        — 8pm alert if streak endangered");
-  console.log("[SCHEDULER]   Women's Month         — August Mondays");
-  console.log("[SCHEDULER]   Phase advancement     — auto-advance on 75% compliance");
-  console.log("[SCHEDULER]   Goal check / review   — Monday 7am UTC at weeks 4/8/12/16/20/24");
-  console.log("[SCHEDULER]   Injury follow-up      — Wednesday check on injured clients");
-  console.log("[SCHEDULER]   New Year reset        — January 2nd continuation message");
-  console.log("[SCHEDULER]   Plateau detection        — Sunday 9am SAST (3-week stall → protocol)");
-  console.log("[SCHEDULER]   Pre-training nutrition   — daily 12pm SAST (workout day reminder)");
-  console.log("[SCHEDULER]   Ramadan mode         — activates only on explicit client mention");
-  console.log("[SCHEDULER]   Weekly KPI report       — Monday 7am SAST to coach WhatsApp");
-  console.log("[SCHEDULER]   Step leaderboard        — Sunday 5pm SAST broadcast");
-  console.log("[SCHEDULER]   Payday shopping nudge   — 15th + 25th of each month");
-  console.log("[SCHEDULER]   Supplement reminder       — daily 8am SAST (logged users)");
-  console.log("[SCHEDULER]   Auto calorie adjustment   — Sunday 10am SAST (3-week plateau)");
-  console.log("[SCHEDULER]   Monthly NPS survey        — 1st of each month 10am SAST");
+  logger.info("scheduler", "Proactive coaching jobs active: morning check-in, evening accountability, week-3 intervention, month-end budget, milestones, silence detection, Friday strategy, Sunday report, onboarding, measurements, cultural calendar, silence escalation, referral nudge, goal reassessment, streak-at-risk, Women's Month, phase advancement, goal check, injury follow-up, New Year reset, plateau detection, KPI report, leaderboard, payday nudge, supplement reminder, auto calorie adjustment, NPS survey");
 
   // ============================================================
   // PAYDAY SHOPPING NUDGE — 15th + 25th at 9am SAST (7am UTC)

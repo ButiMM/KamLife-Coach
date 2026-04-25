@@ -1,4 +1,33 @@
 // ============================================================
+// SCHEDULER & RATE-LIMIT CONSTANTS
+// ============================================================
+
+export const SCHEDULER_LIMITS = {
+  // Silence thresholds (days)
+  SILENCE_STOP_MESSAGING_DAYS: 7,       // stop proactive messages after this many silent days
+  SILENCE_RE_ENGAGE_MIN_DAYS: 3,        // start re-engagement messages after this many silent days
+  ESCALATION_THRESHOLD_DAYS: 14,        // create escalation record after this many silent days
+
+  // Twilio circuit breaker
+  TWILIO_CIRCUIT_FAILURE_THRESHOLD: 5,  // open circuit after this many consecutive failures
+  TWILIO_CIRCUIT_RESET_MS: 60_000,      // attempt reset after 60 seconds
+
+  // GPT rate limiting (per user)
+  GPT_RATE_LIMIT_PER_MIN: 10,           // max GPT calls per user per minute
+  GPT_TIMEOUT_MS: 15_000,               // abort GPT call after 15 seconds
+
+  // Media dedup cache
+  MEDIA_DEDUP_MAX_SIZE: 500,            // max entries in the media dedup Map
+  MEDIA_DEDUP_TTL_MS: 60_000,           // evict media dedup entries after 60 seconds
+
+  // weeklyKeyedSent Map eviction
+  WEEKLY_KEYED_MAX_SIZE: 10_000,        // evict oldest entries when Map exceeds this size
+
+  // Daily proactive budget
+  MAX_PROACTIVE_PER_DAY: 1,            // max proactive messages per client per calendar day
+} as const;
+
+// ============================================================
 // HARDCODED LOOKUP TABLES — no GPT cost
 // ============================================================
 

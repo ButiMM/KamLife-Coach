@@ -5,12 +5,27 @@ import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
+import { getDisplayName } from "./utils";
+import { SCHEDULER_LIMITS } from "./constants";
+import { logger } from "./logger";
 
-// Local utility — avoids circular dep with routes.ts
-function getDisplayName(user: any): string {
-  const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-  if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
-  return user.name;
+// ── GPT call timeout wrapper ──────────────────────────────────────────────────
+// Prevents OpenAI calls from hanging indefinitely. Rejects after SCHEDULER_LIMITS.GPT_TIMEOUT_MS.
+async function withGptTimeout<T>(label: string, fn: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      fn(),
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error(`${label}_timeout_${SCHEDULER_LIMITS.GPT_TIMEOUT_MS}ms`)),
+          SCHEDULER_LIMITS.GPT_TIMEOUT_MS,
+        );
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 const openai = new OpenAI({
@@ -320,7 +335,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
     return parts.join(" ");
   } catch (err) {
-    console.error("[PATTERN] buildPatternSummary error:", err);
+    logger.error("gpt", "buildPatternSummary error", err);
     const fallback = [`PATTERN CONTEXT: ${name}.`];
     if (programmeWeek === 3) fallback.push("Week 3 — danger zone.");
     if (today.getDate() >= 20) fallback.push("Budget mode active.");
@@ -344,7 +359,7 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   // GPT-4o only for genuine crisis — safety requires best model
   const crisis = GPT4O_TEXT_SIGNALS.find(s => msgLower.includes(s));
   if (crisis) {
-    console.log(`[MODEL] gpt-4o (crisis) — matched: "${crisis}"`);
+    logger.debug("gpt", `model=gpt-4o (crisis) matched: "${crisis}"`);
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
@@ -363,12 +378,12 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   ];
   const isComplex = COMPLEX_SIGNALS.some(s => msgLower.includes(s));
   if (isComplex) {
-    console.log(`[MODEL] gpt-4o (complex coaching) | msg: "${userMessage.slice(0, 60)}"`);
+    logger.debug("gpt", `model=gpt-4o (complex) msg="${userMessage.slice(0, 60)}"`);
     return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
   }
 
   // Everything else: gpt-4o-mini — coaching quality is equal, cost is 15x lower
-  console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
+  logger.debug("gpt", `model=gpt-4o-mini msg="${userMessage.slice(0, 60)}"`);
   return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };
 }
 
@@ -585,7 +600,7 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
 
     // Model signals this message is NOT a food log — don't force-log non-food messages
     if (parsed.is_food === false) {
-      console.log("[gptFoodFallback] model says not food — skipping");
+      logger.debug("gpt", "gptFoodFallback: model says not food — skipping");
       return null;
     }
 
@@ -614,7 +629,7 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
     foodFallbackCache.set(cacheKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
     return result;
   } catch (err) {
-    console.warn("[gptFoodFallback] error:", err);
+    logger.warn("gpt", "gptFoodFallback error", err);
     return null;
   }
 }
@@ -648,7 +663,7 @@ export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string): Promise<string> {
   const context = buildContext(user);
   const patternSummary = await buildPatternSummary(user);
-  console.log(`[PATTERN] ${patternSummary}`);
+  logger.debug("gpt", `pattern: ${patternSummary}`);
   // Addition 5 — SA seasonal/cultural flags injected into every GPT call (user-aware)
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
@@ -706,7 +721,7 @@ Protein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g stil
 CRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
     }
   } catch (foodErr) {
-    console.warn("[GPT] Could not fetch today's food context:", foodErr);
+    logger.warn("gpt", "Could not fetch today's food context", foodErr);
   }
 
   // Inject recent lift data so GPT can reference real numbers (never fabricate)
@@ -728,7 +743,7 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
       liftContext = `\n\nCLIENT'S RECENT LIFTS (use these exact numbers — never guess):\n${lines.join("\n")}\nWhen advising on weight/progression, reference these numbers directly.`;
     }
   } catch (liftErr) {
-    console.warn("[GPT] Could not fetch lift context:", liftErr);
+    logger.warn("gpt", "Could not fetch lift context", liftErr);
   }
 
   const { model, maxTokens } = selectModel(instruction, userMessage);
@@ -740,7 +755,7 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
   let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const MAX_SYSTEM_CHARS = 10_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
-    console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
+    logger.warn("gpt", `System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
     // Preserve the essential tail (hardLimit + instruction) when truncating
     const tail = `\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
     systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS - tail.length) + tail;
@@ -765,11 +780,11 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
       return msgs;
     });
   } catch (histErr) {
-    console.warn("[GPT] Could not fetch chat history:", histErr);
+    logger.warn("gpt", "Could not fetch chat history", histErr);
   }
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await withGptTimeout("askCoachK", () => openai.chat.completions.create({
       model,
       max_tokens: maxTokens,
       messages: [
@@ -783,7 +798,7 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
           content: userMessage
         }
       ]
-    });
+    }));
     // ── Cost tracking ──────────────────────────────────────
     const usage = response.usage;
     if (usage) {
@@ -796,7 +811,7 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
         ? (inputTokens / 1000) * 0.00015 + (outputTokens / 1000) * 0.0006
         : (inputTokens / 1000) * 0.005   + (outputTokens / 1000) * 0.015;
       const costZAR = costUSD * 18.5; // approximate USD→ZAR
-      console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
+      logger.info("gpt", `${model} | in:${inputTokens} out:${outputTokens} | ${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
     }
 
     return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
@@ -806,18 +821,18 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
     const msg = err?.message ?? "";
 
     if (status === 401 || code === 401 || msg.includes("401")) {
-      console.error("[GPT] OpenAI auth error (401) — check AI_INTEGRATIONS_OPENAI_API_KEY:", msg);
+      logger.error("gpt", "OpenAI auth error (401) — check AI_INTEGRATIONS_OPENAI_API_KEY", msg);
       return "Coach K is almost ready. Type *menu* to see your options or *calories* for your daily target. Your programme, meal plan, and targets are all set.";
     }
     if (status === 429 || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota")) {
-      console.error("[GPT] OpenAI rate limit / quota exceeded:", msg);
+      logger.error("gpt", "OpenAI rate limit / quota exceeded", msg);
       return "Coach K is a bit busy right now. Give it 30 seconds and try again.";
     }
     if (status === 503 || status === 504 || msg.toLowerCase().includes("timeout") || code === "ECONNRESET") {
-      console.error("[GPT] OpenAI timeout / service unavailable:", msg);
+      logger.error("gpt", "OpenAI timeout / service unavailable", msg);
       return "Network hiccup on my side. Send that again in a moment.";
     }
-    console.error("[GPT] OpenAI unexpected error:", { status, code, msg });
+    logger.error("gpt", "OpenAI unexpected error", { status, code, msg });
     return "Eish Coach K had a moment. Try that again.";
   }
 }
@@ -901,13 +916,13 @@ OTHER      - everything else`,
 
     if (response.usage && userId) {
       const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
-      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%) tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
+      logger.debug("gpt", `intent=${intent}(${Math.round(confidence * 100)}%) tokens=${response.usage.total_tokens} ${costUSD.toFixed(5)} user=${userId.slice(-6)}`);
     }
 
     return { intent, confidence };
   } catch (err) {
     // Non-fatal — routing gracefully falls back to keyword matching
-    console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
+    logger.warn("gpt", "Intent classifier error (non-fatal, falling back)", err);
     return { intent: "OTHER", confidence: 0 };
   }
 }

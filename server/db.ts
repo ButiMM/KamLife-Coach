@@ -10,5 +10,10 @@ if (!process.env.DATABASE_URL) {
   );
 }
 
-export const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+export const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 10,              // max concurrent connections (Railway hobby = 25 limit)
+  idleTimeoutMillis: 30_000,   // release idle connections after 30s
+  connectionTimeoutMillis: 5_000, // fail fast if pool is exhausted
+});
 export const db = drizzle(pool, { schema });
