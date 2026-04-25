@@ -479,4 +479,27 @@ async function activateCoachAccount(): Promise<void> {
       activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
     },
   );
+
+  // Graceful shutdown — Railway sends SIGTERM before killing the container.
+  // Drain existing connections cleanly so in-flight WhatsApp replies finish.
+  const shutdown = async (signal: string) => {
+    console.log(`[SHUTDOWN] ${signal} received — closing server`);
+    httpServer.close(async () => {
+      try {
+        await pool.end();
+        console.log("[SHUTDOWN] DB pool closed cleanly");
+      } catch (e) {
+        console.error("[SHUTDOWN] DB pool close error:", e);
+      }
+      process.exit(0);
+    });
+    // Force-exit after 15s if connections don't drain
+    setTimeout(() => {
+      console.error("[SHUTDOWN] Force exit after timeout");
+      process.exit(1);
+    }, 15_000).unref();
+  };
+
+  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  process.on("SIGINT", () => shutdown("SIGINT"));
 })();

@@ -824,6 +824,13 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           cancelledAt: new Date(),
         }).where(eq(users.id, uid));
       });
+      // Delete vector memory embeddings (pgvector) — outside transaction as it's a raw query
+      try {
+        await pool.query("DELETE FROM memories WHERE phone = $1", [phone]);
+        console.log(`[POPIA DELETE] Vector memories cleared for ${phone}`);
+      } catch (memErr: any) {
+        console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
+      }
       console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
       return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
     }
@@ -2445,7 +2452,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const daysPerWeek = user.trainingDaysPerWeek || 3;
       if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
       let newPhase = user.programmePhase || 1;
-      if (newWeek > 4) { newWeek = 1; newPhase = Math.min(newPhase + 1, 4); }
+      const gymPhaseLen = newPhase === 5 ? 1 : 4;
+      if (newWeek > gymPhaseLen) {
+        newWeek = 1;
+        if (newPhase >= 5) { newPhase = 1; } else { newPhase = newPhase + 1; }
+      }
       await db.update(users).set({
         totalWorkoutsCompleted: newTotal,
         programmeDayInWeek: newDay,
@@ -2487,11 +2498,16 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     const daysPerWeek = user.trainingDaysPerWeek || 3;
 
     if (newDay > daysPerWeek) { newDay = 1; newWeek++; }
-    // When week exceeds 4, cycle back to week 1 and advance the phase (4-week programme structure)
-    // Phase advancement is also handled by the scheduler's Phase Advancement job (75% compliance check)
-    // but this inline advance ensures the user is never stuck at "Week 4" indefinitely.
+    // Phase advancement: 4 weeks per phase (Phase 5/Deload = 1 week), then full cycle restart.
+    // Foundation(4w) → Build(4w) → Push(4w) → Peak(4w) → Deload(1w) → Foundation again (Cycle 2+)
     let newPhase = user.programmePhase || 1;
-    if (newWeek > 4) { newWeek = 1; newPhase = Math.min(newPhase + 1, 4); }
+    const phaseLength = newPhase === 5 ? 1 : 4;
+    let cycleCompleted = false;
+    if (newWeek > phaseLength) {
+      newWeek = 1;
+      if (newPhase >= 5) { newPhase = 1; cycleCompleted = true; } // full cycle → restart
+      else { newPhase = newPhase + 1; }
+    }
 
     // Workout streak — continues if last session was within 2 days (but NOT same calendar day,
     // which is already prevented by the double-log guard above)
@@ -2609,7 +2625,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       ? WORKOUT_SURPRISES[Math.floor(Math.random() * WORKOUT_SURPRISES.length)]
       : "";
 
-    let doneReply = `${celebration}${milestoneNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
+    // Full cycle completion — all 5 phases done, restarting stronger
+    const cycleNote = cycleCompleted
+      ? `\n\n🏆 *Full programme cycle complete.* Foundation → Build → Push → Peak → Deload — you did all of it.\n\nCycle 2 starts now. Same structure, heavier weights, shorter rests. Let's see what you're actually made of.`
+      : newPhase === 5 && newWeek === 1
+        ? `\n\n😮‍💨 *Deload week.* Drop weights by 40%, keep the movement. Your body repairs during this week — do not skip it.`
+        : "";
+
+    let doneReply = `${celebration}${milestoneNote}${cycleNote}${workoutSurprise}${streakLine}\n\n✅ Workout ${newTotal} logged.${perfectDay || ""}${liftPrompt}`;
 
     // Progressive programme delivery — unlock next day's workout after completing each session
     try {
