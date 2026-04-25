@@ -952,7 +952,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- SUBSCRIPTION GATE — inactive users get free basic tier, premium features gated ----
   // FREE (always available): food logging, step tracking, water, weight, basic Q&A, meal diary
   // PREMIUM (requires subscription): workout programmes, shopping lists, full coaching, meal plans
-  if (user.subscriptionStatus === 'inactive') {
+  // isCoach always bypasses the gate — their account is also healed in the DB above
+  if (user.subscriptionStatus === 'inactive' && !isCoach) {
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");

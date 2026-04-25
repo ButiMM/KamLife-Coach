@@ -7,7 +7,9 @@ import { createServer } from "http";
 import { initScheduler } from "./scheduler";
 import { initMemoryTable, initMealLogsTable } from "./memory";
 import { initFoodsTable } from "./foods";
-import { pool } from "./db";
+import { pool, db } from "./db";
+import { users } from "../shared/schema";
+import { eq } from "drizzle-orm";
 
 async function runMigrations(): Promise<void> {
   // ── PHASE 1: Create all tables if they don't exist (fresh Railway deploy) ──
@@ -382,6 +384,27 @@ app.use((req, res, next) => {
   next();
 });
 
+// Ensure the coach/owner account is always active in the DB on boot.
+// Works off COACH_ALERT_PHONE or ADMIN_PHONE_OVERRIDE env var.
+async function activateCoachAccount(): Promise<void> {
+  const rawPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+  if (!rawPhone) return;
+  const digits = rawPhone.replace(/\D/g, "");
+  const normalised = `whatsapp:+${digits}`;
+  try {
+    const result = await db
+      .update(users)
+      .set({ subscriptionStatus: "active" })
+      .where(eq(users.phoneNumber, normalised))
+      .returning({ id: users.id });
+    if (result.length > 0) {
+      console.log(`[STARTUP] Coach account activated: ${normalised}`);
+    }
+  } catch (e: any) {
+    console.warn(`[STARTUP] Could not activate coach account: ${e.message}`);
+  }
+}
+
 (async () => {
   await runMigrations();
   registerAudioRoutes(app);
@@ -453,6 +476,7 @@ app.use((req, res, next) => {
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
       initMealLogsTable().catch(e => console.error("[STARTUP] Meal logs init failed:", e));
+      activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
     },
   );
 })();
