@@ -1994,7 +1994,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             const daysBetween = Math.round(
               (Date.now() - new Date(firstPhoto.loggedAt || "").getTime()) / 86_400_000
             );
-            const progressDecision = selectVisionModel("progress_compare", user.subscriptionStatus);
+            const progressDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
             console.log(`[VISION][${mediaTrace}] progress model=${progressDecision.model} tier=${user.subscriptionStatus}`);
             const comparisonResponse = await openai.chat.completions.create({
               model: progressDecision.model,
@@ -2044,7 +2044,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
         );
         // ── Tier-gated vision — inactive users don't burn API budget ──
-        const foodVisionDecision = selectVisionModel("food_photo", user.subscriptionStatus);
+        // isCoach always bypasses the gate regardless of subscription status
+        const foodVisionDecision = selectVisionModel("food_photo", isCoach ? "active" : user.subscriptionStatus);
         if (!foodVisionDecision.allowed) {
           return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
         }
@@ -3611,12 +3612,16 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
-      // Smart protein suggestion based on remaining protein target
-      // Skip for drinks/tiny items (< 100 kcal) — logging morning coffee shouldn't trigger a pilchards nag
+      // Smart protein suggestion — only fires late in the day when it actually matters.
+      // Rules: meal >= 100 kcal (not a drink), running cals >= 40% of daily target
+      // (early-day logs don't need nagging — whole day is still ahead), and coachNote
+      // hasn't already mentioned protein remaining (avoid double-messaging).
       let proteinTip = "";
       const budgetTier = user.weeklyFoodBudget || "100_300";
       const protRemaining = (user.proteinTarget || 120) - runningProtein;
-      if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100) {
+      const earlyInDay = runningCals < (calorieTarget * 0.4); // < 40% logged = still morning/midday
+      const coachNoteAlreadyMentionsProtein = coachNote.includes("protein still needed") || coachNote.includes("Protein target hit");
+      if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100 && !earlyInDay && !coachNoteAlreadyMentionsProtein) {
         const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
         const suggestions = lowBudget
           ? [
