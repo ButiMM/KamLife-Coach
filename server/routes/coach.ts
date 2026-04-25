@@ -2,7 +2,9 @@ import type { Express } from "express";
 import crypto from "crypto";
 import { db } from "../db";
 import { users, workoutLogs, stepLogs, chatHistory, mealLogs, weightLogs, escalations } from "../../shared/schema";
-import { eq, desc, and, gte, lt, sql, count } from "drizzle-orm";
+import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
+import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../../shared/pricing";
+import { deliveryStats } from "../scheduler";
 
 export function registerCoachRoutes(app: Express): void {
 // ============================================================

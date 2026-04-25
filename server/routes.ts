@@ -3,7 +3,7 @@ import { type Server } from "http";
 import crypto from "crypto";
 import path from "path";
 import { db, pool } from "./db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abExperiments, abAssignments, mealLogs } from "../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, clothingCheckins, bodyMeasurements, weeklyCheckins, exerciseLogs, progressPhotos, escalations, abAssignments, mealLogs } from "../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import OpenAI from "openai";
 import { tmpdir } from "os";
@@ -19,14 +19,11 @@ import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnder
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../shared/pricing";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
 import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
-import { deliveryStats, sendWhatsApp } from "./scheduler";
+import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
-import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
-import { detectEscalation, escalationSLA } from "./safety-detection";
 import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
 import { getSleepResponse } from "./handlers/sleep";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
@@ -49,41 +46,6 @@ function sastToday(): string {
 
 // Programme constants, workout builders, and GPT functions moved to dedicated modules (see imports above)
 
-// ============================================================
-// SA FOOD CALORIE ESTIMATES
-// ============================================================
-
-const SA_FOOD_CALORIES: Record<string, number> = {
-  pap: 350, samp: 300, rice: 200, bread: 80, "brown bread": 70,
-  oats: 150, "jungle oats": 150, maltabella: 160, "weet-bix": 130, "all bran": 175, "all-bran": 175, "all bran flakes": 175, "corn flakes": 155, "special k": 155, "coco pops": 165, "froot loops": 165, "pronutro chocolate": 195,
-  egg: 70, eggs: 140, pilchards: 180, "tinned tuna": 120,
-  chicken: 165, "chicken breast": 165, beef: 250, mince: 300,
-  "sugar beans": 200, "baked beans": 120, lentils: 180,
-  kota: 900, "fat cake": 400, magwinya: 400, vetkoek: 350,
-  "russian sausage": 290, polony: 280, viennas: 250,
-  "simba chips": 500, niknaks: 480, "bar one": 230,
-  "kfc streetwise 2": 800, kfc: 600, "steers burger": 700,
-  "peanut butter": 190, avocado: 160, banana: 90,
-  "cool drink": 140, coke: 140, fanta: 130,
-  beer: 150, "castle": 150, "black label": 160,
-  hennessy: 250, henny: 250, "henry and coke": 350, "henny and coke": 350,
-  "sweet potato": 130, butternut: 80, spinach: 20, cabbage: 25,
-  "mageu": 180, "mahewu": 180, cremora: 60,
-  "green tea": 2, rooibos: 2, "latte": 250, "giant latte": 400,
-  creatine: 0, "protein shake": 120,
-  "stew": 280, "fatty": 350, "pork": 300,
-  // Wraps — single-item compound names to prevent GPT splitting them
-  "steak wrap": 520, "beef wrap": 520, "chicken wrap": 420, "tuna wrap": 380, "veggie wrap": 300,
-};
-
-function estimateCalories(message: string): number {
-  const lower = message.toLowerCase();
-  let total = 0;
-  for (const [food, cals] of Object.entries(SA_FOOD_CALORIES)) {
-    if (lower.includes(food)) total += cals;
-  }
-  return total || 400;
-}
 
 // ============================================================
 // DISPLAY NAME HELPER
