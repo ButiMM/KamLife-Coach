@@ -27,6 +27,11 @@ import { deliveryStats, sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
 import { enforceCoachGuardrails, classifyMediaFailure } from "./coach-guardrails";
 import { detectEscalation, escalationSLA } from "./safety-detection";
+import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
+import { getSleepResponse } from "./handlers/sleep";
+import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
+import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex } from "./handlers/food-scanner";
+import { logChat, logMediaFailure, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -130,20 +135,6 @@ async function getOrCreateUser(phone: string): Promise<any> {
 }
 
 
-// ============================================================
-// ROTATING STEP RESPONSES (no GPT cost for simple logs)
-// ============================================================
-
-
-// ============================================================
-// STREAK HELPER — counts consecutive days with step logs
-// ============================================================
-
-import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
-import { getSleepResponse } from "./handlers/sleep";
-import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
-import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply } from "./handlers/food-scanner";
-import { logChat, logMediaFailure, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 
 
 async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
@@ -3177,6 +3168,16 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
 
+      const mealLabel = isMultiMeal ? "Day total" : "Meal total";
+      // Smart protein suggestion — only fires late in the day when it actually matters.
+      // Rules: meal >= 100 kcal (not a drink), running cals >= 40% of daily target
+      // (early-day logs don't need nagging — whole day is still ahead), and coachNote
+      // hasn't already mentioned protein remaining (avoid double-messaging).
+      let proteinTip = "";
+      const budgetTier = user.weeklyFoodBudget || "100_300";
+      const protRemaining = (user.proteinTarget || 120) - runningProtein;
+      const earlyInDay = runningCals < (calorieTarget * 0.4); // < 40% logged = still morning/midday
+
       // Day-pacing assessment — tells user if they're on track, not just the number
       let dayAssessment = "";
       if (prevCals > 0 && totalCals >= 100) {
@@ -3187,25 +3188,13 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         if (calRemaining <= 0) {
           dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
         } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
-          // Late day, undereating
           dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
         } else if (!earlyInDay && calPace > 1.3) {
-          // Running over
           dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
         } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
           dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
         }
       }
-
-      const mealLabel = isMultiMeal ? "Day total" : "Meal total";
-      // Smart protein suggestion — only fires late in the day when it actually matters.
-      // Rules: meal >= 100 kcal (not a drink), running cals >= 40% of daily target
-      // (early-day logs don't need nagging — whole day is still ahead), and coachNote
-      // hasn't already mentioned protein remaining (avoid double-messaging).
-      let proteinTip = "";
-      const budgetTier = user.weeklyFoodBudget || "100_300";
-      const protRemaining = (user.proteinTarget || 120) - runningProtein;
-      const earlyInDay = runningCals < (calorieTarget * 0.4); // < 40% logged = still morning/midday
       const coachNoteAlreadyMentionsProtein = coachNote.includes("protein still needed") || coachNote.includes("Protein target hit");
       if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100 && !earlyInDay && !coachNoteAlreadyMentionsProtein) {
         const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";

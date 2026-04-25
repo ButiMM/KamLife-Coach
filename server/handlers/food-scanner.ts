@@ -1,7 +1,7 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 
-function escapeRegex(s: string): string {
+export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
