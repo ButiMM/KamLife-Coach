@@ -1821,16 +1821,6 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
-    // Gate premium media (voice + photos) for inactive users before burning API credits
-    if (user.subscriptionStatus === "inactive") {
-      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const nm = user.name?.split(" ")[0] || "there";
-      return `${nm}, photo and voice note coaching require an active subscription.\n\nYou can still type your food or steps and I will log them free.\n\n*R149/month:* ${payLink}`;
-    }
-
     const ctype = mediaContentType || "";
     const mediaTrace = buildMediaTrace(phone, ctype);
     console.log(`[MEDIA][${mediaTrace}] start type=${ctype || "unknown"} hasCaption=${Boolean(message && message.trim())}`);
