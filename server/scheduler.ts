@@ -768,7 +768,7 @@ cron.schedule("0 17 * * *", async () => {
 // Runs daily 6am SAST (4am UTC) — sends once per user on their first day of week 3
 // ============================================================
 
-cron.schedule("0 4 * * *", async () => {
+cron.schedule("2 4 * * *", async () => {
   console.log("[SCHEDULER] JOB: Week 3 intervention");
   const clients = await getActiveClients();
   const state = loadState();
@@ -926,7 +926,7 @@ cron.schedule("0 6 * * *", async () => {
 // Runs every 12 hours (6am and 6pm SAST = 4am and 4pm UTC)
 // ============================================================
 
-cron.schedule("0 4,16 * * *", async () => {
+cron.schedule("4 4,16 * * *", async () => {
   console.log("[SCHEDULER] JOB: Silence detection");
   const clients = await getActiveClients();
   const now = Date.now();
@@ -1520,7 +1520,7 @@ if (false) (async () => {
 // Runs every 12 hours alongside silence detection
 // ============================================================
 
-cron.schedule("0 5,17 * * *", async () => {
+cron.schedule("0 5,18 * * *", async () => {
   console.log("[SCHEDULER] JOB: Deep silence escalation");
   const clients = await getActiveClients();
   const now = Date.now();
@@ -2269,7 +2269,7 @@ cron.schedule("0 7 * * 0", async () => {
 // Warns 3 days before expiry, deactivates on expiry
 // ============================================================
 
-cron.schedule("0 8 * * *", async () => {
+cron.schedule("5 8 * * *", async () => {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
   const clients = await getActiveClients();
   const now = Date.now();
@@ -2435,7 +2435,7 @@ cron.schedule("0 8 * * 0", async () => {
 // updates complianceLevel: RESET | BUILDING | CONSISTENT | LOCKED IN
 // ============================================================
 
-cron.schedule("0 7 * * 0", async () => {
+cron.schedule("10 7 * * 0", async () => {
   console.log("[SCHEDULER] JOB: Weekly compliance level update");
   const clients = await getActiveClients();
   const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
@@ -2489,7 +2489,7 @@ cron.schedule("0 7 * * 0", async () => {
 // Lapsed paying clients (cancelled): Day 3, Day 7, Day 30 win-back
 // ============================================================
 
-cron.schedule("0 9 * * *", async () => {
+cron.schedule("3 9 * * *", async () => {
   console.log("[SCHEDULER] JOB: Signup nudge + lapsed win-back");
   const inactiveClients = await db.select().from(users)
     .where(eq(users.subscriptionStatus, "inactive"));

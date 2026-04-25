@@ -87,6 +87,11 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       }
 
       const rawPhone = phoneKey;
+      // Guard: malformed or missing From field — Twilio always sends this
+      if (!rawPhone || !rawPhone.startsWith("whatsapp:")) {
+        console.warn(`[WEBHOOK] Invalid From field: ${JSON.stringify(rawPhone)}`);
+        return res.status(400).end();
+      }
       const rawMsg = ((req.body.Body || "") as string).trim();
       const numMedia = Number(req.body.NumMedia || 0);
       const mediaItems = Array.from({ length: Math.max(0, numMedia) }, (_, idx) => ({

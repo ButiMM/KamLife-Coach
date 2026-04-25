@@ -460,32 +460,34 @@ async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: num
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
-  // Primary: sum kcalInt + proteinInt from meal_logs table — written at log time, no re-parsing.
-  const [mealLogSum] = await db.select({
-    calories: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
-    protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
-  }).from(mealLogs).where(and(
-    eq(mealLogs.userId, userId),
-    gte(mealLogs.loggedAt, todayStart),
-  ));
+  // Run both queries in parallel — primary wins if it has data, legacy used as fallback.
+  const [mealLogSum, legacyLogs] = await Promise.all([
+    db.select({
+      calories: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+      protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+    }).from(mealLogs).where(and(
+      eq(mealLogs.userId, userId),
+      gte(mealLogs.loggedAt, todayStart),
+    )).then(r => r[0]),
+
+    db.select({
+      messageIn: chatHistory.messageIn,
+      messageOut: chatHistory.messageOut,
+    }).from(chatHistory).where(and(
+      eq(chatHistory.userId, userId),
+      eq(chatHistory.intent, "FOOD_LOG"),
+      gte(chatHistory.createdAt, todayStart),
+    )),
+  ]);
 
   if (mealLogSum && (mealLogSum.calories > 0 || mealLogSum.protein > 0)) {
     return { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
   }
 
-  // Fallback: legacy chatHistory scanning (users onboarded before meal_logs table existed)
-  const logs = await db.select({
-    messageIn: chatHistory.messageIn,
-    messageOut: chatHistory.messageOut,
-  }).from(chatHistory).where(and(
-    eq(chatHistory.userId, userId),
-    eq(chatHistory.intent, "FOOD_LOG"),
-    gte(chatHistory.createdAt, todayStart),
-  ));
-
+  // Fallback: legacy chatHistory scanning (pre-meal_logs users)
   let calories = 0;
   let protein = 0;
-  for (const log of logs) {
+  for (const log of legacyLogs) {
     const parsed = parseFoodLogTotalsFromMessageOut(log.messageOut || "");
     if (parsed) {
       calories += parsed.calories;
