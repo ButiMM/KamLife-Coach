@@ -54,6 +54,10 @@ function splitMessage(text: string, maxLen = 1500): string[] {
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {
   const { handleMessage, checkRateLimit } = deps;
 
+  // Dedup map for WhatsApp album spam: one reply per phone per 10s window for media-only messages.
+  // WhatsApp albums arrive as N separate webhooks — we reply to the first, drop the rest silently.
+  const mediaDedup = new Map<string, number>();
+
   // ── Main Twilio WhatsApp webhook ──
   app.post("/twilio/whatsapp", async (req, res) => {
     try {
@@ -109,6 +113,23 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       // Allow empty text when media exists so downstream handler can detect "no caption" correctly.
       if (!message && !mediaUrl) {
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+      }
+
+      // WhatsApp albums arrive as separate webhooks — one per photo. Deduplicate: if this phone
+      // already got a reply for a media-only message within the last 10 seconds, drop silently.
+      if (mediaUrl && !message) {
+        const lastSent = mediaDedup.get(rawPhone);
+        const now = Date.now();
+        if (lastSent && now - lastSent < 10_000) {
+          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        }
+        mediaDedup.set(rawPhone, now);
+        // Evict stale entries to prevent unbounded growth
+        if (mediaDedup.size > 500) {
+          for (const [k, v] of mediaDedup) {
+            if (now - v > 30_000) mediaDedup.delete(k);
+          }
+        }
       }
 
       const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
