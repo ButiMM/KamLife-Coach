@@ -2255,12 +2255,19 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           }));
         } catch (transErr) {
           console.warn(`[VOICE] transcribe attempt 1 failed (lang=${whisperLang || "auto"}), retrying without hint:`, transErr);
-          const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
-          transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
-            file: retryFile,
-            model: "whisper-1",
-            prompt: whisperPrompt,
-          }));
+          try {
+            const retryFile = new File([audioBuffer], `audio.${audioExt}`, { type: sourceAudioType || "audio/ogg" });
+            transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
+              file: retryFile,
+              model: "whisper-1",
+              prompt: whisperPrompt,
+            }));
+          } catch (retryErr) {
+            // Both attempts failed — fall through to empty-text handling below so
+            // failure counter increments and the 3-strike escalation fires correctly
+            console.warn("[VOICE] transcribe attempt 2 also failed:", retryErr);
+            transcription = { text: "" };
+          }
         }
 
         let transcribedText = transcription.text?.trim();
@@ -2289,9 +2296,13 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           const failCount = bumpVoiceFailure(user.id);
           if (failCount >= 3) {
             clearVoiceFailure(user.id);
-            return "I keep struggling to pick up your voice notes. Please type your message and I'll get you a detailed reply straight away.";
+            return "I keep struggling to pick up your voice notes — this is on my side. Please type your message and I'll get you a detailed reply straight away.";
           }
-          return "I received your voice note but it was too short or too quiet to transcribe. Hold the mic for at least 5 seconds, speak clearly, and resend — or just type your message.";
+          const noteLen = audioBuffer.byteLength;
+          const likelySilent = noteLen < 12_000; // < ~6s — possibly background noise / mic issue
+          return likelySilent
+            ? "I got your voice note but couldn't make it out — might have been too quiet or too short. Hold the mic close and speak clearly, or just type your message."
+            : "I got your voice note but had trouble processing it right now. Please resend it, or type your message and I'll reply straight away.";
         }
 
         const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
