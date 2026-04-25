@@ -199,6 +199,7 @@ async function claimProactive(userId: string, messageKey: string, dedupeWindow: 
 
 // Purge stale in-memory entries at midnight SAST (22:00 UTC) — prevents unbounded growth.
 // Also prunes sentProactive DB rows older than 30 days (keep DB lean).
+// Also alerts on overdue escalations past their SLA deadline.
 cron.schedule("0 22 * * *", async () => {
   const today = todaySAST();
   // Clear yesterday's daily budget entries from the Set
@@ -216,6 +217,38 @@ cron.schedule("0 22 * * *", async () => {
     await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as any, thirtyDaysAgo));
   } catch { /* non-fatal */ }
   console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size, "keyed:", weeklyKeyedSent.size);
+
+  // Escalation SLA check — alert coach for any open escalation past its deadline
+  try {
+    const overdueEscalations = await db.select({
+      id: escalations.id, userId: escalations.userId,
+      reason: escalations.reason, priority: escalations.priority,
+      slaDeadline: escalations.slaDeadline,
+    }).from(escalations).where(
+      and(
+        eq(escalations.status, "open"),
+        lt(escalations.slaDeadline, new Date()),
+      )
+    ).limit(20);
+
+    if (overdueEscalations.length > 0) {
+      const coachPhone = process.env.COACH_PHONE;
+      if (coachPhone) {
+        const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
+          ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
+          : "";
+        if (fromNum) {
+          const urgentCount = overdueEscalations.filter(e => e.priority === "urgent").length;
+          const msg = `⚠️ KamLife Coach — ${overdueEscalations.length} escalation${overdueEscalations.length > 1 ? "s" : ""} past SLA (${urgentCount} urgent). Check your dashboard.`;
+          await twilioC.messages.create({ from: fromNum, to: `whatsapp:${coachPhone}`, body: msg }).catch(e => console.error("[SLA ALERT]", e));
+        }
+      }
+      console.log(`[SCHEDULER] SLA breach — ${overdueEscalations.length} overdue escalations`);
+    }
+  } catch (slaErr) {
+    console.error("[SCHEDULER] SLA check failed:", slaErr);
+  }
 }, { timezone: "UTC" });
 
 function thisWeekUTC(): string {

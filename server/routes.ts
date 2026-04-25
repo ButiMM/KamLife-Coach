@@ -867,7 +867,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // On any error, returns { intent: "OTHER", confidence: 0 } — never blocks.
   const intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }> =
     (!mediaUrl && message.length >= 2 && message.length <= 500)
-      ? classifyIntent(message, user.id).catch(() => ({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }))
+      ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
       : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
 
   // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
