@@ -479,12 +479,12 @@ async function runMorningCheckin(): Promise<void> {
         const stepDays = new Set<string>();
         for (const l of recentStepLogs as { loggedAt: Date | null }[]) {
           if (!l.loggedAt) continue;
-          const d = new Date(l.loggedAt);
-          stepDays.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+          const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000); // SAST
+          stepDays.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
         }
-        const stepCheck = new Date(); stepCheck.setDate(stepCheck.getDate() - 1);
+        const stepCheck = new Date(Date.now() + 2 * 3_600_000); stepCheck.setUTCDate(stepCheck.getUTCDate() - 1); // SAST yesterday
         while (true) {
-          const key = `${stepCheck.getFullYear()}-${stepCheck.getMonth()}-${stepCheck.getDate()}`;
+          const key = `${stepCheck.getUTCFullYear()}-${stepCheck.getUTCMonth()}-${stepCheck.getUTCDate()}`;
           if (!stepDays.has(key)) break;
           stepStreakCount++;
           stepCheck.setDate(stepCheck.getDate() - 1);
@@ -1621,13 +1621,13 @@ cron.schedule("0 19 * * *", async () => {
     const days = new Set<string>();
     for (const l of logs) {
       if (!l.loggedAt) continue;
-      const d = new Date(l.loggedAt);
-      days.add(`${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`);
+      const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000); // SAST
+      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
     }
     let streak = 0;
-    const cur = new Date(); cur.setDate(cur.getDate() - 1); // start yesterday
+    const cur = new Date(Date.now() + 2 * 3_600_000); cur.setUTCDate(cur.getUTCDate() - 1); // SAST yesterday
     while (true) {
-      const key = `${cur.getFullYear()}-${cur.getMonth()}-${cur.getDate()}`;
+      const key = `${cur.getUTCFullYear()}-${cur.getUTCMonth()}-${cur.getUTCDate()}`;
       if (!days.has(key)) break;
       streak++;
       cur.setDate(cur.getDate() - 1);

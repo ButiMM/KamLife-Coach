@@ -1022,7 +1022,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const profileCtx = `CRITICAL PROFILE: Goal=${user.goalType}, Budget=${user.weeklyFoodBudget}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}.`;
     const severeCtx = `The client is severely frustrated. They are ready to quit. Message: "${message}". Last bot response (${lastIntent}): "${lastOut}". ${profileCtx}\n\nRULES: 1) Do NOT apologise generically. 2) Do NOT ask what happened — you know what happened: the bot failed them. 3) Acknowledge the SPECIFIC failure. 4) Tell them ONE specific thing that still works or IS personalised to their profile. 5) Give them a direct, concrete action for TODAY only. 6) Maximum 4 sentences. SA voice. Human, direct, no corporate speak.`;
     try {
-      const severeReply = await askCoachK(message, user, severeCtx);
+      const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
       return severeReply;
     } catch (e) {
@@ -1416,9 +1416,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const goal = user.goalType || "fat_loss";
     const pTarget = user.proteinTarget || 120;
     const cTarget = user.calorieTarget || 1800;
-    const adjustReply = await askCoachK(message, user,
+    const adjustReply = await withTimeout("gpt_adjust", 20000, () => askCoachK(message, user,
       `The client just sent you their personal shopping/grocery list. Analyze it as Coach K. Be specific and SA-focused:\n\n1. What's GOOD about their list (acknowledge what they're doing right)\n2. What's MISSING for their ${goal} goal (especially protein sources — they need ${pTarget}g/day)\n3. What to SWAP (not remove — replace with a better option at similar price)\n4. What to REMOVE (only if genuinely harmful to their goal)\n5. End with a specific weekly total estimate in ZAR\n\nKeep it direct, no fluff. Use SA product names and prices. Max 4 bullet points per section. Their calorie target is ${cTarget} kcal/day.`
-    );
+    ));
     await logChat(user.id, message, adjustReply, "SHOPPING_LIST_ADJUST");
     return adjustReply;
   }
@@ -1448,9 +1448,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       return guide;
     }
     // For restaurants not in the guide, use GPT
-    const gptRestaurant = await askCoachK(message, user,
+    const gptRestaurant = await withTimeout("gpt_restaurant", 20000, () => askCoachK(message, user,
       `Client is asking what to eat at ${restaurant}. Give a SA-focused restaurant guide:\n- Best option (calories + protein)\n- Decent option\n- What to avoid\n- One pro tip\nTheir goal is ${goal}, protein target ${pTarget}g/day, calorie target ${cTarget}/day. Max 6 lines. Be specific about menu items.`
-    );
+    ));
     await logChat(user.id, message, gptRestaurant, "RESTAURANT_GUIDE");
     return gptRestaurant;
   }
@@ -1521,9 +1521,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       return swapReply;
     }
     // If no swap found in DB, use GPT
-    const gptSwap = await askCoachK(message, user,
+    const gptSwap = await withTimeout("gpt_swap", 20000, () => askCoachK(message, user,
       `Client doesn't want ${foodName} (${category}). Suggest 3-4 SA alternatives in the same category at a ${budget} budget. Include calories and protein per portion. Their goal is ${goal}. Be specific.`
-    );
+    ));
     await logChat(user.id, message, gptSwap, "FOOD_SWAP");
     return gptSwap;
   }
@@ -1821,6 +1821,16 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
+    // Gate premium media (voice + photos) for inactive users before burning API credits
+    if (user.subscriptionStatus === "inactive") {
+      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+      const merchantId = process.env.PAYFAST_MERCHANT_ID;
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      const nm = user.name?.split(" ")[0] || "there";
+      return `${nm}, photo and voice note coaching require an active subscription.\n\nYou can still type your food or steps and I will log them free.\n\n*R149/month:* ${payLink}`;
+    }
+
     const ctype = mediaContentType || "";
     const mediaTrace = buildMediaTrace(phone, ctype);
     console.log(`[MEDIA][${mediaTrace}] start type=${ctype || "unknown"} hasCaption=${Boolean(message && message.trim())}`);
@@ -3108,7 +3118,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     if (isReferenceCorrection && !hasCorrectionPrefix) {
       // Route to GPT — it has chat history context to understand what the user means
       // MUST return here to prevent food scanner from creating duplicate entries
-      const gptRef = await askCoachK(message, user, "The user is referencing or correcting a previous food log. Use chat history to understand what they mean and respond helpfully. Do NOT log new food.");
+      const gptRef = await withTimeout("gpt_food_ref", 20000, () => askCoachK(message, user, "The user is referencing or correcting a previous food log. Use chat history to understand what they mean and respond helpfully. Do NOT log new food."));
       await logChat(user.id, message, gptRef, "FOOD_CORRECTION_REF");
       return gptRef;
     } else {
@@ -3920,7 +3930,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         ? " IMPORTANT — this client is in WEEK 3, which is statistically the highest dropout point. The physical adaptation is happening but is not yet visible. Specifically acknowledge Week 3 by name. Tell them exactly what is happening physiologically this week (muscles adapting, metabolism shifting) and that the visible results come in weeks 4–6 if they do not stop now."
         : "";
       const struggleContext = `Client is struggling and said: "${message}". RULES — empathy first in one sentence, no generic motivation speech. Then state this real data point: "${dataPoint || "You showed up and sent this message — that means you have not quit."}". Then give ONE single specific action for today only. Never a list. Never "you've got this" or "believe in yourself". Be real and direct like a coach, not a cheerleader. SA voice.${week3Note}`;
-      const struggleReply = await askCoachK(message, user, struggleContext);
+      const struggleReply = await withTimeout("gpt_struggle", 20000, () => askCoachK(message, user, struggleContext));
       await logChat(user.id, message, struggleReply, "MOTIVATION");
       return struggleReply;
     } catch (e) {
@@ -3950,7 +3960,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // ---- FIX 3: HANDLER 5 — Period and cycle tracking ----
   if (m.includes("my period") || m.includes("time of the month") || m.includes(" pms") || m.includes("that time") || m.includes("menstrual") || m.includes("on my period") || m.includes("period started") || m.includes("period week")) {
     const cycleContext = `Client mentioned their menstrual cycle or period. Ask which phase they are in using EXACTLY these options: "Just started (Day 1–5)", "Middle of cycle (Day 6–14)", "PMS week (Day 15–21)", or "Period week (Day 22–28)". Then based on their reply: Phase 1 (period) — lighter training is fine, walking counts, iron-rich foods essential (red meat, spinach, pilchards), no guilt for lower energy. Phase 2 (follicular) — best training week, peak strength, push harder, carbs support performance. Phase 3 (PMS) — reduce intensity slightly, higher protein reduces cravings, magnesium from dark leafy greens helps mood. Phase 4 (period) — same as Phase 1. Normalise all of it. Weight fluctuates 1–3kg from water retention before period — not fat. Do not panic. Coach the next meal or session, not the feelings. SA voice. Max 3 sentences unless giving phase-specific advice.`;
-    const cycleReply = await askCoachK(message, user, cycleContext);
+    const cycleReply = await withTimeout("gpt_cycle", 20000, () => askCoachK(message, user, cycleContext));
     await logChat(user.id, message, cycleReply, "CYCLE");
     return cycleReply;
   }
@@ -6713,7 +6723,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
       const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
-      const shortReply = sanitizeCoachReply(await askCoachK(message, user, shortReplyContext, memoryContext), message, user.weeklyFoodBudget, user.injuries);
+      const shortReply = sanitizeCoachReply(await withTimeout("gpt_short", 20000, () => askCoachK(message, user, shortReplyContext, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }
@@ -6749,7 +6759,7 @@ CRITICAL RULES — these are non-negotiable:
       const lastIntent = lastBotMsg[0]?.intent || "";
       const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
       const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
-      const frustReply = sanitizeCoachReply(await askCoachK(message, user, frustContext), message, user.weeklyFoodBudget, user.injuries);
+      const frustReply = sanitizeCoachReply(await withTimeout("gpt_frust", 20000, () => askCoachK(message, user, frustContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
     } catch (e) { console.warn("[fall-through-gpt]", e); }
@@ -6794,15 +6804,15 @@ CRITICAL RULES — these are non-negotiable:
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
     } else {
-      gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
+      gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
     }
     // If specialist agent returned its own error string, fall back to full Coach K
     if (gptReply === AGENT_ERROR) {
-      gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
+      gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
     }
   } catch (e) {
     console.warn("[agent-routing]", e);
-    gptReply = await askCoachK(message, user, finalInstruction, memoryContext);
+    gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
   }
 
   const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message, user.weeklyFoodBudget, user.injuries);
