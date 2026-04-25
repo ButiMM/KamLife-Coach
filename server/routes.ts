@@ -3524,18 +3524,29 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       mealSegments.push({ label: "", text: m });
     }
 
+    // Helper: convert word numbers to digits in a segment string
+    function normaliseWordNumbers(text: string): string {
+      const map: Record<string, string> = {
+        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+        "half": "0.5", "a": "1", "an": "1",
+      };
+      return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, m => map[m.toLowerCase()] ?? m);
+    }
+
     // Helper: adjust foods by quantity for a given text segment
     function adjustFoodsForSegment(foods: SAFood[], segText: string) {
+      const normText = normaliseWordNumbers(segText);
       return foods.map(f => {
         const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
         let quantity = 1;
         for (const alias of allAliases) {
           // Match "3 toast", "3 slices of toast", "2 cups of rice", "3 pieces of chicken"
-          const qtyDirect = segText.match(new RegExp(`(\\d+)\\s+(?:${escapeRegex(alias)})`, "i"));
-          const qtyWithFiller = segText.match(new RegExp(`(\\d+)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
+          const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
+          const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
           const qtyBefore = qtyDirect || qtyWithFiller;
           if (qtyBefore) {
-            const userQty = parseInt(qtyBefore[1]);
+            const userQty = parseFloat(qtyBefore[1]);
             const defaultQtyMatch = f.typicalPortionDescription.match(/^(\d+)/);
             const defaultQty = defaultQtyMatch ? parseInt(defaultQtyMatch[1]) : 1;
             if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
