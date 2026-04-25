@@ -1,0 +1,87 @@
+import { db } from "../db";
+import { stepLogs } from "../../shared/schema";
+import { eq, desc } from "drizzle-orm";
+
+export async function getStepStreak(userId: string): Promise<number> {
+  try {
+    const logs = await db.select({ loggedAt: stepLogs.loggedAt })
+      .from(stepLogs).where(eq(stepLogs.userId, userId))
+      .orderBy(desc(stepLogs.loggedAt)).limit(90);
+    if (logs.length === 0) return 0;
+    const days = new Set<string>();
+    for (const log of logs) {
+      const d = new Date(log.loggedAt!);
+      days.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+    }
+    let streak = 0;
+    const checkDate = new Date();
+    const todayKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+    if (!days.has(todayKey)) checkDate.setDate(checkDate.getDate() - 1);
+    while (true) {
+      const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+      if (!days.has(key)) break;
+      streak++;
+      checkDate.setDate(checkDate.getDate() - 1);
+    }
+    return streak;
+  } catch { return 0; }
+}
+
+const STEP_RESPONSES_LOW = [
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. Walk to the shop, take the stairs, park further. Close that gap before bed.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps today. ${remaining.toLocaleString()} more will hit your target. A 15-minute walk is about 1,500 steps — go.`,
+  (steps: number, remaining: number, target: number) =>
+    `Short day — ${steps.toLocaleString()} steps. Your target is ${target.toLocaleString()}. Set a reminder for an evening walk and hit it before you sleep.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps is a start, not a finish. ${remaining.toLocaleString()} to go. Walk while you talk on the phone. Use every gap.`,
+  (steps: number, remaining: number, target: number) =>
+    `${steps.toLocaleString()} steps logged. Target: ${target.toLocaleString()}. You are ${Math.round((steps / target) * 100)}% there — finish the job tonight.`,
+];
+
+const STEP_RESPONSES_GOOD = [
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — almost there. ${(target - steps).toLocaleString()} more to hit target. You are close, do not let it go.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps is solid progress. ${(target - steps).toLocaleString()} away from your ${target.toLocaleString()} target — one more walk and you have it.`,
+  (steps: number, target: number) =>
+    `Nearly at target — ${steps.toLocaleString()} steps done. Finish line is ${(target - steps).toLocaleString()} steps away. You have come too far not to finish.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — ${Math.round((steps / target) * 100)}% of your target. ${(target - steps).toLocaleString()} steps left. A 10-minute walk finishes this off.`,
+  (steps: number, target: number) =>
+    `Good movement today — ${steps.toLocaleString()} steps. ${(target - steps).toLocaleString()} more to reach ${target.toLocaleString()}. Walk around the block before bed and it is yours.`,
+];
+
+const STEP_RESPONSES_TARGET = [
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — target hit. ✅ This daily discipline is what separates results from excuses. Same again tomorrow.`,
+  (steps: number, target: number) =>
+    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your fat loss. Do not skip tomorrow.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps done. ✅ Above target and earning it. Your body is changing because you are consistent — keep it up.`,
+  (steps: number, target: number) =>
+    `${steps.toLocaleString()} steps — you smashed the ${target.toLocaleString()} target. ✅ Lekker. Same energy tomorrow.`,
+  (steps: number, target: number) =>
+    `Target done — ${steps.toLocaleString()} steps. ✅ This is what consistency looks like. Log tomorrow and keep the streak going.`,
+];
+
+export function getStepResponse(steps: number, target: number, weightKg = 75): string {
+  const idx = Math.floor(Date.now() / 86400000) % 5;
+  const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
+  const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
+  let base: string;
+  if (steps >= target) {
+    base = STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
+  } else if (steps >= target * 0.75) {
+    base = STEP_RESPONSES_GOOD[idx % STEP_RESPONSES_GOOD.length](steps, target);
+  } else {
+    const remaining = target - steps;
+    base = STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
+  }
+  const firstDot = base.indexOf(".");
+  if (firstDot > 0 && burnNote) {
+    return base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1);
+  }
+  return base + burnNote;
+}
