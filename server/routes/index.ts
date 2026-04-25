@@ -12,3 +12,4 @@ export { registerAdminRoutes } from "./admin";
 export { registerWhatsAppRoutes } from "./whatsapp";
 export { registerDashboardRoutes } from "./dashboard";
 export { registerPaymentRoutes } from "./payments";
+export { registerCoachRoutes } from "./coach";
