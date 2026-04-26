@@ -464,8 +464,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
 
-  // ---- RESET CALORIES — "reset my calories", "clear food log", "undo last meal" ----
-  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today)\b/i.test(m)) {
+  // ---- RESET CALORIES — "reset my calories", "clear food log", "remove meals today" ----
+  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
     // Delete from both mealLogs (primary) and chatHistory (legacy)
@@ -477,7 +477,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
-  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim())) {
+  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
     // Primary: delete most recent mealLogs row
@@ -6124,7 +6124,21 @@ CRITICAL RULES — these are non-negotiable:
   } catch (e) { console.warn("[non-fatal]", e); }
 
   // ---- SHORT REPLY HANDLER — "yes", "no", "ok" etc need conversation context ----
-  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish", "thanks", "thank you", "dankie", "lekker", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "aight", "right"];
+  // Pure punctuation / frustration symbols — "!!!!!", "???", "..." — treat as short contextual reply
+  if (/^[!?.\s]+$/.test(m) && m.replace(/\s/g, "").length >= 1) {
+    try {
+      const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+        .from(chatHistory).where(eq(chatHistory.userId, user.id)).orderBy(desc(chatHistory.createdAt)).limit(1);
+      const lastOut = lastExchange[0]?.messageOut || "";
+      const lastIntent = lastExchange[0]?.intent || "";
+      const punctCtx = `Client sent only "${message}" (pure frustration/reaction). They are responding to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This means they are either frustrated, confused, or surprised by your last reply. Acknowledge the reaction briefly and either clarify your last response or ask what specifically they need. Do not ask what they mean — you know they are reacting to your last message. Be direct, max 2 sentences, SA voice.`;
+      const punctReply = sanitizeCoachReply(await withTimeout("gpt_punct", 15000, () => askCoachK(message, user, punctCtx, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
+      await logChat(user.id, message, punctReply, "SHORT_REPLY");
+      return punctReply;
+    } catch (e) { console.warn("[punct-reply]", e); }
+  }
+
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish", "omg", "wtf", "lol", "wow", "thanks", "thank you", "dankie", "lekker", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "aight", "right"];
   if (SHORT_REPLIES.includes(m)) {
     try {
       const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
