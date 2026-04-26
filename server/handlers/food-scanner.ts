@@ -54,6 +54,11 @@ const FUZZY_BLACKLIST = new Set([
   "start", "stop", "keep", "send", "show", "tell", "look", "work",
   "think", "know", "really", "thing", "things", "stuff", "great",
   "terrible", "horrible", "broken", "fixed", "update", "check",
+  // Non-food words that fuzzy-match real foods (e.g. "past" → "pasta", "days" → "dates")
+  "past", "days", "havent", "trained", "training", "three", "down",
+  "flat", "week", "weeks", "month", "months", "year", "years",
+  "motivated", "motivation", "unmotivated", "struggling", "struggle",
+  "missed", "missing", "lately", "recently", "done", "gone",
 ]);
 
 export function scanForSAFoods(msg: string): SAFood[] {

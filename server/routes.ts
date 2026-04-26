@@ -2812,11 +2812,15 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // Also catches direct food names: "bolognaise", "2 eggs", "oats with milk"
   // Food logging gate: MUST have actual food detected by scanner
   // hasLogTrigger alone is not enough — "I had a great day" has "had" but no food
+  // Emotional/motivational messages are always excluded — they reach the motivation handler below
+  const isHardQuitEarly = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
+  const isSoftStruggleEarly = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
+  const isEmotionalMsg = isHardQuitEarly || isSoftStruggleEarly;
   const foodsInMsg = scanForSAFoods(m);
   const hasActualFood = foodsInMsg.length > 0;
   const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
   const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 15;
-  if (!isQuestion && !isFrustration && hasActualFood && (hasLogTrigger || directFoodScan)) {
+  if (!isQuestion && !isFrustration && !isEmotionalMsg && hasActualFood && (hasLogTrigger || directFoodScan)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
     //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
@@ -3171,7 +3175,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
   // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
-  if (!isQuestion && hasLogTrigger && !hasActualFood) {
+  if (!isQuestion && !isEmotionalMsg && hasLogTrigger && !hasActualFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 2000;
@@ -3336,8 +3340,9 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   }
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
-  const isHardQuit = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
-  const isSoftStruggle = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
+  // isHardQuitEarly / isSoftStruggleEarly already computed above (before food scanner)
+  const isHardQuit = isHardQuitEarly;
+  const isSoftStruggle = isSoftStruggleEarly;
   if (isHardQuit || isSoftStruggle) {
     try {
       const [recentW, recentS] = await Promise.all([
