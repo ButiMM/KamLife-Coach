@@ -2812,10 +2812,12 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // Also catches direct food names: "bolognaise", "2 eggs", "oats with milk"
   // Food logging gate: MUST have actual food detected by scanner
   // hasLogTrigger alone is not enough — "I had a great day" has "had" but no food
-  // Emotional/motivational messages are always excluded — they reach the motivation handler below
-  const isHardQuitEarly = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
+  // Emotional/motivational messages bypass the food scanner so they reach the motivation handler.
+  // IMPORTANT: use only word-boundary patterns here — loose .includes() checks would block food
+  // logging for combined messages like "I had eggs but not seeing results".
+  // isHardQuit (with loose .includes()) stays in its original position AFTER the food scanner.
   const isSoftStruggleEarly = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
-  const isEmotionalMsg = isHardQuitEarly || isSoftStruggleEarly;
+  const isEmotionalMsg = isSoftStruggleEarly;
   const foodsInMsg = scanForSAFoods(m);
   const hasActualFood = foodsInMsg.length > 0;
   const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
@@ -3340,8 +3342,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   }
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
-  // isHardQuitEarly / isSoftStruggleEarly already computed above (before food scanner)
-  const isHardQuit = isHardQuitEarly;
+  const isHardQuit = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
   const isSoftStruggle = isSoftStruggleEarly;
   if (isHardQuit || isSoftStruggle) {
     try {
@@ -5380,7 +5381,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
-  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
+  if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
     // Primary: read from structured mealLogs table — stores SA scanner + GPT fallback + photo logs.
