@@ -228,6 +228,88 @@ test("over_600 tier estimated total string differs from under_100", () => {
     `premium ${premium.estimatedTotal} should cost more than cheap ${cheap.estimatedTotal}`);
 });
 
+test("Tier 3 and Tier 4 shopping lists have Week B for variety", () => {
+  const t3a = getShoppingList("300_600", 1);
+  const t3b = getShoppingList("300_600", 2);
+  assert.ok(t3a, "Tier 3 Week A should exist");
+  assert.ok(t3b, "Tier 3 Week B should exist");
+  assert.notDeepEqual(t3a.items, t3b.items, "Tier 3 Week A and B should have different items");
+
+  const t4a = getShoppingList("over_600", 1);
+  const t4b = getShoppingList("over_600", 2);
+  assert.ok(t4a, "Tier 4 Week A should exist");
+  assert.ok(t4b, "Tier 4 Week B should exist");
+  assert.notDeepEqual(t4a.items, t4b.items, "Tier 4 Week A and B should have different items");
+});
+
+// ============================================================
+// Meal removal regex — catches all expected phrases
+// ============================================================
+
+const REMOVE_REGEX = /^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i;
+
+test("'Remove that meal' matches meal removal regex", () => {
+  assert.ok(REMOVE_REGEX.test("Remove that meal"), "should match 'Remove that meal'");
+});
+
+test("'remove last meal' still matches", () => {
+  assert.ok(REMOVE_REGEX.test("remove last meal"), "should match 'remove last meal'");
+});
+
+test("'delete that meal' matches", () => {
+  assert.ok(REMOVE_REGEX.test("delete that meal"), "should match 'delete that meal'");
+});
+
+test("'undo that' matches", () => {
+  assert.ok(REMOVE_REGEX.test("undo that"), "should match 'undo that'");
+});
+
+test("'Remove that meal please' does NOT match (extra words)", () => {
+  assert.ok(!REMOVE_REGEX.test("Remove that meal please"), "should not match phrases with extra words");
+});
+
+test("'remove the meal' matches", () => {
+  assert.ok(REMOVE_REGEX.test("remove the meal"), "should match 'remove the meal'");
+});
+
+// ============================================================
+// Motivational dip handler — catches unmotivated and missed training
+// ============================================================
+
+function testSoftStruggle(msg: string): boolean {
+  const m = msg.toLowerCase();
+  return (
+    /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) ||
+    /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) ||
+    /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) ||
+    /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) ||
+    /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) ||
+    /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(msg) ||
+    /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(msg)
+  );
+}
+
+test("\"Haven't trained for the past 3 days. Feeling down and unmotivated\" triggers soft struggle", () => {
+  assert.ok(testSoftStruggle("Haven't trained for the past 3 days. Feeling down and unmotivated"),
+    "should detect motivational dip with 'haven't trained' + 'feeling down and unmotivated'");
+});
+
+test("\"feeling unmotivated\" triggers soft struggle", () => {
+  assert.ok(testSoftStruggle("feeling unmotivated"), "should detect 'feeling unmotivated'");
+});
+
+test("\"I haven't worked out in 5 days\" triggers soft struggle", () => {
+  assert.ok(testSoftStruggle("I haven't worked out in 5 days"), "should detect 'haven't worked out in 5 days'");
+});
+
+test("\"just had coffee\" does NOT trigger soft struggle", () => {
+  assert.ok(!testSoftStruggle("just had coffee"), "food log should not trigger struggle handler");
+});
+
+test("\"done\" does NOT trigger soft struggle", () => {
+  assert.ok(!testSoftStruggle("done"), "workout log should not trigger struggle handler");
+});
+
 // ============================================================
 // Step streak logic — SAST timezone correctness
 // ============================================================

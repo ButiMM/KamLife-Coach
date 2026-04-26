@@ -477,7 +477,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
-  if (/^(no\s+)?(remove|delete|undo)\s+(it|that|last|last one|last meal)$/i.test(m.trim())) {
+  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim())) {
     const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
 
     // Primary: delete most recent mealLogs row
@@ -1400,7 +1400,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             contentType,
           });
 
-          await logChat(user.id, `[Progress Photo ${photoNumber}]`, "", "PROGRESS_PHOTO");
+          await logChat(user.id, `[Progress Photo ${photoNumber}]`, "[Photo received]", "PROGRESS_PHOTO");
 
           // If this is a second or later photo — compare with the first
           if (existingPhotos.length >= 1) {
@@ -3337,7 +3337,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- FIX 3: HANDLER 3 — Motivation and struggle ----
   const isHardQuit = m.includes("i want to quit") || m.includes("want to give up") || m.includes("this is too hard") || m.includes("i can't do this") || m.includes("i cant do this") || m.includes("not seeing results") || m.includes("nothing is working") || m.includes("no results") || m.includes("waste of time") || m.includes("doesn't work") || m.includes("not working for me");
-  const isSoftStruggle = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m);
+  const isSoftStruggle = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
   if (isHardQuit || isSoftStruggle) {
     try {
       const [recentW, recentS] = await Promise.all([

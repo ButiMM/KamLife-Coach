@@ -155,11 +155,19 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         : "";
       if (fromNum) {
         for (let i = 1; i < parts.length; i++) {
-          try {
-            await twilioC.messages.create({ from: fromNum, to: rawPhone, body: parts[i] });
-          } catch (e: any) {
-            console.error(`[MULTI-MSG] Part ${i + 1} failed: ${e.message}`);
+          const delays = [0, 2000, 5000];
+          let sent = false;
+          for (let d = 0; d < delays.length; d++) {
+            if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
+            try {
+              await twilioC.messages.create({ from: fromNum, to: rawPhone, body: parts[i] });
+              sent = true;
+              break;
+            } catch (e: any) {
+              if (d === delays.length - 1) console.error(`[MULTI-MSG] Part ${i + 1} failed after ${d + 1} attempts: ${e.message}`);
+            }
           }
+          if (!sent) console.error(`[MULTI-MSG] Part ${i + 1} permanently dropped for ${rawPhone.slice(-6)}`);
         }
       }
     } catch (err: any) {

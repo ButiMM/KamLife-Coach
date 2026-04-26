@@ -290,16 +290,25 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
     deliveryStats.failed++;
     return;
   }
-  try {
-    const params: any = { from: FROM_NUMBER, to, body };
-    if (mediaUrl) params.mediaUrl = [mediaUrl];
-    await twilioClient.messages.create(params);
-    deliveryStats.sent++;
-    console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
-  } catch (err) {
-    deliveryStats.failed++;
-    console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)}:`, err);
-    throw err; // re-throw so callers can handle
+  const params: any = { from: FROM_NUMBER, to, body };
+  if (mediaUrl) params.mediaUrl = [mediaUrl];
+  const delays = [0, 3000, 8000];
+  for (let i = 0; i < delays.length; i++) {
+    if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
+    try {
+      await twilioClient.messages.create(params);
+      deliveryStats.sent++;
+      console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
+      return;
+    } catch (err: any) {
+      const isTransient = !err?.status || err.status >= 500 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
+      if (!isTransient || i === delays.length - 1) {
+        deliveryStats.failed++;
+        console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)} after ${i + 1} attempt(s):`, err?.message || err);
+        throw err;
+      }
+      console.warn(`[SCHEDULER] ⚠ Send attempt ${i + 1} failed (${err?.message}), retrying in ${delays[i + 1]}ms…`);
+    }
   }
 }
 

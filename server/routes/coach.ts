@@ -42,9 +42,9 @@ app.get("/coach", async (req: any, res: any) => {
       db.select({ count: sql<number>`COUNT(*)` }).from(users).where(and(eq(users.onboardingState, "COMPLETE"), lt(users.lastActiveAt, fourteenDaysAgo))),
       db.select({ count: sql<number>`COUNT(*)` }).from(workoutLogs),
       db.select({ total: sql<string>`COALESCE(SUM(steps), 0)` }).from(stepLogs),
-      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), lt(users.lastActiveAt, sevenDaysAgo))).orderBy(asc(users.lastActiveAt)),
-      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), eq(users.programmeWeek, 3))),
-      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), gte(users.createdAt, sevenDaysAgo))).orderBy(desc(users.createdAt)),
+      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), lt(users.lastActiveAt, sevenDaysAgo))).orderBy(asc(users.lastActiveAt)).limit(200),
+      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), eq(users.programmeWeek, 3))).limit(200),
+      db.select().from(users).where(and(eq(users.onboardingState, "COMPLETE"), gte(users.createdAt, sevenDaysAgo))).orderBy(desc(users.createdAt)).limit(100),
     ]);
 
     // Goal/budget breakdown — project only needed columns, reuse allCompleteUsers where possible

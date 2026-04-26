@@ -62,6 +62,19 @@ const IMPORTANCE: Record<string, number> = {
   training: 3, nutrition: 3, mindset: 2,
 };
 
+async function pruneOldMemories(phone: string): Promise<void> {
+  try {
+    const ninetyDaysAgo = new Date(Date.now() - 90 * 86400000).toISOString();
+    const oneYearAgo = new Date(Date.now() - 365 * 86400000).toISOString();
+    await pool.query(
+      `DELETE FROM memories WHERE phone = $1 AND ((importance <= 3 AND created_at < $2) OR (importance = 4 AND created_at < $3))`,
+      [phone, ninetyDaysAgo, oneYearAgo]
+    );
+  } catch (err) {
+    console.warn("[MEMORY] Prune error:", err);
+  }
+}
+
 export async function storeMemory(phone: string, content: string, category: string): Promise<void> {
   try {
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: content });
@@ -75,6 +88,8 @@ export async function storeMemory(phone: string, content: string, category: stri
       `INSERT INTO memories (phone, content, embedding, category, importance) VALUES ($1, $2, $3::vector, $4, $5)`,
       [phone, content, `[${vec.join(",")}]`, category, importance]
     );
+    // Prune stale low-importance memories occasionally (1-in-20 writes)
+    if (Math.random() < 0.05) pruneOldMemories(phone).catch(() => {});
   } catch (err) {
     console.error("[MEMORY] Store error:", err);
   }

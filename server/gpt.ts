@@ -669,7 +669,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
         gte(chatHistory.createdAt, todayStart),
       ))
       .orderBy(chatHistory.createdAt)
-      .limit(10);
+      .limit(20);
 
     if (todayFoodLogs.length > 0) {
       // Extract calorie/protein totals from the running total line in each bot response
