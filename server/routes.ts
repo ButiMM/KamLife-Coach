@@ -1081,7 +1081,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
       const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
-      return `Supplement logged ✅ (${todaySuppLogs.length} today)\n\nConsistency with supplements matters more than the brand. Take them at the same time daily — set a phone alarm if needed.`;
+      const suppStreakLine = todaySuppLogs.length >= 2 ? ` Day ${todaySuppLogs.length} in a row — that's the habit.` : "";
+      return `Taken ✅${suppStreakLine}\n\nSame time every day beats the perfect supplement stack. Set a phone alarm and make it automatic.`;
     }
 
     // Otherwise give supplement guide based on their goal
@@ -3706,7 +3707,109 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     } catch (e) { console.error("[STATS]", e); }
   }
 
-  // ---- NEW: REFERRAL ----
+  // ---- WEEKLY PROGRESS CARD ----
+  if (/\b(my week|weekly stats|progress card|week report|how.*i doing this week|weekly progress|my weekly|weekly card|week card|my stats this week|progress this week)\b/i.test(m)) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const name = user.name?.split(" ")[0] || "there";
+      const wStreak = user.workoutStreak || 0;
+      const programmeDays = user.programmeStartDate
+        ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+        : 0;
+      const weekNum = programmeDays > 0 ? Math.ceil(programmeDays / 7) : 1;
+
+      const [weekWorkouts, weekMeals] = await Promise.all([
+        db.select({ id: workoutLogs.id, loggedAt: workoutLogs.loggedAt })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select({ loggedAt: mealLogs.loggedAt, proteinInt: mealLogs.proteinInt })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+      ]);
+
+      const foodDays = new Set(weekMeals.map(m => {
+        const d = new Date((m.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+        return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+      })).size;
+
+      // Best protein day
+      const protByDay: Record<string, number> = {};
+      for (const meal of weekMeals) {
+        const d = new Date((meal.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        protByDay[key] = (protByDay[key] || 0) + (meal.proteinInt || 0);
+      }
+      const bestProt = Object.values(protByDay).length > 0 ? Math.max(...Object.values(protByDay)) : 0;
+      const protTarget = user.proteinTarget || 130;
+      const protLine = bestProt > 0
+        ? (bestProt >= protTarget ? `💪 Best: ${bestProt}g protein — *target hit*` : `💪 Best: ${bestProt}g protein`)
+        : "";
+
+      const workoutCount = weekWorkouts.length;
+      const trainingDays = user.trainingDaysPerWeek || 3;
+      const scoreEmoji = workoutCount >= trainingDays && foodDays >= 5 ? "🔥" : workoutCount >= trainingDays || foodDays >= 5 ? "✅" : "📈";
+
+      let referralCode = user.referralCode;
+      if (!referralCode) {
+        const prefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+        referralCode = `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
+        await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
+      }
+
+      const cardLines = [
+        `${scoreEmoji} *${name} — Week ${weekNum} Report*`,
+        ``,
+        `🏋️ Workouts: ${workoutCount}/${trainingDays}`,
+        `🔥 Streak: ${wStreak} sessions`,
+        `🥗 Food logged: ${foodDays}/7 days`,
+        protLine,
+        ``,
+        workoutCount >= trainingDays && foodDays >= 5
+          ? `Consistent week. This is what results look like in the making.`
+          : workoutCount >= trainingDays || foodDays >= 5
+            ? `Solid effort. Close the one gap next week.`
+            : `One more push next week — you have the plan, now execute it.`,
+        ``,
+        `_KamLife Coach — forward this to a friend who needs accountability. Code *${referralCode}* gets them month 1 for R50._`,
+      ].filter(l => l !== undefined);
+
+      const cardReply = cardLines.join("\n");
+      await logChat(user.id, message, cardReply, "PROGRESS_CARD");
+      return cardReply;
+    } catch (e) {
+      console.error("[PROGRESS_CARD]", e);
+    }
+  }
+
+  // ---- CHALLENGE A FRIEND ----
+  if (/\b(challenge\s+a?\s*friend|challenge\s+someone|start\s+(a\s+)?challenge|dare\s+a?\s*friend|challenge\s+buddy)\b/i.test(m)) {
+    let code = user.referralCode;
+    if (!code) {
+      const prefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+      code = `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
+      await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
+    }
+    const wk = user.workoutStreak || 0;
+    const challengeTarget = `${user.trainingDaysPerWeek || 3} workouts + food logged 5 out of 7 days`;
+    const challengeReply = `*This week's challenge: ${challengeTarget}.*\n\nYou're ${wk > 0 ? `on a ${wk}-session streak` : "ready to start a streak"}. Now bring someone else in.\n\nSend your friend this message:\n\n_"I'm doing a weekly fitness challenge on WhatsApp with a real SA coach. Join me — text *join ${code}* to this number: ${process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "[your coach number]"}. First month R50 with my code."_\n\nWhen they join, you both get an extra accountability nudge each week.`;
+    await logChat(user.id, message, challengeReply, "CHALLENGE_INVITE");
+    return challengeReply;
+  }
+
+  // ---- JOIN CHALLENGE (friend accepting an invite) ----
+  if (/^join\s+([A-Z]{3}\d{4})$/i.test(m.trim())) {
+    const challengeCode = m.trim().split(/\s+/)[1].toUpperCase();
+    const [inviter] = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber })
+      .from(users).where(eq(users.referralCode, challengeCode)).limit(1);
+    if (inviter && inviter.id !== user.id) {
+      await db.update(users).set({ referredBy: inviter.id }).where(eq(users.phoneNumber, phone));
+      await logChat(user.id, message, `Challenge accepted`, "CHALLENGE_JOIN");
+      return `Challenge accepted. You and ${inviter.name?.split(" ")[0] || "your friend"} are now in the same weekly challenge.\n\nYour target: ${user.trainingDaysPerWeek || 3} workouts + food logged 5 days this week.\n\nLet's go. Send me your first meal or reply *programme* to see your workout plan.`;
+    }
+    return `I could not find that challenge code. Double-check it and try again, or reply *challenge a friend* to create your own.`;
+  }
+
+  // ---- REFERRAL ----
   if (["refer", "referral", "my referral", "my code", "referral code", "refer a friend", "invite"].includes(m)) {
     let code = user.referralCode;
     if (!code) {
@@ -5245,8 +5348,13 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     );
     await db.update(users).set({ calorieTarget: newCals, proteinTarget: newProt }).where(eq(users.phoneNumber, phone));
     const goalLabels: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
-    const clientName = user.name ? `, ${user.name}` : "";
-    const goalReply = `Sharp${clientName}. Goal updated to ${goalLabels[pendingGoal] || pendingGoal}. New targets: ${newCals} kcal/day, ${newProt}g protein. Programme stays the same — reply *programme* to see it or *new programme* if you want one built from scratch.`;
+    const capName = user.name?.split(" ")[0] || "there";
+    const goalActionNote = pendingGoal === "fat_loss"
+      ? `Protein first, every meal. Hit ${newProt}g and the rest takes care of itself.`
+      : pendingGoal === "muscle_gain"
+        ? `Eat above ${newCals} kcal on training days. Protein every meal — target ${newProt}g.`
+        : `Protein at every meal (${newProt}g/day) with a slight calorie deficit on rest days and maintenance on training days.`;
+    const goalReply = `${capName}, locked in — ${goalLabels[pendingGoal] || pendingGoal}.\n\nNew daily targets: *${newCals} kcal | ${newProt}g protein.*\n\n${goalActionNote}\n\nReply *programme* to see your updated plan.`;
     await logChat(user.id, message, goalReply, "PROFILE_UPDATE");
     return goalReply;
   }
@@ -5260,7 +5368,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     const updatedUser = { ...user, trainingMode: "gym", gymName };
     const gymProg = buildFullProgramme(updatedUser);
     const clientName = user.name ? `, ${user.name}` : "";
-    const gymReply = `Sharp${clientName}. ${gymName ? `${gymName}` : "Gym"} programme loaded. ${user.trainingDaysPerWeek || 3} days/week.\n\n${gymProg}`;
+    const gymReply = `${gymName ? `${gymName}` : "Gym"} programme loaded${clientName}. *${user.trainingDaysPerWeek || 3} days/week* — progressive overload from session 1.\n\n${gymProg}`;
     await logChat(user.id, message, gymReply, "PROGRAMME_DELIVERY");
     return gymReply;
   }

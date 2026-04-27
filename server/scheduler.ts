@@ -421,7 +421,7 @@ async function runMorningCheckin(): Promise<void> {
         if (assignmentId !== null) await recordDelivery(assignmentId);
         // Set awaiting state so routes.ts routes "1"/"2"/"3" replies correctly
         await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.id, client.id));
-        recordProactiveSend(client.id);
+        recordProactiveSend(client.id, "comeback_rescue");
       }
       continue;
     }
@@ -3641,6 +3641,91 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
       console.log(`[SCHEDULER] Cohort snapshot saved: ${JSON.stringify(snapshot)}`);
     } catch (err) {
       console.error("[SCHEDULER] Cohort snapshot error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB — WEEKLY PROGRESS CARD (Friday 9am SAST = 7am UTC)
+  // Auto-sends a shareable weekly progress card to users who had
+  // a strong week (2+ workouts OR 5+ food-log days). Skips users
+  // who had a bad week — a card showing nothing is demotivating.
+  // ============================================================
+  cron.schedule("0 7 * * 5", async () => {
+    const today = todaySAST();
+    const cardKey = `weekly_progress_card_${today.slice(0, 7)}_w${Math.ceil(parseInt(today.slice(8)) / 7)}`;
+    if (loadState()[cardKey] === "sent") return;
+    saveState(cardKey, "sent");
+    console.log("[SCHEDULER] JOB: Weekly progress card");
+    try {
+      const clients = await getActiveClients();
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      let sent = 0;
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!canSendProactive(client.id)) continue;
+        const wStreak = client.workoutStreak || 0;
+        const [weekWorkouts, weekMeals] = await Promise.all([
+          db.select({ id: workoutLogs.id })
+            .from(workoutLogs)
+            .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+          db.select({ loggedAt: mealLogs.loggedAt, proteinInt: mealLogs.proteinInt })
+            .from(mealLogs)
+            .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+        ]);
+        const workoutCount = weekWorkouts.length;
+        const foodDays = new Set(weekMeals.map(m => {
+          const d = new Date((m.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+          return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        })).size;
+        // Only send if there's a win to show
+        if (workoutCount < 2 && foodDays < 4) continue;
+
+        const name = client.name?.split(" ")[0] || "there";
+        const protByDay: Record<string, number> = {};
+        for (const meal of weekMeals) {
+          const d = new Date((meal.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+          const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+          protByDay[key] = (protByDay[key] || 0) + (meal.proteinInt || 0);
+        }
+        const bestProt = Object.values(protByDay).length > 0 ? Math.max(...Object.values(protByDay)) : 0;
+        const protTarget = client.proteinTarget || 130;
+        const trainingDays = client.trainingDaysPerWeek || 3;
+        const programmeDays = client.programmeStartDate
+          ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000) : 0;
+        const weekNum = programmeDays > 0 ? Math.ceil(programmeDays / 7) : 1;
+        const scoreEmoji = workoutCount >= trainingDays && foodDays >= 5 ? "🔥" : "✅";
+
+        let referralCode = client.referralCode;
+        if (!referralCode) {
+          const prefix = (client.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+          referralCode = `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
+          await db.update(users).set({ referralCode }).where(eq(users.id, client.id));
+        }
+
+        const lines = [
+          `${scoreEmoji} *${name} — Week ${weekNum} Report*`,
+          ``,
+          `🏋️ Workouts: ${workoutCount}/${trainingDays}`,
+          `🔥 Streak: ${wStreak} sessions`,
+          `🥗 Food logged: ${foodDays}/7 days`,
+          bestProt > 0 ? `💪 Best: ${bestProt}g protein${bestProt >= protTarget ? " — target hit" : ""}` : "",
+          ``,
+          workoutCount >= trainingDays && foodDays >= 5
+            ? `Consistent week. Keep it going.`
+            : `Good week. Close the gap next Friday.`,
+          ``,
+          `_Forward this to a friend. Code *${referralCode}* — month 1 for R50._`,
+        ].filter(Boolean);
+
+        await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+        recordProactiveSend(client.id, "weekly_progress_card");
+        sent++;
+        await new Promise(r => setTimeout(r, 300));
+        if (sent >= 200) break;
+      }
+      console.log(`[SCHEDULER] Weekly progress card sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Weekly progress card error:", err);
     }
   }, { timezone: "UTC" });
 
