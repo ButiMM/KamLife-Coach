@@ -28,7 +28,7 @@ import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/s
 import { getSleepResponse } from "./handlers/sleep";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, logMediaFailure, buildMediaTrace, withTimeout } from "./handlers/chat-log";
+import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 
 const openai = new OpenAI({
@@ -1243,6 +1243,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (mediaUrl) {
     const ctype = mediaContentType || "";
     const mediaTrace = buildMediaTrace(phone, ctype);
+    const mediaFlowStart = Date.now();
     console.log(`[MEDIA][${mediaTrace}] start type=${ctype || "unknown"} hasCaption=${Boolean(message && message.trim())}`);
 
     // ---- STICKER DETECTION — skip stickers (image/webp with no caption) ----
@@ -1257,12 +1258,14 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
         const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
         const imgAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+        const imgDownloadStart = Date.now();
         const imageResponse = await withTimeout("image_download", 12000, () => fetch(mediaUrl, {
           headers: { Authorization: imgAuthHeader },
         }));
         if (!imageResponse.ok) {
-          console.error(`[MEDIA][${mediaTrace}] image_download_failed ${imageResponse.status} ${imageResponse.statusText}`);
-          await logMediaFailure(user.id, "image_download", `${imageResponse.status}`);
+          const dlMs = Date.now() - imgDownloadStart;
+          console.error(`[MEDIA][${mediaTrace}] image_download_failed status=${imageResponse.status} ms=${dlMs}`);
+          await logMediaFailure(user.id, "image_download", `${imageResponse.status}`, dlMs);
           return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
         }
         const imageLen = parseInt(imageResponse.headers.get("content-length") || "0", 10);
@@ -1275,6 +1278,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           console.warn(`[MEDIA][${mediaTrace}] image_buffer_too_large bytes=${buffer.byteLength}`);
           return "That image is too large for reliable processing. Please resend a smaller screenshot or crop it tighter.";
         }
+        const imgDownloadMs = Date.now() - imgDownloadStart;
+        console.log(`[MEDIA][${mediaTrace}] image_download_ok bytes=${buffer.byteLength} ms=${imgDownloadMs}`);
         const base64 = Buffer.from(buffer).toString("base64");
         const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
         const clientName = user.name || "there";
@@ -1464,6 +1469,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
           return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
         }
         console.log(`[VISION][${mediaTrace}] food model=${foodVisionDecision.model} tier=${user.subscriptionStatus}`);
+        const foodVisionStart = Date.now();
         const visionResponse = await withTimeout("food_vision", 22000, () => openai.chat.completions.create({
           model: foodVisionDecision.model,
           max_tokens: foodVisionDecision.maxTokens,
@@ -1493,7 +1499,8 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
           ],
         }));
         const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
-        console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} (${foodVisionDecision.reason})`);
+        const foodVisionMs = Date.now() - foodVisionStart;
+        console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
 
         const visionReply = visionResponse.choices[0]?.message?.content?.trim();
         if (!visionReply || visionReply.length < 10) {
@@ -1587,10 +1594,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         // Combine main reply with any extra photo analyses
         const extraSection = extraReplies.length > 0 ? `\n\n${extraReplies.join("\n")}` : "";
         const multiPhotoNote = extraReplies.length > 0 ? `\n_${extraReplies.length + 1} photos logged — total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+        const photoTotalMs = Date.now() - mediaFlowStart;
+        console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs}`);
+        await logMediaSuccess(user.id, "photo", photoTotalMs);
         return `${visionReply}${extraSection}${multiPhotoNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       } catch (err) {
-        console.error(`[MEDIA][${mediaTrace}] vision_error:`, err);
-        await logMediaFailure(user.id, "vision", err);
+        const photoFailMs = Date.now() - mediaFlowStart;
+        console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
+        await logMediaFailure(user.id, "vision", err, photoFailMs);
         return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
       }
     }
@@ -1599,6 +1610,8 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     // Exclusive: if audio, always return — never falls through to text handler
     if (ctype.startsWith("audio/")) {
       let voiceStage = "download";
+      const voiceFlowStart = Date.now();
+      let voiceStageStart = voiceFlowStart;
       let _tmpAudioCleanup: (() => void) | null = null;
       try {
         // Part 1 — Twilio media requires basic auth (ACCOUNT_SID:AUTH_TOKEN)
@@ -1609,14 +1622,15 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         // Retry once if Twilio download fails (intermittent 5xx errors)
         let audioResponse = await withTimeout("audio_download_1", 12000, () => fetch(mediaUrl, { headers: { Authorization: authHeader } }));
         if (!audioResponse.ok) {
-          console.warn(`[VOICE] Twilio download attempt 1 failed: ${audioResponse.status}. Retrying...`);
+          console.warn(`[VOICE][${mediaTrace}] download_attempt_1_failed status=${audioResponse.status} ms=${Date.now()-voiceStageStart}`);
           await new Promise(r => setTimeout(r, 1500));
           audioResponse = await withTimeout("audio_download_2", 12000, () => fetch(mediaUrl, { headers: { Authorization: authHeader } }));
         }
 
         if (!audioResponse.ok) {
-          console.error(`[VOICE] Twilio download failed after retry: ${audioResponse.status} ${audioResponse.statusText}`);
-          await logMediaFailure(user.id, "audio_download", `${audioResponse.status}`);
+          const dlMs = Date.now() - voiceStageStart;
+          console.error(`[VOICE][${mediaTrace}] download_failed_after_retry status=${audioResponse.status} ms=${dlMs}`);
+          await logMediaFailure(user.id, "audio_download", `${audioResponse.status}`, dlMs);
           return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
         }
 
@@ -1649,13 +1663,15 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
         // Threshold: 2KB (~1s of Opus). Anything under this is silence/noise — not speech.
         // WhatsApp Opus at 12kbps = ~1,500 bytes/sec, so 2KB ≈ 1.3s minimum.
-        console.log(`[VOICE] audio_ready bytes=${audioBuffer.byteLength} type=${sourceAudioType} ext=${audioExt}`);
+        const audioDownloadMs = Date.now() - voiceStageStart;
+        console.log(`[VOICE][${mediaTrace}] download_ok bytes=${audioBuffer.byteLength} type=${sourceAudioType} ext=${audioExt} ms=${audioDownloadMs}`);
         if (audioBuffer.byteLength < 2000) {
-          console.warn(`[VOICE] audio_too_short bytes=${audioBuffer.byteLength} — rejecting`);
+          console.warn(`[VOICE][${mediaTrace}] audio_too_short bytes=${audioBuffer.byteLength} — rejecting`);
           return "That voice note was too short to transcribe — hold the mic button for at least 3 seconds and resend, or just type your message.";
         }
 
         voiceStage = "transcribe";
+        voiceStageStart = Date.now();
 
         // Write audio to a temp file — createReadStream avoids File/Blob API entirely
         // (toFile and new File() both require globalThis.File which is Node 20+ only)
@@ -1760,19 +1776,25 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         else if (TSONGA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xitsonga. Respond in simple SA English but acknowledge their language naturally.";
         else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans.";
 
-        console.log(`[VOICE] Transcribed (${whisperLang || "auto"}): "${transcribedText}"${languageNote ? " [" + languageNote.split(".")[0] + "]" : ""}`);
+        const transcribeMs = Date.now() - voiceStageStart;
+        console.log(`[VOICE][${mediaTrace}] transcribe_ok words=${wordCount} ms=${transcribeMs} lang=${whisperLang || "auto"}${languageNote ? " detected=" + languageNote.split(" ")[4] : ""}`);
 
         voiceStage = "coach_reply";
+        voiceStageStart = Date.now();
         const voiceReply = await withTimeout("voice_coach_reply", 20000, () => handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : "")));
         // Part 4 — explicit return, no fall-through
-        console.log(`[MEDIA][${mediaTrace}] voice_processed words=${wordCount}`);
+        const coachReplyMs = Date.now() - voiceStageStart;
+        const voiceTotalMs = Date.now() - voiceFlowStart;
+        console.log(`[MEDIA][${mediaTrace}] voice_ok words=${wordCount} coach_reply_ms=${coachReplyMs} total_ms=${voiceTotalMs}`);
+        await logMediaSuccess(user.id, "voice", voiceTotalMs);
         await cleanupTmp();
         return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
 
       } catch (err) {
         if (_tmpAudioCleanup) _tmpAudioCleanup();
-        console.error(`[VOICE] Processing error at stage "${voiceStage}":`, err);
-        await logMediaFailure(user.id, `voice_${voiceStage}`, err);
+        const stageMs = Date.now() - voiceStageStart;
+        console.error(`[VOICE][${mediaTrace}] error stage=${voiceStage} ms=${stageMs}:`, err);
+        await logMediaFailure(user.id, `voice_${voiceStage}`, err, stageMs);
         // Part 4 — always return, never fall through to text handler.
         // Count transcribe failures toward the 3-strike escalation — an API error
         // has the same user impact as a bad transcription.

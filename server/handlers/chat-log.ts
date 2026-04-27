@@ -56,12 +56,21 @@ export async function logChat(userId: string, messageIn: string, messageOut: str
   }
 }
 
-export async function logMediaFailure(userId: string, stage: string, rawError?: unknown): Promise<void> {
+export async function logMediaFailure(userId: string, stage: string, rawError?: unknown, latencyMs?: number): Promise<void> {
   const code = classifyMediaFailure(stage, rawError);
+  const payload = latencyMs !== undefined ? `${code} latency=${latencyMs}ms` : code;
   try {
-    await logChat(userId, `[MEDIA_FAIL:${stage}]`, code, "MEDIA_FAILURE");
+    await logChat(userId, `[MEDIA_FAIL:${stage}]`, payload, "MEDIA_FAILURE");
   } catch (e) {
     console.warn("[media-failure-log]", e);
+  }
+}
+
+export async function logMediaSuccess(userId: string, flow: string, totalMs: number): Promise<void> {
+  try {
+    await logChat(userId, `[MEDIA_OK:${flow}]`, `total_ms=${totalMs}`, "MEDIA_SUCCESS");
+  } catch (e) {
+    console.warn("[media-success-log]", e);
   }
 }
 
