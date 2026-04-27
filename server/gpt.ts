@@ -5,13 +5,7 @@ import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
-
-// Local utility — avoids circular dep with routes.ts
-function getDisplayName(user: any): string {
-  const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-  if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
-  return user.name;
-}
+import { getDisplayName } from "./utils";
 
 const openai = new OpenAI({
   // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.

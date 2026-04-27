@@ -143,6 +143,8 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     try {
       const { base64, contentType = "image/jpeg" } = req.body as { base64?: string; contentType?: string };
       if (!base64) return res.status(400).json({ error: "base64 image data is required" });
+      const ALLOWED_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+      if (!ALLOWED_TYPES.has(contentType)) return res.status(415).json({ error: "Unsupported image type. Use jpeg, png, webp, or heic." });
 
       // Strip data URI prefix if present
       const cleaned = base64.replace(/^data:[^;]+;base64,/, "");

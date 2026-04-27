@@ -5,6 +5,7 @@ import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets } from "./targets";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
+import { getDisplayName } from "./utils";
 
 // ============================================================
 // MENU TEXT — context-aware
@@ -985,12 +986,6 @@ export async function handleOnboarding(user: any, message: string, phone: string
 // ============================================================
 // HELPER FUNCTIONS (used internally by getMenuText)
 // ============================================================
-
-function getDisplayName(user: any): string {
-  const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-  if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
-  return user.name;
-}
 
 function getPhaseNames(): Record<number, string> {
   return { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };

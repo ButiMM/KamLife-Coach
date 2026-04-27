@@ -1,5 +1,6 @@
 import cron from "node-cron";
 import twilio from "twilio";
+import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure } from "./utils";
 import { db } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
@@ -290,6 +291,11 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
     deliveryStats.failed++;
     return;
   }
+  if (isTwilioCircuitOpen()) {
+    deliveryStats.failed++;
+    console.warn(`[CIRCUIT] Twilio circuit open — dropping send to ${to.slice(-8)}`);
+    return;
+  }
   const params: any = { from: FROM_NUMBER, to, body };
   if (mediaUrl) params.mediaUrl = [mediaUrl];
   const delays = [0, 3000, 8000];
@@ -297,12 +303,14 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
     if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
     try {
       await twilioClient.messages.create(params);
+      recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
       return;
     } catch (err: any) {
       const isTransient = !err?.status || err.status >= 500 || err.code === "ECONNRESET" || err.code === "ETIMEDOUT";
       if (!isTransient || i === delays.length - 1) {
+        recordTwilioFailure();
         deliveryStats.failed++;
         console.error(`[SCHEDULER] ✗ Failed to send to ${to.slice(-8)} after ${i + 1} attempt(s):`, err?.message || err);
         throw err;

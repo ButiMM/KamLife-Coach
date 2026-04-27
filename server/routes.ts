@@ -30,6 +30,7 @@ import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, get
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
+import { getDisplayName, checkGptRateLimit } from "./utils";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -48,15 +49,6 @@ function sastToday(): string {
 // Programme constants, workout builders, and GPT functions moved to dedicated modules (see imports above)
 
 
-// ============================================================
-// DISPLAY NAME HELPER
-// ============================================================
-
-function getDisplayName(user: any): string {
-  const INVALID = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
-  if (!user.name || user.name.length < 2 || INVALID.has((user.name || "").toUpperCase())) return "";
-  return user.name;
-}
 
 // detectEscalation + escalationSLA now live in ./safety-detection for unit testing
 
@@ -6371,6 +6363,11 @@ CRITICAL RULES — these are non-negotiable:
   if (classifiedIntent === "RANT" && intentConfidence >= 0.75) {
     agentType = "mindset";
     console.log(`[INTENT] RANT override → mindset agent (${Math.round(intentConfidence * 100)}% confidence)`);
+  }
+
+  if (!checkGptRateLimit(user.id)) {
+    console.warn(`[RATE] GPT rate limit hit for user ${user.id.slice(0, 8)}`);
+    return "You're sending messages very fast — give Coach K a moment and try again.";
   }
 
   let gptReply: string;
