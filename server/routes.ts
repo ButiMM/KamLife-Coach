@@ -1200,10 +1200,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- SICK / ILL ----
-  const isSick = /\b(sick|ill|flu|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine)\b/i.test(m)
-    && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal)\b/i.test(m);
+  const isSick = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i.test(m)
+    && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better)\b/i.test(m);
   if (isSick) {
-    const sickReply = `${capName}, rest is training. Your body is fighting something — pushing through will make it worse and set you back further.\n\nWhat to do right now:\n- *Eat something, even if small.* Your body needs fuel to recover. Soft foods: pap, egg, toast, yoghurt, soup.\n- *Drink water.* A lot of it. Illness dehydrates fast.\n- *No workout today* — sleep is more anabolic than any gym session when you're ill.\n\nMessage me when you're feeling better and we pick up exactly where you left off. Your programme is saved. Rest well.`;
+    const sickReply = `${capName}, *no training.* Full stop.\n\nWhen you're sick, rest IS the training. Pushing through flu or fever does not build discipline — it extends illness and can cause serious damage (myocarditis is real). Your body needs all its energy to fight, not to lift.\n\n*What to do right now:*\n• Sleep as much as you can\n• Drink water, juice, or soup — dehydration makes everything worse\n• Eat small: pap, eggs, toast, yoghurt — whatever you can stomach\n• No steps target, no calorie pressure today\n\nWhen you're feeling better — not just "okay", properly better — message me and we pick up exactly where you left off. Programme and targets are saved. Rest well ${capName}.`;
     await logChat(user.id, message, sickReply, "SICK_DAY");
     return sickReply;
   }
@@ -2627,7 +2627,8 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // Frustration guard — but NOT if the message also contains food correction intent
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
   // "read it again" and "read that again" are corrections, not frustration — handled by correction flow
-  const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|the above|for lunch|for dinner|for breakfast|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
+  // Frustration is NOT blocking if message has clear food reporting intent (any log verb)
+  const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
   // Log triggers: words that suggest the user is REPORTING food they ate/are eating
   // Standalone meal words (breakfast/lunch/dinner) are safe because the food logging gate
   // at line ~2218 ALSO requires hasActualFood (scanner must find real food in the message)
@@ -2820,9 +2821,16 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   const isEmotionalMsg = isSoftStruggleEarly;
   const foodsInMsg = scanForSAFoods(m);
   const hasActualFood = foodsInMsg.length > 0;
+  // isEmotionalOnly: emotional language WITHOUT a log trigger — "haven't trained, feeling down"
+  // If there IS a log trigger ("had", "ate", etc.), the user is logging food AND expressing emotion
+  // — food logging takes priority and the motivation handler can run after if needed
+  const isEmotionalOnly = isEmotionalMsg && !hasLogTrigger;
   const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
   const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 15;
-  if (!isQuestion && !isFrustration && !isEmotionalMsg && hasActualFood && (hasLogTrigger || directFoodScan)) {
+  // Bug fix: isQuestion doesn't block food logging when user clearly mentions food they ate
+  // ("I had eggs, how many calories?" → still log the eggs)
+  const foodLogOverride = hasLogTrigger && hasActualFood;
+  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && hasActualFood && (hasLogTrigger || directFoodScan)) {
     // Split message by meal keywords to handle multi-meal logging
     // Supports BOTH patterns:
     //   "breakfast eggs and toast, lunch chicken rice"  (keyword BEFORE food)
@@ -3177,7 +3185,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
   // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
-  if (!isQuestion && !isEmotionalMsg && hasLogTrigger && !hasActualFood) {
+  if (!isQuestion && !isEmotionalOnly && hasLogTrigger && !hasActualFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 2000;
