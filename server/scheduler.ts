@@ -408,21 +408,19 @@ async function runMorningCheckin(): Promise<void> {
     // More than 7 days silent — stop messaging (save WhatsApp costs)
     if (daysSilent > 7) continue;
 
-    // 3-7 days silent — send a short re-engagement, not the full check-in
+    // 3-7 days silent — Comeback Rescue: friendly reset with explicit reply options
     if (daysSilent >= 3) {
       if (canSendProactive(client.id)) {
         const name = client.name || "there";
-        const daysOnProgramme = Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
-        const defaultReEngageMsg = daysOnProgramme <= 14
-          ? `Hey ${name}. Haven't heard from you in a few days. No judgement — just checking in. When you're ready, send me what you ate today and we'll pick up where we left off.`
-          : `${name}. ${daysSilent} days of silence. Your programme doesn't pause when you do. One message is all it takes to restart — tell me what you ate today.`;
-
+        const comebBackMsg = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:\n\n*1* — I'm back, let's pick up where we left off\n*2* — I need a simpler plan, I've been overwhelmed\n*3* — I'm just busy for a bit, check in next week\n\nOne reply is all I need.`;
         // A/B: if an active re_engagement experiment exists, use the variant template
         const { text: reEngageMsg, assignmentId } = await selectVariantMessage(
-          client.id, "re_engagement", defaultReEngageMsg
+          client.id, "re_engagement", comebBackMsg
         );
         await sendWhatsApp(client.phoneNumber, reEngageMsg);
         if (assignmentId !== null) await recordDelivery(assignmentId);
+        // Set awaiting state so routes.ts routes "1"/"2"/"3" replies correctly
+        await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.id, client.id));
         recordProactiveSend(client.id);
       }
       continue;
@@ -435,11 +433,26 @@ async function runMorningCheckin(): Promise<void> {
       const yesterdayLogs = await getYesterdayLogs(client.id);
 
       if (yesterdayLogs.length === 0) {
-        // Completely silent day — short and direct
+        // Completely silent day — check streak shield before generic accountability
         if (canSendProactive(client.id)) {
-          await sendWhatsApp(phone,
-            `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`
-          );
+          const wStreak = client.workoutStreak || 0;
+          const currentMonth = todaySAST().slice(0, 7); // "YYYY-MM"
+          const shieldUsedMonth = (client.profileNotes || "").match(/streak_shield:(\d{4}-\d{2})/)?.[1];
+          const shieldAvailable = wStreak >= 3 && shieldUsedMonth !== currentMonth;
+
+          if (shieldAvailable) {
+            // Auto-apply shield — preserve streak, record usage
+            const updatedNotes = (client.profileNotes || "").replace(/streak_shield:\d{4}-\d{2}/, "").trim()
+              + ` streak_shield:${currentMonth}`;
+            await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
+            await sendWhatsApp(phone,
+              `Morning ${name}. Yesterday was a miss — but your *${wStreak}-session streak is protected* by your monthly shield.\n\nShield used. No more protection this month.\n\nLog today's session to keep the momentum going.`
+            );
+          } else {
+            await sendWhatsApp(phone,
+              `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`
+            );
+          }
           recordProactiveSend(client.id);
         }
         continue;
@@ -743,20 +756,29 @@ async function runEveningAccountability(): Promise<void> {
         parts.push(`*Walking:* ❓ No steps logged. Did you walk today? Send your count or a screenshot.`);
       }
 
-      // Adaptive closing — tone matches how the day went
+      // Daily Win — one concrete win with actual numbers, one clear action for tomorrow
       const hadFood = todayCal > 0;
       const hadWorkout = todayWorkouts.length > 0;
       const hadSteps = todaySteps.length > 0 && todaySteps[0].steps >= stepsTarget;
+      const protHit = hadFood && todayProt >= Math.round(protTarget * 0.9);
+      const stepCount = todaySteps.length > 0 ? todaySteps[0].steps : 0;
 
       const score = (hadFood ? 1 : 0) + (hadWorkout ? 1 : 0) + (hadSteps ? 1 : 0);
       if (score === 3) {
-        parts.push(`\n💪 All three boxes checked. That's what a champion day looks like.`);
+        const winDetail = protHit
+          ? `${todayProt}g protein — target hit`
+          : `session done, food logged, steps in`;
+        parts.push(`\n💪 *Win: ${winDetail}.*\nDo it again tomorrow.`);
       } else if (score === 2) {
-        parts.push(`\nSolid day. One gap to close tomorrow — you know which one.`);
+        const gap = !hadFood ? `Log at least 2 meals` : !hadWorkout ? `Get your session in` : `Hit ${stepsTarget.toLocaleString()} steps`;
+        const win = protHit ? `${todayProt}g protein ✓` : hadWorkout ? `Session done ✓` : `${stepCount.toLocaleString()} steps ✓`;
+        parts.push(`\n${win}\nTomorrow: ${gap}. Two out of three is progress. Three is the standard.`);
       } else if (score === 1) {
-        parts.push(`\nTomorrow, aim to hit 2 out of 3: food + workout + steps. One day at a time.`);
+        const win = hadFood ? `Food logged` : hadWorkout ? `Session done` : `${stepCount.toLocaleString()} steps walked`;
+        const next = !hadFood ? `log a meal` : !hadWorkout ? `log your session` : `log your steps`;
+        parts.push(`\n${win} — build on that tomorrow. Add one more: ${next}.`);
       } else {
-        parts.push(`\nTomorrow is a fresh start. One meal logged. That's all I'm asking.`);
+        parts.push(`\nTomorrow: log one meal. That is the only job.`);
       }
 
       await sendWhatsApp(phone, parts.join("\n"));
@@ -853,7 +875,10 @@ cron.schedule("0 8 20 * *", async () => {
 // Day milestones — specific to each client's actual numbers
 function buildDayMilestoneMessage(name: string, days: number, workouts: number, weightKg: string | null): string {
   if (days === 7) {
-    return `${name}, seven days in. ${workouts > 0 ? `${workouts} session${workouts > 1 ? "s" : ""} completed.` : "Keep building the habit."} Most people quit before they even get here. Send your weight today — I want a baseline for week two.`;
+    return `${name}, seven days in. ${workouts > 0 ? `${workouts} session${workouts > 1 ? "s" : ""} done.` : "Keep building."} Most people quit before week two — you are still here.\n\n🔓 *Week 2 unlocked:* Your programme steps up in intensity this week. Send your weight today so I can calibrate.`;
+  }
+  if (days === 14) {
+    return `${name}, two weeks. ${workouts > 0 ? `${workouts} sessions logged.` : "The habit is forming."} Two weeks is when the body starts adapting — not just to training, but to the routine itself.\n\n🔓 *Consistency badge:* You have shown up for 14 days. That puts you ahead of 80% of people who start. Keep this momentum into week 3.`;
   }
   if (days === 30) {
     const weightLine = weightKg ? `You started at ${weightKg}kg. ` : "";
@@ -902,7 +927,7 @@ cron.schedule("0 6 * * *", async () => {
       const days = programmeDaysSince(client.programmeStartDate);
 
       // Day milestones — naturally de-duplicated because `days` is exact on one calendar date
-      if ([7, 30, 60, 90, 180, 365].includes(days)) {
+      if ([7, 14, 30, 60, 90, 180, 365].includes(days)) {
         const firstWeight = await db.select({ weight: weightLogs.weight })
           .from(weightLogs)
           .where(eq(weightLogs.userId, client.id))
@@ -3529,6 +3554,93 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
       console.log(`[SCHEDULER] Payday prep Day 3 sent: ${sent}`);
     } catch (err) {
       console.error("[SCHEDULER] Payday prep 3 error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB — SURPRISE REINFORCEMENT (Saturday 9am SAST = 7am UTC)
+  // Fires weekly for clients who had 5+ food-log days AND
+  // workout streak >= 3 in the last 7 days. One message per week.
+  // ============================================================
+  cron.schedule("0 7 * * 6", async () => {
+    const today = todaySAST();
+    const weekKey = `surprise_reinforcement_${today.slice(0, 7)}_w${Math.ceil(parseInt(today.slice(8)) / 7)}`;
+    if (loadState()[weekKey] === "sent") return;
+    saveState(weekKey, "sent");
+    console.log("[SCHEDULER] JOB: Surprise reinforcement");
+    try {
+      const clients = await getActiveClients();
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      let sent = 0;
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!canSendProactive(client.id)) continue;
+        const wStreak = client.workoutStreak || 0;
+        if (wStreak < 3) continue;
+        // Count distinct food-log days in last 7 days
+        const recentMeals = await db.select({ loggedAt: mealLogs.loggedAt })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, sevenDaysAgo)));
+        const logDays = new Set(recentMeals.map(m => {
+          const d = new Date((m.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+          return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        }));
+        if (logDays.size < 5) continue;
+        const name = client.name?.split(" ")[0] || "there";
+        await sendWhatsApp(client.phoneNumber,
+          `${name} — I do not send this message often.\n\n${logDays.size} days of food logged this week. ${wStreak} sessions in the streak. That is not motivation — that is discipline.\n\nMost people who start a programme like yours are long gone by now. You are still here, still logging, still showing up.\n\nKeep going. The compounding is real.`
+        );
+        recordProactiveSend(client.id);
+        sent++;
+        await new Promise(r => setTimeout(r, 300));
+        if (sent >= 50) break;
+      }
+      console.log(`[SCHEDULER] Surprise reinforcement sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Surprise reinforcement error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB — MONTHLY COHORT SNAPSHOT (1st of each month, 2am SAST)
+  // Writes an immutable JSON record to the scheduler state file
+  // with trial→paid conversion, active count, and churn for the
+  // closing month. Used for CFO-level retention metrics.
+  // ============================================================
+  cron.schedule("0 0 1 * *", async () => {
+    const snapshotMonth = (() => {
+      const d = new Date(Date.now() + 2 * 3_600_000 - 86_400_000); // yesterday = closing month
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    })();
+    const snapKey = `cohort_snapshot_${snapshotMonth}`;
+    if (loadState()[snapKey]) return; // immutable — never overwrite
+    console.log(`[SCHEDULER] JOB: Monthly cohort snapshot for ${snapshotMonth}`);
+    try {
+      const allUsers = await db.select({
+        id: users.id,
+        subscriptionStatus: users.subscriptionStatus,
+        createdAt: users.createdAt,
+        cancelledAt: users.cancelledAt,
+        lastActiveAt: users.lastActiveAt,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+      }).from(users);
+
+      const monthStart = new Date(`${snapshotMonth}-01T00:00:00.000Z`);
+      const monthEnd = new Date(Date.UTC(monthStart.getUTCFullYear(), monthStart.getUTCMonth() + 1, 1));
+
+      const active = allUsers.filter(u => u.subscriptionStatus === "active").length;
+      const trial = allUsers.filter(u => u.subscriptionStatus === "trial").length;
+      const inactive = allUsers.filter(u => u.subscriptionStatus === "inactive").length;
+      const newSignups = allUsers.filter(u => u.createdAt && new Date(u.createdAt) >= monthStart && new Date(u.createdAt) < monthEnd).length;
+      const churned = allUsers.filter(u => u.cancelledAt && new Date(u.cancelledAt) >= monthStart && new Date(u.cancelledAt) < monthEnd).length;
+      const atRisk = allUsers.filter(u => u.subscriptionStatus === "active" && u.lastActiveAt && (Date.now() - new Date(u.lastActiveAt).getTime()) > 7 * 86_400_000).length;
+      const engagedActive = allUsers.filter(u => u.subscriptionStatus === "active" && (u.totalWorkoutsCompleted || 0) >= 3).length;
+
+      const snapshot = { month: snapshotMonth, snappedAt: new Date().toISOString(), active, trial, inactive, newSignups, churned, atRisk, engagedActive };
+      saveState(snapKey, JSON.stringify(snapshot));
+      console.log(`[SCHEDULER] Cohort snapshot saved: ${JSON.stringify(snapshot)}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Cohort snapshot error:", err);
     }
   }, { timezone: "UTC" });
 

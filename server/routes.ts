@@ -5213,6 +5213,27 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // (isNewProgrammeRequest handled earlier — before awaitingProgrammeAnswers)
 
+  // ---- COMEBACK RESCUE — handle "1"/"2"/"3" replies from lapsed users ----
+  if (user.awaitingInputType === "comeback") {
+    const choice = m.trim();
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+    const capName = user.name?.split(" ")[0] || "there";
+    let reply = "";
+    if (choice === "1" || /\b(back|let.?s go|i.?m back|ready|let's start)\b/i.test(m)) {
+      reply = `${capName} is back. No big deal — resets are part of the process.\n\nSend me what you ate today and we pick up right now. No restarts, no lectures.`;
+    } else if (choice === "2" || /\b(simpler|simple|overwhelm|too much)\b/i.test(m)) {
+      reply = `Got it, ${capName}. We strip it down.\n\nFor the next 3 days, your only job is: *log 2 meals a day*. Nothing else. No workout pressure. No step count. Just food.\n\nSend your first meal whenever you're ready.`;
+    } else if (choice === "3" || /\b(busy|later|week|not now)\b/i.test(m)) {
+      reply = `Understood, ${capName}. I will check in with you next week.\n\nYour programme is exactly where you left it — no restart needed. One message brings it back. I'll be here.`;
+    } else {
+      // Unrecognised reply — re-prompt once
+      reply = `${capName}, I got your message but need a clearer signal:\n\n*1* — I'm back\n*2* — Need a simpler plan\n*3* — Just busy for now\n\nWhich one?`;
+      await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.phoneNumber, phone));
+    }
+    await logChat(user.id, message, reply, "COMEBACK_RESCUE");
+    return reply;
+  }
+
   // ---- AWAITING GOAL CHANGE REASON — ask why first before applying goal change ----
   if (user.awaitingInputType?.startsWith("goal_reason:")) {
     const pendingGoal = user.awaitingInputType.split(":")[1] as string;
