@@ -3,6 +3,7 @@ import { enforceCoachGuardrails } from "../coach-guardrails";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql } from "drizzle-orm";
+import { sastDayStart } from "../utils";
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -240,8 +241,7 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 }
 
 export async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
 
   const [mealLogSum, legacyLogs] = await Promise.all([
     db.select({

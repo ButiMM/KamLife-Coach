@@ -20,7 +20,7 @@ export async function handleWeightLog(
   await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
 
   // Prevent duplicate weight logs — update today's entry if it exists, otherwise insert
-  const todayWeightStart = new Date(); todayWeightStart.setHours(0, 0, 0, 0);
+  const todayWeightStart = sastDayStart();
   const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
     .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
     .limit(1);

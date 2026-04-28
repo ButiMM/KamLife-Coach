@@ -56,7 +56,7 @@ export async function getDamageControlNote(userId: string, message: string): Pro
   const lowerMsg = message.toLowerCase();
   const triggerCount = DAMAGE_TRIGGERS.filter(t => lowerMsg.includes(t)).length;
   if (triggerCount < 2) return "";
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
   const recentDamage = await db.select({ id: chatHistory.id }).from(chatHistory)
     .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "DAMAGE_CONTROL"), gte(chatHistory.createdAt, todayStart)))
     .limit(1);
@@ -99,8 +99,7 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
 
 export async function checkPerfectDay(userId: string, proteinTarget = 130): Promise<string | null> {
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
 
     // "Food tracked" must mean the PROTEIN TARGET was hit, not merely "a food
     // row exists". Before this, checkPerfectDay read chatHistory.FOOD_LOG while

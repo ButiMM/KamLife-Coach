@@ -5,7 +5,7 @@ import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
-import { getDisplayName } from "./utils";
+import { getDisplayName, sastDayStart } from "./utils";
 
 const openai = new OpenAI({
   // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
@@ -155,8 +155,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
   const proteinTarget = user.proteinTarget || 120;
   const programmeWeek = user.programmeWeek || 1;
   const today = new Date();
-  const sevenDaysAgo = new Date(today.getTime() - 7 * 86_400_000);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = sastDayStart(new Date(today.getTime() - 7 * 86_400_000));
   const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
 
   try {
@@ -623,7 +622,7 @@ setInterval(() => {
 
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     // Only count messages the CLIENT actually sent (messageIn not empty) — excludes scheduler proactive messages
     const result = await db.select({ count: sql`count(*)` })
       .from(chatHistory)
@@ -653,8 +652,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   // Without this, GPT suggests dinner without knowing 1,767 kcal was already consumed.
   let todayFoodContext = "";
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
       .from(chatHistory)
       .where(and(

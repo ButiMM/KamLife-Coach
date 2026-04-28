@@ -30,7 +30,7 @@ import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, get
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
-import { getDisplayName, checkGptRateLimit } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart } from "./utils";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -459,7 +459,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- RESET CALORIES — "reset my calories", "clear food log", "remove meals today" ----
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     // Delete from both mealLogs (primary) and chatHistory (legacy)
     await Promise.all([
       db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
@@ -470,7 +470,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
   if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
 
     // Primary: delete most recent mealLogs row
     const lastMealLog = await db.select({ id: mealLogs.id })
@@ -510,7 +510,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
     if (foodToRemove.length >= 2) {
       try {
-        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayStart = sastDayStart();
 
         // Primary: search mealLogs table (SA scanner + GPT fallback + photo logs all write here)
         const mealLogRows = await db.select({
@@ -580,7 +580,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
   if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const logs = await db.select({
       messageIn: chatHistory.messageIn,
       messageOut: chatHistory.messageOut,
@@ -627,25 +627,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
-    // ALWAYS recalculate from actual food logs — never trust stored counter (can get corrupted)
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-    let todayCals = 0; let todayProt = 0;
-    for (const log of todayFoodLogs) {
-      const matched = scanForSAFoods(log.messageIn || "");
-      if (matched.length > 0) {
-        todayCals += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-        todayProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-      } else {
-        // Fallback: extract from GPT response
-        const calMatch = (log.messageOut || "").match(/~?(\d+)\s*kcal/i);
-        const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
-        if (calMatch) todayCals += parseInt(calMatch[1]);
-        if (protMatch) todayProt += parseInt(protMatch[1]);
-      }
-    }
+    // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
+    const totals = await recomputeTodayFoodTotals(user.id);
+    const todayCals = totals.calories;
+    const todayProt = totals.protein;
     const remaining = cal - todayCals;
     const protRemaining = prot - todayProt;
     if (todayCals > 0) {
@@ -1070,7 +1055,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (logSupp) {
       await logChat(user.id, message, "Supplement logged", "SUPPLEMENT_LOG");
       // Count today's supplement logs
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
       const suppStreakLine = todaySuppLogs.length >= 2 ? ` Day ${todaySuppLogs.length} in a row — that's the habit.` : "";
@@ -1345,7 +1330,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
             if (!isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
               const target = user.stepsTarget || 10000;
-              const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+              const todayStartSteps = sastDayStart();
               const existingStep = await db.select({ id: stepLogs.id })
                 .from(stepLogs)
                 .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
@@ -1443,7 +1428,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
         // ---- FOOD PHOTO continues below ----
         // Rate limit food photo logging — max 3 per day (only count actual photo logs, not text food entries)
-        const todayStartPhoto = new Date(); todayStartPhoto.setHours(0, 0, 0, 0);
+        const todayStartPhoto = sastDayStart();
         const photoCountResult = await db.select({ count: sql`count(*)` })
           .from(chatHistory)
           .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
@@ -1860,7 +1845,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     const warningCount = (m.match(/⚠️|warning|struggled|nearly/gi) || []).length;
 
     // Log the workout
-    const todayStartGym = new Date(); todayStartGym.setHours(0, 0, 0, 0);
+    const todayStartGym = sastDayStart();
     const alreadyLogged = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStartGym)))
@@ -1904,7 +1889,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // ---- DONE — workout complete (direct) ----
   if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
     // Guard: prevent double-logging on the same calendar day (race condition + accidental re-send)
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
@@ -1934,10 +1919,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     // Workout streak — continues if last session was within 2 days (but NOT same calendar day,
     // which is already prevented by the double-log guard above)
     const lastW = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
-    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    const todayMidnight = sastDayStart();
     let newStreak = 1;
     if (lastW) {
-      const lastDay = new Date(lastW); lastDay.setHours(0, 0, 0, 0);
+      const lastDay = sastDayStart(new Date(lastW));
       const daysDiff = Math.floor((todayMidnight.getTime() - lastDay.getTime()) / 86400000);
       // daysDiff === 0 means same day — treated as fresh start (shouldn't happen after guard above)
       if (daysDiff >= 1 && daysDiff <= 2) newStreak = (user.workoutStreak || 0) + 1;
@@ -2405,7 +2390,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
-      const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+      const todayStartSteps = sastDayStart();
       const existingStep = await db.select({ id: stepLogs.id })
         .from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
@@ -2523,7 +2508,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       return gptRef;
     } else {
       // Mark the previous food log as corrected so it is excluded from today's totals
-      const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
+      const todayStartCorr = sastDayStart();
       try {
         const lastFoodLog = await db.select({ id: chatHistory.id })
           .from(chatHistory)
@@ -2717,8 +2702,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const refYesterday = /yesterday/i.test(m);
 
       // Search window: today first, then last 48h for "same as yesterday"
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const windowStart = refYesterday
         ? new Date(Date.now() - 48 * 3600_000)
         : todayStart;
@@ -2770,6 +2754,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         rawMessage: mealLogs.rawMessage,
         source: mealLogs.source,
         items: mealLogs.items,
+        loggedAt: mealLogs.loggedAt,
       }).from(mealLogs).where(and(
         eq(mealLogs.userId, user.id),
         gte(mealLogs.loggedAt, new Date(Date.now() - 48 * 3600_000)),
@@ -2810,8 +2795,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         const updTodayProt = relogged.protein;
         const remaining = calorieTarget - updTodayCals;
         const protGap = proteinTarget - updTodayProt;
-        await logChat(user.id, message, `Quick relog: ${labels.join(", ")}`, "FOOD_LOG");
-        return `♻️ Copied from yesterday:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
+        const mealWasToday = matchedMeal.loggedAt ? matchedMeal.loggedAt >= sastDayStart() : false;
+        const copyLabel = mealWasToday ? "Copied from earlier today" : "Copied from yesterday";
+        await logChat(user.id, message, `Quick relog: ${labels.join(", ")} (+${totalCals} kcal · +${totalProt}g protein)`, "FOOD_LOG");
+        return `♻️ ${copyLabel}:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
       }
 
       // Fallback: re-process through the food scanner — for older logs without meal_logs entries
@@ -5496,7 +5483,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // ---- "AM I ON TRACK?" STATUS COMMAND — no GPT ----
   if (/\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status)\b/i.test(m)) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const [stepLogsWeek, workoutLogsWeek, weightLogsRecent, foodLogsToday] = await Promise.all([
       db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
       db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
@@ -5533,7 +5520,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
   if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
 
     // Primary: read from structured mealLogs table — stores SA scanner + GPT fallback + photo logs.
     // This is authoritative: we wrote to it at log time, no re-parsing needed.
@@ -6441,7 +6428,7 @@ CRITICAL RULES — these are non-negotiable:
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));

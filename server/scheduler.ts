@@ -1,6 +1,6 @@
 import cron from "node-cron";
 import twilio from "twilio";
-import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure } from "./utils";
+import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart } from "./utils";
 import { db } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
@@ -347,10 +347,8 @@ function isPaused(client: any): boolean {
 }
 
 function dayStart(offsetDays = 0): Date {
-  const d = new Date();
-  d.setDate(d.getDate() + offsetDays);
-  d.setHours(0, 0, 0, 0);
-  return d;
+  const d = new Date(Date.now() + offsetDays * 86_400_000);
+  return sastDayStart(d);
 }
 
 async function getYesterdayLogs(userId: string) {
@@ -1332,7 +1330,7 @@ cron.schedule("0 8 * * *", async () => {
         } else if (days === 5) {
           // Day 5 — value proof: show what they have achieved so far
           const workoutsDone = client.totalWorkoutsCompleted || 0;
-          const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+          const todayStart = sastDayStart();
           const fiveDaysAgoOnb = new Date(Date.now() - 5 * 86_400_000);
           const recentSteps = await db.select({ steps: stepLogs.steps })
             .from(stepLogs)
@@ -1411,8 +1409,7 @@ if (false) (async () => {
       if (!schedule.includes(todayDOW)) continue;
 
       // Only send if they have not already trained today
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const [todayWorkout, todayFoodLog] = await Promise.all([
         db.select({ id: workoutLogs.id }).from(workoutLogs)
           .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
@@ -1513,7 +1510,7 @@ cron.schedule("0 5 * * *", async () => {
 if (false) (async () => {
   console.log("[SCHEDULER] JOB: Midday activation nudge");
   const clients = await getActiveClients();
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
   let sent = 0;
 
   for (const client of clients) {
@@ -1688,7 +1685,7 @@ cron.schedule("0 9 * * *", async () => {
 cron.schedule("0 19 * * *", async () => {
   console.log("[SCHEDULER] JOB: Streak-at-risk alert (9pm SAST)");
   const clients = await getActiveClients();
-  const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
   const todayDOW = new Date().getDay(); // 0=Sun
 
   // Helper: compute consecutive-day streak from a list of loggedAt timestamps
@@ -2942,7 +2939,7 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
       if (uniqueUserIds.length === 0) return;
 
       // Check which ones have NOT logged today
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       let sent = 0;
       for (const uid of uniqueUserIds) {
         const todayLog = await db.select({ id: chatHistory.id }).from(chatHistory)
