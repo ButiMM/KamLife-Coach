@@ -3187,7 +3187,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
   // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
-  if (!isQuestion && !isEmotionalOnly && hasLogTrigger && !hasActualFood) {
+  // Word count ceiling: voice transcriptions are 80–200+ words and trigger hasLogTrigger
+  // on words like "having" in non-food contexts, causing GPT hallucinations.
+  // Real food log messages are almost always under 50 words.
+  const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
+  if (!isQuestion && !isEmotionalOnly && hasLogTrigger && !hasActualFood && !voiceFallbackTooLong) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 2000;
