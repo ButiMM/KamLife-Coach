@@ -234,6 +234,17 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS client_actions_user_idx ON client_actions(user_id)`,
 
+    `CREATE TABLE IF NOT EXISTS sent_proactive (
+      id SERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      message_key TEXT NOT NULL,
+      dedupe_window TEXT NOT NULL,
+      sent_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sent_proactive_uniq_idx ON sent_proactive(user_id, message_key, dedupe_window)`,
+    `CREATE INDEX IF NOT EXISTS sent_proactive_user_idx ON sent_proactive(user_id)`,
+    `CREATE INDEX IF NOT EXISTS sent_proactive_sent_at_idx ON sent_proactive(sent_at)`,
+
     `CREATE TABLE IF NOT EXISTS conversations (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
