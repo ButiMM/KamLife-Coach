@@ -6496,8 +6496,15 @@ CRITICAL RULES — these are non-negotiable:
 
   return finalReply;
 
-  } catch (err) {
-    console.error("[handleMessage FATAL]", phone, message, err);
+  } catch (err: any) {
+    console.error("[handleMessage FATAL]", JSON.stringify({
+      phone,
+      message: (message || "").slice(0, 200),
+      hasMedia: !!mediaUrl,
+      errMessage: err?.message || String(err),
+      errCode: err?.code,
+      errStack: err?.stack?.split("\n").slice(0, 8).join(" | "),
+    }));
     return "Eish, something went wrong on my side. Give me a second and try again.";
   }
 }
