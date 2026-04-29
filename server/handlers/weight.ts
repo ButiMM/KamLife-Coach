@@ -9,6 +9,13 @@ export async function handleWeightLog(
   user: any,
   newKg: number,
 ): Promise<string> {
+  // Sanity bounds: 30kg–250kg covers from very small adolescents to severely obese adults.
+  // Anything outside is almost certainly a typo (e.g. "850kg" = "85kg", "8kg" = "80kg")
+  // or an OCR/Whisper error. Don't update targets, ask user to confirm.
+  if (!Number.isFinite(newKg) || newKg < 30 || newKg > 250) {
+    return `That weight reads as *${newKg}kg* — that doesn't look right. Send your weight again as just a number followed by kg, like "82kg" or "76.5kg".`;
+  }
+
   const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(
     newKg, user.goalType || "fat_loss", user.lifeSituation || "office",
     user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170,

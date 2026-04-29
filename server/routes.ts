@@ -1314,21 +1314,24 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               model: "gpt-4o-mini",
               max_tokens: 50,
               messages: [
-                { role: "system", content: "Extract the step count number from this screenshot. Reply with ONLY the number. If you cannot find a step count, reply UNKNOWN." },
+                { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If no step count is clearly labelled, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
                 { role: "user", content: [
-                  { type: "text", text: "What is the step count shown in this screenshot?" },
+                  { type: "text", text: "Extract the labelled step count from this screenshot, or reply NOT_STEPS." },
                   { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
                 ] },
               ],
             }));
             const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
-            const extractedSteps = parseInt(stepText.replace(/[^0-9]/g, ""));
+            // Vision model explicitly rejected — don't try to extract a number from "NOT_STEPS"
+            const visionRejected = /\b(NOT_STEPS|UNKNOWN)\b/i.test(stepText);
+            const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
             // Guard against random OCR numbers from food labels/photos:
             // accept low numbers only when user explicitly indicated steps.
             const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
-            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps < 100000;
+            // Realistic range: 100–60,000 steps/day. 60k = ~45km walking, hard upper bound for a real human day.
+            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 60000;
             const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
-            if (!isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
+            if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
               const target = user.stepsTarget || 10000;
               const todayStartSteps = sastDayStart();
               const existingStep = await db.select({ id: stepLogs.id })
@@ -1469,7 +1472,9 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-BEST GUESS RULE: Always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if you genuinely cannot tell whether the image is food at all (e.g. it is completely dark, blurry beyond recognition, or clearly not food) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
+FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food (selfie, gym mirror, screenshot of an app, document, scenery, body progress photo, scale, supplement bottle, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY this single line and nothing else: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
+
+BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
                 },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
               ],
@@ -1484,16 +1489,30 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         if (!visionReply || visionReply.length < 10) {
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
+
+        // NOT_FOOD gate — model says image isn't food. Don't log, don't burn extra vision.
+        if (/^NOT_FOOD\b/i.test(visionReply)) {
+          console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
+          return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+        }
+
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
 
         // Write to mealLogs so photo meals appear in "my meals" and count in daily totals
+        // Sanity bounds: 50-3000 kcal per meal, 0-200g protein. Anything outside is a hallucination.
         const extractKcal = (text: string) => {
           const m = text.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || text.match(/\b(\d{2,4})\s*kcal/i);
-          return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+          if (!m) return 0;
+          const n = parseInt(m[1].replace(/,/g, ""), 10);
+          if (!Number.isFinite(n) || n < 50 || n > 3000) return 0;
+          return n;
         };
         const extractProt = (text: string) => {
           const m = text.match(/\b(\d{1,3})\s*g\s*protein/i);
-          return m ? parseInt(m[1], 10) : 0;
+          if (!m) return 0;
+          const n = parseInt(m[1], 10);
+          if (!Number.isFinite(n) || n < 0 || n > 200) return 0;
+          return n;
         };
 
         let totalPhotoKcal = extractKcal(visionReply);
@@ -2137,6 +2156,12 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
     const weightMatch = m.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
     const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 0;
+    // Sanity bound: 0.5kg–500kg. Above 500kg is almost certainly a typo
+    // (e.g. "1000kg bench press" instead of "100kg"). Below 0.5kg is a parsing error.
+    // Reject confidently so we don't cite the bad number in future coaching.
+    if (weightKg > 0 && (weightKg < 0.5 || weightKg > 500)) {
+      return `That weight reads as *${weightKg}kg* — looks like a typo. Send the lift again, e.g. "bench press 80kg 3x8".`;
+    }
     if (!weightKg) { /* fall through to GPT */ } else {
 
     // Parse optional reps and sets: "3x10", "3 sets 10 reps", "x10", "10 reps"
@@ -3191,7 +3216,11 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // on words like "having" in non-food contexts, causing GPT hallucinations.
   // Real food log messages are almost always under 50 words.
   const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
-  if (!isQuestion && !isEmotionalOnly && hasLogTrigger && !hasActualFood && !voiceFallbackTooLong) {
+  // Strong trigger: explicit eating-past-tense / meal-name patterns. The looser hasLogTrigger
+  // includes bare "having"/"have" which fires on motivation talk like "I'm having a hard time".
+  // For the GPT fallback (which invents data), require something the scanner couldn't fake.
+  const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal)\b/i.test(m);
+  if (!isQuestion && !isEmotionalOnly && hasStrongFoodTrigger && !hasActualFood && !voiceFallbackTooLong) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 2000;
