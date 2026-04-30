@@ -680,6 +680,22 @@ cron.schedule("0 4 * * *", async () => {
 // Runs 7pm SAST (5pm UTC) daily
 // ============================================================
 
+// Detects if a client mentioned being sick, injured, or unwell today.
+// Used to suppress workout nudges — we never push training on someone who just said they're ill.
+async function isSickOrInjuredToday(userId: string): Promise<boolean> {
+  const todayStart = dayStart(0);
+  const recentMessages = await db
+    .select({ messageIn: chatHistory.messageIn })
+    .from(chatHistory)
+    .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, todayStart)))
+    .orderBy(desc(chatHistory.createdAt))
+    .limit(20);
+
+  const SICK_PATTERNS = /\b(sick|flu|flu|fever|ill|cold|vomit|nausea|nauseous|diarrhea|diarrhoea|hospital|doctor|clinic|pain|injury|injured|hurt|sprain|strain|pulled|torn|not feeling|feeling sick|feel sick|feeling bad|unwell|too sick|got sick|i am sick|i'm sick|im sick|still sick|rest day|can't train|cant train|cannot train|no training|skip.*gym|skip.*workout|miss.*gym|miss.*workout)\b/i;
+
+  return recentMessages.some(row => row.messageIn && SICK_PATTERNS.test(row.messageIn));
+}
+
 async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
   const clients = await getActiveClients();
@@ -688,10 +704,11 @@ async function runEveningAccountability(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
-      const name = client.name || "there";
+      const name = (client.name || "there").split(" ")[0];
       const phone = client.phoneNumber;
       const todayLogs = await getTodayLogs(client.id);
 
+      // Silent client — no messages at all today
       if (todayLogs.length === 0) {
         if (canSendProactive(client.id)) {
           const isNewClient = !client.totalWorkoutsCompleted && client.createdAt &&
@@ -703,7 +720,7 @@ async function runEveningAccountability(): Promise<void> {
             );
           } else {
             await sendWhatsApp(phone,
-              `${name}, it's 7pm and I haven't heard from you today. No judgment. Just tell me one thing — did you move today?`
+              `${name}, haven't heard from you today. Did you move?`
             );
           }
           recordProactiveSend(client.id);
@@ -711,83 +728,87 @@ async function runEveningAccountability(): Promise<void> {
         continue;
       }
 
-      // Build daily summary for active users
       if (!canSendProactive(client.id)) continue;
 
-      const parts: string[] = [`${name}, day's winding down.`];
+      // Check if client mentioned being sick or injured today — never nudge training on a sick day
+      const sick = await isSickOrInjuredToday(client.id);
 
-      // Food summary — read from mealLogs (source of truth, includes photo/voice logs)
-      const calTarget = client.calorieTarget || 1800;
+      // Gather today's data
       const protTarget = client.proteinTarget || 130;
+      const stepsTarget = client.stepsTarget || 10000;
+      const trainingDays = client.trainingDaysPerWeek || 3;
+      const dow = new Date().getUTCDay();
+      const isTrainingDay = (TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3]).includes(dow);
+
       const [mealSum] = await db.select({
         todayCal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
         todayProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
       }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)));
       const todayCal = mealSum?.todayCal || 0;
       const todayProt = mealSum?.todayProt || 0;
-      if (todayCal > 0) {
-        parts.push(`\n*Food:* ${todayCal} kcal | ${todayProt}g protein (target: ${calTarget} kcal | ${protTarget}g)`);
-      } else {
-        parts.push(`\n*Food:* No meals logged today.`);
-      }
 
-      // Workout check
-      const todayWorkouts = await db.select({ id: workoutLogs.id })
+      const [todayWorkout] = await db.select({ id: workoutLogs.id })
         .from(workoutLogs)
-        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
+        .where(and(
+          eq(workoutLogs.userId, client.id),
+          gte(workoutLogs.loggedAt, todayStart),
+          eq(workoutLogs.workoutCompleted, true),
+        ))
         .limit(1);
-      if (todayWorkouts.length > 0) {
-        parts.push(`*Workout:* ✅ Done`);
+
+      const [todayStep] = await db.select({ steps: stepLogs.steps })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
+        .orderBy(desc(stepLogs.loggedAt))
+        .limit(1);
+
+      const workedOut = !!todayWorkout;
+      const stepsDone = todayStep ? todayStep.steps >= stepsTarget : false;
+      const protHit = todayProt >= Math.round(protTarget * 0.9);
+      const stepCount = todayStep?.steps ?? 0;
+
+      let msg: string;
+
+      if (sick) {
+        // Client mentioned being sick today — acknowledge rest, skip all training nudges
+        msg = `Rest up, ${name}. No targets today. Your data is saved — we pick up when you're better.`;
       } else {
-        const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
-        const dow = new Date().getDay();
-        if (schedule.includes(dow)) {
-          parts.push(`*Workout:* ❌ Not logged — still time tonight.`);
+        const score = (todayCal > 0 ? 1 : 0) + (workedOut ? 1 : 0) + (stepsDone ? 1 : 0);
+
+        if (score === 3) {
+          // Perfect day — short and specific
+          const highlight = protHit
+            ? `${todayProt}g protein, session done, steps hit`
+            : `session done, steps hit, food logged`;
+          msg = `${name}, clean day — ${highlight}. Do it again tomorrow.`;
+        } else if (workedOut && protHit) {
+          // Trained and ate well — just steps missing
+          msg = `${name}, session done and ${todayProt}g protein logged. ${stepCount > 0 ? `${stepCount.toLocaleString()} steps — push to ${stepsTarget.toLocaleString()} tomorrow.` : `Log your steps — walking is half the programme.`}`;
+        } else if (workedOut && stepsDone) {
+          // Trained and walked — food logging missing
+          msg = `${name}, session done and ${stepCount.toLocaleString()} steps. Log tonight's food so I can track your protein.`;
+        } else if (workedOut) {
+          // Only trained — missing food and steps
+          msg = `${name}, session done. ${todayCal > 0 ? `${todayProt}g protein logged — get to ${protTarget}g tonight.` : `No food logged. Log tonight's meal.`}`;
+        } else if (isTrainingDay && !sick) {
+          // Training day but no workout yet — most important nudge
+          const foodLine = todayCal > 0 ? ` Food's in.` : ``;
+          msg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
+        } else if (stepsDone) {
+          // Rest day, steps hit
+          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
+        } else if (todayCal > 0 || stepCount > 0) {
+          // Some data logged — acknowledge and push the gap
+          const done = stepCount > 0 ? `${stepCount.toLocaleString()} steps` : `food logged`;
+          const gap = stepCount < stepsTarget ? `${(stepsTarget - stepCount).toLocaleString()} steps short` : `protein at ${todayProt}g — get to ${protTarget}g`;
+          msg = `${name}, ${done} today. ${gap}. One more thing before bed.`;
         } else {
-          parts.push(`*Workout:* Rest day`);
+          // Nothing logged
+          msg = `${name}, nothing logged today. Log one meal tonight — that is the only job.`;
         }
       }
 
-      // Steps check — this is the walking accountability
-      const todaySteps = await db.select({ steps: stepLogs.steps })
-        .from(stepLogs)
-        .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
-        .limit(1);
-      const stepsTarget = client.stepsTarget || 10000;
-      if (todaySteps.length > 0) {
-        const s = todaySteps[0].steps;
-        const pct = Math.round((s / stepsTarget) * 100);
-        parts.push(`*Walking:* ${s.toLocaleString()} steps (${pct}% of ${stepsTarget.toLocaleString()} target)${s >= stepsTarget ? " ✅" : ""}`);
-      } else {
-        parts.push(`*Walking:* ❓ No steps logged. Did you walk today? Send your count or a screenshot.`);
-      }
-
-      // Daily Win — one concrete win with actual numbers, one clear action for tomorrow
-      const hadFood = todayCal > 0;
-      const hadWorkout = todayWorkouts.length > 0;
-      const hadSteps = todaySteps.length > 0 && todaySteps[0].steps >= stepsTarget;
-      const protHit = hadFood && todayProt >= Math.round(protTarget * 0.9);
-      const stepCount = todaySteps.length > 0 ? todaySteps[0].steps : 0;
-
-      const score = (hadFood ? 1 : 0) + (hadWorkout ? 1 : 0) + (hadSteps ? 1 : 0);
-      if (score === 3) {
-        const winDetail = protHit
-          ? `${todayProt}g protein — target hit`
-          : `session done, food logged, steps in`;
-        parts.push(`\n💪 *Win: ${winDetail}.*\nDo it again tomorrow.`);
-      } else if (score === 2) {
-        const gap = !hadFood ? `Log at least 2 meals` : !hadWorkout ? `Get your session in` : `Hit ${stepsTarget.toLocaleString()} steps`;
-        const win = protHit ? `${todayProt}g protein ✓` : hadWorkout ? `Session done ✓` : `${stepCount.toLocaleString()} steps ✓`;
-        parts.push(`\n${win}\nTomorrow: ${gap}. Two out of three is progress. Three is the standard.`);
-      } else if (score === 1) {
-        const win = hadFood ? `Food logged` : hadWorkout ? `Session done` : `${stepCount.toLocaleString()} steps walked`;
-        const next = !hadFood ? `log a meal` : !hadWorkout ? `log your session` : `log your steps`;
-        parts.push(`\n${win} — build on that tomorrow. Add one more: ${next}.`);
-      } else {
-        parts.push(`\nTomorrow: log one meal. That is the only job.`);
-      }
-
-      await sendWhatsApp(phone, parts.join("\n"));
+      await sendWhatsApp(phone, msg);
       recordProactiveSend(client.id);
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
@@ -3801,6 +3822,9 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
           ))
           .limit(1);
         if (todayWorkout.length > 0) continue; // already done — no nudge needed
+
+        // Never push training on a sick/injured client
+        if (await isSickOrInjuredToday(client.id)) continue;
 
         const ok = await claimProactive(client.id, "streak_protect", today);
         if (!ok) continue;
