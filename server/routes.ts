@@ -6581,6 +6581,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     registerDashboardRoutes,
     registerPaymentRoutes,
     registerCoachRoutes,
+    registerVoiceBroadcastRoutes,
   } = await import("./routes/index");
 
   // Deps that route modules need from this file
@@ -6594,6 +6595,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   registerDashboardRoutes(app, routeDeps);
   registerPaymentRoutes(app);
   registerCoachRoutes(app);
+  registerVoiceBroadcastRoutes(app);
 
   // Routes now in server/routes/*.ts:
   //   routes/auth.ts      — /api/auth/login
