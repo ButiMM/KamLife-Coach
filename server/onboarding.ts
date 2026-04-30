@@ -5,7 +5,7 @@ import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets } from "./targets";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { getDisplayName } from "./utils";
+import { getDisplayName, sastDayStart } from "./utils";
 
 // ============================================================
 // MENU TEXT — context-aware

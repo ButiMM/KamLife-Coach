@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs } from "../../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
+import { sastDayStart } from "../utils";
 
 export const JUNK_WORDS = [
   "kfc", "kota", "fat cake", "magwinya", "vetkoek", "chips", "niknaks", "cool drink", "coke", "fanta",
