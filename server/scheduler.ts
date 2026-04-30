@@ -439,8 +439,18 @@ async function runMorningCheckin(): Promise<void> {
       const yesterdayLogs = await getYesterdayLogs(client.id);
 
       if (yesterdayLogs.length === 0) {
-        // Completely silent day — check streak shield before generic accountability
+        // Completely silent day — check if they were sick before flagging
         if (canSendProactive(client.id)) {
+          const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
+          if (sickYesterday) {
+            // They said they were sick — no guilt, just check in
+            await sendWhatsApp(phone,
+              `Morning ${name}. Hope you're feeling better. When you're ready to get back on it, just say Hi.`
+            );
+            recordProactiveSend(client.id);
+            continue;
+          }
+
           const wStreak = client.workoutStreak || 0;
           const currentMonth = todaySAST().slice(0, 7); // "YYYY-MM"
           const shieldUsedMonth = (client.profileNotes || "").match(/streak_shield:(\d{4}-\d{2})/)?.[1];
@@ -560,7 +570,18 @@ async function runMorningCheckin(): Promise<void> {
       if (stepStreakCount >= 2) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
       const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
+      // Check if they were sick/injured yesterday — suppress workout/food guilt
+      const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
+
       const parts: string[] = [`Morning ${name}.${dowOpener}${identityLine}${streakLine}`];
+
+      if (sickYesterday) {
+        // They were sick — skip all accountability, just check in warmly
+        parts.push(`Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.`);
+        await sendWhatsApp(phone, parts.join(" "));
+        recordProactiveSend(client.id);
+        continue;
+      }
 
       // Protein — be specific about the number and the gap
       if (foodLogs.length === 0) {
@@ -680,20 +701,23 @@ cron.schedule("0 4 * * *", async () => {
 // Runs 7pm SAST (5pm UTC) daily
 // ============================================================
 
-// Detects if a client mentioned being sick, injured, or unwell today.
-// Used to suppress workout nudges — we never push training on someone who just said they're ill.
-async function isSickOrInjuredToday(userId: string): Promise<boolean> {
-  const todayStart = dayStart(0);
+const SICK_PATTERNS = /\b(sick|flu|fever|ill|cold|vomit|nausea|nauseous|diarrhea|diarrhoea|hospital|doctor|clinic|injured|injury|hurt|sprain|strain|pulled|torn|not feeling|feeling sick|feel sick|feeling bad|unwell|too sick|got sick|i am sick|i'm sick|im sick|still sick|rest day|can't train|cant train|cannot train|no training|skip.*gym|skip.*workout|miss.*gym|miss.*workout)\b/i;
+
+// Detects if a client mentioned being sick, injured, or unwell since the given date.
+// Used to suppress workout nudges — we never push training on someone who said they're ill.
+async function wasSickOrInjured(userId: string, since: Date): Promise<boolean> {
   const recentMessages = await db
     .select({ messageIn: chatHistory.messageIn })
     .from(chatHistory)
-    .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, todayStart)))
+    .where(and(eq(chatHistory.userId, userId), gte(chatHistory.createdAt, since)))
     .orderBy(desc(chatHistory.createdAt))
     .limit(20);
-
-  const SICK_PATTERNS = /\b(sick|flu|flu|fever|ill|cold|vomit|nausea|nauseous|diarrhea|diarrhoea|hospital|doctor|clinic|pain|injury|injured|hurt|sprain|strain|pulled|torn|not feeling|feeling sick|feel sick|feeling bad|unwell|too sick|got sick|i am sick|i'm sick|im sick|still sick|rest day|can't train|cant train|cannot train|no training|skip.*gym|skip.*workout|miss.*gym|miss.*workout)\b/i;
-
   return recentMessages.some(row => row.messageIn && SICK_PATTERNS.test(row.messageIn));
+}
+
+// Convenience: check today only
+async function isSickOrInjuredToday(userId: string): Promise<boolean> {
+  return wasSickOrInjured(userId, dayStart(0));
 }
 
 async function runEveningAccountability(): Promise<void> {
@@ -1752,7 +1776,7 @@ cron.schedule("0 19 * * *", async () => {
       const name = client.name || "there";
 
       // ── 1. Workout streak at risk ──
-      // Only on training days when user hasn't logged a session yet
+      // Only on training days when user hasn't logged a session yet and isn't sick
       const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
       const isTodayTrainingDay = schedule.includes(todayDOW);
       const wStreak = client.workoutStreak || 0;
@@ -1761,7 +1785,7 @@ cron.schedule("0 19 * * *", async () => {
           .from(workoutLogs)
           .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart)))
           .limit(1);
-        if (todayWorkout.length === 0) {
+        if (todayWorkout.length === 0 && !await isSickOrInjuredToday(client.id)) {
           await sendWhatsApp(client.phoneNumber,
             `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`
           );
