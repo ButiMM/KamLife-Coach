@@ -264,6 +264,18 @@ async function runMigrations(): Promise<void> {
       window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       hit_count INTEGER NOT NULL DEFAULT 1
     )`,
+
+    `CREATE TABLE IF NOT EXISTS voice_broadcasts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      label TEXT NOT NULL DEFAULT 'Voice Broadcast',
+      audio_base64 TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'audio/ogg',
+      duration_secs INTEGER,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS voice_broadcasts_created_idx ON voice_broadcasts(created_at DESC)`,
   ];
 
   let created = 0;
@@ -354,10 +366,10 @@ declare module "http" {
   }
 }
 
-// Progress photo uploads can be up to ~8MB base64 — allow a larger body for that path.
-// All other JSON endpoints get a tight 100kb cap to bound attack surface.
+// Progress photo uploads (/api/users) and voice broadcast uploads (/api/admin)
+// can be up to ~8MB base64. All other JSON endpoints get a tight 100kb cap.
 app.use(
-  "/api/users",
+  ["/api/users", "/api/admin"],
   express.json({
     limit: "10mb",
     verify: (req: any, _res, buf) => { req.rawBody = buf; },

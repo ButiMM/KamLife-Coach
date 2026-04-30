@@ -17,6 +17,7 @@ import ABTests from "@/pages/ab-tests";
 import PaymentSuccess from "@/pages/payment-success";
 import PaymentCancel from "@/pages/payment-cancel";
 import Login from "@/pages/login";
+import VoiceBroadcast from "@/pages/voice-broadcast";
 
 function AuthGuard({ component: Component }: { component: React.ComponentType }) {
   const { data: isAuth, isLoading } = useQuery<boolean>({
@@ -48,6 +49,7 @@ function Router() {
       <Route path="/ab-tests">{() => <AuthGuard component={ABTests} />}</Route>
       <Route path="/admin/test">{() => <AuthGuard component={AdminTest} />}</Route>
       <Route path="/admin/beta">{() => <AuthGuard component={BetaTesters} />}</Route>
+      <Route path="/voice-broadcast">{() => <AuthGuard component={VoiceBroadcast} />}</Route>
       <Route component={NotFound} />
     </Switch>
   );
