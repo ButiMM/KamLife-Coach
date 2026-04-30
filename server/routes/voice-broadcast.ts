@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { pool } from "../db";
 import { sendWhatsApp } from "../scheduler";
 import { requireAdminKey } from "./auth";
+import { isElevenLabsConfigured, getElevenLabsQuota } from "../elevenlabs";
 
 const ALLOWED_AUDIO_TYPES = new Set([
   "audio/ogg", "audio/mpeg", "audio/mp4", "audio/webm",
@@ -126,6 +127,79 @@ export function registerVoiceBroadcastRoutes(app: Express) {
     try {
       await pool.query(`DELETE FROM voice_broadcasts WHERE id = $1`, [req.params.id]);
       return res.json({ success: true });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Serve recap audio publicly — no auth, Twilio must fetch this ──
+  app.get("/api/voice-recap/:id/audio", async (req: any, res: any) => {
+    try {
+      const { rows } = await pool.query<{ audio_base64: string; content_type: string }>(
+        `SELECT audio_base64, content_type FROM voice_recap_logs WHERE id = $1`,
+        [req.params.id]
+      );
+      if (!rows.length || !rows[0].audio_base64) return res.status(404).end();
+      const buf = Buffer.from(rows[0].audio_base64, "base64");
+      res.set("Content-Type", rows[0].content_type);
+      res.set("Content-Length", String(buf.length));
+      res.set("Cache-Control", "public, max-age=604800");
+      return res.send(buf);
+    } catch (e: any) {
+      return res.status(500).end();
+    }
+  });
+
+  // ── ElevenLabs status + quota ──
+  app.get("/api/admin/voice-recap/status", requireAdminKey, async (_req: any, res: any) => {
+    const configured = isElevenLabsConfigured();
+    const quota = configured ? await getElevenLabsQuota() : null;
+    return res.json({ configured, quota });
+  });
+
+  // ── Preview the script that would be sent to a specific user ──
+  app.get("/api/admin/voice-recap/preview/:userId", requireAdminKey, async (req: any, res: any) => {
+    try {
+      const { previewRecapScript } = await import("../weekly-recap");
+      const result = await previewRecapScript(req.params.userId);
+      if (!result) return res.status(404).json({ error: "User not found or no data" });
+      return res.json(result);
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Manually trigger weekly recaps (for testing) ──
+  app.post("/api/admin/voice-recap/run", requireAdminKey, async (_req: any, res: any) => {
+    try {
+      const { runWeeklyRecaps } = await import("../weekly-recap");
+      // Run async — don't block the HTTP response
+      runWeeklyRecaps().then(r => {
+        console.log(`[VOICE_RECAP] Manual run complete:`, r);
+      }).catch(e => {
+        console.error(`[VOICE_RECAP] Manual run error:`, e.message);
+      });
+      return res.json({ message: "Weekly recap run started — check server logs for progress" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── List recent recap logs ──
+  app.get("/api/admin/voice-recap/logs", requireAdminKey, async (req: any, res: any) => {
+    try {
+      const limit = Math.min(parseInt(req.query.limit || "50"), 200);
+      const { rows } = await pool.query(
+        `SELECT r.id, r.user_id, u.name, r.week_start, r.message_text,
+                r.sent_at, r.created_at,
+                (r.audio_base64 IS NOT NULL) AS has_audio
+         FROM voice_recap_logs r
+         JOIN users u ON u.id = r.user_id
+         ORDER BY r.created_at DESC
+         LIMIT $1`,
+        [limit]
+      );
+      return res.json({ logs: rows });
     } catch (e: any) {
       return res.status(500).json({ error: e.message });
     }

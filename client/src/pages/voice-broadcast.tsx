@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { format } from "date-fns";
-import { Mic, Upload, Send, Trash2, CheckCircle2, Clock, Users } from "lucide-react";
+import { Mic, Upload, Send, Trash2, CheckCircle2, Clock, Users, Sparkles, Play, AlertCircle, RefreshCw } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -292,6 +292,157 @@ export default function VoiceBroadcast() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Weekly Recap Section */}
+      <WeeklyRecapSection />
     </DashboardLayout>
+  );
+}
+
+// ─────────────────────────────────────────────
+// Weekly Recap Section (cloned voice)
+// ─────────────────────────────────────────────
+
+interface RecapLog {
+  id: string;
+  user_id: string;
+  name: string;
+  week_start: string;
+  message_text: string;
+  has_audio: boolean;
+  sent_at: string | null;
+  created_at: string;
+}
+
+function WeeklyRecapSection() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+
+  const { data: statusData } = useQuery<{ configured: boolean; quota: { used: number; limit: number } | null }>({
+    queryKey: ["/api/admin/voice-recap/status"],
+    queryFn: () => fetch("/api/admin/voice-recap/status", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 30_000,
+  });
+
+  const { data: logsData, isLoading: logsLoading } = useQuery<{ logs: RecapLog[] }>({
+    queryKey: ["/api/admin/voice-recap/logs"],
+    queryFn: () => fetch("/api/admin/voice-recap/logs?limit=20", { credentials: "include" }).then(r => r.json()),
+    refetchInterval: 15_000,
+    enabled: !!statusData?.configured,
+  });
+
+  const runMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/admin/voice-recap/run", { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: () => {
+      toast({ title: "Weekly recaps started", description: "Generating personalized voice notes — check logs for progress." });
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["/api/admin/voice-recap/logs"] }), 5000);
+    },
+    onError: (e: any) => toast({ title: "Failed to start", description: e.message, variant: "destructive" }),
+  });
+
+  const configured = statusData?.configured ?? false;
+  const quota = statusData?.quota;
+  const logs = logsData?.logs ?? [];
+
+  return (
+    <div className="space-y-4 pt-4 border-t border-border">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <div className="p-2 bg-violet-100 text-violet-600 rounded-xl">
+            <Sparkles className="w-5 h-5" />
+          </div>
+          <div>
+            <h2 className="font-semibold text-lg">Weekly Voice Recaps</h2>
+            <p className="text-sm text-muted-foreground">Personalized weekly check-in in your cloned voice — sent every Sunday night.</p>
+          </div>
+        </div>
+        {configured && (
+          <Button variant="outline" size="sm" onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
+            Run now
+          </Button>
+        )}
+      </div>
+
+      {!configured ? (
+        <Card className="p-6 border-dashed border-border/50 bg-muted/30">
+          <div className="flex gap-4 items-start">
+            <AlertCircle className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" />
+            <div className="space-y-2">
+              <p className="font-medium">ElevenLabs not connected yet</p>
+              <p className="text-sm text-muted-foreground">To enable personalized voice recaps, add these two environment variables in Railway:</p>
+              <div className="bg-background rounded-lg p-3 font-mono text-xs space-y-1 border border-border">
+                <div><span className="text-violet-500">ELEVENLABS_API_KEY</span>=your_api_key_here</div>
+                <div><span className="text-violet-500">ELEVENLABS_VOICE_ID</span>=your_voice_id_here</div>
+              </div>
+              <p className="text-xs text-muted-foreground">Get both from elevenlabs.io → Voices → Coach K</p>
+            </div>
+          </div>
+        </Card>
+      ) : (
+        <>
+          {quota && (
+            <Card className="p-4 border-border/50">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-muted-foreground">ElevenLabs quota this month</span>
+                <span className="font-medium">{quota.used.toLocaleString()} / {quota.limit.toLocaleString()} chars used</span>
+              </div>
+              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-violet-500 rounded-full transition-all"
+                  style={{ width: `${Math.min(100, (quota.used / quota.limit) * 100)}%` }}
+                />
+              </div>
+            </Card>
+          )}
+
+          {logsLoading ? (
+            <div className="space-y-3">
+              {[1, 2, 3].map(i => <div key={i} className="h-16 bg-muted rounded-xl animate-pulse" />)}
+            </div>
+          ) : logs.length === 0 ? (
+            <div className="text-center py-10 text-muted-foreground">
+              <Sparkles className="w-8 h-8 mx-auto mb-2 opacity-30" />
+              <p className="text-sm">No recaps sent yet. Hit <strong>Run now</strong> to generate the first batch.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {logs.map(log => (
+                <Card key={log.id} className="p-4 border-border/50">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-1">
+                        <span className="font-medium text-sm">{log.name || "Unknown"}</span>
+                        <span className="text-xs text-muted-foreground">·</span>
+                        <span className="text-xs text-muted-foreground">Week of {format(new Date(log.week_start), "MMM d")}</span>
+                        {log.sent_at ? (
+                          <span className="text-xs text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3" /> Sent
+                          </span>
+                        ) : (
+                          <span className="text-xs text-amber-600 bg-amber-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Clock className="w-3 h-3" /> Generated
+                          </span>
+                        )}
+                        {log.has_audio && (
+                          <span className="text-xs text-violet-600 bg-violet-50 px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <Mic className="w-3 h-3" /> Voice
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-muted-foreground italic">"{log.message_text}"</p>
+                      {log.has_audio && (
+                        <audio controls src={`/api/voice-recap/${log.id}/audio`} className="mt-2 h-8 w-full max-w-xs" />
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
   );
 }

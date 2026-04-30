@@ -275,7 +275,19 @@ async function runMigrations(): Promise<void> {
       sent_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
-    `CREATE INDEX IF NOT EXISTS voice_broadcasts_created_idx ON voice_broadcasts(created_at DESC)`,
+    `CREATE TABLE IF NOT EXISTS voice_recap_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      week_start DATE NOT NULL,
+      message_text TEXT NOT NULL,
+      audio_base64 TEXT,
+      content_type TEXT NOT NULL DEFAULT 'audio/mpeg',
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, week_start)
+    )`,
+    `CREATE INDEX IF NOT EXISTS voice_recap_logs_user_idx ON voice_recap_logs(user_id)`,
+    `CREATE INDEX IF NOT EXISTS voice_recap_logs_week_idx ON voice_recap_logs(week_start DESC)`,
   ];
 
   let created = 0;
