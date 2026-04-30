@@ -3751,4 +3751,18 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
     }
   }, { timezone: "UTC" });
 
+  // ── Weekly voice recap — Sunday 10pm SAST (20:00 UTC) ──
+  // Personalized voice note in Coach K's cloned voice, generated per client.
+  // Only runs when ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID are set.
+  cron.schedule("0 20 * * 0", async () => {
+    console.log("[SCHEDULER] JOB: Weekly voice recaps");
+    try {
+      const { runWeeklyRecaps } = await import("./weekly-recap");
+      const result = await runWeeklyRecaps();
+      console.log(`[SCHEDULER] Voice recaps complete — sent:${result.sent} failed:${result.failed} skipped:${result.skipped}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Weekly voice recap error:", err);
+    }
+  }, { timezone: "UTC" });
+
 }
