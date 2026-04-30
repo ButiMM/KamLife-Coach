@@ -3,6 +3,7 @@ import { users, weightLogs } from "../../shared/schema";
 import { eq, and, gte, asc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
+import { sastDayStart } from "../utils";
 
 export async function handleWeightLog(
   phone: string,
