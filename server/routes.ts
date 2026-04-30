@@ -6511,15 +6511,8 @@ CRITICAL RULES — these are non-negotiable:
 
 // ============================================================
 // RATE LIMITER — 15 messages per phone per 60 seconds
+// DB-backed so limits survive server restarts / multi-instance deploys.
 // ============================================================
-
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of rateLimitMap.entries()) {
-    if (now > val.resetAt) rateLimitMap.delete(key);
-  }
-}, 5 * 60 * 1000);
 
 // ============================================================
 // VOICE NOTE FAILURE TRACKER — escalate to "please type" after 3 failures
@@ -6548,17 +6541,29 @@ export function clearVoiceFailure(userId: string): void {
   voiceFailureMap.delete(userId);
 }
 
-function checkRateLimit(phone: string): boolean {
-  const now = Date.now();
-  const window = 60 * 1000;
-  const entry = rateLimitMap.get(phone);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(phone, { count: 1, resetAt: now + window });
-    return true;
+async function checkRateLimit(phone: string): Promise<boolean> {
+  try {
+    const result = await pool.query<{ hit_count: number }>(`
+      INSERT INTO rate_limits (phone, window_start, hit_count)
+      VALUES ($1, NOW(), 1)
+      ON CONFLICT (phone) DO UPDATE SET
+        hit_count = CASE
+          WHEN rate_limits.window_start > NOW() - INTERVAL '60 seconds'
+            THEN rate_limits.hit_count + 1
+          ELSE 1
+        END,
+        window_start = CASE
+          WHEN rate_limits.window_start > NOW() - INTERVAL '60 seconds'
+            THEN rate_limits.window_start
+          ELSE NOW()
+        END
+      RETURNING hit_count
+    `, [phone]);
+    return result.rows[0].hit_count <= 15;
+  } catch (e) {
+    console.error("[RATE_LIMIT] DB error — allowing request:", e);
+    return true; // fail open rather than blocking legitimate users
   }
-  if (entry.count >= 15) return false;
-  entry.count++;
-  return true;
 }
 
 // ============================================================

@@ -258,6 +258,12 @@ async function runMigrations(): Promise<void> {
       content TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
     )`,
+
+    `CREATE TABLE IF NOT EXISTS rate_limits (
+      phone TEXT PRIMARY KEY,
+      window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      hit_count INTEGER NOT NULL DEFAULT 1
+    )`,
   ];
 
   let created = 0;
@@ -348,11 +354,19 @@ declare module "http" {
   }
 }
 
+// Progress photo uploads can be up to ~8MB base64 — allow a larger body for that path.
+// All other JSON endpoints get a tight 100kb cap to bound attack surface.
+app.use(
+  "/api/users",
+  express.json({
+    limit: "10mb",
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+  }),
+);
 app.use(
   express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
+    limit: "100kb",
+    verify: (req: any, _res, buf) => { if (!req.rawBody) req.rawBody = buf; },
   }),
 );
 
@@ -483,7 +497,7 @@ async function activateCoachAccount(): Promise<void> {
     listenOptions,
     () => {
       log(`serving on port ${port}`);
-      initScheduler();
+      initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
       initMealLogsTable().catch(e => console.error("[STARTUP] Meal logs init failed:", e));

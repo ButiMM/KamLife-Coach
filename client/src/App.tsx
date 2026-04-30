@@ -1,6 +1,6 @@
 import { Switch, Route, Redirect } from "wouter";
 import { queryClient } from "./lib/queryClient";
-import { QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider, useQuery } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/not-found";
@@ -17,10 +17,18 @@ import ABTests from "@/pages/ab-tests";
 import PaymentSuccess from "@/pages/payment-success";
 import PaymentCancel from "@/pages/payment-cancel";
 import Login from "@/pages/login";
-import { isAuthenticated } from "@/lib/auth";
 
 function AuthGuard({ component: Component }: { component: React.ComponentType }) {
-  if (!isAuthenticated()) return <Redirect to="/login" />;
+  const { data: isAuth, isLoading } = useQuery<boolean>({
+    queryKey: ["/api/auth/check"],
+    queryFn: () =>
+      fetch("/api/auth/check", { credentials: "include" }).then((r) => r.ok),
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+
+  if (isLoading) return null;
+  if (!isAuth) return <Redirect to="/login" />;
   return <Component />;
 }
 
