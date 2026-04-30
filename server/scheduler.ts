@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import twilio from "twilio";
 import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart } from "./utils";
-import { db } from "./db";
+import { db, pool } from "./db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../shared/schema";
 import { eq, gte, lte, and, lt, desc, asc, or, sql, count } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
@@ -2637,11 +2637,28 @@ cron.schedule("0 8 * * 6", async () => {
 
 let schedulerInitialised = false;
 
-export function initScheduler(): void {
+export async function initScheduler(): Promise<void> {
   if (schedulerInitialised) {
     console.log("[SCHEDULER] Already initialised — skipping duplicate registration");
     return;
   }
+
+  // PostgreSQL session-level advisory lock — only one replica runs the scheduler.
+  // Lock is released automatically when the DB connection closes (on server shutdown).
+  // Lock ID 8675309 is an arbitrary stable integer unique to this scheduler.
+  try {
+    const { rows } = await pool.query<{ pg_try_advisory_lock: boolean }>(
+      "SELECT pg_try_advisory_lock(8675309)"
+    );
+    if (!rows[0].pg_try_advisory_lock) {
+      console.log("[SCHEDULER] Another instance holds the leader lock — cron jobs skipped on this replica");
+      return;
+    }
+    console.log("[SCHEDULER] Acquired leader lock — this replica will run all cron jobs");
+  } catch (e) {
+    console.warn("[SCHEDULER] Could not acquire advisory lock — starting scheduler anyway:", e);
+  }
+
   schedulerInitialised = true;
 
   // Catch-up removed: Railway filesystem is ephemeral — state file lost on every deploy
