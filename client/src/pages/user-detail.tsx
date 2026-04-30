@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Input } from "@/components/ui/input";
 import { format, formatDistanceToNow } from "date-fns";
 import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
-import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare, UtensilsCrossed, Camera, Mic, ClipboardList, Check, Trash2, Plus, Activity, ShieldAlert, Utensils } from "lucide-react";
+import { Dumbbell, Footprints, Scale, Calendar, User as UserIcon, Send, AlertTriangle, Trophy, MessageSquare, UtensilsCrossed, Camera, Mic, ClipboardList, Check, Trash2, Plus, Activity, ShieldAlert, Utensils, ShieldCheck, ShieldOff } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
@@ -90,6 +90,21 @@ export default function UserDetail() {
 
   const { data: userData, isLoading: userLoading } = useUser(userId);
   const { data: timelineData } = useClientTimeline(userId);
+
+  const setSubscriptionMutation = useMutation({
+    mutationFn: async (status: "active" | "inactive") => {
+      const res = await apiRequest("POST", "/api/admin/set-subscription", {
+        phone: user?.phoneNumber?.replace(/^whatsapp:\+?/, ""),
+        status,
+      });
+      return res.json();
+    },
+    onSuccess: (_, status) => {
+      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] });
+      toast({ title: status === "active" ? "Account activated" : "Account deactivated", description: status === "active" ? "Client now has full access" : "Client access suspended" });
+    },
+    onError: (err: any) => toast({ title: "Failed to update subscription", description: err.message, variant: "destructive" }),
+  });
 
   const sendMessageMutation = useMutation({
     mutationFn: async (message: string) => {
@@ -205,7 +220,32 @@ export default function UserDetail() {
               </div>
             </div>
           </div>
-          <StatusBadge status={user.subscriptionStatus} className="text-base px-4 py-1.5" />
+          <div className="flex items-center gap-3">
+            <StatusBadge status={user.subscriptionStatus} className="text-base px-4 py-1.5" />
+            {user.subscriptionStatus === "active" ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                disabled={setSubscriptionMutation.isPending}
+                onClick={() => setSubscriptionMutation.mutate("inactive")}
+              >
+                <ShieldOff className="w-4 h-4 mr-1" />
+                Deactivate
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                size="sm"
+                className="border-emerald-500/50 text-emerald-600 hover:bg-emerald-50"
+                disabled={setSubscriptionMutation.isPending}
+                onClick={() => setSubscriptionMutation.mutate("active")}
+              >
+                <ShieldCheck className="w-4 h-4 mr-1" />
+                Activate
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* Stats Grid */}
