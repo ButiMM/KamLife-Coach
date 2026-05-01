@@ -410,18 +410,20 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
-  // Catches multi-signal frustration messages like "this is all useless... shut down... I'm done"
-  // so that the bot does NOT respond with a workout programme or food log
+  // Catches frustration messages so the bot does NOT respond with a workout programme or payment link.
+  // A single STRONG signal is enough to intercept — waiting for 2 signals caused the
+  // "I'm not paying for this nonsense" → payment link bug (only 1 signal counted, fell through to payment handler).
+  const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|doesn.?t work|nothing works|broken|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
     /\b(terrible|pathetic|garbage|rubbish|broken|nothing works)\b/i.test(m),
     /\b(i.?m done|i am done|giving up|shut down|shut it down|i.?m out)\b/i.test(m),
     /\b(not paying|won.?t pay|i won.?t pay|i.?m not paying|nobody.?s paying|not worth)\b/i.test(m),
-    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic)\b/i.test(m),
+    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic|robotic|generic man)\b/i.test(m),
     /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
   ].filter(Boolean).length;
 
-  if (frustrationSignalCount >= 2) {
+  if (STRONG_FRUSTRATION || frustrationSignalCount >= 2) {
     const firstName = user.name?.split(" ")[0] || "";
     const namePrefix = firstName ? `${firstName}, ` : "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
@@ -5269,7 +5271,10 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
   }
 
   // ---- PAYMENT / REJOIN — inactive users asking to pay or rejoin ----
-  if (/\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
+  // IMPORTANT: exclude negative-payment phrases — "I'm not paying", "not worth paying", "won't pay"
+  // must NEVER trigger the payment link. They are frustration, not purchase intent.
+  const isNegativePayment = /\b(not paying|won.?t pay|i.?m not paying|not worth|nonsense|rubbish|garbage|terrible|useless)\b/i.test(m);
+  if (!isNegativePayment && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const clientName = user.name ? `, ${user.name}` : "";
