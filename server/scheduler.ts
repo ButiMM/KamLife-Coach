@@ -1412,15 +1412,43 @@ cron.schedule("0 8 * * *", async () => {
 cron.schedule("0 7 1 * *", async () => {
   console.log("[SCHEDULER] JOB: Monthly measurements");
   const clients = await getActiveClients();
+  const threeMonthsAgo = new Date(Date.now() - 90 * 86_400_000);
+  const lastMonthStart = new Date(Date.now() - 35 * 86_400_000);
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     if (!canSendProactive(client.id)) continue;
     try {
-      const name = client.name || "there";
-      await sendWhatsApp(client.phoneNumber,
-        `${name}, it is the 1st. Measurement day.\n\nGet a tape measure and send me:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nWeigh in as well. Same conditions — morning, after bathroom, before food. The tape does not lie when the scale does.`
-      );
+      const name = (client.name || "there").split(" ")[0];
+
+      // Pull last recorded weight + oldest weight (for context on progress)
+      const [latestWeight] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+        .from(weightLogs).where(eq(weightLogs.userId, client.id))
+        .orderBy(desc(weightLogs.loggedAt)).limit(1);
+
+      const [oldestWeight] = await db.select({ weight: weightLogs.weight })
+        .from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, threeMonthsAgo)))
+        .orderBy(asc(weightLogs.loggedAt)).limit(1);
+
+      // Did they log measurements last month? (any weight in the last 31-35 days)
+      const [lastMonthWeigh] = await db.select({ weight: weightLogs.weight })
+        .from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, lastMonthStart)))
+        .orderBy(asc(weightLogs.loggedAt)).limit(1);
+
+      let contextLine = "";
+      if (latestWeight && oldestWeight && latestWeight.weight !== oldestWeight.weight) {
+        const diff = parseFloat(String(latestWeight.weight)) - parseFloat(String(oldestWeight.weight));
+        const direction = diff < 0 ? `down ${Math.abs(diff).toFixed(1)}kg` : `up ${diff.toFixed(1)}kg`;
+        const goal = client.goalType || "fat_loss";
+        const onTrack = (goal === "fat_loss" && diff < 0) || (goal === "muscle_gain" && diff > 0);
+        contextLine = `\n\nScale says you're ${direction} since we started. ${onTrack ? "That's the right direction." : "Let's look at what needs to change."}`;
+      }
+
+      const msg = latestWeight
+        ? `${name}, it's the 1st — measurement day.\n\nWeigh in this morning (before food, after bathroom) and send me the number. Also grab a tape measure and send:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm${contextLine}`
+        : `${name}, it's the 1st — measurement day.\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nAlso grab a tape measure:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\n\nThe tape doesn't lie when the scale does.`;
+
+      await sendWhatsApp(client.phoneNumber, msg);
       recordProactiveSend(client.id);
     } catch (err) {
       console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err);
@@ -2750,16 +2778,23 @@ export async function initScheduler(): Promise<void> {
     for (const client of clients) {
       if (isPaused(client)) continue;
       try {
-        const name = client.name || "there";
+        const name = (client.name || "there").split(" ")[0];
         const budget = client.weeklyFoodBudget || "100_300";
+        const goal = client.goalType || "fat_loss";
         let msg = "";
+
         if (budget === "under_100" || budget === "50_100" || budget === "under_50") {
-          msg = `${name}, if today is payday — buy your protein FIRST before anything else.\n\n*Priority list:*\n1. Eggs 12 pack — R45\n2. Pilchards 3 tins — R36\n3. Sugar beans 500g — R20\n\nThat is R101 and covers your protein for the week. Everything else is secondary. Reply *shopping list* for the full plan.`;
+          // Tight budget — protein per rand, no prices (they go stale)
+          msg = `${name}, if today is payday — protein before anything else.\n\nBest value at Shoprite or Boxer: eggs, pilchards, sugar beans. In that order. Those three cover your protein for the week.\n\nEverything else comes after. Reply *shopping list* for the full plan.`;
         } else if (budget === "100_300") {
-          msg = `${name}, payday reminder — stock up on your week's food today before the money goes.\n\n*Top priority:*\n1. Frozen chicken 1kg — R40\n2. Eggs 12 pack — R45\n3. Oats 500g — R15\n4. Sweet potato 1kg — R12\n\nReply *shopping list* for the complete list. Reply *meal prep* for a batch cooking plan.`;
+          const focus = goal === "muscle_gain"
+            ? `Frozen chicken and eggs are your priority — you need volume.`
+            : `Frozen chicken, oats, and sweet potato. Protein first, carbs around training.`;
+          msg = `${name}, payday — stock up before the money goes.\n\n${focus}\n\nReply *shopping list* for your full list. Reply *meal prep* for the batch cooking plan.`;
         } else {
-          msg = `${name}, start of the pay cycle — perfect time to stock your kitchen.\n\nBuy protein in bulk today: chicken breast, eggs, mince. Freeze what you won't use this week.\n\nReply *shopping list* for your personalised list or *meal prep* for a batch cooking plan.`;
+          msg = `${name}, start of the pay cycle — best time to set up your kitchen for the week.\n\nBuy ${goal === "muscle_gain" ? "chicken breast, eggs, and Greek yoghurt in bulk" : "lean protein in bulk — chicken breast, tuna, eggs"}. Freeze what you won't use this week.\n\nReply *shopping list* for your personalised list.`;
         }
+
         if (canSendProactive(client.id)) {
           await sendWhatsApp(client.phoneNumber, msg);
           recordProactiveSend(client.id);
@@ -3013,8 +3048,25 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
           .from(users).where(eq(users.id, uid)).limit(1);
         if (!client || client.subscriptionStatus !== "active") continue;
 
+        // Try to identify what supplements they actually take from recent logs
+        const recentSupp = await db.select({ messageIn: chatHistory.messageIn })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, uid), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, fourteenDaysAgo)))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(3);
+
+        const suppText = recentSupp.map(s => s.messageIn || "").join(" ").toLowerCase();
+        let suppName = "";
+        if (/creatine/.test(suppText)) suppName = "creatine";
+        else if (/protein|whey|shake/.test(suppText)) suppName = "protein";
+        else if (/omega|fish.?oil/.test(suppText)) suppName = "omega-3s";
+        else if (/vitamin|vit\s*[cd]|multivit/.test(suppText)) suppName = "vitamins";
+        else if (/magnesium/.test(suppText)) suppName = "magnesium";
+
         const name = client.name?.split(" ")[0] || "there";
-        const msg = `Morning ${name} — have you taken your supplements today? Reply "took my vitamins" when done. Consistency matters more than the brand. 💊`;
+        const msg = suppName
+          ? `Morning ${name} — ${suppName} taken yet? Consistency is what makes it work.`
+          : `Morning ${name} — supplements taken? One less thing to think about later.`;
         await sendWhatsApp(client.phoneNumber, msg);
         sent++;
         if (sent >= 50) break; // rate limit
