@@ -3147,10 +3147,11 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
   }, { timezone: "UTC" });
 
   // ============================================================
-  // MONTHLY NPS SURVEY — 1st of each month, 10am SAST (8am UTC)
-  // Sends satisfaction survey to active clients
+  // MONTHLY NPS SURVEY — 3rd of each month, 7pm SAST (5pm UTC)
+  // Runs on the 3rd (not 1st — avoids colliding with measurements day).
+  // Skips clients who already received a coaching message today.
   // ============================================================
-  cron.schedule("0 8 1 * *", async () => {
+  cron.schedule("0 17 3 * *", async () => {
     console.log("[SCHEDULER] JOB: Monthly NPS survey");
     const stateKey = "nps_survey";
     const today = todaySAST();
@@ -3159,19 +3160,34 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
 
     try {
       const activeClients = await db.select({
+        id: users.id,
         phoneNumber: users.phoneNumber,
         name: users.name,
         subscriptionStatus: users.subscriptionStatus,
         totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        programmeStartDate: users.programmeStartDate,
       }).from(users).where(eq(users.subscriptionStatus, "active"));
 
+      const todayStart = sastDayStart();
       let sent = 0;
       for (const client of activeClients) {
         if ((client.totalWorkoutsCompleted || 0) < 3) continue; // too early to survey
+
+        // Skip if they already received a proactive message today — don't double-up
+        const alreadySentToday = await db.select({ id: sentProactive.id })
+          .from(sentProactive)
+          .where(and(eq(sentProactive.userId, client.id), eq(sentProactive.dedupeWindow, today)))
+          .limit(1);
+        if (alreadySentToday.length > 0) continue;
+
+        const daysOn = client.programmeStartDate
+          ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000)
+          : 0;
         const name = client.name?.split(" ")[0] || "there";
-        const msg = `${name}, quick monthly check-in:\n\nOn a scale of 1-10, how likely are you to recommend Coach K to a friend?\n\nJust reply with "rate" followed by your number (e.g. "rate 8").\n\nYour honest answer helps me improve. 🙏`;
+        const msg = `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`;
         await sendWhatsApp(client.phoneNumber, msg);
         sent++;
+        await new Promise(r => setTimeout(r, 200));
         if (sent >= 100) break;
       }
       console.log(`[SCHEDULER] NPS surveys sent: ${sent}`);
