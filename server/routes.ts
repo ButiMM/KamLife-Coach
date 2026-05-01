@@ -425,7 +425,6 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   if (STRONG_FRUSTRATION || frustrationSignalCount >= 2) {
     const firstName = user.name?.split(" ")[0] || "";
-    const namePrefix = firstName ? `${firstName}, ` : "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
       .where(eq(chatHistory.userId, user.id))
@@ -433,14 +432,29 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       .limit(3);
     const lastIntent = lastBotMsgs[0]?.intent || "";
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
-    const profileCtx = `CRITICAL PROFILE: Goal=${user.goalType}, Budget=${user.weeklyFoodBudget}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}.`;
-    const severeCtx = `The client is severely frustrated. They are ready to quit. Message: "${message}". Last bot response (${lastIntent}): "${lastOut}". ${profileCtx}\n\nRULES: 1) Do NOT apologise generically. 2) Do NOT ask what happened — you know what happened: the bot failed them. 3) Acknowledge the SPECIFIC failure. 4) Tell them ONE specific thing that still works or IS personalised to their profile. 5) Give them a direct, concrete action for TODAY only. 6) Maximum 4 sentences. SA voice. Human, direct, no corporate speak.`;
+    const streak = user.workoutStreak || 0;
+    const totalW = user.totalWorkoutsCompleted || 0;
+    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
+
+Your last message (${lastIntent}): "${lastOut}"
+
+They are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
+
+REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.
+
+WRITE TWO SENTENCES ONLY:
+1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
+2. Give one concrete coaching action using their actual numbers above
+
+BANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
+
+Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
       return severeReply;
     } catch (e) {
-      const fallback = `${namePrefix}I hear you — that wasn't good enough. Your calorie target is ${user.calorieTarget || 1800} kcal and protein target is ${user.proteinTarget || 120}g today. Log what you eat and I will track it accurately. Nothing else.`;
+      const fallback = `${firstName ? `${firstName}, ` : ""}that response wasn't good enough. Your protein target is ${user.proteinTarget || 120}g today — log your next meal and I will track it accurately.`;
       await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
       return fallback;
     }
@@ -3911,20 +3925,29 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
 
   // ---- NPS / CLIENT FEEDBACK — "rate", "feedback", "survey" ----
   if (m === "rate" || m === "feedback" || m === "survey" || m === "rate coach k" || m === "nps" || /\b(rate\s*coach|give\s*feedback|how.?s?\s*the\s*service|satisfaction)\b/i.test(m)) {
-    // Check if they are sending a rating (1-10)
-    const ratingMatch = m.match(/\b([1-9]|10)\s*(?:out of 10|\/10|stars?)?\b/);
-    if (ratingMatch && /\b(rate|rating|score|feedback|survey|nps)\b/i.test(m)) {
-      const score = parseInt(ratingMatch[1]);
+    // Check if they are sending a rating (0-10) — also capture bare numbers when last bot msg was NPS survey
+    const ratingMatch = m.match(/\b(0|[1-9]|10)\s*(?:out of 10|\/10|stars?)?\b/);
+    const lastBotForNPS = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+      .from(chatHistory).where(eq(chatHistory.userId, user.id)).orderBy(desc(chatHistory.createdAt)).limit(1);
+    const lastWasNPS = (lastBotForNPS[0]?.intent === "NPS_SURVEY") || /scale of 1-10|recommend Coach K/i.test(lastBotForNPS[0]?.messageOut || "");
+
+    // Accept a bare number if the last bot message was the NPS survey
+    const scoreStr = ratingMatch && (lastWasNPS || /\b(rate|rating|score|feedback|survey|nps)\b/i.test(m)) ? ratingMatch[1] : null;
+    if (scoreStr !== null) {
+      const score = parseInt(scoreStr);
       const category = score >= 9 ? "promoter" : score >= 7 ? "passive" : "detractor";
       await logChat(user.id, message, `NPS: ${score}/10 (${category})`, "NPS_RATING");
 
       let followUp = "";
       if (score >= 9) {
-        followUp = `${score}/10 — thank you! That means a lot. If you know someone who needs this, share your referral code: type *refer* to get it. Your recommendation is the best way to grow this.`;
+        followUp = `${score}/10 — sharp. Type *refer* to get your referral code and share this with someone who needs it.`;
       } else if (score >= 7) {
-        followUp = `${score}/10 — solid. What is the ONE thing that would make this a 10? Tell me straight — I want to improve.`;
+        followUp = `${score}/10. What is the one thing that would make it a 10? Tell me straight.`;
+      } else if (score >= 4) {
+        followUp = `${score}/10. What specifically is not working? One thing. I will fix it.`;
       } else {
-        followUp = `${score}/10 — I hear you. What is not working? Be specific — I read every response and I will fix it. Your honesty helps me build something better.`;
+        // 0-3: low score — acknowledge directly, no corporate speak
+        followUp = `${score}/10 — I needed to hear that. What broke down? Be specific and I will address it directly.`;
       }
       return followUp;
     }
@@ -3936,13 +3959,14 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
 
     if (recentNPS.length > 0 && m.length > 10 && !/\b(rate|feedback|survey)\b/i.test(m)) {
       await logChat(user.id, message, "Feedback noted", "NPS_FEEDBACK");
-      return `Noted — thank you for the honest feedback. I will use this to improve. Keep pushing, and keep telling me what works and what does not.`;
+      return `Noted. I will use this to improve. Keep telling me what works and what does not.`;
     }
 
-    // Prompt for rating
+    // Prompt for rating — no emojis, Coach K voice
     const name = user.name?.split(" ")[0] || "there";
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
-    return `*${name}, quick question:*\n\nOn a scale of 1-10, how likely are you to recommend Coach K to a friend?\n\n1 = Not at all\n10 = Absolutely\n\n_You have been on the programme for ${daysOn} days. Your honest answer helps me improve for everyone._\n\nJust reply with your number (e.g. "rate 8").`;
+    await logChat(user.id, message, `NPS survey prompted (${daysOn} days on programme)`, "NPS_SURVEY");
+    return `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`;
   }
 
   // ---- WATER REPORT — "my water" trend report ----
@@ -6360,7 +6384,16 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
       const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
-      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
+      const frustContext = `You are Coach K. Client said: "${message}". Your previous message was: "${lastOut.slice(0, 200)}".
+
+They are unhappy with your response. ${profileGuard}
+
+TWO SENTENCES ONLY:
+1. Acknowledge what specifically was wrong with your last response (don't be vague — name it)
+2. Correct it with one specific, profile-aware coaching action
+
+NEVER SAY: "I apologise", "I'm sorry", "I understand", "It sounds like", "You need support", "Let's focus", "feel free", "reach out", "be kind to yourself"
+SA voice. Direct. Coach forward, not backward.`;
       const frustReply = sanitizeCoachReply(await withTimeout("gpt_frust", 20000, () => askCoachK(message, user, frustContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
