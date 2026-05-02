@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "content=$(cat /home/user/KamLife-Coach/TASKS.md 2>/dev/null || echo 'TASKS.md not found'); printf '{\"hookSpecificOutput\": {\"hookEventName\": \"SessionStart\", \"additionalContext\": %s}}' \"$(echo \"$content\" | jq -Rs .)\"",
+            "timeout": 10,
+            "statusMessage": "Loading task list..."
+          }
+        ]
+      }
+    ]
+  }
+}

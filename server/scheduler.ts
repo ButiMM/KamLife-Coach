@@ -859,6 +859,8 @@ cron.schedule("2 4 * * *", async () => {
     if (isPaused(client)) continue;
     try {
       if (client.programmeWeek !== 3) continue;
+      // Skip if sick — week 3 urgency message makes no sense when they are in bed
+      if (await isSickOrInjuredToday(client.id)) continue;
       // Only send once per user when they enter week 3
       const sentKey = `week3_sent_${client.id}`;
       if (state[sentKey] === "sent") continue;
@@ -973,6 +975,10 @@ cron.schedule("0 6 * * *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
+      // Never celebrate while client is sick — save it for when they recover
+      const isSick = await isSickOrInjuredToday(client.id);
+      if (isSick) continue;
+
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = programmeDaysSince(client.programmeStartDate);
@@ -1083,6 +1089,10 @@ cron.schedule("0 14 * * 5", async () => {
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
       : Math.floor((Date.now() - new Date(client.createdAt || Date.now()).getTime()) / 86_400_000);
     if (daysSilent > 10) { skippedSilent++; continue; }
+
+    // Skip sick clients — weekend training push is irrelevant when they are in bed
+    const isSick = await isSickOrInjuredToday(client.id);
+    if (isSick) continue;
 
     // Daily budget (2 proactive msgs/day across all jobs) — cheap in-memory check first
     if (!canSendProactive(client.id)) { skippedBudget++; continue; }
@@ -1354,6 +1364,10 @@ cron.schedule("0 8 * * *", async () => {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
+      // Skip workout nudges when client is sick
+      const isSick = await isSickOrInjuredToday(client.id);
+      if (isSick) continue;
+
       const days = programmeDaysSince(client.programmeStartDate);
       const name = client.name || "there";
       if (canSendProactive(client.id)) {
