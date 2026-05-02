@@ -31,6 +31,7 @@ import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, e
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { getDisplayName, checkGptRateLimit, sastDayStart } from "./utils";
+import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, PORTION_IMAGES, PORTION_GUIDE as EXERCISE_PORTION_GUIDE } from "./exercise-media";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -700,6 +701,39 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     }
   }
 
+  // ---- EXERCISE GIF / DEMO REQUEST ----
+  // "show me squat", "squat gif", "how to bench press", "hip thrust demo"
+  const showExerciseRe = /\b(?:show(?:\s+me)?|how\s+(?:to|do(?:\s+i)?|do\s+i\s+do)|gif|demo|video\s+(?:for|of)|form\s+(?:for|on))\s+(?:the\s+|a\s+)?([a-z][a-z\s\-]+?)(?:\s+(?:gif|video|demo|form|tutorial))?\s*$/i;
+  const exNameRe = /^([a-z][a-z\s\-]+?)\s+(?:gif|video|form|demo|tutorial)\s*$/i;
+  const showMatch = m.match(showExerciseRe) || m.match(exNameRe);
+  if (showMatch) {
+    const exName = showMatch[1].trim();
+    const gifUrl = getExerciseGifUrl(exName);
+    if (gifUrl) {
+      const replyText = `${exName.charAt(0).toUpperCase() + exName.slice(1)} — watch the form before your next set.`;
+      await logChat(user.id, message, replyText, "EXERCISE_GIF");
+      return `${replyText}[MEDIA:${gifUrl}]`;
+    }
+  }
+
+  // ---- PORTION GUIDE ----
+  // "portions", "portion sizes", "plate guide", "show me portions", "lunch portions"
+  if (/\b(portion(?:s|ing)?|plate\s*(?:guide|method)|meal\s*guide|food\s*portions?|show\s*(?:me\s*)?portions?)\b/i.test(m)) {
+    const isLunch = /lunch/i.test(m);
+    const isDinner = /dinner|supper/i.test(m);
+    const mealKey = isDinner ? "dinner" : isLunch ? "lunch" : "breakfast";
+    const text = EXERCISE_PORTION_GUIDE[mealKey];
+    const imgUrl = PORTION_IMAGES[mealKey]();
+    const followUp = mealKey === "breakfast"
+      ? `\nReply *lunch portions* or *dinner portions* for the other meals.`
+      : mealKey === "lunch"
+        ? `\nReply *breakfast portions* or *dinner portions* for the other meals.`
+        : `\nReply *breakfast portions* or *lunch portions* for the other meals.`;
+    const reply = `${text}${followUp}`;
+    await logChat(user.id, message, reply, "PORTION_GUIDE");
+    return imgUrl ? `${reply}[MEDIA:${imgUrl}]` : reply;
+  }
+
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
@@ -708,9 +742,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const sessionNum = user.totalWorkoutsCompleted || 0;
     const sessionNote = sessionNum > 0 ? ` — Session ${sessionNum + 1}` : "";
     const weekNote = `*Week ${week}${sessionNote}*\n\n`;
+    const gifUrl = getPrimaryWorkoutGifUrl(workout);
     const reply = `${weekNote}${poContext}${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
     await logChat(user.id, message, reply, "WORKOUT_VIEW");
-    return reply;
+    return gifUrl ? `${reply}[MEDIA:${gifUrl}]` : reply;
   }
 
   if (m === "my targets" || m === "targets" || m === "my stats" || m === "stats") {
