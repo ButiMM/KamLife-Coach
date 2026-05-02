@@ -13,11 +13,47 @@ const PREMIUM_FOOD_RE = /\b(greek\s*yog(?:h)?urt|quinoa|salmon|avocado toast|woo
 const GENERIC_ASK_RE = /\bwhat do you need from me right now\??\b/i;
 const HARD_TRAINING_RE = /\b(squat|deadlift|run|sprint|jump|plyometric|heavy)\b/i;
 
+// Phrases the coach prompt explicitly bans — GPT still produces them sometimes.
+// Strip or replace them before the reply goes to the client.
+const BANNED_PHRASES: Array<{ pattern: RegExp; replacement: string }> = [
+  { pattern: /\bIt sounds like\b/gi, replacement: "" },
+  { pattern: /\bIt seems like\b/gi, replacement: "" },
+  { pattern: /\bI understand your frustration\.?\b/gi, replacement: "" },
+  { pattern: /\bI understand that\b/gi, replacement: "" },
+  { pattern: /\bHow can I help you(?: today)?\??\b/gi, replacement: "What do you need right now?" },
+  { pattern: /\bAbsolutely[!,.]?\s*/gi, replacement: "" },
+  { pattern: /\bCertainly[!,.]?\s*/gi, replacement: "" },
+  { pattern: /\bGreat question[!.]?\s*/gi, replacement: "" },
+  { pattern: /\bAmazing[!,.]?\s*/gi, replacement: "" },
+  { pattern: /\bFantastic[!,.]?\s*/gi, replacement: "" },
+  { pattern: /\bAwesome[!,.]?\s*/gi, replacement: "" },
+  { pattern: /\bI hope this helps\.?\s*/gi, replacement: "" },
+  { pattern: /\bFeel free to (ask|reach out)[^.]*\.?\s*/gi, replacement: "" },
+  { pattern: /\bLet me know if you need anything\.?\s*/gi, replacement: "" },
+  { pattern: /\bAs your coach,?\s*/gi, replacement: "" },
+  { pattern: /\bYou'?ve got this\.?\s*/gi, replacement: "" },
+  { pattern: /\bStay hydrated\.?\s*/gi, replacement: "" },
+  { pattern: /\bBased on your data,?\s*/gi, replacement: "" },
+  { pattern: /\bAccording to your logs,?\s*/gi, replacement: "" },
+  { pattern: /\bI can see that\s*/gi, replacement: "" },
+  { pattern: /\bI notice that\s*/gi, replacement: "" },
+];
+
 export function enforceCoachGuardrails(input: string, context: GuardrailContext): GuardrailResult {
   let reply = (input || "").trim();
   const violations: string[] = [];
   const budget = (context.budgetTier || "").toLowerCase();
   const injuries = (context.injuries || "").toLowerCase();
+
+  // Strip banned phrases before anything else
+  for (const { pattern, replacement } of BANNED_PHRASES) {
+    if (pattern.test(reply)) {
+      violations.push(`BANNED_PHRASE:${pattern.source.slice(0, 30)}`);
+      reply = reply.replace(pattern, replacement);
+    }
+  }
+  // Clean up double spaces and leading/trailing whitespace left by removals
+  reply = reply.replace(/\s{2,}/g, " ").replace(/^\s+/, "").replace(/\.\s+\./g, ".").trim();
 
   if (GENERIC_ASK_RE.test(reply)) {
     violations.push("GENERIC_OPEN_QUESTION");

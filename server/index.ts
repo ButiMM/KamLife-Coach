@@ -234,6 +234,17 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS client_actions_user_idx ON client_actions(user_id)`,
 
+    `CREATE TABLE IF NOT EXISTS sent_proactive (
+      id SERIAL PRIMARY KEY,
+      user_id UUID NOT NULL REFERENCES users(id),
+      message_key TEXT NOT NULL,
+      dedupe_window TEXT NOT NULL,
+      sent_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS sent_proactive_uniq_idx ON sent_proactive(user_id, message_key, dedupe_window)`,
+    `CREATE INDEX IF NOT EXISTS sent_proactive_user_idx ON sent_proactive(user_id)`,
+    `CREATE INDEX IF NOT EXISTS sent_proactive_sent_at_idx ON sent_proactive(sent_at)`,
+
     `CREATE TABLE IF NOT EXISTS conversations (
       id SERIAL PRIMARY KEY,
       title TEXT NOT NULL,
@@ -247,6 +258,36 @@ async function runMigrations(): Promise<void> {
       content TEXT NOT NULL,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL
     )`,
+
+    `CREATE TABLE IF NOT EXISTS rate_limits (
+      phone TEXT PRIMARY KEY,
+      window_start TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      hit_count INTEGER NOT NULL DEFAULT 1
+    )`,
+
+    `CREATE TABLE IF NOT EXISTS voice_broadcasts (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      label TEXT NOT NULL DEFAULT 'Voice Broadcast',
+      audio_base64 TEXT NOT NULL,
+      content_type TEXT NOT NULL DEFAULT 'audio/ogg',
+      duration_secs INTEGER,
+      sent_count INTEGER NOT NULL DEFAULT 0,
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE TABLE IF NOT EXISTS voice_recap_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      week_start DATE NOT NULL,
+      message_text TEXT NOT NULL,
+      audio_base64 TEXT,
+      content_type TEXT NOT NULL DEFAULT 'audio/mpeg',
+      sent_at TIMESTAMPTZ,
+      created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(user_id, week_start)
+    )`,
+    `CREATE INDEX IF NOT EXISTS voice_recap_logs_user_idx ON voice_recap_logs(user_id)`,
+    `CREATE INDEX IF NOT EXISTS voice_recap_logs_week_idx ON voice_recap_logs(week_start DESC)`,
   ];
 
   let created = 0;
@@ -337,11 +378,19 @@ declare module "http" {
   }
 }
 
+// Progress photo uploads (/api/users) and voice broadcast uploads (/api/admin)
+// can be up to ~8MB base64. All other JSON endpoints get a tight 100kb cap.
+app.use(
+  ["/api/users", "/api/admin"],
+  express.json({
+    limit: "10mb",
+    verify: (req: any, _res, buf) => { req.rawBody = buf; },
+  }),
+);
 app.use(
   express.json({
-    verify: (req, _res, buf) => {
-      req.rawBody = buf;
-    },
+    limit: "100kb",
+    verify: (req: any, _res, buf) => { if (!req.rawBody) req.rawBody = buf; },
   }),
 );
 
@@ -472,7 +521,7 @@ async function activateCoachAccount(): Promise<void> {
     listenOptions,
     () => {
       log(`serving on port ${port}`);
-      initScheduler();
+      initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
       initMealLogsTable().catch(e => console.error("[STARTUP] Meal logs init failed:", e));

@@ -1,11 +1,11 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs } from "../shared/schema";
+import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs, mealLogs } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
-import { getDisplayName } from "./utils";
+import { getDisplayName, sastDayStart } from "./utils";
 
 const openai = new OpenAI({
   // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
@@ -155,8 +155,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
   const proteinTarget = user.proteinTarget || 120;
   const programmeWeek = user.programmeWeek || 1;
   const today = new Date();
-  const sevenDaysAgo = new Date(today.getTime() - 7 * 86_400_000);
-  sevenDaysAgo.setHours(0, 0, 0, 0);
+  const sevenDaysAgo = sastDayStart(new Date(today.getTime() - 7 * 86_400_000));
   const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
 
   try {
@@ -190,16 +189,27 @@ export async function buildPatternSummary(user: any): Promise<string> {
     ).size;
     const daysSilent = 7 - daysWithLogs;
 
-    // ---- Protein estimate from food log GPT responses ----
+    // ---- Protein estimate from mealLogs (canonical source) ----
+    // Previous version regexed messageOut and falsely picked up numbers like
+    // "69g protein still needed" or "120g target" as if they were eaten.
+    // Query mealLogs directly and average per-day total protein.
     const foodLogs = recentChats.filter(c => c.intent === "FOOD_LOG");
-    const proteinNums: number[] = [];
-    for (const log of foodLogs) {
-      const m = (log.messageOut || "").match(/(\d{2,3})g?\s*(?:of\s+)?protein/i);
-      if (m) proteinNums.push(parseInt(m[1]));
+    let avgProtein: number | null = null;
+    try {
+      const dailyProtein = await db.select({
+        day: sql<string>`DATE(${mealLogs.loggedAt})`,
+        protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo)))
+        .groupBy(sql`DATE(${mealLogs.loggedAt})`);
+      const dailyTotals = dailyProtein.map(d => d.protein).filter(p => p > 0);
+      if (dailyTotals.length >= 2) {
+        avgProtein = Math.round(dailyTotals.reduce((a, b) => a + b, 0) / dailyTotals.length);
+      }
+    } catch (protErr) {
+      console.warn("[PATTERN] meal log protein query failed:", protErr);
     }
-    const avgProtein = proteinNums.length >= 2
-      ? Math.round(proteinNums.reduce((a, b) => a + b, 0) / proteinNums.length)
-      : null;
 
     // ---- Scan message text for signals ----
     const allIn = recentChats.map(c => (c.messageIn || "").toLowerCase()).join(" ");
@@ -595,8 +605,16 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
 
     if (foods.length === 0) return null;
 
+    // Sanity bounds — reject obvious hallucinations.
+    // Per-item: 0–2500 kcal (a single huge meal). Total meal: 0–3500 kcal (largest realistic single meal).
+    // If any item or the total is wildly outside this range, the model has hallucinated.
     const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
     const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
+    const itemOutOfRange = foods.some(f => f.kcal > 2500 || f.protein_g > 250);
+    if (itemOutOfRange || totalKcal > 3500 || totalProtein > 350) {
+      console.warn(`[gptFoodFallback] rejecting hallucinated meal — totalKcal=${totalKcal} totalProt=${totalProtein} items=${foods.map(f => `${f.name}:${f.kcal}`).join(",")}`);
+      return null;
+    }
     const result: GptFoodFallbackResult = {
       foods,
       totalKcal,
@@ -623,7 +641,7 @@ setInterval(() => {
 
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     // Only count messages the CLIENT actually sent (messageIn not empty) — excludes scheduler proactive messages
     const result = await db.select({ count: sql`count(*)` })
       .from(chatHistory)
@@ -653,8 +671,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   // Without this, GPT suggests dinner without knowing 1,767 kcal was already consumed.
   let todayFoodContext = "";
   try {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
       .from(chatHistory)
       .where(and(

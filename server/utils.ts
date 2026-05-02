@@ -1,5 +1,16 @@
 const INVALID_NAMES = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
 
+// SAST = UTC+2, no DST. Returns the UTC Date representing SAST midnight of the given date
+// (or today if omitted). Use this everywhere instead of new Date(); setHours(0,0,0,0) which
+// resolves to UTC midnight = 2am SAST, causing meals logged at midnight–2am to be misattributed.
+export function sastDayStart(date?: Date): Date {
+  const SAST_OFFSET = 2 * 3_600_000;
+  const base = date ? date.getTime() : Date.now();
+  const inSAST = new Date(base + SAST_OFFSET);
+  const sastDateStr = inSAST.toISOString().slice(0, 10); // "YYYY-MM-DD" in SAST
+  return new Date(`${sastDateStr}T00:00:00+02:00`); // back to real UTC
+}
+
 export function getDisplayName(user: any): string {
   if (!user.name || user.name.length < 2 || INVALID_NAMES.has((user.name || "").toUpperCase())) return "";
   return user.name;

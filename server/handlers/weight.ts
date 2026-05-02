@@ -3,12 +3,20 @@ import { users, weightLogs } from "../../shared/schema";
 import { eq, and, gte, asc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
+import { sastDayStart } from "../utils";
 
 export async function handleWeightLog(
   phone: string,
   user: any,
   newKg: number,
 ): Promise<string> {
+  // Sanity bounds: 30kg–250kg covers from very small adolescents to severely obese adults.
+  // Anything outside is almost certainly a typo (e.g. "850kg" = "85kg", "8kg" = "80kg")
+  // or an OCR/Whisper error. Don't update targets, ask user to confirm.
+  if (!Number.isFinite(newKg) || newKg < 30 || newKg > 250) {
+    return `That weight reads as *${newKg}kg* — that doesn't look right. Send your weight again as just a number followed by kg, like "82kg" or "76.5kg".`;
+  }
+
   const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(
     newKg, user.goalType || "fat_loss", user.lifeSituation || "office",
     user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170,
@@ -20,7 +28,7 @@ export async function handleWeightLog(
   await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
 
   // Prevent duplicate weight logs — update today's entry if it exists, otherwise insert
-  const todayWeightStart = new Date(); todayWeightStart.setHours(0, 0, 0, 0);
+  const todayWeightStart = sastDayStart();
   const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
     .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
     .limit(1);

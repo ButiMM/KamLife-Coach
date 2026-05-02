@@ -1,17 +1,13 @@
-const KEY = "kamlife_dashboard_token";
+const SESSION_HINT = "kamlife_session";
 
-export function getToken(): string | null {
-  return localStorage.getItem(KEY);
+export function markLoggedIn(): void {
+  sessionStorage.setItem(SESSION_HINT, "1");
 }
 
-export function setToken(token: string): void {
-  localStorage.setItem(KEY, token);
+export function markLoggedOut(): void {
+  sessionStorage.removeItem(SESSION_HINT);
 }
 
-export function clearToken(): void {
-  localStorage.removeItem(KEY);
-}
-
-export function isAuthenticated(): boolean {
-  return !!getToken();
+export function hasSessionHint(): boolean {
+  return !!sessionStorage.getItem(SESSION_HINT);
 }

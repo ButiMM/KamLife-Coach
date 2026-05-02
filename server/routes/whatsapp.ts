@@ -82,7 +82,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       // Rate limiter
       const rawPhoneEarly = (req.body.From || "") as string;
       const phoneKey = rawPhoneEarly.replace(/^(whatsapp:)\s+/, "$1+");
-      if (!checkRateLimit(phoneKey)) {
+      if (!await checkRateLimit(phoneKey)) {
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Too many messages. Wait 60 seconds.</Message></Response>`);
       }
 

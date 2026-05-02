@@ -30,7 +30,7 @@ import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, get
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
-import { getDisplayName, checkGptRateLimit } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart } from "./utils";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -410,20 +410,21 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
-  // Catches multi-signal frustration messages like "this is all useless... shut down... I'm done"
-  // so that the bot does NOT respond with a workout programme or food log
+  // Catches frustration messages so the bot does NOT respond with a workout programme or payment link.
+  // A single STRONG signal is enough to intercept — waiting for 2 signals caused the
+  // "I'm not paying for this nonsense" → payment link bug (only 1 signal counted, fell through to payment handler).
+  const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|doesn.?t work|nothing works|broken|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
     /\b(terrible|pathetic|garbage|rubbish|broken|nothing works)\b/i.test(m),
     /\b(i.?m done|i am done|giving up|shut down|shut it down|i.?m out)\b/i.test(m),
     /\b(not paying|won.?t pay|i won.?t pay|i.?m not paying|nobody.?s paying|not worth)\b/i.test(m),
-    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic)\b/i.test(m),
+    /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic|robotic|generic man)\b/i.test(m),
     /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
   ].filter(Boolean).length;
 
-  if (frustrationSignalCount >= 2) {
+  if (STRONG_FRUSTRATION || frustrationSignalCount >= 2) {
     const firstName = user.name?.split(" ")[0] || "";
-    const namePrefix = firstName ? `${firstName}, ` : "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
       .where(eq(chatHistory.userId, user.id))
@@ -431,14 +432,29 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       .limit(3);
     const lastIntent = lastBotMsgs[0]?.intent || "";
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
-    const profileCtx = `CRITICAL PROFILE: Goal=${user.goalType}, Budget=${user.weeklyFoodBudget}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}.`;
-    const severeCtx = `The client is severely frustrated. They are ready to quit. Message: "${message}". Last bot response (${lastIntent}): "${lastOut}". ${profileCtx}\n\nRULES: 1) Do NOT apologise generically. 2) Do NOT ask what happened — you know what happened: the bot failed them. 3) Acknowledge the SPECIFIC failure. 4) Tell them ONE specific thing that still works or IS personalised to their profile. 5) Give them a direct, concrete action for TODAY only. 6) Maximum 4 sentences. SA voice. Human, direct, no corporate speak.`;
+    const streak = user.workoutStreak || 0;
+    const totalW = user.totalWorkoutsCompleted || 0;
+    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
+
+Your last message (${lastIntent}): "${lastOut}"
+
+They are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
+
+REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.
+
+WRITE TWO SENTENCES ONLY:
+1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
+2. Give one concrete coaching action using their actual numbers above
+
+BANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
+
+Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
       return severeReply;
     } catch (e) {
-      const fallback = `${namePrefix}I hear you — that wasn't good enough. Your calorie target is ${user.calorieTarget || 1800} kcal and protein target is ${user.proteinTarget || 120}g today. Log what you eat and I will track it accurately. Nothing else.`;
+      const fallback = `${firstName ? `${firstName}, ` : ""}that response wasn't good enough. Your protein target is ${user.proteinTarget || 120}g today — log your next meal and I will track it accurately.`;
       await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
       return fallback;
     }
@@ -459,7 +475,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- RESET CALORIES — "reset my calories", "clear food log", "remove meals today" ----
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     // Delete from both mealLogs (primary) and chatHistory (legacy)
     await Promise.all([
       db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
@@ -470,7 +486,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
   if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
 
     // Primary: delete most recent mealLogs row
     const lastMealLog = await db.select({ id: mealLogs.id })
@@ -510,7 +526,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
     if (foodToRemove.length >= 2) {
       try {
-        const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+        const todayStart = sastDayStart();
 
         // Primary: search mealLogs table (SA scanner + GPT fallback + photo logs all write here)
         const mealLogRows = await db.select({
@@ -580,7 +596,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
   // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
   if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const logs = await db.select({
       messageIn: chatHistory.messageIn,
       messageOut: chatHistory.messageOut,
@@ -627,25 +643,10 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
-    // ALWAYS recalculate from actual food logs — never trust stored counter (can get corrupted)
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
-    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
-    let todayCals = 0; let todayProt = 0;
-    for (const log of todayFoodLogs) {
-      const matched = scanForSAFoods(log.messageIn || "");
-      if (matched.length > 0) {
-        todayCals += matched.reduce((s: number, f: any) => s + (f.typicalPortionCalories || 0), 0);
-        todayProt += matched.reduce((s: number, f: any) => s + (f.typicalPortionProtein || 0), 0);
-      } else {
-        // Fallback: extract from GPT response
-        const calMatch = (log.messageOut || "").match(/~?(\d+)\s*kcal/i);
-        const protMatch = (log.messageOut || "").match(/(\d+)g?\s*protein/i);
-        if (calMatch) todayCals += parseInt(calMatch[1]);
-        if (protMatch) todayProt += parseInt(protMatch[1]);
-      }
-    }
+    // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
+    const totals = await recomputeTodayFoodTotals(user.id);
+    const todayCals = totals.calories;
+    const todayProt = totals.protein;
     const remaining = cal - todayCals;
     const protRemaining = prot - todayProt;
     if (todayCals > 0) {
@@ -1070,7 +1071,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (logSupp) {
       await logChat(user.id, message, "Supplement logged", "SUPPLEMENT_LOG");
       // Count today's supplement logs
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
       const suppStreakLine = todaySuppLogs.length >= 2 ? ` Day ${todaySuppLogs.length} in a row — that's the habit.` : "";
@@ -1329,23 +1330,26 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
               model: "gpt-4o-mini",
               max_tokens: 50,
               messages: [
-                { role: "system", content: "Extract the step count number from this screenshot. Reply with ONLY the number. If you cannot find a step count, reply UNKNOWN." },
+                { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If no step count is clearly labelled, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
                 { role: "user", content: [
-                  { type: "text", text: "What is the step count shown in this screenshot?" },
+                  { type: "text", text: "Extract the labelled step count from this screenshot, or reply NOT_STEPS." },
                   { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
                 ] },
               ],
             }));
             const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
-            const extractedSteps = parseInt(stepText.replace(/[^0-9]/g, ""));
+            // Vision model explicitly rejected — don't try to extract a number from "NOT_STEPS"
+            const visionRejected = /\b(NOT_STEPS|UNKNOWN)\b/i.test(stepText);
+            const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
             // Guard against random OCR numbers from food labels/photos:
             // accept low numbers only when user explicitly indicated steps.
             const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
-            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps < 100000;
+            // Realistic range: 100–60,000 steps/day. 60k = ~45km walking, hard upper bound for a real human day.
+            const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 60000;
             const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
-            if (!isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
+            if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
               const target = user.stepsTarget || 10000;
-              const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+              const todayStartSteps = sastDayStart();
               const existingStep = await db.select({ id: stepLogs.id })
                 .from(stepLogs)
                 .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
@@ -1443,7 +1447,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
         // ---- FOOD PHOTO continues below ----
         // Rate limit food photo logging — max 3 per day (only count actual photo logs, not text food entries)
-        const todayStartPhoto = new Date(); todayStartPhoto.setHours(0, 0, 0, 0);
+        const todayStartPhoto = sastDayStart();
         const photoCountResult = await db.select({ count: sql`count(*)` })
           .from(chatHistory)
           .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
@@ -1484,7 +1488,9 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-BEST GUESS RULE: Always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if you genuinely cannot tell whether the image is food at all (e.g. it is completely dark, blurry beyond recognition, or clearly not food) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
+FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food (selfie, gym mirror, screenshot of an app, document, scenery, body progress photo, scale, supplement bottle, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY this single line and nothing else: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
+
+BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
                 },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
               ],
@@ -1499,16 +1505,30 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         if (!visionReply || visionReply.length < 10) {
           return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
         }
+
+        // NOT_FOOD gate — model says image isn't food. Don't log, don't burn extra vision.
+        if (/^NOT_FOOD\b/i.test(visionReply)) {
+          console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
+          return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+        }
+
         await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
 
         // Write to mealLogs so photo meals appear in "my meals" and count in daily totals
+        // Sanity bounds: 50-3000 kcal per meal, 0-200g protein. Anything outside is a hallucination.
         const extractKcal = (text: string) => {
           const m = text.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || text.match(/\b(\d{2,4})\s*kcal/i);
-          return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0;
+          if (!m) return 0;
+          const n = parseInt(m[1].replace(/,/g, ""), 10);
+          if (!Number.isFinite(n) || n < 50 || n > 3000) return 0;
+          return n;
         };
         const extractProt = (text: string) => {
           const m = text.match(/\b(\d{1,3})\s*g\s*protein/i);
-          return m ? parseInt(m[1], 10) : 0;
+          if (!m) return 0;
+          const n = parseInt(m[1], 10);
+          if (!Number.isFinite(n) || n < 0 || n > 200) return 0;
+          return n;
         };
 
         let totalPhotoKcal = extractKcal(visionReply);
@@ -1860,7 +1880,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     const warningCount = (m.match(/⚠️|warning|struggled|nearly/gi) || []).length;
 
     // Log the workout
-    const todayStartGym = new Date(); todayStartGym.setHours(0, 0, 0, 0);
+    const todayStartGym = sastDayStart();
     const alreadyLogged = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStartGym)))
@@ -1904,7 +1924,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // ---- DONE — workout complete (direct) ----
   if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
     // Guard: prevent double-logging on the same calendar day (race condition + accidental re-send)
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)
       .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
@@ -1934,10 +1954,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     // Workout streak — continues if last session was within 2 days (but NOT same calendar day,
     // which is already prevented by the double-log guard above)
     const lastW = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
-    const todayMidnight = new Date(); todayMidnight.setHours(0, 0, 0, 0);
+    const todayMidnight = sastDayStart();
     let newStreak = 1;
     if (lastW) {
-      const lastDay = new Date(lastW); lastDay.setHours(0, 0, 0, 0);
+      const lastDay = sastDayStart(new Date(lastW));
       const daysDiff = Math.floor((todayMidnight.getTime() - lastDay.getTime()) / 86400000);
       // daysDiff === 0 means same day — treated as fresh start (shouldn't happen after guard above)
       if (daysDiff >= 1 && daysDiff <= 2) newStreak = (user.workoutStreak || 0) + 1;
@@ -2152,6 +2172,12 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
     const weightMatch = m.match(/\b(\d+(?:\.\d+)?)\s*kg\b/i);
     const weightKg = weightMatch ? parseFloat(weightMatch[1]) : 0;
+    // Sanity bound: 0.5kg–500kg. Above 500kg is almost certainly a typo
+    // (e.g. "1000kg bench press" instead of "100kg"). Below 0.5kg is a parsing error.
+    // Reject confidently so we don't cite the bad number in future coaching.
+    if (weightKg > 0 && (weightKg < 0.5 || weightKg > 500)) {
+      return `That weight reads as *${weightKg}kg* — looks like a typo. Send the lift again, e.g. "bench press 80kg 3x8".`;
+    }
     if (!weightKg) { /* fall through to GPT */ } else {
 
     // Parse optional reps and sets: "3x10", "3 sets 10 reps", "x10", "10 reps"
@@ -2405,7 +2431,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
-      const todayStartSteps = new Date(); todayStartSteps.setHours(0, 0, 0, 0);
+      const todayStartSteps = sastDayStart();
       const existingStep = await db.select({ id: stepLogs.id })
         .from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
@@ -2523,7 +2549,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       return gptRef;
     } else {
       // Mark the previous food log as corrected so it is excluded from today's totals
-      const todayStartCorr = new Date(); todayStartCorr.setHours(0, 0, 0, 0);
+      const todayStartCorr = sastDayStart();
       try {
         const lastFoodLog = await db.select({ id: chatHistory.id })
           .from(chatHistory)
@@ -2717,8 +2743,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
       const refYesterday = /yesterday/i.test(m);
 
       // Search window: today first, then last 48h for "same as yesterday"
-      const todayStart = new Date();
-      todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const windowStart = refYesterday
         ? new Date(Date.now() - 48 * 3600_000)
         : todayStart;
@@ -2770,6 +2795,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         rawMessage: mealLogs.rawMessage,
         source: mealLogs.source,
         items: mealLogs.items,
+        loggedAt: mealLogs.loggedAt,
       }).from(mealLogs).where(and(
         eq(mealLogs.userId, user.id),
         gte(mealLogs.loggedAt, new Date(Date.now() - 48 * 3600_000)),
@@ -2810,8 +2836,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
         const updTodayProt = relogged.protein;
         const remaining = calorieTarget - updTodayCals;
         const protGap = proteinTarget - updTodayProt;
-        await logChat(user.id, message, `Quick relog: ${labels.join(", ")}`, "FOOD_LOG");
-        return `♻️ Copied from yesterday:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
+        const mealWasToday = matchedMeal.loggedAt ? matchedMeal.loggedAt >= sastDayStart() : false;
+        const copyLabel = mealWasToday ? "Copied from earlier today" : "Copied from yesterday";
+        await logChat(user.id, message, `Quick relog: ${labels.join(", ")} (+${totalCals} kcal · +${totalProt}g protein)`, "FOOD_LOG");
+        return `♻️ ${copyLabel}:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
       }
 
       // Fallback: re-process through the food scanner — for older logs without meal_logs entries
@@ -3200,7 +3228,15 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- GPT FOOD FALLBACK (no SA foods detected at all but clear food intent) ----
   // e.g. "I had avocado toast" — scanner had no match; GPT extracts the data.
-  if (!isQuestion && !isEmotionalOnly && hasLogTrigger && !hasActualFood) {
+  // Word count ceiling: voice transcriptions are 80–200+ words and trigger hasLogTrigger
+  // on words like "having" in non-food contexts, causing GPT hallucinations.
+  // Real food log messages are almost always under 50 words.
+  const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
+  // Strong trigger: explicit eating-past-tense / meal-name patterns. The looser hasLogTrigger
+  // includes bare "having"/"have" which fires on motivation talk like "I'm having a hard time".
+  // For the GPT fallback (which invents data), require something the scanner couldn't fake.
+  const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal)\b/i.test(m);
+  if (!isQuestion && !isEmotionalOnly && hasStrongFoodTrigger && !hasActualFood && !voiceFallbackTooLong) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 2000;
@@ -3889,20 +3925,29 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- NPS / CLIENT FEEDBACK — "rate", "feedback", "survey" ----
   if (m === "rate" || m === "feedback" || m === "survey" || m === "rate coach k" || m === "nps" || /\b(rate\s*coach|give\s*feedback|how.?s?\s*the\s*service|satisfaction)\b/i.test(m)) {
-    // Check if they are sending a rating (1-10)
-    const ratingMatch = m.match(/\b([1-9]|10)\s*(?:out of 10|\/10|stars?)?\b/);
-    if (ratingMatch && /\b(rate|rating|score|feedback|survey|nps)\b/i.test(m)) {
-      const score = parseInt(ratingMatch[1]);
+    // Check if they are sending a rating (0-10) — also capture bare numbers when last bot msg was NPS survey
+    const ratingMatch = m.match(/\b(0|[1-9]|10)\s*(?:out of 10|\/10|stars?)?\b/);
+    const lastBotForNPS = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
+      .from(chatHistory).where(eq(chatHistory.userId, user.id)).orderBy(desc(chatHistory.createdAt)).limit(1);
+    const lastWasNPS = (lastBotForNPS[0]?.intent === "NPS_SURVEY") || /scale of 1-10|recommend Coach K/i.test(lastBotForNPS[0]?.messageOut || "");
+
+    // Accept a bare number if the last bot message was the NPS survey
+    const scoreStr = ratingMatch && (lastWasNPS || /\b(rate|rating|score|feedback|survey|nps)\b/i.test(m)) ? ratingMatch[1] : null;
+    if (scoreStr !== null) {
+      const score = parseInt(scoreStr);
       const category = score >= 9 ? "promoter" : score >= 7 ? "passive" : "detractor";
       await logChat(user.id, message, `NPS: ${score}/10 (${category})`, "NPS_RATING");
 
       let followUp = "";
       if (score >= 9) {
-        followUp = `${score}/10 — thank you! That means a lot. If you know someone who needs this, share your referral code: type *refer* to get it. Your recommendation is the best way to grow this.`;
+        followUp = `${score}/10 — sharp. Type *refer* to get your referral code and share this with someone who needs it.`;
       } else if (score >= 7) {
-        followUp = `${score}/10 — solid. What is the ONE thing that would make this a 10? Tell me straight — I want to improve.`;
+        followUp = `${score}/10. What is the one thing that would make it a 10? Tell me straight.`;
+      } else if (score >= 4) {
+        followUp = `${score}/10. What specifically is not working? One thing. I will fix it.`;
       } else {
-        followUp = `${score}/10 — I hear you. What is not working? Be specific — I read every response and I will fix it. Your honesty helps me build something better.`;
+        // 0-3: low score — acknowledge directly, no corporate speak
+        followUp = `${score}/10 — I needed to hear that. What broke down? Be specific and I will address it directly.`;
       }
       return followUp;
     }
@@ -3914,13 +3959,14 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
     if (recentNPS.length > 0 && m.length > 10 && !/\b(rate|feedback|survey)\b/i.test(m)) {
       await logChat(user.id, message, "Feedback noted", "NPS_FEEDBACK");
-      return `Noted — thank you for the honest feedback. I will use this to improve. Keep pushing, and keep telling me what works and what does not.`;
+      return `Noted. I will use this to improve. Keep telling me what works and what does not.`;
     }
 
-    // Prompt for rating
+    // Prompt for rating — no emojis, Coach K voice
     const name = user.name?.split(" ")[0] || "there";
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
-    return `*${name}, quick question:*\n\nOn a scale of 1-10, how likely are you to recommend Coach K to a friend?\n\n1 = Not at all\n10 = Absolutely\n\n_You have been on the programme for ${daysOn} days. Your honest answer helps me improve for everyone._\n\nJust reply with your number (e.g. "rate 8").`;
+    await logChat(user.id, message, `NPS survey prompted (${daysOn} days on programme)`, "NPS_SURVEY");
+    return `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`;
   }
 
   // ---- WATER REPORT — "my water" trend report ----
@@ -5249,7 +5295,10 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   }
 
   // ---- PAYMENT / REJOIN — inactive users asking to pay or rejoin ----
-  if (/\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
+  // IMPORTANT: exclude negative-payment phrases — "I'm not paying", "not worth paying", "won't pay"
+  // must NEVER trigger the payment link. They are frustration, not purchase intent.
+  const isNegativePayment = /\b(not paying|won.?t pay|i.?m not paying|not worth|nonsense|rubbish|garbage|terrible|useless)\b/i.test(m);
+  if (!isNegativePayment && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const clientName = user.name ? `, ${user.name}` : "";
@@ -5496,7 +5545,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
   // ---- "AM I ON TRACK?" STATUS COMMAND — no GPT ----
   if (/\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status)\b/i.test(m)) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
     const [stepLogsWeek, workoutLogsWeek, weightLogsRecent, foodLogsToday] = await Promise.all([
       db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
       db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
@@ -5533,7 +5582,7 @@ BEST GUESS RULE: Always make your best estimate even if the photo is not perfect
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
   if (/\b(what.*(?:i eat|i ate|i had)|my food|food diary|food log|meal log|meal logs|today.?s?\s*meal\s*logs?|meals today|melas today|melas|ate today|eaten today|log today|today.?s?\s*food|food.*today|what.*eat.*today|how many.*calori|calori.*today|today.?s?\s*calori|protein today|today.?s?\s*protein|macros today|today.?s?\s*macros|daily total|today.?s?\s*total|total today|how much.*eaten|what.*logged|my meals|my logged|logged meals|see my (?:meal|food)|show my (?:meal|food)|view my (?:meal|food)|meals|today.?s meals)\b/i.test(m)) {
-    const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+    const todayStart = sastDayStart();
 
     // Primary: read from structured mealLogs table — stores SA scanner + GPT fallback + photo logs.
     // This is authoritative: we wrote to it at log time, no re-parsing needed.
@@ -6335,7 +6384,16 @@ CRITICAL RULES — these are non-negotiable:
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
       const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
-      const frustContext = `Client is frustrated or unimpressed. Their last message: "${message}". The previous bot response was (intent: ${lastIntent}): "${lastOut.slice(0, 200)}". RULES: The client is reacting negatively to YOUR previous response — "${message}" means they are unhappy with what you just said. Acknowledge the specific issue in one sentence. Do not say "I apologise" or "I'm sorry" generically. Do NOT ask "what happened" or "what caught you off guard" — YOU are what happened. Then correct course with a concrete, profile-aware answer that includes ONE immediate action. Avoid open-ended questions unless strictly required. ${profileGuard} SA voice. Direct. No fluff.`;
+      const frustContext = `You are Coach K. Client said: "${message}". Your previous message was: "${lastOut.slice(0, 200)}".
+
+They are unhappy with your response. ${profileGuard}
+
+TWO SENTENCES ONLY:
+1. Acknowledge what specifically was wrong with your last response (don't be vague — name it)
+2. Correct it with one specific, profile-aware coaching action
+
+NEVER SAY: "I apologise", "I'm sorry", "I understand", "It sounds like", "You need support", "Let's focus", "feel free", "reach out", "be kind to yourself"
+SA voice. Direct. Coach forward, not backward.`;
       const frustReply = sanitizeCoachReply(await withTimeout("gpt_frust", 20000, () => askCoachK(message, user, frustContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, frustReply, "FRUSTRATION");
       return frustReply;
@@ -6441,7 +6499,7 @@ CRITICAL RULES — these are non-negotiable:
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
-      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const todayStart = sastDayStart();
       const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)));
@@ -6476,23 +6534,23 @@ CRITICAL RULES — these are non-negotiable:
 
   return finalReply;
 
-  } catch (err) {
-    console.error("[handleMessage FATAL]", phone, message, err);
+  } catch (err: any) {
+    console.error("[handleMessage FATAL]", JSON.stringify({
+      phone,
+      message: (message || "").slice(0, 200),
+      hasMedia: !!mediaUrl,
+      errMessage: err?.message || String(err),
+      errCode: err?.code,
+      errStack: err?.stack?.split("\n").slice(0, 8).join(" | "),
+    }));
     return "Eish, something went wrong on my side. Give me a second and try again.";
   }
 }
 
 // ============================================================
 // RATE LIMITER — 15 messages per phone per 60 seconds
+// DB-backed so limits survive server restarts / multi-instance deploys.
 // ============================================================
-
-const rateLimitMap = new Map<string, { count: number; resetAt: number }>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, val] of rateLimitMap.entries()) {
-    if (now > val.resetAt) rateLimitMap.delete(key);
-  }
-}, 5 * 60 * 1000);
 
 // ============================================================
 // VOICE NOTE FAILURE TRACKER — escalate to "please type" after 3 failures
@@ -6521,17 +6579,29 @@ export function clearVoiceFailure(userId: string): void {
   voiceFailureMap.delete(userId);
 }
 
-function checkRateLimit(phone: string): boolean {
-  const now = Date.now();
-  const window = 60 * 1000;
-  const entry = rateLimitMap.get(phone);
-  if (!entry || now > entry.resetAt) {
-    rateLimitMap.set(phone, { count: 1, resetAt: now + window });
-    return true;
+async function checkRateLimit(phone: string): Promise<boolean> {
+  try {
+    const result = await pool.query<{ hit_count: number }>(`
+      INSERT INTO rate_limits (phone, window_start, hit_count)
+      VALUES ($1, NOW(), 1)
+      ON CONFLICT (phone) DO UPDATE SET
+        hit_count = CASE
+          WHEN rate_limits.window_start > NOW() - INTERVAL '60 seconds'
+            THEN rate_limits.hit_count + 1
+          ELSE 1
+        END,
+        window_start = CASE
+          WHEN rate_limits.window_start > NOW() - INTERVAL '60 seconds'
+            THEN rate_limits.window_start
+          ELSE NOW()
+        END
+      RETURNING hit_count
+    `, [phone]);
+    return result.rows[0].hit_count <= 15;
+  } catch (e) {
+    console.error("[RATE_LIMIT] DB error — allowing request:", e);
+    return true; // fail open rather than blocking legitimate users
   }
-  if (entry.count >= 15) return false;
-  entry.count++;
-  return true;
 }
 
 // ============================================================
@@ -6549,6 +6619,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     registerDashboardRoutes,
     registerPaymentRoutes,
     registerCoachRoutes,
+    registerVoiceBroadcastRoutes,
   } = await import("./routes/index");
 
   // Deps that route modules need from this file
@@ -6562,6 +6633,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   registerDashboardRoutes(app, routeDeps);
   registerPaymentRoutes(app);
   registerCoachRoutes(app);
+  registerVoiceBroadcastRoutes(app);
 
   // Routes now in server/routes/*.ts:
   //   routes/auth.ts      — /api/auth/login

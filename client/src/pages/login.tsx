@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
-import { setToken } from "@/lib/auth";
+import { markLoggedIn } from "@/lib/auth";
+import { queryClient } from "@/lib/queryClient";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,14 +21,19 @@ export default function Login() {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        credentials: "include",
         body: JSON.stringify({ password }),
       });
+      if (res.status === 429) {
+        setError("Too many failed attempts — try again in 15 minutes");
+        return;
+      }
       if (!res.ok) {
         setError("Invalid password");
         return;
       }
-      const { token } = await res.json();
-      setToken(token);
+      markLoggedIn();
+      queryClient.setQueryData(["/api/auth/check"], true);
       navigate("/dashboard");
     } catch {
       setError("Connection error — try again");

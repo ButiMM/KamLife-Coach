@@ -3,6 +3,7 @@ import { enforceCoachGuardrails } from "../coach-guardrails";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql } from "drizzle-orm";
+import { sastDayStart } from "../utils";
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -213,26 +214,26 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 
   if (/^what happened\??$/i.test(trimmed)) {
     if (looksSteps) {
-      return "I did not read the screenshot clearly. Send it again with this caption: \"steps screenshot\".";
+      return "Send the screenshot again with this caption: \"steps screenshot\" — I will pull the number.";
     }
     if (looksVoice) {
-      return "I did not process that voice note fully. Please resend it, or type the message.";
+      return "Didn't fully process that voice note. Please resend it, or type the message.";
     }
     if (looksFoodLog) {
-      return "I could not log that meal. Format: \"I had 2 eggs, pap, and cabbage for lunch\" — I will log the kcal and protein instantly.";
+      return "Type the meal like this: \"I had 2 eggs, pap, and cabbage for lunch\" — I will log the kcal and protein instantly.";
     }
-    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+    return "What happened? Tell me.";
   }
 
   if (looksFoodLog && trimmed.length < 60 && !/\d+\s*(kcal|cal|calories|protein|g\s*protein|kj)/i.test(trimmed) && !/food logged|logged ✅|meal total|day total/i.test(trimmed)) {
-    return "I could not log that automatically. Type your meal like this:\n\n\"I had 2 eggs and brown bread for breakfast\"\n\"Chicken and rice for lunch\"\n\nI will give you the full kcal and protein breakdown.";
+    return "Type the meal like this:\n\n\"I had 2 eggs and brown bread for breakfast\"\n\"Chicken and rice for lunch\"\n\nI will give you the full kcal and protein breakdown.";
   }
 
   if (/^(i understand\.?|understood\.?|great\.?|noted\.?|got it\.?|sure\.?|ok\.?|okay\.?)$/i.test(trimmed)) {
     if (looksFoodLog) {
-      return "Tell me exactly what you ate — food name, rough quantity, and which meal — and I will log the calories and protein.";
+      return "Tell me what you ate — food name, rough quantity, and which meal — and I will log the calories and protein.";
     }
-    return "I missed your point there. Tell me exactly what you need right now and I will fix it.";
+    return "What do you need right now?";
   }
 
   const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
@@ -240,8 +241,7 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 }
 
 export async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
 
   const [mealLogSum, legacyLogs] = await Promise.all([
     db.select({

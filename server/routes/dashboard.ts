@@ -6,6 +6,7 @@ import twilio from "twilio";
 import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../../shared/pricing";
 import { calculateTargets } from "../targets";
 import { getDayType } from "../programme";
+import { sastDayStart } from "../utils";
 import { requireAdminKey } from "./auth";
 import type { RouteDeps } from "./types";
 import { getOrAssignVariant } from "../ab";
@@ -682,8 +683,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
 
       const dauTrend: { date: string; count: number }[] = [];
       for (let i = 13; i >= 0; i--) {
-        const dayStart = new Date(Date.now() - i * 86400_000);
-        dayStart.setHours(0, 0, 0, 0);
+        const dayStart = sastDayStart(new Date(Date.now() - i * 86400_000));
         const dayEnd = new Date(dayStart.getTime() + 86400_000);
         const [dau] = await db.select({ c: count() }).from(chatHistory)
           .where(and(gte(chatHistory.createdAt, dayStart), lt(chatHistory.createdAt, dayEnd)));
@@ -711,8 +711,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       const cohorts: { week: string; signups: number; retention: number[] }[] = [];
 
       for (let w = weeks - 1; w >= 0; w--) {
-        const weekStart = new Date(Date.now() - (w + 1) * 7 * 86400_000);
-        weekStart.setHours(0, 0, 0, 0);
+        const weekStart = sastDayStart(new Date(Date.now() - (w + 1) * 7 * 86400_000));
         const weekEnd = new Date(weekStart.getTime() + 7 * 86400_000);
 
         const cohortUsers = await db.select({ id: users.id, lastActive: users.lastActiveAt })

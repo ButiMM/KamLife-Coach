@@ -5,7 +5,7 @@ import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets } from "./targets";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { getDisplayName } from "./utils";
+import { getDisplayName, sastDayStart } from "./utils";
 
 // ============================================================
 // MENU TEXT — context-aware
@@ -22,8 +22,7 @@ export async function getMenuText(user: any): Promise<string> {
   const mode = user.trainingMode || "home";
   const stepsTarget = user.stepsTarget || 8000;
 
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
+  const todayStart = sastDayStart();
 
   let workoutDone = false;
   let todayStepCount: number | null = null;
