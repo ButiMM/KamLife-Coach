@@ -233,7 +233,8 @@ export function getOnboardingMealPlan(user: any): string {
       ? ["½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato"]
       : ["½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans", "½ medium sweet potato", "½ cup brown rice", "½ medium sweet potato", "½ cup samp and beans"];
   } else if (goal === "recomposition") {
-    dinnerCarbs = ["½ medium sweet potato", "½ cup brown rice", "extra veg only (rest day)", "½ medium sweet potato", "½ cup brown rice", "extra veg only (rest day)", "½ medium sweet potato"];
+    // Recomp: carbs on training days, veg-only on rest days — use isTraining per-day in the loop, not hardcoded positions
+    dinnerCarbs = allDays.map((day) => trainingSet.has(day) ? "½ medium sweet potato" : "extra veg only (rest day)") as string[];
   } else {
     dinnerCarbs = lunchCarbs;
   }

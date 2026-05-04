@@ -11,6 +11,7 @@ export const JUNK_WORDS = [
 
 export async function checkFoodPatterns(userId: string): Promise<string | null> {
   try {
+    const todayStart = sastDayStart();
     const recent = await db.select().from(chatHistory)
       .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG")))
       .orderBy(desc(chatHistory.createdAt))
@@ -23,6 +24,22 @@ export async function checkFoodPatterns(userId: string): Promise<string | null> 
     const junkStreak = last3.filter(msg => JUNK_WORDS.some(w => msg.includes(w))).length;
     if (junkStreak >= 3) {
       return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
+    }
+
+    // Positive reset: if damage control was sent today and the most recent meal is clean, acknowledge the recovery
+    const mostRecent = last3[0];
+    const isCleanMeal = !JUNK_WORDS.some(w => mostRecent.includes(w));
+    if (isCleanMeal && recent.length >= 2) {
+      const damageToday = await db.select({ id: chatHistory.id }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "DAMAGE_CONTROL"), gte(chatHistory.createdAt, todayStart)))
+        .limit(1);
+      const recoveryAlreadySent = await db.select({ id: chatHistory.id }).from(chatHistory)
+        .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "DAMAGE_RECOVERY"), gte(chatHistory.createdAt, todayStart)))
+        .limit(1);
+      if (damageToday.length > 0 && recoveryAlreadySent.length === 0) {
+        await db.insert(chatHistory).values({ userId, messageIn: "[system]", messageOut: "[damage_recovery_sent]", intent: "DAMAGE_RECOVERY" });
+        return `Good. That's the right call. One clean meal after a rough one is all it takes — the damage is already being undone. Keep going.`;
+      }
     }
 
     // Use mealLogs.proteinInt for the protein streak check — text-based detection

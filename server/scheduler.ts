@@ -88,26 +88,22 @@ async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean
   if (dailySentThisProcess.has(dailyKey(clientId))) return false;
 
   try {
-    // 1. Check global daily cap — has ANY proactive been sent today?
-    const existing = await db
-      .select({ id: sentProactive.id })
-      .from(sentProactive)
-      .where(and(
-        eq(sentProactive.userId, clientId),
-        eq(sentProactive.dedupeWindow, today),
-      ))
-      .limit(1);
-    if (existing.length > 0) return false; // already got one today
-
-    // 2. Try to claim this specific job slot (unique index prevents races)
-    const inserted = await db
+    // Atomically claim the DAILY_CAP slot first — unique index on (userId, messageKey, dedupeWindow)
+    // means only one job per day can win this insert, regardless of parallel processes.
+    const capInserted = await db
       .insert(sentProactive)
-      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
+      .values({ userId: clientId, messageKey: "DAILY_CAP", dedupeWindow: today })
       .onConflictDoNothing()
       .returning({ id: sentProactive.id });
-    if (!inserted.length) return false; // race: someone else claimed it
+    if (!capInserted.length) return false; // another job already sent today
 
-    // 3. Mark in-memory so the same process doesn't double-send
+    // Also record the specific job key for audit trail (non-blocking conflict = ok)
+    await db
+      .insert(sentProactive)
+      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
+      .onConflictDoNothing();
+
+    // Mark in-memory so same process skips DB on next iteration
     dailySentThisProcess.add(dailyKey(clientId));
     return true;
   } catch (err) {
@@ -233,17 +229,24 @@ cron.schedule("0 22 * * *", async () => {
     ).limit(20);
 
     if (overdueEscalations.length > 0) {
-      const coachPhone = process.env.COACH_PHONE;
-      if (coachPhone) {
-        const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+      const coachPhone = process.env.COACH_ALERT_PHONE || process.env.COACH_PHONE;
+      if (coachPhone && process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+        const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
           ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
           : "";
         if (fromNum) {
           const urgentCount = overdueEscalations.filter(e => e.priority === "urgent").length;
-          const msg = `⚠️ KamLife Coach — ${overdueEscalations.length} escalation${overdueEscalations.length > 1 ? "s" : ""} past SLA (${urgentCount} urgent). Check your dashboard.`;
+          const highCount = overdueEscalations.filter(e => e.priority === "high").length;
+          const urgentDetails = overdueEscalations
+            .filter(e => e.priority === "urgent")
+            .map(e => `• ${e.reason} (${e.userId.slice(0, 8)})`)
+            .join("\n");
+          const msg = `🚨 KamLife SLA BREACH — ${overdueEscalations.length} open escalation${overdueEscalations.length > 1 ? "s" : ""} past deadline\n\nUrgent: ${urgentCount} | High: ${highCount}\n${urgentDetails}\n\nOpen your dashboard inbox now.`;
           await twilioC.messages.create({ from: fromNum, to: `whatsapp:${coachPhone}`, body: msg }).catch(e => console.error("[SLA ALERT]", e));
         }
+      } else {
+        console.error(`[SLA ALERT] ⚠️ Cannot send SLA breach alert — COACH_ALERT_PHONE or Twilio credentials not set. ${overdueEscalations.length} overdue escalations!`);
       }
       console.log(`[SCHEDULER] SLA breach — ${overdueEscalations.length} overdue escalations`);
     }
@@ -405,7 +408,22 @@ async function runMorningCheckin(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client)) {
+      // On last day of pause, notify client that coaching resumes tomorrow
+      const notes = client.profileNotes || "";
+      const pauseMatch = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/);
+      if (pauseMatch) {
+        const pauseEnd = new Date(pauseMatch[1]);
+        const tomorrow = new Date(Date.now() + 86_400_000);
+        const isTomorrowEnd = pauseEnd.toISOString().slice(0, 10) === tomorrow.toISOString().slice(0, 10);
+        if (isTomorrowEnd && canSendProactive(client.id)) {
+          const name = client.name?.split(" ")[0] || "there";
+          await sendWhatsApp(client.phoneNumber, `${name}, your coaching pause ends tomorrow. Morning check-ins and workout reminders resume from tomorrow. Your programme is exactly where you left it — nothing resets.`);
+          recordProactiveSend(client.id);
+        }
+      }
+      continue;
+    }
     // Smart re-engagement: silent clients get a different message, not silence
     const daysSilent = client.lastActiveAt
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
@@ -481,7 +499,8 @@ async function runMorningCheckin(): Promise<void> {
       // Previously serial awaits; Promise.all cuts latency ~50% per client.
       const yStart = dayStart(-1);
       const yEnd = dayStart(0);
-      const twoWeeksAgoSteps = new Date(Date.now() - 14 * 86_400_000);
+      // 90-day window so step streaks > 14 days are correctly calculated
+      const ninetyDaysAgoSteps = new Date(Date.now() - 90 * 86_400_000);
 
       const [proteinRows, recentStepLogs, yesterdayStepRows] = await Promise.all([
         db.select({
@@ -494,7 +513,7 @@ async function runMorningCheckin(): Promise<void> {
 
         db.select({ loggedAt: stepLogs.loggedAt })
           .from(stepLogs)
-          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, twoWeeksAgoSteps)))
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, ninetyDaysAgoSteps)))
           .orderBy(desc(stepLogs.loggedAt))
           .catch((_e: Error) => [] as { loggedAt: Date | null }[]),
 
@@ -1033,14 +1052,20 @@ cron.schedule("4 4,16 * * *", async () => {
           `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
         );
         try {
-          await db.insert(escalations).values({
-            userId: client.id,
-            reason: "14_day_silence",
-            status: "open",
-            priority: "urgent",
-            slaDeadline: new Date(Date.now() + 48 * HOUR),
-          });
-          console.log(`[SCHEDULER] 14-day silence — escalation created: ${client.phoneNumber}`);
+          const existingEsc = await db.select({ id: escalations.id })
+            .from(escalations)
+            .where(and(eq(escalations.userId, client.id), eq(escalations.status, "open")))
+            .limit(1);
+          if (existingEsc.length === 0) {
+            await db.insert(escalations).values({
+              userId: client.id,
+              reason: "14_day_silence",
+              status: "open",
+              priority: "urgent",
+              slaDeadline: new Date(Date.now() + 48 * HOUR),
+            });
+            console.log(`[SCHEDULER] 14-day silence — escalation created: ${client.phoneNumber}`);
+          }
         } catch (flagErr) {
           console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
         }
@@ -1831,7 +1856,7 @@ cron.schedule("0 19 * * *", async () => {
       if (todaySteps.length === 0) {
         const recentSteps = await db.select({ loggedAt: stepLogs.loggedAt })
           .from(stepLogs)
-          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 14 * 86400_000))))
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 90 * 86400_000))))
           .orderBy(desc(stepLogs.loggedAt));
         const stepStreak = computeStreakFromLogs(recentSteps);
         if (stepStreak >= 2) {

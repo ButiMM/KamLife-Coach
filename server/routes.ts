@@ -160,6 +160,16 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     return crisisReply;
   }
 
+  // ---- ACUTE MEDICAL EMERGENCY — non-crisis but needs immediate medical attention ----
+  // Separate from the suicidal-crisis check above; catches cardiac/respiratory emergencies
+  // where the client needs 10177 not SADAG.
+  if (/\b(chest pain|chest tightness|heart attack|stroke|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|collapsed)\b/i.test(m)) {
+    const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait.\n\nYour coach has been notified. Health first — everything else can wait.`;
+    try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
+    return acuteReply;
+  }
+
   // ---- TERMINAL / GIT COMMAND GUARD — before user lookup ----
   // Catches messages like "git pull origin main && pkill node", "npm run dev", etc.
   const TERMINAL_PATTERNS = [
@@ -346,10 +356,15 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      const payLink = merchantId
+        ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`
+        : null;
       const name = user.name || "there";
       const workouts = user.totalWorkoutsCompleted || 0;
-      const trialEndReply = `${name}, your 7-day free trial has ended.${workouts > 0 ? `\n\nYou completed ${workouts} workout${workouts > 1 ? "s" : ""} — that's real momentum.` : ""}\n\nEverything is saved — your programme, progress, and targets. Subscribe to keep coaching going.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Reply *pay* anytime to get your link.`;
+      const payPart = payLink
+        ? `*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Reply *pay* anytime to get your link.`
+        : `Reply *pay* and we will send you the payment link directly. R149/month — cancel anytime.`;
+      const trialEndReply = `${name}, your 7-day free trial has ended.${workouts > 0 ? `\n\nYou completed ${workouts} workout${workouts > 1 ? "s" : ""} — that's real momentum.` : ""}\n\nEverything is saved — your programme, progress, and targets. Subscribe to keep coaching going.\n\n${payPart}`;
       await logChat(user.id, message, trialEndReply, "TRIAL_EXPIRED");
       return trialEndReply;
     }
@@ -407,6 +422,17 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     await db.update(users).set({ doctorClearanceRequired: false }).where(eq(users.phoneNumber, phone));
     const name = user.name || "there";
     return `${name}, noted — doctor clearance confirmed. Your full programme is now unlocked. Let's get to work. Type *menu* to see today's workout.`;
+  }
+
+  // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
+  // When a client mentions medication or a new diagnosis, we are not equipped to advise —
+  // return a clear disclaimer and redirect. Still logs (which triggers escalation → coach alert).
+  const MEDICATION_SIGNAL = /\b(on medication|taking medication|my medication|my meds|my pills|blood thinners|antiretroviral|ARVs?|antiretrovirals?|insulin|metformin|warfarin|blood pressure (pills?|medication|tablets?)|epilepsy (medication|tablets?|pills?)|seizure medication|newly diagnosed|just diagnosed|just found out i have|blood test results?|doctor said i have|specialist said)\b/i.test(m);
+  if (MEDICATION_SIGNAL) {
+    const medName = user.name?.split(" ")[0] || "";
+    const medDisclaimer = `${medName}, noted. I'm a fitness coach — not a medical professional. Anything involving medication, new diagnoses, or test results needs to go through your doctor or specialist first.\n\nWhat I *can* help with: food choices that work alongside your condition, safe exercise intensity, and lifestyle habits.\n\nYour coach has been flagged so a human can follow up. In the meantime — what specifically did you want help with on the fitness side?`;
+    await logChat(user.id, message, medDisclaimer, "MEDICAL_DISCLAIMER");
+    return medDisclaimer;
   }
 
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
@@ -708,7 +734,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const sessionNum = user.totalWorkoutsCompleted || 0;
     const sessionNote = sessionNum > 0 ? ` — Session ${sessionNum + 1}` : "";
     const weekNote = `*Week ${week}${sessionNote}*\n\n`;
-    const reply = `${weekNote}${poContext}${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
+    const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
+      ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain. Reply *injury* for safe alternatives.`
+      : "";
+    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
     await logChat(user.id, message, reply, "WORKOUT_VIEW");
     return reply;
   }
@@ -783,7 +812,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode };
     const programme = buildFullProgramme(updatedUser);
     const modeLabel = trainingMode === "gym" ? "Gym" : "Home";
-    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}`;
+    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}\n\n_Reply *menu* anytime to see all your options — workouts, food log, targets, shopping list, and more._`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
 
     // Day 1 progress photo challenge — fires immediately after programme delivery.
@@ -5274,6 +5303,26 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
   }
 
+  // ---- CANCEL SUBSCRIPTION CONFIRMATION (step 2) ----
+  if (user.awaitingInputType === "cancel_confirm") {
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+    if (/^(yes|confirm|cancel|yep|ja|yeah)$/i.test(m)) {
+      const name = user.name || "there";
+      await db.update(users).set({
+        subscriptionStatus: "inactive",
+        cancelledAt: new Date(),
+      }).where(eq(users.phoneNumber, phone));
+      const appUrl2 = process.env.APP_URL || "https://kamlifecoach.co.za";
+      const confirmedCancelReply = `Done, ${name}. Subscription cancelled — no more charges.\n\nYour profile and ${user.totalWorkoutsCompleted || 0} sessions are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
+      await logChat(user.id, message, confirmedCancelReply, "CANCEL_CONFIRMED");
+      return confirmedCancelReply;
+    } else {
+      const keptReply = `Got it — cancellation skipped. You're still active. Anything I can help with?`;
+      await logChat(user.id, message, keptReply, "CANCEL_ABORTED");
+      return keptReply;
+    }
+  }
+
   // ---- CANCEL SUBSCRIPTION ----
   if (m === "cancel" || m === "cancel subscription" || m === "unsubscribe" || m === "stop coaching" || m === "stop subscription") {
     const alreadyInactive = user.subscriptionStatus === "inactive";
@@ -5284,14 +5333,18 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       return cancelledAlreadyReply;
     }
     const name = user.name || "there";
-    await db.update(users).set({
-      subscriptionStatus: "inactive",
-      cancelledAt: new Date(),
-      awaitingInputType: null,
-    }).where(eq(users.phoneNumber, phone));
-    const cancelReply = `Done${name ? `, ${name}` : ""}. Subscription cancelled — no more charges.\n\nYour profile and ${user.totalWorkoutsCompleted || 0} sessions are saved for 90 days. Come back anytime and pick up where you left off.\n\nIf you change your mind, reply *rejoin*.`;
-    await logChat(user.id, message, cancelReply, "CANCEL");
-    return cancelReply;
+    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
+    const cancelConfirmReply = `${name}, just to confirm — do you want to cancel your subscription?\n\nReply *yes* to cancel, or anything else to keep it.\n\n_Your R149/month coaching, workouts, and progress will stop. Your data stays saved for 90 days._`;
+    await logChat(user.id, message, cancelConfirmReply, "CANCEL_CONFIRM");
+    return cancelConfirmReply;
+  }
+
+  // ---- REFUND REQUEST ----
+  if (/\b(refund|money back|money-back|want my money|give me my money|get my money|reimburse|reimbursement|charge.*back|chargeback)\b/i.test(m)) {
+    const refundName = user.name?.split(" ")[0] || "";
+    const refundReply = `${refundName}, I hear you — let me get a human on this.\n\nRefund requests go directly to the founder. Reply to this message with:\n1. What happened\n2. How much you want refunded\n3. Your payment date (if you have it)\n\nYour coach has been notified and will respond within 24 hours. If it's urgent, WhatsApp the team directly at the number on your invoice.`;
+    await logChat(user.id, message, refundReply, "REFUND_REQUEST");
+    return refundReply;
   }
 
   // ---- PAYMENT / REJOIN — inactive users asking to pay or rejoin ----
