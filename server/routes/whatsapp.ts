@@ -138,16 +138,32 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       }
 
       const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
-      const parts = splitMessage(reply);
+
+      // Extract [MEDIA:url] marker injected by handlers (exercise GIFs, portion plate images)
+      const mediaMarkerMatch = reply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
+      const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
+      const cleanReply = replyMediaUrl ? reply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : reply;
+
+      const parts = splitMessage(cleanReply);
 
       if (parts.length <= 1) {
-        const safe = escapeXml(reply);
+        if (replyMediaUrl) {
+          const safe = escapeXml(cleanReply);
+          const safeMedia = escapeXml(replyMediaUrl);
+          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${safe}</Body><Media>${safeMedia}</Media></Message></Response>`);
+        }
+        const safe = escapeXml(cleanReply);
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`);
       }
 
       // Multi-part: TwiML can only send one reply, send extra via API
       const firstPart = escapeXml(parts[0]);
-      res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${firstPart}</Message></Response>`);
+      if (replyMediaUrl) {
+        const safeMedia = escapeXml(replyMediaUrl);
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${firstPart}</Body><Media>${safeMedia}</Media></Message></Response>`);
+      } else {
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${firstPart}</Message></Response>`);
+      }
 
       const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
       const fromNum = process.env.TWILIO_WHATSAPP_NUMBER

@@ -14,6 +14,7 @@ import twilio from "twilio";
 import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
+import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES, getDayType, buildDay1Workout, buildDay2Workout, buildDay3Workout } from "./programme";
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, gptFoodFallback, classifyIntent, type ClassifiedIntent } from "./gpt";
 import { calculateTargets } from "./targets";
@@ -737,8 +738,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
       ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain. Reply *injury* for safe alternatives.`
       : "";
-    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
-    await logChat(user.id, message, reply, "WORKOUT_VIEW");
+    const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
+    const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
+    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}`;
+    await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]/, "").trim(), "WORKOUT_VIEW");
     return reply;
   }
 
@@ -2331,8 +2334,10 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       const totalSessions = user.totalWorkoutsCompleted || 0;
       const poCtx = await getProgressiveOverloadContext(user.id);
       const sessionNote = totalSessions > 0 ? ` | Session ${totalSessions + 1}` : "";
-      const r = `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Your Workout Today*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
-      await logChat(user.id, message, r, "WORKOUT_VIEW");
+      const workoutGif = getPrimaryWorkoutGifUrl(workout);
+      const gifTag = workoutGif ? `\n[MEDIA:${workoutGif}]` : "";
+      const r = `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Your Workout Today*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifTag}`;
+      await logChat(user.id, message, r.replace(/\[MEDIA:[^\]]+\]/, "").trim(), "WORKOUT_VIEW");
       return r;
     } catch (e) {
       console.error("[TODAY_WORKOUT]", e);
@@ -3906,7 +3911,8 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       const dayUser = { ...user, programmeDayInWeek: requestedDay };
       const workout = buildDayWorkout(dayUser);
       const poCtx = await getProgressiveOverloadContext(user.id);
-      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
+      const gif1 = getPrimaryWorkoutGifUrl(workout);
+      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif1 ? `\n[MEDIA:${gif1}]` : ""}`;
     }
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
@@ -3914,7 +3920,8 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     const totalSessions = user.totalWorkoutsCompleted || 0;
     const poCtx = await getProgressiveOverloadContext(user.id);
     const sessionNote = totalSessions > 0 ? ` | Session ${totalSessions + 1}` : "";
-    return `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"`;
+    const gif2 = getPrimaryWorkoutGifUrl(workout);
+    return `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
 
   // ---- NEW: NEXT WORKOUT ----
@@ -4566,6 +4573,40 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     // Generic substitution advice
     const reply = `Tell me which exercise you cannot do and I will give you alternatives.\n\nExamples:\n• "can't do squats" (knee issue)\n• "alternative to deadlift" (back concern)\n• "can't do pull-ups" (not strong enough yet)\n• "instead of bench press" (shoulder pain)\n\nI have alternatives for every exercise — ${mode === "gym" ? "gym" : "home"} options based on your setup.`;
     return reply;
+  }
+
+  // ---- EXERCISE DEMO — "show me squat", "how to bench press", "squat gif" ----
+  {
+    const demoName = (
+      m.match(/^show\s+(?:me\s+)?(?:a\s+)?(.+?)(?:\s+gif)?$/i)?.[1] ||
+      m.match(/^how\s+to\s+(?:do\s+(?:a\s+)?)?(.+?)(?:\s+gif)?$/i)?.[1] ||
+      m.match(/^how\s+do\s+(?:i|you)\s+(?:do\s+(?:a\s+)?)?(.+?)(?:\s+gif)?$/i)?.[1] ||
+      m.match(/^demo(?:nstrate)?\s+(?:a\s+)?(.+?)(?:\s+gif)?$/i)?.[1] ||
+      m.match(/^(.+?)\s+gif$/i)?.[1]
+    )?.trim().toLowerCase();
+    if (demoName && demoName.length > 2 && demoName.length < 40) {
+      const demoGifUrl = getExerciseGifUrl(demoName);
+      if (demoGifUrl) {
+        const displayName = demoName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+        const demoReply = `*${displayName} — Form Demo*\n\nWatch the full movement. Key points:\n• Control the descent — don't drop\n• Full range of motion, not partial reps\n• If something hurts sharp — stop immediately\n\nReply *injury* if you need modifications.\n[MEDIA:${demoGifUrl}]`;
+        await logChat(user.id, message, `${displayName} — Form Demo (GIF sent)`, "EXERCISE_DEMO");
+        return demoReply;
+      }
+    }
+  }
+
+  // ---- MEAL PLATE IMAGES — "breakfast plate", "show me lunch portions", "dinner plate guide" ----
+  {
+    const plateMealMatch = m.match(/\b(breakfast|lunch|dinner|supper)\b/i);
+    const isPlateRequest = plateMealMatch && /\b(plate|portion|image|pic|show|guide|look|example|what does|how does)\b/i.test(m);
+    if (isPlateRequest) {
+      const rawMeal = plateMealMatch[1].toLowerCase();
+      const mealType = rawMeal === "supper" ? "dinner" : rawMeal as "breakfast" | "lunch" | "dinner";
+      const { imageUrl, caption } = getPortionGuide(mealType);
+      const plateReply = imageUrl ? `${caption}\n[MEDIA:${imageUrl}]` : caption;
+      await logChat(user.id, message, caption, "PORTION_IMAGE");
+      return plateReply;
+    }
   }
 
   // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
