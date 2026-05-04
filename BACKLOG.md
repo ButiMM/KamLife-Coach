@@ -1,31 +1,13 @@
 # KamLife Coach — Active Backlog
 
-> This file is the single source of truth for what's open, what's done, and what's next.
-> Read this at the start of every session before touching any code.
+> Single source of truth. Read this at the start of every session before touching code.
+> Rule: no overbuilding. Every item must justify its complexity with direct user value.
 
 ---
 
-## 🔴 BLOCKING — Do before launch
+## 🔴 BLOCKING — Owner action required before launch
 
-### 1. Exercise GIFs — upload & activate
-**Status:** System built and wired. Waiting on media hosting.
-
-What still needs to happen (owner action):
-1. Host GIF files on any public CDN (Cloudflare R2, Backblaze B2, or Railway static)
-2. Name files exactly: `squat.gif`, `bench-press.gif`, `deadlift.gif`, `hip-thrust.gif` etc. (slugs are in `server/exercise-media.ts`)
-3. Upload portion plate images: `breakfast.jpg`, `lunch.jpg`, `dinner.jpg`
-4. Set Railway env var: `MEDIA_BASE_URL=https://your-cdn.com`
-
-Everything activates automatically once `MEDIA_BASE_URL` is set. No code changes needed.
-
-**Exercise slugs reference:** see `server/exercise-media.ts` — EXERCISE_SLUGS constant (70+ exercises)
-**Portion image dimensions:** Use 800×600 minimum. JPEG is fine.
-
----
-
-### 2. Environment variables — set in Railway
-All of these need to be set before going live:
-
+### 1. Set environment variables in Railway
 | Env Var | Where to get it |
 |---|---|
 | `TWILIO_AUTH_TOKEN` | Twilio dashboard → Account → API keys |
@@ -34,68 +16,95 @@ All of these need to be set before going live:
 | `PAYFAST_MERCHANT_ID` | PayFast dashboard → Integration |
 | `PAYFAST_MERCHANT_KEY` | PayFast dashboard |
 | `OPENAI_API_KEY` | OpenAI platform |
-| `COACH_ALERT_PHONE` | The owner's WhatsApp number for escalation alerts |
-| `ELEVENLABS_API_KEY` | ElevenLabs dashboard (for Sunday voice recaps) |
-| `ELEVENLABS_VOICE_ID` | Your cloned voice ID in ElevenLabs |
-| `MEDIA_BASE_URL` | Your CDN root URL (see GIF task above) |
-| `APP_URL` | Your Railway app public URL (needed for voice recap audio delivery) |
+| `COACH_ALERT_PHONE` | Owner's WhatsApp number for escalation alerts |
+| `ELEVENLABS_API_KEY` | ElevenLabs dashboard (Sunday voice recaps) |
+| `ELEVENLABS_VOICE_ID` | Cloned voice ID in ElevenLabs |
+| `MEDIA_BASE_URL` | CDN root URL for GIFs and plate images |
+| `APP_URL` | Railway public URL (needed for voice recap audio) |
+
+### 2. Upload media assets
+1. Upload exercise GIFs to: `MEDIA_BASE_URL/ex/<slug>.gif` (slug list in `server/exercise-media.ts`)
+2. Upload portion plate images: `MEDIA_BASE_URL/portions/breakfast.jpg`, `lunch.jpg`, `dinner.jpg`
+3. Minimum image size: 800×600, JPEG fine
+
+### 3. Register PayFast IPN webhook
+In PayFast dashboard, set the notification URL to: `https://your-app.railway.app/payfast/itn`
 
 ---
 
-## 🟡 NEXT UP — High value, do soon
+## 🟡 NEXT UP — Code work, do in order
 
-### 3. ElevenLabs Sunday voice recap
-**Status:** Code complete. Blocked on env vars.
-Set `ELEVENLABS_API_KEY` and `ELEVENLABS_VOICE_ID` in Railway — recap fires automatically every Sunday 10pm SAST.
+### 4. Progress photo scalability (when user count > 2,000)
+**Issue:** Photos stored as base64 text in DB (`photo_base64` column). Fine now, will hurt at scale.
+**Fix when ready:** Migrate to object storage (Cloudflare R2 or similar), store URL pointer in DB.
+**Do not touch yet** — not a launch blocker at current user count.
 
-### 4. PayFast trial-to-paid flow
-**Status:** Code present. Need to verify IPN webhook URL is registered in PayFast dashboard.
-PayFast IPN URL: `https://your-app.railway.app/payfast/itn`
+### 5. YouTube links in workout text
+**Issue:** Exercise video links are YouTube search URLs, not direct videos.
+**Fix:** Either source real video URLs per exercise, or remove links entirely and rely on GIFs.
+**File:** `server/programme.ts` — search for `youtube.com/results?search_query=`
 
 ---
 
-## 🟢 DONE — Recently completed
+## 🟢 DONE — Complete and on main
 
-- [x] 40+ product audit gaps fixed (safety, scheduler, UX, business logic)
+**Third-party review items (reviewed 2026-05-04):**
+- [x] Voice pipeline timeouts — `withTimeout()` used on every AI/media call with stage labels
+- [x] Voice stage telemetry — `logMediaFailure()` + `voiceStage` tracking on all error paths
+- [x] Monthly cohort snapshot — fires 1st of month, 2am SAST (`server/scheduler.ts` line ~3765)
+- [x] Comeback rescue — re-engages clients silent 3–7 days (`server/scheduler.ts` line ~3288)
+- [x] Daily Win loop — Mon–Sat 7:30pm SAST, sends one concrete win + one tomorrow action to active clients only
+
+**Product audit (prior sprint):**
 - [x] Acute medical emergency handler (chest pain → 10177)
 - [x] Medication/diagnosis disclaimer
 - [x] Cancel confirmation two-step flow
 - [x] Refund handler
 - [x] Injury note on workout delivery
 - [x] Recomposition dinner carbs fix (rest vs training day)
-- [x] Step streak query window extended to 90 days (was 14)
-- [x] `claimDailySlot()` race condition fixed (atomic DB insert)
+- [x] Step streak 90-day query window
+- [x] `claimDailySlot()` race condition fixed (atomic insert)
 - [x] Duplicate escalation deduplication
-- [x] SLA breach alert env var fix (`COACH_ALERT_PHONE`)
 - [x] Pause resume notification
-- [x] `DAMAGE_RECOVERY` positive reset handler
-- [x] Exercise GIF system built (`server/exercise-media.ts`)
-- [x] Portion plate images with SA-specific captions (pap/samp/sweet potato/morogo)
-- [x] `[MEDIA:url]` parsing in whatsapp.ts → TwiML `<Body>` + `<Media>` delivery
-- [x] Workout delivery attaches first exercise GIF automatically
+- [x] DAMAGE_RECOVERY positive reset handler
+- [x] Exercise GIF system (`server/exercise-media.ts`, 70+ exercises)
+- [x] Portion plate images with SA-specific captions (pap/samp/sweet potato/morogo/pilchards)
+- [x] `[MEDIA:url]` marker → TwiML `<Body>` + `<Media>` delivery in `server/routes/whatsapp.ts`
 - [x] Exercise demo handler ("show me squat", "how to bench press", "squat gif")
-- [x] Meal plate image handler ("breakfast plate", "lunch portions", "dinner guide")
-- [x] Instant diabetes food alert — white pap/rice/bread/sugary drinks → swap suggestion, no GPT
+- [x] Meal plate image handler ("breakfast plate", "lunch portions")
+- [x] Instant diabetes food alert (white pap/rice/bread/sugary drinks → no GPT)
+
+**All Finals from builder brief (1–14):**
+- [x] Equipment alternatives, food substitutions, portion guide, store advice, injury programmes
+- [x] Supplement guide, water logging, body measurements, week 4 check-in
+- [x] Language detection, POPIA consent, delete my data, banned phrases
+- [x] SA food database: 440 foods
 
 ---
 
-## 📋 KNOWN GAPS — Not yet prioritised
+## 📋 DEFERRED — Good ideas, not now
 
-- [ ] YouTube tutorial links in workout text are search URLs not real videos — replace with actual exercise video URLs or remove
-- [ ] No push notification when trial expires at midnight (only when client next messages)
-- [ ] Admin dashboard: no way to bulk-message all active users
-- [ ] Shopping list not auto-refreshed when user changes budget tier mid-programme
-- [ ] Progress photo comparison (before/after) is stored but no diff description is sent back automatically
+These are real gaps from the third-party review. Deferred because they add complexity without proportional user value at current scale:
+
+| Item | Why deferred |
+|---|---|
+| routes.ts modularisation (~6.7k lines) | High refactor risk, no user-facing value |
+| Scheduler reason codes/campaign tagging | Ops tooling, not revenue |
+| Integration tests for media endpoints | Important, not blocking |
+| Weekly shareable progress card | New feature, needs design decisions |
+| Referral challenge trigger | Nice to have, not urgent |
+| WhatsApp channel abstraction layer | Pre-emptive architecture, not needed yet |
 
 ---
 
-## 🗂 ARCHITECTURE NOTES (for Claude)
+## 🗂 ARCHITECTURE NOTES (for Claude — read before coding)
 
 - **Push directly to `main`** — no PRs, no feature branches
-- **Do not use GPT for anything that has a hardcoded answer** — equipment alternatives, food substitutions, portion guide, supplement guide, store advice, injury modifications are all constants in `server/constants.ts`
-- **`server/exercise-media.ts`** — GIF and portion image URL builder. Null-safe: returns null if `MEDIA_BASE_URL` not set
-- **`[MEDIA:url]`** marker in reply strings — parsed by `server/routes/whatsapp.ts` → becomes TwiML `<Media>` tag
-- **`claimDailySlot()`** in scheduler — atomic, use this for all proactive messages
-- **ElevenLabs recap** — `server/weekly-recap.ts`, fires Sunday cron at `0 20 * * 0` (20:00 UTC = 22:00 SAST)
-- **PayFast** — ITN webhook at `/payfast/itn`, handles subscription activation
-- **Food logging flow** — SA food scanner first (hardcoded, instant), GPT fallback only if scanner finds nothing
+- **No GPT for hardcoded answers** — equipment, food substitutions, portion guide, supplements, store advice, injuries are all in `server/constants.ts`
+- **`server/exercise-media.ts`** — GIF/image URL builder. Returns null if `MEDIA_BASE_URL` unset. Safe to call anywhere.
+- **`[MEDIA:url]`** in reply strings → parsed by `server/routes/whatsapp.ts` → TwiML `<Media>` tag
+- **`claimDailySlot(clientId, jobKey)`** in scheduler — atomic daily gate. Use for every proactive send.
+- **ElevenLabs recap** — `server/weekly-recap.ts`, Sunday `0 20 * * 0` UTC (10pm SAST)
+- **PayFast** — ITN at `/payfast/itn`
+- **Food logging flow** — SA food scanner (instant, no GPT) → GPT fallback only if scanner finds nothing
+- **Scale inflection points** — progress photo migration needed at ~2k users; read replicas at ~10k

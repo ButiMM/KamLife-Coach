@@ -4150,4 +4150,77 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
     }
   }, { timezone: "UTC" });
 
+// ── DAILY WIN — Mon–Sat 7:30pm SAST (17:30 UTC) ─────────────────────────────
+// Sends a one-sentence win + one-sentence tomorrow action to clients
+// who logged SOMETHING today. Silent clients are skipped — they get the
+// streak-at-risk message at 9pm instead. Deliberately short and specific.
+cron.schedule("30 17 * * 1-6", async () => {
+  console.log("[SCHEDULER] JOB: Daily Win (7:30pm SAST)");
+  const clients = await getActiveClients();
+  const todayStart = sastDayStart();
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    const ok = await claimDailySlot(client.id, "daily_win");
+    if (!ok) continue;
+
+    try {
+      const name = (client.name || "").split(" ")[0] || "there";
+      const todayDOW = new Date().getDay();
+
+      const [workoutRow, mealRow, stepRow] = await Promise.all([
+        db.select({ id: workoutLogs.id })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart), eq(workoutLogs.workoutCompleted, true)))
+          .limit(1),
+        db.select({ count: sql<number>`count(*)::int` })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart))),
+        db.select({ steps: stepLogs.steps })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
+          .orderBy(desc(stepLogs.loggedAt))
+          .limit(1),
+      ]);
+
+      const didWorkout = workoutRow.length > 0;
+      const mealsLogged = Number(mealRow[0]?.count || 0);
+      const stepsToday = stepRow[0]?.steps ? parseInt(String(stepRow[0].steps)) : 0;
+      const hasActivity = didWorkout || mealsLogged > 0 || stepsToday > 0;
+
+      if (!hasActivity) continue; // Skip — streak-at-risk handles this at 9pm
+
+      const streak = client.workoutStreak || 0;
+      const stepsTarget = client.stepsTarget || 8500;
+      const tomorrowDOW = (todayDOW + 1) % 7;
+      const tomorrowSchedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const tomorrowIsTraining = tomorrowSchedule.includes(tomorrowDOW);
+
+      let winMsg = "";
+      if (didWorkout && streak >= 2) {
+        winMsg = `${name} — session logged. ${streak} in a row. ${tomorrowIsTraining ? "Tomorrow: train, protein first meal." : "Tomorrow is a rest day — eat well and sleep."}`;
+      } else if (didWorkout) {
+        winMsg = `${name} — session done. One down, keep the week going. ${tomorrowIsTraining ? "Tomorrow: train again." : "Tomorrow: rest day — eat to your protein target."}`;
+      } else if (mealsLogged >= 2) {
+        winMsg = `${name} — ${mealsLogged} meals logged today. Tracking is the actual work. ${tomorrowIsTraining ? "Tomorrow: training day — hit protein before you train." : "Tomorrow: one full day of clean eating."}`;
+      } else if (stepsToday >= stepsTarget) {
+        winMsg = `${name} — step target hit. ${stepsToday.toLocaleString()} steps today. ${tomorrowIsTraining ? "Tomorrow is a training day — show up." : "Tomorrow: same again."}`;
+      } else if (stepsToday > 0) {
+        winMsg = `${name} — ${stepsToday.toLocaleString()} steps logged. ${tomorrowIsTraining ? "Tomorrow: training day. Steps + session = strong week." : "Tomorrow: push the steps. Target is " + stepsTarget.toLocaleString() + "."}`;
+      } else {
+        winMsg = `${name} — day logged. Stay consistent. ${tomorrowIsTraining ? "Tomorrow: training day." : "Tomorrow: food and steps."}`;
+      }
+
+      await sendWhatsApp(client.phoneNumber, winMsg);
+      sent++;
+      await new Promise(r => setTimeout(r, 300));
+    } catch (e: any) {
+      console.error(`[DAILY_WIN] Failed for ${client.id.slice(-6)}:`, e.message);
+    }
+  }
+
+  console.log(`[SCHEDULER] Daily Win sent: ${sent}`);
+}, { timezone: "UTC" });
+
 }
