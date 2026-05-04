@@ -3091,6 +3091,24 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         }
         if (note) junkNote = `\n\n${note}`;
       }
+
+      // Instant diabetes food alert — no GPT, hardcoded swaps for high-GI foods
+      const isDiabeticClient = (user.medicalConditions || "").toLowerCase().includes("diabetes");
+      if (isDiabeticClient) {
+        const HIGH_GI_PATTERNS = [
+          { match: /\b(white pap|stiff pap|soft pap|pap|mieliepap)\b/i, swap: "samp and beans or oats" },
+          { match: /\b(white rice|jasmine rice)\b/i, swap: "brown rice or sweet potato" },
+          { match: /\b(white bread|polony roll|hot dog roll)\b/i, swap: "whole wheat bread" },
+          { match: /\b(coke|fanta|sprite|cream soda|stoney|twist|energade|powerade|juice)\b/i, swap: "water or rooibos tea" },
+        ];
+        const loggedNames = allAdjustedFoods.map(f => f.name.toLowerCase()).join(" ") + " " + m;
+        for (const { match, swap } of HIGH_GI_PATTERNS) {
+          if (match.test(loggedNames)) {
+            junkNote = `\n\n⚠️ *Diabetes note:* For your blood sugar stability, swap this for ${swap}. Same satisfaction — without the spike.`;
+            break;
+          }
+        }
+      }
       const runningLine = prevCals > 0
         ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
         : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
