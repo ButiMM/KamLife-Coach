@@ -17,7 +17,142 @@ export type Exercise = {
 };
 
 // ============================================================
-// GYM — 3-DAY FULL BODY (FULL EQUIPMENT)
+// 2-DAY FULL BODY
+// ============================================================
+
+const NEW_2DAY_A: Exercise[] = [
+  { name: "Smith Squat / Leg Press", sets: "2 × 6–10", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Core tight throughout.", mistake: "Heels rising or knees caving inward. Keep full foot planted.", modification: "Dumbbell Goblet Squat if no machine." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension at the top — squeeze your quads hard. Lower slowly over 2 seconds.", mistake: "Using momentum. Control both the up and down.", modification: "Dumbbell Step-up if no machine." },
+  { name: "Leg Curl", sets: "2 × 6–10", description: "Curl heels all the way toward your glutes. Slow 2-second lowering. Hips stay down.", mistake: "Hips rising off the pad. Keep them pinned throughout.", modification: "Dumbbell Romanian Deadlift as alternative." },
+  { name: "Calf Raise", sets: "4 × 12–15", description: "Full range — heel as low as possible, rise all the way up on toes. Pause at the top.", mistake: "Short bouncy reps. Full range is what builds calves.", modification: "Single-leg bodyweight calf raise." },
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees from torso. Drive to full extension. Slow 2-second lower.", mistake: "Elbows flaring wide. Keep them at 45 degrees.", modification: "Dumbbell Floor Press if no bench." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Drive elbows down toward your back pockets. Squeeze shoulder blades hard at the bottom.", mistake: "Pulling with your arms, not your back. Think elbows to pockets.", modification: "Dumbbell Row if no cable machine." },
+  { name: "Seated Row / Dumbbell Row", sets: "2 × 6–10", description: "Pull to your lower chest. Squeeze shoulder blades hard together. Full stretch at the front.", mistake: "Leaning back with torso to build momentum. Stay upright.", modification: "Dumbbell Row with knee on bench." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly over 2 seconds. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+];
+
+const NEW_2DAY_B_MEN: Exercise[] = [
+  { name: "Smith Squat / Leg Press", sets: "2 × 6–10", description: "Focus on depth today — aim slightly deeper than last session. Drive through heels.", mistake: "Heels rising or knees caving. Keep full foot planted.", modification: "Dumbbell Goblet Squat." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension, hard squeeze at the top. 2-second lowering phase.", mistake: "Momentum-driven reps. Control both directions.", modification: "Dumbbell Step-up." },
+  { name: "Hip Thrust / Glute Bridge", sets: "2 × 6–10", description: "Drive hips up explosively. Squeeze glutes hard at the top for 1 full second. Lower slowly.", mistake: "Using lower back instead of glutes. Drive hips, do not arch back.", modification: "Glute Bridge flat on floor if no bench." },
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees. Full extension at top. Slow 2-second lowering.", mistake: "Elbows flaring wide. Keep at 45 degrees throughout.", modification: "Dumbbell Floor Press." },
+  { name: "Chest Fly / Dumbbell Chest Fly", sets: "2 × 6–10", description: "Wide arc with a slight bend in the elbows. Squeeze chest hard at the top. Feel the stretch at the bottom.", mistake: "Turning it into a press. Keep the arc shape throughout.", modification: "Dumbbell Chest Fly lying on floor." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze back hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core and keep ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard at the end.", mistake: "Elbow moving — it stays pinned. Only the forearm moves.", modification: "Dumbbell Kickback." },
+];
+
+const NEW_2DAY_B_WOMEN: Exercise[] = [
+  { name: "Smith Squat / Leg Press", sets: "2 × 6–10", description: "Focus on depth today — aim slightly deeper than last session. Drive through heels.", mistake: "Heels rising or knees caving. Keep full foot planted.", modification: "Dumbbell Goblet Squat." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension, hard squeeze at the top. 2-second lowering phase.", mistake: "Momentum-driven reps. Control both directions.", modification: "Dumbbell Step-up." },
+  { name: "Hip Thrust / Glute Bridge", sets: "2 × 6–10", description: "Drive hips up explosively. Squeeze glutes hard at the top for 1 full second. Lower slowly.", mistake: "Using lower back instead of glutes. Drive hips, do not arch back.", modification: "Glute Bridge flat on floor if no bench." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core and keep ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Chest Fly / Dumbbell Chest Fly", sets: "2 × 6–10", description: "Wide arc, slight elbow bend. Squeeze chest hard at the top. Full stretch at the bottom.", mistake: "Turning it into a press. Keep the arc shape throughout.", modification: "Dumbbell Chest Fly lying on floor." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze back hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard at the end.", mistake: "Elbow moving — it stays pinned. Only the forearm moves.", modification: "Dumbbell Kickback." },
+];
+
+// ============================================================
+// 3-DAY FULL BODY
+// ============================================================
+
+const NEW_3DAY_A: Exercise[] = [
+  { name: "Smith Squat / Leg Press", sets: "2 × 6–10", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Core tight throughout.", mistake: "Heels rising or knees caving. Keep full foot planted.", modification: "Dumbbell Goblet Squat." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension at the top — squeeze your quads hard. Lower slowly over 2 seconds.", mistake: "Using momentum. Control both directions.", modification: "Dumbbell Step-up." },
+  { name: "Calf Raise", sets: "4 × 12–15", description: "Full range — heel as low as possible, rise all the way up on toes. Pause at the top.", mistake: "Short bouncy reps. Full range is what builds calves.", modification: "Single-leg bodyweight calf raise." },
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees from torso. Drive to full extension. Slow 2-second lower.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Dumbbell Floor Press." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Drive elbows down toward your back pockets. Squeeze shoulder blades hard at the bottom.", mistake: "Pulling with arms only. Think elbows to pockets.", modification: "Dumbbell Row." },
+  { name: "Seated Row / Dumbbell Row", sets: "2 × 6–10", description: "Pull to your lower chest. Squeeze shoulder blades hard together. Full stretch at the front.", mistake: "Leaning back with torso to build momentum. Stay upright.", modification: "Dumbbell Row with knee on bench." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+];
+
+const NEW_3DAY_B: Exercise[] = [
+  { name: "Smith Squat / Bulgarian Split Squat", sets: "2 × 6–10", description: "Squat variation — focus on quad depth. Split squat: back foot elevated on bench, front foot far forward.", mistake: "Front knee caving inward. Push it out over your middle toe.", modification: "Dumbbell Goblet Squat or Dumbbell Reverse Lunge." },
+  { name: "Leg Curl", sets: "2 × 6–10", description: "Curl heels all the way toward your glutes. Slow 2-second lowering. Hips stay down.", mistake: "Hips rising off the pad. Keep them pinned.", modification: "Dumbbell Romanian Deadlift." },
+  { name: "Hip Thrust / Glute Bridge", sets: "2 × 6–10", description: "Drive hips up explosively. Squeeze glutes hard at the top for 1 full second. Lower slowly.", mistake: "Using lower back instead of glutes. Drive hips, do not arch back.", modification: "Glute Bridge flat on floor." },
+  { name: "Upper Back Row / Cable Face Pull", sets: "2 × 6–10", description: "Pull to your face with elbows high and wide. Squeeze rear delts hard at the end position.", mistake: "Pulling too low or using too much weight. Light weight, full squeeze.", modification: "Bent-Over Rear Delt Raise with dumbbells." },
+  { name: "Chest Fly / Dumbbell Chest Fly", sets: "2 × 6–10", description: "Wide arc, slight elbow bend. Squeeze chest hard at the top. Full stretch at the bottom.", mistake: "Turning it into a press. Keep the arc shape throughout.", modification: "Dumbbell Chest Fly lying on floor." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at your sides. Curl fully to shoulder. Lower slowly — do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl to remove swing." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned firmly at your sides. Push down until arms are straight. Squeeze at the bottom.", mistake: "Elbows drifting forward. If they move, reduce the weight.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+const NEW_3DAY_C_MEN: Exercise[] = [
+  { name: "Leg Press", sets: "2 × 6–10", description: "Feet mid-platform. Lower until thighs past parallel. Drive through heels.", mistake: "Locking knees fully at the top. Keep a slight bend.", modification: "Dumbbell Goblet Squat." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard.", mistake: "Elbow moving — it stays pinned. Only the forearm moves.", modification: "Dumbbell Kickback." },
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees. Full extension. Slow 2-second lower. Chest drives the movement.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Dumbbell Floor Press." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze shoulder blades hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core, keep ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned at sides. Push down until arms straight. Squeeze at bottom.", mistake: "Elbows drifting forward. Reduce weight if they move.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+const NEW_3DAY_C_WOMEN: Exercise[] = [
+  { name: "Leg Press", sets: "2 × 6–10", description: "Feet mid-platform. Lower until thighs past parallel. Drive through heels.", mistake: "Locking knees fully at the top. Keep a slight bend.", modification: "Dumbbell Goblet Squat." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard.", mistake: "Elbow moving — it stays pinned. Only the forearm moves.", modification: "Dumbbell Kickback." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze shoulder blades hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core, keep ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned at sides. Push down until arms straight. Squeeze at bottom.", mistake: "Elbows drifting forward. Reduce weight if they move.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+// ============================================================
+// 4-DAY UPPER / LOWER
+// ============================================================
+
+const NEW_4DAY_UPPER_A: Exercise[] = [
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees. Full extension. Slow 2-second lower. Chest drives the movement.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Dumbbell Floor Press." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Drive elbows down toward your back pockets. Squeeze shoulder blades hard at the bottom.", mistake: "Pulling with arms only. Think elbows to pockets.", modification: "Dumbbell Row." },
+  { name: "Seated Row / Dumbbell Row", sets: "2 × 6–10", description: "Pull to your lower chest. Squeeze shoulder blades hard together. Full stretch at the front.", mistake: "Leaning back with torso to build momentum. Stay upright.", modification: "Dumbbell Row with knee on bench." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+  { name: "Cable Face Pull / Upper Back Row", sets: "2 × 6–10", description: "Pull to your face, elbows high and wide. Squeeze rear delts hard at the end position.", mistake: "Pulling too low or using too much weight.", modification: "Bent-Over Rear Delt Raise with dumbbells." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned at sides. Push down until arms straight. Squeeze at bottom.", mistake: "Elbows drifting forward. Reduce weight if they move.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+const NEW_4DAY_LOWER_A: Exercise[] = [
+  { name: "Smith Squat / Leg Press", sets: "2 × 6–10", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Core tight.", mistake: "Heels rising or knees caving. Keep full foot planted.", modification: "Dumbbell Goblet Squat." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension, hard squeeze at the top. 2-second lowering phase.", mistake: "Momentum-driven reps. Control both directions.", modification: "Dumbbell Step-up." },
+  { name: "Leg Curl", sets: "2 × 6–10", description: "Curl heels toward your glutes. Slow 2-second lowering. Hips stay down.", mistake: "Hips rising off the pad. Keep them pinned.", modification: "Dumbbell Romanian Deadlift." },
+  { name: "Hip Thrust / Glute Bridge", sets: "2 × 6–10", description: "Drive hips up explosively. Squeeze glutes hard at top for 1 full second. Lower slowly.", mistake: "Using lower back instead of glutes. Drive hips.", modification: "Glute Bridge flat on floor." },
+  { name: "Calf Raise", sets: "4 × 12–15", description: "Full range — heel as low as possible, rise all the way up on toes. Pause at top.", mistake: "Short bouncy reps. Full range builds calves.", modification: "Single-leg bodyweight calf raise." },
+  { name: "Bulgarian Split Squat / Reverse Lunge", sets: "2 × 6–10", description: "Back foot elevated on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push it out over middle toe.", modification: "Dumbbell Reverse Lunge." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard.", mistake: "Elbow moving — it stays pinned. Only forearm moves.", modification: "Dumbbell Kickback." },
+];
+
+const NEW_4DAY_UPPER_B_MEN: Exercise[] = [
+  { name: "Chest Fly / Dumbbell Chest Fly", sets: "2 × 6–10", description: "Wide arc, slight elbow bend. Squeeze chest hard at the top. Full stretch at the bottom.", mistake: "Turning it into a press. Keep the arc shape throughout.", modification: "Dumbbell Chest Fly lying on floor." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze shoulder blades hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core, ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Machine Chest Press / Dumbbell Press", sets: "2 × 6–10", description: "Elbows at 45 degrees. Full extension. Slow 2-second lower.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Dumbbell Floor Press." },
+  { name: "Cable Face Pull / Upper Back Row", sets: "2 × 6–10", description: "Pull to face, elbows high and wide. Squeeze rear delts hard at the end position.", mistake: "Pulling too low or using too much weight.", modification: "Bent-Over Rear Delt Raise with dumbbells." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned at sides. Push down until arms straight. Squeeze at bottom.", mistake: "Elbows drifting forward. Reduce weight if they move.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+const NEW_4DAY_UPPER_B_WOMEN: Exercise[] = [
+  { name: "Chest Fly / Dumbbell Chest Fly", sets: "2 × 6–10", description: "Wide arc, slight elbow bend. Squeeze chest hard at the top. Full stretch at the bottom.", mistake: "Turning it into a press. Keep the arc shape throughout.", modification: "Dumbbell Chest Fly lying on floor." },
+  { name: "Lat Pulldown / Assisted Pull-up", sets: "2 × 6–10", description: "Elbows to pockets. Squeeze shoulder blades hard at the bottom. Full stretch at the top.", mistake: "Pulling with arms only. Use back muscles.", modification: "Dumbbell Row." },
+  { name: "Machine Shoulder Press / Dumbbell Shoulder Press", sets: "2 × 6–10", description: "Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core, ribs down.", modification: "Seated Dumbbell Shoulder Press." },
+  { name: "Cable Lateral Raise / Dumbbell Lateral Raise", sets: "2 × 6–10", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "Dumbbell Lateral Raise." },
+  { name: "Cable Face Pull / Upper Back Row", sets: "2 × 6–10", description: "Pull to face, elbows high and wide. Squeeze rear delts hard at the end position.", mistake: "Pulling too low or using too much weight.", modification: "Bent-Over Rear Delt Raise with dumbbells." },
+  { name: "Bicep Curl", sets: "2 × 6–10", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Pushdown", sets: "2 × 6–10", description: "Elbows pinned at sides. Push down until arms straight. Squeeze at bottom.", mistake: "Elbows drifting forward. Reduce weight if they move.", modification: "Dumbbell Overhead Tricep Extension." },
+];
+
+const NEW_4DAY_LOWER_B: Exercise[] = [
+  { name: "Romanian Deadlift / Dumbbell RDL", sets: "2 × 6–10", description: "Hinge at hips, push bum back. Lower until hamstring stretch. Drive hips forward to stand. Flat back.", mistake: "Rounding the lower back. Only go as deep as a flat back allows.", modification: "Dumbbell RDL." },
+  { name: "Leg Press", sets: "2 × 6–10", description: "Feet mid-platform. Lower until thighs past parallel. Drive through heels.", mistake: "Locking knees fully at top. Keep a slight bend.", modification: "Dumbbell Goblet Squat." },
+  { name: "Leg Curl", sets: "2 × 6–10", description: "Curl heels toward your glutes. Slow 2-second lowering. Hips stay down.", mistake: "Hips rising off the pad. Keep them pinned.", modification: "Dumbbell Romanian Deadlift." },
+  { name: "Hip Thrust / Glute Bridge", sets: "2 × 6–10", description: "Drive hips up explosively. Squeeze glutes hard at top for 1 full second. Lower slowly.", mistake: "Using lower back instead of glutes. Drive hips.", modification: "Glute Bridge flat on floor." },
+  { name: "Leg Extension", sets: "2 × 6–10", description: "Full extension, hard squeeze at top. 2-second lowering phase.", mistake: "Momentum-driven reps. Control both directions.", modification: "Dumbbell Step-up." },
+  { name: "Bulgarian Split Squat / Reverse Lunge", sets: "2 × 6–10", description: "Back foot elevated on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push it out over middle toe.", modification: "Dumbbell Reverse Lunge." },
+  { name: "Cable Kickback / Machine Kickback", sets: "2 × 6–10", description: "Elbow pinned at your side. Extend fully until arm is straight. Squeeze tricep hard.", mistake: "Elbow moving — it stays pinned. Only forearm moves.", modification: "Dumbbell Kickback." },
+];
+
+// ============================================================
+// GYM — 3-DAY FULL BODY (FULL EQUIPMENT) — kept for backward compat
 // ============================================================
 
 const GYM_FULL_DAY_A: Exercise[] = [
@@ -797,11 +932,7 @@ function getGymDay(
     const map = { 1: GYM_GLUTES_DAY_A, 2: GYM_GLUTES_DAY_B, 3: GYM_GLUTES_DAY_C };
     return map[daySlot];
   }
-  if (isDumbbell) {
-    const map = { 1: GYM_DUMBBELL_DAY_A, 2: GYM_DUMBBELL_DAY_B, 3: GYM_DUMBBELL_DAY_C };
-    return map[daySlot];
-  }
-  const map = { 1: GYM_FULL_DAY_A, 2: GYM_FULL_DAY_B, 3: GYM_FULL_DAY_C };
+  const map = { 1: NEW_3DAY_A, 2: NEW_3DAY_B, 3: NEW_3DAY_C_MEN };
   return map[daySlot];
 }
 
@@ -809,10 +940,41 @@ function daySlotLabel(slot: 1 | 2 | 3, isGlutesFocus: boolean, isDumbbell: boole
   if (isGlutesFocus) {
     return ["Glute Push Day A", "Upper + Light Lower B", "Posterior Chain Day C"][slot - 1];
   }
-  if (isDumbbell) {
-    return [`Dumbbell Full Body A`, `Dumbbell Full Body B`, `Dumbbell Full Body C`][slot - 1];
-  }
   return [`Full Body A`, `Full Body B`, `Full Body C`][slot - 1];
+}
+
+function getNewGymDay(
+  trainingDays: number,
+  dayNumber: number,
+  gender: string,
+  isGlutesFocus: boolean
+): { exercises: Exercise[]; label: string } {
+  if (isGlutesFocus) {
+    const slot = (((dayNumber - 1) % 3) + 1) as 1 | 2 | 3;
+    const map = { 1: GYM_GLUTES_DAY_A, 2: GYM_GLUTES_DAY_B, 3: GYM_GLUTES_DAY_C };
+    const labels = ["Glute Push Day A", "Upper + Light Lower B", "Posterior Chain Day C"];
+    return { exercises: map[slot], label: labels[slot - 1] };
+  }
+
+  if (trainingDays <= 2) {
+    const slot = ((dayNumber - 1) % 2) + 1;
+    if (slot === 1) return { exercises: NEW_2DAY_A, label: "Full Body A" };
+    return { exercises: gender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, label: "Full Body B" };
+  }
+
+  if (trainingDays >= 4) {
+    const slot = ((dayNumber - 1) % 4) + 1;
+    if (slot === 1) return { exercises: NEW_4DAY_UPPER_A, label: "Upper Body A" };
+    if (slot === 2) return { exercises: NEW_4DAY_LOWER_A, label: "Lower Body A" };
+    if (slot === 3) return { exercises: gender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, label: "Upper Body B" };
+    return { exercises: NEW_4DAY_LOWER_B, label: "Lower Body B" };
+  }
+
+  // 3-day (default)
+  const slot = ((dayNumber - 1) % 3) + 1;
+  if (slot === 1) return { exercises: NEW_3DAY_A, label: "Full Body A" };
+  if (slot === 2) return { exercises: NEW_3DAY_B, label: "Full Body B" };
+  return { exercises: gender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, label: "Full Body C" };
 }
 
 const PHASE_OPENERS: Record<number, string> = {
@@ -836,22 +998,47 @@ function formatGymDay(
   phaseName: string,
   week: number,
   multiplier: { sets: string; reps: string; rest: string },
-  goal = "fat_loss"
+  goal = "fat_loss",
+  isDumbbell = false,
+  injuries = "none"
 ): string {
   const opener = PHASE_OPENERS[phase] || PHASE_OPENERS[1];
   const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
-  let out = `*Week ${week} — ${label}*\nRest ${multiplier.rest} between sets\n\n_${opener}_\n\n`;
-  const ytLinks: string[] = [];
-  for (let i = 0; i < exercises.length; i++) {
-    const ex = exercises[i];
+  const week1Note = phase === 1 && week === 1
+    ? `⚠️ *First session:* Start with a weight you can control. Leave 2 reps in the tank. Form first — weight follows.\n\n`
+    : ``;
+  const equipNote = isDumbbell
+    ? `_No machine? Each exercise has a dumbbell option in brackets._\n\n`
+    : ``;
+
+  const { safeEx, skippedNames } = filterInjuredGymExercises(exercises, injuries);
+
+  let out = `💪 *Week ${week} — ${label}*\n\n`;
+  out += `⚡ *Warm-up:* 5 min incline walk. Then 1 light set at half weight on your first exercise.\n`;
+  out += `Rest 90–120 sec between sets. Hit 10 clean reps → add weight next session. 🔺\n\n`;
+  out += week1Note;
+  out += equipNote;
+  out += `_${opener}_\n\n`;
+
+  for (let i = 0; i < safeEx.length; i++) {
+    const ex = safeEx[i];
     const num = i + 1;
-    // Short one-line cue — just the key thing to remember
-    const shortCue = ex.description.split(". ").slice(0, 1).join(". ");
-    out += `${num}. *${ex.name}* — ${ex.sets}\n${shortCue}\n\n`;
-    const yt = ex.youtube || `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
-    ytLinks.push(`${num}. ${ex.name}: ${yt}`);
+    const shortCue = ex.description.split(". ")[0];
+    out += `${num}. *${ex.name}* — ${ex.sets}\n`;
+    out += `${shortCue}\n`;
+    if (isDumbbell && ex.modification) {
+      out += `_(No machine: ${ex.modification})_\n`;
+    }
+    out += `\n`;
   }
-  out += `Reply *DONE* when finished.\n\n${finisher}\n\n_Form videos:_\n${ytLinks.join("\n")}`;
+
+  if (skippedNames.length > 0) {
+    out += `⚠️ *Skipped (injury — ${injuries}):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
+  }
+
+  out += `Reply *DONE* when finished.\n\n`;
+  out += finisher;
+  out += `\n\n🚶 *Bonus:* 20 min incline walk after your session. No running needed.`;
   return out;
 }
 
@@ -1063,10 +1250,24 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const phaseName = getPhaseNames()[phase] || "Foundation";
       return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
     }
-    const dayA = formatGymDay(GYM_DUMBBELL_DAY_A, "Dumbbell Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const dayB = formatGymDay(GYM_DUMBBELL_DAY_B, "Dumbbell Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const dayC = formatGymDay(GYM_DUMBBELL_DAY_C, "Dumbbell Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
+    const dbTrainingDays = user.trainingDaysPerWeek || 3;
+    const dbGender = user.gender || "male";
+    if (dbTrainingDays <= 2) {
+      const dA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const dB = formatGymDay(dbGender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      return `${dA}\n\n---\n\n${dB}`;
+    }
+    if (dbTrainingDays >= 4) {
+      const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const ub = formatGymDay(dbGender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      return `${ua}\n\n---\n\n${la}\n\n---\n\n${ub}\n\n---\n\n${lb}`;
+    }
+    const dA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+    const dB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+    const dC = formatGymDay(dbGender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+    return `${dA}\n\n---\n\n${dB}\n\n---\n\n${dC}`;
   }
 
   if (isGlutesFocus) {
@@ -1105,9 +1306,23 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
   }
 
-  const dayA = formatGymDay(GYM_FULL_DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-  const dayB = formatGymDay(GYM_FULL_DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-  const dayC = formatGymDay(GYM_FULL_DAY_C, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const gender = user.gender || "male";
+  if (trainingDays <= 2) {
+    const dayA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const dayB = formatGymDay(gender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    return `${dayA}\n\n---\n\n${dayB}`;
+  }
+  if (trainingDays >= 4) {
+    const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const ub = formatGymDay(gender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    return `${ua}\n\n---\n\n${la}\n\n---\n\n${ub}\n\n---\n\n${lb}`;
+  }
+  const dayA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const dayB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const dayC = formatGymDay(gender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
   return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
 }
 
@@ -1147,6 +1362,27 @@ function filterInjuredExercises(exercises: HomeEx[], injuries: string): { safe: 
     }
   }
   return { safe, skipped };
+}
+
+function filterInjuredGymExercises(exercises: Exercise[], injuries: string): { safeEx: Exercise[]; skippedNames: string[] } {
+  if (!injuries || injuries === "none") return { safeEx: exercises, skippedNames: [] };
+  const injuryLower = injuries.toLowerCase();
+  const blockedPatterns: string[] = [];
+  for (const [area, patterns] of Object.entries(INJURY_EXERCISE_MAP)) {
+    if (injuryLower.includes(area)) blockedPatterns.push(...patterns);
+  }
+  if (blockedPatterns.length === 0) return { safeEx: exercises, skippedNames: [] };
+  const safeEx: Exercise[] = [];
+  const skippedNames: string[] = [];
+  for (const ex of exercises) {
+    const nameLower = ex.name.toLowerCase();
+    if (blockedPatterns.some(p => nameLower.includes(p))) {
+      skippedNames.push(ex.name);
+    } else {
+      safeEx.push(ex);
+    }
+  }
+  return { safeEx, skippedNames };
 }
 
 export function buildDayWorkout(user: any): string {
@@ -1268,12 +1504,11 @@ export function buildDayWorkout(user: any): string {
     return isUpperDay ? INTERMEDIATE_GYM_UPPER : INTERMEDIATE_GYM_LOWER;
   }
 
-  // Gym users — ALWAYS use programmeDayInWeek mod 3 to pick day slot
-  // Never use calendar day of week for gym sessions
-  const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-  const exercises = getGymDay(daySlot, isDumbbell, isFemaleGluteFocus);
-  const label = daySlotLabel(daySlot, isFemaleGluteFocus, isDumbbell);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss");
+  // Gym users — route to correct day based on trainingDaysPerWeek and gender
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const gender = user.gender || "male";
+  const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", isDumbbell, injuries);
 }
 
 // ============================================================

@@ -120,6 +120,14 @@ const PROTEIN_WORDS: string[] = Array.from(new Set([
 // Onboarding functions moved to ./onboarding (see imports above)
 
 // ============================================================
+// TEMPORARY EQUIPMENT MODE — holiday / travel (in-memory, no DB needed)
+// phone → "gym" | "gym_dumbbell" | "home" | null
+// Cleared after one workout delivery.
+// ============================================================
+const tempEquipmentMode = new Map<string, string>();
+const awaitingEquipmentAnswer = new Map<string, boolean>();
+
+// ============================================================
 // MAIN MESSAGE HANDLER
 // ============================================================
 
@@ -727,7 +735,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
-    const workout = buildDayWorkout(user);
+    const effectiveUser = tempEquipmentMode.has(phone)
+      ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
+      : user;
+    tempEquipmentMode.delete(phone);
+    const workout = buildDayWorkout(effectiveUser);
     const dayNum = user.programmeDayInWeek || 1;
     const poContext = await getProgressiveOverloadContext(user.id);
     const week = user.programmeWeek || 1;
@@ -754,6 +766,48 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- NEW / CHANGE PROGRAMME REQUEST — always ask, never auto-deliver ----
+  // ---- DIRECT DAYS SWITCH — "switch to 3 days" / "I want to do 4 days" ----
+  // Updates training days immediately without the full questionnaire.
+  const directSwitchMatch = m.match(/\b(?:switch|change|move|update)\s+(?:me\s+)?to\s+([2-6])\s*days?\b/i)
+    || m.match(/\bwant\s+to\s+(?:do|train)\s+([2-6])\s*days?\s*(?:a\s*week|per\s*week)?\b/i);
+  if (directSwitchMatch) {
+    const newDays = parseInt(directSwitchMatch[1]);
+    await db.update(users).set({ trainingDaysPerWeek: newDays, programmeDayInWeek: 1 }).where(eq(users.phoneNumber, phone));
+    const updatedUser = { ...user, trainingDaysPerWeek: newDays, programmeDayInWeek: 1 };
+    const newProg = buildFullProgramme(updatedUser);
+    const switchReply = `Done${firstName ? `, ${firstName}` : ""} — updated to ${newDays} days/week. Here is your new programme.\n\n${newProg}`;
+    await logChat(user.id, message, switchReply, "PROGRAMME_SWITCH");
+    return switchReply;
+  }
+
+  // ---- HOLIDAY / TRAVEL EQUIPMENT QUESTION ----
+  // If client mentions travel + requests a workout, ask what equipment they have.
+  const isHolidayContext = /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip)\b/i.test(m);
+  const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train)\b/i.test(m);
+
+  if (awaitingEquipmentAnswer.get(phone)) {
+    awaitingEquipmentAnswer.delete(phone);
+    let tempMode = user.trainingMode || "gym";
+    if (/\b(full gym|gym|machines|cables|full equipment|1)\b/i.test(m)) tempMode = "gym";
+    else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
+    else if (/\b(nothing|no equipment|bodyweight|hotel room|3)\b/i.test(m)) tempMode = "home";
+    tempEquipmentMode.set(phone, tempMode);
+    const tempUser = { ...user, trainingMode: tempMode };
+    const workout = buildDayWorkout(tempUser);
+    const gifUrl = getPrimaryWorkoutGifUrl(workout);
+    const gifMarker = gifUrl ? `\n[MEDIA:${gifUrl}]` : "";
+    const tReply = `Here is your session adapted for what you have available.\n\n${workout}\n\nSend *done* when finished.${gifMarker}`;
+    await logChat(user.id, message, tReply, "WORKOUT_HOLIDAY");
+    return tReply;
+  }
+
+  if (isHolidayContext && isWorkoutRequestInMessage) {
+    awaitingEquipmentAnswer.set(phone, true);
+    const equipQ = `${firstName ? firstName + ", w" : "W"}here are you training from? Reply:\n\n*gym* — full machines and cables\n*dumbbells* — dumbbells only\n*nothing* — no equipment, bodyweight only`;
+    await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
+    return equipQ;
+  }
+
   // Must be checked BEFORE awaitingProgrammeAnswers so a new request resets the flow
   const isNewProgrammeRequest =
     /\b(new|change|different|update|rebuild|swap|switch|give me a new|i need a new|want a new)\b.{0,30}\b(programme|program|workout|training plan|plan|gym|home)\b/i.test(m) ||
