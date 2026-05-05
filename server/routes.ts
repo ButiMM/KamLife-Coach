@@ -129,6 +129,117 @@ const tempEquipmentMode = new Map<string, string>();
 const awaitingEquipmentAnswer = new Map<string, boolean>();
 
 // ============================================================
+// FOOD LOG REPLY BUILDER
+// Shared by SA scanner + both GPT fallback paths.
+// Pure function — no async, no DB. Eliminates duplicate logic across 3 paths.
+// Pre-build junkNoteText in the calling path (needs SA food DB notes + diabetes check).
+// ============================================================
+function buildFoodLogReply(p: {
+  foodLines: string;
+  mealLabel: string;
+  totalMealCals: number;
+  totalMealProtein: number;
+  runningCals: number;
+  runningProtein: number;
+  calorieTarget: number;
+  proteinTarget: number;
+  prevCals: number;
+  junkNoteText?: string;
+  hasGoodProteins?: boolean;
+  hasCarbs?: boolean;
+  coachNoteOverride?: string;
+  user: any;
+}): string {
+  const {
+    foodLines, mealLabel, totalMealCals, totalMealProtein,
+    runningCals, runningProtein, calorieTarget, proteinTarget,
+    prevCals, junkNoteText, hasGoodProteins, hasCarbs,
+    coachNoteOverride, user,
+  } = p;
+
+  const calRemaining = calorieTarget - runningCals;
+  const proteinRemaining = proteinTarget - runningProtein;
+  const earlyInDay = runningCals < (calorieTarget * 0.4);
+
+  const runningLine = prevCals > 0
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
+    : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+
+  // Day-pacing assessment
+  let dayAssessment = "";
+  if (prevCals > 0 && totalMealCals >= 100) {
+    const hourNow = new Date().getUTCHours() + 2;
+    const dayProgress = Math.min(hourNow / 20, 1);
+    const expectedCals = calorieTarget * dayProgress;
+    const calPace = runningCals / Math.max(expectedCals, 1);
+    if (calRemaining <= 0) {
+      dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
+    } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
+      dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
+    } else if (!earlyInDay && calPace > 1.3) {
+      dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
+    } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
+      dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
+    }
+  }
+
+  // Coach note — use GPT override, or derive from food categories
+  let coachNote = "";
+  if (coachNoteOverride) {
+    coachNote = `\n\n${coachNoteOverride}`;
+  } else if (totalMealCals >= 100) {
+    if (totalMealProtein >= 20) {
+      coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+    } else if (!hasGoodProteins && hasCarbs) {
+      coachNote = `\n\nCarbs without protein — add a protein source next meal.`;
+    } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
+      coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
+    }
+  }
+
+  const junkNote = junkNoteText ? `\n\n${junkNoteText}` : "";
+
+  // Protein tip — only when coachNote is empty (avoids double-up)
+  let proteinTip = "";
+  const budgetTier = user.weeklyFoodBudget || "100_300";
+  const protRemaining = proteinTarget - runningProtein;
+  if (!coachNote && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
+    const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
+    const suggestions = lowBudget
+      ? [`Add pilchards (22g protein, about R12) to your next meal.`, `2 boiled eggs = 12g protein. Quick win.`, `Tin of tuna = 25g protein. Easy add.`]
+      : [`Add pilchards (22g protein, R12) to your next meal.`, `2 boiled eggs = 12g protein. Quick win.`, `Tin of tuna = 25g protein. Easy add.`, `Low-fat yoghurt = 10g protein. Good snack option.`];
+    proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
+  } else if (protRemaining <= 0) {
+    proteinTip = `\n\nProtein target hit. ✅`;
+  }
+
+  // Variable reinforcement (~15% of logs — slot-machine psychology)
+  let variableReinforcement = "";
+  if (Math.random() < 0.15) {
+    const fn = (user.name || "").split(" ")[0] || "Sharp";
+    const daysSinceStart = user.programmeStartDate
+      ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+      : 0;
+    const NOTES = [
+      `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+      `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
+      `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
+      `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
+      `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
+    ];
+    variableReinforcement = NOTES[Math.floor(Math.random() * NOTES.length)];
+  }
+
+  // Calorie floor warning — after 5pm SAST, under 850 kcal total
+  const sastHour = new Date().getUTCHours() + 2;
+  const calorieFloorNote = (sastHour >= 17 && runningCals > 0 && runningCals < 850)
+    ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
+    : "";
+
+  return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
+}
+
+// ============================================================
 // MAIN MESSAGE HANDLER
 // ============================================================
 
@@ -2873,7 +2984,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     }
 
     eventReply += `\n\n_Send me what you ate tomorrow morning — no judgment, just logging. I will help you get back on track._`;
-    await logChat(user.id, message, eventReply, "FOOD_LOG");
+    await logChat(user.id, message, eventReply, "SOCIAL_EVENT");
     return eventReply;
   }
 
@@ -3214,29 +3325,15 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       } catch (e) { console.warn("[non-fatal] calorie update:", e); }
       const prevCals = Math.max(0, runningCals - totalCals);
 
-      const calRemaining = calorieTarget - runningCals;
-      const proteinRemaining = proteinTarget - runningProtein;
-      let coachNote = "";
-      // Only add coaching notes for real meals (>= 100 kcal) — not for drinks/water/black coffee
-      if (totalCals >= 100) {
-        if (totalProtein >= 20) {
-          coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
-        } else if (junkFoods.length > 0) {
-          coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
-        } else if (allAdjustedFoods.some(f => f.category === "carb")) {
-          coachNote = `\n\nCarbs without protein — add a protein source next meal.`;
-        }
-      }
-      let junkNote = "";
+      // Build junk note — SA scanner specific (needs food DB notes + diabetes check)
+      let junkNoteText = "";
       if (junkFoods.length > 0) {
         let note = junkFoods[0].notes || "";
         if (goodProteins.length > 0) {
           note = note.replace(/Better to choose.*$/i, "").replace(/Add (?:eggs|pilchards|protein).*$/i, "").trim();
         }
-        if (note) junkNote = `\n\n${note}`;
+        if (note) junkNoteText = note;
       }
-
-      // Instant diabetes food alert — no GPT, hardcoded swaps for high-GI foods
       const isDiabeticClient = (user.medicalConditions || "").toLowerCase().includes("diabetes");
       if (isDiabeticClient) {
         const HIGH_GI_PATTERNS = [
@@ -3248,90 +3345,20 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         const loggedNames = allAdjustedFoods.map(f => f.name.toLowerCase()).join(" ") + " " + m;
         for (const { match, swap } of HIGH_GI_PATTERNS) {
           if (match.test(loggedNames)) {
-            junkNote = `\n\n⚠️ *Diabetes note:* For your blood sugar stability, swap this for ${swap}. Same satisfaction — without the spike.`;
+            junkNoteText = `⚠️ *Diabetes note:* For your blood sugar stability, swap this for ${swap}. Same satisfaction — without the spike.`;
             break;
           }
         }
       }
-      const runningLine = prevCals > 0
-        ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
-        : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
 
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
-      // Smart protein suggestion — only fires late in the day when it actually matters.
-      // Rules: meal >= 100 kcal (not a drink), running cals >= 40% of daily target
-      // (early-day logs don't need nagging — whole day is still ahead), and coachNote
-      // hasn't already mentioned protein remaining (avoid double-messaging).
-      let proteinTip = "";
-      const budgetTier = user.weeklyFoodBudget || "100_300";
-      const protRemaining = (user.proteinTarget || 120) - runningProtein;
-      const earlyInDay = runningCals < (calorieTarget * 0.4); // < 40% logged = still morning/midday
-
-      // Day-pacing assessment — tells user if they're on track, not just the number
-      let dayAssessment = "";
-      if (prevCals > 0 && totalCals >= 100) {
-        const hourNow = new Date().getUTCHours() + 2; // SAST
-        const dayProgress = Math.min(hourNow / 20, 1); // 20:00 SAST = end of eating window
-        const expectedCals = calorieTarget * dayProgress;
-        const calPace = runningCals / Math.max(expectedCals, 1);
-        if (calRemaining <= 0) {
-          dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
-        } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
-          dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
-        } else if (!earlyInDay && calPace > 1.3) {
-          dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
-        } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
-          dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
-        }
-      }
-      // Only fire proteinTip if coachNote is empty — avoid double protein messaging
-      const coachNoteAlreadyMentionsProtein = coachNote.length > 0;
-      if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100 && !earlyInDay && !coachNoteAlreadyMentionsProtein) {
-        const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
-        const suggestions = lowBudget
-          ? [
-            `Add pilchards (22g protein, about R12) to your next meal.`,
-            `2 boiled eggs = 12g protein. Quick win.`,
-            `Tin of tuna = 25g protein. Easy add.`,
-          ]
-          : [
-            `Add pilchards (22g protein, R12) to your next meal.`,
-            `2 boiled eggs = 12g protein. Quick win.`,
-            `Tin of tuna = 25g protein. Easy add.`,
-            `Low-fat yoghurt = 10g protein. Good snack option.`,
-          ];
-        proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
-      } else if (protRemaining <= 0) {
-        proteinTip = `\n\nProtein target hit. ✅`;
-      }
-
-      // Variable reinforcement — fires ~15% of the time (1-in-7 logs).
-      // Slot machine psychology: unpredictable reward > predictable reward.
-      // These messages appear randomly, feel personal, build identity.
-      const variantRoll = Math.random();
-      let variableReinforcement = "";
-      if (variantRoll < 0.15) {
-        const firstName = (user.name || "").split(" ")[0] || "Sharp";
-        const daysSinceStart = user.programmeStartDate
-          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
-          : 0;
-        const SURPRISE_NOTES = [
-          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
-          `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
-          `\n\n🎯 _${firstName}, the consistency you're building right now is worth more than any single perfect meal._`,
-          `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
-          `\n\n🔒 _${firstName}, locking in the habit. Keep it exactly like this._`,
-        ];
-        variableReinforcement = SURPRISE_NOTES[Math.floor(Math.random() * SURPRISE_NOTES.length)];
-      }
-
-      // Calorie floor warning — fires after 5pm SAST when daily total is dangerously low
-      const sastHour = new Date().getUTCHours() + 2;
-      const calorieFloorNote = (sastHour >= 17 && runningCals > 0 && runningCals < 850)
-        ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
-        : "";
-
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
+      const reply = buildFoodLogReply({
+        foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
+        runningCals, runningProtein, calorieTarget, proteinTarget, prevCals,
+        junkNoteText, hasGoodProteins: goodProteins.length > 0,
+        hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
+        user,
+      });
 
       // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
       try {
@@ -3396,21 +3423,18 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
             todayCaloriesDate: todayStr,
           }).where(eq(users.phoneNumber, phone));
         } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
-        const calRemaining = calorieTarget - runningCals;
-        const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
-        const fbVarRoll = Math.random();
-        const fbSurprise = fbVarRoll < 0.15 ? (() => {
-          const fn = (user.name || "").split(" ")[0] || "Sharp";
-          const NOTES = [`\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`, `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`, `\n\n🎯 _Clients who log every day lose 3× more than those who don't — you're doing the right thing._`];
-          return NOTES[Math.floor(Math.random() * NOTES.length)];
-        })() : "";
-        const fbSastHour = new Date().getUTCHours() + 2;
-        const fbFloorNote = (fbSastHour >= 17 && runningCals > 0 && runningCals < 850)
-          ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight.`
-          : "";
-        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fbSurprise}${fbFloorNote}`;
+        const fbPrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
+        const fallbackReply = buildFoodLogReply({
+          foodLines, mealLabel: "Meal total",
+          totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
+          runningCals, runningProtein, calorieTarget, proteinTarget, prevCals: fbPrevCals,
+          coachNoteOverride: gptFallbackResult.coachNote || undefined,
+          hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
+          hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),
+          user,
+        });
         try {
-          const items = gptFallbackResult.foods.map(f => ({
+          const items = gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
           }));
           await db.insert(mealLogs).values({
@@ -3463,27 +3487,17 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
           todayCaloriesDate: todayStr,
         }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
-      const calRemaining = calorieTarget - runningCals;
-      const runningLine = `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅"}`;
-      const fb2VarRoll = Math.random();
-      const fb2Surprise = fb2VarRoll < 0.15 ? (() => {
-        const fn = (user.name || "").split(" ")[0] || "Sharp";
-        const daysSince = user.programmeStartDate
-          ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
-          : 0;
-        const NOTES = [
-          `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
-          `\n\n⚡ _Most people at day ${daysSince || "?"} have already stopped logging. You haven't. That matters._`,
-          `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
-          `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
-        ];
-        return NOTES[Math.floor(Math.random() * NOTES.length)];
-      })() : "";
-      const fb2SastHour = new Date().getUTCHours() + 2;
-      const fb2FloorNote = (fb2SastHour >= 17 && runningCals > 0 && runningCals < 850)
-        ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight.`
-        : "";
-      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fb2Surprise}${fb2FloorNote}`;
+      const fb2PrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
+      const fallbackReply = buildFoodLogReply({
+        foodLines, mealLabel: "Meal total",
+        totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
+        runningCals, runningProtein, calorieTarget, proteinTarget: user.proteinTarget || 120,
+        prevCals: fb2PrevCals,
+        coachNoteOverride: gptFallbackResult.coachNote || undefined,
+        hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
+        hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),
+        user,
+      });
       try {
         const items = gptFallbackResult.foods.map(f => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
