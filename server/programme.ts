@@ -1505,7 +1505,6 @@ export function buildDayWorkout(user: any): string {
   }
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
-  const trainingDays = user.trainingDaysPerWeek || 3;
   const gender = user.gender || "male";
   const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
   return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", isDumbbell, injuries);

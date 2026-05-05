@@ -1312,13 +1312,73 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     return lsReply;
   }
 
-  // ---- SICK / ILL ----
+  // ---- SICK / ILL — above-neck vs below-neck rule ----
+  const isAboveNeckOnly = /\b(runny nose|blocked nose|stuffy nose|sneezing|sneezy|light cold|mild cold|bit of a cold|slight headache|congested|congestion)\b/i.test(m)
+    && !/\b(fever|vomit|nausea|nauseous|throwing up|stomach|chest|flu|covid|body aches|can.?t breathe|diarr|diarrhoea)\b/i.test(m);
   const isSick = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i.test(m)
     && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better)\b/i.test(m);
+  if (isAboveNeckOnly) {
+    const aboveNeckReply = `${capName}, above-the-neck rule: runny nose or congestion = light training is fine.\n\nYou can train — but drop the intensity. A 30-min walk, a light session at 60% effort. If you feel worse during warm-up, stop and rest. No heavy lifts, no max effort today.\n\n*Eat well:* protein + fluids. Vitamin C from fruit or juice. You'll be back to full speed in a day or two.`;
+    await logChat(user.id, message, aboveNeckReply, "SICK_ABOVE_NECK");
+    return aboveNeckReply;
+  }
   if (isSick) {
-    const sickReply = `${capName}, *no training.* Full stop.\n\nWhen you're sick, rest IS the training. Pushing through flu or fever does not build discipline — it extends illness and can cause serious damage (myocarditis is real). Your body needs all its energy to fight, not to lift.\n\n*What to do right now:*\n• Sleep as much as you can\n• Drink water, juice, or soup — dehydration makes everything worse\n• Eat small: pap, eggs, toast, yoghurt — whatever you can stomach\n• No steps target, no calorie pressure today\n\nWhen you're feeling better — not just "okay", properly better — message me and we pick up exactly where you left off. Programme and targets are saved. Rest well ${capName}.`;
+    const sickReply = `${capName}, *no training today.* Full stop.\n\nFever, nausea, chest or stomach — below the neck means your body is in emergency mode. Pushing through makes it worse and longer. Rest IS the training right now.\n\n*What to do:*\n• Sleep as much as you can\n• Fluids — water, Energade, soup, juice\n• Eat small: pap, eggs, toast, yoghurt — whatever you can stomach\n• No steps target, no calorie pressure today\n\nMessage me when you're properly better. Programme and targets are saved — you pick up exactly where you left off.`;
     await logChat(user.id, message, sickReply, "SICK_DAY");
     return sickReply;
+  }
+
+  // ---- OVER-TRAINING SIGNAL ----
+  const isFatigueMessage = /\b(so tired|exhausted|body.*sore|everything.*sore|can.?t move|legs.*dead|dead.*legs|burnt out|overtrain|worn out|body.*aching|aching all over|too sore|too tired|destroyed|wrecked|ruined|my body.*killing|killing me.*gym|can.?t walk|can.?t lift|barely.*move)\b/i.test(m);
+  if (isFatigueMessage && (user.workoutStreak || 0) >= 4) {
+    const overtrainReply = `${capName}, that's your body telling you to stop — and you should listen.\n\n${user.workoutStreak} days straight is real work. But without rest, you're breaking muscle down, not building it. Progress lives in recovery.\n\n*Today: rest.* No gym, no run. Walk if you want, but nothing intense.\n\n*Eat:* hit your protein target — your muscles repair during rest, not during training.\n\n*Tomorrow:* come back. You will lift more, feel better, and actually make progress. Rest is not quitting — it's part of the programme.`;
+    await logChat(user.id, message, overtrainReply, "OVERTRAIN");
+    return overtrainReply;
+  }
+
+  // ---- ALCOHOL QUESTION (not a log — asking about it) ----
+  const isAlcoholQuestion = /\b(can i (drink|have.*alcohol|have.*beer|have.*wine)|alcohol.*ok|ok.*alcohol|is (beer|wine|alcohol|drinking) ok|what about (alcohol|drinking|beer|wine)|alcohol.*diet|diet.*alcohol|drinking.*weekends?|weekends?.*drink|how bad.*alcohol|affect.*results|alcohol.*results|skip.*alcohol|cut.*alcohol|limit.*alcohol)\b/i.test(m)
+    && !(/\b(had|drank|drinking|having|tonight|last night|yesterday|at the braai|at the party)\b/i.test(m));
+  if (isAlcoholQuestion) {
+    const goal = user.goalType || "fat_loss";
+    const alcoholQReply = goal === "muscle_gain"
+      ? `${capName}, alcohol and muscle gain don't mix well — here's the honest version:\n\nYour body burns alcohol before everything else. While it's processing the drinks, testosterone drops and cortisol (the breakdown hormone) rises. That means less muscle built from that session.\n\n*Practical rule:* 1–2 drinks max on social occasions. Not every weekend. The more you drink, the more you undo.\n\n*What actually kills gains:* missing protein meals the next day because you're hungover. Eat your protein even on bad nights.`
+      : `${capName}, alcohol is the one thing that silently kills fat loss without people realising it.\n\nYour body treats alcohol as a toxin and stops burning fat completely until it's processed — that can take 6–24 hours depending on how much you drank. The food you eat while drinking is more likely to be stored as fat.\n\n*Practical rule:* limit to 1–2 drinks max, not every weekend. Stick to spirits + soda water (no sugary mixers). Beer and wine add up fast.\n\n*It's not banned* — but if your results are stalling and you're drinking every weekend, that's likely why.`;
+    await logChat(user.id, message, alcoholQReply, "ALCOHOL_QUESTION");
+    return alcoholQReply;
+  }
+
+  // ---- FOODS TO AVOID / LIMIT ----
+  const isFoodsToAvoidQ = /\b(what.*avoid|what.*not.*eat|foods?.*cut|foods?.*limit|foods?.*avoid|avoid.*foods?|what.*skip|bad.*foods?|worst.*foods?|should.*avoid|cut.*out|what.*hurting|what.*killing|killing.*results|what.*blocking|what.*slowing|bad for.*loss|bad for.*gain|what (not|never) (to )?eat)\b/i.test(m);
+  if (isFoodsToAvoidQ) {
+    const goal = user.goalType || "fat_loss";
+    let avoidReply = "";
+    if (goal === "muscle_gain") {
+      avoidReply = `${capName}, for muscle gain the biggest mistakes are:\n\n🚫 *What quietly kills your gains:*\n• Skipping meals — your muscles have nothing to build with\n• Not enough protein at each meal — aim for 30–40g per meal\n• Alcohol — drops testosterone, raises cortisol, slows recovery\n• Sugary drinks — empty calories with no protein\n• Too much junk — you can't out-supplement a bad diet\n\n✅ *Eat freely:* chicken, eggs, beef, tuna, pilchards, brown rice, sweet potato, oats, peanut butter\n\n_Nothing is permanently banned. You're just prioritising what builds muscle._`;
+    } else {
+      avoidReply = `${capName}, these are the things quietly killing fat loss for most South Africans:\n\n🚫 *The main culprits:*\n• *Sugary drinks* — Coke, juice, Oros, Energade. Liquid calories you don't feel full from\n• *White bread, pap, white rice* — spike blood sugar fast, you're hungry again in 2 hours\n• *Takeaways more than once a week* — KFC, Steers, Debonairs are mostly oil + refined carbs\n• *Alcohol* — stops fat burning for up to 24hrs. More than 2 drinks a weekend stalls progress\n• *Flavoured yoghurt + cereals* — marketed as "healthy", full of added sugar\n\n⚠️ *Limit, don't stress:*\nFull-cream dairy, peanut butter, dried fruit — fine in small amounts, just track it\n\n✅ *Eat as much as you want:*\nChicken, eggs, tuna, pilchards, vegetables, sweet potato, oats, brown rice\n\n_Nothing is permanently banned. You're spending your calorie budget wisely._`;
+    }
+    await logChat(user.id, message, avoidReply, "FOODS_TO_AVOID");
+    return avoidReply;
+  }
+
+  // ---- BAD EATING DAY / BINGE RECOVERY ----
+  const isBadEatingDay = /\b(ate (badly|everything|too much|junk|rubbish|badly today)|went off track|off track (today|completely)|had a (bad|terrible|awful) (day|eating)|cheat day gone (wrong|bad|too far)|couldn.?t stop eating|binge(d|ing)|ate everything in sight|blew (my|the) (diet|plan|calories)|messed up (today|my diet|my eating)|fell off|ruined (today|my diet|it)|ate like (crazy|mad|pig)|stress (ate|eating))\b/i.test(m);
+  if (isBadEatingDay) {
+    const badDayReply = `${capName}, one bad day doesn't undo weeks of work. It's one meal — not one month.\n\nHere's what actually matters now:\n\n*Tonight:* drink water, get to sleep at a decent time. Don't try to "make up" for it by skipping tomorrow's meals — that makes it worse.\n\n*Tomorrow:* back to normal. First meal — protein. Eggs, chicken, tuna. Don't punish yourself with restriction, just get back on track.\n\n*The truth:* fat loss happens over weeks and months. One rough day is noise in the data. What you do the next 3 days is what actually matters.`;
+    await logChat(user.id, message, badDayReply, "BAD_EATING_DAY");
+    return badDayReply;
+  }
+
+  // ---- SKIPPING MEALS / FORGOT TO EAT ----
+  const isSkippingMeals = /\b(haven.?t eaten|forgot to eat|haven.?t had anything|skipped (breakfast|lunch|dinner|meals?|eating)|too busy to eat|no time to eat|nothing today|haven.?t had food|not eaten (yet|today|all day)|missed (breakfast|lunch|dinner|meals?)|didn.?t eat|didn.?t have (breakfast|lunch|dinner)|no food today)\b/i.test(m);
+  if (isSkippingMeals) {
+    const hourSAST = (new Date().getUTCHours() + 2) % 24;
+    const skipReply = hourSAST >= 15
+      ? `${capName}, it's late in the day and you haven't eaten — that's a problem. Your metabolism slows, cortisol rises, and you'll likely overeat tonight.\n\n*Eat something now:* 2 eggs + bread, peanut butter on toast, a tin of tuna — anything with protein. Don't wait for a "proper meal" that never comes.\n\nMissing meals doesn't speed up fat loss — it makes your body hold onto fat harder. Consistent eating wins every time.`
+      : `${capName}, don't let busyness become a skipped meal habit — it backfires. Your body needs fuel to burn fat and build muscle.\n\n*Grab something now:* eggs, bread + peanut butter, a tin of fish, yoghurt. Takes 5 minutes.\n\n_Eating consistently is one of the most powerful things you can do for your results._`;
+    await logChat(user.id, message, skipReply, "SKIPPING_MEALS");
+    return skipReply;
   }
 
   // ---- FUNERAL / BEREAVEMENT ----
