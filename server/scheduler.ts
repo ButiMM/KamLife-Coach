@@ -4150,10 +4150,50 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
     }
   }, { timezone: "UTC" });
 
+  // ── Rest day recovery tip — 12pm SAST (10am UTC) on Wednesdays and Sundays ──
+  // Only fires for clients who have NOT logged a workout today and are gym users.
+  cron.schedule("0 10 * * 3,0", async () => {
+    console.log("[SCHEDULER] JOB: Rest day recovery tip");
+    try {
+      const clients = await getActiveClients();
+      const REST_TIPS = [
+        (name: string) => `${name}, rest day. That's not a lazy day — that's when your body actually builds muscle.\n\n*Today:* eat your protein, drink your water, walk if you can. Tomorrow you come back stronger.`,
+        (name: string) => `${name}, recovery day. Your muscles grow during rest, not during training.\n\n*Three things that help today:* protein with every meal, 7+ hours sleep, 20 min easy walk. That's it.`,
+        (name: string) => `${name}, your body is working right now — you just can't feel it.\n\nRest day nutrition: hit your protein target, keep carbs moderate, drink at least 2L water. The work you did this week pays off tonight.`,
+        (name: string) => `Rest day, ${name}. The session is in the bank — now let it work.\n\n*Reminder:* progressive overload means next session you add weight or reps to at least one exercise. Decide now what you're pushing harder.`,
+      ];
+      let sent = 0;
+      const todayStr = new Date().toISOString().slice(0, 10);
+
+      for (const client of clients) {
+        if (isPaused(client)) continue;
+        if (!client.trainingMode || client.trainingMode === "home" || client.trainingMode === "walk_only") continue;
+
+        const [todayLog] = await db
+          .select({ id: workoutLogs.id })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, new Date(todayStr))))
+          .limit(1);
+        if (todayLog) continue;
+
+        const ok = await claimDailySlot(client.id, "rest_day_tip");
+        if (!ok) continue;
+
+        const name = client.name?.split(" ")[0] || "there";
+        const tipFn = REST_TIPS[Math.floor(Math.random() * REST_TIPS.length)];
+        await sendWhatsApp(client.phoneNumber, tipFn(name));
+        sent++;
+        await new Promise(r => setTimeout(r, 300));
+      }
+      console.log(`[SCHEDULER] Rest day tips sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Rest day tip error:", err);
+    }
+  }, { timezone: "UTC" });
+
+}
+
 // ── DAILY WIN — Mon–Sat 7:30pm SAST (17:30 UTC) ─────────────────────────────
-// Sends a one-sentence win + one-sentence tomorrow action to clients
-// who logged SOMETHING today. Silent clients are skipped — they get the
-// streak-at-risk message at 9pm instead. Deliberately short and specific.
 cron.schedule("30 17 * * 1-6", async () => {
   console.log("[SCHEDULER] JOB: Daily Win (7:30pm SAST)");
   const clients = await getActiveClients();
@@ -4189,7 +4229,7 @@ cron.schedule("30 17 * * 1-6", async () => {
       const stepsToday = stepRow[0]?.steps ? parseInt(String(stepRow[0].steps)) : 0;
       const hasActivity = didWorkout || mealsLogged > 0 || stepsToday > 0;
 
-      if (!hasActivity) continue; // Skip — streak-at-risk handles this at 9pm
+      if (!hasActivity) continue;
 
       const streak = client.workoutStreak || 0;
       const stepsTarget = client.stepsTarget || 8500;
@@ -4222,5 +4262,3 @@ cron.schedule("30 17 * * 1-6", async () => {
 
   console.log(`[SCHEDULER] Daily Win sent: ${sent}`);
 }, { timezone: "UTC" });
-
-}
