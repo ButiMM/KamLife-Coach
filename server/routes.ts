@@ -842,7 +842,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- SHOPPING LIST command ----
-  if (m === "4" || m === "shopping list" || m === "shoppinglist" || m === "shopping" || m === "shop") {
+  if (m === "4" || ["shopping list", "shoppinglist", "shopping", "shop", "grocery list", "groceries", "my groceries", "weekly shop", "weekly shopping", "what to buy", "what should i buy", "what must i buy"].includes(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
@@ -855,14 +855,27 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // ---- CLIENT SENDS THEIR OWN SHOPPING LIST — "adjust my list", "here's what I buy", "fix my groceries" ----
   const isClientList = /\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
     && /\b(list|buy|shop|grocery|groceries|shopping|trolley|basket)\b/i.test(m)
-    && m.split(/\s+/).length >= 5; // must be a meaningful list, not just "my list"
+    && m.split(/\s+/).length >= 5;
   if (isClientList) {
-    const clientName = user.name?.split(" ")[0] || "there";
     const goal = user.goalType || "fat_loss";
     const pTarget = user.proteinTarget || 120;
     const cTarget = user.calorieTarget || 1800;
+    const budget = user.weeklyFoodBudget || "100_300";
+    const budgetLabel: Record<string, string> = { under_100: "under R100/week", "100_300": "R100–R300/week", "300_600": "R300–R600/week", over_600: "over R600/week" };
     const adjustReply = await withTimeout("gpt_adjust", 20000, () => askCoachK(message, user,
-      `The client just sent you their personal shopping/grocery list. Analyze it as Coach K. Be specific and SA-focused:\n\n1. What's GOOD about their list (acknowledge what they're doing right)\n2. What's MISSING for their ${goal} goal (especially protein sources — they need ${pTarget}g/day)\n3. What to SWAP (not remove — replace with a better option at similar price)\n4. What to REMOVE (only if genuinely harmful to their goal)\n5. End with a specific weekly total estimate in ZAR\n\nKeep it direct, no fluff. Use SA product names and prices. Max 4 bullet points per section. Their calorie target is ${cTarget} kcal/day.`
+      `The client just shared their personal grocery/shopping list. Your job: give a sharp, SA-specific Coach K review. Budget: ${budgetLabel[budget] || "moderate"}. Goal: ${goal.replace("_", " ")}. Their targets: ${cTarget} kcal/day, ${pTarget}g protein/day.
+
+Structure your response exactly like this (no intro, no fluff):
+
+✅ *What's good:* (1-2 items they're already buying right — be specific)
+
+❌ *What's missing:* (1-2 specific gaps for their ${goal.replace("_", " ")} goal — especially protein if under 3 sources)
+
+🔄 *Swap:* (1-2 direct swaps — same price, better for goal. Format: "X → Y (reason)")
+
+📋 *Add:* (1-2 cheap items that fill the biggest gap — include SA price estimate)
+
+Keep entire response under 120 words. Use SA product names. No lectures.`
     ));
     await logChat(user.id, message, adjustReply, "SHOPPING_LIST_ADJUST");
     return adjustReply;
@@ -1178,8 +1191,28 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return `*Why these specific foods for you:*\n\n${why}\n\n${budgetWhy}${extras.length > 0 ? "\n\n" + extras.join("\n\n") : ""}`;
   }
 
-  // ---- MEAL PLAN re-delivery ----
-  if (["meal plan", "mealplan", "food plan", "my meal plan", "my food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "weekly meal plan", "my nutrition plan", "my eating plan", "what should i eat", "what do i eat"].includes(m) || /\b(diet plan|eating plan|nutrition plan|weekly meal|food plan)\b/i.test(m)) {
+  // ---- DIET PLAN / MEAL PLAN — redirect to goal-adjusted shopping list ----
+  // Clients ask for "diet plans" constantly. Diet plans don't work — people
+  // can't follow them for more than a week. A shopping list changes behaviour.
+  const isDietPlanRequest = ["diet plan", "meal plan", "mealplan", "food plan", "my meal plan", "my food plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "weekly meal plan", "my nutrition plan", "my eating plan"].includes(m)
+    || /\b(give me a diet plan|i need a diet plan|send.*diet plan|diet plan please|eating plan|nutrition plan|weekly meal plan|food plan|what should i eat this week|i need a meal plan)\b/i.test(m);
+  if (isDietPlanRequest) {
+    const budget = user.weeklyFoodBudget || "100_300";
+    const weekNum = user.programmeWeek || 1;
+    const goal = user.goalType || "fat_loss";
+    const firstName = user.name?.split(" ")[0] || "there";
+    const list = getShoppingList(budget, weekNum, goal);
+    const listText = formatShoppingList(list, firstName, goal);
+    const intro = goal === "muscle_gain"
+      ? `${firstName}, a diet plan tells you what to eat — and most people stop following it by Wednesday. A shopping list builds the habit. Buy the right things and the eating takes care of itself.\n\n`
+      : `${firstName}, diet plans don't work long-term — they're too rigid and people fall off. What actually works is buying the right things. Here's your goal-adjusted shopping list:\n\n`;
+    const reply = `${intro}${listText}\n\n_Send me your own grocery list and I'll adjust it for your ${goal === "muscle_gain" ? "muscle building" : "fat loss"} goal. Or reply *7 day meals* if you want a full day-by-day breakdown._`;
+    await logChat(user.id, message, reply, "DIET_PLAN_REDIRECT");
+    return reply;
+  }
+
+  // ---- 7 DAY MEALS — explicit request for day-by-day plan ----
+  if (["7 day meals", "7day meals", "full meal plan", "weekly meals breakdown", "what should i eat", "what do i eat"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
 
@@ -3738,7 +3771,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
   if (["programme", "program", "my programme", "my program"].includes(m)) {
     return getKamlifeProgramme(user);
   }
-  if (["meal plan", "food plan", "diet plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "my nutrition plan", "my eating plan", "my meal plan"].includes(m)) {
+  if (["7 day meals", "7day meals", "full meal plan", "day by day meals"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
   if (["progress", "my progress", "how am i doing"].includes(m)) {

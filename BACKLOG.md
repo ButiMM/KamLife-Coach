@@ -39,9 +39,18 @@ In PayFast dashboard, set the notification URL to: `https://your-app.railway.app
 **Fix when ready:** Migrate to object storage (Cloudflare R2 or similar), store URL pointer in DB.
 **Do not touch yet** — not a launch blocker at current user count.
 
-### 5. YouTube links in workout text
+### 5. Workout programme restructure (owner confirmed priority)
+**Spec from owner:**
+- 2-day: Full body (men and women, separate exercises)
+- 3-day: Full body (men and women, separate exercises)
+- 4-day: Upper / Lower / Upper / Lower split
+- All gender-specific — different exercise selection and rep ranges for men vs women
+- **File to update:** `server/programme.ts`
+- **Do this as a dedicated session** — it's a full rebuild of the programme logic
+
+### 6. YouTube links in workout text
 **Issue:** Exercise video links are YouTube search URLs, not direct videos.
-**Fix:** Either source real video URLs per exercise, or remove links entirely and rely on GIFs.
+**Fix:** Remove links and rely on GIFs (already built in `server/exercise-media.ts`). Or source real video URLs.
 **File:** `server/programme.ts` — search for `youtube.com/results?search_query=`
 
 ---
@@ -54,6 +63,10 @@ In PayFast dashboard, set the notification URL to: `https://your-app.railway.app
 - [x] Monthly cohort snapshot — fires 1st of month, 2am SAST (`server/scheduler.ts` line ~3765)
 - [x] Comeback rescue — re-engages clients silent 3–7 days (`server/scheduler.ts` line ~3288)
 - [x] Daily Win loop — Mon–Sat 7:30pm SAST, sends one concrete win + one tomorrow action to active clients only
+- [x] Shopping list: "diet plan" requests now redirect to goal-adjusted shopping list with explanation
+- [x] Shopping list: expanded triggers (grocery, groceries, what to buy, weekly shop, etc.)
+- [x] Shopping list: client list analysis prompt tightened — structured response, under 120 words, SA-specific
+- [x] 7-day meal plan preserved as opt-in via "7 day meals" command
 
 **Product audit (prior sprint):**
 - [x] Acute medical emergency handler (chest pain → 10177)
