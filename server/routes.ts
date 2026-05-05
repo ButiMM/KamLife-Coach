@@ -3327,7 +3327,13 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         variableReinforcement = SURPRISE_NOTES[Math.floor(Math.random() * SURPRISE_NOTES.length)];
       }
 
-      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}`;
+      // Calorie floor warning — fires after 5pm SAST when daily total is dangerously low
+      const sastHour = new Date().getUTCHours() + 2;
+      const calorieFloorNote = (sastHour >= 17 && runningCals > 0 && runningCals < 850)
+        ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
+        : "";
+
+      const reply = `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalCals} kcal | ~${Math.round(totalProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
 
       // Structured meal_logs write — numeric columns, no regex re-parsing downstream.
       try {
@@ -3400,7 +3406,11 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
           const NOTES = [`\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`, `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`, `\n\n🎯 _Clients who log every day lose 3× more than those who don't — you're doing the right thing._`];
           return NOTES[Math.floor(Math.random() * NOTES.length)];
         })() : "";
-        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fbSurprise}`;
+        const fbSastHour = new Date().getUTCHours() + 2;
+        const fbFloorNote = (fbSastHour >= 17 && runningCals > 0 && runningCals < 850)
+          ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight.`
+          : "";
+        const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fbSurprise}${fbFloorNote}`;
         try {
           const items = gptFallbackResult.foods.map(f => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
@@ -3471,7 +3481,11 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         ];
         return NOTES[Math.floor(Math.random() * NOTES.length)];
       })() : "";
-      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fb2Surprise}`;
+      const fb2SastHour = new Date().getUTCHours() + 2;
+      const fb2FloorNote = (fb2SastHour >= 17 && runningCals > 0 && runningCals < 850)
+        ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight.`
+        : "";
+      const fallbackReply = `*Food logged ✅*\n\n${foodLines}\n\n*Meal total: ~${gptFallbackResult.totalKcal} kcal | ~${gptFallbackResult.totalProtein}g protein*\n${runningLine}${gptFallbackResult.coachNote ? "\n\n" + gptFallbackResult.coachNote : ""}${fb2Surprise}${fb2FloorNote}`;
       try {
         const items = gptFallbackResult.foods.map(f => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,

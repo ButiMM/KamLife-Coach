@@ -582,16 +582,7 @@ Push down, squeeze triceps. Elbows locked to ribs
 7. *Standing Calf Raise* — 3×15
 Full stretch down, full press up. Pause at top
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Hip Thrust: https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form
-2. Sumo Squat: https://www.youtube.com/results?search_query=sumo+squat+glutes+tutorial
-3. Shoulder Press: https://www.youtube.com/results?search_query=machine+shoulder+press+tutorial
-4. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
-5. Bicep Curl: https://www.youtube.com/results?search_query=dumbbell+bicep+curl+tutorial
-6. Tricep Pushdown: https://www.youtube.com/results?search_query=cable+tricep+pushdown+tutorial
-7. Calf Raise: https://www.youtube.com/results?search_query=standing+calf+raise+tutorial`;
+Reply *DONE* when finished.`;
 
 export const FEMALE_DAY_B = `*Day B — Back + Hamstrings*
 Rest 75 sec between sets | 55–65 min
@@ -617,16 +608,7 @@ Pull rope to face, elbows high. Squeeze at end
 7. *Seated Calf Raise* — 3×15
 Full stretch down, full press up. Pause at top
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Romanian Deadlift: https://www.youtube.com/results?search_query=romanian+deadlift+tutorial+glutes
-2. Leg Curl: https://www.youtube.com/results?search_query=leg+curl+machine+tutorial
-3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
-4. Cable Row: https://www.youtube.com/results?search_query=seated+cable+row+tutorial
-5. Cable Kickback: https://www.youtube.com/results?search_query=cable+kickback+glutes+tutorial
-6. Face Pull: https://www.youtube.com/results?search_query=face+pull+cable+tutorial
-7. Calf Raise: https://www.youtube.com/results?search_query=seated+calf+raise+tutorial`;
+Reply *DONE* when finished.`;
 
 export const FEMALE_DAY_C = `*Day C — Full Body + Glutes*
 Rest 75 sec between sets | 55–65 min
@@ -652,16 +634,7 @@ Palms face each other. Elbows pinned to sides
 7. *Standing Calf Raise* — 3×15
 Full stretch down, full press up. Add weight from last week
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Hip Thrust: https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial
-2. Leg Press: https://www.youtube.com/results?search_query=leg+press+wide+stance+glutes+tutorial
-3. Incline Press: https://www.youtube.com/results?search_query=incline+dumbbell+press+tutorial
-4. Hip Abduction: https://www.youtube.com/results?search_query=hip+abduction+machine+tutorial
-5. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
-6. Hammer Curl: https://www.youtube.com/results?search_query=hammer+curl+dumbbell+tutorial
-7. Calf Raise: https://www.youtube.com/results?search_query=standing+calf+raise+tutorial`;
+Reply *DONE* when finished.`;
 
 // ============================================================
 // LEGACY GYM STRINGS (kept for backward compat with getKamlifeProgramme)
@@ -687,14 +660,7 @@ Press overhead. Lower slow. Keep core tight
 
 Each session: try 1 more rep. Hit 12 reps? Add small weight, drop to 10.
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Squat: https://www.youtube.com/results?search_query=barbell+squat+form+tutorial
-2. Bench Press: https://www.youtube.com/results?search_query=bench+press+form+tutorial
-3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
-4. Romanian Deadlift: https://www.youtube.com/results?search_query=romanian+deadlift+tutorial
-5. Shoulder Press: https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial`;
+Reply *DONE* when finished.`;
 
 export const INTERMEDIATE_GYM_UPPER = `*Upper Body — Intermediate*
 4 sets | Rest 75 sec | 55–65 min
@@ -720,16 +686,7 @@ Elbows at sides. Push down, squeeze
 7. *Cable Bicep Curl* — 3×15
 Elbows fixed. Squeeze at top. Full range
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Chest Press: https://www.youtube.com/results?search_query=chest+press+machine+tutorial
-2. Cable Row: https://www.youtube.com/results?search_query=seated+cable+row+tutorial
-3. Lat Pulldown: https://www.youtube.com/results?search_query=lat+pulldown+tutorial
-4. Shoulder Press: https://www.youtube.com/results?search_query=shoulder+press+machine+tutorial
-5. Lateral Raise: https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial
-6. Tricep Pushdown: https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial
-7. Bicep Curl: https://www.youtube.com/results?search_query=cable+bicep+curl+tutorial`;
+Reply *DONE* when finished.`;
 
 export const INTERMEDIATE_GYM_LOWER = `*Lower Body — Intermediate*
 4 sets | Rest 75 sec | 55–65 min
@@ -752,15 +709,7 @@ Full stretch down, full press up. High reps
 6. *Cable Crunch* — 3×15
 Rope behind head. Crunch down, squeeze abs
 
-Reply *DONE* when finished.
-
-_Form videos:_
-1. Hack Squat: https://www.youtube.com/results?search_query=hack+squat+machine+tutorial
-2. Leg Extension: https://www.youtube.com/results?search_query=leg+extension+machine+tutorial
-3. Leg Curl: https://www.youtube.com/results?search_query=leg+curl+machine+tutorial
-4. Hip Thrust: https://www.youtube.com/results?search_query=hip+thrust+machine+tutorial
-5. Calf Raise: https://www.youtube.com/results?search_query=seated+calf+raise+tutorial
-6. Cable Crunch: https://www.youtube.com/results?search_query=cable+crunch+tutorial`;
+Reply *DONE* when finished.`;
 
 export const HOME_PROGRAMME_GUIDE = `*Home Workout — No Gym Needed*
 3 sets each | Rest 60 sec | 40–50 min
