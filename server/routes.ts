@@ -1426,7 +1426,7 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
   // ---- SICK / ILL — above-neck vs below-neck rule ----
   const isAboveNeckOnly = /\b(runny nose|blocked nose|stuffy nose|sneezing|sneezy|light cold|mild cold|bit of a cold|slight headache|congested|congestion)\b/i.test(m)
     && !/\b(fever|vomit|nausea|nauseous|throwing up|stomach|chest|flu|covid|body aches|can.?t breathe|diarr|diarrhoea)\b/i.test(m);
-  const isSick = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|resting|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i.test(m)
+  const isSick = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i.test(m)
     && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better|not sick|not ill|not unwell|i.?m not sick|no longer sick|not sick anymore|i.?m better|i.?m fine now|i.?m okay now|i.?m ok now|feel better|feeling better|better now|i.?m well|i.?m healthy|recovered from|over the|over it now)\b/i.test(m);
   if (isAboveNeckOnly) {
     const aboveNeckReply = `${capName}, above-the-neck rule: runny nose or congestion = light training is fine.\n\nYou can train — but drop the intensity. A 30-min walk, a light session at 60% effort. If you feel worse during warm-up, stop and rest. No heavy lifts, no max effort today.\n\n*Eat well:* protein + fluids. Vitamin C from fruit or juice. You'll be back to full speed in a day or two.`;
@@ -3096,10 +3096,23 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
 
       const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
       if (usableMeals.length > 0) {
-        // Match on the specific meal the user referenced (prefer rawMessage match, then most recent)
-        const matchedMeal = usableMeals.find(r =>
-          r.rawMessage && toRepeat && r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase())
-        ) || usableMeals[0];
+        // usableMeals is DESC by loggedAt — [0]=most recent, [last]=earliest
+        // For specific meal type references, pick by time-of-day position:
+        //   breakfast = earliest (last in desc array), dinner = most recent (first), lunch = middle
+        // This works even when the raw message doesn't contain the meal keyword.
+        let matchedMeal = usableMeals[0];
+        if (refBreakfast && usableMeals.length > 0) {
+          matchedMeal = usableMeals[usableMeals.length - 1]; // earliest = breakfast
+        } else if (refDinner && usableMeals.length > 0) {
+          matchedMeal = usableMeals[0]; // most recent = dinner
+        } else if (refLunch && usableMeals.length >= 2) {
+          matchedMeal = usableMeals[Math.floor(usableMeals.length / 2)]; // middle = lunch
+        } else {
+          // Generic "same as yesterday" — try rawMessage keyword match, else most recent
+          matchedMeal = usableMeals.find(r =>
+            r.rawMessage && toRepeat && r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase())
+          ) || usableMeals[0];
+        }
 
         const totalCals = matchedMeal.kcalInt || 0;
         const totalProt = matchedMeal.proteinInt || 0;

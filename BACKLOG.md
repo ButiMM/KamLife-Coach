@@ -39,23 +39,23 @@ In PayFast dashboard, set the notification URL to: `https://your-app.railway.app
 **Fix when ready:** Migrate to object storage (Cloudflare R2 or similar), store URL pointer in DB.
 **Do not touch yet** — not a launch blocker at current user count.
 
-### 5. Workout programme restructure (owner confirmed priority)
-**Spec from owner:**
-- 2-day: Full body (men and women, separate exercises)
-- 3-day: Full body (men and women, separate exercises)
-- 4-day: Upper / Lower / Upper / Lower split
-- All gender-specific — different exercise selection and rep ranges for men vs women
-- **File to update:** `server/programme.ts`
-- **Do this as a dedicated session** — it's a full rebuild of the programme logic
-
-### 6. YouTube links in workout text
-**Issue:** Exercise video links are YouTube search URLs, not direct videos.
-**Fix:** Remove links and rely on GIFs (already built in `server/exercise-media.ts`). Or source real video URLs.
-**File:** `server/programme.ts` — search for `youtube.com/results?search_query=`
-
 ---
 
 ## 🟢 DONE — Complete and on main
+
+**Food log bug audit + refactor (2026-05-05):**
+- [x] `buildFoodLogReply()` shared helper — eliminated 3 separate duplicate reply-building paths
+- [x] SA scanner, GPT Fallback 1, GPT Fallback 2 all call the same function (consistent dayAssessment, proteinTip, variableReinforcement, calorieFloorNote)
+- [x] Sick handler negation expanded — "not sick", "I'm better", "feeling better", "not sick anymore", 15+ patterns
+- [x] "Jesus" removed from `isFrustrated` regex (common SA exclamation, not a complaint)
+- [x] "No remove meal" / "remove meal" — added bare `meal` to remove handler regex
+- [x] "Same breakfast as yesterday" quick relog — added `same breakfast` to `refBreakfast` pattern
+- [x] "Solid protein" false trigger — removed `msgHasProtein` check; now requires `totalProtein >= 20g`
+- [x] Sugar beans removed from low-budget protein suggestions; replaced with tuna
+- [x] `proteinTip` double-messaging — suppressed whenever `coachNote` has any content
+- [x] Braai/social event advice logged as `SOCIAL_EVENT` intent (not `FOOD_LOG`)
+- [x] Workout programme rebuilt — 2/3/4-day, gender split, warm-up, cardio, injury filter, holiday mode
+- [x] YouTube search URLs removed from all workout strings (`server/programme.ts`)
 
 **Third-party review items (reviewed 2026-05-04):**
 - [x] Voice pipeline timeouts — `withTimeout()` used on every AI/media call with stage labels
