@@ -520,7 +520,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
-  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
+  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one|meal)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
     const todayStart = sastDayStart();
 
     // Primary: delete most recent mealLogs row
@@ -2918,9 +2918,9 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
   if (isRepeatMeal) {
     try {
       // Which meal are they referencing? Prefer the one they mention after "as" / "as my"
-      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again)\b/i.test(m);
-      const refDinner = /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again)\b/i.test(m);
-      const refBreakfast = /\b(same as (my )?breakfast|breakfast again)\b/i.test(m);
+      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again|same lunch)\b/i.test(m);
+      const refDinner = /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again|same dinner)\b/i.test(m);
+      const refBreakfast = /\b(same as (my )?breakfast|breakfast again|same breakfast)\b/i.test(m);
       const refYesterday = /yesterday/i.test(m);
 
       // Search window: today first, then last 48h for "same as yesterday"
@@ -3216,24 +3216,21 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
 
       const calRemaining = calorieTarget - runningCals;
       const proteinRemaining = proteinTarget - runningProtein;
-      const msgHasProtein = PROTEIN_WORDS.some(w => m.includes(w));
       let coachNote = "";
       // Only add coaching notes for real meals (>= 100 kcal) — not for drinks/water/black coffee
       if (totalCals >= 100) {
-        if (goodProteins.length > 0 || msgHasProtein) {
-          if (totalProtein >= 20 || msgHasProtein) {
-            coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
-          }
+        if (totalProtein >= 20) {
+          coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
         } else if (junkFoods.length > 0) {
           coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
         } else if (allAdjustedFoods.some(f => f.category === "carb")) {
-          coachNote = `\n\nCarbs without protein — add a protein source. Eggs, pilchards, or beans work.`;
+          coachNote = `\n\nCarbs without protein — add a protein source next meal.`;
         }
       }
       let junkNote = "";
       if (junkFoods.length > 0) {
         let note = junkFoods[0].notes || "";
-        if (goodProteins.length > 0 || msgHasProtein) {
+        if (goodProteins.length > 0) {
           note = note.replace(/Better to choose.*$/i, "").replace(/Add (?:eggs|pilchards|protein).*$/i, "").trim();
         }
         if (note) junkNote = `\n\n${note}`;
@@ -3287,14 +3284,15 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
           dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
         }
       }
-      const coachNoteAlreadyMentionsProtein = coachNote.includes("protein still needed") || coachNote.includes("Protein target hit");
+      // Only fire proteinTip if coachNote is empty — avoid double protein messaging
+      const coachNoteAlreadyMentionsProtein = coachNote.length > 0;
       if (protRemaining > 40 && calRemaining > 200 && totalCals >= 100 && !earlyInDay && !coachNoteAlreadyMentionsProtein) {
         const lowBudget = budgetTier === "under_100" || budgetTier === "under_50" || budgetTier === "50_100";
         const suggestions = lowBudget
           ? [
             `Add pilchards (22g protein, about R12) to your next meal.`,
             `2 boiled eggs = 12g protein. Quick win.`,
-            `Add 1/2 tin sugar beans (7g protein) with your next meal.`,
+            `Tin of tuna = 25g protein. Easy add.`,
           ]
           : [
             `Add pilchards (22g protein, R12) to your next meal.`,
