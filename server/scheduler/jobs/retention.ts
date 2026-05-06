@@ -1,0 +1,300 @@
+import {
+  db, users, chatHistory, stepLogs, workoutLogs, mealLogs,
+  eq, gte, and, lt, desc, sql,
+  sendWhatsApp, canSendProactive, recordProactiveSend,
+  getActiveClients, isPaused, dayStart, loadState, saveState,
+  TRAINING_SCHEDULES, wasSickOrInjured, isSickOrInjuredToday,
+  todaySAST, claimProactive,
+  escalations,
+} from "../shared";
+import { selectVariantMessage, recordDelivery } from "../../ab";
+
+export async function runWeek3Intervention(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Week 3 intervention");
+  const clients = await getActiveClients();
+  const state = loadState();
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (client.programmeWeek !== 3) continue;
+      const sentKey = `week3_sent_${client.id}`;
+      if (state[sentKey] === "sent") continue;
+      const name = client.name || "there";
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const planned = client.trainingDaysPerWeek || 3;
+      if (canSendProactive(client.id)) {
+        const daysSinceActive = client.lastActiveAt
+          ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+          : 999;
+        const isSlipping = daysSinceActive >= 3;
+        const week3Msg = isSlipping
+          ? `${name}, I have not heard from you in ${daysSinceActive} days. You are in Week 3 — the week most people quit.\n\n${workouts} sessions completed. That work is real and it does not disappear.\n\nI am not asking for a perfect week. I am asking for ONE session today. Reply *1* and I will send your workout. 20 minutes. That is all.`
+          : `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`;
+        await sendWhatsApp(client.phoneNumber, week3Msg);
+        recordProactiveSend(client.id);
+        saveState(sentKey, "sent");
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Week 3 intervention error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
+
+export async function runSilenceDetection(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Silence detection");
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const HOUR = 3_600_000;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (!client.lastActiveAt) continue;
+      const name = client.name || "there";
+      const silenceMs = now - new Date(client.lastActiveAt).getTime();
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const week = client.programmeWeek || 1;
+
+      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
+        );
+        try {
+          const existingEsc = await db.select({ id: escalations.id })
+            .from(escalations).where(and(eq(escalations.userId, client.id), eq(escalations.status, "open"))).limit(1);
+          if (existingEsc.length === 0) {
+            await db.insert(escalations).values({
+              userId: client.id, reason: "14_day_silence", status: "open",
+              priority: "urgent", slaDeadline: new Date(Date.now() + 48 * HOUR),
+            });
+          }
+        } catch (flagErr) {
+          console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
+        }
+      } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\nReply *1* to see today's workout. That is all — one session.`
+        );
+      } else if (silenceMs >= 48 * HOUR && silenceMs < 48 * HOUR + 12 * HOUR) {
+        await sendWhatsApp(client.phoneNumber, `${name}, two days quiet. Everything okay? No pressure. Just checking.`);
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Silence detection error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
+
+export async function runDeepSilenceEscalation(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Deep silence escalation");
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const HOUR = 3_600_000;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (!client.lastActiveAt) continue;
+      const name = client.name || "there";
+      const silenceMs = now - new Date(client.lastActiveAt).getTime();
+      const workouts = client.totalWorkoutsCompleted || 0;
+      const week = client.programmeWeek || 1;
+
+      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
+        const historyNote = workouts > 0
+          ? `You have ${workouts} session${workouts !== 1 ? "s" : ""} logged. That work does not disappear.`
+          : `Your programme is still here waiting.`;
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, two weeks since I heard from you. ${historyNote} Life is not always linear — I know that. When you are ready, just reply with one word: "back". We go from exactly where you left off, week ${week}, no questions asked.`
+        );
+      } else if (silenceMs >= 30 * 24 * HOUR && silenceMs < 30 * 24 * HOUR + 12 * HOUR) {
+        await sendWhatsApp(client.phoneNumber,
+          `${name}, a month of silence. I am not going to keep messaging you after this. Your profile is saved, your programme is saved, everything is exactly as you left it. When life settles and you are ready — just say "back" and we go again. No judgment.`
+        );
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Deep silence error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
+
+export async function runComebackMessages(): Promise<void> {
+  console.log("[SCHEDULER] Running comeback messages...");
+  const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+
+  const silentClients = await db.select().from(users)
+    .where(and(
+      eq(users.onboardingState, "COMPLETE"),
+      lt(users.lastActiveAt, threeDaysAgo),
+      gte(users.lastActiveAt, sevenDaysAgo)
+    ));
+
+  const comebacks = [
+    (name: string, wk: number) => `${name}, it has been a few days. Your programme is still here waiting. ${wk > 0 ? `You were on ${wk} workouts — do not let that go.` : ""} One session today changes the trajectory. What time are you training?`,
+    (name: string, wk: number) => `${name}. No judgment. Life happens. But your goals have not changed.\n\n${wk >= 3 ? `You had a ${wk}-session streak going — that is worth protecting.` : "One workout today puts you back on track."}\n\nReply "menu" to see today's workout. That is all I am asking.`,
+    (name: string, wk: number) => `${name}, quick check — you good? Have not heard from you in a few days.\n\nYour programme is ready whenever you are. Just reply "menu" and we pick up exactly where you left off.\n\nNo reset. No guilt. Just forward.`,
+    (name: string, wk: number) => `${name}, I noticed you have been quiet. That is usually when the excuses win.\n\nBut not today. ${wk >= 5 ? `${wk} sessions done already — that is more than most people do in a month.` : "Every session counts."}\n\nReply *done* after your next workout. I will be here.`,
+  ];
+
+  let sent = 0;
+  for (const client of silentClients) {
+    const name = client.name?.split(" ")[0] || "Champ";
+    const wk = client.totalWorkoutsCompleted || 0;
+    const msg = comebacks[sent % comebacks.length](name, wk);
+    await sendWhatsApp(client.phoneNumber, msg);
+    sent++;
+    await new Promise(r => setTimeout(r, 200));
+    if (sent >= 100) break;
+  }
+  console.log(`[SCHEDULER] Comeback messages sent: ${sent}`);
+}
+
+export async function runBuddyAccountability(): Promise<void> {
+  const now = new Date();
+  const hourAgo = new Date(now.getTime() - 3_600_000);
+  const twoDaysAgo = new Date(now.getTime() - 2 * 86_400_000);
+  const hourUTC = now.getUTCHours();
+  if (hourUTC < 5 || hourUTC > 19) return;
+
+  try {
+    const recentWorkouts = await db.select({ userId: workoutLogs.userId, loggedAt: workoutLogs.loggedAt })
+      .from(workoutLogs).where(gte(workoutLogs.loggedAt, hourAgo)).orderBy(desc(workoutLogs.loggedAt));
+
+    const notifiedPairs = new Set<string>();
+    for (const w of recentWorkouts) {
+      try {
+        const [worker] = await db.select({
+          id: users.id, name: users.name, phoneNumber: users.phoneNumber,
+          buddyId: users.buddyId, workoutStreak: users.workoutStreak, subscriptionStatus: users.subscriptionStatus,
+        }).from(users).where(eq(users.id, w.userId)).limit(1);
+        if (!worker || !worker.buddyId || worker.subscriptionStatus !== "active") continue;
+        const pairKey = [worker.id, worker.buddyId].sort().join(":");
+        if (notifiedPairs.has(pairKey)) continue;
+        notifiedPairs.add(pairKey);
+        const [buddy] = await db.select({ name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus })
+          .from(users).where(eq(users.id, worker.buddyId)).limit(1);
+        if (!buddy || buddy.subscriptionStatus !== "active") continue;
+        const workerFirst = worker.name?.split(" ")[0] || "Your buddy";
+        const workerStreak = worker.workoutStreak || 1;
+        const streakAdd = workerStreak >= 3 ? ` That's a ${workerStreak}-session streak.` : "";
+        const claimed = await claimProactive(worker.buddyId, `buddy_workout_${worker.id}`, todaySAST());
+        if (!claimed) continue;
+        await sendWhatsApp(buddy.phoneNumber, `🏋️ *${workerFirst} just logged a session.* Don't let them get ahead.${streakAdd}\n\nReply *done* when you finish yours.`);
+        recordProactiveSend(worker.buddyId);
+      } catch { /* skip pair */ }
+    }
+
+    const pairedUsers = await db.select({
+      id: users.id, name: users.name, phoneNumber: users.phoneNumber,
+      buddyId: users.buddyId, lastActiveAt: users.lastActiveAt, subscriptionStatus: users.subscriptionStatus,
+    }).from(users).where(and(eq(users.subscriptionStatus, "active"), sql`${users.buddyId} IS NOT NULL`, lt(users.lastActiveAt, twoDaysAgo))).limit(50);
+
+    for (const silentBuddy of pairedUsers) {
+      try {
+        if (!silentBuddy.buddyId) continue;
+        const [partner] = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus })
+          .from(users).where(eq(users.id, silentBuddy.buddyId)).limit(1);
+        if (!partner || partner.subscriptionStatus !== "active") continue;
+        const silentFirst = silentBuddy.name?.split(" ")[0] || "Your buddy";
+        const daysSilent = silentBuddy.lastActiveAt
+          ? Math.floor((Date.now() - new Date(silentBuddy.lastActiveAt).getTime()) / 86_400_000)
+          : 2;
+        const claimed = await claimProactive(partner.id, `buddy_silence_${silentBuddy.id}`, todaySAST());
+        if (!claimed) continue;
+        await sendWhatsApp(partner.phoneNumber, `👀 *${silentFirst} hasn't logged in ${daysSilent} days.*\n\nYou're pulling ahead — but having an active buddy keeps you both sharper. If you know them, give them a nudge.`);
+        recordProactiveSend(partner.id);
+      } catch { /* skip */ }
+    }
+  } catch (err) {
+    console.error("[SCHEDULER] Buddy accountability error:", err);
+  }
+}
+
+export async function runStreakAtRisk(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Streak-at-risk alert (9pm SAST)");
+  const clients = await getActiveClients();
+  const todayStart = dayStart(0);
+  const todayDOW = new Date().getDay();
+
+  function computeStreakFromLogs(logs: { loggedAt: Date | null }[]): number {
+    const days = new Set<string>();
+    for (const l of logs) {
+      if (!l.loggedAt) continue;
+      const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000);
+      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+    }
+    let streak = 0;
+    const cur = new Date(Date.now() + 2 * 3_600_000);
+    cur.setUTCDate(cur.getUTCDate() - 1);
+    while (true) {
+      const key = `${cur.getUTCFullYear()}-${cur.getUTCMonth()}-${cur.getUTCDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      cur.setDate(cur.getDate() - 1);
+    }
+    return streak;
+  }
+
+  let streakAlertsSent = 0;
+  const STREAK_ALERT_CAP = 150;
+
+  for (const client of clients) {
+    if (streakAlertsSent >= STREAK_ALERT_CAP) { console.warn(`[SCHEDULER] Streak-at-risk cap reached`); break; }
+    if (isPaused(client)) continue;
+    if (!canSendProactive(client.id)) continue;
+
+    const daysSilent = client.lastActiveAt
+      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (daysSilent > 2) continue;
+
+    try {
+      const name = client.name || "there";
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 3] || TRAINING_SCHEDULES[3];
+      const isTodayTrainingDay = schedule.includes(todayDOW);
+      const wStreak = client.workoutStreak || 0;
+
+      if (isTodayTrainingDay && wStreak >= 2) {
+        const todayWorkout = await db.select({ id: workoutLogs.id })
+          .from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart))).limit(1);
+        if (todayWorkout.length === 0 && !await isSickOrInjuredToday(client.id)) {
+          await sendWhatsApp(client.phoneNumber, `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`);
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+          continue;
+        }
+      }
+
+      const todaySteps = await db.select({ id: stepLogs.id })
+        .from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart))).limit(1);
+      if (todaySteps.length === 0) {
+        const recentSteps = await db.select({ loggedAt: stepLogs.loggedAt })
+          .from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 90 * 86400_000)))).orderBy(desc(stepLogs.loggedAt));
+        const stepStreak = computeStreakFromLogs(recentSteps);
+        if (stepStreak >= 2) {
+          await sendWhatsApp(client.phoneNumber, `🚶 ${name}, your *${stepStreak}-day step streak* ends at midnight.\n\nLog your steps now — even if it's only 3,000. Reply with a number or send a screenshot.`);
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+          continue;
+        }
+      }
+
+      const todayFood = await db.select({ id: mealLogs.id })
+        .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart))).limit(1);
+      if (todayFood.length === 0) {
+        const recentMeals = await db.select({ loggedAt: mealLogs.loggedAt })
+          .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, new Date(Date.now() - 14 * 86400_000)))).orderBy(desc(mealLogs.loggedAt));
+        const foodStreak = computeStreakFromLogs(recentMeals);
+        if (foodStreak >= 3) {
+          await sendWhatsApp(client.phoneNumber, `📋 ${name}, your *${foodStreak}-day food logging streak* ends at midnight.\n\nTell me one thing you ate today — even "pap and chicken" is enough to keep it alive.`);
+          recordProactiveSend(client.id);
+          streakAlertsSent++;
+        }
+      }
+    } catch (err) {
+      console.error(`[SCHEDULER] Streak-at-risk error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Streak-at-risk: ${streakAlertsSent} alerts sent`);
+}

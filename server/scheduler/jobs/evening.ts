@@ -1,0 +1,102 @@
+import {
+  db, users, stepLogs, workoutLogs, mealLogs,
+  eq, gte, and, desc, sql,
+  sendWhatsApp, canSendProactive, recordProactiveSend,
+  getActiveClients, isPaused, dayStart, getTodayLogs,
+  TRAINING_SCHEDULES, isSickOrInjuredToday,
+} from "../shared";
+
+export async function runEveningAccountability(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Evening accountability");
+  const clients = await getActiveClients();
+  const todayStart = dayStart(0);
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const name = (client.name || "there").split(" ")[0];
+      const phone = client.phoneNumber;
+      const todayLogs = await getTodayLogs(client.id);
+
+      if (todayLogs.length === 0) {
+        if (canSendProactive(client.id)) {
+          const isNewClient = !client.totalWorkoutsCompleted && client.createdAt &&
+            (Date.now() - new Date(client.createdAt).getTime()) > 6 * 3_600_000 &&
+            (Date.now() - new Date(client.createdAt).getTime()) < 48 * 3_600_000;
+          if (isNewClient) {
+            await sendWhatsApp(phone, `${name}, your programme is loaded and ready. Reply *1* to see today's workout — it takes 20 minutes. The first session is always the hardest. Get it done tonight.`);
+          } else {
+            await sendWhatsApp(phone, `${name}, haven't heard from you today. Did you move?`);
+          }
+          recordProactiveSend(client.id);
+        }
+        continue;
+      }
+
+      if (!canSendProactive(client.id)) continue;
+
+      const sick = await isSickOrInjuredToday(client.id);
+      const protTarget = client.proteinTarget || 130;
+      const stepsTarget = client.stepsTarget || 10000;
+      const trainingDays = client.trainingDaysPerWeek || 3;
+      const dow = new Date().getUTCDay();
+      const isTrainingDay = (TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3]).includes(dow);
+
+      const [mealSum] = await db.select({
+        todayCal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+        todayProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, todayStart)));
+      const todayCal = mealSum?.todayCal || 0;
+      const todayProt = mealSum?.todayProt || 0;
+
+      const [todayWorkout] = await db.select({ id: workoutLogs.id })
+        .from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart), eq(workoutLogs.workoutCompleted, true)))
+        .limit(1);
+
+      const [todayStep] = await db.select({ steps: stepLogs.steps })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, todayStart)))
+        .orderBy(desc(stepLogs.loggedAt)).limit(1);
+
+      const workedOut = !!todayWorkout;
+      const stepsDone = todayStep ? todayStep.steps >= stepsTarget : false;
+      const protHit = todayProt >= Math.round(protTarget * 0.9);
+      const stepCount = todayStep?.steps ?? 0;
+
+      let msg: string;
+
+      if (sick) {
+        msg = `Rest up, ${name}. No targets today. Your data is saved — we pick up when you're better.`;
+      } else {
+        const score = (todayCal > 0 ? 1 : 0) + (workedOut ? 1 : 0) + (stepsDone ? 1 : 0);
+        if (score === 3) {
+          const highlight = protHit ? `${todayProt}g protein, session done, steps hit` : `session done, steps hit, food logged`;
+          msg = `${name}, clean day — ${highlight}. Do it again tomorrow.`;
+        } else if (workedOut && protHit) {
+          msg = `${name}, session done and ${todayProt}g protein logged. ${stepCount > 0 ? `${stepCount.toLocaleString()} steps — push to ${stepsTarget.toLocaleString()} tomorrow.` : `Log your steps — walking is half the programme.`}`;
+        } else if (workedOut && stepsDone) {
+          msg = `${name}, session done and ${stepCount.toLocaleString()} steps. Log tonight's food so I can track your protein.`;
+        } else if (workedOut) {
+          msg = `${name}, session done. ${todayCal > 0 ? `${todayProt}g protein logged — get to ${protTarget}g tonight.` : `No food logged. Log tonight's meal.`}`;
+        } else if (isTrainingDay) {
+          const foodLine = todayCal > 0 ? ` Food's in.` : ``;
+          msg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
+        } else if (stepsDone) {
+          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
+        } else if (todayCal > 0 || stepCount > 0) {
+          const done = stepCount > 0 ? `${stepCount.toLocaleString()} steps` : `food logged`;
+          const gap = stepCount < stepsTarget ? `${(stepsTarget - stepCount).toLocaleString()} steps short` : `protein at ${todayProt}g — get to ${protTarget}g`;
+          msg = `${name}, ${done} today. ${gap}. One more thing before bed.`;
+        } else {
+          msg = `${name}, nothing logged today. Log one meal tonight — that is the only job.`;
+        }
+      }
+
+      await sendWhatsApp(phone, msg);
+      recordProactiveSend(client.id);
+    } catch (err) {
+      console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
