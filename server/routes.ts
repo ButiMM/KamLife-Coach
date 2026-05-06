@@ -185,31 +185,47 @@ function buildFoodLogReply(p: {
 
   // Coach note — use GPT override, or derive from food categories
   let coachNote = "";
+  const goal = user.goalType || "fat_loss";
   if (coachNoteOverride) {
     coachNote = `\n\n${coachNoteOverride}`;
   } else if (totalMealCals >= 100) {
     if (totalMealProtein >= 20) {
       coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+    } else if (hasGoodProteins && totalMealProtein >= 10) {
+      // Has protein foods but under 20g — acknowledge the choice, note the gap
+      coachNote = `\n\n${Math.round(totalMealProtein)}g protein this meal — good start. Aim for 20g+ per meal to build up your daily total.`;
     } else if (!hasGoodProteins && hasCarbs) {
-      coachNote = `\n\nCarbs without protein — add a protein source next meal.`;
+      coachNote = `\n\nCarbs without protein — add a protein source to your next meal.`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
-      coachNote = `\n\nNext meal: add protein — eggs, pilchards, or chicken.`;
+      coachNote = `\n\nNext meal: add protein — eggs, chicken, or tuna.`;
     }
   }
 
   const junkNote = junkNoteText ? `\n\n${junkNoteText}` : "";
 
   // Protein tip — only when coachNote is empty AND meal has no protein foods
-  // Suppress when hasGoodProteins: client already chose protein, don't suggest pilchards anyway
+  // Never fires when hasGoodProteins — client chose protein, coach acknowledges, moves on
   let proteinTip = "";
   const budgetTier = user.weeklyFoodBudget || "100_300";
   const protRemaining = proteinTarget - runningProtein;
   if (!coachNote && !hasGoodProteins && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
     const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
+    // Varied suggestions — rotate through options, never same food twice in a row
     const suggestions = lowBudget
-      ? [`Add pilchards (22g protein, about R12) to your next meal.`, `2 boiled eggs = 12g protein. Quick win.`, `Tin of tuna = 25g protein. Easy add.`]
-      : [`Add pilchards (22g protein, R12) to your next meal.`, `2 boiled eggs = 12g protein. Quick win.`, `Tin of tuna = 25g protein. Easy add.`, `Low-fat yoghurt = 10g protein. Good snack option.`];
-    proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${protRemaining}g protein still needed today.`;
+      ? [
+          `Next meal: add 2 eggs (12g protein). Fast and cheap.`,
+          `Tin of pilchards with your next meal — 22g protein, R12.`,
+          `Tin of tuna = 25g protein. Easy add.`,
+          `3 boiled eggs ready in the fridge = protein for the rest of the day.`,
+        ]
+      : [
+          `Next meal: chicken, eggs, or fish — at least 20g protein.`,
+          `Greek yoghurt = 10g protein. Good snack if you're not hungry for a full meal.`,
+          `Tin of tuna = 25g protein. Easy, fast, keeps you on target.`,
+          `2 eggs + anything = quick protein fix. Don't skip it.`,
+          `Cottage cheese (15g protein per 100g) — works as a snack or meal add.`,
+        ];
+    proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${Math.round(protRemaining)}g protein still needed today.`;
   } else if (protRemaining <= 0) {
     proteinTip = `\n\nProtein target hit. ✅`;
   }
