@@ -3427,11 +3427,65 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       }
 
       const mealLabel = isMultiMeal ? "Day total" : "Meal total";
+
+      // ---- DENSE-BUT-HEALTHY FOOD COACHING ----
+      // These foods are nutritious but calorie-dense. Coach acknowledges them positively,
+      // gives context appropriate to the goal, never demonizes. Pre-workout timing aware.
+      const clientGoal = user.goalType || "fat_loss";
+      const isPreWorkout = /\b(pre.?workout|before.*gym|before.*training|pre.*gym|before.*session)\b/i.test(m)
+        || (new Date().getUTCHours() + 2 >= 5 && new Date().getUTCHours() + 2 <= 9); // early morning = likely pre-workout
+      type DenseNote = { fat_loss: string; muscle_gain: string; recomposition: string };
+      const DENSE_HEALTHY: Record<string, DenseNote> = {
+        "Avocado": {
+          fat_loss: "Avocado is a smart fat — keeps you full and supports hormones. Half is the right portion for fat loss.",
+          muscle_gain: "Healthy fat. No restriction — good fuel for building.",
+          recomposition: "Healthy fat choice. Satisfying and nutrient-dense. Keep the portion to half.",
+        },
+        "Peanut butter": {
+          fat_loss: "Good protein and fat combo. Calorie-dense but it earns its place — stick to 2 tbsp and you're fine.",
+          muscle_gain: "Solid protein and fat. Good choice for muscle building — keep fuelling.",
+          recomposition: "Protein and fat in one. The 2-tbsp portion is right — calorie-dense but nutrient-dense too.",
+        },
+        "Peanut butter (smooth)": {
+          fat_loss: "Good protein and fat combo. Calorie-dense but it earns its place — stick to 2 tbsp and you're fine.",
+          muscle_gain: "Solid protein and fat. Good choice for muscle building.",
+          recomposition: "Good protein and fat source. Keep portions logged accurately.",
+        },
+        "Banana": {
+          fat_loss: isPreWorkout
+            ? "Perfect pre-workout fuel. Banana gives quick energy for your session — good timing."
+            : "Natural carb with potassium. Best timing is before a workout. If it's a rest day, factor the 90 kcal into your total.",
+          muscle_gain: isPreWorkout
+            ? "Perfect. Banana before training = better session and better gains."
+            : "Good natural carb for fuelling training. Eat it around your workouts.",
+          recomposition: isPreWorkout
+            ? "Good timing — banana before training fuels the session."
+            : "Natural carb. Best around training — before or after.",
+        },
+        "Nut mix": {
+          fat_loss: "Healthy fats and some protein. Easy to overeat — the logged portion is what counts. Great snack if you're watching calories.",
+          muscle_gain: "Good healthy fats. Keep them in — good fuel for building.",
+          recomposition: "Healthy fats. Calorie-dense — log the portion accurately.",
+        },
+        "Peanuts (roasted)": {
+          fat_loss: "High protein, healthy fat. Calorie-dense — the small pack is the right portion. Good snack choice.",
+          muscle_gain: "Protein and fat snack. Good choice — keep fuelling.",
+          recomposition: "Protein and fat. Calorie-dense — log accurately and you're fine.",
+        },
+      };
+      const denseMatch = allAdjustedFoods
+        .map(f => ({ food: f, note: DENSE_HEALTHY[f.name as keyof typeof DENSE_HEALTHY] }))
+        .find(x => x.note);
+      const denseFoodCoachNote = denseMatch
+        ? denseMatch.note[clientGoal as keyof DenseNote] || denseMatch.note.fat_loss
+        : undefined;
+
       const reply = buildFoodLogReply({
         foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
         runningCals, runningProtein, calorieTarget, proteinTarget, prevCals,
         junkNoteText, hasGoodProteins: goodProteins.length > 0,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
+        coachNoteOverride: denseFoodCoachNote,
         user,
       });
 
