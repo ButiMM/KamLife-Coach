@@ -24,6 +24,7 @@ import { recordConversion } from "./ab";
 import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
+import { runSafetyGuards } from "./handlers/safety";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
@@ -261,157 +262,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   try {
   const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
 
-  // ---- ADDITION 6: EMERGENCY / CRISIS DETECTION — before everything ----
-  const CRISIS_PHRASES = [
-    "want to die", "kill myself", "end it all", "cannot go on", "can't go on",
-    "suicidal", "self harm", "self-harm", "cutting myself", "hurting myself",
-    "not worth living", "end my life", "no reason to live", "give up on life",
-  ];
-  if (CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
-    const crisisUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const crisisName = crisisUser[0]?.name || "friend";
-    const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
-    try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
-    // Alert the coach immediately — safety-critical, any failure must be loud and visible
-    const coachAlertPhone = process.env.COACH_ALERT_PHONE;
-    if (!coachAlertPhone) {
-      console.error(`[CRISIS] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${crisisName} (${phone}). Message: "${message.slice(0, 150)}"`);
-    } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      try {
-        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
-        await alertClient.messages.create({
-          from: fromNum,
-          to: `whatsapp:${coachAlertPhone}`,
-          body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
-        });
-        console.log(`[CRISIS] Coach alert sent to ${coachAlertPhone}`);
-      } catch (e) {
-        // Log at ERROR level — must surface in monitoring so the coach can be reached manually
-        console.error(`[CRISIS] ⚠️  COACH ALERT SEND FAILED — coach NOT notified! Client: ${crisisName} (${phone}). Error:`, e);
-      }
-    }
-    return crisisReply;
-  }
-
-  // ---- ACUTE MEDICAL EMERGENCY — non-crisis but needs immediate medical attention ----
-  // Separate from the suicidal-crisis check above; catches cardiac/respiratory emergencies
-  // where the client needs 10177 not SADAG.
-  if (/\b(chest pain|chest tightness|heart attack|stroke|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|collapsed)\b/i.test(m)) {
-    const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait.\n\nYour coach has been notified. Health first — everything else can wait.`;
-    try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
-    return acuteReply;
-  }
-
-  // ---- TERMINAL / GIT COMMAND GUARD — before user lookup ----
-  // Catches messages like "git pull origin main && pkill node", "npm run dev", etc.
-  const TERMINAL_PATTERNS = [
-    /\bgit\s+(pull|push|commit|clone|checkout|reset|rebase|merge|status|log|diff|add|stash)\b/i,
-    /\bnpm\s+(run|install|start|build|test|update|uninstall)\b/i,
-    /\bpkill\b|\bkill\s+-\d/i,
-    /\brm\s+-rf\b/i,
-    /\bsudo\b.*\b(apt|brew|yum|pip|npm)\b/i,
-    /^[a-z0-9_.-]+\s*&&\s*[a-z0-9_.-]+/i,   // "cmd1 && cmd2" at start of message
-    /\bcd\s+\/[a-z]/i,
-    /\bchmod\b|\bchown\b/i,
-  ];
-  if (TERMINAL_PATTERNS.some(re => re.test(message))) {
-    return `That looks like a terminal command — I'm your fitness coach, not a shell! Send me what you ate, your workout, or ask about your goals. 💪`;
-  }
-
-  // ---- DELETE MY DATA (Item 16) — before user lookup ----
-  if (/delete my data|forget me|remove my account|popia delete|delete me|erase my data/i.test(m)) {
-    const existing = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (existing.length === 0) return "No account found for this number.";
-    const uid = existing[0].id;
-    const name = existing[0].name || "there";
-    // Two-step: first confirm
-    await db.update(users).set({ awaitingInputType: "delete_confirm" }).where(eq(users.phoneNumber, phone));
-    return `${name}, this will permanently delete all your data — workouts, steps, food logs, measurements, weight history, and your profile. This cannot be undone.\n\nReply *DELETE* (in capitals) to confirm, or anything else to cancel.`;
-  }
-
-  if (m === "delete") {
-    const existing = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (existing.length > 0 && existing[0].awaitingInputType === "delete_confirm") {
-      const uid = existing[0].id;
-      console.log(`[POPIA DELETE] User ${uid} (${phone}) requested data deletion at ${new Date().toISOString()}`);
-      // Wrap all deletes in a transaction — partial deletion is worse than no deletion
-      await db.transaction(async (tx) => {
-        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
-        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
-        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
-        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
-        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-        await tx.delete(escalations).where(eq(escalations.userId, uid));
-        // Nullify PII and anonymize phone number — row kept for compliance audit trail only
-        await tx.update(users).set({
-          phoneNumber: `[deleted-${uid}]`,
-          name: null,
-          onboardingState: null,
-          popiConsent: false,
-          awaitingInputType: null,
-          currentWeight: null,
-          heightCm: null,
-          age: null,
-          gender: null,
-          medicalConditions: null,
-          injuries: null,
-          otherMedicalNotes: null,
-          profileNotes: null,
-          lastActiveAt: null,
-          cancelledAt: new Date(),
-        }).where(eq(users.id, uid));
-      });
-      // Delete vector memory embeddings (pgvector) — outside transaction as it's a raw query
-      try {
-        await pool.query("DELETE FROM memories WHERE phone = $1", [phone]);
-        console.log(`[POPIA DELETE] Vector memories cleared for ${phone}`);
-      } catch (memErr: any) {
-        console.warn(`[POPIA DELETE] Vector memory deletion failed (non-fatal): ${memErr.message}`);
-      }
-      console.log(`[POPIA DELETE] Completed — all data deleted for ${uid}`);
-      return "Done. All your data has been permanently deleted in compliance with POPIA. If you want to start fresh, just send any message.";
-    }
-  }
-
-  // ---- FIX 1: RESET — absolute first, before getOrCreateUser, before everything ----
-  if (m === "reset") {
-    const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (existing.length > 0) {
-      const uid = existing[0].id;
-      // Delete ALL FK-dependent tables before deleting user row
-      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
-      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
-      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
-      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
-      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-      await db.delete(escalations).where(eq(escalations.userId, uid));
-      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
-      await db.delete(users).where(eq(users.id, uid));
-    }
-    await db.insert(users).values({
-      phoneNumber: phone,
-      subscriptionStatus: "inactive",
-      onboardingState: "WELCOME",
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      trainingMode: "home",
-      stepsTarget: 8500,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
-    });
-    return "Fresh start. What's your name?";
-  }
+  // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
+  const safetyResult = await runSafetyGuards(phone, message, m);
+  if (safetyResult !== null) return safetyResult;
 
   const user = await getOrCreateUser(phone);
 
