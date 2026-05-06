@@ -3332,10 +3332,9 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
   // causing two messages every weekday morning. Day-specific context is now part of morning check-in.
 
   // ============================================================
-  // JOB: WEIGHT CHECK-IN REMINDER (Wednesday 7am SAST = 5am UTC)
-  // Reminds clients who haven't weighed in this week
-  // ============================================================
-  cron.schedule("0 5 * * 3", async () => {
+  // JOB: WEIGHT CHECK-IN REMINDER (Monday 6:30am SAST = 4:30am UTC)
+  // Monday = fresh week, fresh data. Goes out before progress summary (7am) and grocery list (8am).
+  cron.schedule("30 4 * * 1", async () => {
     const today = todaySAST();
     if (hasRunToday("weight_reminder", today)) return;
     saveState("weight_reminder", today);
