@@ -25,6 +25,7 @@ import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/s
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
+import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, escapeRegex, recomputeTodayFoodTotals } from "./handlers/food-scanner";
 import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
@@ -485,164 +486,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     recordConversion(user.id, abAction).catch(() => {/* non-fatal */});
   }
 
-  // ---- RESET CALORIES — "reset my calories", "clear food log", "remove meals today" ----
-  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
-    await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
-    const todayStart = sastDayStart();
-    // Delete from both mealLogs (primary) and chatHistory (legacy)
-    await Promise.all([
-      db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
-      db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).catch(e => console.warn("[non-fatal] clear chat food log:", e)),
-    ]);
-    return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
-  }
 
-  // ---- REMOVE LAST LOGGED MEAL — quick correction command ----
-  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one|meal)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
-    const todayStart = sastDayStart();
+  // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
+  const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
+  if (foodLogMgmtResult !== null) return foodLogMgmtResult;
 
-    // Primary: delete most recent mealLogs row
-    const lastMealLog = await db.select({ id: mealLogs.id })
-      .from(mealLogs)
-      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
-      .orderBy(desc(mealLogs.loggedAt))
-      .limit(1);
-
-    if (lastMealLog.length > 0) {
-      await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLog[0].id));
-    } else {
-      // Legacy fallback: mark chatHistory entry corrected
-      const lastFoodLog = await db.select({ id: chatHistory.id })
-        .from(chatHistory)
-        .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
-        .orderBy(desc(chatHistory.createdAt))
-        .limit(1);
-      if (lastFoodLog.length === 0) return `No meal logged yet today to remove.`;
-      await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
-    }
-
-    const recomputed = await recomputeTodayFoodTotals(user.id);
-    await db.update(users).set({
-      todayCalories: recomputed.calories,
-      todayProteinG: recomputed.protein,
-      todayCaloriesDate: sastToday(),
-    }).where(eq(users.id, user.id));
-
-    return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
-  }
-
-  // ---- REMOVE SPECIFIC FOOD FROM LOG — "remove the viennas", "I didn't have the eggs" ----
-  // Catches: "remove viennas", "didn't have eggs", "take out the bread", "no viennas in my log"
-  const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|didn.?t have|did not have|i didn.?t eat|i did not eat|no )\s+(the\s+)?(.{2,30}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
-  const isRemoveSpecific = !!removeSpecificMatch && !/(last|that|it|this|meal|log)$/.test((removeSpecificMatch[2] || "").trim());
-  if (isRemoveSpecific && removeSpecificMatch) {
-    const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
-    if (foodToRemove.length >= 2) {
-      try {
-        const todayStart = sastDayStart();
-
-        // Primary: search mealLogs table (SA scanner + GPT fallback + photo logs all write here)
-        const mealLogRows = await db.select({
-          id: mealLogs.id,
-          rawMessage: mealLogs.rawMessage,
-          items: mealLogs.items,
-        }).from(mealLogs)
-          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
-          .orderBy(desc(mealLogs.loggedAt))
-          .limit(15);
-
-        const targetMealLog = mealLogRows.find(l => {
-          if ((l.rawMessage || "").toLowerCase().includes(foodToRemove)) return true;
-          const logItems = l.items as Array<{ name?: string; foodName?: string }> | null;
-          return Array.isArray(logItems) && logItems.some(i =>
-            (i.name || i.foodName || "").toLowerCase().includes(foodToRemove)
-          );
-        });
-
-        if (targetMealLog) {
-          await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
-          const recomputed = await recomputeTodayFoodTotals(user.id);
-          await db.update(users).set({
-            todayCalories: recomputed.calories,
-            todayProteinG: recomputed.protein,
-            todayCaloriesDate: sastToday(),
-          }).where(eq(users.id, user.id));
-          return `Removed ${foodToRemove} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${(user.calorieTarget || 1800) - recomputed.calories} kcal | ~${(user.proteinTarget || 120) - recomputed.protein}g protein still to go.`;
-        }
-
-        // Fallback: search legacy chatHistory logs
-        const todayLogs = await db.select({ id: chatHistory.id, messageIn: chatHistory.messageIn })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart)))
-          .orderBy(desc(chatHistory.createdAt))
-          .limit(15);
-
-        const targetLog = todayLogs.find(l => (l.messageIn || "").toLowerCase().includes(foodToRemove));
-        if (!targetLog) {
-          return `I don't see "${foodToRemove}" in today's food log. Send "my meals" to see what's logged.`;
-        }
-
-        const updatedMsg = (targetLog.messageIn || "")
-          .replace(new RegExp(`\\b${foodToRemove.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`, "gi"), "")
-          .replace(/,\s*,/g, ",").replace(/^,\s*|,\s*$/g, "").replace(/\s{2,}/g, " ").trim();
-
-        if (!updatedMsg || updatedMsg.length < 3) {
-          await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, targetLog.id));
-        } else {
-          await db.update(chatHistory).set({ messageIn: updatedMsg }).where(eq(chatHistory.id, targetLog.id));
-        }
-
-        const recomputed = await recomputeTodayFoodTotals(user.id);
-        await db.update(users).set({
-          todayCalories: recomputed.calories,
-          todayProteinG: recomputed.protein,
-          todayCaloriesDate: sastToday(),
-        }).where(eq(users.id, user.id));
-
-        return `Removed ${foodToRemove} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${(user.calorieTarget || 1800) - recomputed.calories} kcal | ~${(user.proteinTarget || 120) - recomputed.protein}g protein still to go.`;
-      } catch (removeErr) {
-        console.error("[REMOVE_FOOD]", removeErr);
-        return `Could not update your log right now. Try "remove last meal" or send "my meals" to see what's logged.`;
-      }
-    }
-  }
-
-  // ---- SHOW TODAY'S MEAL LOG — transparency for trust ----
-  if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim())) {
-    const todayStart = sastDayStart();
-    const logs = await db.select({
-      messageIn: chatHistory.messageIn,
-      messageOut: chatHistory.messageOut,
-      createdAt: chatHistory.createdAt,
-    }).from(chatHistory).where(and(
-      eq(chatHistory.userId, user.id),
-      eq(chatHistory.intent, "FOOD_LOG"),
-      gte(chatHistory.createdAt, todayStart),
-    )).orderBy(asc(chatHistory.createdAt)).limit(20);
-
-    if (logs.length === 0) {
-      return `No food logged yet today. Send your meal and I will track it.`;
-    }
-
-    const lines: string[] = [];
-    let totalCals = 0;
-    let totalProtein = 0;
-    for (const l of logs) {
-      const parsed = parseFoodLogTotalsFromMessageOut(l.messageOut || "");
-      if (parsed) {
-        totalCals += parsed.calories;
-        totalProtein += parsed.protein;
-      } else {
-        const matched = scanForSAFoods(l.messageIn || "");
-        totalCals += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
-        totalProtein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
-      }
-      const time = l.createdAt ? new Date(l.createdAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "--:--";
-      lines.push(`${time} — ${(l.messageIn || "[photo]").slice(0, 80)}`);
-    }
-
-    return `*Today's meal log (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total so far:* ~${totalCals} kcal | ~${totalProtein}g protein`;
-  }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
