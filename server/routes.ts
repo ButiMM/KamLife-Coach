@@ -803,7 +803,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
     const prot = user.proteinTarget || 120;
-    return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), sugar beans (8g per 100g cooked).`;
+    return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), tinned tuna (25g per tin).`;
   }
 
   // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak".
@@ -1346,7 +1346,7 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     if (noFish) extras.push(`Pilchards replaced with chicken and eggs — chicken thigh especially is a high protein-to-cost protein for your budget.`);
 
     const budgetReasons: Record<string, string> = {
-      under_100: `Every item was chosen for maximum nutrition per rand — eggs and pilchards are the highest protein-per-rand foods in South Africa. Sugar beans give cheap fibre and protein that stretch across multiple meals.`,
+      under_100: `Every item was chosen for maximum nutrition per rand — eggs and pilchards are the highest protein-per-rand foods in South Africa. Pap and spinach stretch the budget across multiple meals.`,
       "100_300": `Frozen chicken and eggs are your protein anchors at this budget. Oats and sweet potato give you slow-burning carbs that cost very little. The whole week's food costs under R250 and covers all your nutritional needs.`,
       "300_600": `This budget lets you rotate proteins — chicken, mince, eggs, pilchards — so you never get bored and never get gaps in your nutrition. Mince is the best value red meat in SA.`,
       over_600: `Salmon twice a week gives you omega-3 fatty acids that reduce inflammation — critical for recovery and long-term health. Greek yoghurt is one of the highest protein dairy foods per gram.`,
@@ -3732,7 +3732,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       suggestion += `You need *${protLeft}g more protein* today. That is the priority.\n\n`;
       const meals: string[] = [];
       if (budget === "under_100") {
-        meals.push("2 eggs + sugar beans (~300 kcal, 22g protein)");
+        meals.push("2 eggs + pap (~300 kcal, 18g protein)");
         meals.push("Tin of pilchards + pap (~350 kcal, 24g protein)");
       } else {
         meals.push("Chicken breast + rice + spinach (~450 kcal, 35g protein)");
@@ -3914,7 +3914,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     const p = user.proteinTarget || 140;
     const perMeal = Math.round(p / 4);
-    return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each. Best SA sources: eggs (6g each), pilchards (20g per tin), chicken breast (30g per 100g), sugar beans (8g per half cup). This drives everything — muscle, fat loss, fullness.`;
+    return `*Your Daily Protein Target*\n\n💪 ${p}g protein per day.\n\nSpread across 4 meals — roughly ${perMeal}g each. Best SA sources: eggs (6g each), pilchards (20g per tin), chicken breast (30g per 100g), tinned tuna (25g per tin). This drives everything — muscle, fat loss, fullness.`;
   }
   if (["weight", "my weight", "current weight"].includes(m)) {
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged yet";
@@ -6268,7 +6268,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         : "• *3 eggs + 1 slice brown bread* — 320 kcal, 22g protein\n• *Oats + low fat milk + boiled egg* — 380 kcal, 20g protein\n• *Greek yoghurt + banana + handful nuts* — 350 kcal, 18g protein"}\n\n${goal === "fat_loss" ? "Protein first at breakfast kills hunger for 4 hours. No protein = cravings by 10am." : "Bigger breakfast for muscle gain — add an extra egg or a scoop of protein."}`;
     } else if (isMealLunch) {
       mealReply = `Lunch${name} — your biggest protein hit of the day:\n\n${budget === "under_100"
-        ? "• *Pilchards + pap + cabbage* — 420 kcal, 30g protein. R15 total.\n• *Sugar beans + brown rice + spinach* — 380 kcal, 18g protein. R8 total.\n• *2 eggs + bread + tomato* — 340 kcal, 16g protein."
+        ? "• *Pilchards + pap + cabbage* — 420 kcal, 30g protein. R15 total.\n• *2 eggs + pap + spinach* — 340 kcal, 18g protein. R6 total.\n• *Tinned tuna + bread + tomato* — 360 kcal, 26g protein. R18 total."
         : "• *Chicken breast + sweet potato + salad* — 480 kcal, 38g protein ✅ Best option\n• *Tuna + brown rice + cucumber* — 400 kcal, 32g protein\n• *Mince + pap + morogo* — 500 kcal, 35g protein"}\n\n${goal === "fat_loss" ? "Make lunch your biggest meal — front-loading calories earlier means less hunger at night." : "This is where muscle gain happens — eat big and get your protein in."}`;
     } else if (isMealDinner) {
       mealReply = `Dinner${name}:\n\n${goal === "fat_loss"
@@ -6384,7 +6384,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name ? `, ${user.name}` : "";
-    const plateReply = `*The Coach K plate method${name}:*\n\nForget calorie counting. I don't count calories, I make the right choices. Here is the whole system:\n\n*Every meal, every time:*\n🥩 *Protein first* — takes up half your plate. Eggs, chicken, pilchards, mince, beans. If there is no protein on the plate, it is not a meal.\n🍠 *One carb* — takes up a quarter of your plate. Pap, brown rice, sweet potato, oats. ONE — not all three.\n🥬 *Vegetables* — fills the rest. Spinach, cabbage, morogo, tomatoes, cucumber. Unlimited. The more the better.\n\n*That is it.* No app. No scale. No counting. Just: protein + one carb + vegetables.\n\nDo this for every meal and your body does the rest.\n\n${goal === "fat_loss" ? "For fat loss: make the protein portion bigger and the carb portion smaller." : "For muscle gain: make the carb portion bigger, especially before and after training."}\n\n${budget === "under_100" ? "At your budget: eggs + pap + spinach. Pilchards + pap + cabbage. Repeat. Simple and it works." : "Best SA options: pilchards, eggs, chicken thigh, sugar beans — paired with sweet potato or pap and whatever vegetable you have."}`;
+    const plateReply = `*The Coach K plate method${name}:*\n\nForget calorie counting. I don't count calories, I make the right choices. Here is the whole system:\n\n*Every meal, every time:*\n🥩 *Protein first* — takes up half your plate. Eggs, chicken, pilchards, mince, beans. If there is no protein on the plate, it is not a meal.\n🍠 *One carb* — takes up a quarter of your plate. Pap, brown rice, sweet potato, oats. ONE — not all three.\n🥬 *Vegetables* — fills the rest. Spinach, cabbage, morogo, tomatoes, cucumber. Unlimited. The more the better.\n\n*That is it.* No app. No scale. No counting. Just: protein + one carb + vegetables.\n\nDo this for every meal and your body does the rest.\n\n${goal === "fat_loss" ? "For fat loss: make the protein portion bigger and the carb portion smaller." : "For muscle gain: make the carb portion bigger, especially before and after training."}\n\n${budget === "under_100" ? "At your budget: eggs + pap + spinach. Pilchards + pap + cabbage. Repeat. Simple and it works." : "Best SA options: pilchards, eggs, chicken thigh, tinned tuna — paired with sweet potato or pap and whatever vegetable you have."}`;
     await logChat(user.id, message, plateReply, "PLATE_METHOD");
     return plateReply;
   }
