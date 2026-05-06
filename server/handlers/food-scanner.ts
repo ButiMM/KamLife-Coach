@@ -92,13 +92,13 @@ export function scanForSAFoods(msg: string): SAFood[] {
     }
   }
 
-  // DEDUP PASS 2: drop shorter alias if dominated by longer alias in same category
+  // DEDUP PASS 2: drop shorter alias if it appears inside a longer matched alias
+  // No category restriction — "butter" inside "peanut butter" is dominated regardless of category
   for (const entry of deduped) {
     const dominated = deduped.some(other =>
       other.food.name !== entry.food.name &&
       other.alias.length > entry.alias.length &&
-      other.alias.includes(entry.alias) &&
-      other.food.category === entry.food.category
+      other.alias.includes(entry.alias)
     );
     if (!dominated) matched.push(entry.food);
   }

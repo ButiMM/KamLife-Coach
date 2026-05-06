@@ -199,11 +199,12 @@ function buildFoodLogReply(p: {
 
   const junkNote = junkNoteText ? `\n\n${junkNoteText}` : "";
 
-  // Protein tip — only when coachNote is empty (avoids double-up)
+  // Protein tip — only when coachNote is empty AND meal has no protein foods
+  // Suppress when hasGoodProteins: client already chose protein, don't suggest pilchards anyway
   let proteinTip = "";
   const budgetTier = user.weeklyFoodBudget || "100_300";
   const protRemaining = proteinTarget - runningProtein;
-  if (!coachNote && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
+  if (!coachNote && !hasGoodProteins && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
     const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
     const suggestions = lowBudget
       ? [`Add pilchards (22g protein, about R12) to your next meal.`, `2 boiled eggs = 12g protein. Quick win.`, `Tin of tuna = 25g protein. Easy add.`]
