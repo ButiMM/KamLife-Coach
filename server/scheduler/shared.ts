@@ -13,6 +13,7 @@ import { join } from "path";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations };
+export { abExperiments, abAssignments } from "../../shared/schema";
 export { eq, gte, and, lt, desc, or, sql, sastDayStart };
 
 // ── Re-export heavy deps job files need ──────────────────────────────────────

@@ -1,11 +1,11 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
+  abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, loadState, saveState,
-  deliveryStats, todaySAST, FROM_NUMBER,
+  deliveryStats, todaySAST, FROM_NUMBER, PRICING,
 } from "../shared";
-import { PRICING } from "../../shared/pricing";
 
 export async function runMonthEndBudget(): Promise<void> {
   console.log("[SCHEDULER] JOB: Month-end budget mode");
@@ -214,12 +214,11 @@ export async function runWeeklyKpiReport(): Promise<void> {
     const foodSources: string[] = ((foodSourceRows as unknown as { rows?: { source?: string; c?: number }[] })?.rows || []).map((r) => `${r.source || "unknown"}: ${r.c}`);
     let abSection = "";
     try {
-      const { abExperiments: abExp, abAssignments: abAsgn } = await import("../../shared/schema");
-      const activeExps = await db.select().from(abExp).where(eq(abExp.status, "active"));
+      const activeExps = await db.select().from(abExperiments).where(eq(abExperiments.status, "active"));
       if (activeExps.length > 0) {
         const abLines: string[] = [];
         for (const exp of activeExps.slice(0, 3)) {
-          const assignments = await db.select({ variant: abAsgn.variant, delivered: abAsgn.delivered, responded: abAsgn.responded }).from(abAsgn).where(eq(abAsgn.experimentId, exp.id));
+          const assignments = await db.select({ variant: abAssignments.variant, delivered: abAssignments.delivered, responded: abAssignments.responded }).from(abAssignments).where(eq(abAssignments.experimentId, exp.id));
           const a = assignments.filter(x => x.variant === "A");
           const b = assignments.filter(x => x.variant === "B");
           const rateA = a.filter(x => x.delivered).length > 0 ? Math.round(a.filter(x => x.responded).length / a.filter(x => x.delivered).length * 100) : 0;
