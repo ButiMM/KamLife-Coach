@@ -3359,7 +3359,16 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
         if ((recent.c || 0) > 0) continue; // already weighed in
 
         const name = client.name?.split(" ")[0] || "there";
-        const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\nSend me the number: "84.5kg"\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
+
+        // Get last recorded weight for a personalised format hint
+        const [lastWeightRow] = await db.select({ weight: weightLogs.weight })
+          .from(weightLogs).where(eq(weightLogs.userId, client.id))
+          .orderBy(desc(weightLogs.loggedAt)).limit(1).catch(() => []);
+        const lastWeightHint = lastWeightRow?.weight
+          ? `Last week: ${parseFloat(lastWeightRow.weight).toFixed(1)}kg — what's today's number?`
+          : `Send me the number (e.g. 75.3kg)`;
+
+        const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\n${lastWeightHint}\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
         await sendWhatsApp(client.phoneNumber, msg);
         sent++;
         await new Promise(r => setTimeout(r, 200));
