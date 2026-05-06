@@ -79,7 +79,11 @@ export async function handleWeightLog(
           journeyNote = `\n\n📉 Total lost: *${Math.abs(totalChange).toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.3 && parseFloat(pacePerWeek) <= 0.8 ? "right on target" : parseFloat(pacePerWeek) < 0.3 ? "slower than optimal — check protein and deficit" : "slightly fast — make sure you're eating enough protein"}.`;
         } else if (totalChange > 0 && goal === "muscle_gain") {
           journeyNote = `\n\n📈 Total gained: *${totalChange.toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.1 && parseFloat(pacePerWeek) <= 0.5 ? "solid lean gain rate" : parseFloat(pacePerWeek) > 0.5 ? "gaining fast — watch body fat" : "very slow — push calories slightly"}.`;
-        } else if (Math.abs(totalChange) >= 0.5) {
+        } else if (totalChange > 0 && goal === "fat_loss") {
+          journeyNote = `\n\n📈 Up *${totalChange.toFixed(1)}kg* from starting weight of ${startKg}kg. Weight is moving the wrong way for fat loss — tighten up on carb portions and hit the protein target every day. The calories and protein targets above are your numbers.`;
+        } else if (totalChange < 0 && goal === "muscle_gain") {
+          journeyNote = `\n\n📉 Down *${Math.abs(totalChange).toFixed(1)}kg* from starting weight of ${startKg}kg. For muscle gain you need to be eating more — bump calories by 200/day and make sure you're hitting protein every meal.`;
+        } else {
           journeyNote = `\n\n${totalChange < 0 ? "📉" : "📈"} Total change: *${totalChange > 0 ? "+" : ""}${totalChange.toFixed(1)}kg* from starting weight of ${startKg}kg.`;
         }
       }
