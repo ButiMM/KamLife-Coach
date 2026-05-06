@@ -349,6 +349,10 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS age INTEGER`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS buddy_id UUID`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS buddy_paired_at TIMESTAMP`,
+    // Diet breaks, goal reached, target weight
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS target_weight_kg NUMERIC`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_break_ends_at TIMESTAMP`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_break_cal_target INTEGER`,
     // Bump all existing users from old 7000 default to new 8500 — only updates those still at 7000
     `UPDATE users SET steps_target = 8500 WHERE steps_target = 7000 OR steps_target IS NULL`,
     // Clear any stuck awaitingProgrammeAnswers flags older than 24 hours
