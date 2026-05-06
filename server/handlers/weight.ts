@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users, weightLogs } from "../../shared/schema";
-import { eq, and, gte, asc } from "drizzle-orm";
+import { eq, and, gte, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
 import { sastDayStart } from "../utils";
@@ -96,6 +96,19 @@ export async function handleWeightLog(
     targetsNote = `\n\nTargets updated: ${newCals} kcal/day | ${newProtein}g protein. (Automatically adjusted — keeps results moving.)`;
   } else {
     targetsNote = `\n\nTargets: ${newCals} kcal/day | ${newProtein}g protein.`;
+  }
+
+  // Goal reached detection
+  const targetKg = parseFloat(user.targetWeightKg || "0");
+  const goal = user.goalType || "fat_loss";
+  if (targetKg > 0) {
+    const hitGoal = (goal === "fat_loss" && newKg <= targetKg)
+      || (goal === "muscle_gain" && newKg >= targetKg);
+    if (hitGoal) {
+      const firstName = (user.name || "").split(" ")[0] || "there";
+      await db.update(users).set({ awaitingInputType: "goal_transition" }).where(eq(users.phoneNumber, phone));
+      return `🏆 *GOAL REACHED.*\n\nWeight logged: *${newKg}kg.*${changeNote}\n\n${firstName}, you hit your target of ${targetKg}kg. This is real — you did the work.\n\nNow we need a new direction. Reply with a number:\n\n*1* — Maintain this weight\n*2* — Build muscle\n*3* — Recomposition (hold weight, swap fat for muscle)\n\nWhat's next?`;
+    }
   }
 
   // Plateau detection — no change >0.5kg in 3 weeks

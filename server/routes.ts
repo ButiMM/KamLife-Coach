@@ -1415,6 +1415,51 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     : 0;
   const isReturning = daysSilent >= 2;
 
+  // ---- TARGET WEIGHT DETECTION — "I want to get to 70kg", "my goal is 75kg" ----
+  const targetWeightMatch = m.match(/\b(?:get(?:\s+down)?|lose\s+(?:weight\s+)?(?:to|down\s+to)|reach|hit|weigh|target(?:\s+is|\s+weight)?|goal(?:\s+is|\s+weight)?|aim(?:ing)?\s+(?:for|to\s+(?:get\s+)?to)|slim\s+down\s+to)\s+(?:to\s+)?(\d{2,3}(?:\.\d)?)\s*kg\b/i);
+  if (targetWeightMatch) {
+    const targetKg = parseFloat(targetWeightMatch[1]);
+    if (targetKg >= 35 && targetKg <= 200 && targetKg !== parseFloat(user.currentWeight || "0")) {
+      await db.update(users).set({ targetWeightKg: targetKg.toString() }).where(eq(users.phoneNumber, phone));
+      user.targetWeightKg = targetKg.toString();
+    }
+  }
+
+  // ---- DIET BREAK ----
+  const isDietBreakRequest = /\b(diet.?break|maintenance.?week|eat at maintenance|taking a break from dieting|break from the diet|week off the diet|diet.?rest|refeed week|refeed)\b/i.test(m);
+  if (isDietBreakRequest) {
+    const goal = user.goalType || "fat_loss";
+    const week = user.programmeWeek || 1;
+    const activeDietBreak = user.dietBreakEndsAt && new Date(user.dietBreakEndsAt) > new Date();
+    if (activeDietBreak) {
+      const daysLeft = Math.ceil((new Date(user.dietBreakEndsAt!).getTime() - Date.now()) / 86_400_000);
+      const dbReply = `${capName}, you're already on a diet break — ${daysLeft} day${daysLeft !== 1 ? "s" : ""} left. Eat at ${user.calorieTarget} kcal, same protein. After that, we go back to the deficit and push hard.`;
+      await logChat(user.id, message, dbReply, "DIET_BREAK");
+      return dbReply;
+    }
+    if (goal !== "fat_loss") {
+      const dbReply = `${capName}, diet breaks are for fat loss phases — you're in ${goal.replace("_", " ")} mode. Keep eating at your current targets.`;
+      await logChat(user.id, message, dbReply, "DIET_BREAK");
+      return dbReply;
+    }
+    if (week < 8) {
+      const dbReply = `${capName}, diet breaks kick in after 8+ weeks of consistent deficit. You're on week ${week} — not there yet. Stay on the programme.`;
+      await logChat(user.id, message, dbReply, "DIET_BREAK");
+      return dbReply;
+    }
+    // Eligible — start a 7-day diet break
+    const maintenanceCals = (user.calorieTarget || 1800) + 300;
+    const breakEnds = new Date(Date.now() + 7 * 86_400_000);
+    await db.update(users).set({
+      dietBreakEndsAt: breakEnds,
+      dietBreakCalTarget: user.calorieTarget || 1800,
+      calorieTarget: maintenanceCals,
+    }).where(eq(users.phoneNumber, phone));
+    const dbReply = `${capName}, diet break starts now. *7 days at maintenance.*\n\n*Your targets this week:*\n• Calories: ${maintenanceCals} kcal/day (+300 above deficit)\n• Protein: ${user.proteinTarget || 120}g/day — keep this the same\n\n*Why this works:*\nAfter ${week} weeks in deficit, your hunger hormones are elevated and metabolism has adapted slightly. One maintenance week resets both. You won't gain fat — you'll mostly refill muscle glycogen (carbs stored in muscle). You may see the scale go up 0.5–1kg — that's water and glycogen, not fat.\n\n*Eating this week:* Same foods, just more carbs. Add an extra portion of sweet potato, oats, or rice. Don't eat junk — just eat more of the right things.\n\nIn 7 days we go back to the deficit, stronger and more focused. I'll remind you.`;
+    await logChat(user.id, message, dbReply, "DIET_BREAK");
+    return dbReply;
+  }
+
   // ---- LOAD SHEDDING ----
   const isLoadShedding = /\b(load.?shed|loadshed|eskom|no.?electricity|no.?power|stage\s*[1-8]|power.?cut|power.?out|blackout|no.?lights|lights.?out|inverter.?dead|battery.?dead|no.?signal.*load|generator.*off)\b/i.test(m);
   if (isLoadShedding) {
@@ -5674,6 +5719,42 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
     }
     await logChat(user.id, message, reply, "COMEBACK_RESCUE");
     return reply;
+  }
+
+  // ---- GOAL TRANSITION — response to 1/2/3 after goal reached message ----
+  if (user.awaitingInputType === "goal_transition") {
+    const choice = m.trim().replace(/[^123]/g, "");
+    const newGoal = choice === "1" ? "maintenance" : choice === "2" ? "muscle_gain" : choice === "3" ? "recomposition" : null;
+    if (newGoal) {
+      const wt = parseFloat(user.currentWeight || "75");
+      let newCals = user.calorieTarget || 2000;
+      let newProt = user.proteinTarget || 120;
+      if (newGoal === "maintenance") {
+        newCals = (user.calorieTarget || 2000) + 200;
+      } else {
+        const t = calculateTargets(wt, newGoal === "maintenance" ? "fat_loss" : newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
+        newCals = t.calorieTarget;
+        newProt = t.proteinTarget;
+      }
+      await db.update(users).set({
+        goalType: newGoal === "maintenance" ? "fat_loss" : newGoal,
+        calorieTarget: newCals,
+        proteinTarget: newProt,
+        targetWeightKg: null,
+        awaitingInputType: null,
+      }).where(eq(users.phoneNumber, phone));
+      const goalNames: Record<string, string> = { maintenance: "maintaining your weight", muscle_gain: "building muscle", recomposition: "body recomposition" };
+      const goalNotes: Record<string, string> = {
+        maintenance: `Eat at ${newCals} kcal daily. Keep training. Keep logging. Your job now is to hold what you've built.`,
+        muscle_gain: `Eat above ${newCals} kcal on training days — especially carbs around workouts. Hit ${newProt}g protein every day. We're building now.`,
+        recomposition: `Eat at ${newCals} kcal daily. High protein (${newProt}g) with a slight deficit on rest days and maintenance on training days. Body fat drops while muscle grows — slower, but both happen.`,
+      };
+      const gtReply = `${capName}, locked in — *${goalNames[newGoal]}*.\n\nNew targets: *${newCals} kcal/day | ${newProt}g protein/day.*\n\n${goalNotes[newGoal]}\n\nReply *programme* for your updated workout plan.`;
+      await logChat(user.id, message, gtReply, "GOAL_TRANSITION");
+      return gtReply;
+    }
+    const gtPrompt = `${capName}, reply with a number:\n1 — Maintain this weight\n2 — Build muscle\n3 — Recomposition`;
+    return gtPrompt;
   }
 
   // ---- AWAITING GOAL CHANGE REASON — ask why first before applying goal change ----

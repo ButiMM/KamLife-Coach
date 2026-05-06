@@ -100,6 +100,9 @@ export const users = pgTable(
     todayProteinG: integer("today_protein_g").default(0),
     buddyId: uuid("buddy_id"), // accountability partner — mutual pairing
     buddyPairedAt: timestamp("buddy_paired_at"),
+    targetWeightKg: numeric("target_weight_kg"), // stated goal weight
+    dietBreakEndsAt: timestamp("diet_break_ends_at"), // null = not on break
+    dietBreakCalTarget: integer("diet_break_cal_target"), // saved cal target before break
   },
   (table) => {
     return {

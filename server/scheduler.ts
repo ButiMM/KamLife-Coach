@@ -3381,6 +3381,90 @@ Sent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
   }, { timezone: "UTC" });
 
   // ============================================================
+  // JOB: DIET BREAK EXPIRY CHECK (daily 6am SAST = 4am UTC)
+  // When a client's 7-day diet break ends, restore their deficit targets + notify
+  // ============================================================
+  cron.schedule("0 4 * * *", async () => {
+    const today = todaySAST();
+    if (loadState()["diet_break_check"] === today) return;
+    saveState("diet_break_check", today);
+    try {
+      const expired = await db.select().from(users).where(
+        and(
+          eq(users.onboardingState, "COMPLETE"),
+          lt(users.dietBreakEndsAt, new Date()),
+          sql`diet_break_ends_at IS NOT NULL`,
+          sql`diet_break_cal_target IS NOT NULL`,
+        )
+      );
+      for (const client of expired) {
+        const restored = client.dietBreakCalTarget!;
+        await db.update(users).set({
+          calorieTarget: restored,
+          dietBreakEndsAt: null,
+          dietBreakCalTarget: null,
+        }).where(eq(users.id, client.id));
+        const name = (client.name || "").split(" ")[0] || "there";
+        const msg = `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full. Now we push harder than before. Log your food today.`;
+        await sendWhatsApp(client.phoneNumber, msg).catch(() => {});
+        await new Promise(r => setTimeout(r, 300));
+      }
+      if (expired.length > 0) console.log(`[SCHEDULER] Diet break expired: ${expired.length} clients restored`);
+    } catch (err) {
+      console.error("[SCHEDULER] Diet break check error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
+  // JOB: MONDAY GROCERY LIST (Monday 8am SAST = 6am UTC)
+  // Proactive weekly shopping list — personalized by goal + budget
+  // Only sends if client has logged food at least 3 times this week
+  // ============================================================
+  cron.schedule("0 6 * * 1", async () => {
+    const today = todaySAST();
+    if (loadState()["monday_groceries"] === today) return;
+    saveState("monday_groceries", today);
+    console.log("[SCHEDULER] Running Monday grocery list...");
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const activeClients = await db.select().from(users).where(
+        and(eq(users.onboardingState, "COMPLETE"), gte(users.lastActiveAt, sevenDaysAgo))
+      );
+      let sent = 0;
+      for (const client of activeClients) {
+        try {
+          if (!(await claimDailySlot(client.id, "monday_groceries"))) continue;
+          const name = (client.name || "").split(" ")[0] || "there";
+          const goal = client.goalType || "fat_loss";
+          const budget = client.weeklyFoodBudget || "100_300";
+          const isLowBudget = ["under_100", "under_50", "50_100"].includes(budget);
+          const isMuscle = goal === "muscle_gain";
+
+          const proteinItems = isLowBudget
+            ? `☐ Eggs 12-pack — R45\n☐ Pilchards 4 tins — R48\n☐ Chicken thighs 1kg — R55`
+            : `☐ Chicken breast 1kg — R70\n☐ Eggs 12-pack — R45\n☐ Tinned tuna 3 tins — R45\n☐ Pilchards 2 tins — R24`;
+          const carbItems = isMuscle
+            ? `☐ Brown rice 1kg — R22\n☐ Oats 1kg — R25\n☐ Sweet potato 1kg — R18\n☐ Brown bread — R16`
+            : `☐ Oats 1kg — R25\n☐ Sweet potato 500g — R12\n☐ ${isLowBudget ? "Pap 2kg — R15" : "Brown rice 1kg — R22"}`;
+          const vegItems = `☐ Spinach bunch — R8\n☐ Cabbage head — R10\n☐ Tomatoes — R15\n☐ Onions 1kg — R12`;
+          const tip = isLowBudget
+            ? `_Shoprite or Boxer first — best protein-per-rand. Batch cook this weekend._`
+            : `_Prep protein on Sunday — cook in bulk so weekdays are easy._`;
+
+          const msg = `*${name}'s Weekly Shopping List* 🛒\n_${goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Recomposition"} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
+          await sendWhatsApp(client.phoneNumber, msg);
+          sent++;
+          await new Promise(r => setTimeout(r, 250));
+          if (sent >= 150) break;
+        } catch { continue; }
+      }
+      console.log(`[SCHEDULER] Monday grocery lists sent: ${sent}`);
+    } catch (err) {
+      console.error("[SCHEDULER] Monday groceries error:", err);
+    }
+  }, { timezone: "UTC" });
+
+  // ============================================================
   // JOB: MONDAY PROGRESS SUMMARY (Monday 7am SAST = 5am UTC)
   // The "proof of progress" message — specific numbers, personal, 3 lines
   // This is the #1 retention lever: makes people feel SEEN
