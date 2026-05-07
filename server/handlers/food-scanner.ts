@@ -358,7 +358,7 @@ export function buildFoodLogReply(p: {
   let proteinTip = "";
   const budgetTier = user.weeklyFoodBudget || "100_300";
   const protRemaining = proteinTarget - runningProtein;
-  if (!coachNote && !hasGoodProteins && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
+  if (!coachNote && !hasGoodProteins && !isFruitSnack && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
     const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
     const suggestions = lowBudget
       ? [
