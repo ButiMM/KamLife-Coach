@@ -95,6 +95,16 @@ export async function handleEarlyCommands(ctx: {
     }
   }
 
+  // ---- BACK TO GYM / CLEAR HOLIDAY MODE ----
+  // Fires before the holiday check so "back at the gym" doesn't re-trigger the equipment question.
+  if (/\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
+    tempEquipmentMode.delete(phone);
+    awaitingEquipmentAnswer.delete(phone);
+    const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Reply *menu* or *workout* for today's session.`;
+    await logChat(user.id, message, backMsg, "BACK_TO_GYM");
+    return backMsg;
+  }
+
   // ---- HOLIDAY / TRAVEL EQUIPMENT QUESTION ----
   // Must be checked BEFORE the workout delivery so it intercepts correctly.
   const isHolidayMention = /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip|at home today|only have dumbbells|no gym today|training at home today|can.?t get to the gym)\b/i.test(m);
