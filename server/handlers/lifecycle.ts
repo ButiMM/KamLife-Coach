@@ -513,6 +513,34 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- MEASUREMENTS LOGGING (Item 23) — parse and store ----
+  // Multi-measurement block first — handles "Waist: 82cm\nHips: 95cm\nChest: 100cm" in one shot.
+  const fwdPat = /\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b[:\s]+(\d+(?:\.\d+)?)\s*cm/gi;
+  const revPat = /(\d+(?:\.\d+)?)\s*cm\s*(?:[a-z\s]{0,10})?\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b/gi;
+  const parsedMeasures: { type: string; value: number }[] = [];
+  const seenTypes = new Set<string>();
+  for (const pat of [fwdPat, revPat]) {
+    pat.lastIndex = 0;
+    let hit: RegExpExecArray | null;
+    while ((hit = pat.exec(message)) !== null) {
+      const [rawType, rawVal] = pat === fwdPat ? [hit[1], hit[2]] : [hit[2], hit[1]];
+      const mType = rawType.toLowerCase().replace("hips", "hip").replace("biceps", "bicep");
+      const mVal = parseFloat(rawVal);
+      if (!seenTypes.has(mType) && mVal > 20 && mVal < 300) {
+        parsedMeasures.push({ type: mType, value: mVal });
+        seenTypes.add(mType);
+      }
+    }
+  }
+  if (parsedMeasures.length >= 2) {
+    await Promise.all(parsedMeasures.map(pm =>
+      db.insert(bodyMeasurements).values({ userId: user.id, measurementType: pm.type, value: pm.value.toString() }).catch(() => {})
+    ));
+    const lines = parsedMeasures.map(pm => `• ${pm.type.charAt(0).toUpperCase() + pm.type.slice(1)}: ${pm.value}cm`);
+    const multiReply = `*Measurements logged:*\n${lines.join("\n")}\n\nTracked. Check them monthly — the tape tells the truth when the scale doesn't.`;
+    await logChat(user.id, message, multiReply, "MEASUREMENT_LOG");
+    return multiReply;
+  }
+  // Single measurement fallback
   const measPattern = /(\d+(?:\.\d+)?)\s*cm\s*(?:.*?)?\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b/i;
   const measPatternReverse = /\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b\s*(?:is|:|\s)\s*(\d+(?:\.\d+)?)\s*cm/i;
   const measMatch = m.match(measPattern) || m.match(measPatternReverse);
@@ -527,7 +555,6 @@ export async function handleLifecycle(ctx: {
       measValue = parseFloat(measMatch[2]);
     }
     if (measValue > 20 && measValue < 300) {
-      // Check last entry for comparison
       let compareNote = "";
       try {
         const lastMeas = await db.select().from(bodyMeasurements)

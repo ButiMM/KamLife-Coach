@@ -15,97 +15,101 @@ const BASE = (process.env.MEDIA_BASE_URL || "").replace(/\/$/, "");
 
 // ── Exercise name → URL slug ──────────────────────────────────────────────────
 
+// Exact exercise names from the programme → GIF slug
+// Client short-form phrases ("show me squat", "hip thrust gif") also included
 const EXERCISE_SLUGS: Record<string, string> = {
-  // Lower body
-  "squat": "squat",
-  "squats": "squat",
-  "back squat": "squat",
-  "goblet squat": "goblet-squat",
-  "leg press": "leg-press",
-  "leg curl": "leg-curl",
-  "lying leg curl": "leg-curl",
-  "seated leg curl": "leg-curl",
-  "leg extension": "leg-extension",
-  "romanian deadlift": "rdl",
-  "rdl": "rdl",
-  "stiff leg deadlift": "rdl",
-  "deadlift": "deadlift",
-  "sumo deadlift": "sumo-deadlift",
-  "hip thrust": "hip-thrust",
-  "glute bridge": "glute-bridge",
-  "lunge": "lunge",
-  "lunges": "lunge",
-  "walking lunge": "lunge",
-  "reverse lunge": "reverse-lunge",
-  "step up": "step-up",
-  "step ups": "step-up",
-  "calf raise": "calf-raise",
-  "calf raises": "calf-raise",
-  "seated calf raise": "calf-raise",
+  // ── Exact programme exercise names ───────────────────────────────────────────
+  "smith squat / leg press":                          "squat",
+  "smith squat / bulgarian split squat":              "squat",
+  "leg extension":                                    "leg-extension",
+  "leg curl":                                         "leg-curl",
+  "calf raise":                                       "calf-raise",
+  "machine chest press / dumbbell press":             "chest-press",
+  "lat pulldown / assisted pull-up":                  "lat-pulldown",
+  "seated row / dumbbell row":                        "seated-row",
+  "cable lateral raise / dumbbell lateral raise":     "lateral-raise",
+  "hip thrust / glute bridge":                        "hip-thrust",
+  "chest fly / dumbbell chest fly":                   "chest-fly",
+  "machine shoulder press / dumbbell shoulder press": "shoulder-press",
+  "cable kickback / machine kickback":                "cable-kickback",
+  "upper back row / cable face pull":                 "face-pull",
+  "cable face pull / upper back row":                 "face-pull",
+  "bicep curl":                                       "bicep-curl",
+  "tricep pushdown":                                  "tricep-pushdown",
+  "leg press":                                        "leg-press",
+  "bulgarian split squat / reverse lunge":            "bulgarian-split-squat",
+  "romanian deadlift / dumbbell rdl":                 "rdl",
 
-  // Push
-  "bench press": "bench-press",
-  "dumbbell bench press": "db-bench-press",
-  "incline bench press": "incline-bench-press",
-  "push up": "push-up",
-  "push ups": "push-up",
-  "chest press machine": "chest-press-machine",
-  "overhead press": "overhead-press",
-  "ohp": "overhead-press",
-  "shoulder press": "overhead-press",
-  "dumbbell shoulder press": "db-shoulder-press",
-  "lateral raise": "lateral-raise",
-  "lateral raises": "lateral-raise",
-  "tricep dips": "tricep-dips",
-  "dips": "tricep-dips",
-  "tricep pushdown": "tricep-pushdown",
-  "skull crusher": "skull-crusher",
-
-  // Pull
-  "pull up": "pull-up",
-  "pull ups": "pull-up",
-  "chin up": "chin-up",
-  "chin ups": "chin-up",
-  "lat pulldown": "lat-pulldown",
-  "seated cable row": "seated-row",
-  "cable row": "seated-row",
-  "bent over row": "bent-over-row",
-  "barbell row": "bent-over-row",
-  "dumbbell row": "db-row",
-  "single arm row": "db-row",
-  "face pull": "face-pull",
-  "bicep curl": "bicep-curl",
-  "bicep curls": "bicep-curl",
-  "hammer curl": "hammer-curl",
-
-  // Core
-  "plank": "plank",
-  "crunch": "crunch",
-  "crunches": "crunch",
-  "bicycle crunch": "bicycle-crunch",
-  "leg raise": "leg-raise",
-  "hanging leg raise": "hanging-leg-raise",
-  "mountain climber": "mountain-climber",
-  "dead bug": "dead-bug",
-
-  // Cardio / bodyweight
-  "burpee": "burpee",
-  "burpees": "burpee",
-  "jumping jack": "jumping-jack",
-  "jumping jacks": "jumping-jack",
-  "high knees": "high-knees",
-  "box jump": "box-jump",
-  "skipping": "skipping",
+  // ── Short-form phrases clients use with "show me X" / "X gif" ───────────────
+  "squat":                    "squat",
+  "squats":                   "squat",
+  "goblet squat":             "squat",
+  "hip thrust":               "hip-thrust",
+  "glute bridge":             "hip-thrust",
+  "leg press":                "leg-press",
+  "leg curl":                 "leg-curl",
+  "leg extension":            "leg-extension",
+  "calf raise":               "calf-raise",
+  "calf raises":              "calf-raise",
+  "rdl":                      "rdl",
+  "romanian deadlift":        "rdl",
+  "bulgarian split squat":    "bulgarian-split-squat",
+  "split squat":              "bulgarian-split-squat",
+  "reverse lunge":            "bulgarian-split-squat",
+  "lunge":                    "bulgarian-split-squat",
+  "chest press":              "chest-press",
+  "bench press":              "chest-press",
+  "chest fly":                "chest-fly",
+  "lat pulldown":             "lat-pulldown",
+  "pull up":                  "lat-pulldown",
+  "pull ups":                 "lat-pulldown",
+  "seated row":               "seated-row",
+  "row":                      "seated-row",
+  "face pull":                "face-pull",
+  "lateral raise":            "lateral-raise",
+  "lateral raises":           "lateral-raise",
+  "shoulder press":           "shoulder-press",
+  "overhead press":           "shoulder-press",
+  "bicep curl":               "bicep-curl",
+  "bicep curls":              "bicep-curl",
+  "curls":                    "bicep-curl",
+  "tricep pushdown":          "tricep-pushdown",
+  "cable kickback":           "cable-kickback",
+  "kickback":                 "cable-kickback",
+  "push up":                  "push-up",
+  "push ups":                 "push-up",
+  "plank":                    "plank",
+  "dead bug":                 "dead-bug",
 };
 
 /**
  * Returns the GIF URL for a given exercise name, or null if not configured / not found.
+ * Handles "Exercise A / Exercise B" alternatives and strips common machine prefixes.
  */
 export function getExerciseGifUrl(exerciseName: string): string | null {
   if (!BASE) return null;
-  const slug = EXERCISE_SLUGS[exerciseName.toLowerCase().trim()];
-  if (!slug) return null;
-  return `${BASE}/ex/${slug}.gif`;
+  const name = exerciseName.toLowerCase().trim();
+
+  // Direct lookup
+  let slug = EXERCISE_SLUGS[name];
+  if (slug) return `${BASE}/ex/${slug}.gif`;
+
+  // Handle "Exercise A / Exercise B" — try each alternative left to right
+  if (name.includes(" / ")) {
+    for (const part of name.split(" / ")) {
+      slug = EXERCISE_SLUGS[part.trim()];
+      if (slug) return `${BASE}/ex/${slug}.gif`;
+    }
+  }
+
+  // Strip common equipment prefixes and retry
+  const stripped = name.replace(/^(machine|cable|smith|barbell|assisted|seated|standing|lying|dumbbell)\s+/, "");
+  if (stripped !== name) {
+    slug = EXERCISE_SLUGS[stripped];
+    if (slug) return `${BASE}/ex/${slug}.gif`;
+  }
+
+  return null;
 }
 
 /**

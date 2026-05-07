@@ -152,6 +152,236 @@ const NEW_4DAY_LOWER_B: Exercise[] = [
 ];
 
 // ============================================================
+// DUMBBELL-ONLY PROGRAMME — 2 / 3 / 4 DAY, GENDER-SPECIFIC
+// ============================================================
+
+// ── 2-DAY ────────────────────────────────────────────────────
+
+const DB_2DAY_A: Exercise[] = [
+  { name: "Goblet Squat", sets: "3 × 10–12", description: "Hold dumbbell at chest. Feet shoulder width. Lower until thighs parallel. Drive through heels. Keep chest tall.", mistake: "Heels rising. Keep full foot planted throughout.", modification: "Hold a bag or backpack filled with books." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 10–12", description: "Hinge at hips, push bum back. Lower along shins until hamstring stretch. Drive hips forward to stand. Flat back.", mistake: "Rounding the lower back. Only go as deep as flat back allows.", modification: "Use a bag held in both hands." },
+  { name: "Dumbbell Press / Floor Press", sets: "3 × 10–12", description: "Lie on bench or floor. Press dumbbells up until arms nearly extended. Slow 2-second lower. Elbows at 45 degrees.", mistake: "Elbows flaring wide. Keep at 45 degrees throughout.", modification: "Floor press if no bench — works identically." },
+  { name: "Dumbbell Row", sets: "3 × 10–12", description: "One knee on bench. Pull dumbbell from full hang to hip. Squeeze shoulder blade hard at top. Lower slowly.", mistake: "Rotating the torso to pull. Keep hips square.", modification: "Both arms bent-over row standing if no bench." },
+  { name: "Dumbbell Shoulder Press", sets: "3 × 10–12", description: "Dumbbells at shoulder height. Press overhead until arms nearly extended. Core braced. Lower slowly.", mistake: "Excessive lower back arch. Brace core and keep ribs down.", modification: "Seated press on a chair for lower back support." },
+  { name: "Lateral Raise", sets: "3 × 12–15", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly over 2 seconds. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "One arm at a time holding something for balance." },
+];
+
+const DB_2DAY_B_MEN: Exercise[] = [
+  { name: "Goblet Squat", sets: "3 × 10–12", description: "Go heavier than Day A — same mechanics, more load. Control the descent over 2 seconds.", mistake: "Heels rising or chest collapsing. Drive through full foot.", modification: "Hold a bag or backpack for resistance." },
+  { name: "Hip Thrust with Dumbbell", sets: "3 × 12", description: "Upper back on bench. Dumbbell on hips. Drive hips up explosively. Squeeze glutes hard at top for 1 second. Lower slowly.", mistake: "Using lower back to push. Feel it in the glutes, not the spine.", modification: "Glute bridge flat on floor — same movement, no bench." },
+  { name: "Incline Dumbbell Press", sets: "3 × 10–12", description: "Bench at 30–45 degrees. Press dumbbells up and slightly inward. Full range. Control descent 2 seconds.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Flat floor press if no incline bench." },
+  { name: "Bent-Over Dumbbell Row", sets: "3 × 10–12", description: "Hinge forward until torso is parallel to floor. Pull both dumbbells to lower chest. Squeeze shoulder blades hard. Lower slowly.", mistake: "Rounding the back to reach. Hinge from hips, keep back flat.", modification: "Single-arm row with support if lower back is sore." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl to remove swing." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned at side. Extend forearm fully until arm is straight. Squeeze tricep hard at the end.", mistake: "Elbow moving — it stays pinned. Only forearm moves.", modification: "Overhead tricep extension with one dumbbell." },
+];
+
+const DB_2DAY_B_WOMEN: Exercise[] = [
+  { name: "Bulgarian Split Squat", sets: "3 × 10 each leg", description: "Hold dumbbells at sides. Back foot on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push it out over middle toe.", modification: "Reverse lunge without elevation if balance is a problem." },
+  { name: "Hip Thrust with Dumbbell", sets: "3 × 15", description: "Upper back on bench. Dumbbell on hips. Drive hips up explosively. Squeeze glutes hard at top for 1 full second. Lower slowly.", mistake: "Using lower back to push. Feel it in the glutes only.", modification: "Glute bridge flat on floor — identical movement, no bench." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 12", description: "Hinge at hips, push bum back. Lower along shins until strong hamstring stretch. Drive hips forward. Flat back.", mistake: "Rounding the lower back. Only go as deep as flat back allows.", modification: "Use a bag held in both hands." },
+  { name: "Lateral Raise", sets: "3 × 15", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly over 2 seconds. No shrugging.", mistake: "Using momentum or raising above shoulder height.", modification: "One arm at a time." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl to remove swing." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned at side. Extend forearm fully until arm is straight. Squeeze tricep hard.", mistake: "Elbow moving — it stays pinned. Only forearm moves.", modification: "Overhead tricep extension with one dumbbell." },
+];
+
+// ── 3-DAY ────────────────────────────────────────────────────
+
+const DB_3DAY_A: Exercise[] = [
+  { name: "Goblet Squat", sets: "3 × 10–12", description: "Hold dumbbell at chest. Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest tall.", mistake: "Heels rising or chest collapsing. Drive through full foot.", modification: "Hold a bag or backpack." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 10–12", description: "Hinge at hips, push bum back. Lower along shins until hamstring stretch. Drive hips forward. Flat back.", mistake: "Rounding the lower back. Only go as deep as flat back allows.", modification: "Use a bag held in both hands." },
+  { name: "Dumbbell Press / Floor Press", sets: "3 × 10–12", description: "Lie on bench or floor. Press dumbbells up. Elbows at 45 degrees. Slow 2-second lower.", mistake: "Elbows flaring wide.", modification: "Floor press works identically to bench." },
+  { name: "Dumbbell Row", sets: "3 × 10–12", description: "One knee on bench. Pull dumbbell from full hang to hip. Squeeze shoulder blade hard at top. Lower slowly.", mistake: "Rotating torso to pull. Keep hips square.", modification: "Both arms bent-over row standing." },
+  { name: "Lateral Raise", sets: "3 × 12–15", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Momentum or raising above shoulder height.", modification: "One arm at a time." },
+];
+
+const DB_3DAY_B: Exercise[] = [
+  { name: "Bulgarian Split Squat", sets: "3 × 10 each leg", description: "Hold dumbbells at sides. Back foot on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push it out over middle toe.", modification: "Reverse lunge without elevation." },
+  { name: "Hip Thrust with Dumbbell", sets: "3 × 12", description: "Upper back on bench. Dumbbell on hips. Drive hips up explosively. Squeeze glutes at top for 1 second. Lower slowly.", mistake: "Using lower back instead of glutes.", modification: "Glute bridge flat on floor." },
+  { name: "Bent-Over Dumbbell Row", sets: "3 × 10–12", description: "Hinge forward until torso is parallel to floor. Pull both dumbbells to lower chest. Squeeze shoulder blades. Lower slowly.", mistake: "Rounding back. Hinge from hips, keep back flat.", modification: "Single-arm row with support." },
+  { name: "Incline Dumbbell Press", sets: "3 × 10–12", description: "Bench at 30–45 degrees. Press dumbbells up and slightly inward. Full range. Control 2-second descent.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Flat floor press if no incline." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully to shoulder. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned at side. Extend fully until arm straight. Squeeze tricep hard.", mistake: "Elbow moving — only the forearm moves.", modification: "Overhead tricep extension." },
+];
+
+const DB_3DAY_C_MEN: Exercise[] = [
+  { name: "Goblet Squat", sets: "3 × 12", description: "Go heavier than Day A. Control descent slowly over 3 seconds. Feel the quad stretch at the bottom.", mistake: "Rushing through reps. The slow lowering is where the muscle builds.", modification: "Hold a bag or backpack." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 12", description: "Heavier than Day A. Hinge at hips, push bum back. Lower until strong hamstring stretch. Drive hips forward.", mistake: "Rounding the lower back.", modification: "Use a bag." },
+  { name: "Dumbbell Floor Press", sets: "3 × 10–12", description: "Lie flat on floor. Press dumbbells up. Lower until triceps touch floor. Pause briefly. Press from dead stop.", mistake: "Bouncing triceps off floor for momentum. Pause and press clean.", modification: "Any flat surface works." },
+  { name: "Dumbbell Row", sets: "3 × 12", description: "One knee on bench. Pull dumbbell from full hang to hip. Squeeze hard at top. Lower slowly.", mistake: "Rotating torso. Keep hips square.", modification: "Bent-over row both arms." },
+  { name: "Dumbbell Shoulder Press", sets: "3 × 12", description: "Dumbbells at shoulder height. Press overhead. Core braced. Lower slowly.", mistake: "Lower back arching. Keep core tight.", modification: "Seated press." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned. Curl fully. Lower slowly. No swing.", mistake: "Elbows drifting forward or swinging torso.", modification: "Seated curl." },
+];
+
+const DB_3DAY_C_WOMEN: Exercise[] = [
+  { name: "Hip Thrust with Dumbbell", sets: "4 × 15", description: "Upper back on bench. Heavy dumbbell on hips. Drive hips up explosively. Squeeze glutes hard at top for 1 full second.", mistake: "Lower back doing the work. Drive through hips only.", modification: "Glute bridge flat on floor." },
+  { name: "Bulgarian Split Squat", sets: "3 × 12 each leg", description: "Hold dumbbells. Back foot on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward.", modification: "Reverse lunge without elevation." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 12", description: "Hinge at hips, push bum back. Lower until strong hamstring stretch. Drive hips forward. Flat back.", mistake: "Rounding the lower back.", modification: "Use a bag." },
+  { name: "Dumbbell Press / Floor Press", sets: "3 × 10–12", description: "Lie on bench or floor. Press dumbbells up. Elbows at 45 degrees. Slow lower.", mistake: "Elbows flaring wide.", modification: "Floor press." },
+  { name: "Lateral Raise", sets: "3 × 15", description: "Arms slightly bent. Raise to shoulder height only. Lower slowly. No shrugging.", mistake: "Momentum or above shoulder height.", modification: "One arm at a time." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned. Curl fully. Lower slowly. No swing.", mistake: "Swinging torso or elbows drifting.", modification: "Seated curl." },
+];
+
+// ── 4-DAY ────────────────────────────────────────────────────
+
+const DB_4DAY_UPPER_A: Exercise[] = [
+  { name: "Dumbbell Press / Floor Press", sets: "3 × 10–12", description: "Lie on bench or floor. Press dumbbells up. Elbows at 45 degrees. Slow 2-second lower.", mistake: "Elbows flaring wide.", modification: "Floor press works identically." },
+  { name: "Dumbbell Row", sets: "3 × 10–12", description: "One knee on bench. Pull dumbbell from full hang to hip. Squeeze shoulder blade hard at top. Lower slowly.", mistake: "Rotating torso to pull.", modification: "Bent-over row both arms standing." },
+  { name: "Dumbbell Shoulder Press", sets: "3 × 10–12", description: "Dumbbells at shoulder height. Press overhead. Core braced. Lower slowly.", mistake: "Lower back arching. Core tight.", modification: "Seated press on a chair." },
+  { name: "Lateral Raise", sets: "3 × 12–15", description: "Arms slightly bent. Raise to shoulder height. Lower slowly. No shrugging.", mistake: "Momentum or above shoulder height.", modification: "One arm at a time." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully. Lower slowly. No swing.", mistake: "Elbows drifting or torso swinging.", modification: "Seated curl." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned at side. Extend fully until arm straight. Squeeze hard.", mistake: "Elbow moving — only forearm moves.", modification: "Overhead extension." },
+];
+
+const DB_4DAY_LOWER_A: Exercise[] = [
+  { name: "Goblet Squat", sets: "3 × 12", description: "Hold dumbbell at chest. Feet shoulder width. Lower until thighs parallel. Drive through heels.", mistake: "Heels rising or knees caving.", modification: "Hold a bag or backpack." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 12", description: "Hinge at hips, push bum back. Lower along shins until hamstring stretch. Drive hips forward. Flat back.", mistake: "Rounding the lower back.", modification: "Use a bag." },
+  { name: "Hip Thrust with Dumbbell", sets: "3 × 12", description: "Upper back on bench. Dumbbell on hips. Drive hips up explosively. Squeeze glutes at top 1 second. Lower slowly.", mistake: "Lower back doing the work.", modification: "Glute bridge flat on floor." },
+  { name: "Bulgarian Split Squat", sets: "3 × 10 each leg", description: "Hold dumbbells. Back foot on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward.", modification: "Reverse lunge without elevation." },
+  { name: "Calf Raise", sets: "4 × 15", description: "Stand holding dumbbells. Rise all the way up on toes. Pause at top. Lower heel fully below step if possible.", mistake: "Short bouncy reps. Full range builds calves.", modification: "Single-leg if both legs are too easy." },
+];
+
+const DB_4DAY_UPPER_B_MEN: Exercise[] = [
+  { name: "Incline Dumbbell Press", sets: "3 × 10–12", description: "Bench at 30–45 degrees. Press dumbbells up and slightly inward. Full range. Control 2-second descent.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Flat floor press if no incline." },
+  { name: "Bent-Over Dumbbell Row", sets: "3 × 10–12", description: "Hinge forward until torso parallel to floor. Pull both dumbbells to lower chest. Squeeze shoulder blades. Lower slowly.", mistake: "Rounding back. Hinge from hips, flat back.", modification: "Single-arm row with support." },
+  { name: "Dumbbell Shoulder Press", sets: "3 × 12", description: "Dumbbells at shoulder height. Press overhead. Core braced. Lower slowly.", mistake: "Lower back arching. Core tight throughout.", modification: "Seated press." },
+  { name: "Lateral Raise", sets: "3 × 15", description: "Arms slightly bent. Raise to shoulder height. Lower slowly. No shrugging.", mistake: "Momentum or above shoulder height.", modification: "One arm at a time." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully. Lower slowly. No swing.", mistake: "Torso swinging or elbows drifting.", modification: "Seated curl." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned. Extend fully until arm straight. Squeeze hard at end.", mistake: "Elbow moving — only forearm moves.", modification: "Overhead extension." },
+];
+
+const DB_4DAY_UPPER_B_WOMEN: Exercise[] = [
+  { name: "Incline Dumbbell Press", sets: "3 × 10–12", description: "Bench at 30–45 degrees. Press dumbbells up and slightly inward. Full range. Control 2-second descent.", mistake: "Elbows flaring wide. Keep at 45 degrees.", modification: "Flat floor press if no incline." },
+  { name: "Bent-Over Dumbbell Row", sets: "3 × 10–12", description: "Hinge forward until torso parallel to floor. Pull both dumbbells to lower chest. Squeeze shoulder blades. Lower slowly.", mistake: "Rounding back. Hinge from hips, flat back.", modification: "Single-arm row with support." },
+  { name: "Lateral Raise", sets: "3 × 15", description: "Arms slightly bent. Raise to shoulder height. Lower slowly. No shrugging.", mistake: "Momentum or above shoulder height.", modification: "One arm at a time." },
+  { name: "Bicep Curl", sets: "3 × 12", description: "Elbows pinned at sides. Curl fully. Lower slowly. No swing.", mistake: "Torso swinging or elbows drifting.", modification: "Seated curl." },
+  { name: "Tricep Kickback", sets: "3 × 12", description: "Hinge forward. Elbow pinned. Extend fully until arm straight. Squeeze hard.", mistake: "Elbow moving — only forearm moves.", modification: "Overhead extension." },
+];
+
+const DB_4DAY_LOWER_B: Exercise[] = [
+  { name: "Hip Thrust with Dumbbell", sets: "4 × 12–15", description: "Upper back on bench. Heavy dumbbell on hips. Drive hips up explosively. Squeeze glutes at top 1 full second. Lower slowly.", mistake: "Lower back doing the work. Drive through hips only.", modification: "Glute bridge flat on floor." },
+  { name: "Dumbbell Romanian Deadlift", sets: "3 × 12", description: "Heavier than Lower A. Hinge at hips, push bum back. Strong hamstring stretch. Drive hips forward. Flat back.", mistake: "Rounding the lower back.", modification: "Use a bag." },
+  { name: "Bulgarian Split Squat", sets: "3 × 10 each leg", description: "Hold dumbbells. Back foot on bench. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward.", modification: "Reverse lunge without elevation." },
+  { name: "Goblet Squat", sets: "3 × 15", description: "Higher rep day. Focus on depth and squeeze at bottom. Slow descent 3 seconds.", mistake: "Rushing reps. The slow lowering builds the muscle.", modification: "Hold a bag or backpack." },
+  { name: "Calf Raise", sets: "4 × 15", description: "Stand holding dumbbells. Full range — heel as low as possible, all the way up on toes. Pause at top.", mistake: "Short bouncy reps. Full range only.", modification: "Single-leg." },
+];
+
+// ============================================================
+// HOME PROGRAMME — 2 / 3 / 4 DAY, GENDER-SPECIFIC
+// Bodyweight + improvised load (bag, backpack, water bottles)
+// ============================================================
+
+// ── 2-DAY ────────────────────────────────────────────────────
+
+const HOME_2DAY_A: Exercise[] = [
+  { name: "Squat", sets: "3 × 15", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest tall. Add a backpack with books for extra resistance.", mistake: "Knees caving inward. Push knees out over toes throughout.", modification: "Squat to a chair and stand back up." },
+  { name: "Push-Up", sets: "3 × 10", description: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.", mistake: "Hips sagging or rising. Keep body in one straight line.", modification: "Knees on floor until you build strength." },
+  { name: "Glute Bridge", sets: "3 × 15", description: "Lie on back. Feet flat, hip width. Drive hips to ceiling. Squeeze glutes hard at top for 2 seconds. Lower slowly.", mistake: "Pushing through lower back instead of glutes. Drive hips up.", modification: "Place a bag on hips for added resistance." },
+  { name: "Reverse Lunge", sets: "3 × 10 each leg", description: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.", mistake: "Front knee travelling past toes. Keep shin vertical.", modification: "Hold a wall for balance until comfortable." },
+  { name: "Table Row", sets: "3 × 12", description: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.", mistake: "Hips dropping. Keep body rigid like a plank throughout.", modification: "Bend knees to make it easier." },
+  { name: "Plank", sets: "3 × 30 sec", description: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.", mistake: "Hips rising or sagging. Everything in one line.", modification: "Drop knees to floor." },
+];
+
+const HOME_2DAY_B_MEN: Exercise[] = [
+  { name: "Jump Squat", sets: "3 × 10", description: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset and go again.", mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.", modification: "Regular squat if knees are sore." },
+  { name: "Push-Up", sets: "3 × 12", description: "Hands shoulder width. Body straight. Lower chest to floor. Push up explosively. More reps than Day A.", mistake: "Hips sagging. Keep core tight throughout.", modification: "Knees on floor." },
+  { name: "Single-Leg Glute Bridge", sets: "3 × 10 each leg", description: "Lie on back. One foot flat, other leg extended. Drive hips up through planted heel. Squeeze hard at top. Lower slowly.", mistake: "Hips dropping to one side. Keep hips level throughout.", modification: "Both feet down (regular glute bridge)." },
+  { name: "Walking Lunge", sets: "3 × 10 each leg", description: "Step forward into a lunge. Back knee almost touches floor. Step through and continue walking. Keep torso upright.", mistake: "Leaning forward. Keep chest up and shoulders back.", modification: "Stationary reverse lunge if space is limited." },
+  { name: "Door Frame Row", sets: "3 × 12", description: "Stand in doorframe. Grip both sides at chest height. Lean back until arms straight. Pull chest to frame. Squeeze shoulder blades.", mistake: "Using momentum. Control both directions.", modification: "Table row if no doorframe." },
+  { name: "Plank", sets: "3 × 40 sec", description: "Forearms on floor. Body straight. Squeeze stomach hard. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_2DAY_B_WOMEN: Exercise[] = [
+  { name: "Sumo Squat", sets: "3 × 15", description: "Feet wide, toes pointing out at 45 degrees. Lower until thighs parallel. Drive through heels. Squeeze glutes at top. Add backpack for resistance.", mistake: "Knees caving inward. Push them out over toes.", modification: "Squat to a chair." },
+  { name: "Push-Up", sets: "3 × 10", description: "Hands shoulder width. Body straight. Lower chest to floor. Push up explosively.", mistake: "Hips sagging or rising. One straight line.", modification: "Knees on floor." },
+  { name: "Single-Leg Glute Bridge", sets: "4 × 12 each leg", description: "Lie on back. One foot flat, other leg extended. Drive hips up through planted heel. Squeeze glutes hard at top. Lower slowly.", mistake: "Hips tilting to one side. Keep them level throughout.", modification: "Place a bag on hips for added load." },
+  { name: "Reverse Lunge", sets: "3 × 12 each leg", description: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.", mistake: "Front knee past toes. Keep shin vertical.", modification: "Hold a wall for balance." },
+  { name: "Table Row", sets: "3 × 12", description: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.", mistake: "Hips dropping. Keep body rigid like a plank.", modification: "Bend knees to make it easier." },
+  { name: "Plank", sets: "3 × 30 sec", description: "Forearms on floor. Body straight. Squeeze stomach hard. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+// ── 3-DAY ────────────────────────────────────────────────────
+
+const HOME_3DAY_A: Exercise[] = [
+  { name: "Squat", sets: "3 × 15", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest tall. Add a backpack for resistance.", mistake: "Knees caving inward. Push knees out over toes.", modification: "Squat to a chair." },
+  { name: "Push-Up", sets: "3 × 10", description: "Hands shoulder width. Body straight. Lower chest to floor. Push up explosively.", mistake: "Hips sagging or rising. One straight line.", modification: "Knees on floor." },
+  { name: "Glute Bridge", sets: "3 × 15", description: "Lie on back. Feet flat hip width. Drive hips up. Squeeze glutes hard at top 2 seconds. Lower slowly.", mistake: "Lower back doing the work. Drive through hips.", modification: "Place a bag on hips for load." },
+  { name: "Reverse Lunge", sets: "3 × 10 each leg", description: "Step back. Lower back knee toward floor. Push through front heel. Torso upright.", mistake: "Front knee past toes. Keep shin vertical.", modification: "Hold a wall for balance." },
+  { name: "Table Row", sets: "3 × 12", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up. Lower slowly.", mistake: "Hips dropping. Keep body rigid.", modification: "Bend knees to make it easier." },
+  { name: "Plank", sets: "3 × 30 sec", description: "Forearms on floor. Body straight. Squeeze stomach. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_3DAY_B: Exercise[] = [
+  { name: "Jump Squat", sets: "3 × 10", description: "Squat to parallel. Explode upward. Land softly with bent knees. Reset.", mistake: "Stiff landing. Absorb through hips and knees.", modification: "Regular squat if knees are sore." },
+  { name: "Pike Push-Up", sets: "3 × 8", description: "Hips high, forming a triangle. Lower head toward floor between hands. Push back up. Targets shoulders.", mistake: "Bending the knees or not going low enough.", modification: "Regular push-up if too hard." },
+  { name: "Single-Leg Glute Bridge", sets: "3 × 10 each leg", description: "One foot flat, other leg extended. Drive hips up through planted heel. Squeeze at top. Lower slowly.", mistake: "Hips tilting to one side. Keep them level.", modification: "Both feet down if too hard." },
+  { name: "Walking Lunge", sets: "3 × 10 each leg", description: "Step forward into a lunge. Back knee almost touches floor. Step through. Chest up.", mistake: "Leaning forward. Keep torso upright throughout.", modification: "Stationary lunge if no space." },
+  { name: "Door Frame Row", sets: "3 × 12", description: "Stand in doorframe. Grip sides. Lean back. Pull chest to frame. Squeeze shoulder blades.", mistake: "Swinging forward with momentum. Control both directions.", modification: "Table row if no doorframe." },
+];
+
+const HOME_3DAY_C_MEN: Exercise[] = [
+  { name: "Squat", sets: "3 × 20", description: "High-rep day. Add a backpack for resistance. Control descent 2 seconds. Feel the burn.", mistake: "Rushing reps. Slow lowering builds the muscle.", modification: "Bodyweight only — do 25 reps." },
+  { name: "Diamond Push-Up", sets: "3 × 8", description: "Hands close together forming a diamond under chest. Lower chest to hands. Push back up. Targets triceps and chest.", mistake: "Elbows flaring wide. Keep them pointing back.", modification: "Wide push-up if too hard." },
+  { name: "Glute Bridge", sets: "4 × 20", description: "Drive hips up explosively. Squeeze glutes hard at top for 1 full second. High rep day — feel the burn.", mistake: "Lower back doing the work. Drive through hips.", modification: "Place a bag on hips for added resistance." },
+  { name: "Reverse Lunge", sets: "3 × 12 each leg", description: "Step back. Lower back knee toward floor. Push through front heel. Torso upright.", mistake: "Front knee past toes. Shin stays vertical.", modification: "Hold a wall for balance." },
+  { name: "Table Row", sets: "3 × 15", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up. Lower slowly. More reps than before.", mistake: "Hips dropping. Keep body rigid.", modification: "Bend knees." },
+  { name: "Plank", sets: "3 × 45 sec", description: "Forearms on floor. Body straight. Squeeze stomach. Breathe steadily. Longer hold than before.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_3DAY_C_WOMEN: Exercise[] = [
+  { name: "Sumo Squat", sets: "3 × 20", description: "Feet wide, toes out 45 degrees. Lower until thighs parallel. Squeeze glutes at top. Add backpack for resistance.", mistake: "Knees caving inward. Push out over toes.", modification: "Squat to chair." },
+  { name: "Push-Up", sets: "3 × 12", description: "Hands shoulder width. Body straight. Lower chest to floor. Push up explosively. More reps than Day A.", mistake: "Hips sagging. One straight line.", modification: "Knees on floor." },
+  { name: "Single-Leg Glute Bridge", sets: "4 × 15 each leg", description: "One foot flat, other extended. Drive hips up through planted heel. Squeeze at top. High reps — feel the glutes burn.", mistake: "Hips tilting to one side. Keep level.", modification: "Place a bag on hips for load." },
+  { name: "Reverse Lunge", sets: "3 × 12 each leg", description: "Step back. Lower back knee toward floor. Push through front heel. Torso upright.", mistake: "Front knee past toes.", modification: "Hold wall for balance." },
+  { name: "Table Row", sets: "3 × 15", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up. Lower slowly.", mistake: "Hips dropping. Keep rigid.", modification: "Bend knees." },
+  { name: "Plank", sets: "3 × 40 sec", description: "Forearms on floor. Body straight. Squeeze stomach. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+// ── 4-DAY ────────────────────────────────────────────────────
+
+const HOME_4DAY_UPPER_A: Exercise[] = [
+  { name: "Push-Up", sets: "4 × 12", description: "Hands shoulder width. Body straight. Lower chest to floor. Push up explosively.", mistake: "Hips sagging. One straight line.", modification: "Knees on floor." },
+  { name: "Pike Push-Up", sets: "3 × 8", description: "Hips high forming a triangle. Lower head toward floor between hands. Push back up. Shoulder builder.", mistake: "Knees bending or not going low enough.", modification: "Regular push-up if too hard." },
+  { name: "Table Row", sets: "4 × 12", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up. Lower slowly.", mistake: "Hips dropping. Keep body rigid like a plank.", modification: "Bend knees." },
+  { name: "Door Frame Row", sets: "3 × 12", description: "Grip doorframe sides at chest height. Lean back. Pull chest to frame. Squeeze shoulder blades.", mistake: "Swinging with momentum. Control both directions.", modification: "Table row." },
+  { name: "Plank", sets: "3 × 40 sec", description: "Forearms on floor. Body straight. Core squeezed. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_4DAY_LOWER_A: Exercise[] = [
+  { name: "Squat", sets: "4 × 15", description: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest tall. Add backpack for resistance.", mistake: "Knees caving inward.", modification: "Squat to a chair." },
+  { name: "Glute Bridge", sets: "4 × 15", description: "Lie on back. Feet flat hip width. Drive hips up. Squeeze glutes at top 2 seconds. Lower slowly.", mistake: "Lower back doing the work.", modification: "Place a bag on hips." },
+  { name: "Reverse Lunge", sets: "3 × 12 each leg", description: "Step back. Lower back knee toward floor. Push through front heel. Torso upright.", mistake: "Front knee past toes.", modification: "Hold wall for balance." },
+  { name: "Calf Raise", sets: "4 × 20", description: "Stand on edge of a step. Full range — heel all the way down, rise up on toes. Pause at top.", mistake: "Short bouncy reps. Full range builds calves.", modification: "Flat floor if no step." },
+];
+
+const HOME_4DAY_UPPER_B_MEN: Exercise[] = [
+  { name: "Diamond Push-Up", sets: "3 × 8", description: "Hands close together forming a diamond. Lower chest to hands. Push back up. Triceps and chest.", mistake: "Elbows flaring wide. Point them back.", modification: "Wide push-up if too hard." },
+  { name: "Decline Push-Up", sets: "3 × 10", description: "Feet on a chair or couch. Hands on floor. Lower chest toward floor. Press back up.", mistake: "Hips rising. Keep body straight.", modification: "Regular push-up." },
+  { name: "Table Row", sets: "4 × 15", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.", mistake: "Hips dropping. Keep rigid.", modification: "Bend knees." },
+  { name: "Plank", sets: "3 × 45 sec", description: "Forearms on floor. Body straight. Core squeezed. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_4DAY_UPPER_B_WOMEN: Exercise[] = [
+  { name: "Wide Push-Up", sets: "3 × 10", description: "Hands wider than shoulder width. Lower chest to floor. Push back up. Targets chest more than standard push-up.", mistake: "Hips sagging. One straight line.", modification: "Knees on floor." },
+  { name: "Pike Push-Up", sets: "3 × 8", description: "Hips high forming a triangle. Lower head toward floor between hands. Push back up.", mistake: "Knees bending or not going low enough.", modification: "Regular push-up." },
+  { name: "Table Row", sets: "4 × 15", description: "Sit under sturdy table. Grip edge. Body straight. Pull chest up. Lower slowly.", mistake: "Hips dropping. Keep body rigid.", modification: "Bend knees." },
+  { name: "Plank", sets: "3 × 40 sec", description: "Forearms on floor. Body straight. Core squeezed. Breathe steadily.", mistake: "Hips rising or sagging.", modification: "Knees on floor." },
+];
+
+const HOME_4DAY_LOWER_B_MEN: Exercise[] = [
+  { name: "Jump Squat", sets: "4 × 12", description: "Squat to parallel. Explode upward. Land softly with bent knees. Reset immediately.", mistake: "Stiff landing. Absorb through hips and knees.", modification: "Regular squat if knees are sore." },
+  { name: "Single-Leg Glute Bridge", sets: "3 × 12 each leg", description: "One foot flat, other extended. Drive hips up through planted heel. Squeeze at top. Lower slowly.", mistake: "Hips tilting to one side. Keep level.", modification: "Place a bag on hips for load." },
+  { name: "Walking Lunge", sets: "3 × 12 each leg", description: "Step forward into a lunge. Back knee almost touches floor. Step through. Chest up.", mistake: "Leaning forward. Torso upright throughout.", modification: "Stationary lunge." },
+  { name: "Bulgarian Split Squat", sets: "3 × 10 each leg", description: "Back foot on a chair or couch. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push out over middle toe.", modification: "Reverse lunge without elevation." },
+];
+
+const HOME_4DAY_LOWER_B_WOMEN: Exercise[] = [
+  { name: "Sumo Squat", sets: "4 × 20", description: "Feet wide, toes out 45 degrees. Lower until thighs parallel. Squeeze glutes at top. Add backpack for load.", mistake: "Knees caving inward. Push out over toes.", modification: "Squat to chair." },
+  { name: "Single-Leg Glute Bridge", sets: "4 × 15 each leg", description: "One foot flat, other extended. Drive hips up through planted heel. Squeeze glutes hard at top. Lower slowly.", mistake: "Hips tilting to one side. Keep level.", modification: "Place a bag on hips for extra load." },
+  { name: "Walking Lunge", sets: "3 × 12 each leg", description: "Step forward into a lunge. Back knee almost touches floor. Step through. Chest up.", mistake: "Leaning forward. Torso upright.", modification: "Stationary lunge." },
+  { name: "Bulgarian Split Squat", sets: "3 × 12 each leg", description: "Back foot on a chair or couch. Front foot far forward. Lower back knee toward floor. Drive through front heel.", mistake: "Front knee caving inward. Push out over middle toe.", modification: "Reverse lunge without elevation." },
+];
+
+// ============================================================
 // GYM — 3-DAY FULL BODY (FULL EQUIPMENT) — kept for backward compat
 // ============================================================
 
@@ -892,6 +1122,54 @@ function daySlotLabel(slot: 1 | 2 | 3, isGlutesFocus: boolean, isDumbbell: boole
   return [`Full Body A`, `Full Body B`, `Full Body C`][slot - 1];
 }
 
+function getNewDbDay(
+  trainingDays: number,
+  dayNumber: number,
+  gender: string,
+): { exercises: Exercise[]; label: string } {
+  if (trainingDays <= 2) {
+    const slot = ((dayNumber - 1) % 2) + 1;
+    if (slot === 1) return { exercises: DB_2DAY_A, label: "Full Body A" };
+    return { exercises: gender === "female" ? DB_2DAY_B_WOMEN : DB_2DAY_B_MEN, label: "Full Body B" };
+  }
+  if (trainingDays >= 4) {
+    const slot = ((dayNumber - 1) % 4) + 1;
+    if (slot === 1) return { exercises: DB_4DAY_UPPER_A, label: "Upper Body A" };
+    if (slot === 2) return { exercises: DB_4DAY_LOWER_A, label: "Lower Body A" };
+    if (slot === 3) return { exercises: gender === "female" ? DB_4DAY_UPPER_B_WOMEN : DB_4DAY_UPPER_B_MEN, label: "Upper Body B" };
+    return { exercises: DB_4DAY_LOWER_B, label: "Lower Body B" };
+  }
+  // 3-day default
+  const slot = ((dayNumber - 1) % 3) + 1;
+  if (slot === 1) return { exercises: DB_3DAY_A, label: "Full Body A" };
+  if (slot === 2) return { exercises: DB_3DAY_B, label: "Full Body B" };
+  return { exercises: gender === "female" ? DB_3DAY_C_WOMEN : DB_3DAY_C_MEN, label: "Full Body C" };
+}
+
+function getNewHomeDay(
+  trainingDays: number,
+  dayNumber: number,
+  gender: string,
+): { exercises: Exercise[]; label: string } {
+  if (trainingDays <= 2) {
+    const slot = ((dayNumber - 1) % 2) + 1;
+    if (slot === 1) return { exercises: HOME_2DAY_A, label: "Full Body A" };
+    return { exercises: gender === "female" ? HOME_2DAY_B_WOMEN : HOME_2DAY_B_MEN, label: "Full Body B" };
+  }
+  if (trainingDays >= 4) {
+    const slot = ((dayNumber - 1) % 4) + 1;
+    if (slot === 1) return { exercises: HOME_4DAY_UPPER_A, label: "Upper Body A" };
+    if (slot === 2) return { exercises: HOME_4DAY_LOWER_A, label: "Lower Body A" };
+    if (slot === 3) return { exercises: gender === "female" ? HOME_4DAY_UPPER_B_WOMEN : HOME_4DAY_UPPER_B_MEN, label: "Upper Body B" };
+    return { exercises: gender === "female" ? HOME_4DAY_LOWER_B_WOMEN : HOME_4DAY_LOWER_B_MEN, label: "Lower Body B" };
+  }
+  // 3-day default
+  const slot = ((dayNumber - 1) % 3) + 1;
+  if (slot === 1) return { exercises: HOME_3DAY_A, label: "Full Body A" };
+  if (slot === 2) return { exercises: HOME_3DAY_B, label: "Full Body B" };
+  return { exercises: gender === "female" ? HOME_3DAY_C_WOMEN : HOME_3DAY_C_MEN, label: "Full Body C" };
+}
+
 function getNewGymDay(
   trainingDays: number,
   dayNumber: number,
@@ -1355,108 +1633,24 @@ export function buildDayWorkout(user: any): string {
     return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
   }
 
-  // Home users — rotating 3-day full body with progressive week-based variation
-  if (mode !== "gym" && mode !== "gym_dumbbell") {
-    // Cycle weeks 5-8 back through 1-4 base so progression repeats but at higher phase multiplier
-    const weekInCycle = ((week - 1) % 8) + 1; // 1..8 then repeats
-    const daySlot = (((day - 1) % 3) + 1) as 1 | 2 | 3;
-    let allExercises = [...HOME_DAYS[daySlot]];
-
-    // Week-based variation: progressive overload and exercise swap
-    const cyclePhase = weekInCycle; // 1-8 within the cycle
-    if (cyclePhase === 2 && daySlot === 1) {
-      // Swap Bodyweight Squat → Jump Squat
-      allExercises = allExercises.map(ex =>
-        ex.name === "Bodyweight Squat" ? { ...HOME_DAYS[2][0], setsReps: "3 sets of 10 reps" } : ex
-      );
-    } else if (cyclePhase === 3) {
-      // Add 2 reps to every exercise
-      allExercises = allExercises.map(ex => ({
-        ...ex,
-        setsReps: ex.setsReps.replace(/(\d+) reps/, (_, n) => `${Math.min(parseInt(n) + 2, 20)} reps`)
-          .replace(/(\d+) seconds/, (_, n) => `${parseInt(n) + 10} seconds`),
-      }));
-    } else if (cyclePhase === 4) {
-      // Swap middle exercises for novelty
-      if (daySlot === 1 && HOME_DAYS[3].length > 2) {
-        allExercises[2] = HOME_DAYS[3][2];
-      } else if (daySlot === 2 && HOME_DAYS[1].length > 1) {
-        allExercises[1] = HOME_DAYS[1][1];
-      }
-    } else if (cyclePhase === 5) {
-      // Tempo week: slow eccentric (3 seconds down on every exercise)
-      allExercises = allExercises.map(ex => ({
-        ...ex,
-        setsReps: ex.setsReps.replace(/(\d+) reps/, (_, n) => `${n} reps (3-sec lowering)`),
-        cue: ex.cue + " Lower SLOWLY over 3 seconds — this is where the muscle builds.",
-      }));
-    } else if (cyclePhase === 6) {
-      // Volume week: 4 sets instead of 3
-      allExercises = allExercises.map(ex => ({
-        ...ex,
-        setsReps: ex.setsReps.replace(/^3 sets/, "4 sets"),
-      }));
-    } else if (cyclePhase === 7) {
-      // Advanced week: use Day 3 exercises (hardest pool) regardless of day slot
-      allExercises = [...HOME_DAYS[3]];
-    } else if (cyclePhase === 8) {
-      // Deload week: 2 sets, focus on form — important for recovery
-      allExercises = allExercises.map(ex => ({
-        ...ex,
-        setsReps: ex.setsReps.replace(/^[34] sets/, "2 sets"),
-        cue: ex.cue + " Deload week — focus on perfect form, not intensity.",
-      }));
-    }
-
-    const { safe: exercises, skipped } = filterInjuredExercises(allExercises, injuries);
-    const goal = user.goalType || "fat_loss";
-    const phaseOpener = PHASE_OPENERS[phase] || PHASE_OPENERS[1];
-    const goalNote = goal === "fat_loss"
-      ? `_After: protein within 60 min. Eggs, chicken, pilchards. Rest 45 sec between sets — the sweat is the fat burning._`
-      : goal === "muscle_gain"
-        ? `_After: eat within 30 minutes — rice + protein. Push every set to near-failure. The last 2 reps are where the muscle is built._`
-        : `_After: protein within 60 min, moderate carbs. Push all sets to near-failure. Slow the eccentric — 3 seconds down builds more than explosive reps._`;
-
-    let workout = `*Week ${week} — Home Day ${daySlot}*\nRest ${multiplier.rest} between sets | 40–50 min\n\n_${phaseOpener}_\n\n`;
-    const ytLinks: string[] = [];
-    for (let i = 0; i < exercises.length; i++) {
-      const ex = exercises[i];
-      const num = i + 1;
-      const displaySetsReps = phase > 1 ? `${multiplier.sets} sets of ${multiplier.reps} reps` : ex.setsReps;
-      workout += `${num}. *${ex.name}* — ${displaySetsReps}\n${ex.cue}\n\n`;
-      ytLinks.push(`${num}. ${ex.name}: ${ex.yt}`);
-    }
-    if (skipped.length > 0) {
-      workout += `⚠️ *Skipped due to ${injuries}:* ${skipped.join(", ")}. These return when you report recovery.\n\n`;
-    }
-    if (isFemaleGluteFocus && !skipped.some(s => s.toLowerCase().includes("glute"))) {
-      workout += `*Glute Focus Add-on:* Add an extra set of Glute Bridge or Hip Thrust at the end. Slow the lowering phase to 3 seconds.\n\n`;
-    }
-    workout += `Reply *DONE* when finished.\n\n${goalNote}\n\n_Form videos:_\n${ytLinks.join("\n")}`;
-    return workout;
-  }
-
-  // Female complete programme (shoulders/back/arms/glutes/hamstrings/calves)
-  if (isFemaleGluteFocus) {
-    const femaleSlot = (((day - 1) % 3) + 1);
-    if (femaleSlot === 1) return FEMALE_DAY_A;
-    if (femaleSlot === 2) return FEMALE_DAY_B;
-    return FEMALE_DAY_C;
-  }
-
-  // 4-day upper/lower split — for intermediate/advanced gym users training 4+ days
   const trainingDays = user.trainingDaysPerWeek || 3;
-  const exp = user.trainingExperience || "beginner";
-  if (trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
-    // Alternate upper/lower: odd days = upper, even days = lower
-    const isUpperDay = day % 2 !== 0;
-    return isUpperDay ? INTERMEDIATE_GYM_UPPER : INTERMEDIATE_GYM_LOWER;
+  const gender = user.gender || "male";
+
+  // Dumbbell-only users — full 2/3/4-day programme, gender-specific
+  if (mode === "gym_dumbbell") {
+    const { exercises, label } = getNewDbDay(trainingDays, day, gender);
+    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", true, injuries);
+  }
+
+  // Home / no-equipment users — full 2/3/4-day programme, gender-specific
+  if (mode !== "gym") {
+    const { exercises, label } = getNewHomeDay(trainingDays, day, gender);
+    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries);
   }
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
-  const gender = user.gender || "male";
   const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", isDumbbell, injuries);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries);
 }
 
 // ============================================================

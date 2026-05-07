@@ -95,6 +95,46 @@ export async function handleEarlyCommands(ctx: {
     }
   }
 
+  // ---- BACK TO GYM / CLEAR HOLIDAY MODE ----
+  // Fires before the holiday check so "back at the gym" doesn't re-trigger the equipment question.
+  if (/\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
+    tempEquipmentMode.delete(phone);
+    awaitingEquipmentAnswer.delete(phone);
+    const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Reply *menu* or *workout* for today's session.`;
+    await logChat(user.id, message, backMsg, "BACK_TO_GYM");
+    return backMsg;
+  }
+
+  // ---- HOLIDAY / TRAVEL EQUIPMENT QUESTION ----
+  // Must be checked BEFORE the workout delivery so it intercepts correctly.
+  const isHolidayMention = /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip|at home today|only have dumbbells|no gym today|training at home today|can.?t get to the gym)\b/i.test(m);
+
+  // If awaiting equipment answer, handle it now regardless of what they typed
+  if (awaitingEquipmentAnswer.get(phone)) {
+    awaitingEquipmentAnswer.delete(phone);
+    let tempMode = user.trainingMode || "gym";
+    if (/\b(full gym|gym|machines|cables|full equipment|1)\b/i.test(m)) tempMode = "gym";
+    else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
+    else if (/\b(nothing|no equipment|bodyweight|hotel room|3)\b/i.test(m)) tempMode = "home";
+    tempEquipmentMode.set(phone, tempMode);
+    const tempUser = { ...user, trainingMode: tempMode };
+    const workout = buildDayWorkout(tempUser);
+    const gifUrl = getPrimaryWorkoutGifUrl(workout);
+    const gifMarker = gifUrl ? `\n[MEDIA:${gifUrl}]` : "";
+    const tReply = `Here is your session adapted for what you have available.\n\n${workout}\n\nSend *done* when finished.${gifMarker}`;
+    await logChat(user.id, message, tReply, "WORKOUT_HOLIDAY");
+    return tReply;
+  }
+
+  // If holiday mentioned (with or without workout request), ask what equipment they have
+  const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train|send me|my workout|today)\b/i.test(m);
+  if (isHolidayMention) {
+    awaitingEquipmentAnswer.set(phone, true);
+    const equipQ = `${firstName ? firstName + ", w" : "W"}hat do you have access to where you are? Reply:\n\n*1 — gym* — full machines and cables\n*2 — dumbbells* — dumbbells only\n*3 — nothing* — no equipment, bodyweight only`;
+    await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
+    return equipQ;
+  }
+
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
     const effectiveUser = tempEquipmentMode.has(phone)
       ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
@@ -143,11 +183,6 @@ export async function handleEarlyCommands(ctx: {
     return switchReply;
   }
 
-  // ---- HOLIDAY / TRAVEL EQUIPMENT QUESTION ----
-  // If client mentions travel + requests a workout, ask what equipment they have.
-  const isHolidayContext = /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip)\b/i.test(m);
-  const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train)\b/i.test(m);
-
   if (awaitingEquipmentAnswer.get(phone)) {
     awaitingEquipmentAnswer.delete(phone);
     let tempMode = user.trainingMode || "gym";
@@ -162,13 +197,6 @@ export async function handleEarlyCommands(ctx: {
     const tReply = `Here is your session adapted for what you have available.\n\n${workout}\n\nSend *done* when finished.${gifMarker}`;
     await logChat(user.id, message, tReply, "WORKOUT_HOLIDAY");
     return tReply;
-  }
-
-  if (isHolidayContext && isWorkoutRequestInMessage) {
-    awaitingEquipmentAnswer.set(phone, true);
-    const equipQ = `${firstName ? firstName + ", w" : "W"}here are you training from? Reply:\n\n*gym* — full machines and cables\n*dumbbells* — dumbbells only\n*nothing* — no equipment, bodyweight only`;
-    await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
-    return equipQ;
   }
 
   // Must be checked BEFORE awaitingProgrammeAnswers so a new request resets the flow
