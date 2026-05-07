@@ -1,5 +1,10 @@
 const INVALID_NAMES = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
 
+export function sastToday(): string {
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  return sast.toISOString().slice(0, 10);
+}
+
 // SAST = UTC+2, no DST. Returns the UTC Date representing SAST midnight of the given date
 // (or today if omitted). Use this everywhere instead of new Date(); setHours(0,0,0,0) which
 // resolves to UTC midnight = 2am SAST, causing meals logged at midnight–2am to be misattributed.

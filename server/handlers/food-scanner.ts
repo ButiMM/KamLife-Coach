@@ -282,3 +282,117 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
   }
   return { calories, protein };
 }
+
+export function buildFoodLogReply(p: {
+  foodLines: string;
+  mealLabel: string;
+  totalMealCals: number;
+  totalMealProtein: number;
+  runningCals: number;
+  runningProtein: number;
+  calorieTarget: number;
+  proteinTarget: number;
+  prevCals: number;
+  junkNoteText?: string;
+  hasGoodProteins?: boolean;
+  hasCarbs?: boolean;
+  coachNoteOverride?: string;
+  user: any;
+}): string {
+  const {
+    foodLines, mealLabel, totalMealCals, totalMealProtein,
+    runningCals, runningProtein, calorieTarget, proteinTarget,
+    prevCals, junkNoteText, hasGoodProteins, hasCarbs,
+    coachNoteOverride, user,
+  } = p;
+
+  const calRemaining = calorieTarget - runningCals;
+  const proteinRemaining = proteinTarget - runningProtein;
+  const earlyInDay = runningCals < (calorieTarget * 0.4);
+
+  const runningLine = prevCals > 0
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
+    : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+
+  let dayAssessment = "";
+  if (prevCals > 0 && totalMealCals >= 100) {
+    const hourNow = new Date().getUTCHours() + 2;
+    const dayProgress = Math.min(hourNow / 20, 1);
+    const expectedCals = calorieTarget * dayProgress;
+    const calPace = runningCals / Math.max(expectedCals, 1);
+    if (calRemaining <= 0) {
+      dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
+    } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
+      dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
+    } else if (!earlyInDay && calPace > 1.3) {
+      dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
+    } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
+      dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
+    }
+  }
+
+  let coachNote = "";
+  const goal = user.goalType || "fat_loss";
+  if (coachNoteOverride) {
+    coachNote = `\n\n${coachNoteOverride}`;
+  } else if (totalMealCals >= 100) {
+    if (totalMealProtein >= 20) {
+      coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+    } else if (hasGoodProteins && totalMealProtein >= 10) {
+      coachNote = `\n\n${Math.round(totalMealProtein)}g protein this meal — good start. Aim for 20g+ per meal to build up your daily total.`;
+    } else if (!hasGoodProteins && hasCarbs) {
+      coachNote = `\n\nCarbs without protein — add a protein source to your next meal.`;
+    } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
+      coachNote = `\n\nNext meal: add protein — eggs, chicken, or tuna.`;
+    }
+  }
+
+  const junkNote = junkNoteText ? `\n\n${junkNoteText}` : "";
+
+  let proteinTip = "";
+  const budgetTier = user.weeklyFoodBudget || "100_300";
+  const protRemaining = proteinTarget - runningProtein;
+  if (!coachNote && !hasGoodProteins && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
+    const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
+    const suggestions = lowBudget
+      ? [
+          `Next meal: add 2 eggs (12g protein). Fast and cheap.`,
+          `Tin of pilchards with your next meal — 22g protein, R12.`,
+          `Tin of tuna = 25g protein. Easy add.`,
+          `3 boiled eggs ready in the fridge = protein for the rest of the day.`,
+        ]
+      : [
+          `Next meal: chicken, eggs, or fish — at least 20g protein.`,
+          `Greek yoghurt = 10g protein. Good snack if you're not hungry for a full meal.`,
+          `Tin of tuna = 25g protein. Easy, fast, keeps you on target.`,
+          `2 eggs + anything = quick protein fix. Don't skip it.`,
+          `Cottage cheese (15g protein per 100g) — works as a snack or meal add.`,
+        ];
+    proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${Math.round(protRemaining)}g protein still needed today.`;
+  } else if (protRemaining <= 0) {
+    proteinTip = `\n\nProtein target hit. ✅`;
+  }
+
+  let variableReinforcement = "";
+  if (Math.random() < 0.15) {
+    const fn = (user.name || "").split(" ")[0] || "Sharp";
+    const daysSinceStart = user.programmeStartDate
+      ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
+      : 0;
+    const NOTES = [
+      `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
+      `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
+      `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
+      `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
+      `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
+    ];
+    variableReinforcement = NOTES[Math.floor(Math.random() * NOTES.length)];
+  }
+
+  const sastHour = new Date().getUTCHours() + 2;
+  const calorieFloorNote = (sastHour >= 17 && runningCals > 0 && runningCals < 850)
+    ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
+    : "";
+
+  return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
+}
