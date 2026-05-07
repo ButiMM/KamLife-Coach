@@ -68,9 +68,10 @@ export async function handleMiscCommands(ctx: {
   };
   const suppMatch = Object.entries(suppKeywords).find(([kw]) => m.includes(kw));
   if (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take")) {
-    // Supplement week gate — locked before week 4
+    // Supplement week gate — locked before week 4, BUT safety/medical questions always get through
+    const isSafetyQuestion = /\b(safe|safety|danger|dangerous|side effect|kidney|liver|heart|allergy|allergic|interact|reaction|risk|harm|harmful|dose|overdose|too much|cancer|blood pressure|diabetes)\b/i.test(m);
     const progWeek = user.programmeWeek || 1;
-    if (progWeek < 4) {
+    if (progWeek < 4 && !isSafetyQuestion) {
       const weekGate = `Supplements unlock at Week 4.\n\nYou are in Week ${progWeek} — food consistency is the foundation. No supplement will out-work a solid week of eating right.\n\nFocus now: hit your ${user.proteinTarget || 120}g protein target daily from real food. When you reach Week 4, I give you the full supplement protocol — creatine, protein timing, the works.`;
       await logChat(user.id, message, weekGate, "SUPPLEMENT_GATED");
       return weekGate;

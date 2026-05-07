@@ -3,6 +3,7 @@ import { users, workoutLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, desc, count } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
+import { calculateTargets } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { sendWhatsApp } from "../scheduler";
@@ -175,28 +176,28 @@ export async function handleEarlyCommands(ctx: {
     || m.match(/\bwant\s+to\s+(?:do|train)\s+([2-6])\s*days?\s*(?:a\s*week|per\s*week)?\b/i);
   if (directSwitchMatch) {
     const newDays = parseInt(directSwitchMatch[1]);
-    await db.update(users).set({ trainingDaysPerWeek: newDays, programmeDayInWeek: 1 }).where(eq(users.phoneNumber, phone));
+    const newTargets = user.currentWeight
+      ? calculateTargets(
+          parseFloat(user.currentWeight),
+          user.goalType || "fat_loss",
+          user.lifeSituation || "office",
+          newDays,
+          user.gender || "male",
+          user.age || 30,
+          user.heightCm || 170,
+        )
+      : null;
+    await db.update(users).set({
+      trainingDaysPerWeek: newDays,
+      programmeDayInWeek: 1,
+      ...(newTargets ? { calorieTarget: newTargets.calorieTarget, proteinTarget: newTargets.proteinTarget } : {}),
+    }).where(eq(users.phoneNumber, phone));
     const updatedUser = { ...user, trainingDaysPerWeek: newDays, programmeDayInWeek: 1 };
     const newProg = buildFullProgramme(updatedUser);
-    const switchReply = `Done${firstName ? `, ${firstName}` : ""} — updated to ${newDays} days/week. Here is your new programme.\n\n${newProg}`;
+    const targetsNote = newTargets ? `\nTargets updated: ${newTargets.calorieTarget} kcal · ${newTargets.proteinTarget}g protein` : "";
+    const switchReply = `Done${firstName ? `, ${firstName}` : ""} — updated to ${newDays} days/week.${targetsNote}\n\n${newProg}`;
     await logChat(user.id, message, switchReply, "PROGRAMME_SWITCH");
     return switchReply;
-  }
-
-  if (awaitingEquipmentAnswer.get(phone)) {
-    awaitingEquipmentAnswer.delete(phone);
-    let tempMode = user.trainingMode || "gym";
-    if (/\b(full gym|gym|machines|cables|full equipment|1)\b/i.test(m)) tempMode = "gym";
-    else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
-    else if (/\b(nothing|no equipment|bodyweight|hotel room|3)\b/i.test(m)) tempMode = "home";
-    tempEquipmentMode.set(phone, tempMode);
-    const tempUser = { ...user, trainingMode: tempMode };
-    const workout = buildDayWorkout(tempUser);
-    const gifUrl = getPrimaryWorkoutGifUrl(workout);
-    const gifMarker = gifUrl ? `\n[MEDIA:${gifUrl}]` : "";
-    const tReply = `Here is your session adapted for what you have available.\n\n${workout}\n\nSend *done* when finished.${gifMarker}`;
-    await logChat(user.id, message, tReply, "WORKOUT_HOLIDAY");
-    return tReply;
   }
 
   // Must be checked BEFORE awaitingProgrammeAnswers so a new request resets the flow
@@ -837,10 +838,10 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
   // those MUST fall through to lifecycle.ts isProfileUpdate handler.
   const isProfileUpdateMsg =
     /\b(train(ing)?\s+(at|from|to)?\s*(home|gym)|home\s+workout|i\s+train|working\s+out\s+(at\s+)?home|joined.*gym|going.*gym|quit.*gym|no.*gym|left.*gym|change.*goal|my\s+goal\s+is|switch\s+to|new\s+goal|update.*goal|change.*training|training\s+days?)\b/i.test(m);
-  const isComeback = isReturning && !isProfileUpdateMsg && (
-    /\b(i.?m back|i am back|back now|returning|i.?m here|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|reset|fresh start|new week|new day|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m)
-    || m.length < 30 // short message after silence = returning check-in
-  );
+  // Must have an explicit return/excuse phrase — short messages like "done", "today",
+  // "menu", "1" are action intent, not comebacks, and must fall through to their handlers.
+  const isComeback = isReturning && !isProfileUpdateMsg &&
+    /\b(i.?m back|i am back|back now|returning|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|fresh start|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m);
 
   if (isComeback) {
     const daysText = daysSilent === 2 ? "2 days" : daysSilent <= 7 ? `${daysSilent} days` : daysSilent <= 14 ? "a week" : "a while";
