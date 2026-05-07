@@ -491,7 +491,9 @@ export async function handleFoodContext(ctx: {
         }
       }
 
-      const mealLabel = isMultiMeal ? "Day total" : "Meal total";
+      const isSnackLog = /\bsnack\b/i.test(m) || (!isMultiMeal && totalCals < 250 && totalProtein <= 4);
+      const isDessertLog = !isMultiMeal && /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
+      const mealLabel = isMultiMeal ? "Day total" : isDessertLog ? "Dessert" : isSnackLog ? "Snack" : "Meal total";
       const clientGoal = user.goalType || "fat_loss";
       type DenseNote = { fat_loss: string; muscle_gain: string; recomposition: string };
       const DENSE_HEALTHY: Record<string, DenseNote> = {
@@ -601,8 +603,10 @@ export async function handleFoodContext(ctx: {
           }).where(eq(users.phoneNumber, phone));
         } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
         const fbPrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
+        const fbIsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
+        const fbIsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
         const fallbackReply = buildFoodLogReply({
-          foodLines, mealLabel: "Meal total",
+          foodLines, mealLabel: fbIsDessert ? "Dessert" : fbIsSnack ? "Snack" : "Meal total",
           totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
           runningCals, runningProtein, calorieTarget, proteinTarget, prevCals: fbPrevCals,
           coachNoteOverride: gptFallbackResult.coachNote || undefined,
@@ -658,8 +662,10 @@ export async function handleFoodContext(ctx: {
         }).where(eq(users.phoneNumber, phone));
       } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
       const fb2PrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
+      const fb2IsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
+      const fb2IsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
       const fallbackReply = buildFoodLogReply({
-        foodLines, mealLabel: "Meal total",
+        foodLines, mealLabel: fb2IsDessert ? "Dessert" : fb2IsSnack ? "Snack" : "Meal total",
         totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
         runningCals, runningProtein, calorieTarget, proteinTarget: user.proteinTarget || 120,
         prevCals: fb2PrevCals,

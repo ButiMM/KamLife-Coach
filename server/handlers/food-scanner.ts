@@ -331,6 +331,12 @@ export function buildFoodLogReply(p: {
     }
   }
 
+  // Fruit snacks (apple, pear, banana etc.) are categorised as "carb" but protein
+  // lecturing on fruit makes no sense. Suppress when protein ≤ 3g (fruit range) AND
+  // total calories < 300 (snack, not a meal). Grain carbs (pap 6g, rice 4-5g, oats 5g)
+  // clear the threshold and still get the coaching note.
+  const isFruitSnack = totalMealProtein <= 3 && totalMealCals < 300;
+
   let coachNote = "";
   const goal = user.goalType || "fat_loss";
   if (coachNoteOverride) {
@@ -340,7 +346,7 @@ export function buildFoodLogReply(p: {
       coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
     } else if (hasGoodProteins && totalMealProtein >= 10) {
       coachNote = `\n\n${Math.round(totalMealProtein)}g protein this meal — good start. Aim for 20g+ per meal to build up your daily total.`;
-    } else if (!hasGoodProteins && hasCarbs) {
+    } else if (!hasGoodProteins && hasCarbs && !isFruitSnack) {
       coachNote = `\n\nCarbs without protein — add a protein source to your next meal.`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
       coachNote = `\n\nNext meal: add protein — eggs, chicken, or tuna.`;

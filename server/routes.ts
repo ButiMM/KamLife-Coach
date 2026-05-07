@@ -1232,6 +1232,22 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
   const lifecycleResult = await handleLifecycle({ phone, message, m, user });
   if (lifecycleResult !== null) return lifecycleResult;
 
+  // ---- LANGUAGE DETECTION — needed for GPT instruction and response prefix ----
+  const _detectedLang = detectLanguage(m);
+  const activeLang: string = _detectedLang !== "en" ? _detectedLang : (user.preferredLanguage || "en");
+  let langPrefix = "";
+  if (activeLang !== "en") {
+    const _langFirstName = user.name?.split(" ")[0] || "";
+    switch (activeLang) {
+      case "zu": langPrefix = `Sawubona ${_langFirstName}. `; break;
+      case "xh": langPrefix = `Molo ${_langFirstName}. `; break;
+      case "st": langPrefix = `Dumela ${_langFirstName}. `; break;
+      case "tn": langPrefix = `Dumela ${_langFirstName}. `; break;
+      case "ts": langPrefix = `Avuxeni ${_langFirstName}. `; break;
+      case "af": langPrefix = `Dag ${_langFirstName}. `; break;
+    }
+  }
+
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });

@@ -828,7 +828,7 @@ export async function handleLifecycle(ctx: {
     /\b(change.*budget|budget.*changed|my budget is now|budget is now|new budget)\b/i.test(m) ||
     (!hasNegativeGym && /\b(joined.*gym|got.*gym|have.*gym|going to.*gym|now.*gym|gym.*membership)\b/i.test(m)) ||
     /\b(change.*training days|training.*(\d)\s*days|now training.*(\d)|(\d)\s*days.*week.*train)\b/i.test(m) ||
-    /\b(training at home|working out at home|no.*gym.*more|quit.*gym|left.*gym|home.*workout.*now)\b/i.test(m) ||
+    /\b(training at home|train.*from home|train.*at home|i train.*home|working out at home|no.*gym.*more|quit.*gym|left.*gym|home.*workout.*now)\b/i.test(m) ||
     (!hasNegativeGym && /\b(want to gym|going to gym|start gym|gym.*\d+.*day|train.*\d+.*day|workout.*\d+.*day|\d+.*day.*gym|\d+.*day.*train|\d+.*day.*week)\b/i.test(m));
 
   if (isProfileUpdate) {
