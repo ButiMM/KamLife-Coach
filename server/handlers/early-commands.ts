@@ -733,7 +733,7 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
       dietBreakCalTarget: user.calorieTarget || 1800,
       calorieTarget: maintenanceCals,
     }).where(eq(users.phoneNumber, phone));
-    const dbReply = `${capName}, diet break starts now. *7 days at maintenance.*\n\n*Your targets this week:*\n• Calories: ${maintenanceCals} kcal/day (+300 above deficit)\n• Protein: ${user.proteinTarget || 120}g/day — keep this the same\n\n*Why this works:*\nAfter ${week} weeks in deficit, your hunger hormones are elevated and metabolism has adapted slightly. One maintenance week resets both. You won't gain fat — you'll mostly refill muscle glycogen (carbs stored in muscle). You may see the scale go up 0.5–1kg — that's water and glycogen, not fat.\n\n*Eating this week:* Same foods, just more carbs. Add an extra portion of sweet potato, oats, or rice. Don't eat junk — just eat more of the right things.\n\nIn 7 days we go back to the deficit, stronger and more focused. I'll remind you.`;
+    const dbReply = `${capName}, diet break starts now — 7 days at maintenance.\n\n• Calories: *${maintenanceCals} kcal/day*\n• Protein: ${user.proteinTarget || 120}g/day — unchanged\n\nSame foods, just add more carbs (sweet potato, oats, rice). Scale may go up 0.5–1kg — that's glycogen, not fat. In 7 days we go back to the deficit. I'll remind you.`;
     await logChat(user.id, message, dbReply, "DIET_BREAK");
     return dbReply;
   }
