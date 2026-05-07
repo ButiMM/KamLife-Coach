@@ -20,6 +20,7 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "squat": "squat",
   "squats": "squat",
   "back squat": "squat",
+  "smith squat": "squat",
   "goblet squat": "goblet-squat",
   "leg press": "leg-press",
   "leg curl": "leg-curl",
@@ -28,6 +29,7 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "leg extension": "leg-extension",
   "romanian deadlift": "rdl",
   "rdl": "rdl",
+  "dumbbell rdl": "rdl",
   "stiff leg deadlift": "rdl",
   "deadlift": "deadlift",
   "sumo deadlift": "sumo-deadlift",
@@ -37,6 +39,8 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "lunges": "lunge",
   "walking lunge": "lunge",
   "reverse lunge": "reverse-lunge",
+  "bulgarian split squat": "bulgarian-split-squat",
+  "split squat": "bulgarian-split-squat",
   "step up": "step-up",
   "step ups": "step-up",
   "calf raise": "calf-raise",
@@ -49,31 +53,45 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "incline bench press": "incline-bench-press",
   "push up": "push-up",
   "push ups": "push-up",
+  "chest press": "chest-press-machine",
   "chest press machine": "chest-press-machine",
+  "machine chest press": "chest-press-machine",
+  "chest fly": "chest-fly",
+  "dumbbell chest fly": "chest-fly",
   "overhead press": "overhead-press",
   "ohp": "overhead-press",
   "shoulder press": "overhead-press",
+  "machine shoulder press": "overhead-press",
   "dumbbell shoulder press": "db-shoulder-press",
   "lateral raise": "lateral-raise",
   "lateral raises": "lateral-raise",
+  "cable lateral raise": "lateral-raise",
   "tricep dips": "tricep-dips",
   "dips": "tricep-dips",
   "tricep pushdown": "tricep-pushdown",
+  "cable tricep pushdown": "tricep-pushdown",
+  "kickback": "kickback",
+  "cable kickback": "kickback",
+  "machine kickback": "kickback",
   "skull crusher": "skull-crusher",
 
   // Pull
   "pull up": "pull-up",
   "pull ups": "pull-up",
+  "assisted pull-up": "pull-up",
   "chin up": "chin-up",
   "chin ups": "chin-up",
   "lat pulldown": "lat-pulldown",
+  "seated row": "seated-row",
   "seated cable row": "seated-row",
   "cable row": "seated-row",
+  "upper back row": "seated-row",
   "bent over row": "bent-over-row",
   "barbell row": "bent-over-row",
   "dumbbell row": "db-row",
   "single arm row": "db-row",
   "face pull": "face-pull",
+  "cable face pull": "face-pull",
   "bicep curl": "bicep-curl",
   "bicep curls": "bicep-curl",
   "hammer curl": "hammer-curl",
@@ -100,12 +118,32 @@ const EXERCISE_SLUGS: Record<string, string> = {
 
 /**
  * Returns the GIF URL for a given exercise name, or null if not configured / not found.
+ * Handles "Exercise A / Exercise B" alternatives and strips common machine prefixes.
  */
 export function getExerciseGifUrl(exerciseName: string): string | null {
   if (!BASE) return null;
-  const slug = EXERCISE_SLUGS[exerciseName.toLowerCase().trim()];
-  if (!slug) return null;
-  return `${BASE}/ex/${slug}.gif`;
+  const name = exerciseName.toLowerCase().trim();
+
+  // Direct lookup
+  let slug = EXERCISE_SLUGS[name];
+  if (slug) return `${BASE}/ex/${slug}.gif`;
+
+  // Handle "Exercise A / Exercise B" — try each alternative left to right
+  if (name.includes(" / ")) {
+    for (const part of name.split(" / ")) {
+      slug = EXERCISE_SLUGS[part.trim()];
+      if (slug) return `${BASE}/ex/${slug}.gif`;
+    }
+  }
+
+  // Strip common equipment prefixes and retry
+  const stripped = name.replace(/^(machine|cable|smith|barbell|assisted|seated|standing|lying|dumbbell)\s+/, "");
+  if (stripped !== name) {
+    slug = EXERCISE_SLUGS[stripped];
+    if (slug) return `${BASE}/ex/${slug}.gif`;
+  }
+
+  return null;
 }
 
 /**
