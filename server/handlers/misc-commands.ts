@@ -13,8 +13,9 @@ import { SUPPLEMENT_GUIDE } from "../constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "../exercise-media";
 import {
   buildDayWorkout, buildDayWorkoutForType, buildFullProgramme,
-  getKamlifeProgramme, getDayType, getOnboardingMealPlan,
+  getKamlifeProgramme, getDayType,
 } from "../programme";
+import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
 import { calculateTargets } from "../targets";
