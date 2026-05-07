@@ -94,29 +94,6 @@ async function getOrCreateUser(phone: string): Promise<any> {
 
 const getStepResponse = _getStepResponse;
 
-// ============================================================
-// FOOD PATTERN DETECTION
-// ============================================================
-
-const JUNK_WORDS = _JUNK_WORDS;
-
-// Build PROTEIN_WORDS dynamically from SA_FOODS_SEED so expanding the database
-// automatically fixes false-positive protein warnings. Any food with >=8g protein
-// per 100g OR >=10g protein per typical portion is treated as a protein source.
-const PROTEIN_WORDS: string[] = Array.from(new Set([
-  ...SA_FOODS_SEED
-    .filter(f => f.proteinPer100g >= 8 || f.typicalPortionProtein >= 10)
-    .flatMap(f => [f.name.toLowerCase(), ...f.aliases.map((a: string) => a.toLowerCase())]),
-  // Extra SA protein keywords users might type that may not exactly match DB entries
-  "protein", "shake", "whey", "steak", "braai", "wors", "boerewors",
-  "smileys", "mogodu", "tripe", "liver", "walkie talkies", "chicken feet",
-  "oxtail", "ox tail", "sosaties", "chesa nyama", "bobotie",
-  // Core protein sources — must ALWAYS suppress protein warning
-  "chicken", "beef", "fish", "tuna", "mince", "pork", "lamb", "turkey",
-  "salmon", "hake", "sardine", "sardines", "prawn", "prawns", "biltong",
-  "droëwors", "droewors", "cottage cheese", "greek yoghurt", "greek yogurt",
-]));
-
 // Onboarding functions moved to ./onboarding (see imports above)
 
 // ============================================================
