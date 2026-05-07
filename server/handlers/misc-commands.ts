@@ -425,6 +425,7 @@ export async function handleMiscCommands(ctx: {
   if (/\b(my week|weekly stats|progress card|week report|how.*i doing this week|weekly progress|my weekly|weekly card|week card|my stats this week|progress this week)\b/i.test(m)) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
       const name = user.name?.split(" ")[0] || "there";
       const wStreak = user.workoutStreak || 0;
       const programmeDays = user.programmeStartDate
@@ -432,21 +433,29 @@ export async function handleMiscCommands(ctx: {
         : 0;
       const weekNum = programmeDays > 0 ? Math.ceil(programmeDays / 7) : 1;
 
-      const [weekWorkouts, weekMeals] = await Promise.all([
+      const [weekWorkouts, weekMeals, weekSteps, recentWeights] = await Promise.all([
         db.select({ id: workoutLogs.id, loggedAt: workoutLogs.loggedAt })
           .from(workoutLogs)
           .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
         db.select({ loggedAt: mealLogs.loggedAt, proteinInt: mealLogs.proteinInt })
           .from(mealLogs)
           .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+        db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+          .from(weightLogs)
+          .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, fourteenDaysAgo)))
+          .orderBy(asc(weightLogs.loggedAt)),
       ]);
 
-      const foodDays = new Set(weekMeals.map(m => {
-        const d = new Date((m.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+      // Food: days with at least one logged meal
+      const foodDays = new Set(weekMeals.map(ml => {
+        const d = new Date((ml.loggedAt?.getTime() || 0) + 2 * 3_600_000);
         return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
       })).size;
 
-      // Best protein day
+      // Best protein day this week
       const protByDay: Record<string, number> = {};
       for (const meal of weekMeals) {
         const d = new Date((meal.loggedAt?.getTime() || 0) + 2 * 3_600_000);
@@ -455,39 +464,60 @@ export async function handleMiscCommands(ctx: {
       }
       const bestProt = Object.values(protByDay).length > 0 ? Math.max(...Object.values(protByDay)) : 0;
       const protTarget = user.proteinTarget || 130;
-      const protLine = bestProt > 0
-        ? (bestProt >= protTarget ? `💪 Best: ${bestProt}g protein — *target hit*` : `💪 Best: ${bestProt}g protein`)
-        : "";
+
+      // Steps: average this week
+      const stepsTarget = user.stepsTarget || 8500;
+      const avgSteps = weekSteps.length > 0
+        ? Math.round(weekSteps.reduce((s, r) => s + (r.steps || 0), 0) / weekSteps.length)
+        : 0;
+      const daysHitSteps = weekSteps.filter(r => (r.steps || 0) >= stepsTarget).length;
+
+      // Weight: change over the period
+      const oldestWeight = recentWeights.length >= 2 ? parseFloat(recentWeights[0].weight || "0") : 0;
+      const newestWeight = recentWeights.length >= 1 ? parseFloat(recentWeights[recentWeights.length - 1].weight || "0") : 0;
+      const weightDelta = (oldestWeight > 0 && newestWeight > 0) ? (newestWeight - oldestWeight) : null;
 
       const workoutCount = weekWorkouts.length;
       const trainingDays = user.trainingDaysPerWeek || 3;
-      const scoreEmoji = workoutCount >= trainingDays && foodDays >= 5 ? "🔥" : workoutCount >= trainingDays || foodDays >= 5 ? "✅" : "📈";
 
-      let referralCode = user.referralCode;
-      if (!referralCode) {
-        const prefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
-        referralCode = `${prefix}${Math.floor(1000 + Math.random() * 9000)}`;
-        await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
+      // Score: how many of the 3 pillars did they hit?
+      const pillars = [workoutCount >= trainingDays, foodDays >= 5, avgSteps >= stepsTarget].filter(Boolean).length;
+      const scoreEmoji = pillars === 3 ? "🔥" : pillars >= 2 ? "✅" : "📈";
+
+      // Build card lines
+      const lines: string[] = [];
+      lines.push(`${scoreEmoji} *${name} — Week ${weekNum} Summary*`);
+      lines.push(``);
+      lines.push(`🏋️ *Workouts:* ${workoutCount}/${trainingDays}${workoutCount >= trainingDays ? " ✅" : ""}`);
+      if (avgSteps > 0) {
+        lines.push(`👟 *Steps avg:* ${avgSteps.toLocaleString()}/day${daysHitSteps > 0 ? ` (${daysHitSteps} days hit target)` : ""}`);
+      }
+      lines.push(`🥗 *Food logged:* ${foodDays}/7 days${foodDays >= 5 ? " ✅" : ""}`);
+      if (bestProt > 0) {
+        lines.push(`💪 *Best protein day:* ${bestProt}g${bestProt >= protTarget ? " — target hit ✅" : ` (target: ${protTarget}g)`}`);
+      }
+      if (wStreak > 0) lines.push(`🔥 *Streak:* ${wStreak} sessions`);
+      if (weightDelta !== null) {
+        const arrow = weightDelta < -0.1 ? "⬇️" : weightDelta > 0.3 ? "⬆️" : "➡️";
+        lines.push(`⚖️ *Weight:* ${newestWeight}kg ${arrow} (${weightDelta > 0 ? "+" : ""}${weightDelta.toFixed(1)}kg this period)`);
+      }
+      lines.push(``);
+
+      // Closing line based on performance
+      if (pillars === 3) {
+        lines.push(`Locked in. Three pillars hit — workouts, steps, food. This is the week that moves the needle.`);
+      } else if (workoutCount >= trainingDays) {
+        lines.push(`Workouts done — that's the hardest one. Close the food or steps gap next week and the results compound.`);
+      } else if (foodDays >= 5) {
+        lines.push(`Solid food discipline. Now pair that with the sessions — ${trainingDays - workoutCount} workout${trainingDays - workoutCount > 1 ? "s" : ""} left this week.`);
+      } else {
+        lines.push(`Next week: workouts first, food second. One consistent week is all it takes to build momentum.`);
       }
 
-      const cardLines = [
-        `${scoreEmoji} *${name} — Week ${weekNum} Report*`,
-        ``,
-        `🏋️ Workouts: ${workoutCount}/${trainingDays}`,
-        `🔥 Streak: ${wStreak} sessions`,
-        `🥗 Food logged: ${foodDays}/7 days`,
-        protLine,
-        ``,
-        workoutCount >= trainingDays && foodDays >= 5
-          ? `Consistent week. This is what results look like in the making.`
-          : workoutCount >= trainingDays || foodDays >= 5
-            ? `Solid effort. Close the one gap next week.`
-            : `One more push next week — you have the plan, now execute it.`,
-        ``,
-        `_KamLife Coach — forward this to a friend who needs accountability. Code *${referralCode}* gets them month 1 for R50._`,
-      ].filter(l => l !== undefined);
+      lines.push(``);
+      lines.push(`_Screenshot this and send it to whoever keeps you accountable._`);
 
-      const cardReply = cardLines.join("\n");
+      const cardReply = lines.join("\n");
       await logChat(user.id, message, cardReply, "PROGRESS_CARD");
       return cardReply;
     } catch (e) {
