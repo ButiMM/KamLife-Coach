@@ -805,7 +805,11 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
   // ---- COMEBACK AFTER SILENCE (2+ days) ----
   // Detect when a client returns with an excuse/explanation after going quiet.
   // Respond with empathy and a clean restart plan — not a workout delivered cold.
-  const isComeback = isReturning && (
+  // Guard: do NOT intercept profile-update messages (training mode, goals, days) —
+  // those MUST fall through to lifecycle.ts isProfileUpdate handler.
+  const isProfileUpdateMsg =
+    /\b(train(ing)?\s+(at|from|to)?\s*(home|gym)|home\s+workout|i\s+train|working\s+out\s+(at\s+)?home|joined.*gym|going.*gym|quit.*gym|no.*gym|left.*gym|change.*goal|my\s+goal\s+is|switch\s+to|new\s+goal|update.*goal|change.*training|training\s+days?)\b/i.test(m);
+  const isComeback = isReturning && !isProfileUpdateMsg && (
     /\b(i.?m back|i am back|back now|returning|i.?m here|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|reset|fresh start|new week|new day|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m)
     || m.length < 30 // short message after silence = returning check-in
   );

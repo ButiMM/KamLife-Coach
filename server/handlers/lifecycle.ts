@@ -888,34 +888,47 @@ export async function handleLifecycle(ctx: {
     }
 
     if (Object.keys(updates).length > 0) {
-      // Recalculate targets if weight-related fields changed
-      if (updates.goalType || updates.trainingDaysPerWeek) {
-        const currentWeight = parseFloat(user.currentWeight || "75");
-        const newGoal = updates.goalType || user.goalType || "fat_loss";
-        const newDays = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
-        const { calorieTarget, proteinTarget } = calculateTargets(currentWeight, newGoal, user.lifeSituation || "office", newDays);
-        updates.calorieTarget = calorieTarget;
-        updates.proteinTarget = proteinTarget;
-        updateSummary += ` New targets: ${calorieTarget} kcal/day, ${proteinTarget}g protein.`;
+      try {
+        // Recalculate targets if weight-related fields changed
+        if (updates.goalType || updates.trainingDaysPerWeek) {
+          const currentWeight = parseFloat(user.currentWeight || "75");
+          const newGoal = updates.goalType || user.goalType || "fat_loss";
+          const newDays = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
+          const { calorieTarget, proteinTarget } = calculateTargets(currentWeight, newGoal, user.lifeSituation || "office", newDays);
+          updates.calorieTarget = calorieTarget;
+          updates.proteinTarget = proteinTarget;
+          updateSummary += ` New targets: ${calorieTarget} kcal/day, ${proteinTarget}g protein.`;
+        }
+        // When switching training mode or days, reset programme day to 1 so the
+        // next workout request doesn't inherit a stale leg/lower day from a gym split.
+        if (updates.trainingMode || updates.trainingDaysPerWeek) {
+          updates.programmeDayInWeek = 1;
+        }
+        await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
+        // If training mode or days changed, rebuild and show the programme immediately
+        const clientName = user.name || "";
+        let profileReply = "";
+        if (updates.trainingMode || updates.trainingDaysPerWeek) {
+          const updatedUser = { ...user, ...updates };
+          const newProgramme = buildFullProgramme(updatedUser);
+          const modeLabel = (updates.trainingMode || user.trainingMode || "home") === "gym" ? "Gym" : "Home";
+          const daysLabel = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
+          profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. ${daysLabel} days/week. ${modeLabel}. New programme built.\n\n${newProgramme}`;
+        } else if (updates.goalType) {
+          const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "recomposition" };
+          profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. Goal updated to ${goalLabel[updates.goalType] || updates.goalType}. New targets: ${updates.calorieTarget} kcal/day, ${updates.proteinTarget}g protein. Programme stays the same — reply *programme* to see it.`;
+        } else {
+          profileReply = `Sharp. Profile updated. Reply *menu* to see your options.`;
+        }
+        await logChat(user.id, message, profileReply, "PROFILE_UPDATE");
+        return profileReply;
+      } catch (profileUpdateErr) {
+        console.error("[PROFILE_UPDATE_ERR]", { updates, err: profileUpdateErr instanceof Error ? profileUpdateErr.message : String(profileUpdateErr) });
+        // Surface a safe fallback rather than crashing to global handler
+        const fallbackReply = `Profile noted — your training mode and targets have been saved. Reply *menu* to see everything.`;
+        await logChat(user.id, message, fallbackReply, "PROFILE_UPDATE").catch(() => {});
+        return fallbackReply;
       }
-      await db.update(users).set(updates).where(eq(users.phoneNumber, phone));
-      // If training mode or days changed, rebuild and show the programme immediately
-      const clientName = user.name || "";
-      let profileReply = "";
-      if (updates.trainingMode || updates.trainingDaysPerWeek) {
-        const updatedUser = { ...user, ...updates };
-        const newProgramme = buildFullProgramme(updatedUser);
-        const modeLabel = (updates.trainingMode || user.trainingMode || "home") === "gym" ? "Gym" : "Home";
-        const daysLabel = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
-        profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. ${daysLabel} days/week. ${modeLabel}. New programme built.\n\n${newProgramme}`;
-      } else if (updates.goalType) {
-        const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "recomposition" };
-        profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. Goal updated to ${goalLabel[updates.goalType] || updates.goalType}. New targets: ${updates.calorieTarget} kcal/day, ${updates.proteinTarget}g protein. Programme stays the same — reply *programme* to see it.`;
-      } else {
-        profileReply = `Sharp. Profile updated. Reply *menu* to see your options.`;
-      }
-      await logChat(user.id, message, profileReply, "PROFILE_UPDATE");
-      return profileReply;
     }
     // If we couldn't parse what to update, fall through to GPT
   }
