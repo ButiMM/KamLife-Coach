@@ -24,7 +24,7 @@ import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday } from "../utils";
+import { sastToday, sastDayStart } from "../utils";
 import { SA_FOODS_SEED } from "../foods";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -360,6 +360,47 @@ export async function handleMiscCommands(ctx: {
     const stepsT = user.stepsTarget || 8500;
     const name2 = user.name ? `${user.name} — ` : "";
     return `${name2}${stepsT.toLocaleString()} steps is your target. Log your steps tonight — "8500 steps" or "I walked 6km".`;
+  }
+
+  // ---- STEPS TODAY — "how many steps today?", "steps today", "did I hit my steps" ----
+  if (/\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m)) {
+    try {
+      const [todayStep] = await db.select({ steps: stepLogs.steps })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
+        .orderBy(desc(stepLogs.loggedAt))
+        .limit(1);
+      const logged = todayStep?.steps || 0;
+      const target = user.stepsTarget || 8500;
+      const remaining = Math.max(0, target - logged);
+      const name2 = user.name?.split(" ")[0] || "";
+      if (!logged) return `${name2 ? name2 + ", n" : "N"}o steps logged yet today. Send your count — "8500 steps" or "walked 5km".`;
+      if (remaining === 0) return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps today. Target hit ✅`;
+      return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps logged today. ${remaining.toLocaleString()} to go to hit your ${target.toLocaleString()} target.`;
+    } catch { /* fall through */ }
+  }
+
+  // ---- WEIGHT HISTORY — "weight history", "weight trend", "how much have I lost" ----
+  if (/\b(weight history|weight trend|my weights|all my weights|weight progress|how much (weight )?(have i|did i) (lost?|gained?)|total (weight )?(lost?|gained?)|weight (since|over time))\b/i.test(m)) {
+    try {
+      const logs = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+        .from(weightLogs)
+        .where(eq(weightLogs.userId, user.id))
+        .orderBy(asc(weightLogs.loggedAt));
+      if (logs.length === 0) return `No weight history yet. Log your first weight — just send "84kg".`;
+      const first = parseFloat(String(logs[0].weight));
+      const latest = parseFloat(String(logs[logs.length - 1].weight));
+      const totalChange = latest - first;
+      const goal = user.goalType || "fat_loss";
+      const changeDir = totalChange < 0 ? `Down ${Math.abs(totalChange).toFixed(1)}kg` : totalChange > 0 ? `Up ${totalChange.toFixed(1)}kg` : "No change";
+      const verdict = goal === "fat_loss" && totalChange < -1 ? "Moving in the right direction." : goal === "muscle_gain" && totalChange > 0.5 ? "Scale is going up — keep fuelling." : goal === "fat_loss" && totalChange >= 0 ? "Scale hasn't moved yet — check food logging consistency." : "";
+      const recent = logs.slice(-5).map(l => {
+        const d = new Date(l.loggedAt as Date);
+        return `• ${parseFloat(String(l.weight)).toFixed(1)}kg — ${d.toLocaleDateString("en-ZA", { day: "numeric", month: "short" })}`;
+      }).join("\n");
+      const name2 = user.name?.split(" ")[0] || "";
+      return `*${name2 ? name2 + "'s " : ""}Weight History*\n\n${recent}\n\n${changeDir} since you started. ${verdict}`.trim();
+    } catch { /* fall through */ }
   }
   if (["protein", "my protein", "protein target", "daily protein", "protein daily", "how much protein", "my protein target"].includes(m)) {
     const p = user.proteinTarget || 140;

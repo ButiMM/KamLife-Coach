@@ -101,6 +101,7 @@ export async function handleEarlyCommands(ctx: {
   if (/\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
     tempEquipmentMode.delete(phone);
     awaitingEquipmentAnswer.delete(phone);
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
     const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Reply *menu* or *workout* for today's session.`;
     await logChat(user.id, message, backMsg, "BACK_TO_GYM");
     return backMsg;
@@ -110,9 +111,11 @@ export async function handleEarlyCommands(ctx: {
   // Must be checked BEFORE the workout delivery so it intercepts correctly.
   const isHolidayMention = /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip|at home today|only have dumbbells|no gym today|training at home today|can.?t get to the gym)\b/i.test(m);
 
-  // If awaiting equipment answer, handle it now regardless of what they typed
-  if (awaitingEquipmentAnswer.get(phone)) {
+  // If awaiting equipment answer — check in-memory map AND db field (survives restart)
+  const isAwaitingEquipment = awaitingEquipmentAnswer.get(phone) || user.awaitingInputType === "equipment";
+  if (isAwaitingEquipment) {
     awaitingEquipmentAnswer.delete(phone);
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
     let tempMode = user.trainingMode || "gym";
     if (/\b(full gym|gym|machines|cables|full equipment|1)\b/i.test(m)) tempMode = "gym";
     else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
@@ -131,6 +134,7 @@ export async function handleEarlyCommands(ctx: {
   const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train|send me|my workout|today)\b/i.test(m);
   if (isHolidayMention) {
     awaitingEquipmentAnswer.set(phone, true);
+    await db.update(users).set({ awaitingInputType: "equipment" }).where(eq(users.phoneNumber, phone)).catch(() => {});
     const equipQ = `${firstName ? firstName + ", w" : "W"}hat do you have access to where you are? Reply:\n\n*1 — gym* — full machines and cables\n*2 — dumbbells* — dumbbells only\n*3 — nothing* — no equipment, bodyweight only`;
     await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
     return equipQ;
@@ -201,12 +205,15 @@ export async function handleEarlyCommands(ctx: {
   }
 
   // Must be checked BEFORE awaitingProgrammeAnswers so a new request resets the flow
-  const isNewProgrammeRequest =
+  // Guard: if message contains quit/frustration signal, do NOT put them in programme setup
+  const isQuitOrFrustrated = /\b(quit|giving up|not doing this|done with this|cancel|i.?m out|too hard|not worth|hate this|this (sucks|is shit|doesn.?t work|is useless|is a waste))\b/i.test(m);
+  const isNewProgrammeRequest = !isQuitOrFrustrated && (
     /\b(new|change|different|update|rebuild|swap|switch|give me a new|i need a new|want a new)\b.{0,30}\b(programme|program|workout|training plan|plan|gym|home)\b/i.test(m) ||
     /\b(programme|program|workout|training)\b.{0,30}\b(new|change|different|update|rebuild)\b/i.test(m) ||
     /\b(a new one|different one|another one|new gym|new home|new workout|new training)\b/i.test(m) ||
     /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
-    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m);
+    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m)
+  );
 
   if (isNewProgrammeRequest) {
     await db.update(users).set({ awaitingProgrammeAnswers: true }).where(eq(users.phoneNumber, phone));

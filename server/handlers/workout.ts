@@ -386,19 +386,8 @@ export async function handleWorkoutCommands(ctx: {
     }
   }
 
-  // ---- WEIGHT MENTION: update stored weight if client states a different one ----
-  const weightInMsg = m.match(/\b(\d{2,3}(?:\.\d)?)\s*kg\b/);
-  if (weightInMsg) {
-    const mentionedKg = parseFloat(weightInMsg[1]);
-    const storedKg = parseFloat(user.currentWeight || "0");
-    if (mentionedKg >= 35 && mentionedKg <= 250 && Math.abs(mentionedKg - storedKg) > 0.4) {
-      const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(mentionedKg, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
-      await db.update(users).set({ currentWeight: mentionedKg.toString(), proteinTarget: newProtein, calorieTarget: newCals }).where(eq(users.phoneNumber, phone));
-      ctx.user.currentWeight = mentionedKg.toString();
-      ctx.user.proteinTarget = newProtein;
-      ctx.user.calorieTarget = newCals;
-    }
-  }
+  // Passive weight mention guard removed — caused false positives ("my friend weighs 85kg",
+  // "the bar is 20kg"). Explicit weight logging via handleWeightLog covers the real case.
 
   // ---- PROGRAMME SETUP REPLY — detect "3 intermediate lose fat" style answers ----
   const hasDayCount = /\b[3-5]\b/.test(m);

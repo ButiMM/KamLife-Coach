@@ -390,7 +390,10 @@ export function getOnboardingMealPlan(user: any): string {
   const header = `*Your Personalised 7 Day Meal Plan*\n${name} | Goal: ${goalLabels[goal] || goal} | ${adjustedCal} cal/day | ${adjustedProt}g protein/day\nBudget: ${budgetLabels[budget]} per week | Shop at Shoprite or Boxer${medFlags.length > 0 ? `\n⚠️ Medical: ${medFlags.join(" · ")}` : ""}`;
   const trainingLine = `\n*Training Days:* ${trainingDaysStr} (${daysPerWeek} day${daysPerWeek > 1 ? "s" : ""}/week)`;
 
-  return `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}\n${plan}\n\n${shopList}\nEstimated total: R${shopTotal}\n🛒 Pro tip: ${proTip}\n\n_Reply SWAP [day] to swap any day. Reply SHOPPING LIST for just the shopping list. Reply WHY to understand why I chose these specific foods for your goal._`;
+  const headerBlock = `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}`;
+  const planBlock = plan.trim();
+  const shopBlock = `${shopList}\nEstimated total: R${shopTotal}\n🛒 ${proTip}`;
+  return `${headerBlock}\n\n---\n\n${planBlock}\n\n---\n\n${shopBlock}\n\n_Reply SWAP [day] to swap a day. Reply SHOPPING LIST for just the shopping list._`;
 }
 
 // ============================================================
