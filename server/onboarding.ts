@@ -473,10 +473,25 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
   const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
 
-  const refCodeLine = referralCode ? `\n\n🎁 *Referral code: ${referralCode}* — share it. Friends get 50% off month 1. You get R50 credit when they subscribe.` : "";
-  const msg1 = `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Steps:* ${stepsLabel}/day — mandatory\n*Calories:* ${calorieTarget} kcal/day\n*Protein:* ${proteinTarget}g/day${ageNote}${refCodeLine}\n\n_Coach K is AI — not a substitute for medical advice._`;
-  const msg2 = `*Day 1 — Your first session:*\n\n${firstWorkout}\n\nSend *done* when finished.`;
-  const msg3 = `${shoppingPreview}\n\nTell me what you ate today and let's start. After the trial: *R149/month* — R5/day.`;
+  const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. Your friend gets 50% off month 1. You get R50 credit when they subscribe.` : "";
+
+  // Goal-specific hook line — personal, not generic
+  const goalHook: Record<string, string> = {
+    fat_loss: `The weight does not come off in the gym — it comes off in the kitchen and on your feet. I have set your targets so you lose fat without starving.`,
+    muscle_gain: `Muscle is built with consistency, not intensity. Progressive overload every session and enough protein — that is the whole secret. I have set your numbers.`,
+    recomposition: `Recomp takes longer but the results last. We build muscle and lose fat at the same time. Protein stays high, training stays consistent, steps stay non-negotiable.`,
+  };
+
+  const trainingHook = mode === "walk_only"
+    ? `No gym needed. Walking and bodyweight — done right, it changes your body.`
+    : mode === "home"
+      ? `Home training is underrated. The best results I have seen came from people with no gym and no excuses.`
+      : `${gymName || "The gym"} is your tool. How you use it decides everything.`;
+
+  const name = u.name || "there";
+  const msg1 = `${name}, your programme is live. *7 days free — let's go.*\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
+  const msg2 = `*Day 1 starts now.*\n\n${firstWorkout}\n\nSend *done* when you finish. I will log it.`;
+  const msg3 = `${shoppingPreview}\n\nTell me what you had to eat today — even if it was not perfect. That is how we start.\n\n_After the trial: R149/month — R5/day. Cancel anytime._`;
   return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
@@ -490,10 +505,10 @@ export async function handleOnboarding(user: any, message: string, phone: string
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
-  // ---- START — POPIA consent combined with introduction ----
+  // ---- START — lead with value, keep legal minimal ----
   if (state === "START") {
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here — your AI-powered SA fitness and nutrition coach. Real programmes, real food advice, real accountability.\n\n⚠️ *Important:* Coach K is an AI tool — not a human coach, not a doctor, not a dietitian. Always consult your doctor before starting a new exercise or nutrition programme, especially if you have diabetes, hypertension, HIV/ARVs, a heart condition, or any other health condition.\n\n🔒 *Your data:* Stored securely under POPIA. Used only for your coaching. Never sold. Deleted on request — reply *delete my data* at any time.\n\n💳 *Subscription:* 7-day free trial, then R149/month. Cancel anytime by replying *cancel*.\n\nReply *yes* to start.`;
+    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\n7-day free trial. Then R149/month — cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
   }
 
   // ---- ASK_POPIA ----
@@ -503,7 +518,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       await db.update(users).set({ popiConsent: true, popiConsentAt: new Date(), onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
       return `Sharp. What's your name?`;
     }
-    return `I need your consent before I can coach you. Your data is used only for your coaching — never sold. Reply *yes* to continue.`;
+    return `I need your agreement before I can coach you. Your data is used only for your coaching — never sold. Reply *yes* to continue.`;
   }
 
   // ---- WELCOME — name ----

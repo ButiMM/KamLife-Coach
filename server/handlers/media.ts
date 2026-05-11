@@ -251,9 +251,11 @@ export async function handleMediaMessage(ctx: {
           const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
             || "I can see both photos but could not compare them clearly. Send them in better lighting.";
           await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
-          return `Progress photo ${photoNumber} saved — ${daysBetween} days since photo 1.\n\n${comparisonText}`;
+          const weeksLabel = Math.round(daysBetween / 7);
+          const weekStr = weeksLabel === 1 ? "1 week" : `${weeksLabel} weeks`;
+          return `Photo ${photoNumber} — ${weekStr} of work.\n\n${comparisonText}`;
         } else {
-          return `Progress photo 1 saved, ${clientName}. Send your next progress photo in 30 days and I will compare them side by side and tell you exactly what changed.`;
+          return `Saved, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
         }
       }
 
