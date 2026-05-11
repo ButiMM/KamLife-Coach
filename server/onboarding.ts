@@ -397,6 +397,90 @@ export function getOnboardingMealPlan(user: any): string {
 }
 
 // ============================================================
+// ONBOARDING COMPLETION HELPER
+// Called from ASK_BUDGET (legacy path) and ASK_EXPERIENCE (fast-track path)
+// ============================================================
+
+async function completeOnboarding(phone: string, u: any, budget: string, budgetLevel: string, exp: string): Promise<string> {
+  const defaultGoal = u.goalType || "fat_loss";
+  const actualWeight = parseFloat(u.currentWeight || "75");
+  const age = u.age || 30;
+  const gender = u.gender || "male";
+  const heightCm = u.heightCm || 170;
+  const isYouth = age < 18;
+  const isElderly = age >= 60;
+
+  const trainingDays = u.trainingDaysPerWeek || ((isYouth || isElderly) ? 3 : 4);
+
+  const { calorieTarget, proteinTarget } = calculateTargets(
+    actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm
+  );
+
+  const stepsTarget = age >= 70 ? 6000 : isElderly ? 8000 : 10000;
+
+  let referralCode: string | undefined;
+  {
+    const namePrefix = (u.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
+      const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
+      if (existing.length === 0) { referralCode = candidate; break; }
+    }
+  }
+
+  await db.update(users).set({
+    trainingDaysPerWeek: trainingDays,
+    trainingExperience: exp,
+    weeklyFoodBudget: budget,
+    budgetLevel,
+    lifeSituation: u.lifeSituation || "office",
+    workSchedule: u.workSchedule || "standard",
+    calorieTarget,
+    proteinTarget,
+    stepsTarget,
+    programmePhase: 1,
+    programmeWeek: 1,
+    programmeDayInWeek: 1,
+    programmeStartDate: new Date(),
+    subscriptionStatus: "trial",
+    betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+    onboardingState: "COMPLETE",
+    ...(referralCode && !u.referralCode ? { referralCode } : {}),
+  }).where(eq(users.phoneNumber, phone));
+
+  const goalLabel: Record<string, string> = {
+    fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Recomposition",
+  };
+  const mode = u.trainingMode || "home";
+  const gymName = u.gymName;
+  const modeLabel = mode === "walk_only" ? "Walking + bodyweight" : mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
+
+  const ageNote = isYouth
+    ? `\n\n_Note for under-18s: Your programme is designed to be safe and fun. No heavy maximal lifts — we focus on movement, form, and building healthy habits for life._`
+    : isElderly
+      ? `\n\n_Your programme is joint-friendly with lower-impact alternatives. We focus on mobility, strength maintenance, and keeping you active and independent. Always listen to your body._`
+      : "";
+
+  const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
+
+  const updatedUser = { ...u, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: u.age || 30, primaryFocusArea: u.primaryFocusArea };
+  const firstWorkout = getKamlifeProgramme(updatedUser, true);
+
+  const weekOneList = getShoppingList(budget, 1, defaultGoal);
+  const shoppingPreview = formatShoppingList(weekOneList, u.name || undefined, defaultGoal);
+
+  const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
+  const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
+  const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
+
+  const refCodeLine = referralCode ? `\n\n🎁 *Referral code: ${referralCode}* — share it. Friends get 50% off month 1. You get R50 credit when they subscribe.` : "";
+  const msg1 = `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Steps:* ${stepsLabel}/day — mandatory\n*Calories:* ${calorieTarget} kcal/day\n*Protein:* ${proteinTarget}g/day${ageNote}${refCodeLine}\n\n_Coach K is AI — not a substitute for medical advice._`;
+  const msg2 = `*Day 1 — Your first session:*\n\n${firstWorkout}\n\nSend *done* when finished.`;
+  const msg3 = `${shoppingPreview}\n\nTell me what you ate today and let's start. After the trial: *R149/month* — R5/day.`;
+  return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
+}
+
+// ============================================================
 // ONBOARDING FLOW — 3-QUESTION FAST TRACK
 // POPIA → Name → Goal → Gym or Home → Immediate programme
 // Everything else collected progressively through coaching
@@ -623,7 +707,9 @@ export async function handleOnboarding(user: any, message: string, phone: string
     return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
   }
 
-  // ---- ASK_BUDGET — grocery budget tier, then COMPLETE ----
+  // ---- ASK_BUDGET — grocery budget tier ----
+  // Fast-track path: routes to ASK_EXPERIENCE (experience not yet captured)
+  // Legacy path: experience was captured before budget → complete directly
   if (state === "ASK_BUDGET") {
     const lower = msg.toLowerCase();
     let budget = "100_300";
@@ -638,100 +724,19 @@ export async function handleOnboarding(user: any, message: string, phone: string
       budget = "over_600"; budgetLevel = "premium";
     }
 
-    const defaultGoal = user.goalType || "fat_loss";
-    const actualWeight = parseFloat(user.currentWeight || "75");
-    const age = user.age || 30;
-    const gender = user.gender || "male";
-    const heightCm = user.heightCm || 170;
-    const isYouth = age < 18;
-    const isElderly = age >= 60;
-
-    // Age-appropriate training days: youth and elderly start at 3, standard at 4
-    const trainingDays = (isYouth || isElderly) ? 3 : 4;
-
-    const { calorieTarget, proteinTarget } = calculateTargets(
-      actualWeight, defaultGoal, "office", trainingDays, gender, age, heightCm
-    );
-
-    // Age-appropriate step targets:
-    // Youth (14-17): 10,000 (they move naturally, but set a target)
-    // Standard (18-59): 10,000
-    // Active seniors (60-69): 8,000
-    // Elderly (70+): 6,000
-    const stepsTarget = age >= 70 ? 6000 : isElderly ? 8000 : 10000;
-
-    // Auto-set female focus area based on gender
-    const isFemale = user.gender === "female";
-
-    // Generate referral code at onboarding — every user gets one from day 1
-    let referralCode: string | undefined;
-    {
-      const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
-      for (let attempt = 0; attempt < 5; attempt++) {
-        const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
-        const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
-        if (existing.length === 0) { referralCode = candidate; break; }
-      }
+    if (user.trainingExperience) {
+      // Legacy path: experience already captured, complete now
+      return completeOnboarding(phone, user, budget, budgetLevel, user.trainingExperience);
     }
 
+    // Fast-track path: ask experience before completing
     await db.update(users).set({
-      trainingDaysPerWeek: trainingDays,
-      trainingExperience: isYouth ? "beginner" : isElderly ? "beginner" : "beginner",
       weeklyFoodBudget: budget,
       budgetLevel,
-      lifeSituation: "office",
-      workSchedule: "standard",
-      calorieTarget,
-      proteinTarget,
-      stepsTarget,
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      programmeStartDate: new Date(),
-      subscriptionStatus: "trial",
-      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000), // 7-day free trial
-      onboardingState: "COMPLETE",
-      ...(referralCode && !user.referralCode ? { referralCode } : {}),
+      onboardingState: "ASK_EXPERIENCE",
     }).where(eq(users.phoneNumber, phone));
 
-    const goalLabel: Record<string, string> = {
-      fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Recomposition",
-    };
-    const mode = user.trainingMode || "home";
-    const gymName = user.gymName;
-    const modeLabel = mode === "walk_only" ? "Walking + bodyweight" : mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
-    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-
-    const budgetLabels: Record<string, string> = { under_100: "Under R1,500", "100_300": "R1,500–R3,000", "300_600": "R3,000–R5,000", over_600: "R5,000+" };
-
-    // Age-appropriate completion message
-    const ageNote = isYouth
-      ? `\n\n_Note for under-18s: Your programme is designed to be safe and fun. No heavy maximal lifts — we focus on movement, form, and building healthy habits for life._`
-      : isElderly
-        ? `\n\n_Your programme is joint-friendly with lower-impact alternatives. We focus on mobility, strength maintenance, and keeping you active and independent. Always listen to your body._`
-        : "";
-
-    const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
-
-    // Immediately build today's workout so they get value NOW
-    const updatedUser = { ...user, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: user.age || 30, primaryFocusArea: user.primaryFocusArea };
-    const firstWorkout = getKamlifeProgramme(updatedUser, true);
-    // Show the full Day 1 workout — truncating to 2 exercises makes us look amateur
-    const workoutPreview = firstWorkout;
-
-    // Get first shopping list
-    const weekOneList = getShoppingList(budget, 1, defaultGoal);
-    const shoppingPreview = formatShoppingList(weekOneList, user.name || undefined, defaultGoal);
-
-    const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
-    const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
-    const bmiDisplay = user.bmi ? ` · BMI ${user.bmi}` : "";
-
-    const refCodeLine = referralCode ? `\n\n🎁 *Referral code: ${referralCode}* — share it. Friends get 50% off month 1. You get R50 credit when they subscribe.` : "";
-    const msg1 = `Your programme is built. *7 days free — full access starts now.*\n\n*Goal:* ${goalLabel[defaultGoal] || defaultGoal}${weightDisplay}${heightDisplay}${bmiDisplay}\n*Training:* ${modeLabel} · ${trainingDays} days/week\n*Steps:* ${stepsLabel}/day — mandatory\n*Calories:* ${calorieTarget} kcal/day\n*Protein:* ${proteinTarget}g/day${ageNote}${refCodeLine}\n\n_Coach K is AI — not a substitute for medical advice._`;
-    const msg2 = `*Day 1 — Your first session:*\n\n${workoutPreview}\n\nSend *done* when finished.`;
-    const msg3 = `${shoppingPreview}\n\nTell me what you ate today and let's start. After the trial: *R149/month* — R5/day.`;
-    return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
+    return `Last one — training experience?\n\n1️⃣ Beginner — just starting out\n2️⃣ Some experience — been active before\n3️⃣ Intermediate — 1-2 years consistent\n4️⃣ Advanced — 2+ years serious lifting`;
   }
 
   // ---- LEGACY STATES — kept for existing users mid-onboarding ----
@@ -910,10 +915,16 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let exp = "beginner";
     if (msg.includes("3") || lower.includes("intermediate")) exp = "intermediate";
     else if (msg.includes("4") || lower.includes("advanced")) exp = "advanced";
-    // Legacy ASK_EXPERIENCE path — transition into main flow's ASK_BUDGET (line ~606),
-    // not the former duplicate ASK_BUDGET handler (deleted — it was unreachable and
-    // routed into ASK_WORK_SCHEDULE which has no main-flow predecessor).
-    await db.update(users).set({ trainingExperience: exp, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+
+    await db.update(users).set({ trainingExperience: exp }).where(eq(users.phoneNumber, phone));
+
+    if (user.weeklyFoodBudget) {
+      // Fast-track path: budget was captured in ASK_BUDGET, complete now
+      return completeOnboarding(phone, user, user.weeklyFoodBudget, user.budgetLevel || "medium", exp);
+    }
+
+    // Legacy path: budget not yet captured
+    await db.update(users).set({ onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
     return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
   }
   // Duplicate ASK_BUDGET handler removed — it was dead code shadowed by main handler at line ~606.

@@ -37,6 +37,7 @@ export async function runMorningCheckin(): Promise<void> {
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
       : 0;
     if (daysSilent > 7) continue;
+    if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {
       if (canSendProactive(client.id)) {
