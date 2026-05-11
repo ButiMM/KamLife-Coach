@@ -647,6 +647,54 @@ export async function handleLifecycle(ctx: {
     // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
   }
 
+  // ---- CANCEL SAVE — handle reason (step 2 of cancel flow) ----
+  if (user.awaitingInputType === "cancel_save") {
+    const name = (user.name || "").split(" ")[0] || "there";
+    const choice = m.trim();
+    const goal = user.goalType || "fat_loss";
+    const cals = user.calorieTarget || 1800;
+    const protein = user.proteinTarget || 140;
+
+    if (choice === "1" || /\b(too expensive|expensive|can.?t afford|afford|price|cost|money)\b/i.test(m)) {
+      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+      const existingNotes = user.profileNotes || "";
+      const pausedNotes = existingNotes.includes("paused_until:")
+        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
+        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
+      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nR149 is R5/day. When things ease up, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
+      await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
+      return priceReply;
+    }
+
+    if (choice === "2" || /\b(not seeing results|no results|not working|isn.?t working|not losing|not gaining|plateau|stuck)\b/i.test(m)) {
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      const resultsReply = goal === "fat_loss"
+        ? `${name}, results come from hitting *${cals} kcal / ${protein}g protein* consistently — not perfectly, but most days.\n\nIf you're doing that and the scale isn't moving, your targets need adjusting. Log your food for 5 days and send me a message — I'll audit exactly what's not working and fix your numbers. Give it that before you go.`
+        : `${name}, muscle takes longer than fat loss but it compounds hard. Are you hitting *${cals} kcal / ${protein}g protein* and adding reps or weight each session?\n\nLog food for 5 days and message me — I'll look at your numbers and adjust. Give it that before you go.`;
+      await logChat(user.id, message, resultsReply, "CANCEL_SAVE_RESULTS");
+      return resultsReply;
+    }
+
+    if (choice === "3" || /\b(break|need a break|taking a break|rest|holiday|vacation|pause|step away)\b/i.test(m)) {
+      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+      const existingNotes = user.profileNotes || "";
+      const pausedNotes = existingNotes.includes("paused_until:")
+        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
+        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
+      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      const breakReply = `Done, ${name}. Paused for 30 days — no check-ins. Programme saved.\n\nWhen you're ready, reply *back* and we go again. No restart needed.`;
+      await logChat(user.id, message, breakReply, "CANCEL_SAVE_PAUSE_BREAK");
+      return breakReply;
+    }
+
+    // Option 4 or unrecognised — route to confirm flow
+    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
+    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your R149/month coaching stops. Data saved 90 days._`;
+    await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
+    return confirmReply;
+  }
+
   // ---- CANCEL SUBSCRIPTION CONFIRMATION (step 2) ----
   if (user.awaitingInputType === "cancel_confirm") {
     await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
@@ -676,11 +724,13 @@ export async function handleLifecycle(ctx: {
       await logChat(user.id, message, cancelledAlreadyReply, "CANCEL");
       return cancelledAlreadyReply;
     }
-    const name = user.name || "there";
-    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
-    const cancelConfirmReply = `${name}, just to confirm — do you want to cancel your subscription?\n\nReply *yes* to cancel, or anything else to keep it.\n\n_Your R149/month coaching, workouts, and progress will stop. Your data stays saved for 90 days._`;
-    await logChat(user.id, message, cancelConfirmReply, "CANCEL_CONFIRM");
-    return cancelConfirmReply;
+    const name = (user.name || "").split(" ")[0] || "there";
+    const sessions = user.totalWorkoutsCompleted || 0;
+    const sessionLine = sessions > 0 ? `${sessions} session${sessions === 1 ? "" : "s"} logged.` : "Your profile is saved.";
+    await db.update(users).set({ awaitingInputType: "cancel_save" }).where(eq(users.phoneNumber, phone));
+    const cancelSaveReply = `${name}, before I cancel — ${sessionLine}\n\nWhat's making you want to leave?\n\n*1* — Too expensive\n*2* — Not seeing results\n*3* — Need a break, not quitting\n*4* — Just cancel`;
+    await logChat(user.id, message, cancelSaveReply, "CANCEL_SAVE_START");
+    return cancelSaveReply;
   }
 
   // ---- REFUND REQUEST ----
@@ -1615,6 +1665,21 @@ export async function handleLifecycle(ctx: {
       await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
       return formatReply;
     }
+  }
+
+  // ---- THANKS / COMPLIMENT — deflect credit back to the user ----
+  const isThanks = /\b(thank you|thanks|thank u|thx|you.?re amazing|you.?re the best|great coach|love this|love you coach|you.?re great|you.?re awesome|you.?re helping|so helpful|this is helping|this is working|appreciate (you|it|this)|grateful)\b/i.test(m);
+  if (isThanks && m.split(/\s+/).length < 20) {
+    const fn = (user.name || "").split(" ")[0] || "there";
+    const goal = user.goalType || "fat_loss";
+    const forward = goal === "fat_loss"
+      ? `Send me what you're eating today — even one meal. That is how we keep it moving.`
+      : goal === "muscle_gain"
+        ? `Send me today's training session when you're done — let's keep the streak going.`
+        : `Log something today — food, a workout, a weight. Every log is a data point.`;
+    const thanksReply = `${fn}, that is all you — I just give the numbers and the nudges. You are the one showing up.\n\n${forward}`;
+    await logChat(user.id, message, thanksReply, "THANKS");
+    return thanksReply;
   }
 
   return null;
