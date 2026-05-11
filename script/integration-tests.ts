@@ -212,6 +212,78 @@ test("classifyMediaFailure: unknown → FAIL with stage prefix", () => {
   assert.ok(r.includes("FAIL") && r.startsWith("FOOD_VISION"));
 });
 
+// ── Progress photo upload validation (mirrors admin.ts logic) ────────────────
+
+const ALLOWED_PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
+const PHOTO_MAX_BYTES = 8 * 1024 * 1024;
+
+function validateProgressPhotoUpload(body: { base64?: string; contentType?: string }): { status: number; error?: string } {
+  if (!body.base64) return { status: 400, error: "base64 image data is required" };
+  if (!ALLOWED_PHOTO_TYPES.has(body.contentType || "")) {
+    return { status: 415, error: "Unsupported image type. Use jpeg, png, webp, or heic." };
+  }
+  const cleaned = (body.base64 || "").replace(/^data:[^;]+;base64,/, "");
+  const sizeBytes = Buffer.byteLength(cleaned, "base64");
+  if (sizeBytes > PHOTO_MAX_BYTES) return { status: 413, error: "Image must be under 8MB" };
+  return { status: 200 };
+}
+
+test("photo upload: missing base64 → 400", () => {
+  const r = validateProgressPhotoUpload({ contentType: "image/jpeg" });
+  assert.equal(r.status, 400);
+});
+test("photo upload: unsupported MIME image/gif → 415", () => {
+  const r = validateProgressPhotoUpload({ base64: "abc", contentType: "image/gif" });
+  assert.equal(r.status, 415);
+});
+test("photo upload: unsupported MIME application/pdf → 415", () => {
+  const r = validateProgressPhotoUpload({ base64: "abc", contentType: "application/pdf" });
+  assert.equal(r.status, 415);
+});
+test("photo upload: oversize payload → 413", () => {
+  // 8MB + 1 byte of base64 data
+  const oversizeB64 = Buffer.alloc(PHOTO_MAX_BYTES + 1).toString("base64");
+  const r = validateProgressPhotoUpload({ base64: oversizeB64, contentType: "image/jpeg" });
+  assert.equal(r.status, 413);
+});
+test("photo upload: valid jpeg within size limit → 200", () => {
+  const smallB64 = Buffer.alloc(100).toString("base64");
+  const r = validateProgressPhotoUpload({ base64: smallB64, contentType: "image/jpeg" });
+  assert.equal(r.status, 200);
+});
+test("photo upload: valid webp → 200", () => {
+  const r = validateProgressPhotoUpload({ base64: "abc", contentType: "image/webp" });
+  assert.equal(r.status, 200);
+});
+test("photo upload: data URI prefix stripped before size check", () => {
+  const payload = "data:image/jpeg;base64," + Buffer.alloc(100).toString("base64");
+  const r = validateProgressPhotoUpload({ base64: payload, contentType: "image/jpeg" });
+  assert.equal(r.status, 200, "data URI prefix should be stripped — small payload should pass");
+});
+test("photo upload: heic content type accepted", () => {
+  const r = validateProgressPhotoUpload({ base64: "abc", contentType: "image/heic" });
+  assert.equal(r.status, 200);
+});
+
+// ── Proactive send pause switch ───────────────────────────────────────────────
+
+function isProactivePausedTest(env: string | undefined): boolean {
+  return env === "true";
+}
+
+test("proactive pause: PROACTIVE_PAUSED=true → paused", () => {
+  assert.equal(isProactivePausedTest("true"), true);
+});
+test("proactive pause: PROACTIVE_PAUSED=false → not paused", () => {
+  assert.equal(isProactivePausedTest("false"), false);
+});
+test("proactive pause: PROACTIVE_PAUSED=undefined → not paused", () => {
+  assert.equal(isProactivePausedTest(undefined), false);
+});
+test("proactive pause: PROACTIVE_PAUSED=1 (wrong value) → not paused", () => {
+  assert.equal(isProactivePausedTest("1"), false);
+});
+
 // ── Results ──────────────────────────────────────────────────────────────────
 
 console.log(`\nintegration-tests: ${passed}/${passed + failed} passed`);

@@ -69,6 +69,11 @@ export function thisWeekUTC(): string {
 
 // ── DB-BACKED DAILY PROACTIVE BUDGET ─────────────────────────────────────────
 
+// PROACTIVE_PAUSED=true → all proactive sends blocked immediately (hot killswitch)
+export function isProactivePaused(): boolean {
+  return process.env.PROACTIVE_PAUSED === "true";
+}
+
 export const dailySentThisProcess = new Set<string>();
 
 export function dailyKey(clientId: string): string {
@@ -76,6 +81,10 @@ export function dailyKey(clientId: string): string {
 }
 
 export async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean> {
+  if (isProactivePaused()) {
+    console.log(`[SCHEDULER:PAUSED] ${jobKey} blocked — PROACTIVE_PAUSED=true`);
+    return false;
+  }
   const today = todaySAST();
   if (dailySentThisProcess.has(dailyKey(clientId))) return false;
   try {
@@ -90,6 +99,7 @@ export async function claimDailySlot(clientId: string, jobKey: string): Promise<
       .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
       .onConflictDoNothing();
     dailySentThisProcess.add(dailyKey(clientId));
+    console.log(`[SCHEDULER:SEND] campaign=${jobKey} user=...${clientId.slice(-6)}`);
     return true;
   } catch (err) {
     console.warn(`[claimDailySlot] DB error (${jobKey}/${clientId.slice(0, 8)}):`, err);
@@ -100,10 +110,12 @@ export async function claimDailySlot(clientId: string, jobKey: string): Promise<
 }
 
 export function canSendProactive(clientId: string): boolean {
+  if (isProactivePaused()) return false;
   return !dailySentThisProcess.has(dailyKey(clientId));
 }
 
 export function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
+  console.log(`[SCHEDULER:SEND] campaign=${jobKey} user=...${clientId.slice(-6)}`);
   dailySentThisProcess.add(dailyKey(clientId));
   db.insert(sentProactive)
     .values({ userId: clientId, messageKey: jobKey, dedupeWindow: todaySAST() })
@@ -119,6 +131,7 @@ export function weeklyKeyedKey(clientId: string, messageKey: string, window: str
 }
 
 export async function claimProactive(userId: string, messageKey: string, dedupeWindow: string): Promise<boolean> {
+  if (isProactivePaused()) return false;
   const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
   if (weeklyKeyedSent.has(inMemKey)) return false;
   try {
