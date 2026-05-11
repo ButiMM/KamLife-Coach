@@ -6,7 +6,7 @@
  */
 
 import { db } from "../db";
-import { users, mealLogs, chatHistory } from "../../shared/schema";
+import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
@@ -454,10 +454,17 @@ export async function handleFoodContext(ctx: {
       const todayStr = sastToday();
       let runningCals = totalCals;
       let runningProtein = Math.round(totalProtein);
+      let todayStepCount = 0;
       try {
-        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        const [existingTotals, stepRow] = await Promise.all([
+          recomputeTodayFoodTotals(user.id),
+          db.select({ steps: stepLogs.steps }).from(stepLogs)
+            .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
+            .orderBy(desc(stepLogs.loggedAt)).limit(1),
+        ]);
         runningCals = existingTotals.calories + totalCals;
         runningProtein = existingTotals.protein + Math.round(totalProtein);
+        todayStepCount = stepRow[0]?.steps || 0;
         await db.update(users).set({
           todayCalories: runningCals,
           todayProteinG: runningProtein,
@@ -541,7 +548,7 @@ export async function handleFoodContext(ctx: {
         junkNoteText, hasGoodProteins: goodProteins.length > 0,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
         coachNoteOverride: denseFoodCoachNote,
-        user,
+        user, todaySteps: todayStepCount,
       });
 
       try {

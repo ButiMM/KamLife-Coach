@@ -86,7 +86,7 @@ export async function handleWorkoutCommands(ctx: {
   }
 
   // ---- DONE — workout complete (direct) ----
-  if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
+  if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[\s.,!?✓✅🏋️‍♂️🏋️]+$/u, "").trim())) {
     const todayStart = sastDayStart();
     const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)

@@ -298,6 +298,7 @@ export function buildFoodLogReply(p: {
   hasCarbs?: boolean;
   coachNoteOverride?: string;
   user: any;
+  todaySteps?: number;
 }): string {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
@@ -310,9 +311,20 @@ export function buildFoodLogReply(p: {
   const proteinRemaining = proteinTarget - runningProtein;
   const earlyInDay = runningCals < (calorieTarget * 0.4);
 
+  // Extra step burn: ~40 kcal per 1,000 steps beyond target
+  const stepsTarget = user.stepsTarget || 8500;
+  const todaySteps = p.todaySteps || 0;
+  const extraStepsBurned = todaySteps > stepsTarget
+    ? Math.round((todaySteps - stepsTarget) * 0.04)
+    : 0;
+
+  const effectiveRemaining = calRemaining + extraStepsBurned;
+  const stepsNote = extraStepsBurned > 0 && calRemaining < 0
+    ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
+    : "";
   const runningLine = prevCals > 0
-    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
-    : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
+    : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   let dayAssessment = "";
   if (prevCals > 0 && totalMealCals >= 100) {
@@ -320,9 +332,16 @@ export function buildFoodLogReply(p: {
     const dayProgress = Math.min(hourNow / 20, 1);
     const expectedCals = calorieTarget * dayProgress;
     const calPace = runningCals / Math.max(expectedCals, 1);
-    if (calRemaining <= 0) {
-      dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
-    } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
+    if (calRemaining <= 0 && effectiveRemaining <= -100) {
+      // Over after steps — if big steps, soften message
+      if (extraStepsBurned >= 80) {
+        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${Math.abs(effectiveRemaining)} kcal. Keep dinner light._`;
+      } else {
+        dayAssessment = `\n_Calorie target reached — keep dinner light. Protein and vegetables only._`;
+      }
+    } else if (calRemaining <= 0 && effectiveRemaining > -100) {
+      dayAssessment = `\n_Your step count covered the overage — you're effectively on target. Keep the last meal light._`;
+    } else if (!earlyInDay && calPace < 0.6 && effectiveRemaining < 600) {
       dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
     } else if (!earlyInDay && calPace > 1.3) {
       dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
