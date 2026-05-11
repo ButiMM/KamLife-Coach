@@ -2,7 +2,7 @@ import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  sendWhatsApp, sendCriticalAlert, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, loadState, saveState,
   deliveryStats, todaySAST, FROM_NUMBER, PRICING,
 } from "../shared";
@@ -43,11 +43,11 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
       const name = client.name || "there";
       if (msUntilRenewal > 0 && msUntilRenewal <= threeDaysMs) {
         const daysLeft = Math.ceil(msUntilRenewal / 86_400_000);
-        await sendWhatsApp(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
       }
       if (msUntilRenewal < 0 && client.subscriptionStatus === "active") {
         await db.update(users).set({ subscriptionStatus: "inactive" }).where(eq(users.phoneNumber, client.phoneNumber));
-        await sendWhatsApp(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
         console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber}`);
       }
     } catch (err) { console.error(`[SCHEDULER] Subscription expiry error — ${client.phoneNumber}:`, err); }
@@ -70,11 +70,11 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       if (daysSinceFail === 1) {
-        await sendWhatsApp(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`);
       } else if (daysSinceFail === 3) {
-        await sendWhatsApp(client.phoneNumber, `${name} — 3 days without coaching. You are in Week ${client.programmeWeek || 1} with ${workouts} sessions done.\n\nClients who take more than a week off lose momentum and rarely come back at the same level. Your streak, your targets, your programme — all still here.\n\nFix your payment in 30 seconds:\n${payLink}`);
+        await sendCriticalAlert(client.phoneNumber, `${name} — 3 days without coaching. You are in Week ${client.programmeWeek || 1} with ${workouts} sessions done.\n\nClients who take more than a week off lose momentum and rarely come back at the same level. Your streak, your targets, your programme — all still here.\n\nFix your payment in 30 seconds:\n${payLink}`);
       } else if (daysSinceFail === 7) {
-        await sendWhatsApp(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nIf money is tight right now, I get it — reply *pay* when you are ready and I will send a fresh link. No pressure, no expiry on your data.\n\nIf you want to stop completely, reply *STOP* and I won't message again.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nIf money is tight right now, I get it — reply *pay* when you are ready and I will send a fresh link. No pressure, no expiry on your data.\n\nIf you want to stop completely, reply *STOP* and I won't message again.`);
       }
     } catch (err) { console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err); }
   }
@@ -97,19 +97,19 @@ export async function runSignupNudge(): Promise<void> {
         const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSince === 5 && client.subscriptionStatus === "trial") {
-          await sendWhatsApp(client.phoneNumber, `${name}, 2 days left on your free trial.${workouts > 0 ? ` You've done ${workouts} session${workouts > 1 ? "s" : ""} — that's real progress.` : ""}\n\nKeep everything — workouts, food coaching, daily accountability.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Less than a KFC streetwise.`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, 2 days left on your free trial.${workouts > 0 ? ` You've done ${workouts} session${workouts > 1 ? "s" : ""} — that's real progress.` : ""}\n\nKeep everything — workouts, food coaching, daily accountability.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Less than a KFC streetwise.`);
         } else if (daysSince === 7 && client.subscriptionStatus === "trial") {
-          await sendWhatsApp(client.phoneNumber, `${name} — last day of your trial. Tomorrow coaching stops unless you subscribe.\n\nYour programme, targets, and progress are saved. Pay now and nothing changes — Day ${(client.programmeDayInWeek || 1) + 1} drops tomorrow morning.\n\n*R149/month:*\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — last day of your trial. Tomorrow coaching stops unless you subscribe.\n\nYour programme, targets, and progress are saved. Pay now and nothing changes — Day ${(client.programmeDayInWeek || 1) + 1} drops tomorrow morning.\n\n*R149/month:*\n${payLink}`);
         }
       } else if (!isNewSignup && cancelled) {
         const daysSinceCancelled = Math.floor((Date.now() - cancelled.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSinceCancelled === 3) {
-          await sendWhatsApp(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R149/month:*\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R149/month:*\n${payLink}`);
         } else if (daysSinceCancelled === 7) {
-          await sendWhatsApp(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR149/month. Your data is here:\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR149/month. Your data is here:\n${payLink}`);
         } else if (daysSinceCancelled === 30) {
-          await sendWhatsApp(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR149/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR149/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
         }
       }
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }

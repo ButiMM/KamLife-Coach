@@ -170,6 +170,47 @@ export const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
   : "";
 
+// SMS_FROM: set TWILIO_SMS_NUMBER to a Twilio phone number (e.g. +27XXXXXXXXX or a shortcode).
+// When WhatsApp delivery fails with a channel error, critical alerts fall back to SMS.
+// SMS works on every SA phone — no data, no app, no WhatsApp account required.
+const SMS_FROM = process.env.TWILIO_SMS_NUMBER || "";
+
+// Twilio error codes that mean "WhatsApp channel is unavailable for this recipient"
+// (not transient network errors — these won't resolve with retry)
+const WA_CHANNEL_ERRORS = new Set([
+  63003, // Channel not available
+  63007, // User not opted in to WhatsApp
+  63016, // Message not allowed
+  21408, // Region not permitted
+]);
+
+async function sendSMSFallback(to: string, body: string): Promise<void> {
+  if (!SMS_FROM) return;
+  const smsTo = to.replace(/^whatsapp:/, "");
+  // SMS messages truncated to 320 chars — enough for an alert, not a coaching essay
+  const smsBody = body.length > 320
+    ? body.slice(0, 317) + "…"
+    : body;
+  try {
+    await twilioClient.messages.create({ from: SMS_FROM, to: smsTo, body: smsBody });
+    console.log(`[SMS:FALLBACK] → ${smsTo.slice(-8)}: ${smsBody.slice(0, 60)}…`);
+  } catch (smsErr: unknown) {
+    console.error(`[SMS:FALLBACK] ✗ SMS also failed for ${smsTo.slice(-8)}:`, (smsErr as any)?.message || smsErr);
+  }
+}
+
+// sendCriticalAlert — use for subscription notices, account alerts, and service outages.
+// Tries WhatsApp first, falls back to SMS if WhatsApp fails.
+// DO NOT use for routine coaching responses — SMS coaching is not viable at full length.
+export async function sendCriticalAlert(to: string, body: string): Promise<void> {
+  try {
+    await sendWhatsApp(to, body);
+  } catch {
+    console.warn(`[ALERT] WhatsApp failed for ${to.slice(-8)} — attempting SMS fallback`);
+    await sendSMSFallback(to, body);
+  }
+}
+
 export const deliveryStats = { sent: 0, failed: 0, lastReset: new Date().toISOString().slice(0, 10) };
 
 function resetDeliveryStatsIfNeeded() {
@@ -205,8 +246,16 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
       return;
     } catch (err: unknown) {
-      const e = err as { status?: number; code?: string; message?: string };
-      const isTransient = !e?.status || e.status >= 500 || e.code === "ECONNRESET" || e.code === "ETIMEDOUT";
+      const e = err as { status?: number; code?: number; message?: string };
+      // WhatsApp channel errors — don't retry, attempt SMS fallback for this recipient
+      if (e?.code && WA_CHANNEL_ERRORS.has(e.code)) {
+        recordTwilioFailure();
+        deliveryStats.failed++;
+        console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
+        await sendSMSFallback(to, body);
+        return;
+      }
+      const isTransient = !e?.status || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
       if (!isTransient || i === delays.length - 1) {
         recordTwilioFailure();
         deliveryStats.failed++;
