@@ -1181,23 +1181,76 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- WIN / POSITIVE UPDATE — client shares a weight loss, milestone, or NSV ----
-  const isWinMsg =
-    (/\b(lost|dropped|down|lighter|less than before|weighed in at)\b/i.test(m) &&
-     /\b(\d+(?:\.\d+)?)\s*kg\b/.test(m) &&
-     /\b(lost|dropped|down)\b/i.test(m)) ||
-    /\b(jeans.*fit|clothes.*fitting|fitting better|looser.*clothes|clothes.*looser|compliment|someone noticed|people.*noticed|noticed.*change|can feel.*difference|feeling.*stronger|lifted more|new pb|personal best|pb today)\b/i.test(m);
+  const isWeightWin =
+    /\b(lost|dropped|down|lighter|less than before|weighed in at)\b/i.test(m) &&
+    /\b(\d+(?:\.\d+)?)\s*kg\b/.test(m) &&
+    /\b(lost|dropped|down)\b/i.test(m);
 
-  if (isWinMsg) {
+  const isNSV =
+    /\b(jeans.*fit|clothes.*fitting|fitting better|looser.*clothes|clothes.*looser|jeans.*too big|shirt.*too big|dress.*too big|pants.*too big|clothes.*loose|jeans.*loose)\b/i.test(m) ||
+    /\b(compliment|someone noticed|people.*noticed|noticed.*change|people.*say.*look|people.*saying.*look|someone.*said.*look|friends.*noticed|family.*noticed)\b/i.test(m) ||
+    /\b(can feel.*difference|feel.*difference|feel.*different|look.*different|see.*difference|see.*changes|seeing.*changes|seeing.*results|results.*showing|starting to show)\b/i.test(m) ||
+    /\b(can see my abs|seeing.*abs|abs.*showing|stomach.*flatter|belly.*smaller|waist.*smaller|waist.*getting smaller)\b/i.test(m) ||
+    /\b(feeling.*stronger|feel.*stronger|lifted more|new pb|personal best|pb today|ran further|ran longer|first time.*ran|ran.*without.*stopping|didn.?t get.*tired)\b/i.test(m) ||
+    /\b(energy.*better|so much.*energy|more energy|energy.*up|sleeping better|sleep.*improved|feel amazing|feel incredible|feel great about)\b/i.test(m) ||
+    /\b(meal prep|meal prepped|prepped.*food|cooked.*bulk|batch cook|batch cooked)\b/i.test(m);
+
+  if (isWeightWin || isNSV) {
     const kgMatch = m.match(/(\d+(?:\.\d+)?)\s*kg/);
     const kgLost = kgMatch ? parseFloat(kgMatch[1]) : null;
     const total = user.totalWorkoutsCompleted || 0;
     const weeks = user.programmeWeek || 1;
     const name = user.name || "there";
-    const winReply = kgLost && m.match(/\b(lost|dropped|down)\b/i)
-      ? `${kgLost}kg down — that is real${name ? `, ${name}` : ""}. ${total} sessions, ${weeks} week${weeks !== 1 ? "s" : ""} of consistency. This is what the programme does.\n\nThe next ${kgLost}kg follows the same formula — same sessions, same food discipline, same steps. Keep going.`
-      : `${name}, that is a win. Non-scale victories are the most honest data — the clothes do not lie.\n\nYour body is changing. The ${total} sessions you have put in are showing up in the real world. Keep the same habits for the next 4 weeks and this becomes your new normal.`;
+
+    let winReply: string;
+    if (isWeightWin && kgLost) {
+      winReply = `${kgLost}kg down — that is real, ${name}. ${total} session${total !== 1 ? "s" : ""}, ${weeks} week${weeks !== 1 ? "s" : ""} of consistency. This is exactly what the programme is supposed to do.\n\nThe next ${kgLost}kg follows the same formula. Same sessions, same food, same steps. Keep going.`;
+    } else if (/\b(jeans|clothes|shirt|dress|pants)\b/i.test(m)) {
+      winReply = `${name}, clothes don't lie. When they start fitting differently, the scale is just catching up to what your body already knows.\n\n${total} sessions to get here. The people who keep the same habits for another 4 weeks are the ones who don't go back. You're at that point now.`;
+    } else if (/\b(someone noticed|people.*noticed|compliment|people.*say|friends.*noticed|family.*noticed)\b/i.test(m)) {
+      winReply = `When people start noticing, it means the change is real enough that strangers can see it — not just you on a good day in the mirror.\n\n${name}, ${total} sessions built that. Screenshot this and send it to whoever doubted you.`;
+    } else if (/\b(abs|stomach.*flat|belly.*small|waist)\b/i.test(m)) {
+      winReply = `${name}, that is the programme working. Abs are fat loss made visible — you cannot fake that.\n\nKeep the deficit, keep the protein, keep the steps. You are in the phase where the visible changes compound every week.`;
+    } else if (/\b(stronger|pb|personal best|lifted more|ran)\b/i.test(m)) {
+      winReply = `Performance wins are the most honest feedback your body gives. The scale lies, the mirror lies on bad days — but a new personal best never lies.\n\n${name}, ${total} sessions to get here. Same formula next week.`;
+    } else if (/\b(energy|sleep|feel amazing|feel great)\b/i.test(m)) {
+      winReply = `${name}, this is the part most people don't expect — the energy and sleep change before the body visibly changes.\n\nWhat you're feeling right now is your metabolism shifting. The visual results follow. Keep exactly what you're doing.`;
+    } else if (/\b(meal prep|batch cook)\b/i.test(m)) {
+      winReply = `${name}, meal prep is the single habit that separates people who get results from people who talk about it.\n\nWhen the food is already made, you don't make bad decisions under pressure. You just eat what's there. That's the whole secret. Do it every Sunday.`;
+    } else {
+      winReply = `${name}, that is a real win — and it came from ${total} sessions of work. The body is changing.\n\nKeep the same habits for 4 more weeks. This is where it compounds.`;
+    }
     await logChat(user.id, message, winReply, "WIN_CELEBRATION");
     return winReply;
+  }
+
+  // ---- DISCIPLINE MOMENT — trained despite not wanting to ----
+  const isDisciplineWin =
+    /\b(didn.?t (feel like|want to) (train|go|workout|work out|go to gym)|forced myself|made myself (go|train|workout)|dragged myself|almost (didn.?t go|skipped|quit)|wanted to skip but|nearly skipped|almost skipped|didn.?t want to but (went|trained|did it|showed up)|went anyway|trained anyway|showed up anyway)\b/i.test(m);
+
+  if (isDisciplineWin) {
+    const name = user.name?.split(" ")[0] || "there";
+    const total = user.totalWorkoutsCompleted || 0;
+    const disciplineReply = `${name}, that session counts double.\n\nEvery person who has ever changed their body has had that exact same moment — the voice that says "not today." The ones who get results are not the ones who feel motivated. They are the ones who go anyway.\n\nYou just proved to yourself that you are that person. That is not a small thing. ${total > 1 ? `${total} sessions, and this is the one that matters most — because it was the hardest one to start.` : `First sessions are the hardest. You did it.`}\n\nSend *done* when you finish.`;
+    await logChat(user.id, message, disciplineReply, "DISCIPLINE_WIN");
+    return disciplineReply;
+  }
+
+  // ---- FIRST GYM VISIT / GYM ANXIETY ----
+  const isFirstGym =
+    /\b(first time (at|in|to) (the )?gym|first gym (session|day|visit|time)|never been to (a |the )?gym|went to (the )?gym for the first time|my first (day|session) (at|in) (the )?gym)\b/i.test(m);
+  const isGymAnxiety =
+    /\b(nervous (at|in|about) (the )?gym|intimidated (by |at |in )?the gym|don.?t know what (i.?m doing|to do) (at|in) (the )?gym|feel (lost|confused|out of place) (at|in) (the )?gym|gym (is|was) (scary|intimidating|overwhelming)|everyone.*staring|people.*staring.*gym|don.?t belong.*gym)\b/i.test(m);
+
+  if (isFirstGym || isGymAnxiety) {
+    const name = user.name?.split(" ")[0] || "there";
+    const mode = user.trainingMode || "gym";
+    const gymName = (user as any).gymName || "the gym";
+    const gymReply = isFirstGym
+      ? `${name}, you walked in. That is the hardest part — and you already did it.\n\nEvery person in that gym was a first-timer once. Every single one. The ones who look comfortable now were nervous the first day too.\n\nHere is all you need to know today: follow your programme, one exercise at a time. If a machine is taken, move to the next one. Nobody is watching you — everyone is focused on themselves.\n\nSend *done* when you finish your first session. That one counts more than any session after it.`
+      : `${name}, gym anxiety is real and almost everyone feels it. Even people who have trained for years.\n\nHere is the truth: nobody in ${gymName} is watching you as closely as you think. They are thinking about their own training.\n\nYour programme is designed for machines — the safest, most effective way to train. Stick to your list, rest between sets, and leave when you are done. That is the whole thing.\n\nWhat exercise are you on right now? I will walk you through it.`;
+    await logChat(user.id, message, gymReply, "GYM_ANXIETY");
+    return gymReply;
   }
 
   // ---- SUGAR / JUNK CRAVINGS HANDLER — different from general hunger ----
