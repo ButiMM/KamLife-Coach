@@ -395,7 +395,15 @@ export function buildFoodLogReply(p: {
         ];
     proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${Math.round(protRemaining)}g protein still needed today.`;
   } else if (protRemaining <= 0) {
-    proteinTip = `\n\nProtein target hit. ✅`;
+    const evnHour = new Date().getUTCHours() + 2;
+    const isEvening = evnHour >= 17;
+    const caloriesOnTarget = runningCals <= calorieTarget * 1.1;
+    if (isEvening && caloriesOnTarget) {
+      const fn = (user.name || "").split(" ")[0] || "there";
+      proteinTip = `\n\n✅ *Protein target hit, ${fn}.* Calories on track. That is a clean nutrition day — no workout needed to make this count. Same again tomorrow.`;
+    } else {
+      proteinTip = `\n\nProtein target hit. ✅`;
+    }
   }
 
   let variableReinforcement = "";

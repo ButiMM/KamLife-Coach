@@ -253,7 +253,7 @@ export async function handleMediaMessage(ctx: {
           await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
           const weeksLabel = Math.round(daysBetween / 7);
           const weekStr = weeksLabel === 1 ? "1 week" : `${weeksLabel} weeks`;
-          return `Photo ${photoNumber} — ${weekStr} of work.\n\n${comparisonText}`;
+          return `Photo ${photoNumber} — ${weekStr} of work.\n\n${comparisonText}\n\n_Next check-in: send another photo in 30 days. I'll compare all ${photoNumber + 1} side by side._`;
         } else {
           return `Saved, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
         }
