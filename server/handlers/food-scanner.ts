@@ -2,8 +2,49 @@ import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
+
+export async function computeFoodLogStreak(userId: string): Promise<number> {
+  try {
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
+    const logs = await db.select({ createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sixtyDaysAgo)))
+      .orderBy(desc(chatHistory.createdAt));
+    if (logs.length === 0) return 0;
+    const days = new Set<string>();
+    for (const l of logs) {
+      if (!l.createdAt) continue;
+      const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
+      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+    }
+    let streak = 0;
+    const checkDate = new Date(Date.now() + 2 * 3_600_000);
+    while (true) {
+      const key = `${checkDate.getUTCFullYear()}-${checkDate.getUTCMonth()}-${checkDate.getUTCDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+    }
+    return streak;
+  } catch { return 0; }
+}
+
+const FOOD_STREAK_MESSAGES: Record<number, (name: string) => string> = {
+  3:  (n) => `\n\n🔥 *${n}, 3 days logging straight.* The data is building. This is what coaching from facts looks like — keep it going.`,
+  5:  (n) => `\n\n🔥 *${n}, 5 days in a row.* Most people stop at day 2. You're past the quitting point. Don't break the chain.`,
+  7:  (n) => `\n\n🔥 *${n}, 7 days of food logs.* A full week. You now have real data — patterns I can actually coach from. Screenshot this and keep going.`,
+  10: (n) => `\n\n🔥 *${n}, 10 days straight.* Double figures. The habit is forming — your brain is starting to do this automatically. That's exactly where you want to be.`,
+  14: (n) => `\n\n🔥 *${n}, 14 days.* Two weeks of consistent logging. The clients who get results are the clients who do this. You are one of them.`,
+  21: (n) => `\n\n🔥 *${n}, 21 days logging.* Three weeks. This is a habit now — not discipline, not willpower. Habit. The data you've built is yours forever.`,
+  30: (n) => `\n\n🏆 *${n}, 30 days.* A full month of food logs. I do not see many people get here. Your consistency record is real — take a moment with that.`,
+};
+
+export function getFoodStreakCelebration(streak: number, name: string): string {
+  const fn = name.split(" ")[0] || "there";
+  return FOOD_STREAK_MESSAGES[streak]?.(fn) ?? "";
+}
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

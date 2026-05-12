@@ -11,6 +11,7 @@ import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
+  computeFoodLogStreak, getFoodStreakCelebration,
 } from "./food-scanner";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
@@ -582,9 +583,14 @@ export async function handleFoodContext(ctx: {
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
       await logChat(user.id, message, reply, "FOOD_LOG");
-      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      const [saPattern, saDay, foodStreak] = await Promise.all([
+        checkFoodPatterns(user.id),
+        checkPerfectDay(user.id, user.proteinTarget || 130),
+        computeFoodLogStreak(user.id),
+      ]);
+      const streakCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
-      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
+      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${stepAppend}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
@@ -638,9 +644,9 @@ export async function handleFoodContext(ctx: {
           });
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-        const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+        const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fbStreak, user.name || "")}`;
       }
     }
   }
@@ -698,9 +704,9 @@ export async function handleFoodContext(ctx: {
         });
       } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-      const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fb2Streak, user.name || "")}`;
     }
   }
 
