@@ -6,7 +6,7 @@ import {
   todaySAST, thisWeekUTC, hasRunToday,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
-import { generateVoiceNote } from "../../tts";
+import { runWeeklyRecaps } from "../../weekly-recap";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -138,28 +138,6 @@ export async function runSundayWeeklyReport(): Promise<void> {
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
 
-      // Voice summary — 1 call per user per week, ~$0.003/user/week at scale
-      try {
-        const winLine = completedSessions >= plannedSessions
-          ? `${completedSessions} sessions this week — target hit.`
-          : completedSessions > 0
-            ? `${completedSessions} out of ${plannedSessions} sessions done.`
-            : `No sessions logged this week — that changes Monday.`;
-        const fixLine = completedSessions < plannedSessions
-          ? `This week, ${plannedSessions - completedSessions} more session${plannedSessions - completedSessions !== 1 ? "s" : ""} than last.`
-          : proteinHitRate < 60
-            ? `Protein at every meal this week — eggs, pilchards, chicken. Non-negotiable.`
-            : `Maintain the consistency. Same output or better.`;
-        const scoreLine = totalScore >= 85
-          ? `${name}, this is what results look like. Same energy next week.`
-          : totalScore >= 60
-            ? `Solid week, ${name}. One more push and you are in the top tier.`
-            : `${name}, below your best — but you are still here. Reset Sunday night and go again Monday.`;
-        const voiceScript = `${scoreLine} ${winLine} ${fixLine}`.replace(/\s+/g, " ").trim();
-        const voiceUrl = await generateVoiceNote(voiceScript);
-        if (voiceUrl) await sendWhatsApp(client.phoneNumber, "", voiceUrl);
-      } catch (voiceErr) { console.warn("[TTS] Weekly voice note failed:", voiceErr); }
-
       try {
         const budgetTier = client.weeklyFoodBudget || "100_300";
         const clientGoal = client.goalType || "fat_loss";
@@ -176,6 +154,13 @@ export async function runSundayWeeklyReport(): Promise<void> {
     } catch (err) {
       console.error(`[SCHEDULER] Sunday report error — ${client.phoneNumber}:`, err);
     }
+  }
+
+  // Send personalized ElevenLabs voice recap in coach's cloned voice — after all text cards
+  try {
+    await runWeeklyRecaps();
+  } catch (recapErr) {
+    console.error("[SCHEDULER] Weekly recap voice error:", recapErr);
   }
 }
 
