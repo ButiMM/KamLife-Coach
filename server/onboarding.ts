@@ -442,8 +442,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    subscriptionStatus: "trial",
-    betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+    subscriptionStatus: "inactive",
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
@@ -489,9 +488,14 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
       : `${gymName || "The gym"} is your tool. How you use it decides everything.`;
 
   const name = u.name || "there";
-  const msg1 = `${name}, your programme is live. *7 days free — let's go.*\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
-  const msg2 = `*Day 1 starts now.*\n\n${firstWorkout}\n\nSend *done* when you finish. I will log it.`;
-  const msg3 = `${shoppingPreview}\n\nTell me what you had to eat today — even if it was not perfect. That is how we start.\n\n_After the trial: R149/month — R5/day. Cancel anytime._`;
+  const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+  const merchantId = process.env.PAYFAST_MERCHANT_ID;
+  const cleanPhoneOnb = u.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+  const payLinkOnb = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneOnb)}` : appUrl;
+
+  const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
+  const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
+  const msg3 = `${shoppingPreview}\n\n*Activate to start coaching — R149/month, cancel anytime:*\n${payLinkOnb}\n\n_R5/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
   return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
@@ -508,7 +512,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
   // ---- START — lead with value, keep legal minimal ----
   if (state === "START") {
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\n7-day free trial. Then R149/month — cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
+    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\nR149/month — R5/day. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
   }
 
   // ---- ASK_POPIA ----

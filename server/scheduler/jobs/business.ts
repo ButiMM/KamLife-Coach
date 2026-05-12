@@ -96,10 +96,10 @@ export async function runSignupNudge(): Promise<void> {
       if (isNewSignup && created) {
         const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
-        if (daysSince === 5 && client.subscriptionStatus === "trial") {
-          await sendCriticalAlert(client.phoneNumber, `${name}, 2 days left on your free trial.${workouts > 0 ? ` You've done ${workouts} session${workouts > 1 ? "s" : ""} — that's real progress.` : ""}\n\nKeep everything — workouts, food coaching, daily accountability.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Less than a KFC streetwise.`);
-        } else if (daysSince === 7 && client.subscriptionStatus === "trial") {
-          await sendCriticalAlert(client.phoneNumber, `${name} — last day of your trial. Tomorrow coaching stops unless you subscribe.\n\nYour programme, targets, and progress are saved. Pay now and nothing changes — Day ${(client.programmeDayInWeek || 1) + 1} drops tomorrow morning.\n\n*R149/month:*\n${payLink}`);
+        if (daysSince === 1 && client.subscriptionStatus === "inactive") {
+          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day.`);
+        } else if (daysSince === 3 && client.subscriptionStatus === "inactive") {
+          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R149/month — R5/day:\n${payLink}`);
         }
       } else if (!isNewSignup && cancelled) {
         const daysSinceCancelled = Math.floor((Date.now() - cancelled.getTime()) / 86_400_000);
