@@ -6,15 +6,13 @@ import { storeMemory } from "../memory";
 import { sastDayStart } from "../utils";
 import { generateVoiceNote } from "../tts";
 import { sendWhatsApp } from "../scheduler/shared";
+import { generateMilestoneVoiceScript } from "../gpt";
 
 export async function handleWeightLog(
   phone: string,
   user: any,
   newKg: number,
 ): Promise<string> {
-  // Sanity bounds: 30kg–250kg covers from very small adolescents to severely obese adults.
-  // Anything outside is almost certainly a typo (e.g. "850kg" = "85kg", "8kg" = "80kg")
-  // or an OCR/Whisper error. Don't update targets, ask user to confirm.
   if (!Number.isFinite(newKg) || newKg < 30 || newKg > 250) {
     return `That weight reads as *${newKg}kg* — that doesn't look right. Send your weight again as just a number followed by kg, like "82kg" or "76.5kg".`;
   }
@@ -29,7 +27,6 @@ export async function handleWeightLog(
 
   await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
 
-  // Prevent duplicate weight logs — update today's entry if it exists, otherwise insert
   const todayWeightStart = sastDayStart();
   const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
     .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
@@ -40,7 +37,6 @@ export async function handleWeightLog(
     await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
   }
 
-  // Store win memory and build milestone celebration at total loss milestones
   let milestoneCelebration = "";
   try {
     const firstLog = await db.select({ weight: weightLogs.weight }).from(weightLogs)
@@ -56,31 +52,20 @@ export async function handleWeightLog(
         15: `\n\n🏆 *${firstName}, 15kg lost.* That is a genuinely rare thing. Tell me — what's changed beyond the scale? Energy? Sleep? How clothes fit? I want to know.`,
         20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
       };
-      const MILESTONE_VOICE: Record<number, string> = {
-        2:  `Two kilograms gone. That is two bags of sugar your body was carrying - and now it isn't. This is working. Keep logging, keep showing up.`,
-        5:  `Five kilograms. That's a bag of potatoes you were dragging around everywhere - gone. Most people never get here. You did. Screenshot this moment.`,
-        10: `Ten kilograms lost. I want you to think about that. Ten kilos. Most people who start a programme never see this number. You broke through what breaks most people. This is real.`,
-        15: `Fifteen kilos. That is genuinely rare. I have coached a lot of people - fifteen kilograms of fat loss is something most people only dream about. Tell me - what's changed beyond the scale? Because I promise you, everything has changed.`,
-        20: `Twenty kilograms. I'm going to say that again. Twenty. Kilograms. You are not the same person who started this. That version of you does not exist anymore. Twenty kilos is transformation. This is who you are now.`,
-      };
       for (const milestone of [2, 5, 10, 15, 20]) {
         if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
           await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
           milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
-          // Fire voice note in background — milestone fires at most once per client ever
-          const voiceScript = MILESTONE_VOICE[milestone];
-          if (voiceScript) {
-            generateVoiceNote(voiceScript)
-              .then(url => { if (url) return sendWhatsApp(phone, "", url); })
-              .catch(err => console.warn("[TTS] Milestone voice failed:", err));
-          }
+          generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
+            .then(script => generateVoiceNote(script))
+            .then(url => { if (url) return sendWhatsApp(phone, "", url); })
+            .catch(err => console.warn("[TTS] Milestone voice failed:", err));
           break;
         }
       }
     }
   } catch (e) { console.warn("[non-fatal]", e); }
 
-  // Build weight change note vs last log
   let changeNote = "";
   if (prevKg > 0 && Math.abs(newKg - prevKg) > 0.1) {
     const diff = newKg - prevKg;
@@ -88,7 +73,6 @@ export async function handleWeightLog(
     changeNote = ` ${direction} from last log.`;
   }
 
-  // Total journey progress from very first weigh-in
   let journeyNote = "";
   try {
     const [firstLog] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
@@ -116,7 +100,6 @@ export async function handleWeightLog(
     }
   } catch { /* non-fatal */ }
 
-  // Build targets change note
   let targetsNote = "";
   if (Math.abs(newCals - prevCals) > 20 || Math.abs(newProtein - prevProtein) > 2) {
     targetsNote = `\n\nTargets updated: ${newCals} kcal/day | ${newProtein}g protein. (Automatically adjusted — keeps results moving.)`;
@@ -124,7 +107,6 @@ export async function handleWeightLog(
     targetsNote = `\n\nTargets: ${newCals} kcal/day | ${newProtein}g protein.`;
   }
 
-  // Goal reached detection
   const targetKg = parseFloat(user.targetWeightKg || "0");
   const goal = user.goalType || "fat_loss";
   if (targetKg > 0) {
@@ -133,17 +115,16 @@ export async function handleWeightLog(
     if (hitGoal) {
       const firstName = (user.name || "").split(" ")[0] || "there";
       await db.update(users).set({ awaitingInputType: "goal_transition" }).where(eq(users.phoneNumber, phone));
-      const goalVoice = goal === "fat_loss"
-        ? `${firstName}. You hit your target weight. I need you to stop for a second and feel that. You set a number, you worked for it, and you are standing on it right now. That is not luck. That is you.`
-        : `${firstName}. Target weight reached. Every session, every meal, every rep - it built this. You did that.`;
-      generateVoiceNote(goalVoice)
+      const goalMilestone = goal === "fat_loss" ? "goal_reached_fat_loss" : "goal_reached_muscle";
+      const kgLostTotal = prevKg - newKg;
+      generateMilestoneVoiceScript(user, goalMilestone, { currentKg: newKg, startKg: prevKg || newKg, kgLost: Math.max(0, kgLostTotal) })
+        .then(script => generateVoiceNote(script))
         .then(url => { if (url) return sendWhatsApp(phone, "", url); })
         .catch(err => console.warn("[TTS] Goal voice failed:", err));
       return `🏆 *GOAL REACHED.*\n\nWeight logged: *${newKg}kg.*${changeNote}\n\n${firstName}, you hit your target of ${targetKg}kg. This is real — you did the work.\n\nNow we need a new direction. Reply with a number:\n\n*1* — Maintain this weight\n*2* — Build muscle\n*3* — Recomposition (hold weight, swap fat for muscle)\n\nWhat's next?`;
     }
   }
 
-  // Plateau detection — no change >0.5kg in 3 weeks
   const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
   const recentWeightLogs = await db.select({ weight: weightLogs.weight })
     .from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, threeWeeksAgo)))

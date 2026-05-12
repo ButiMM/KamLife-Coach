@@ -5,6 +5,7 @@ import {
   getActiveClients, isPaused, programmeDaysSince, loadState, saveState,
 } from "../shared";
 import { generateVoiceNote } from "../../tts";
+import { generateMilestoneVoiceScript } from "../../gpt";
 
 export function buildDayMilestoneMessage(name: string, days: number, workouts: number, weightKg: string | null): string {
   if (days === 7) return `${name}, seven days in. ${workouts > 0 ? `${workouts} session${workouts > 1 ? "s" : ""} done.` : "Keep building."} Most people quit before week two — you are still here.\n\n🔓 *Week 2 unlocked:* Your programme steps up in intensity this week. Send your weight today so I can calibrate.`;
@@ -55,7 +56,16 @@ export async function runMilestoneCelebrations(): Promise<void> {
         const milestoneKey = `workout_milestone_${workouts}_${client.id}`;
         if (state[milestoneKey] === "sent") continue;
         const text = workoutMilestoneText(name);
-        const voiceUrl = [25, 50, 100].includes(workouts) ? await generateVoiceNote(text) : null;
+        let voiceUrl: string | null = null;
+        if ([25, 50, 100].includes(workouts)) {
+          try {
+            const script = await generateMilestoneVoiceScript(client, "workout_sessions", { sessions: workouts });
+            voiceUrl = await generateVoiceNote(script);
+          } catch (voiceErr) {
+            console.warn("[MILESTONE] Voice script failed, using text:", voiceErr);
+            voiceUrl = await generateVoiceNote(text).catch(() => null);
+          }
+        }
         await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);
         saveState(milestoneKey, "sent");
       }
