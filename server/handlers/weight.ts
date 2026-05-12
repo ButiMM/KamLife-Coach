@@ -4,6 +4,8 @@ import { eq, and, gte, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
 import { sastDayStart } from "../utils";
+import { generateVoiceNote } from "../tts";
+import { sendWhatsApp } from "../scheduler/shared";
 
 export async function handleWeightLog(
   phone: string,
@@ -54,10 +56,24 @@ export async function handleWeightLog(
         15: `\n\n🏆 *${firstName}, 15kg lost.* That is a genuinely rare thing. Tell me — what's changed beyond the scale? Energy? Sleep? How clothes fit? I want to know.`,
         20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
       };
+      const MILESTONE_VOICE: Record<number, string> = {
+        2:  `Two kilograms gone. That is two bags of sugar your body was carrying - and now it isn't. This is working. Keep logging, keep showing up.`,
+        5:  `Five kilograms. That's a bag of potatoes you were dragging around everywhere - gone. Most people never get here. You did. Screenshot this moment.`,
+        10: `Ten kilograms lost. I want you to think about that. Ten kilos. Most people who start a programme never see this number. You broke through what breaks most people. This is real.`,
+        15: `Fifteen kilos. That is genuinely rare. I have coached a lot of people - fifteen kilograms of fat loss is something most people only dream about. Tell me - what's changed beyond the scale? Because I promise you, everything has changed.`,
+        20: `Twenty kilograms. I'm going to say that again. Twenty. Kilograms. You are not the same person who started this. That version of you does not exist anymore. Twenty kilos is transformation. This is who you are now.`,
+      };
       for (const milestone of [2, 5, 10, 15, 20]) {
         if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
           await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
           milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
+          // Fire voice note in background — milestone fires at most once per client ever
+          const voiceScript = MILESTONE_VOICE[milestone];
+          if (voiceScript) {
+            generateVoiceNote(voiceScript)
+              .then(url => { if (url) return sendWhatsApp(phone, "", url); })
+              .catch(err => console.warn("[TTS] Milestone voice failed:", err));
+          }
           break;
         }
       }
@@ -117,6 +133,12 @@ export async function handleWeightLog(
     if (hitGoal) {
       const firstName = (user.name || "").split(" ")[0] || "there";
       await db.update(users).set({ awaitingInputType: "goal_transition" }).where(eq(users.phoneNumber, phone));
+      const goalVoice = goal === "fat_loss"
+        ? `${firstName}. You hit your target weight. I need you to stop for a second and feel that. You set a number, you worked for it, and you are standing on it right now. That is not luck. That is you.`
+        : `${firstName}. Target weight reached. Every session, every meal, every rep - it built this. You did that.`;
+      generateVoiceNote(goalVoice)
+        .then(url => { if (url) return sendWhatsApp(phone, "", url); })
+        .catch(err => console.warn("[TTS] Goal voice failed:", err));
       return `🏆 *GOAL REACHED.*\n\nWeight logged: *${newKg}kg.*${changeNote}\n\n${firstName}, you hit your target of ${targetKg}kg. This is real — you did the work.\n\nNow we need a new direction. Reply with a number:\n\n*1* — Maintain this weight\n*2* — Build muscle\n*3* — Recomposition (hold weight, swap fat for muscle)\n\nWhat's next?`;
     }
   }
