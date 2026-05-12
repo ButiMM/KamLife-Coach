@@ -175,30 +175,6 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     user.subscriptionStatus = "active";
   }
 
-  // ---- TRIAL EXPIRY CHECK — convert expired trials to inactive with a clear message ----
-  if (user.subscriptionStatus === "trial") {
-    const trialEnd = user.betaBypassUntil ? new Date(user.betaBypassUntil) : null;
-    if (trialEnd && trialEnd < new Date()) {
-      // Trial expired — convert to inactive and tell the user
-      await db.update(users).set({ subscriptionStatus: "inactive", betaBypassUntil: null }).where(eq(users.phoneNumber, phone));
-      user.subscriptionStatus = "inactive";
-      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-      const payLink = merchantId
-        ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`
-        : null;
-      const name = user.name || "there";
-      const workouts = user.totalWorkoutsCompleted || 0;
-      const payPart = payLink
-        ? `*R149/month — cancel anytime:*\n${payLink}\n\nR5/day. Reply *pay* anytime to get your link.`
-        : `Reply *pay* and we will send you the payment link directly. R149/month — cancel anytime.`;
-      const trialEndReply = `${name}, your 7-day free trial has ended.${workouts > 0 ? `\n\nYou completed ${workouts} workout${workouts > 1 ? "s" : ""} — that's real momentum.` : ""}\n\nEverything is saved — your programme, progress, and targets. Subscribe to keep coaching going.\n\n${payPart}`;
-      await logChat(user.id, message, trialEndReply, "TRIAL_EXPIRED");
-      return trialEndReply;
-    }
-  }
-
   // ---- SUBSCRIPTION GATE — inactive users get free basic tier, premium features gated ----
   // FREE (always available): food logging, step tracking, water, weight, basic Q&A, meal diary
   // PREMIUM (requires subscription): workout programmes, shopping lists, full coaching, meal plans
@@ -218,8 +194,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
       const gateReply = workouts === 0
-        ? `Your programme is built, ${name} — subscribe to unlock it.\n\nFood tracking is free forever. Workouts, shopping lists, and full coaching are *R149/month — cancel anytime.*\n\n${payLink}\n\n_POPIA protected. Data never sold. Cancel by replying *cancel*._`
-        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:* ${payLink}\n\nFood tracking and steps stay free. Data saved for 90 days.`;
+        ? `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`
+        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
