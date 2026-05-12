@@ -7,6 +7,7 @@ import twilio from "twilio";
 import { requireAdminKey } from "./auth";
 import type { RouteDeps } from "./types";
 import { sendWhatsApp } from "../scheduler";
+import { generateVoiceNote } from "../tts";
 
 // Escape HTML for safe inline rendering — the activity dashboard displays raw
 // user messages, which can contain anything. Never interpolate untrusted text
@@ -620,6 +621,45 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       return res.json({ success: true, user: result[0] });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || "Failed to update subscription" });
+    }
+  });
+
+  // ── Admin: test voice note generation + optional send ──
+  // POST /api/admin/test-voice  { phone?: "+27...", script?: "..." }
+  // Returns { url } so you can paste it in a browser to verify audio works.
+  // If phone is provided, also sends the audio to that WhatsApp number.
+  app.post("/api/admin/test-voice", requireAdminKey, async (req, res) => {
+    try {
+      const { phone, script } = req.body || {};
+      const text = (typeof script === "string" && script.trim())
+        ? script.trim()
+        : "Coach K voice note test. If you can hear this, voice notes are working correctly on this deployment. Sharp.";
+
+      const url = await generateVoiceNote(text);
+      if (!url) {
+        return res.status(500).json({
+          error: "Voice note generation failed — check APP_URL and AI_INTEGRATIONS_OPENAI_API_KEY env vars",
+          appUrl: process.env.APP_URL || process.env.APP_BASE_URL || "(not set)",
+          openaiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY ? "set" : "(not set)",
+        });
+      }
+
+      let sent = false;
+      let sendError: string | null = null;
+      if (phone) {
+        const normalised = phone.startsWith("whatsapp:") ? phone : `whatsapp:+${String(phone).replace(/\D/g, "")}`;
+        try {
+          await sendWhatsApp(normalised, "", url);
+          sent = true;
+        } catch (e: any) {
+          sendError = e.message || "Twilio send failed";
+        }
+      }
+
+      console.log(`[ADMIN] test-voice url=${url} sent=${sent} phone=${phone || "none"}`);
+      return res.json({ success: true, url, sent, sendError });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to generate voice note" });
     }
   });
 }
