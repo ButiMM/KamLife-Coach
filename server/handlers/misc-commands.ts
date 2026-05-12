@@ -597,7 +597,10 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- REFERRAL ----
-  if (["refer", "referral", "my referral", "my code", "referral code", "refer a friend", "invite"].includes(m)) {
+  const isReferralRequest =
+    ["refer", "referral", "my referral", "my code", "referral code", "refer a friend", "invite"].includes(m) ||
+    /\b(my friend wants to (join|try|sign up|start)|how do i (refer|invite|get my friend|bring.*friend)|can i (refer|invite|get.*friend|bring.*friend)|referral (code|link)|share.*coach|get.*friend.*on (this|here|it)|want.*friend.*join|friend.*interested)\b/i.test(m);
+  if (isReferralRequest) {
     let code = user.referralCode;
     if (!code) {
       const namePrefix = (user.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
@@ -605,7 +608,12 @@ export async function handleMiscCommands(ctx: {
       code = `${namePrefix}${randomSuffix}`;
       await db.update(users).set({ referralCode: code }).where(eq(users.phoneNumber, phone));
     }
-    const referralReply = `*Your KamLife Coach Referral Code* 🎯\n\nYour code: *${code}*\n\nShare this with a friend:\n\n_"I'm working with a WhatsApp fitness coach — real SA food, full workout programmes, daily accountability. From R149/month, no app needed. Use code ${code} when you sign up and we BOTH get one month free."_\n\nWhen your friend pays their first month, Coach K sends you a free month automatically. No limit on referrals — every friend earns you a free month.`;
+    const waNum = (process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const waLink = waNum ? `https://wa.me/${waNum}?text=Hi%2C+I+was+referred+by+${code}` : null;
+    const shareMsg = waLink
+      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R149/month, no app. Try it free for 7 days: ${waLink}"_`
+      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R149/month. Tell them code ${code} — your first month is 50% off and I get a free month."_`;
+    const referralReply = `*Your referral code: ${code}* 🎯\n\nSend your friend this:\n\n${shareMsg}\n\nWhen they subscribe, you get a free month. They get 50% off their first month. No cap — every friend earns you one.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;
   }
