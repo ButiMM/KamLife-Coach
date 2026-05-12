@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC, hasRunToday,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
+import { generateVoiceNote } from "../../tts";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -136,6 +137,28 @@ export async function runSundayWeeklyReport(): Promise<void> {
       else lines.push(``, `${name}, below your best but you are still here. That matters. Reset Sunday night and go again Monday.`);
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
+
+      // Voice summary — 1 call per user per week, ~$0.003/user/week at scale
+      try {
+        const winLine = completedSessions >= plannedSessions
+          ? `${completedSessions} sessions this week — target hit.`
+          : completedSessions > 0
+            ? `${completedSessions} out of ${plannedSessions} sessions done.`
+            : `No sessions logged this week — that changes Monday.`;
+        const fixLine = completedSessions < plannedSessions
+          ? `This week, ${plannedSessions - completedSessions} more session${plannedSessions - completedSessions !== 1 ? "s" : ""} than last.`
+          : proteinHitRate < 60
+            ? `Protein at every meal this week — eggs, pilchards, chicken. Non-negotiable.`
+            : `Maintain the consistency. Same output or better.`;
+        const scoreLine = totalScore >= 85
+          ? `${name}, this is what results look like. Same energy next week.`
+          : totalScore >= 60
+            ? `Solid week, ${name}. One more push and you are in the top tier.`
+            : `${name}, below your best — but you are still here. Reset Sunday night and go again Monday.`;
+        const voiceScript = `${scoreLine} ${winLine} ${fixLine}`.replace(/\s+/g, " ").trim();
+        const voiceUrl = await generateVoiceNote(voiceScript);
+        if (voiceUrl) await sendWhatsApp(client.phoneNumber, "", voiceUrl);
+      } catch (voiceErr) { console.warn("[TTS] Weekly voice note failed:", voiceErr); }
 
       try {
         const budgetTier = client.weeklyFoodBudget || "100_300";
