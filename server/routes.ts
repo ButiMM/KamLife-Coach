@@ -102,7 +102,7 @@ const getStepResponse = _getStepResponse;
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
-  const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
+  const m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m);
@@ -193,9 +193,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
     if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
-      const gateReply = workouts === 0
-        ? `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`
-        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+      const isLapsed = !!user.cancelledAt;
+      let gateReply: string;
+      if (workouts === 0 && !isLapsed) {
+        gateReply = `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`;
+      } else if (isLapsed) {
+        const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+        const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
+        const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently ${currentKg}` : ""} — all saved and waiting.` : "";
+        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R149/month — cancel anytime:*\n${payLink}`;
+      } else {
+        gateReply = `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+      }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
@@ -265,21 +274,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
     const streak = user.workoutStreak || 0;
     const totalW = user.totalWorkoutsCompleted || 0;
-    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
-
-Your last message (${lastIntent}): "${lastOut}"
-
-They are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
-
-REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.
-
-WRITE TWO SENTENCES ONLY:
-1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
-2. Give one concrete coaching action using their actual numbers above
-
-BANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
-
-Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
+    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".\n\nYour last message (${lastIntent}): "${lastOut}"\n\nThey are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.\n\nREAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.\n\nWRITE TWO SENTENCES ONLY:\n1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)\n2. Give one concrete coaching action using their actual numbers above\n\nBANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"\n\nCoach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
