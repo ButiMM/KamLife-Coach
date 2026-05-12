@@ -8,6 +8,7 @@ import {
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { getKamlifeProgramme } from "../../programme";
+import { generateVoiceNote } from "../../tts";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -258,6 +259,21 @@ export async function runMorningCheckin(): Promise<void> {
 
       if (canSendProactive(client.id)) {
         await sendWhatsApp(phone, parts.join(" "));
+
+        // Voice note — short spoken opener, sent immediately after the text
+        try {
+          const proteinNote = totalProtLogged >= proteinTarget * 0.9
+            ? `Protein target hit yesterday.`
+            : totalProtLogged > 0
+              ? `${Math.round(proteinTarget - totalProtLogged)}g protein short yesterday. Fix it today.`
+              : `No food logged yesterday. Log breakfast now.`;
+          const trainingNote = isTodayTrainingDay ? `Training day today. Get it done.` : `Rest day. Stay on food and steps.`;
+          const streakNote = wStreak >= 3 ? `${wStreak}-session streak — protect it.` : "";
+          const voiceScript = `Morning ${name}. ${streakNote} ${proteinNote} ${trainingNote}`.replace(/\s+/g, " ").trim();
+          const voiceUrl = await generateVoiceNote(voiceScript);
+          if (voiceUrl) await sendWhatsApp(phone, "", voiceUrl);
+        } catch (voiceErr) { console.warn("[TTS] Morning voice note failed:", voiceErr); }
+
         recordProactiveSend(client.id);
       }
     } catch (err) {
