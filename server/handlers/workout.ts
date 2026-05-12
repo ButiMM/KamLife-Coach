@@ -86,7 +86,7 @@ export async function handleWorkoutCommands(ctx: {
   }
 
   // ---- DONE — workout complete (direct) ----
-  if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[.!?,]+$/, "").trim())) {
+  if (/^(done!*|i.?m done!*|im done!*|all done!*|workout done!*|finished!*|completed!*|session done!*|training done!*|workout completed!*|done with workout!*|done with my workout!*|done training!*)$/i.test(m.replace(/[\s.,!?✓✅🏋️‍♂️🏋️]+$/u, "").trim())) {
     const todayStart = sastDayStart();
     const alreadyLoggedToday = await db.select({ id: workoutLogs.id })
       .from(workoutLogs)
@@ -414,9 +414,13 @@ export async function handleWorkoutCommands(ctx: {
 
     const updatedUser = { ...user, trainingDaysPerWeek: days, trainingExperience: exp, goalType: goal };
     const day1 = buildFullProgramme(updatedUser);
-    const goalLabel = goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Body recomposition";
 
-    return `Sharp. ${days} days/week. ${exp.charAt(0).toUpperCase() + exp.slice(1)}. ${goalLabel}. Here is Day 1 — send *done* when finished to unlock Day 2.\n\n${day1}`;
+    const goalIntro = goal === "fat_loss"
+      ? `${days} days/week builds the muscle that burns fat when you're not training.`
+      : goal === "muscle_gain"
+        ? `${days} days/week with progressive overload — add reps or weight every single session.`
+        : `${days} days/week. Build muscle, lose fat at the same time. Protein and consistency are everything.`;
+    return `Sharp, ${name}. ${goalIntro}\n\nDay 1 is built. Send *done* when you finish — I'll log it and queue Day 2.\n\n${day1}`;
   }
 
   // ---- EXPLICIT WORKOUT COMMANDS — hardcoded, never touch GPT ----

@@ -2,8 +2,49 @@ import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
+
+export async function computeFoodLogStreak(userId: string): Promise<number> {
+  try {
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
+    const logs = await db.select({ createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sixtyDaysAgo)))
+      .orderBy(desc(chatHistory.createdAt));
+    if (logs.length === 0) return 0;
+    const days = new Set<string>();
+    for (const l of logs) {
+      if (!l.createdAt) continue;
+      const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
+      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+    }
+    let streak = 0;
+    const checkDate = new Date(Date.now() + 2 * 3_600_000);
+    while (true) {
+      const key = `${checkDate.getUTCFullYear()}-${checkDate.getUTCMonth()}-${checkDate.getUTCDate()}`;
+      if (!days.has(key)) break;
+      streak++;
+      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
+    }
+    return streak;
+  } catch { return 0; }
+}
+
+const FOOD_STREAK_MESSAGES: Record<number, (name: string) => string> = {
+  3:  (n) => `\n\n🔥 *${n}, 3 days logging straight.* The data is building. This is what coaching from facts looks like — keep it going.`,
+  5:  (n) => `\n\n🔥 *${n}, 5 days in a row.* Most people stop at day 2. You're past the quitting point. Don't break the chain.`,
+  7:  (n) => `\n\n🔥 *${n}, 7 days of food logs.* A full week. You now have real data — patterns I can actually coach from. Screenshot this and keep going.`,
+  10: (n) => `\n\n🔥 *${n}, 10 days straight.* Double figures. The habit is forming — your brain is starting to do this automatically. That's exactly where you want to be.`,
+  14: (n) => `\n\n🔥 *${n}, 14 days.* Two weeks of consistent logging. The clients who get results are the clients who do this. You are one of them.`,
+  21: (n) => `\n\n🔥 *${n}, 21 days logging.* Three weeks. This is a habit now — not discipline, not willpower. Habit. The data you've built is yours forever.`,
+  30: (n) => `\n\n🏆 *${n}, 30 days.* A full month of food logs. I do not see many people get here. Your consistency record is real — take a moment with that.`,
+};
+
+export function getFoodStreakCelebration(streak: number, name: string): string {
+  const fn = name.split(" ")[0] || "there";
+  return FOOD_STREAK_MESSAGES[streak]?.(fn) ?? "";
+}
 
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -298,6 +339,7 @@ export function buildFoodLogReply(p: {
   hasCarbs?: boolean;
   coachNoteOverride?: string;
   user: any;
+  todaySteps?: number;
 }): string {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
@@ -310,9 +352,20 @@ export function buildFoodLogReply(p: {
   const proteinRemaining = proteinTarget - runningProtein;
   const earlyInDay = runningCals < (calorieTarget * 0.4);
 
+  // Extra step burn: ~40 kcal per 1,000 steps beyond target
+  const stepsTarget = user.stepsTarget || 8500;
+  const todaySteps = p.todaySteps || 0;
+  const extraStepsBurned = todaySteps > stepsTarget
+    ? Math.round((todaySteps - stepsTarget) * 0.04)
+    : 0;
+
+  const effectiveRemaining = calRemaining + extraStepsBurned;
+  const stepsNote = extraStepsBurned > 0 && calRemaining < 0
+    ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
+    : "";
   const runningLine = prevCals > 0
-    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${calRemaining > 0 ? ` (${calRemaining} remaining)` : " ✅ target reached"}`
-    : `Remaining today: ~${Math.max(0, calRemaining)} kcal`;
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
+    : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   let dayAssessment = "";
   if (prevCals > 0 && totalMealCals >= 100) {
@@ -320,9 +373,16 @@ export function buildFoodLogReply(p: {
     const dayProgress = Math.min(hourNow / 20, 1);
     const expectedCals = calorieTarget * dayProgress;
     const calPace = runningCals / Math.max(expectedCals, 1);
-    if (calRemaining <= 0) {
-      dayAssessment = `\n_Calorie target reached — stop eating for today. Water and sleep._`;
-    } else if (!earlyInDay && calPace < 0.6 && calRemaining < 600) {
+    if (calRemaining <= 0 && effectiveRemaining <= -100) {
+      // Over after steps — if big steps, soften message
+      if (extraStepsBurned >= 80) {
+        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${Math.abs(effectiveRemaining)} kcal. Keep dinner light._`;
+      } else {
+        dayAssessment = `\n_Calorie target reached — keep dinner light. Protein and vegetables only._`;
+      }
+    } else if (calRemaining <= 0 && effectiveRemaining > -100) {
+      dayAssessment = `\n_Your step count covered the overage — you're effectively on target. Keep the last meal light._`;
+    } else if (!earlyInDay && calPace < 0.6 && effectiveRemaining < 600) {
       dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
     } else if (!earlyInDay && calPace > 1.3) {
       dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
@@ -376,7 +436,15 @@ export function buildFoodLogReply(p: {
         ];
     proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${Math.round(protRemaining)}g protein still needed today.`;
   } else if (protRemaining <= 0) {
-    proteinTip = `\n\nProtein target hit. ✅`;
+    const evnHour = new Date().getUTCHours() + 2;
+    const isEvening = evnHour >= 17;
+    const caloriesOnTarget = runningCals <= calorieTarget * 1.1;
+    if (isEvening && caloriesOnTarget) {
+      const fn = (user.name || "").split(" ")[0] || "there";
+      proteinTip = `\n\n✅ *Protein target hit, ${fn}.* Calories on track. That is a clean nutrition day — no workout needed to make this count. Same again tomorrow.`;
+    } else {
+      proteinTip = `\n\nProtein target hit. ✅`;
+    }
   }
 
   let variableReinforcement = "";

@@ -38,16 +38,26 @@ export async function handleWeightLog(
     await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
   }
 
-  // Store win memory at total loss milestones
+  // Store win memory and build milestone celebration at total loss milestones
+  let milestoneCelebration = "";
   try {
     const firstLog = await db.select({ weight: weightLogs.weight }).from(weightLogs)
       .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
     if (firstLog.length > 0) {
       const startKg = parseFloat(String(firstLog[0].weight));
       const totalLoss = startKg - newKg;
+      const firstName = (user.name || "").split(" ")[0] || "there";
+      const MILESTONE_MESSAGES: Record<number, string> = {
+        2:  `\n\n🏆 *${firstName}, that's 2kg gone.* Two bags of sugar off your body — permanently. This is working.`,
+        5:  `\n\n🏆 *${firstName}, 5kg gone.* Five kilograms. That's a bag of potatoes you were carrying everywhere. It's not coming back. Screenshot this.`,
+        10: `\n\n🏆 *${firstName}, 10 kilograms.* Most people who start a programme never see 10kg. You did. Share this with someone — you've earned it.`,
+        15: `\n\n🏆 *${firstName}, 15kg lost.* That is a genuinely rare thing. Tell me — what's changed beyond the scale? Energy? Sleep? How clothes fit? I want to know.`,
+        20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
+      };
       for (const milestone of [2, 5, 10, 15, 20]) {
         if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
           await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
+          milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
           break;
         }
       }
@@ -125,5 +135,5 @@ export async function handleWeightLog(
     }
   }
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${journeyNote}${targetsNote}${plateauNote}`;
+  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration || journeyNote}${targetsNote}${plateauNote}`;
 }

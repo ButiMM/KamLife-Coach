@@ -414,7 +414,7 @@ SA voice. Direct. Coach forward, not backward.`;
   // ---- FOOD CONTEXT CHECK — only if GPT response is about food the user actually ate ----
   // STRICT: must have BOTH a log trigger AND actual SA food detected by scanner
   // This prevents "I had a great workout", "food is expensive", "dinner plans" from being logged as food
-  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|just had|just ate|i had|i ate|meal)\b/i.test(m);
+  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack(ed|ing)?|just had|just ate|i had|i ate|meal|grabbed|nibbled|had some|bit of|piece of)\b|quick bite/i.test(m);
   const isLogCommand = /\b(log it|save this|save it|log that|save that)\b/i.test(m);
   const isQuestion = /\?|^(what|how|when|where|why|can|should|is|are|do|does|which|could|would)\b/i.test(m);
   const isFrustration = /^\s*(ugh|argh|wtf|what the|this is|not working|doesn.?t work|ridiculous|stupid|useless|terrible|broken|help!+|please!+)\b/i.test(m);

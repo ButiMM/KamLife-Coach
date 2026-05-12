@@ -647,6 +647,54 @@ export async function handleLifecycle(ctx: {
     // Not paused — fall through (bare "start" from a new user means menu, not opt-in)
   }
 
+  // ---- CANCEL SAVE — handle reason (step 2 of cancel flow) ----
+  if (user.awaitingInputType === "cancel_save") {
+    const name = (user.name || "").split(" ")[0] || "there";
+    const choice = m.trim();
+    const goal = user.goalType || "fat_loss";
+    const cals = user.calorieTarget || 1800;
+    const protein = user.proteinTarget || 140;
+
+    if (choice === "1" || /\b(too expensive|expensive|can.?t afford|afford|price|cost|money)\b/i.test(m)) {
+      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+      const existingNotes = user.profileNotes || "";
+      const pausedNotes = existingNotes.includes("paused_until:")
+        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
+        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
+      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nR149 is R5/day. When things ease up, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
+      await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
+      return priceReply;
+    }
+
+    if (choice === "2" || /\b(not seeing results|no results|not working|isn.?t working|not losing|not gaining|plateau|stuck)\b/i.test(m)) {
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      const resultsReply = goal === "fat_loss"
+        ? `${name}, results come from hitting *${cals} kcal / ${protein}g protein* consistently — not perfectly, but most days.\n\nIf you're doing that and the scale isn't moving, your targets need adjusting. Log your food for 5 days and send me a message — I'll audit exactly what's not working and fix your numbers. Give it that before you go.`
+        : `${name}, muscle takes longer than fat loss but it compounds hard. Are you hitting *${cals} kcal / ${protein}g protein* and adding reps or weight each session?\n\nLog food for 5 days and message me — I'll look at your numbers and adjust. Give it that before you go.`;
+      await logChat(user.id, message, resultsReply, "CANCEL_SAVE_RESULTS");
+      return resultsReply;
+    }
+
+    if (choice === "3" || /\b(break|need a break|taking a break|rest|holiday|vacation|pause|step away)\b/i.test(m)) {
+      const pauseUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+      const existingNotes = user.profileNotes || "";
+      const pausedNotes = existingNotes.includes("paused_until:")
+        ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
+        : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
+      await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
+      const breakReply = `Done, ${name}. Paused for 30 days — no check-ins. Programme saved.\n\nWhen you're ready, reply *back* and we go again. No restart needed.`;
+      await logChat(user.id, message, breakReply, "CANCEL_SAVE_PAUSE_BREAK");
+      return breakReply;
+    }
+
+    // Option 4 or unrecognised — route to confirm flow
+    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
+    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your R149/month coaching stops. Data saved 90 days._`;
+    await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
+    return confirmReply;
+  }
+
   // ---- CANCEL SUBSCRIPTION CONFIRMATION (step 2) ----
   if (user.awaitingInputType === "cancel_confirm") {
     await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
@@ -676,11 +724,13 @@ export async function handleLifecycle(ctx: {
       await logChat(user.id, message, cancelledAlreadyReply, "CANCEL");
       return cancelledAlreadyReply;
     }
-    const name = user.name || "there";
-    await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
-    const cancelConfirmReply = `${name}, just to confirm — do you want to cancel your subscription?\n\nReply *yes* to cancel, or anything else to keep it.\n\n_Your R149/month coaching, workouts, and progress will stop. Your data stays saved for 90 days._`;
-    await logChat(user.id, message, cancelConfirmReply, "CANCEL_CONFIRM");
-    return cancelConfirmReply;
+    const name = (user.name || "").split(" ")[0] || "there";
+    const sessions = user.totalWorkoutsCompleted || 0;
+    const sessionLine = sessions > 0 ? `${sessions} session${sessions === 1 ? "" : "s"} logged.` : "Your profile is saved.";
+    await db.update(users).set({ awaitingInputType: "cancel_save" }).where(eq(users.phoneNumber, phone));
+    const cancelSaveReply = `${name}, before I cancel — ${sessionLine}\n\nWhat's making you want to leave?\n\n*1* — Too expensive\n*2* — Not seeing results\n*3* — Need a break, not quitting\n*4* — Just cancel`;
+    await logChat(user.id, message, cancelSaveReply, "CANCEL_SAVE_START");
+    return cancelSaveReply;
   }
 
   // ---- REFUND REQUEST ----
@@ -1181,23 +1231,76 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- WIN / POSITIVE UPDATE — client shares a weight loss, milestone, or NSV ----
-  const isWinMsg =
-    (/\b(lost|dropped|down|lighter|less than before|weighed in at)\b/i.test(m) &&
-     /\b(\d+(?:\.\d+)?)\s*kg\b/.test(m) &&
-     /\b(lost|dropped|down)\b/i.test(m)) ||
-    /\b(jeans.*fit|clothes.*fitting|fitting better|looser.*clothes|clothes.*looser|compliment|someone noticed|people.*noticed|noticed.*change|can feel.*difference|feeling.*stronger|lifted more|new pb|personal best|pb today)\b/i.test(m);
+  const isWeightWin =
+    /\b(lost|dropped|down|lighter|less than before|weighed in at)\b/i.test(m) &&
+    /\b(\d+(?:\.\d+)?)\s*kg\b/.test(m) &&
+    /\b(lost|dropped|down)\b/i.test(m);
 
-  if (isWinMsg) {
+  const isNSV =
+    /\b(jeans.*fit|clothes.*fitting|fitting better|looser.*clothes|clothes.*looser|jeans.*too big|shirt.*too big|dress.*too big|pants.*too big|clothes.*loose|jeans.*loose)\b/i.test(m) ||
+    /\b(compliment|someone noticed|people.*noticed|noticed.*change|people.*say.*look|people.*saying.*look|someone.*said.*look|friends.*noticed|family.*noticed)\b/i.test(m) ||
+    /\b(can feel.*difference|feel.*difference|feel.*different|look.*different|see.*difference|see.*changes|seeing.*changes|seeing.*results|results.*showing|starting to show)\b/i.test(m) ||
+    /\b(can see my abs|seeing.*abs|abs.*showing|stomach.*flatter|belly.*smaller|waist.*smaller|waist.*getting smaller)\b/i.test(m) ||
+    /\b(feeling.*stronger|feel.*stronger|lifted more|new pb|personal best|pb today|ran further|ran longer|first time.*ran|ran.*without.*stopping|didn.?t get.*tired)\b/i.test(m) ||
+    /\b(energy.*better|so much.*energy|more energy|energy.*up|sleeping better|sleep.*improved|feel amazing|feel incredible|feel great about)\b/i.test(m) ||
+    /\b(meal prep|meal prepped|prepped.*food|cooked.*bulk|batch cook|batch cooked)\b/i.test(m);
+
+  if (isWeightWin || isNSV) {
     const kgMatch = m.match(/(\d+(?:\.\d+)?)\s*kg/);
     const kgLost = kgMatch ? parseFloat(kgMatch[1]) : null;
     const total = user.totalWorkoutsCompleted || 0;
     const weeks = user.programmeWeek || 1;
     const name = user.name || "there";
-    const winReply = kgLost && m.match(/\b(lost|dropped|down)\b/i)
-      ? `${kgLost}kg down — that is real${name ? `, ${name}` : ""}. ${total} sessions, ${weeks} week${weeks !== 1 ? "s" : ""} of consistency. This is what the programme does.\n\nThe next ${kgLost}kg follows the same formula — same sessions, same food discipline, same steps. Keep going.`
-      : `${name}, that is a win. Non-scale victories are the most honest data — the clothes do not lie.\n\nYour body is changing. The ${total} sessions you have put in are showing up in the real world. Keep the same habits for the next 4 weeks and this becomes your new normal.`;
+
+    let winReply: string;
+    if (isWeightWin && kgLost) {
+      winReply = `${kgLost}kg down — that is real, ${name}. ${total} session${total !== 1 ? "s" : ""}, ${weeks} week${weeks !== 1 ? "s" : ""} of consistency. This is exactly what the programme is supposed to do.\n\nThe next ${kgLost}kg follows the same formula. Same sessions, same food, same steps. Keep going.`;
+    } else if (/\b(jeans|clothes|shirt|dress|pants)\b/i.test(m)) {
+      winReply = `${name}, clothes don't lie. When they start fitting differently, the scale is just catching up to what your body already knows.\n\n${total} sessions to get here. The people who keep the same habits for another 4 weeks are the ones who don't go back. You're at that point now.`;
+    } else if (/\b(someone noticed|people.*noticed|compliment|people.*say|friends.*noticed|family.*noticed)\b/i.test(m)) {
+      winReply = `When people start noticing, it means the change is real enough that strangers can see it — not just you on a good day in the mirror.\n\n${name}, ${total} sessions built that. Screenshot this and send it to whoever doubted you.`;
+    } else if (/\b(abs|stomach.*flat|belly.*small|waist)\b/i.test(m)) {
+      winReply = `${name}, that is the programme working. Abs are fat loss made visible — you cannot fake that.\n\nKeep the deficit, keep the protein, keep the steps. You are in the phase where the visible changes compound every week.`;
+    } else if (/\b(stronger|pb|personal best|lifted more|ran)\b/i.test(m)) {
+      winReply = `Performance wins are the most honest feedback your body gives. The scale lies, the mirror lies on bad days — but a new personal best never lies.\n\n${name}, ${total} sessions to get here. Same formula next week.`;
+    } else if (/\b(energy|sleep|feel amazing|feel great)\b/i.test(m)) {
+      winReply = `${name}, this is the part most people don't expect — the energy and sleep change before the body visibly changes.\n\nWhat you're feeling right now is your metabolism shifting. The visual results follow. Keep exactly what you're doing.`;
+    } else if (/\b(meal prep|batch cook)\b/i.test(m)) {
+      winReply = `${name}, meal prep is the single habit that separates people who get results from people who talk about it.\n\nWhen the food is already made, you don't make bad decisions under pressure. You just eat what's there. That's the whole secret. Do it every Sunday.`;
+    } else {
+      winReply = `${name}, that is a real win — and it came from ${total} sessions of work. The body is changing.\n\nKeep the same habits for 4 more weeks. This is where it compounds.`;
+    }
     await logChat(user.id, message, winReply, "WIN_CELEBRATION");
     return winReply;
+  }
+
+  // ---- DISCIPLINE MOMENT — trained despite not wanting to ----
+  const isDisciplineWin =
+    /\b(didn.?t (feel like|want to) (train|go|workout|work out|go to gym)|forced myself|made myself (go|train|workout)|dragged myself|almost (didn.?t go|skipped|quit)|wanted to skip but|nearly skipped|almost skipped|didn.?t want to but (went|trained|did it|showed up)|went anyway|trained anyway|showed up anyway)\b/i.test(m);
+
+  if (isDisciplineWin) {
+    const name = user.name?.split(" ")[0] || "there";
+    const total = user.totalWorkoutsCompleted || 0;
+    const disciplineReply = `${name}, that session counts double.\n\nEvery person who has ever changed their body has had that exact same moment — the voice that says "not today." The ones who get results are not the ones who feel motivated. They are the ones who go anyway.\n\nYou just proved to yourself that you are that person. That is not a small thing. ${total > 1 ? `${total} sessions, and this is the one that matters most — because it was the hardest one to start.` : `First sessions are the hardest. You did it.`}\n\nSend *done* when you finish.`;
+    await logChat(user.id, message, disciplineReply, "DISCIPLINE_WIN");
+    return disciplineReply;
+  }
+
+  // ---- FIRST GYM VISIT / GYM ANXIETY ----
+  const isFirstGym =
+    /\b(first time (at|in|to) (the )?gym|first gym (session|day|visit|time)|never been to (a |the )?gym|went to (the )?gym for the first time|my first (day|session) (at|in) (the )?gym)\b/i.test(m);
+  const isGymAnxiety =
+    /\b(nervous (at|in|about) (the )?gym|intimidated (by |at |in )?the gym|don.?t know what (i.?m doing|to do) (at|in) (the )?gym|feel (lost|confused|out of place) (at|in) (the )?gym|gym (is|was) (scary|intimidating|overwhelming)|everyone.*staring|people.*staring.*gym|don.?t belong.*gym)\b/i.test(m);
+
+  if (isFirstGym || isGymAnxiety) {
+    const name = user.name?.split(" ")[0] || "there";
+    const mode = user.trainingMode || "gym";
+    const gymName = (user as any).gymName || "the gym";
+    const gymReply = isFirstGym
+      ? `${name}, you walked in. That is the hardest part — and you already did it.\n\nEvery person in that gym was a first-timer once. Every single one. The ones who look comfortable now were nervous the first day too.\n\nHere is all you need to know today: follow your programme, one exercise at a time. If a machine is taken, move to the next one. Nobody is watching you — everyone is focused on themselves.\n\nSend *done* when you finish your first session. That one counts more than any session after it.`
+      : `${name}, gym anxiety is real and almost everyone feels it. Even people who have trained for years.\n\nHere is the truth: nobody in ${gymName} is watching you as closely as you think. They are thinking about their own training.\n\nYour programme is designed for machines — the safest, most effective way to train. Stick to your list, rest between sets, and leave when you are done. That is the whole thing.\n\nWhat exercise are you on right now? I will walk you through it.`;
+    await logChat(user.id, message, gymReply, "GYM_ANXIETY");
+    return gymReply;
   }
 
   // ---- SUGAR / JUNK CRAVINGS HANDLER — different from general hunger ----
@@ -1562,6 +1665,21 @@ export async function handleLifecycle(ctx: {
       await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
       return formatReply;
     }
+  }
+
+  // ---- THANKS / COMPLIMENT — deflect credit back to the user ----
+  const isThanks = /\b(thank you|thanks|thank u|thx|you.?re amazing|you.?re the best|great coach|love this|love you coach|you.?re great|you.?re awesome|you.?re helping|so helpful|this is helping|this is working|appreciate (you|it|this)|grateful)\b/i.test(m);
+  if (isThanks && m.split(/\s+/).length < 20) {
+    const fn = (user.name || "").split(" ")[0] || "there";
+    const goal = user.goalType || "fat_loss";
+    const forward = goal === "fat_loss"
+      ? `Send me what you're eating today — even one meal. That is how we keep it moving.`
+      : goal === "muscle_gain"
+        ? `Send me today's training session when you're done — let's keep the streak going.`
+        : `Log something today — food, a workout, a weight. Every log is a data point.`;
+    const thanksReply = `${fn}, that is all you — I just give the numbers and the nudges. You are the one showing up.\n\n${forward}`;
+    await logChat(user.id, message, thanksReply, "THANKS");
+    return thanksReply;
   }
 
   return null;

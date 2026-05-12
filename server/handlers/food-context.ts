@@ -6,11 +6,12 @@
  */
 
 import { db } from "../db";
-import { users, mealLogs, chatHistory } from "../../shared/schema";
+import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
+  computeFoodLogStreak, getFoodStreakCelebration,
 } from "./food-scanner";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
@@ -454,10 +455,17 @@ export async function handleFoodContext(ctx: {
       const todayStr = sastToday();
       let runningCals = totalCals;
       let runningProtein = Math.round(totalProtein);
+      let todayStepCount = 0;
       try {
-        const existingTotals = await recomputeTodayFoodTotals(user.id);
+        const [existingTotals, stepRow] = await Promise.all([
+          recomputeTodayFoodTotals(user.id),
+          db.select({ steps: stepLogs.steps }).from(stepLogs)
+            .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
+            .orderBy(desc(stepLogs.loggedAt)).limit(1),
+        ]);
         runningCals = existingTotals.calories + totalCals;
         runningProtein = existingTotals.protein + Math.round(totalProtein);
+        todayStepCount = stepRow[0]?.steps || 0;
         await db.update(users).set({
           todayCalories: runningCals,
           todayProteinG: runningProtein,
@@ -541,7 +549,7 @@ export async function handleFoodContext(ctx: {
         junkNoteText, hasGoodProteins: goodProteins.length > 0,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
         coachNoteOverride: denseFoodCoachNote,
-        user,
+        user, todaySteps: todayStepCount,
       });
 
       try {
@@ -575,9 +583,14 @@ export async function handleFoodContext(ctx: {
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
       await logChat(user.id, message, reply, "FOOD_LOG");
-      const [saPattern, saDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      const [saPattern, saDay, foodStreak] = await Promise.all([
+        checkFoodPatterns(user.id),
+        checkPerfectDay(user.id, user.proteinTarget || 130),
+        computeFoodLogStreak(user.id),
+      ]);
+      const streakCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
-      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${stepAppend}`;
+      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${stepAppend}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
@@ -631,9 +644,9 @@ export async function handleFoodContext(ctx: {
           });
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-        const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+        const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fbStreak, user.name || "")}`;
       }
     }
   }
@@ -691,9 +704,9 @@ export async function handleFoodContext(ctx: {
         });
       } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-      const [fbPattern, fbDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}`;
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fb2Streak, user.name || "")}`;
     }
   }
 

@@ -37,6 +37,7 @@ export async function runMorningCheckin(): Promise<void> {
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
       : 0;
     if (daysSilent > 7) continue;
+    if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {
       if (canSendProactive(client.id)) {
@@ -124,6 +125,29 @@ export async function runMorningCheckin(): Promise<void> {
       else if (progDays === 90) identityLine = " 90 days. You are not the same person who started this.";
 
       const wStreak = client.workoutStreak || 0;
+      let foodLogStreakCount = 0;
+      {
+        const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
+        const recentFoodLogDays = await db.select({ createdAt: chatHistory.createdAt })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sixtyDaysAgo)))
+          .orderBy(desc(chatHistory.createdAt))
+          .catch(() => [] as { createdAt: Date | null }[]);
+        const foodDays = new Set<string>();
+        for (const l of recentFoodLogDays) {
+          if (!l.createdAt) continue;
+          const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
+          foodDays.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+        }
+        const foodCheck = new Date(Date.now() + 2 * 3_600_000);
+        foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
+        while (true) {
+          const key = `${foodCheck.getUTCFullYear()}-${foodCheck.getUTCMonth()}-${foodCheck.getUTCDate()}`;
+          if (!foodDays.has(key)) break;
+          foodLogStreakCount++;
+          foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
+        }
+      }
       let stepStreakCount = 0;
       {
         const stepDays = new Set<string>();
@@ -145,6 +169,7 @@ export async function runMorningCheckin(): Promise<void> {
       const streakParts: string[] = [];
       if (wStreak >= 2) streakParts.push(`🔥 *${wStreak}-session streak*`);
       if (stepStreakCount >= 2) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      if (foodLogStreakCount >= 3) streakParts.push(`🍽️ ${foodLogStreakCount}-day food streak`);
       const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
       const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
