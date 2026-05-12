@@ -36,7 +36,10 @@ interface ClientWeekData {
   weightChange: number | null; // kg change vs 2 weeks ago
   mealsLoggedDays: number;
   workoutStreak: number;
+  lifeContext: string | null; // illness, bereavement, injury, family crisis detected this week
 }
+
+const LIFE_EVENT_PATTERNS = /\b(sick|ill|flu|fever|vomit|nausea|hospital|clinic|doctor|emergency|funeral|died|death|passed away|passed on|lost my|losing my|granny|grandma|grandfather|gran|bereave|mourning|grieving|surgery|operation|injury|injured|hurt|broken|fracture|sprain|overwhelm|breakdown|depressed|depression|anxiety|mental health|can't cope|cant cope|crisis|accident|icu|intensive care|covid|quarantine|isolat)\b/i;
 
 async function getClientWeekData(userId: string): Promise<ClientWeekData | null> {
   const weekAgo = new Date(Date.now() - 7 * 86_400_000);
@@ -86,6 +89,48 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
     const oldWeight = oldWeightRows[0]?.weight ? parseFloat(oldWeightRows[0].weight) : null;
     const weightChange = latestWeight !== null && oldWeight !== null ? latestWeight - oldWeight : null;
 
+    // Detect life events from last 14 days of chat history + memories
+    let lifeContext: string | null = null;
+    try {
+      const [chatEvents, memEvents] = await Promise.all([
+        pool.query<{ message_in: string; intent: string }>(
+          `SELECT message_in, intent FROM chat_history
+           WHERE user_id=$1 AND created_at > NOW() - INTERVAL '14 days'
+           AND (intent IN ('SICK_DAY','INJURY') OR message_in ~* $2)
+           ORDER BY created_at DESC LIMIT 6`,
+          [userId, '\\m(sick|ill|flu|fever|hospital|funeral|died|death|passed away|passed on|lost my|injury|injured|surgery|operation|overwhelm|depression|anxiety|emergency|bereav|griev|mourn|covid|icu|quarantine|isolat|breakdown|fracture|sprain)\\M']
+        ),
+        pool.query<{ content: string }>(
+          `SELECT content FROM memories
+           WHERE phone=$1 AND category='medical' AND created_at > NOW() - INTERVAL '14 days'
+           ORDER BY created_at DESC LIMIT 3`,
+          [u.phone_number]
+        ),
+      ]);
+      const lifeMessages = chatEvents.rows.map(r => r.message_in).filter(Boolean);
+      const lifeMemories = memEvents.rows.map(r => r.content).filter(Boolean);
+      const hasSick = chatEvents.rows.some(r => r.intent === 'SICK_DAY' || LIFE_EVENT_PATTERNS.test(r.message_in || ''));
+      const hasInjury = chatEvents.rows.some(r => r.intent === 'INJURY');
+      const hasBereavement = [...lifeMessages, ...lifeMemories].some(t =>
+        /\b(funeral|died|death|passed away|passed on|lost my|granny|grandma|grandfather|gran|bereave|mourn|griev)\b/i.test(t)
+      );
+      const hasEmergency = lifeMessages.some(t => /\b(emergency|accident|icu|intensive care|surgery|operation)\b/i.test(t));
+
+      if (hasBereavement) {
+        lifeContext = `This client experienced a bereavement or loss this week.`;
+      } else if (hasEmergency) {
+        lifeContext = `This client dealt with a medical emergency or surgery this week.`;
+      } else if (hasInjury) {
+        lifeContext = `This client had an injury this week.`;
+      } else if (hasSick) {
+        lifeContext = `This client was sick or unwell this week.`;
+      } else if (lifeMemories.length > 0) {
+        lifeContext = `Recent medical note: ${lifeMemories[0]}`;
+      }
+    } catch (e: any) {
+      console.warn("[RECAP] Life context fetch failed:", e.message);
+    }
+
     return {
       id: u.id,
       name: u.name,
@@ -101,6 +146,7 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
       weightChange: weightChange !== null ? Math.round(weightChange * 10) / 10 : null,
       mealsLoggedDays: parseInt(mealsRes.rows[0].days, 10),
       workoutStreak: u.workout_streak ?? 0,
+      lifeContext,
     };
   } catch (e: any) {
     console.error(`[RECAP] Failed to fetch data for ${userId}:`, e.message);
@@ -125,19 +171,31 @@ export async function generateRecapScript(data: ClientWeekData): Promise<string>
     data.workoutStreak > 3 ? `Workout streak: ${data.workoutStreak} days` : "",
   ].filter(Boolean).join("\n");
 
+  const lifeNote = data.lifeContext
+    ? `\n\nIMPORTANT LIFE CONTEXT: ${data.lifeContext}`
+    : "";
+
+  const toneRules = data.lifeContext
+    ? `- TONE: Compassionate and human. This client had a hard week outside of fitness.
+- DO NOT reference their numbers as failures or missed targets.
+- Acknowledge that life comes first. Give them permission to have had a slow week.
+- End with a warm, gentle invitation to come back at their own pace — no pressure.
+- Do NOT mention specific workout counts or steps as things they failed at.`
+    : `- If they had a strong week: celebrate it and raise the bar
+- If they had a weak week: be honest but not harsh, redirect forward
+- End with ONE specific thing to focus on next week`;
+
   const prompt = `You are Coach K — a direct, warm, results-focused South African fitness coach.
 Write a personal voice note script for a client's weekly recap. 60–80 words MAX.
 
 Client data:
-${context}
+${context}${lifeNote}
 
 Rules:
 - Start with exactly: "Hey ${firstName}, it's Coach K."
 - Reference 1–2 real numbers from their data (workouts, steps, or weight)
 - Be specific, not generic — make them feel seen
-- If they had a strong week: celebrate it and raise the bar
-- If they had a weak week: be honest but not harsh, redirect forward
-- End with ONE specific thing to focus on next week
+${toneRules}
 - South African voice — direct, no corporate speak, no emojis
 - Max 80 words, no filler phrases like "I'm proud of you" or "amazing job"`;
 
