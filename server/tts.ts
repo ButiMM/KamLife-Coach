@@ -24,11 +24,12 @@ mkdir(VOICE_DIR, { recursive: true }).catch(() => {});
  * Returns the public HTTPS URL for the audio file, or null if APP_BASE_URL is not set.
  */
 export async function generateVoiceNote(text: string): Promise<string | null> {
-  const appUrl = (process.env.APP_BASE_URL || "").replace(/\/$/, "");
+  let appUrl = (process.env.APP_BASE_URL || process.env.APP_URL || "").replace(/\/$/, "");
   if (!appUrl) {
-    console.warn("[TTS] APP_BASE_URL not set — voice notes disabled");
+    console.warn("[TTS] APP_BASE_URL / APP_URL not set — voice notes disabled");
     return null;
   }
+  if (!appUrl.startsWith("http")) appUrl = `https://${appUrl}`;
 
   try {
     await mkdir(VOICE_DIR, { recursive: true });
