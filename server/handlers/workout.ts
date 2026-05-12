@@ -32,6 +32,7 @@ function parseLiftLog(m: string): Array<{ name: string; weight: number; sets?: n
   const parts = m.split(/\s*(?:,\s*|\s+and\s+)/i);
   for (const part of parts) {
     const trimmed = part.trim();
+    // {exercise words} {weight}[kg] [{sets}x{reps}]
     const match = trimmed.match(
       /^([a-z][a-z\s\-]{1,30}?)\s+(\d+(?:\.\d+)?)\s*(?:kg|kgs?)?\s*(?:(\d+)\s*[x×]\s*(\d+))?\s*$/i,
     );
@@ -89,6 +90,7 @@ export async function handleWorkoutCommands(ctx: {
   }
 
   // ---- WEIGHT LOG — standalone "84kg" or brief weight check-in ----
+  // Only fires if message is clearly about body weight, not exercise weight
   const isStandaloneWeight = /^(\d{2,3}(?:\.\d+)?)\s*kg[.!]?$/i.test(m);
   const isWeightCheckIn = (
     /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(m)
@@ -134,6 +136,7 @@ export async function handleWorkoutCommands(ctx: {
     const weekAdvance = nextDay === 1;
     const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
 
+    // Workout streak calculation
     const lastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
     const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
     const yesterdayStart = dayStart(new Date(Date.now() - 86_400_000));

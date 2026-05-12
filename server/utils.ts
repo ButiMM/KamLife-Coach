@@ -44,7 +44,7 @@ export function parseMealDate(message: string): Date {
     return d;
   }
 
-  // "this morning" / "for breakfast" → today at 8am SAST (only if current SAST time is past 11am)
+  // "this morning" / "for breakfast" early in message → today at 8am SAST (only if current SAST time is past 11am)
   const sastHour = new Date(nowSAST).getUTCHours();
   if (/\b(this morning|had.*breakfast|breakfast.*was|morning meal)\b/.test(m) && sastHour >= 11) {
     const d = new Date();
