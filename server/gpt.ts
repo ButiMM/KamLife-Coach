@@ -70,34 +70,7 @@ export function buildContext(user: any): string {
     ageGuidelines = "40+ CLIENT: Recovery matters more. Warm-ups are essential. Mention joint care when relevant. Don't assume they can't perform — many are at their strongest. Respect their time constraints.";
   }
 
-  return `CLIENT PROFILE:
-Name: ${name}
-Gender: ${gender}
-Goal: ${goal}
-Age: ${age}
-Phase: ${phase} — ${phaseName}
-Calorie target: ${calories}
-Protein target: ${protein}g
-Step target: ${steps}
-Training mode: ${mode}
-Equipment: ${equipment}
-Life situation: ${situation}
-Job type: ${job}
-Activity level: ${activity}
-Primary focus: ${focus}
-Injuries: ${injuries}
-Medical conditions: ${medicalConditions}
-Experience: ${experience}
-Water today: ${water}L
-Days on programme: ${daysOnProgramme} (week ${weeksOnProgramme})
-Compliance level: ${user.complianceLevel || 'RESET'}
-Workout streak: ${user.workoutStreak || 0} consecutive sessions
-Total sessions completed: ${user.totalWorkoutsCompleted || 0}
-Programme week: ${user.programmeWeek || 1}
-Subscription status: ${user.subscriptionStatus || 'inactive'}
-
-${coachingTone}
-${ageGuidelines}${medicalDisclaimer}`;
+  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
 }
 
 // ============================================================
@@ -159,7 +132,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
   const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
 
   try {
-    // ---- Parallel DB queries ----
     const [recentChats, recentWeights, olderWeights, recentSteps] = await Promise.all([
       db.select().from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
@@ -183,16 +155,11 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .limit(7),
     ]);
 
-    // ---- Days logged vs silent ----
     const daysWithLogs = new Set(
       recentChats.map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
     ).size;
     const daysSilent = 7 - daysWithLogs;
 
-    // ---- Protein estimate from mealLogs (canonical source) ----
-    // Previous version regexed messageOut and falsely picked up numbers like
-    // "69g protein still needed" or "120g target" as if they were eaten.
-    // Query mealLogs directly and average per-day total protein.
     const foodLogs = recentChats.filter(c => c.intent === "FOOD_LOG");
     let avgProtein: number | null = null;
     try {
@@ -211,7 +178,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
       console.warn("[PATTERN] meal log protein query failed:", protErr);
     }
 
-    // ---- Scan message text for signals ----
     const allIn = recentChats.map(c => (c.messageIn || "").toLowerCase()).join(" ");
 
     const BUDGET_WORDS = ["broke", "no money", "can't afford", "cannot afford", "no cash", "eina the money", "month end", "no food money", "tight on", "struggling financially"];
@@ -226,7 +192,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
     const mentionedPain = PAIN_WORDS.some(w => allIn.includes(w));
     const mentionedStress = STRESS_WORDS.some(w => allIn.includes(w));
 
-    // ---- Training sessions ----
     const DONE_PATTERN = /^(done|workout done|finished|completed)$/;
     const trainingLogs = recentChats.filter(c =>
       DONE_PATTERN.test((c.messageIn || "").toLowerCase().trim()) || c.intent === "WORKOUT_LOG"
@@ -236,7 +201,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
       ? Math.floor((Date.now() - new Date(lastTraining.createdAt).getTime()) / 86_400_000)
       : null;
 
-    // ---- Weight trend ----
     let weightTrend = "No weight data this week.";
     if (recentWeights.length > 0 && olderWeights.length > 0) {
       const recent = parseFloat(String(recentWeights[0].weight));
@@ -252,7 +216,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
         : `Weight unchanged for ${daysAgo} days.`;
     }
 
-    // ---- Assemble paragraph ----
     const parts: string[] = [
       `PATTERN CONTEXT: ${name} has logged ${daysWithLogs} of the last 7 days${daysSilent > 0 ? ` (${daysSilent} day${daysSilent > 1 ? "s" : ""} silent)` : ""}.`,
     ];
@@ -283,7 +246,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
     parts.push(weightTrend);
 
-    // ---- Step compliance ----
     const stepsTarget = user.stepsTarget || 10000;
     if (recentSteps.length > 0) {
       const avgSteps = Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length);
@@ -296,10 +258,9 @@ export async function buildPatternSummary(user: any): Promise<string> {
       parts.push("No step data logged this week.");
     }
 
-    // ---- Weekend pattern detection ----
     const weekendChats = recentChats.filter(c => {
       const day = new Date(c.createdAt || "").getDay();
-      return day === 0 || day === 6; // Sun or Sat
+      return day === 0 || day === 6;
     });
     const weekdayChats = recentChats.filter(c => {
       const day = new Date(c.createdAt || "").getDay();
@@ -309,7 +270,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
       parts.push("Pattern: Active on weekdays, silent on weekends — weekend accountability needed.");
     }
 
-    // ---- Food logging consistency ----
     const foodLogDays = new Set(
       recentChats.filter(c => c.intent === "FOOD_LOG").map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
     ).size;
@@ -336,7 +296,6 @@ export async function buildPatternSummary(user: any): Promise<string> {
 // GPT CALL — ALWAYS USES MASTER PROMPT + FULL CONTEXT
 // ============================================================
 
-// Crisis-only signals that justify GPT-4o for text (quality matters for safety)
 const GPT4O_TEXT_SIGNALS = [
   "suicidal", "suicide", "self harm", "self-harm", "want to die", "kill myself",
   "end it all", "no reason to live", "want to hurt myself",
@@ -345,14 +304,12 @@ const GPT4O_TEXT_SIGNALS = [
 export function selectModel(instruction: string, userMessage: string): { model: string; maxTokens: number; reason: string } {
   const msgLower = userMessage.toLowerCase();
 
-  // GPT-4o only for genuine crisis — safety requires best model
   const crisis = GPT4O_TEXT_SIGNALS.find(s => msgLower.includes(s));
   if (crisis) {
     console.log(`[MODEL] gpt-4o (crisis) — matched: "${crisis}"`);
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
-  // GPT-4o for complex coaching that needs nuanced, accurate advice
   const COMPLEX_SIGNALS = [
     "injury", "hurt my", "pain in", "hurts when", "sore knee", "sore shoulder", "sore back",
     "recomposition", "body recomp", "recomp",
@@ -371,31 +328,9 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 350, reason: "complex" };
   }
 
-  // Everything else: gpt-4o-mini — coaching quality is equal, cost is 15x lower
   console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
   return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };
 }
-
-// ============================================================
-// VISION MODEL SELECTION — cost-gated
-// ============================================================
-//
-// Food photos and progress comparisons drive most of our OpenAI spend.
-// Back-of-napkin at 200 paid users × 3 photos/day × 30 days = 18,000 calls/month:
-//   gpt-4o   vision call ≈ $0.011 each → $198/mo
-//   gpt-4o-mini vision call ≈ $0.0004 each → $7/mo
-//
-// We default to gpt-4o-mini for all vision (quality is more than adequate for
-// SA food identification and calorie estimation; tested against 30 locally-
-// labelled food photos, mini matched gpt-4o on food-ID accuracy and came
-// within 10% on kcal).
-//
-// Progress comparison on paying subscribers stays on gpt-4o because:
-//   (a) it's infrequent (one photo per user per 30 days)
-//   (b) the emotional weight of body-transformation feedback justifies top model
-//
-// Tier gating: inactive subscribers get no vision at all. Trial users get
-// mini. Paid ("active") users get mini for food, gpt-4o for progress.
 
 export type VisionUseCase = "food_photo" | "progress_compare" | "exercise_classify" | "step_ocr";
 export type SubscriptionTier = "active" | "trial" | "inactive" | string | null | undefined;
@@ -413,8 +348,6 @@ export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier
   const paying = t === "active";
   const onboarded = paying || t === "trial";
 
-  // Inactive (churned/never-paid) — no vision. The caller should fall back
-  // to a text prompt asking them to reactivate before we burn API budget.
   if (!onboarded) {
     return {
       allowed: false,
@@ -427,59 +360,35 @@ export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier
 
   switch (useCase) {
     case "progress_compare":
-      // Rare + emotionally loaded → gpt-4o for paid users, mini for trial
       return paying
         ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "progress_paid" }
         : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 350, reason: "progress_trial" };
 
     case "food_photo":
-      // Mini is perfectly capable — even on active subscribers we use it.
       return { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_mini" };
 
     case "exercise_classify":
     case "step_ocr":
-      // Classifier / OCR — mini + low detail is plenty.
       return { allowed: true, model: "gpt-4o-mini", detail: "low", maxTokens: useCase === "step_ocr" ? 50 : 8, reason: useCase };
   }
 }
 
-// Rough cost estimate for observability (USD). Approximate — image tokens
-// depend on dimensions, so this is an upper-bound-ish estimate.
 export function estimateVisionCostUSD(decision: VisionModelDecision, completionTokens: number = 0): number {
-  // Image token estimate: low=85, auto=~170, high=~400
   const imgTok = decision.detail === "low" ? 85 : decision.detail === "high" ? 400 : 170;
-  const promptTok = imgTok + 300; // prompt text roughly 300 tokens
+  const promptTok = imgTok + 300;
   if (decision.model === "gpt-4o-mini") {
     return (promptTok * 0.15 + completionTokens * 0.6) / 1_000_000;
   }
-  // gpt-4o
   return (promptTok * 5 + completionTokens * 15) / 1_000_000;
 }
 
-// ============================================================
-// GPT FOOD FALLBACK — function-calling nutritional extraction
-// ============================================================
-//
-// Triggered when the SA food scanner finds no matches for a user message
-// that clearly contains food intent ("I had avocado toast", "steak wrap
-// and chips", "nandos half chicken"). The scanner covers ~400 common SA
-// foods but misses branded items, international foods, and novel combos.
-//
-// This fallback uses gpt-4o-mini with a typed function call so the response
-// is always structured — never free-form text we have to parse. On failure
-// it returns null and the caller falls through to the coaching-LLM path
-// (which will acknowledge the food but not produce structured calorie data).
-//
-// Call cost: ~$0.0003 per invocation. Budget: acceptable for food-log
-// messages that the SA scanner missed.
-
 export interface GptFoodItem {
-  name: string;          // SA name if applicable
-  kcal: number;          // whole number
-  protein_g: number;     // whole number
+  name: string;
+  kcal: number;
+  protein_g: number;
   carbs_g: number;
   fat_g: number;
-  portion_desc: string;  // e.g. "1 half chicken (~380g)"
+  portion_desc: string;
   category: "protein" | "carb" | "fat" | "vegetable" | "junk" | "dairy" | "beverage" | "other";
 }
 
@@ -487,13 +396,10 @@ export interface GptFoodFallbackResult {
   foods: GptFoodItem[];
   totalKcal: number;
   totalProtein: number;
-  coachNote: string;   // 1-sentence coaching comment Coach K would give
+  coachNote: string;
   fromCache: boolean;
 }
 
-// Simple in-memory cache keyed by normalised message text — prevents burning
-// budget on identical messages (e.g. user resending the same meal).
-// Evicted after 60 minutes.
 const foodFallbackCache = new Map<string, { result: GptFoodFallbackResult; expiresAt: number }>();
 const FOOD_CACHE_TTL_MS = 60 * 60_000;
 
@@ -563,16 +469,7 @@ export async function gptFoodFallback(
       messages: [
         {
           role: "system",
-          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
-
-CRITICAL RULES for compound food names:
-- "steak wrap" = ONE item: a wrap/tortilla filled with beef steak. NOT "beef steak" + "chicken wrap". Log it as "steak wrap (beef)" ~450-550 kcal.
-- "chicken wrap" = ONE item: a tortilla with chicken filling
-- "X wrap" means the wrap is filled with X — never split into two items
-- "chicken rice" = ONE meal: chicken served with rice (not two separate items)
-- Only split at commas, "and", "plus", "with" when clearly listing separate dishes
-
-Use realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — never round to nearest 100.`,
+          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.\n\nCRITICAL RULES for compound food names:\n- "steak wrap" = ONE item: a wrap/tortilla filled with beef steak. NOT "beef steak" + "chicken wrap". Log it as "steak wrap (beef)" ~450-550 kcal.\n- "chicken wrap" = ONE item: a tortilla with chicken filling\n- "X wrap" means the wrap is filled with X — never split into two items\n- "chicken rice" = ONE meal: chicken served with rice (not two separate items)\n- Only split at commas, "and", "plus", "with" when clearly listing separate dishes\n\nUse realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — never round to nearest 100.`,
         },
         {
           role: "user",
@@ -582,12 +479,10 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
     });
 
     const toolCall = resp.choices[0]?.message?.tool_calls?.[0];
-    // Narrow to function-type tool call — OpenAI SDK union includes custom tool calls
     if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
 
     const parsed = JSON.parse(toolCall.function.arguments);
 
-    // Model signals this message is NOT a food log — don't force-log non-food messages
     if (parsed.is_food === false) {
       console.log("[gptFoodFallback] model says not food — skipping");
       return null;
@@ -605,9 +500,6 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
 
     if (foods.length === 0) return null;
 
-    // Sanity bounds — reject obvious hallucinations.
-    // Per-item: 0–2500 kcal (a single huge meal). Total meal: 0–3500 kcal (largest realistic single meal).
-    // If any item or the total is wildly outside this range, the model has hallucinated.
     const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
     const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
     const itemOutOfRange = foods.some(f => f.kcal > 2500 || f.protein_g > 250);
@@ -631,7 +523,6 @@ Use realistic SA portion sizes. When user says "Nando's" use their actual menu i
   }
 }
 
-// Prune stale cache entries — called lazily at module level
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of foodFallbackCache) {
@@ -642,7 +533,6 @@ setInterval(() => {
 export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
   try {
     const todayStart = sastDayStart();
-    // Only count messages the CLIENT actually sent (messageIn not empty) — excludes scheduler proactive messages
     const result = await db.select({ count: sql`count(*)` })
       .from(chatHistory)
       .where(and(
@@ -651,9 +541,9 @@ export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
         sql`message_in IS NOT NULL AND message_in != ''`
       ));
     const count = parseInt(String(result[0]?.count || 0));
-    return count < 40; // 40 client-initiated messages per day
+    return count < 40;
   } catch {
-    return true; // fail open
+    return true;
   }
 }
 
@@ -661,14 +551,11 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const context = buildContext(user);
   const patternSummary = await buildPatternSummary(user);
   console.log(`[PATTERN] ${patternSummary}`);
-  // Addition 5 — SA seasonal/cultural flags injected into every GPT call (user-aware)
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
   const hardLimit = "HARD RULE: Max 3 sentences, 60 words total. Never start with 'Coach K here'. Never say 'Reply MENU'. Always use the client's actual name. End with exactly one specific action.";
   const winMemory = memoryContext ? `\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n${memoryContext}\nUse this to reference specific past wins when relevant. Be specific: if they lost 5kg, say "5kg down". If jeans were tighter at week 2 and loose at week 8, say that. Never fabricate wins not in this list.` : "";
 
-  // ── TODAY'S FOOD LOG — injected so GPT knows exactly what they've eaten today ──
-  // Without this, GPT suggests dinner without knowing 1,767 kcal was already consumed.
   let todayFoodContext = "";
   try {
     const todayStart = sastDayStart();
@@ -683,7 +570,6 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       .limit(20);
 
     if (todayFoodLogs.length > 0) {
-      // Extract calorie/protein totals from the running total line in each bot response
       let totalCalToday = 0;
       let totalProtToday = 0;
       const mealSummaries: string[] = [];
@@ -691,7 +577,6 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       for (const log of todayFoodLogs) {
         const msgIn = log.messageIn || "";
         const msgOut = log.messageOut || "";
-        // Try to get running total from bot response
         const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*\|\s*(\d{2,3})g/i);
         const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*\|\s*~?(\d{2,3})g/i);
         if (runningMatch) {
@@ -709,18 +594,12 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       const calRemaining = calTarget - totalCalToday;
       const protRemaining = protTarget - totalProtToday;
 
-      todayFoodContext = `\n\nTODAY'S FOOD LOG (use these exact numbers — NEVER ignore them):
-Meals logged today: ${mealSummaries.join(" | ")}
-Running total: ${totalCalToday} kcal | ${totalProtToday}g protein
-Calorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}
-Protein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}
-CRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
+      todayFoodContext = `\n\nTODAY'S FOOD LOG (use these exact numbers — NEVER ignore them):\nMeals logged today: ${mealSummaries.join(" | ")}\nRunning total: ${totalCalToday} kcal | ${totalProtToday}g protein\nCalorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}\nProtein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}\nCRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
     }
   } catch (foodErr) {
     console.warn("[GPT] Could not fetch today's food context:", foodErr);
   }
 
-  // Inject recent lift data so GPT can reference real numbers (never fabricate)
   let liftContext = "";
   try {
     const recentLifts = await db.select().from(exerciseLogs)
@@ -744,20 +623,16 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
 
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
-  // Cap winMemory to prevent context blowout for long-running users
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
 
-  // Assemble system prompt and enforce hard character ceiling (~10k chars)
   let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   const MAX_SYSTEM_CHARS = 10_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
     console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
-    // Preserve the essential tail (hardLimit + instruction) when truncating
     const tail = `\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
     systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS - tail.length) + tail;
   }
 
-  // Fetch last 6 messages for conversation context so GPT understands the flow
   let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];
   try {
     const recentMessages = await db.select({
@@ -768,7 +643,6 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
       .orderBy(desc(chatHistory.createdAt))
       .limit(6);
 
-    // Build in chronological order (oldest first)
     conversationHistory = recentMessages.reverse().flatMap(m => {
       const msgs: { role: "user" | "assistant"; content: string }[] = [];
       if (m.messageIn) msgs.push({ role: "user", content: m.messageIn });
@@ -795,18 +669,15 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
         }
       ]
     });
-    // ── Cost tracking ──────────────────────────────────────
     const usage = response.usage;
     if (usage) {
       const inputTokens = usage.prompt_tokens ?? 0;
       const outputTokens = usage.completion_tokens ?? 0;
-      // gpt-4o-mini: $0.00015/1k input, $0.0006/1k output
-      // gpt-4o:      $0.005/1k input,   $0.015/1k output
       const isMini = model === "gpt-4o-mini";
       const costUSD = isMini
         ? (inputTokens / 1000) * 0.00015 + (outputTokens / 1000) * 0.0006
         : (inputTokens / 1000) * 0.005   + (outputTokens / 1000) * 0.015;
-      const costZAR = costUSD * 18.5; // approximate USD→ZAR
+      const costZAR = costUSD * 18.5;
       console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
     }
 
@@ -834,11 +705,88 @@ CRITICAL: When suggesting meals or snacks, account for these already-consumed ca
 }
 
 // ============================================================
-// INTENT CLASSIFIER — structural reset plan item #2
-// One cheap gpt-4o-mini call per text message to label intent.
-// Used to augment keyword routing and tag chatHistory accurately.
-// Cost: ~$0.0001/call. Fast-path avoids GPT for obvious cases.
-// Falls back to { intent: "OTHER", confidence: 0 } on any error.
+// MILESTONE VOICE SCRIPT GENERATOR
+// Replaces static hardcoded scripts with a GPT-generated 2-3 sentence
+// voice note personalised to the client's engagement this week, their
+// history, and their specific achievement numbers.
+// Cost: one gpt-4o-mini call per milestone (milestones are rare — negligible).
+// Falls back to a static script on any error so voice notes never silently drop.
+// ============================================================
+
+export type MilestoneType = "weight_loss" | "goal_reached_fat_loss" | "goal_reached_muscle" | "workout_sessions";
+
+export async function generateMilestoneVoiceScript(
+  user: any,
+  milestoneType: MilestoneType,
+  data: {
+    kgLost?: number;
+    currentKg?: number;
+    startKg?: number;
+    sessions?: number;
+  },
+): Promise<string> {
+  const firstName = (user.name || "").split(" ")[0] || "there";
+  const goal = user.goalType || "fat_loss";
+  const daysOn = Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86_400_000);
+
+  const fallbacks: Record<MilestoneType, string> = {
+    weight_loss: `${firstName}. ${data.kgLost}kg gone. That took real work — not just in the gym, but every meal, every choice. Keep going.`,
+    goal_reached_fat_loss: `${firstName}. You hit your target weight. You set a number, you worked for it, and you are standing on it right now. That is not luck. That is you.`,
+    goal_reached_muscle: `${firstName}. Target weight reached. Every session, every meal, every rep — it built this. You did that.`,
+    workout_sessions: `${firstName}. ${data.sessions} sessions. Every single one was a choice to show up. That is not motivation — that is discipline.`,
+  };
+
+  let patternSummary = "";
+  try {
+    patternSummary = await buildPatternSummary(user);
+  } catch {
+    // non-fatal
+  }
+
+  const milestoneDescription: Record<MilestoneType, string> = {
+    weight_loss: `Lost ${data.kgLost}kg total (started at ${data.startKg}kg, now ${data.currentKg}kg) after ${daysOn} days on the programme`,
+    goal_reached_fat_loss: `Hit their fat loss target weight of ${data.currentKg}kg (started at ${data.startKg}kg, lost ${data.kgLost}kg)`,
+    goal_reached_muscle: `Hit their muscle gain target weight of ${data.currentKg}kg (started at ${data.startKg}kg)`,
+    workout_sessions: `Completed ${data.sessions} total workout sessions with Coach K`,
+  };
+
+  const toneHint = patternSummary.includes("silent") || patternSummary.includes("no training")
+    ? "They have had a rough or inconsistent week. Acknowledge the journey wasn't smooth — this milestone despite the struggle says something real about their character."
+    : patternSummary.includes("consistent") || patternSummary.includes("solid")
+    ? "They have been consistent and showing up. Build on the momentum — this is who they are now."
+    : "Be direct and celebratory — this is a real moment.";
+
+  try {
+    const response = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      max_tokens: 120,
+      temperature: 0.7,
+      messages: [
+        {
+          role: "system",
+          content: `You write short voice note scripts for a South African fitness coach named Coach K. These are spoken aloud to the client so they must sound natural when read out loud.\n\nRULES:\n- Exactly 2-3 sentences. Never more.\n- Start with the client's first name.\n- Reference the exact achievement numbers (do not round or approximate).\n- SA voice: warm, direct, real — not American hype. Use "lekker", "sharp", "eish" naturally if it fits.\n- Never say "I'm Coach K" or "this is Coach K". Never say "keep it up" or "great job".\n- End with ONE specific forward-looking sentence (what they do next, not generic inspiration).\n- No hashtags, emojis, or asterisks.`,
+        },
+        {
+          role: "user",
+          content: `Client: ${firstName}, goal: ${goal}, days on programme: ${daysOn}\nMilestone: ${milestoneDescription[milestoneType]}\nTheir week: ${patternSummary || "no recent data"}\nTone guidance: ${toneHint}\n\nWrite the voice note script now.`,
+        },
+      ],
+    });
+
+    const script = response.choices[0]?.message?.content?.trim();
+    if (script && script.length > 20) {
+      console.log(`[VOICE_SCRIPT] Generated for ${firstName} (${milestoneType}): "${script.slice(0, 80)}..."`);
+      return script;
+    }
+  } catch (err) {
+    console.warn("[VOICE_SCRIPT] GPT failed, using fallback:", err);
+  }
+
+  return fallbacks[milestoneType];
+}
+
+// ============================================================
+// INTENT CLASSIFIER
 // ============================================================
 
 export type ClassifiedIntent =
@@ -847,10 +795,9 @@ export type ClassifiedIntent =
 
 export interface IntentClassification {
   intent: ClassifiedIntent;
-  confidence: number; // 0–1
+  confidence: number;
 }
 
-// Regex fast-paths to skip the GPT call for single-signal messages
 const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
   [/^(hi|hey|hello|howzit|sawubona|dumelang|ekse|yo|sup|gm|good\s*morning|good\s*afternoon|good\s*evening|good\s*night)[\s!?.]*$/i, "GREETING"],
   [/^(menu|help|options|start|\*menu\*|\*help\*)[\s?]*$/i, "MENU_REQUEST"],
@@ -868,12 +815,10 @@ export async function classifyIntent(message: string, userId?: string): Promise<
   const m = message.trim();
   if (m.length < 2) return { intent: "OTHER", confidence: 0.95 };
 
-  // Fast-path: skip GPT for obvious single-signal messages
   for (const [pattern, intent] of INTENT_FAST_PATHS) {
     if (pattern.test(m)) return { intent, confidence: 0.95 };
   }
 
-  // Skip GPT for very long messages — SA food scanner / existing routing handles these
   if (m.length > 500) return { intent: "OTHER", confidence: 0 };
 
   try {
@@ -884,18 +829,7 @@ export async function classifyIntent(message: string, userId?: string): Promise<
       messages: [
         {
           role: "system",
-          content: `Classify this WhatsApp message from a South African fitness app user. Respond ONLY with JSON: {"intent":"X","confidence":0.0}
-
-X must be exactly one of:
-FOOD_LOG   - reporting food/drinks eaten (e.g. "I had pap and eggs", "just ate chicken")
-WORKOUT_LOG- reporting completed exercise/session (e.g. "done", "trained today")
-STEPS      - logging steps walked (e.g. "8500 steps", "walked 6km today")
-WEIGHT     - logging body weight (e.g. "I'm 85kg now", "weighed 78 this morning")
-QUESTION   - asking about fitness, nutrition, or health
-RANT       - venting frustration or emotion (not asking for information)
-GREETING   - purely social opener (hi/hello/morning only)
-MENU_REQUEST - wants menu, options, or help list
-OTHER      - everything else`,
+          content: `Classify this WhatsApp message from a South African fitness app user. Respond ONLY with JSON: {"intent":"X","confidence":0.0}\n\nX must be exactly one of:\nFOOD_LOG   - reporting food/drinks eaten (e.g. "I had pap and eggs", "just ate chicken")\nWORKOUT_LOG- reporting completed exercise/session (e.g. "done", "trained today")\nSTEPS      - logging steps walked (e.g. "8500 steps", "walked 6km today")\nWEIGHT     - logging body weight (e.g. "I'm 85kg now", "weighed 78 this morning")\nQUESTION   - asking about fitness, nutrition, or health\nRANT       - venting frustration or emotion (not asking for information)\nGREETING   - purely social opener (hi/hello/morning only)\nMENU_REQUEST - wants menu, options, or help list\nOTHER      - everything else`,
         },
         { role: "user", content: m.slice(0, 300) },
       ],
@@ -917,7 +851,6 @@ OTHER      - everything else`,
 
     return { intent, confidence };
   } catch (err) {
-    // Non-fatal — routing gracefully falls back to keyword matching
     console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
     return { intent: "OTHER", confidence: 0 };
   }
