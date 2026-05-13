@@ -48,7 +48,12 @@ export async function runGoalCheck(): Promise<void> {
       const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition", general: "general fitness" };
       let goalMsg = "";
       if (currentWeek === 4) goalMsg = `${name}, you have completed Week 4 — ${total} sessions done. Time for a quick check-in.\n\nThree questions:\n1. Is your goal still *${goalLabel[goal] || goal}*?\n2. Has anything changed — injury, schedule, budget, life?\n3. How is your energy this week compared to Week 1?\n\nReply to any of these and I will adjust your programme if needed.`;
-      else if (currentWeek === 8) goalMsg = `${name}, 8 weeks in. ${total} sessions. This is the point where real results start showing up — and where a lot of people shift their goal.\n\n*Is your current goal still right?* ${goalLabel[goal] || goal}.\n\nIf the goal has changed, or if something in your life has changed, tell me now. Your programme adjusts to your reality — not the other way around.`;
+      else if (currentWeek === 8) {
+        goalMsg = `${name}, 8 weeks done. ${total} sessions. This is where most people quit — you didn't.\n\nWeek 9 starts now. You have two directions:\n\n*1 — Maintenance* — 3 days/week, hold your gains, sustainable forever\n*2 — Advanced* — 5 days/week, harder sessions, new exercises, next level\n\nReply *1* or *2* and I will set your programme for the next 8 weeks.`;
+        await sendWhatsApp(client.phoneNumber, goalMsg);
+        await db.update(users).set({ lastGoalCheckWeek: currentWeek, awaitingInputType: "week9_choice" }).where(eq(users.phoneNumber, client.phoneNumber));
+        continue;
+      }
       else if (currentWeek === 12) goalMsg = `${name}, 12 weeks with Coach K. ${total} sessions. One quarter of a year of work.\n\nTime for a full review. Tell me:\n1. What is working?\n2. What is not?\n3. What has changed in your body or your life?\n\nYour programme evolves with you. Let me know what to adjust.`;
       else goalMsg = `${name}, Week ${currentWeek} checkpoint — ${total} sessions done. Is your goal still *${goalLabel[goal] || goal}*? Anything in your life or training that needs to change? Reply and we adjust.`;
       await sendWhatsApp(client.phoneNumber, goalMsg);

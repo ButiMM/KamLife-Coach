@@ -3,6 +3,36 @@ import twilio from "twilio";
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 
+// ── Async voice processor ──
+// Twilio times out after 15s. Whisper takes 20-38s.
+// Solution: ACK immediately, process in background, deliver via outbound API.
+async function processVoiceAsync(
+  phone: string,
+  message: string,
+  mediaUrl: string,
+  mediaType: string,
+  handleMessage: RouteDeps["handleMessage"],
+): Promise<void> {
+  try {
+    const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
+    const parts = reply.split(/\n\n---\n\n/).filter(Boolean);
+    const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+    const fromNum = `whatsapp:${(process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "")}`;
+    if (!fromNum || fromNum === "whatsapp:") {
+      console.error("[VOICE_ASYNC] TWILIO_WHATSAPP_NUMBER not set — cannot deliver async reply");
+      return;
+    }
+    for (const part of parts) {
+      if (part.trim()) {
+        await twilioC.messages.create({ from: fromNum, to: phone, body: part.trim() });
+      }
+    }
+    console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-6)}`);
+  } catch (err: any) {
+    console.error("[VOICE_ASYNC] failed:", err?.message || err);
+  }
+}
+
 // ── WhatsApp message splitting ──
 
 function escapeXml(text: string): string {
@@ -135,6 +165,14 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
             if (now - v > 30_000) mediaDedup.delete(k);
           }
         }
+      }
+
+      // ── ASYNC VOICE: ACK immediately, process in background ──
+      // Twilio hard-kills after 15s. Whisper takes 20-38s. We can never finish in time synchronously.
+      if (audioMedia && mediaUrl) {
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>🎤 Coach K is listening... I'll reply in a moment.</Message></Response>`);
+        processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage).catch(() => {});
+        return;
       }
 
       const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);

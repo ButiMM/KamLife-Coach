@@ -48,6 +48,31 @@ export async function handleMiscCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
+  // ---- WEEK 9 PATH CHOICE ----
+  if (user.awaitingInputType === "week9_choice") {
+    const isMaintenance = /^1$|^maintenance$/i.test(m.trim());
+    const isAdvanced = /^2$|^advanced$/i.test(m.trim());
+    if (isMaintenance || isAdvanced) {
+      const daysPerWeek = isMaintenance ? 3 : 5;
+      const newPhase = isAdvanced ? 2 : 1;
+      await db.update(users).set({
+        awaitingInputType: null,
+        trainingDaysPerWeek: daysPerWeek,
+        programmePhase: newPhase,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+      }).where(eq(users.phoneNumber, phone));
+      const firstName = user.name?.split(" ")[0] || "";
+      const modeLabel = isMaintenance ? "Maintenance" : "Advanced";
+      const modeDesc = isMaintenance
+        ? "3 sessions/week. Built to sustain your gains without burning out."
+        : "5 sessions/week. Harder progressions, new exercises, next level.";
+      const reply = `${firstName}, *${modeLabel} Phase* locked in.\n\n${modeDesc}\n\nYour programme resets from Week 1 with the new structure. Reply *today* for your first session.`;
+      await logChat(user.id, message, reply, "WEEK9_CHOICE");
+      return reply;
+    }
+  }
+
   // ---- SUPPLEMENT INSTANT GUIDE (Item 22) — hardcoded, no GPT ----
   const suppKeywords: Record<string, string> = {
     "creatine": "creatine",

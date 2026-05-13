@@ -222,8 +222,21 @@ function resetDeliveryStatsIfNeeded() {
   }
 }
 
+// Scheduler-side rate limiter: max 10 outbound sends/second to Twilio.
+// Webhook replies are not subject to this limit — only proactive scheduler sends.
+let _lastSchedulerSendAt = 0;
+const SCHEDULER_MIN_GAP_MS = 100; // 10 per second
+
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();
+  // Rate limit: enforce minimum gap between sends
+  const now = Date.now();
+  const gap = now - _lastSchedulerSendAt;
+  if (gap < SCHEDULER_MIN_GAP_MS) {
+    await new Promise(r => setTimeout(r, SCHEDULER_MIN_GAP_MS - gap));
+  }
+  _lastSchedulerSendAt = Date.now();
+
   if (!FROM_NUMBER) {
     console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
     deliveryStats.failed++;
@@ -268,6 +281,27 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
 }
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
+
+// ── THROTTLED BATCH SEND ──────────────────────────────────────────────────────
+// Sends to multiple users at a controlled rate (default: 10/sec).
+// Prevents blasting Twilio with 500 API calls in one second during scheduled jobs.
+export async function sendThrottled(
+  targets: Array<{ phone: string; body: string; mediaUrl?: string }>,
+  msPerMessage = 100, // 10 messages/second
+): Promise<{ sent: number; failed: number }> {
+  let sent = 0;
+  let failed = 0;
+  for (const t of targets) {
+    try {
+      await sendWhatsApp(t.phone, t.body, t.mediaUrl);
+      sent++;
+    } catch {
+      failed++;
+    }
+    if (msPerMessage > 0) await new Promise(r => setTimeout(r, msPerMessage));
+  }
+  return { sent, failed };
+}
 
 export async function getActiveClients() {
   const now = new Date();

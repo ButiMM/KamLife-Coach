@@ -6,6 +6,28 @@ import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart } from "./utils";
+import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
+
+// ============================================================
+// EXPONENTIAL BACKOFF WRAPPER — retries on OpenAI 429 rate limits
+// ============================================================
+async function withOpenAIRetry<T>(fn: () => Promise<T>, label = "openai"): Promise<T> {
+  const MAX_RETRIES = 3;
+  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      return await fn();
+    } catch (err: any) {
+      const status = err?.status ?? err?.statusCode ?? 0;
+      const msg = (err?.message ?? "").toLowerCase();
+      const isRateLimit = status === 429 || msg.includes("rate limit") || msg.includes("quota");
+      if (!isRateLimit || attempt === MAX_RETRIES) throw err;
+      const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+      console.warn(`[${label}] rate-limited — retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
+      await new Promise(r => setTimeout(r, delayMs));
+    }
+  }
+  throw new Error("unreachable");
+}
 
 const openai = new OpenAI({
   // Prevent startup crash when env key is absent; request-time handling returns safe fallbacks.
@@ -124,6 +146,13 @@ export function getSAContextFlags(user?: any): string {
 // ============================================================
 
 export async function buildPatternSummary(user: any): Promise<string> {
+  const cacheKey = `pattern:${user.id}`;
+  const cached = patternCache.get(cacheKey);
+  if (cached) {
+    console.log(`[PATTERN_CACHE] hit user=${user.id?.slice(-6)}`);
+    return cached;
+  }
+
   const name = getDisplayName(user) || "client";
   const proteinTarget = user.proteinTarget || 120;
   const programmeWeek = user.programmeWeek || 1;
@@ -282,7 +311,9 @@ export async function buildPatternSummary(user: any): Promise<string> {
     if (programmeWeek === 3) parts.push("Currently in week 3 of the programme — the danger zone.");
     if (today.getDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
 
-    return parts.join(" ");
+    const result = parts.join(" ");
+    patternCache.set(cacheKey, result, PATTERN_CACHE_TTL_MS);
+    return result;
   } catch (err) {
     console.error("[PATTERN] buildPatternSummary error:", err);
     const fallback = [`PATTERN CONTEXT: ${name}.`];
@@ -425,7 +456,7 @@ export async function gptFoodFallback(
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 130;
 
-    const resp = await openai.chat.completions.create({
+    const resp = await withOpenAIRetry(() => openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,
       max_tokens: 400,
@@ -479,7 +510,7 @@ export async function gptFoodFallback(
           content: message.slice(0, 500),
         },
       ],
-    });
+    }), "gptFoodFallback");
 
     const toolCall = resp.choices[0]?.message?.tool_calls?.[0];
     if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
@@ -657,7 +688,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   }
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await withOpenAIRetry(() => openai.chat.completions.create({
       model,
       max_tokens: maxTokens,
       messages: [
@@ -671,7 +702,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
           content: userMessage
         }
       ]
-    });
+    }), "askCoachK");
     const usage = response.usage;
     if (usage) {
       const inputTokens = usage.prompt_tokens ?? 0;
@@ -825,7 +856,7 @@ export async function classifyIntent(message: string, userId?: string): Promise<
   if (m.length > 500) return { intent: "OTHER", confidence: 0 };
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await withOpenAIRetry(() => openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 20,
       temperature: 0,
@@ -836,7 +867,7 @@ export async function classifyIntent(message: string, userId?: string): Promise<
         },
         { role: "user", content: m.slice(0, 300) },
       ],
-    });
+    }), "classifyIntent");
 
     const raw = (response.choices[0]?.message?.content || "{}").trim();
     const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };

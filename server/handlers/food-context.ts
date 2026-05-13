@@ -17,6 +17,7 @@ import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday } from "../utils";
+import { invalidatePatternCache } from "../cache";
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
@@ -114,6 +115,7 @@ export async function handleFoodContext(ctx: {
             carbsInt: 0,
             fatInt: 0,
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
+          invalidatePatternCache(user.id);
           const recomputed3 = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({
             todayCalories: recomputed3.calories,
@@ -292,6 +294,7 @@ export async function handleFoodContext(ctx: {
           fatInt: matchedMeal.fatInt,
           items: matchedMeal.items,
         }).catch(() => {});
+        invalidatePatternCache(user.id);
         const calorieTarget = user.calorieTarget || 2000;
         const proteinTarget = user.proteinTarget || 120;
         const relogged = await recomputeTodayFoodTotals(user.id);
@@ -580,6 +583,7 @@ export async function handleFoodContext(ctx: {
           items,
           mealLabel: firstSegLabel,
         });
+        invalidatePatternCache(user.id);
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
       await logChat(user.id, message, reply, "FOOD_LOG");
@@ -642,6 +646,7 @@ export async function handleFoodContext(ctx: {
             items,
             mealLabel: null,
           });
+          invalidatePatternCache(user.id);
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
@@ -702,6 +707,7 @@ export async function handleFoodContext(ctx: {
           items,
           mealLabel: null,
         });
+        invalidatePatternCache(user.id);
       } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
