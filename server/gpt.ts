@@ -365,7 +365,10 @@ export function selectVisionModel(useCase: VisionUseCase, tier: SubscriptionTier
         : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 350, reason: "progress_trial" };
 
     case "food_photo":
-      return { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_mini" };
+      // gpt-4o for paying users — better SA food recognition, fewer "cannot make out" failures
+      return paying
+        ? { allowed: true, model: "gpt-4o", detail: "auto", maxTokens: 400, reason: "food_paid" }
+        : { allowed: true, model: "gpt-4o-mini", detail: "auto", maxTokens: 400, reason: "food_trial" };
 
     case "exercise_classify":
     case "step_ocr":
@@ -577,8 +580,8 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       for (const log of todayFoodLogs) {
         const msgIn = log.messageIn || "";
         const msgOut = log.messageOut || "";
-        const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*\|\s*(\d{2,3})g/i);
-        const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*\|\s*~?(\d{2,3})g/i);
+        const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*|\s*(\d{2,3})g/i);
+        const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*|\s*~?(\d{2,3})g/i);
         if (runningMatch) {
           totalCalToday = parseInt(runningMatch[1]);
           totalProtToday = parseInt(runningMatch[2]);
