@@ -39,6 +39,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday } from "./utils";
+import { invalidatePatternCache } from "./cache";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -102,7 +103,7 @@ const getStepResponse = _getStepResponse;
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
-  const m = message.toLowerCase().trim().replace(/[\u2018\u2019\u201C\u201D]/g, "'").replace(/\s+/g, " ");
+  const m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m);
@@ -193,9 +194,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
     if (isPremiumRequest) {
       const workouts = user.totalWorkoutsCompleted || 0;
-      const gateReply = workouts === 0
-        ? `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`
-        : `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+      const isLapsed = !!user.cancelledAt;
+      let gateReply: string;
+      if (workouts === 0 && !isLapsed) {
+        gateReply = `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`;
+      } else if (isLapsed) {
+        const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
+        const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
+        const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently ${currentKg}` : ""} — all saved and waiting.` : "";
+        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R149/month — cancel anytime:*\n${payLink}`;
+      } else {
+        gateReply = `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+      }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
     }
@@ -204,6 +214,30 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const isSafety = /\b(chest pain|can.?t breathe|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
     if (isSafety) {
       // Fall through to crisis handler above
+    }
+
+    // Free tier food log gate: max 3 food logs per week
+    const isFoodLog = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|i had|i ate|just ate|just had)\b/i.test(m)
+      || (mediaUrl && /^image\//i.test(mediaContentType || ""));
+    if (isFoodLog) {
+      const weekStart = new Date(Date.now() - 7 * 86_400_000);
+      const weekLogs = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(
+          eq(chatHistory.userId, user.id),
+          eq(chatHistory.intent, "FOOD_LOG"),
+          gte(chatHistory.createdAt, weekStart),
+        ))
+        .limit(4);
+      if (weekLogs.length >= 3) {
+        const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+        const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+        const payLink = process.env.PAYFAST_MERCHANT_ID ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+        const name = user.name?.split(" ")[0] || "there";
+        const gateMsg = `${name}, you have used your 3 free food logs this week.\n\nUpgrade to KamLife Coach for unlimited meal tracking, personalised coaching, and your full 8-week programme.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`;
+        await logChat(user.id, message, gateMsg, "FREE_TIER_GATE");
+        return gateMsg;
+      }
     }
   }
 
@@ -230,12 +264,13 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
   // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
-  // When a client mentions medication or a new diagnosis, we are not equipped to advise —
-  // return a clear disclaimer and redirect. Still logs (which triggers escalation → coach alert).
+  // When a client mentions medication, a new diagnosis, or asks for condition-specific advice —
+  // return a clear disclaimer and redirect. Still logs (triggers escalation → coach alert).
   const MEDICATION_SIGNAL = /\b(on medication|taking medication|my medication|my meds|my pills|blood thinners|antiretroviral|ARVs?|antiretrovirals?|insulin|metformin|warfarin|blood pressure (pills?|medication|tablets?)|epilepsy (medication|tablets?|pills?)|seizure medication|newly diagnosed|just diagnosed|just found out i have|blood test results?|doctor said i have|specialist said)\b/i.test(m);
-  if (MEDICATION_SIGNAL) {
+  const CHRONIC_CONDITION_SIGNAL = /\b(i have diabetes|i.?m diabetic|type [12] diabetes|my blood sugar|i have hypertension|i.?m hypertensive|my blood pressure is|i have (heart disease|a heart condition|kidney disease|liver disease|thyroid|pcos|epilepsy|hiv|aids))\b/i.test(m);
+  if (MEDICATION_SIGNAL || CHRONIC_CONDITION_SIGNAL) {
     const medName = user.name?.split(" ")[0] || "";
-    const medDisclaimer = `${medName}, noted. I'm a fitness coach — not a medical professional. Anything involving medication, new diagnoses, or test results needs to go through your doctor or specialist first.\n\nWhat I *can* help with: food choices that work alongside your condition, safe exercise intensity, and lifestyle habits.\n\nYour coach has been flagged so a human can follow up. In the meantime — what specifically did you want help with on the fitness side?`;
+    const medDisclaimer = `${medName}, noted. Coach K is a fitness and nutrition guide — not a medical professional. For anything involving medication, diagnoses, blood sugar, blood pressure, or condition-specific advice, your doctor or a registered dietitian must be your first stop.\n\nWhat Coach K *can* do: suggest food choices that are generally safe for your condition, keep exercise intensity appropriate, and hold you accountable to the habits your doctor recommends.\n\n*Important: Any nutrition or exercise guidance from Coach K does not replace medical advice. Always follow your doctor's instructions.*\n\nWhat specifically did you want help with on the fitness side?`;
     await logChat(user.id, message, medDisclaimer, "MEDICAL_DISCLAIMER");
     return medDisclaimer;
   }
@@ -265,21 +300,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
     const streak = user.workoutStreak || 0;
     const totalW = user.totalWorkoutsCompleted || 0;
-    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
-
-Your last message (${lastIntent}): "${lastOut}"
-
-They are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
-
-REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.
-
-WRITE TWO SENTENCES ONLY:
-1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
-2. Give one concrete coaching action using their actual numbers above
-
-BANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
-
-Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
+    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".\n\nYour last message (${lastIntent}): "${lastOut}"\n\nThey are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.\n\nREAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.\n\nWRITE TWO SENTENCES ONLY:\n1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)\n2. Give one concrete coaching action using their actual numbers above\n\nBANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"\n\nCoach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
@@ -361,6 +382,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         await db.insert(stepLogs).values({ userId: user.id, steps });
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
+      invalidatePatternCache(user.id);
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75);
       const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
       const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
