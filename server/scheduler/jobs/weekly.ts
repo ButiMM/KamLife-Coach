@@ -15,6 +15,7 @@ export async function runFridayWeekendStrategy(): Promise<void> {
   const dedupeWindow = thisWeekUTC();
   let sent = 0, skippedPaused = 0, skippedSilent = 0, skippedDup = 0, skippedBudget = 0;
 
+  const weekAgo = new Date(Date.now() - 7 * 86_400_000);
   for (const client of clients) {
     if (isPaused(client)) { skippedPaused++; continue; }
     const daysSilent = client.lastActiveAt
@@ -26,7 +27,43 @@ export async function runFridayWeekendStrategy(): Promise<void> {
     if (!claimed) { skippedDup++; continue; }
     try {
       const name = client.name || "there";
-      await sendWhatsApp(client.phoneNumber, `${name}, weekend is here. This is where most people lose the progress they built Monday to Friday. Two rules only — protein at every meal and one training session before Sunday night. That is it. Everything else is flexible.`);
+      const week = client.programmeWeek || 1;
+
+      const [weekWorkouts, weekWeights, weekSteps, weekFoodDays] = await Promise.all([
+        db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
+        db.select({ weight: weightLogs.weight }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, weekAgo))).orderBy(asc(weightLogs.loggedAt)),
+        db.select({ steps: stepLogs.steps }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
+        db.select({ id: mealLogs.id, loggedAt: mealLogs.loggedAt }).from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, weekAgo))),
+      ]);
+
+      const sessions = weekWorkouts.length;
+      const foodDays = new Set(weekFoodDays.map(f => new Date(f.loggedAt!).toDateString())).size;
+      const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((s, l) => s + (l.steps || 0), 0) / weekSteps.length) : 0;
+      const weightChange = weekWeights.length >= 2
+        ? parseFloat(String(weekWeights[weekWeights.length - 1].weight)) - parseFloat(String(weekWeights[0].weight))
+        : null;
+
+      const weightLine = weightChange === null ? ""
+        : weightChange < -0.2 ? `⬇️ Down ${Math.abs(weightChange).toFixed(1)}kg`
+        : weightChange > 0.2 ? `⬆️ Up ${weightChange.toFixed(1)}kg`
+        : `➡️ Weight holding`;
+
+      const lines = [
+        `*${name} — Week ${week} wrap-up:*`,
+        ``,
+        `💪 ${sessions} workout${sessions !== 1 ? "s" : ""} done`,
+        `📋 ${foodDays} day${foodDays !== 1 ? "s" : ""} food logged`,
+        avgSteps > 0 ? `👟 ${avgSteps.toLocaleString()} avg steps` : "",
+        weightLine,
+        ``,
+        sessions >= (client.trainingDaysPerWeek || 3) && foodDays >= 5
+          ? `Sharp week, ${name}. Two rules this weekend — protein at every meal and one session before Sunday night. That is it.`
+          : sessions === 0
+          ? `Zero sessions this week. One workout before Sunday — just one. You have 48 hours.`
+          : `Weekend is where most people lose the week. Two rules only — protein at every meal and one session before Sunday night.`,
+      ].filter(Boolean);
+
+      await sendWhatsApp(client.phoneNumber, lines.join("\n"));
       recordProactiveSend(client.id);
       sent++;
     } catch (err) { console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err); }
@@ -283,13 +320,9 @@ export async function runNsvCheckin(): Promise<void> {
       const name = client.name || "there";
       const week = client.programmeWeek || 1;
       const nsvPrompts = [
-        // 1 — Physical capability
         `${name}, Week ${week} done.\n\nOne question: what can your body do now that it couldn't when you started?\n\nLift more? Walk further? Climb stairs without stopping? Move without pain?\n\nThat is your real progress. Tell me one thing.`,
-        // 2 — Energy & sleep
         `${name} — end of week check-in.\n\nScale aside — how were your energy levels this week? Did you sleep better? Less afternoon crashes? Wake up feeling less wrecked?\n\nEnergy is the first thing that changes before the scale moves. Tell me what you noticed.`,
-        // 3 — Food relationship & mental
         `${name}, Week ${week}.\n\nForget the numbers for a second. Did you make any food choice this week that you wouldn't have made 3 months ago? Less junk automatically? Didn't finish the whole takeaway? Chose water over a cool drink?\n\nSmall shifts like that are what compound into big change. Tell me one.`,
-        // 4 — Behavioural habits
         `${name} — Saturday check-in.\n\nNon-scale question: what habit stuck this week that didn't exist before you started?\n\nCould be logging meals, hitting your steps, not skipping breakfast, sleeping earlier. Behaviour change is harder than weight loss — and it lasts longer.\n\nTell me one habit that's starting to feel automatic.`,
       ];
       await sendWhatsApp(client.phoneNumber, nsvPrompts[(week - 1) % nsvPrompts.length]);
