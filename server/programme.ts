@@ -1218,6 +1218,59 @@ const GOAL_FINISH_GYM: Record<string, string> = {
   recomposition: "_After: protein within 60 min, moderate carbs. Sweet potato or pap + chicken. Fuel the rebuild._",
 };
 
+function getWeekContext(phase: number, week: number): { rationale: string; sets: string; reps: string; rest: string } {
+  // Returns week-specific coaching rationale and progressive sets/reps.
+  // Each phase has a distinct goal; within each phase, intensity climbs weekly.
+  const P1: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {
+    1: { rationale: "First session. Find where each movement feels right, not how much you can lift. The weight you use today will feel light in 4 weeks — that is the whole point.", sets: "3", reps: "12", rest: "60 sec" },
+    2: { rationale: "Week 2. You have felt the movements. Now find a working weight — something that feels like 7/10 effort at rep 10. Write it down. You will beat it next session.", sets: "3", reps: "10", rest: "60 sec" },
+    3: { rationale: "Week 3. Add 2.5kg to every compound lift from last week. Your body has adapted to the movement — give it new stress or it stops changing.", sets: "3", reps: "10", rest: "75 sec" },
+    4: { rationale: "Week 4 of Foundation — last push before the programme steps up. Every compound lift: heavier than Week 1. You have earned this weight.", sets: "4", reps: "8", rest: "90 sec" },
+  };
+  const P2: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {
+    1: { rationale: "Build Phase begins. Drop to 8 reps — but the weight must be heavier than Foundation. If 12 reps felt like 7/10, you need a weight where 8 reps is 8/10. Find it.", sets: "4", reps: "8", rest: "90 sec" },
+    2: { rationale: "Week 2 of Build. Your joints and tendons are adapting to the heavier load — this is normal. Keep 8 reps. If you hit 10 clean reps on any exercise, add weight next session.", sets: "4", reps: "8", rest: "90 sec" },
+    3: { rationale: "Week 3. Push beyond what felt like your limit in Week 1. Progressive overload is the only mechanism that builds muscle — no supplement replaces this.", sets: "4", reps: "6", rest: "90 sec" },
+    4: { rationale: "Week 4 of Build. Heaviest weights of this phase. You are stronger than 8 weeks ago. Prove it today — not tomorrow, not next week. Today.", sets: "5", reps: "6", rest: "90 sec" },
+  };
+  const P3: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {
+    1: { rationale: "Push Phase. 6 reps now — meaning the weight should be heavy enough that rep 5 and 6 are a genuine fight. Take the full 2 minutes rest. Do not rush.", sets: "4", reps: "6", rest: "2 min" },
+    2: { rationale: "Week 2 of Push. Your nervous system is adapting to heavy loads. This is where real strength builds. Keep 6 reps — if it feels easier, add weight.", sets: "5", reps: "5", rest: "2 min" },
+    3: { rationale: "Week 3. You are past halfway. Most people quit right here — the fatigue is real. You are not most people. The deload next phase will feel completely earned.", sets: "5", reps: "5", rest: "2 min" },
+    4: { rationale: "Final week of Push. Everything you have, today. Heavy, controlled, full range. The programme has been building to this session.", sets: "5", reps: "4", rest: "2 min" },
+  };
+  const P4: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {
+    1: { rationale: "Peak Phase. 5×3 — meaning these are near-maximal sets. Warm up thoroughly: 2 lighter sets before each working set. This is where months of work crystallises.", sets: "5", reps: "3", rest: "2–3 min" },
+    2: { rationale: "Week 2 of Peak. Test what you are capable of. Hit numbers you have not hit before. If you miss a rep — you were close enough. Rest, reset, attempt again.", sets: "5", reps: "3", rest: "2–3 min" },
+  };
+  const P5 = { rationale: "Deload week. Drop every weight by 40%. Keep every movement, every set. Your muscles are repairing and your nervous system is recovering — this week makes your next phase 10% stronger. Do not skip it.", sets: "3", reps: "12", rest: "60 sec" };
+
+  if (phase === 1 && P1[week]) return P1[week];
+  if (phase === 2 && P2[week]) return P2[week];
+  if (phase === 3 && P3[week]) return P3[week];
+  if (phase === 4 && P4[week]) return P4[week];
+  if (phase === 5) return P5;
+  // Fallback: use phase-level defaults
+  const fallbacks: Record<number, { sets: string; reps: string; rest: string }> = {
+    1: { sets: "3", reps: "10", rest: "60 sec" },
+    2: { sets: "4", reps: "8", rest: "90 sec" },
+    3: { sets: "4", reps: "6", rest: "2 min" },
+    4: { sets: "5", reps: "5", rest: "2 min" },
+    5: { sets: "3", reps: "12", rest: "60 sec" },
+  };
+  const fb = fallbacks[phase] || fallbacks[1];
+  return { rationale: PHASE_OPENERS[phase] || PHASE_OPENERS[1], ...fb };
+}
+
+function getExerciseSets(ex: Exercise, wSets: string, wReps: string, phase: number): string {
+  // Calves and high-rep accessories keep their own scheme; all others use the week target.
+  const keepOwn = /calf raise|lateral raise|face pull|kickback|plank|dead.?bug/i.test(ex.name);
+  if (keepOwn) return ex.sets;
+  // Deload: halve the rep count visually but keep sets
+  if (phase === 5) return `${wSets} × ${wReps} reps _(light — 40% of normal weight)_`;
+  return `${wSets} × ${wReps} reps`;
+}
+
 function formatGymDay(
   exercises: Exercise[],
   label: string,
@@ -1229,43 +1282,44 @@ function formatGymDay(
   isDumbbell = false,
   injuries = "none"
 ): string {
-  const opener = PHASE_OPENERS[phase] || PHASE_OPENERS[1];
+  const wCtx = getWeekContext(phase, week);
   const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
-  const week1Note = phase === 1 && week === 1
-    ? `⚠️ *First session:* Start with a weight you can control. Leave 2 reps in the tank. Form first — weight follows.\n\n`
-    : ``;
   const equipNote = isDumbbell
-    ? `_No machine? Each exercise has a dumbbell option in brackets._\n\n`
+    ? `_No machine? Each exercise has a modification listed._\n\n`
     : ``;
 
   const { safeEx, skippedNames } = filterInjuredGymExercises(exercises, injuries);
 
-  let out = `💪 *Week ${week} — ${label}*\n\n`;
-  out += `⚡ *Warm-up:* 5 min incline walk. Then 1 light set at half weight on your first exercise.\n`;
-  out += `Rest 90–120 sec between sets. Hit 10 clean reps → add weight next session. 🔺\n\n`;
-  out += week1Note;
+  let out = `💪 *Week ${week} — ${label}*\n`;
+  out += `_${phaseName} Phase${phase === 5 ? " — Recovery Week" : ""}_\n\n`;
+  out += `⚡ *Warm-up:* 5 min incline walk or light cardio. Then 1 warm-up set (half weight) on your first lift.\n\n`;
   out += equipNote;
-  out += `_${opener}_\n\n`;
+  out += `📋 *Today's target:* ${wCtx.sets} sets × ${wCtx.reps} reps | Rest ${wCtx.rest} between sets.\n`;
+  out += `_${wCtx.rationale}_\n\n`;
 
   for (let i = 0; i < safeEx.length; i++) {
     const ex = safeEx[i];
     const num = i + 1;
     const shortCue = ex.description.split(". ")[0];
-    out += `${num}. *${ex.name}* — ${ex.sets}\n`;
+    const setsDisplay = getExerciseSets(ex, wCtx.sets, wCtx.reps, phase);
+    out += `${num}. *${ex.name}* — ${setsDisplay}\n`;
     out += `${shortCue}\n`;
+    if (ex.mistake) {
+      out += `⚠ ${ex.mistake.split(".")[0]}\n`;
+    }
     if (isDumbbell && ex.modification) {
-      out += `_(No machine: ${ex.modification})_\n`;
+      out += `_(Alt: ${ex.modification})_\n`;
     }
     out += `\n`;
   }
 
   if (skippedNames.length > 0) {
-    out += `⚠️ *Skipped (injury — ${injuries}):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
+    out += `⚠️ *Skipped (injury):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
   }
 
   out += `Reply *DONE* when finished.\n\n`;
   out += finisher;
-  out += `\n\n🚶 *Bonus:* 20 min incline walk after your session. No running needed.`;
+  out += `\n\n🚶 *After:* 15–20 min walk. No running — this is active recovery, not extra cardio.`;
   return out;
 }
 

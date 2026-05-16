@@ -66,7 +66,7 @@ export async function runSafetyGuards(
   }
 
   // ---- ACUTE MEDICAL EMERGENCY ----
-  if (/\b(chest pain|chest tightness|heart attack|stroke|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|collapsed)\b/i.test(m)) {
+  if (/\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|heart attack|stroke|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|shortness of breath|collapsed|heart racing badly|heart pounding)\b/i.test(m)) {
     const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait.\n\nYour coach has been notified. Health first — everything else can wait.`;
     try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }

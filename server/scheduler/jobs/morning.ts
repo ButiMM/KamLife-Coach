@@ -8,6 +8,7 @@ import {
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { getKamlifeProgramme } from "../../programme";
+import { sendWhatsAppButtons } from "../../twilio-interactive";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -42,9 +43,15 @@ export async function runMorningCheckin(): Promise<void> {
     if (daysSilent >= 3) {
       if (canSendProactive(client.id)) {
         const name = client.name || "there";
-        const comebBackMsg = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:\n\n*1* — I'm back, let's pick up where we left off\n*2* — I need a simpler plan, I've been overwhelmed\n*3* — I'm just busy for a bit, check in next week\n\nOne reply is all I need.`;
-        const { text: reEngageMsg, assignmentId } = await selectVariantMessage(client.id, "re_engagement", comebBackMsg);
-        await sendWhatsApp(client.phoneNumber, reEngageMsg);
+        const reEngageBody = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:`;
+        const reEngageButtons = [
+          "I'm back, let's go",
+          "I need a simpler plan",
+          "Busy — check in next week",
+        ];
+        const comebBackMsg = `${reEngageBody}\n\n*1* — ${reEngageButtons[0]}\n*2* — ${reEngageButtons[1]}\n*3* — ${reEngageButtons[2]}\n\nOne reply is all I need.`;
+        const { text: _variantMsg, assignmentId } = await selectVariantMessage(client.id, "re_engagement", comebBackMsg);
+        await sendWhatsAppButtons(client.phoneNumber, reEngageBody, reEngageButtons);
         if (assignmentId !== null) await recordDelivery(assignmentId);
         await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.id, client.id));
         recordProactiveSend(client.id, "comeback_rescue");

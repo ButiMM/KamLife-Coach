@@ -5,6 +5,7 @@ import {
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, isSickOrInjuredToday,
 } from "../shared";
+import { sendWhatsAppButtons } from "../../twilio-interactive";
 
 export async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
@@ -63,6 +64,32 @@ export async function runEveningAccountability(): Promise<void> {
       const stepsDone = todayStep ? todayStep.steps >= stepsTarget : false;
       const protHit = todayProt >= Math.round(protTarget * 0.9);
       const stepCount = todayStep?.steps ?? 0;
+      const goal = client.goalType || "fat_loss";
+
+      // Proactive dinner suggestion: user has been active today but no dinner logged yet.
+      // Identify "dinner" as a meal logged in the last 4 hours — if absent and it's evening, suggest.
+      const fourHoursAgo = new Date(Date.now() - 4 * 3_600_000);
+      const [recentMeal] = await db.select({ id: mealLogs.id })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, fourHoursAgo)))
+        .limit(1)
+        .catch(() => [] as { id: number }[]);
+      const noDinnerYet = !recentMeal;
+      const hasBeenActive = todayCal > 0 || workedOut || stepCount > 1000;
+
+      if (noDinnerYet && hasBeenActive && !sick && canSendProactive(client.id)) {
+        const protGap = protTarget - todayProt;
+        let dinnerSuggestion: string;
+        if (goal === "muscle_gain") {
+          const mealOption = protGap > 40 ? "rice + chicken, or pap + mince + veg" : "eggs + toast, or pilchards on bread";
+          dinnerSuggestion = `${name}, dinner time. Still need ${protGap > 0 ? `${protGap}g protein` : "a solid meal"}. Options: ${mealOption}. What are you working with tonight?`;
+        } else {
+          dinnerSuggestion = `${name}, dinner time soon. Keep it light: scrambled eggs + spinach, pilchards on 1 slice toast, or grilled chicken + veg. What do you have at home?`;
+        }
+        await sendWhatsApp(phone, dinnerSuggestion);
+        recordProactiveSend(client.id);
+        continue;
+      }
 
       let msg: string;
 
@@ -81,7 +108,16 @@ export async function runEveningAccountability(): Promise<void> {
           msg = `${name}, session done. ${todayCal > 0 ? `${todayProt}g protein logged — get to ${protTarget}g tonight.` : `No food logged. Log tonight's meal.`}`;
         } else if (isTrainingDay) {
           const foodLine = todayCal > 0 ? ` Food's in.` : ``;
-          msg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
+          const sessionMsg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
+          if (canSendProactive(client.id)) {
+            await sendWhatsAppButtons(phone, sessionMsg, [
+              "Doing it tonight",
+              "Swap to tomorrow",
+              "Rest day today",
+            ]);
+            recordProactiveSend(client.id);
+          }
+          continue;
         } else if (stepsDone) {
           msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
         } else if (todayCal > 0 || stepCount > 0) {
