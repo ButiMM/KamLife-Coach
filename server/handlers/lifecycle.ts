@@ -1659,7 +1659,8 @@ export async function handleLifecycle(ctx: {
     const hasNothingEaten = /\b(nothing|not.*eat|didn.?t eat|skipped|no food|fasted|fasting|no meals?)\b/i.test(m);
     if (!hasNothingEaten && wordCount >= 3) {
       // Try to extract what they mentioned as a food item for a personalised reply
-      const firstNoun = m.replace(/\b(i had|i ate|just had|just ate|ate|had|having|i have|having|breakfast was|lunch was|dinner was|breakfast|lunch|dinner|supper|snack|brunch|for|at|with|and|the|a|an|some|my)\b/gi, " ").trim().split(/\s+/).filter(w => w.length > 2)[0] || "";
+      const nounWords = m.replace(/\b(i had|i ate|just had|just ate|ate|had|having|i have|having|breakfast was|lunch was|dinner was|breakfast|lunch|dinner|supper|snack|brunch|for|at|with|and|the|a|an|some|my)\b/gi, " ").trim().split(/\s+/).filter(w => w.length > 2);
+      const firstNoun = nounWords.length >= 2 && nounWords[0].length <= 4 ? `${nounWords[0]} ${nounWords[1]}` : nounWords[0] || "";
       const foodHint = firstNoun ? ` (like "${firstNoun}")` : "";
       const formatReply = `I did not recognise that food${foodHint} in my database. Log it like this:\n\n"I had 2 eggs and pap for breakfast"\n"Chicken thigh, sweet potato and spinach for lunch"\n\nInclude: the food name, rough amount, and which meal. I will give you the kcal and protein instantly.`;
       await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");

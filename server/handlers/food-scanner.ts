@@ -5,6 +5,9 @@ import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
 
+// Track which users have already received the low-cal warning today (SAST date key)
+const _lowCalWarnedToday = new Map<string, string>();
+
 export async function computeFoodLogStreak(userId: string): Promise<number> {
   try {
     const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
@@ -463,10 +466,16 @@ export function buildFoodLogReply(p: {
     variableReinforcement = NOTES[Math.floor(Math.random() * NOTES.length)];
   }
 
-  const sastHour = new Date().getUTCHours() + 2;
-  const calorieFloorNote = (sastHour >= 17 && runningCals > 0 && runningCals < 850)
+  const sastNow = new Date(Date.now() + 2 * 3_600_000);
+  const sastHour = sastNow.getUTCHours();
+  const todayKey = `${sastNow.getUTCFullYear()}-${sastNow.getUTCMonth()}-${sastNow.getUTCDate()}`;
+  const warnKey = `${user.id}:${todayKey}`;
+  const alreadyWarned = _lowCalWarnedToday.get(warnKey) === todayKey;
+  const lowCalThreshold = calorieTarget * 0.45;
+  const calorieFloorNote = (!alreadyWarned && sastHour >= 18 && runningCals > 0 && runningCals < lowCalThreshold)
     ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
     : "";
+  if (calorieFloorNote) _lowCalWarnedToday.set(warnKey, todayKey);
 
   return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
 }
