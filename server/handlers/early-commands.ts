@@ -12,7 +12,7 @@ import { logChat, withTimeout } from "./chat-log";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart } from "../utils";
+import { sastDayStart, getScheduleStatus } from "../utils";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -149,8 +149,17 @@ export async function handleEarlyCommands(ctx: {
       ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
       : user;
     tempEquipmentMode.delete(phone);
+
+    // Calendar-aware: check if today is a scheduled training day
+    const { isTrainingDay, todayName, nextTrainingName } = getScheduleStatus(user);
+    if (!isTrainingDay) {
+      const nextWorkout = buildDayWorkout(effectiveUser);
+      const restReply = `*${todayName} is your rest day.*\n\nYou don't need to train today. Rest, walk, hit your protein target.\n\nNext session: *${nextTrainingName}*. Here's a preview of what's coming:\n\n${nextWorkout}\n\n_If you want to train anyway, send *done* after your session._`;
+      await logChat(user.id, message, restReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "REST_DAY_INFO");
+      return restReply;
+    }
+
     const workout = buildDayWorkout(effectiveUser);
-    const dayNum = user.programmeDayInWeek || 1;
     const poContext = await getProgressiveOverloadContext(user.id);
     const week = user.programmeWeek || 1;
     const sessionNum = user.totalWorkoutsCompleted || 0;

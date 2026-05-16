@@ -6,7 +6,7 @@ import { calculateTargets } from "./targets";
 import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { getDisplayName, sastDayStart } from "./utils";
+import { getDisplayName, sastDayStart, getScheduleStatus } from "./utils";
 
 // ============================================================
 // MENU TEXT — context-aware
@@ -65,23 +65,31 @@ export async function getMenuText(user: any): Promise<string> {
     ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}${trialLine}`
     : `*KamLife Coach* 💪${trialLine}`;
 
-  // State-aware menu — no numbered list, exactly 3 buttons
+  const { isTrainingDay, todayName, nextTrainingName } = getScheduleStatus(user);
+  const footer = `\n\n_Also available: shopping list · meal prep · supplements · my sleep · my water · badges · referral_`;
+
+  // State-aware menu — 3 action buttons + discoverable footer
   if (workoutDone) {
     const stepGap = todayStepCount !== null && todayStepCount < stepsTarget
-      ? `Session done. ${(stepsTarget - todayStepCount).toLocaleString()} steps still to go.`
-      : `Good work today. What's next?`;
-    return `${headerLine}\n\n${stepGap}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+      ? `Session done ✅. ${(stepsTarget - todayStepCount).toLocaleString()} steps still to go.`
+      : `Session done ✅. Good work today.`;
+    return `${headerLine}\n\n${stepGap}${footer}[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
   const daysSilent = user.lastActiveAt
     ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
     : 0;
-  if (daysSilent >= 3) {
-    const daysText = daysSilent <= 7 ? `${daysSilent} days` : "a while";
-    return `${headerLine}\n\n${daysText} away — no lecture. Pick up where you left off.[BUTTONS:Today's workout|Log food|My progress]`;
+
+  if (!isTrainingDay) {
+    return `${headerLine}\n\n*${todayName} is your rest day.* Next training: ${nextTrainingName}.${footer}[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
-  return `${headerLine}\n\nWhat are you working on today?[BUTTONS:Today's workout|Log food|My progress]`;
+  if (daysSilent >= 3) {
+    const daysText = daysSilent <= 7 ? `${daysSilent} days` : "a while";
+    return `${headerLine}\n\n${daysText} away — no lecture. Pick up where you left off.${footer}[BUTTONS:Today's workout|Log food|My progress]`;
+  }
+
+  return `${headerLine}\n\nTraining day. Your session is ready.${footer}[BUTTONS:Today's workout|Log food|My progress]`;
 }
 
 // ============================================================

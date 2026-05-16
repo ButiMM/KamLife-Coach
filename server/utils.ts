@@ -1,5 +1,59 @@
 const INVALID_NAMES = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
 
+// ---- TRAINING SCHEDULE UTILITIES ----
+// Days of week: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
+const SCHEDULE_MAP: Record<number, number[]> = {
+  2: [1, 4],           // Mon, Thu
+  3: [1, 3, 5],        // Mon, Wed, Fri
+  4: [1, 2, 4, 5],     // Mon, Tue, Thu, Fri
+  5: [1, 2, 3, 4, 5],  // Mon–Fri
+  6: [1, 2, 3, 4, 5, 6],
+};
+const DOW_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+export function getScheduleStatus(user: any): {
+  isTrainingDay: boolean;
+  todayName: string;
+  nextTrainingName: string;
+  missedThisWeek: number;
+  scheduledThisWeek: number;
+} {
+  // Use SAST (UTC+2) to determine correct day of week
+  const sastMs = Date.now() + 2 * 3_600_000;
+  const sastDOW = new Date(sastMs).getDay();
+
+  const trainingDays = Math.min(6, Math.max(2, user.trainingDaysPerWeek || 3));
+  const schedDOWs = SCHEDULE_MAP[trainingDays] || SCHEDULE_MAP[3];
+  const isTrainingDay = schedDOWs.includes(sastDOW);
+
+  // Next scheduled training day
+  let nextDOW = sastDOW;
+  for (let i = 1; i <= 7; i++) {
+    const candidate = (sastDOW + i) % 7;
+    if (schedDOWs.includes(candidate)) { nextDOW = candidate; break; }
+  }
+
+  // Count scheduled vs completed sessions in past 7 days
+  const sevenDaysAgo = Date.now() - 7 * 86_400_000;
+  let scheduledThisWeek = 0;
+  for (let d = 0; d < 7; d++) {
+    const dow = new Date(sevenDaysAgo + d * 86_400_000 + 2 * 3_600_000).getDay();
+    if (schedDOWs.includes(dow)) scheduledThisWeek++;
+  }
+  const completedThisWeek = user.totalWorkoutsCompleted
+    ? Math.min(scheduledThisWeek, user.weeklyWorkoutsCompleted || 0)
+    : 0;
+  const missedThisWeek = Math.max(0, scheduledThisWeek - completedThisWeek);
+
+  return {
+    isTrainingDay,
+    todayName: DOW_NAMES[sastDOW],
+    nextTrainingName: DOW_NAMES[nextDOW],
+    missedThisWeek,
+    scheduledThisWeek,
+  };
+}
+
 export function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
   return sast.toISOString().slice(0, 10);
