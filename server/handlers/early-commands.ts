@@ -842,6 +842,60 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     return meReply;
   }
 
+  // ---- BUTTON TAPS: Workout delivery buttons ----
+  if (m === "too hard — modify" || m === "too hard - modify") {
+    const effectiveUser = tempEquipmentMode.has(phone)
+      ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
+      : user;
+    const workout = buildDayWorkout(effectiveUser);
+    const modReply = `${firstName ? firstName + ", h" : "H"}ere's the modified version.\n\n*How to scale it down:*\n• Drop weight by 20–30%\n• Do 2 sets instead of 3\n• Rest 90 seconds between sets (not 60)\n• Skip anything causing sharp pain — swap for walking\n\n${workout}\n\nThis still counts as a full session. Send *done* when you're finished.`;
+    await logChat(user.id, message, modReply, "WORKOUT_MODIFY");
+    return modReply;
+  }
+
+  if (m === "skip today") {
+    const streak = user.workoutStreak || 0;
+    const streakLine = streak >= 3
+      ? `Your ${streak}-session streak is noted. One planned skip won't break it — two in a row will.\n\n`
+      : ``;
+    const skipReply = `${streakLine}Rest day logged. Eat your protein, stay hydrated.\n\n*Rule:* never miss twice. One skip is fine. Two in a row is the start of a habit.\n\nTomorrow's session is waiting — send *menu* when you're ready.`;
+    await logChat(user.id, message, skipReply, "WORKOUT_SKIP");
+    return skipReply;
+  }
+
+  // ---- BUTTON TAPS: Evening accountability buttons ----
+  if (m === "doing it tonight") {
+    const reply = `${firstName ? firstName + ", g" : "G"}et it done. Send *done* when you've finished and I'll log it.`;
+    await logChat(user.id, message, reply, "EVENING_COMMIT");
+    return reply;
+  }
+
+  if (m === "swap to tomorrow") {
+    const reply = `${firstName ? firstName + ", t" : "T"}omorrow then — but pick your time right now and stick to it. I'll be here when you send *done*.`;
+    await logChat(user.id, message, reply, "EVENING_SWAP");
+    return reply;
+  }
+
+  if (m === "rest day today") {
+    const reply = `Rest day logged. Eat your protein and walk if you can. Training resumes next session.`;
+    await logChat(user.id, message, reply, "REST_DAY_LOGGED");
+    return reply;
+  }
+
+  // ---- BUTTON TAPS: Combo upsell buttons ----
+  if (m === "add veg side") {
+    const goal = user.goalType || "fat_loss";
+    const vegReply = `*Quick veg sides — 5 minutes or less:*\n\n🥬 *Spinach* — wilt in a pan with garlic, 2 min. 23 kcal, 3g protein.\n🥦 *Frozen broccoli* — microwave 3 min. 55 kcal, 4g protein per cup.\n🥗 *Cabbage* — shred, stir-fry with onion. 22 kcal per cup. Best budget veg in SA.\n🍅 *Tomato + onion* — slice raw, no cooking needed.\n\n${goal === "muscle_gain" ? "Add spinach — iron supports muscle recovery." : "Cabbage and spinach fill you up without touching your calorie budget."}\n\nLog it when you're done.`;
+    await logChat(user.id, message, vegReply, "VEG_SIDE");
+    return vegReply;
+  }
+
+  if (m === "no thanks" || m === "no thank you") {
+    const reply = `No problem. Log your next meal whenever you're ready.`;
+    await logChat(user.id, message, reply, "NO_THANKS");
+    return reply;
+  }
+
   // ---- COMEBACK AFTER SILENCE (2+ days) ----
   // Detect when a client returns with an excuse/explanation after going quiet.
   // Respond with empathy and a clean restart plan — not a workout delivered cold.

@@ -683,7 +683,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: NEXT WORKOUT ----
-  if (["next", "next workout", "tomorrow", "what's next", "whats next", "next session", "next day"].includes(m)) {
+  if (["next", "next workout", "tomorrow", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session"].includes(m)) {
     const tomorrowDow = (new Date().getDay() + 1) % 7;
     const tomorrowType = getDayType(tomorrowDow);
     const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];

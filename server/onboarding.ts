@@ -65,26 +65,23 @@ export async function getMenuText(user: any): Promise<string> {
     ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}${trialLine}`
     : `*KamLife Coach* 💪${trialLine}`;
 
-  return `${headerLine}
+  // State-aware menu — no numbered list, exactly 3 buttons
+  if (workoutDone) {
+    const stepGap = todayStepCount !== null && todayStepCount < stepsTarget
+      ? `Session done. ${(stepsTarget - todayStepCount).toLocaleString()} steps still to go.`
+      : `Good work today. What's next?`;
+    return `${headerLine}\n\n${stepGap}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+  }
 
-*Training:*
-1️⃣ Today's workout
-2️⃣ Log steps / send screenshot
+  const daysSilent = user.lastActiveAt
+    ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
+    : 0;
+  if (daysSilent >= 3) {
+    const daysText = daysSilent <= 7 ? `${daysSilent} days` : "a while";
+    return `${headerLine}\n\n${daysText} away — no lecture. Pick up where you left off.[BUTTONS:Today's workout|Log food|My progress]`;
+  }
 
-*Nutrition:*
-3️⃣ Log food (or just tell me what you ate)
-4️⃣ Shopping list
-5️⃣ Meal prep plan
-
-*Track progress:*
-6️⃣ Weekly report
-7️⃣ Log weight
-
-*More:* _supplements_ · _badges_ · _my sleep_ · _my water_ · _monthly report_ · _referral_ · _rate_ · _find buddy_ · _diet break_
-
-_Have a grocery list? Send it and I'll adjust it for your goal._
-
-Or just talk to me — food, training, life. I'm here.[BUTTONS:Today's workout|Log food|My progress]`;
+  return `${headerLine}\n\nWhat are you working on today?[BUTTONS:Today's workout|Log food|My progress]`;
 }
 
 // ============================================================

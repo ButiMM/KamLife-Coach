@@ -68,7 +68,7 @@ export async function handleWorkoutCommands(ctx: {
   const firstName = user.name?.split(" ")[0] || "";
 
   // ---- "MY LIFTS" — show recent exercise history ----
-  if (["my lifts", "lifts", "lift history", "my lift history", "my exercises", "exercise history"].includes(m)) {
+  if (["my lifts", "lifts", "lift history", "my lift history", "my exercises", "exercise history", "log my lifts"].includes(m)) {
     const recent = await db.select().from(exerciseLogs)
       .where(eq(exerciseLogs.userId, user.id))
       .orderBy(desc(exerciseLogs.loggedAt))
@@ -110,6 +110,7 @@ export async function handleWorkoutCommands(ctx: {
   // ---- WORKOUT DONE — log completion ----
   const isDone = (
     /^(done|finished|complete|completed|trained)[.!?]?$/i.test(m)
+    || /^done\s*[💪✅🔥][.!?]?$/.test(m)
     || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)
     || /^(?:just\s+)?(?:done|finished)\s+(?:my\s+)?(?:workout|session|training|gym)[.!?]?$/i.test(m)
     || m === "done today" || m === "finished today"
