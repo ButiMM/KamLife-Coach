@@ -42,6 +42,7 @@ async function _getOrCreateTemplate(buttons: string[]): Promise<string | null> {
     const limited = buttons.slice(0, 3);
     const created = await (twilioClient as any).content.v1.contents.create({
       friendlyName: `kamlife_${key.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}_${Date.now()}`,
+      language: "en",
       variables: { "1": "placeholder" },
       types: {
         "twilio/quick-reply": {
