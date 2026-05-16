@@ -176,68 +176,32 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     user.subscriptionStatus = "active";
   }
 
-  // ---- SUBSCRIPTION GATE — inactive users get free basic tier, premium features gated ----
-  // FREE (always available): food logging, step tracking, water, weight, basic Q&A, meal diary
-  // PREMIUM (requires subscription): workout programmes, shopping lists, full coaching, meal plans
-  // isCoach always bypasses the gate — their account is also healed in the DB above
+  // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
+  // Safety messages (chest pain, crisis, emergency) always bypass.
+  // Onboarding is handled before this point and bypasses via onboardingState check.
   if (user.subscriptionStatus === 'inactive' && !isCoach) {
-    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-    const merchantId = process.env.PAYFAST_MERCHANT_ID;
-    const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-    const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-    const name = user.name?.split(" ")[0] || "there";
-
-    // Premium features that need subscription
-    const isPremiumRequest =
-      /\b(workout|programme|program|training plan|gym plan|my plan|day 1|day 2|day 3|shopping list|shop|meal plan|full coaching|next session|lift|sets|reps)\b/i.test(m) &&
-      !/\b(food|eat|ate|had|log|steps|walked|weight|water|calories|protein|diary|my meals|remove|delete)\b/i.test(m);
-
-    if (isPremiumRequest) {
+    const isSafety = /\b(chest pain|can.?t breathe|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
+    if (!isSafety) {
+      const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+      const merchantId = process.env.PAYFAST_MERCHANT_ID;
+      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      const name = user.name?.split(" ")[0] || "there";
       const workouts = user.totalWorkoutsCompleted || 0;
       const isLapsed = !!user.cancelledAt;
       let gateReply: string;
-      if (workouts === 0 && !isLapsed) {
-        gateReply = `${name}, your programme is ready — activate to start.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`;
-      } else if (isLapsed) {
+      if (isLapsed) {
         const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
         const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
-        const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently ${currentKg}` : ""} — all saved and waiting.` : "";
+        const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently at ${currentKg}` : ""} — all saved.` : "";
         gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R149/month — cancel anytime:*\n${payLink}`;
+      } else if (workouts > 0) {
+        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
       } else {
-        gateReply = `${name}, reactivate to get your workouts, shopping lists, and full coaching back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R149/month (R5/day)*\n${payLink}\n\n_7-day money-back guarantee — if it's not working for you in the first week, full refund. No questions._`;
       }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;
-    }
-
-    // Crisis and safety always bypass
-    const isSafety = /\b(chest pain|can.?t breathe|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
-    if (isSafety) {
-      // Fall through to crisis handler above
-    }
-
-    // Free tier food log gate: max 3 food logs per week
-    const isFoodLog = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|i had|i ate|just ate|just had)\b/i.test(m)
-      || (mediaUrl && /^image\//i.test(mediaContentType || ""));
-    if (isFoodLog) {
-      const weekStart = new Date(Date.now() - 7 * 86_400_000);
-      const weekLogs = await db.select({ id: chatHistory.id })
-        .from(chatHistory)
-        .where(and(
-          eq(chatHistory.userId, user.id),
-          eq(chatHistory.intent, "FOOD_LOG"),
-          gte(chatHistory.createdAt, weekStart),
-        ))
-        .limit(4);
-      if (weekLogs.length >= 3) {
-        const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-        const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-        const payLink = process.env.PAYFAST_MERCHANT_ID ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-        const name = user.name?.split(" ")[0] || "there";
-        const gateMsg = `${name}, you have used your 3 free food logs this week.\n\nUpgrade to KamLife Coach for unlimited meal tracking, personalised coaching, and your full 8-week programme.\n\n*R149/month — R5/day. Cancel anytime:*\n${payLink}`;
-        await logChat(user.id, message, gateMsg, "FREE_TIER_GATE");
-        return gateMsg;
-      }
     }
   }
 
