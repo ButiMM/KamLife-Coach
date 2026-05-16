@@ -915,6 +915,18 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     return comingBackReply;
   }
 
+  // ---- CONFUSION / LOST USER — catch truly unclear messages before GPT ----
+  // Only fires for genuinely ambiguous single-word or short confusion signals.
+  // Specific questions ("how many calories", "what should i eat") are handled earlier.
+  const CONFUSED_EXACT = new Set(["what", "what?", "huh", "huh?", "???", "??", "!?", "?", "what now", "lost", "confused", "help me", "i'm lost", "im lost"]);
+  const isConfused = CONFUSED_EXACT.has(m)
+    || /^(\?{2,}|!{2,}|\?!+)$/.test(m)
+    || /\b(i.?m (lost|confused|not sure)|don.?t (understand|get it)|what do i do( now)?|not sure what to (do|say|send)|how does this work)\b/i.test(m);
+  if (isConfused) {
+    const menuReply = await getMenuText(user);
+    await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
+    return menuReply;
+  }
 
   return null;
 }
