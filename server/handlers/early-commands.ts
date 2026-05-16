@@ -12,7 +12,8 @@ import { logChat, withTimeout } from "./chat-log";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, getScheduleStatus } from "../utils";
+import { sastDayStart } from "../utils";
+import { getTodayWorkoutState } from "../workout-state";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -150,15 +151,42 @@ export async function handleEarlyCommands(ctx: {
       : user;
     tempEquipmentMode.delete(phone);
 
-    // Calendar-aware: check if today is a scheduled training day
-    const { isTrainingDay, todayName, nextTrainingName } = getScheduleStatus(user);
-    if (!isTrainingDay) {
-      const nextWorkout = buildDayWorkout(effectiveUser);
-      const restReply = `*${todayName} is your rest day.*\n\nYou don't need to train today. Rest, walk, hit your protein target.\n\nNext session: *${nextTrainingName}*. Here's a preview of what's coming:\n\n${nextWorkout}\n\n_If you want to train anyway, send *done* after your session._`;
-      await logChat(user.id, message, restReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "REST_DAY_INFO");
+    const state = await getTodayWorkoutState(user);
+
+    // REST DAY
+    if (state.type === "REST") {
+      const preview = buildDayWorkout(effectiveUser);
+      const restReply = `*${state.todayName} — Rest Day.*\n\nRecovery is when your muscles actually grow. No session needed today.\n\nNext training day: *${state.nextTrainingName}*\n\n_Preview of what's coming:_\n\n${preview}\n\n_Want to train anyway? Go for it — send *done* when finished._`;
+      await logChat(user.id, message, restReply, "REST_DAY_INFO");
       return restReply;
     }
 
+    // ALREADY DONE TODAY
+    if (state.type === "ALREADY_DONE") {
+      const poCtx = await getProgressiveOverloadContext(user.id);
+      const doneReply = `${firstName ? firstName + ", y" : "Y"}ou already logged today's session ✅${poCtx ? "\n\n" + poCtx.trim() : ""}\n\nWhat's next?[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+      await logChat(user.id, message, doneReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_ALREADY_DONE");
+      return doneReply;
+    }
+
+    // MISSED SESSION(S)
+    if (state.type === "MISSED") {
+      const missed = state.missedSessions.join(" and ");
+      const workout = buildDayWorkout(effectiveUser);
+      const poContext = await getProgressiveOverloadContext(user.id);
+      const week = user.programmeWeek || 1;
+      const sessionNum = user.totalWorkoutsCompleted || 0;
+      const injuryNote = user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none"
+        ? `\n\n⚠️ *Active injury noted (${user.injuries}):* Skip any exercise that causes sharp pain.`
+        : "";
+      const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
+      const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
+      const missedReply = `${firstName ? firstName + ", y" : "Y"}ou missed ${missed}.\n\n*${state.todayName} is still a training day — do it now and you're back on track.*\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
+      return missedReply;
+    }
+
+    // NORMAL — scheduled training day, nothing done yet
     const workout = buildDayWorkout(effectiveUser);
     const poContext = await getProgressiveOverloadContext(user.id);
     const week = user.programmeWeek || 1;

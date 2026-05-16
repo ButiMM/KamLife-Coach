@@ -17,7 +17,8 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
-import { sastDayStart, getScheduleStatus } from "../utils";
+import { sastDayStart } from "../utils";
+import { getTodayWorkoutState } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
@@ -190,10 +191,10 @@ export async function handleWorkoutCommands(ctx: {
       week1Badge = `\n\n---\n\n🏆 *WEEK 1 COMPLETE*\n\nYou finished your first full training week. Most people quit before this.\n\nWorkout ${newTotal} is done. Week 2 starts next session — same time, same commitment.\n\nThe gap between who you were and who you're becoming is exactly this: showing up when nobody's watching.`;
     }
 
-    // Detect rest-day / late-log bonus session
-    const { isTrainingDay, todayName, nextTrainingName } = getScheduleStatus(user);
-    const bonusNote = !isTrainingDay
-      ? `\n\n_${todayName} is your rest day — but you trained anyway. That's extra credit._`
+    // Detect rest-day bonus session (trained on a scheduled rest day)
+    const wState = await getTodayWorkoutState(user);
+    const bonusNote = wState.type === "REST"
+      ? `\n\n_${wState.todayName} is your rest day — but you trained anyway. Extra credit._`
       : "";
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
