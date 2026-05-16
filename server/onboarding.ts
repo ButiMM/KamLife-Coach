@@ -3,6 +3,7 @@ import { users, weightLogs, chatHistory, workoutLogs, stepLogs } from "../shared
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets } from "./targets";
+import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { getDisplayName, sastDayStart } from "./utils";
@@ -630,7 +631,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
         onboardingState: "ASK_EQUIPMENT",
       }).where(eq(users.phoneNumber, phone));
       const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
-      return `Goal locked in: *${goalLabel}*.\n\nGym or home training?`;
+      return `Goal locked in: *${goalLabel}*.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
     }
 
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
@@ -651,7 +652,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
         proteinTarget: Math.round(fallbackWeight * 2),
         onboardingState: "ASK_EQUIPMENT",
       }).where(eq(users.phoneNumber, phone));
-      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nGym or home training?`;
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
     }
 
     const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
@@ -695,7 +696,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
       onboardingState: "ASK_EQUIPMENT",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?`;
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
   }
 
   // ---- ASK_EQUIPMENT — gym or home ----
@@ -904,7 +905,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const isClearNone = lower === "none" || lower === "no" || lower === "n/a" || lower === "nil" || lower === "nope" || lower === "nothing";
     const injuries = isClearNone ? "" : msg;
     await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
-    return `Gym or home training?`;
+    return `Gym or home training?[BUTTONS:Gym|Home training|No equipment]`;
   }
 
   if (state === "ASK_GYM_NAME") {

@@ -1,4 +1,5 @@
 import "dotenv/config";
+import * as Sentry from "@sentry/node";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { registerAudioRoutes } from "./replit_integrations/audio/routes";
@@ -10,6 +11,22 @@ import { initFoodsTable } from "./foods";
 import { pool, db } from "./db";
 import { users } from "../shared/schema";
 import { eq } from "drizzle-orm";
+
+// ── Sentry error monitoring — only active when SENTRY_DSN is set ──
+if (process.env.SENTRY_DSN) {
+  Sentry.init({
+    dsn: process.env.SENTRY_DSN,
+    environment: process.env.NODE_ENV || "development",
+    tracesSampleRate: 0.1,
+    beforeSend(event) {
+      // Strip phone numbers from breadcrumbs and messages before sending
+      const str = JSON.stringify(event);
+      const scrubbed = str.replace(/\+27\d{9,}/g, "+27***").replace(/whatsapp:\+27\d{9,}/g, "whatsapp:+27***");
+      return JSON.parse(scrubbed);
+    },
+  });
+  console.log("[SENTRY] Error monitoring active");
+}
 
 async function runMigrations(): Promise<void> {
   // ── PHASE 1: Create all tables if they don't exist (fresh Railway deploy) ──
@@ -462,6 +479,10 @@ async function activateCoachAccount(): Promise<void> {
   await runMigrations();
   registerAudioRoutes(app);
   await registerRoutes(httpServer, app);
+
+  if (process.env.SENTRY_DSN) {
+    app.use(Sentry.expressErrorHandler() as any);
+  }
 
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

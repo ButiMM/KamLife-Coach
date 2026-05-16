@@ -42,15 +42,19 @@ export function registerPaymentRoutes(app: Express) {
   // ── PayFast ITN webhook ──
   app.post("/webhook/payfast", async (req: any, res: any) => {
     res.sendStatus(200);
+    const itnId = `ITN-${Date.now()}`;
     try {
       const data = req.body as Record<string, string>;
       const paymentStatus = data.payment_status;
       const phone = data.custom_str1;
       const pfPaymentId = data.pf_payment_id;
       const amountGross = parseFloat(data.amount_gross || "0");
+      const safePhone = phone ? phone.replace(/\d{4}$/, "****") : "unknown";
+
+      console.log(`[PAYFAST:${itnId}] ITN received — status=${paymentStatus} phone=${safePhone} amount=R${amountGross} pf_id=${pfPaymentId || "none"}`);
 
       if (!phone || !paymentStatus) {
-        console.error("[PAYFAST] Missing phone or payment_status in ITN");
+        console.error(`[PAYFAST:${itnId}] REJECTED — missing phone or payment_status. Body keys: ${Object.keys(data).join(", ")}`);
         return;
       }
 
@@ -64,29 +68,31 @@ export function registerPaymentRoutes(app: Express) {
       const signatureBase = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase)}` : paramString;
       const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
       if (!data.signature || data.signature !== expectedSig) {
-        console.error(`[PAYFAST] Signature ${!data.signature ? "missing" : "mismatch"} for ${phone} — rejecting ITN`);
+        console.error(`[PAYFAST:${itnId}] REJECTED — signature ${!data.signature ? "missing" : "mismatch"} for ${safePhone}. Got: ${data.signature?.slice(0, 8)}... Expected: ${expectedSig.slice(0, 8)}...`);
         return;
       }
+      console.log(`[PAYFAST:${itnId}] Signature valid`);
 
       // Validate merchant ID
       const expectedMerchantId = process.env.PAYFAST_MERCHANT_ID;
       if (expectedMerchantId && data.merchant_id !== expectedMerchantId) {
-        console.error(`[PAYFAST] Merchant ID mismatch (got ${data.merchant_id}) — rejecting ITN`);
+        console.error(`[PAYFAST:${itnId}] REJECTED — merchant ID mismatch (got ${data.merchant_id}, expected ${expectedMerchantId})`);
         return;
       }
 
       // Amount sanity check
       if (paymentStatus === "COMPLETE" && (amountGross < 1 || amountGross > 500)) {
-        console.error(`[PAYFAST] Amount R${amountGross} outside acceptable range — rejecting ITN`);
+        console.error(`[PAYFAST:${itnId}] REJECTED — amount R${amountGross} outside acceptable range (1–500)`);
         return;
       }
 
       const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
       const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
       if (!targetUser) {
-        console.error(`[PAYFAST] No user found for phone: ${phone}`);
+        console.error(`[PAYFAST:${itnId}] REJECTED — no user found for phone: ${safePhone}`);
         return;
       }
+      console.log(`[PAYFAST:${itnId}] User found — id=${targetUser.id} current_status=${targetUser.subscriptionStatus}`);
 
       const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
@@ -178,7 +184,35 @@ export function registerPaymentRoutes(app: Express) {
         }
       }
     } catch (err) {
-      console.error("[PAYFAST] Webhook error:", err);
+      console.error(`[PAYFAST:${itnId}] Webhook processing error:`, err);
+    }
+  });
+
+  // ── Admin: force-activate stuck subscription ──
+  // Use when PayFast ITN fires but webhook fails (network blip, etc.) and user paid but DB didn't update.
+  // Protected by COACH_DASHBOARD_KEY so only the coach can call it.
+  app.post("/api/admin/force-activate", async (req: any, res: any) => {
+    const authKey = req.headers["x-coach-key"] || req.query.key;
+    if (authKey !== process.env.COACH_DASHBOARD_KEY) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    try {
+      const { phone, reason } = req.body as { phone?: string; reason?: string };
+      if (!phone) return res.status(400).json({ error: "phone required" });
+      const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+      const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
+      if (!targetUser) return res.status(404).json({ error: "User not found" });
+      const renewsAt = new Date(Date.now() + 30 * 86_400_000);
+      await db.update(users).set({
+        subscriptionStatus: "active",
+        subscriptionRenewsAt: renewsAt,
+        cancelledAt: null,
+      }).where(eq(users.phoneNumber, normalisedPhone));
+      console.log(`[PAYFAST] FORCE-ACTIVATE — ${normalisedPhone} | reason: ${reason || "manual"} | renews: ${renewsAt.toISOString().slice(0, 10)}`);
+      return res.json({ ok: true, phone: normalisedPhone, renewsAt: renewsAt.toISOString().slice(0, 10) });
+    } catch (err) {
+      console.error("[PAYFAST] Force-activate error:", err);
+      return res.status(500).json({ error: "Internal error" });
     }
   });
 

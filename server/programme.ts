@@ -941,6 +941,26 @@ Rope behind head. Crunch down, squeeze abs
 
 Reply *DONE* when finished.`;
 
+// Exercise[] versions of intermediate programme — used with formatGymDay for week/phase context
+const INTERMEDIATE_UPPER_EX: Exercise[] = [
+  { name: "Chest Press / Bench Press", sets: "4×10", description: "Elbows at 45 degrees. Lower until bar touches chest. Press through the full range. Feel the chest contract at the top — not the shoulders.", mistake: "Shoulders rising and doing the work. Keep shoulder blades pinched back throughout.", modification: "Dumbbell press on a flat bench." },
+  { name: "Seated Cable Row", sets: "4×10", description: "Pull to your lower chest. Squeeze both shoulder blades hard together. Full stretch forward. Sit tall — do not lean back.", mistake: "Leaning back with torso to add momentum. The back does the work, not your bodyweight.", modification: "Dumbbell bent-over row." },
+  { name: "Lat Pulldown", sets: "4×10", description: "Full stretch at the top. Pull elbows down toward your back pockets. Squeeze hard at the bottom for one second.", mistake: "Pulling with your hands and arms. Your elbows lead the movement, not your wrists.", modification: "Resistance band pulldown." },
+  { name: "Shoulder Press", sets: "4×10", description: "Dumbbells at ear height. Press overhead until arms nearly extended. Lower slowly. Core stays braced throughout.", mistake: "Excessive lower back arch. If your back is arching, the weight is too heavy.", modification: "Seated press for extra lower back support." },
+  { name: "Cable Lateral Raise", sets: "3×15", description: "One cable at hip height. Raise arm to shoulder height only. Lower over 2 seconds. No shrugging — shoulders stay down.", mistake: "Raising above shoulder height or shrugging. Both reduce tension on the delts.", modification: "Dumbbell lateral raise." },
+  { name: "Tricep Pushdown", sets: "3×15", description: "Elbows pinned at your sides. Push bar down until arms are straight. Squeeze hard at the bottom. Elbows must not drift forward.", mistake: "Elbows drifting forward — if they move, reduce the weight.", modification: "Dumbbell overhead tricep extension." },
+  { name: "Cable Bicep Curl", sets: "3×15", description: "Elbows pinned at sides. Curl to shoulder. Squeeze hard at the top. Lower slowly — the eccentric builds as much as the curl.", mistake: "Swinging torso or elbows drifting forward. Keep elbows locked.", modification: "Dumbbell curl seated." },
+];
+
+const INTERMEDIATE_LOWER_EX: Exercise[] = [
+  { name: "Hack Squat / Leg Press", sets: "4×10", description: "Go deep — thighs past parallel. Control the descent over 2 seconds. Drive through heels explosively. Intermediate level means heavier than before.", mistake: "Rising onto toes at the bottom. Keep full foot contact throughout.", modification: "Barbell back squat or goblet squat." },
+  { name: "Leg Extension", sets: "4×12", description: "Full extension, hard quad squeeze at the top — hold 1 second. Lower slowly over 2 seconds. Feel it in the quad, not the hip.", mistake: "Using momentum to swing the weight up. Control both directions.", modification: "Dumbbell step-up." },
+  { name: "Leg Curl", sets: "4×12", description: "Curl heels all the way to your glutes. Squeeze hard at the top. Lower over 3 seconds — this eccentric phase is where hamstrings are built.", mistake: "Rushing the lowering phase. If you're not controlling it, the weight is too heavy.", modification: "Dumbbell Romanian deadlift." },
+  { name: "Hip Thrust", sets: "4×12", description: "Bar or heavy dumbbell on hips. Drive hips up explosively. Squeeze glutes hard for a full second at the top. Lower slowly.", mistake: "Using your lower back to press instead of your glutes. You should feel this in your bum, not your spine.", modification: "Glute bridge on the floor." },
+  { name: "Seated Calf Raise", sets: "4×15", description: "Full range — heel as low as the step allows, rise all the way onto toes. Pause at the top. Slow 2-second lower. Calves need full range to grow.", mistake: "Short bouncy reps. Calves only grow through full range of motion.", modification: "Single-leg standing calf raise." },
+  { name: "Cable Crunch", sets: "3×15", description: "Rope pulled behind head. Crunch down bringing elbows toward knees. Squeeze abs hard at the bottom. The movement comes from your abs — not your hips.", mistake: "Pulling the rope with your arms. Your abs create the crunch, arms just hold the rope.", modification: "Weighted sit-up or decline crunch." },
+];
+
 export const HOME_PROGRAMME_GUIDE = `*Home Workout — No Gym Needed*
 3 sets each | Rest 60 sec | 40–50 min
 
@@ -1555,11 +1575,13 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
       const femaleSlot = (((day - 1) % 4) + 1);
-      let workout = FEMALE_DAY_A;
-      if (femaleSlot === 2) workout = FEMALE_DAY_B;
-      else if (femaleSlot === 3) workout = FEMALE_DAY_C;
-      // Day 4 — repeat Day A focus (glutes) with higher volume
-      return prefix + workout + safetyNote + walkingFooter;
+      const slotClamped = (femaleSlot <= 3 ? femaleSlot : 1) as 1 | 2 | 3;
+      const femaleExMap: Record<1 | 2 | 3, Exercise[]> = { 1: GYM_GLUTES_DAY_A, 2: GYM_GLUTES_DAY_B, 3: GYM_GLUTES_DAY_C };
+      const femaleLabelMap: Record<1 | 2 | 3, string> = { 1: "Glutes + Shoulders", 2: "Back + Hamstrings", 3: "Full Body + Glutes" };
+      const phase = user.programmePhase || 1;
+      const phaseName = getPhaseNames()[phase] || "Foundation";
+      const fSession = formatGymDay(femaleExMap[slotClamped], femaleLabelMap[slotClamped], phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none");
+      return prefix + fSession + safetyNote + walkingFooter;
     }
     return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
   }
@@ -1568,8 +1590,13 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (exp === "intermediate" || exp === "advanced") {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      const workout = day % 2 === 0 ? INTERMEDIATE_GYM_LOWER : INTERMEDIATE_GYM_UPPER;
-      return prefix + workout + safetyNote + walkingFooter;
+      const phase = user.programmePhase || 1;
+      const phaseName = getPhaseNames()[phase] || "Foundation";
+      const isLower = day % 2 === 0;
+      const intExercises = isLower ? INTERMEDIATE_LOWER_EX : INTERMEDIATE_UPPER_EX;
+      const intLabel = isLower ? "Lower Body" : "Upper Body";
+      const iSession = formatGymDay(intExercises, intLabel, phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none");
+      return prefix + iSession + safetyNote + walkingFooter;
     }
     return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
   }

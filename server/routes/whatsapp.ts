@@ -2,6 +2,7 @@ import type { Express } from "express";
 import twilio from "twilio";
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
+import { sendWhatsAppButtons } from "../twilio-interactive";
 
 // ── Async voice processor ──
 // Twilio times out after 15s. Whisper takes 20-38s.
@@ -176,6 +177,18 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       }
 
       const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
+
+      // Extract [BUTTONS:Opt1|Opt2|Opt3] marker — sends interactive tap buttons via REST API
+      const buttonsMarkerMatch = reply.match(/\[BUTTONS:([^\]]+)\]/);
+      if (buttonsMarkerMatch) {
+        const buttons = buttonsMarkerMatch[1].split("|").map(b => b.trim()).filter(Boolean);
+        const bodyWithoutMarker = reply.replace(/\s*\[BUTTONS:[^\]]+\]/, "").trim();
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        sendWhatsAppButtons(rawPhone, bodyWithoutMarker, buttons).catch(e =>
+          console.error("[BUTTONS] Failed to send interactive reply:", e?.message)
+        );
+        return;
+      }
 
       // Extract [MEDIA:url] marker injected by handlers (exercise GIFs, portion plate images)
       const mediaMarkerMatch = reply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);

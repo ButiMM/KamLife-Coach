@@ -107,3 +107,16 @@ export async function sendWhatsAppYesNo(
 ): Promise<void> {
   return sendWhatsAppButtons(to, body, [yesLabel, noLabel]);
 }
+
+/**
+ * Encode a button reply for use in webhook reply handlers.
+ * Returns a string with a [BUTTONS:...] marker that whatsapp.ts detects and
+ * sends as interactive tap buttons via REST API (bypasses TwiML limitation).
+ *
+ * Usage in any handler:
+ *   return replyWithButtons("Gym or home training?", ["Gym", "Home", "No equipment"]);
+ */
+export function replyWithButtons(body: string, buttons: string[]): string {
+  const limited = buttons.slice(0, 3).join("|");
+  return `${body}\n[BUTTONS:${limited}]`;
+}
