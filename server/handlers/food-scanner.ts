@@ -196,6 +196,8 @@ export function scanForSAFoods(msg: string): SAFood[] {
     "Chicken and pap": ["Chicken breast", "Chicken thigh", "Pap (stiff maize porridge)"],
     "Fish and chips": ["Hake (frozen, battered)", "Chips (slap chips)"],
     "Pap and pilchards": ["Pap (stiff maize porridge)", "Pilchards in tomato sauce"],
+    "Pap and spinach": ["Pap (stiff maize porridge)", "Spinach", "Morogo (wild spinach)"],
+    "Pilchards on toast": ["Pilchards in tomato sauce", "Brown bread", "White bread"],
     "Rice and beans": ["Brown rice", "White rice", "Sugar beans"],
     "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
     "Vetkoek with mince": ["Vetkoek", "Beef mince"],

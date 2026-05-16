@@ -1662,7 +1662,8 @@ export async function handleLifecycle(ctx: {
       const nounWords = m.replace(/\b(i had|i ate|just had|just ate|ate|had|having|i have|having|breakfast was|lunch was|dinner was|breakfast|lunch|dinner|supper|snack|brunch|for|at|with|and|the|a|an|some|my)\b/gi, " ").trim().split(/\s+/).filter(w => w.length > 2);
       const firstNoun = nounWords.length >= 2 && nounWords[0].length <= 4 ? `${nounWords[0]} ${nounWords[1]}` : nounWords[0] || "";
       const foodHint = firstNoun ? ` (like "${firstNoun}")` : "";
-      const formatReply = `I did not recognise that food${foodHint} in my database. Log it like this:\n\n"I had 2 eggs and pap for breakfast"\n"Chicken thigh, sweet potato and spinach for lunch"\n\nInclude: the food name, rough amount, and which meal. I will give you the kcal and protein instantly.`;
+      const foodLabel = firstNoun ? `*${firstNoun}*` : "that food";
+      const formatReply = `I don't have ${foodLabel} in my SA database yet — send it as a full description and I'll log an estimate:\n\n"I had ${firstNoun || "the food"} for lunch"\n"Chicken thigh, sweet potato and spinach for dinner"\n\nInclude the name, rough amount, and which meal. I'll get the kcal and protein back to you instantly.`;
       await logChat(user.id, message, formatReply, "FOOD_FORMAT_GUIDE");
       return formatReply;
     }
