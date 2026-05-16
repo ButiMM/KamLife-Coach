@@ -157,8 +157,8 @@ export async function handleEarlyCommands(ctx: {
       : "";
     const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
     const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}`;
-    await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]/, "").trim(), "WORKOUT_VIEW");
+    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }
 

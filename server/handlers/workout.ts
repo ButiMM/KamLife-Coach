@@ -185,7 +185,7 @@ export async function handleWorkoutCommands(ctx: {
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
-    return `${doneResponse}${milestoneMsg}${perfectDay || ""}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)`;
+    return `${doneResponse}${milestoneMsg}${perfectDay || ""}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----
