@@ -84,7 +84,7 @@ export async function getMenuText(user: any): Promise<string> {
 
 _Have a grocery list? Send it and I'll adjust it for your goal._
 
-Or just talk to me — food, training, life. I'm here.[BUTTONS:Today's workout|Log food|My progress]`;
+Or just talk to me — food, training, life. I'm here.`;
 }
 
 // ============================================================
