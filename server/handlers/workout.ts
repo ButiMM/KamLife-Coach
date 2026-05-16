@@ -156,12 +156,12 @@ export async function handleWorkoutCommands(ctx: {
 
     let milestoneMsg = "";
     const MILESTONE_TEXTS: Record<number, string> = {
-      1:   `\n\n🎉 *Session 1 — done.* The hardest one is always the first. Every one from here is proof you're not just talking about it.`,
-      3:   `\n\n🔥 *3 sessions in.* The habit is starting. Most people who hit 3 make it to 10.`,
-      5:   `\n\n🔥 *5 sessions.* You've officially started. Some people joined the same day and have already quit — you haven't.`,
-      10:  `\n\n🏆 *10 sessions done.* Most people never get here. The habit is forming. Don't stop now.`,
-      25:  `\n\n🏆 *25 workouts.* A quarter century of sessions. You are not talking about fitness anymore — you are doing it.`,
-      50:  `\n\n🏆 *50 sessions.* Fifty times you showed up when you could have stayed home. That is not motivation — that is discipline.`,
+      1:   `\n\n🔥 *First workout done.* That's the hardest one — starting. Your body is already adapting. See you tomorrow.`,
+      3:   `\n\n🔥 *3 sessions in.* The habit is forming. Most people who hit 3 make it to 10.`,
+      5:   `\n\n🔥 *5 sessions.* You've officially started. Some people signed up the same day and already quit — you haven't.`,
+      10:  `\n\n🏆 *10 sessions done.* Most people never get here. Don't stop now.`,
+      25:  `\n\n🏆 *25 workouts.* You are not talking about fitness anymore — you are doing it.`,
+      50:  `\n\n🏆 *50 sessions.* Fifty times you showed up when you could have stayed home. That is discipline.`,
       100: `\n\n🏆 *100 workouts.* One hundred sessions. Whatever happens next — you earned this.`,
     };
 
@@ -183,9 +183,15 @@ export async function handleWorkoutCommands(ctx: {
 
     const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
 
+    // Week 1 Complete badge — fires once when programme week advances from 1 to 2
+    let week1Badge = "";
+    if (weekAdvance && newWeek === 2) {
+      week1Badge = `\n\n---\n\n🏆 *WEEK 1 COMPLETE*\n\nYou finished your first full training week. Most people quit before this.\n\nWorkout ${newTotal} is done. Week 2 starts next session — same time, same commitment.\n\nThe gap between who you were and who you're becoming is exactly this: showing up when nobody's watching.`;
+    }
+
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
-    return `${doneResponse}${milestoneMsg}${perfectDay || ""}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----

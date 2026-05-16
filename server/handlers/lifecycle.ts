@@ -827,6 +827,7 @@ export async function handleLifecycle(ctx: {
 
   // ---- GOAL TRANSITION — response to 1/2/3 after goal reached message ----
   if (user.awaitingInputType === "goal_transition") {
+    const capName = user.name?.split(" ")[0] || "there";
     const choice = m.trim().replace(/[^123]/g, "");
     const newGoal = choice === "1" ? "maintenance" : choice === "2" ? "muscle_gain" : choice === "3" ? "recomposition" : null;
     if (newGoal) {

@@ -474,10 +474,19 @@ export function buildFoodLogReply(p: {
   const warnKey = `${user.id}:${todayKey}`;
   const alreadyWarned = _lowCalWarnedToday.get(warnKey) === todayKey;
   const lowCalThreshold = calorieTarget * 0.45;
-  const calorieFloorNote = (!alreadyWarned && sastHour >= 18 && runningCals > 0 && runningCals < lowCalThreshold)
-    ? `\n\n⚠️ *Heads up:* You've only logged ${runningCals} kcal today. Eating too little slows your metabolism and causes muscle loss — the opposite of what we want. Have a proper meal tonight. Eggs, rice, chicken — something real.`
-    : "";
-  if (calorieFloorNote) _lowCalWarnedToday.set(warnKey, todayKey);
+  let calorieFloorNote = "";
+  if (!alreadyWarned && sastHour >= 18 && runningCals > 0 && runningCals < lowCalThreshold) {
+    const proteinLogged = Math.round(runningProtein);
+    const dayNum = user.totalWorkoutsCompleted || 1;
+    if (dayNum <= 3) {
+      // Early days — encouraging, not scolding
+      calorieFloorNote = `\n\n🎯 ${proteinLogged}g protein logged today — solid start. Tomorrow aim to hit your full calorie target too. One meal at a time.`;
+    } else {
+      // Established user — coach tone, ask why
+      calorieFloorNote = `\n\n⚡ You're under your calorie target today (${runningCals} kcal). Intentional or just a busy day? Either way — have something real before bed. Eggs, pap, chicken. Your body needs fuel to recover from training.`;
+    }
+    _lowCalWarnedToday.set(warnKey, todayKey);
+  }
 
   return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
 }

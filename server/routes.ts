@@ -347,10 +347,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       invalidatePatternCache(user.id);
-      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75);
       const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
-      const streakNote = streak >= 3 ? `\n\n🔥 ${streak}-day step streak. Don't break it.` : streak === 2 ? `\n\n2 days in a row. Build the habit.` : "";
-      stepReplyPart = stepReply + streakNote + (perfectDay || "");
+      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak);
+      stepReplyPart = stepReply + (perfectDay || "");
 
       // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too
       const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);

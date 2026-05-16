@@ -66,10 +66,21 @@ const STEP_RESPONSES_TARGET = [
     `Target done — ${steps.toLocaleString()} steps. ✅ This is what consistency looks like. Log tomorrow and keep the streak going.`,
 ];
 
-export function getStepResponse(steps: number, target: number, weightKg = 75): string {
+// Real-world equivalents to make calories concrete
+function _stepEquivalent(burnKcal: number): string {
+  if (burnKcal >= 300) return `That's a slice of pizza burned off.`;
+  if (burnKcal >= 200) return `That's a Coke and a half burned off.`;
+  if (burnKcal >= 120) return `That's a bag of chips burned off.`;
+  if (burnKcal >= 60)  return `That's a Bar One burned off.`;
+  return "";
+}
+
+export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0): string {
   const idx = Math.floor(Date.now() / 86400000) % 5;
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
+  const equivalent = steps >= target ? _stepEquivalent(burnEst) : "";
+
   let base: string;
   if (steps >= target) {
     base = STEP_RESPONSES_TARGET[idx % STEP_RESPONSES_TARGET.length](steps, target);
@@ -79,9 +90,22 @@ export function getStepResponse(steps: number, target: number, weightKg = 75): s
     const remaining = target - steps;
     base = STEP_RESPONSES_LOW[idx % STEP_RESPONSES_LOW.length](steps, remaining, target);
   }
+
+  // Insert burn note after first sentence
   const firstDot = base.indexOf(".");
-  if (firstDot > 0 && burnNote) {
-    return base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1);
+  let response = (firstDot > 0 && burnNote)
+    ? base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1)
+    : base + burnNote;
+
+  // Add equivalent note
+  if (equivalent) response += ` ${equivalent}`;
+
+  // Step streak celebration
+  if (streak >= 7) {
+    response += `\n\n🔥 *${streak}-day step streak.* ${streak >= 14 ? "Two weeks of movement. This is a habit now." : "A full week of steps. Don't break it."}`;
+  } else if (streak >= 3 && steps >= target) {
+    response += `\n\n🔥 ${streak} days in a row hitting target. Keep the streak alive.`;
   }
-  return base + burnNote;
+
+  return response;
 }

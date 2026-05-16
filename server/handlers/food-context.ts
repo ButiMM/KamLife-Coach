@@ -594,7 +594,21 @@ export async function handleFoodContext(ctx: {
       ]);
       const streakCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
-      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${stepAppend}`;
+
+      // Combo meal upsell — after logging a high-protein SA combo, suggest a veg side
+      const COMBO_UPSELL: Record<string, string> = {
+        "Mince and pap":     "Pap and mince — classic muscle meal. 💪 Want to add a veg side? Spinach or chakalaka takes 2 minutes and adds iron without touching your macros.",
+        "Pap and pilchards": "Pap and pilchards — the best budget protein meal in SA. 🐟 Add a handful of spinach or chakalaka to round it out.",
+        "Pap and wors":      "Pap and wors — solid meal. 🔥 Add chakalaka or morogo to get some fibre in without adding calories.",
+        "Chicken and pap":   "Pap and chicken — good protein. Add spinach or butternut on the side to hit your micronutrients.[BUTTONS:Add veg side|No thanks]",
+        "Pap and stew":      "Pap and stew — high protein combo. Add cabbage or spinach on the side to balance the meal.",
+      };
+      const comboUpsell = allAdjustedFoods
+        .map(f => COMBO_UPSELL[f.name])
+        .find(note => note);
+      const upsellNote = comboUpsell ? `\n\n${comboUpsell}` : "";
+
+      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${stepAppend}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
