@@ -9,8 +9,7 @@
  * Users tap a button and their reply comes in as the button title text — existing
  * text parsing handles it transparently (no changes to intent logic required).
  *
- * Falls back to formatted numbered text if Content API fails or is not configured.
- * Set TWILIO_ENABLE_BUTTONS=true in Railway env to activate live buttons.
+ * Falls back to inline text options if Content API fails.
  */
 
 import twilio from "twilio";
@@ -21,13 +20,14 @@ const FROM_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
   : "";
 
-const BUTTONS_ENABLED = process.env.TWILIO_ENABLE_BUTTONS === "true";
-
 // Re-use the same Twilio client (does not create a new TCP connection)
 const twilioClient = twilio(ACCOUNT_SID, AUTH_TOKEN);
 
-// Cache ContentSids by button set — avoids recreating templates on every call
+// Cache ContentSids by button set — survives the process lifetime, avoids
+// recreating the same template on every message.
 const _templateCache = new Map<string, string>();
+// Track button sets that permanently failed so we don't retry them endlessly
+const _templateFailed = new Set<string>();
 
 function _cacheKey(buttons: string[]): string {
   return buttons.slice(0, 3).join("|||");
@@ -36,13 +36,12 @@ function _cacheKey(buttons: string[]): string {
 async function _getOrCreateTemplate(buttons: string[]): Promise<string | null> {
   const key = _cacheKey(buttons);
   if (_templateCache.has(key)) return _templateCache.get(key)!;
+  if (_templateFailed.has(key)) return null;
 
   try {
     const limited = buttons.slice(0, 3);
-    // Content API: create a quick-reply template.
-    // Body uses {{1}} variable — we inject the actual message at send time.
     const created = await (twilioClient as any).content.v1.contents.create({
-      friendlyName: `kamlife_btn_${Date.now()}`,
+      friendlyName: `kamlife_${key.replace(/[^a-z0-9]/gi, "_").slice(0, 40)}_${Date.now()}`,
       variables: { "1": "placeholder" },
       types: {
         "twilio/quick-reply": {
@@ -53,17 +52,22 @@ async function _getOrCreateTemplate(buttons: string[]): Promise<string | null> {
     });
     const sid: string = created.sid;
     _templateCache.set(key, sid);
-    console.log(`[BUTTONS] Created template ${sid} for: ${limited.join(" | ")}`);
+    console.log(`[BUTTONS] Template created ${sid}: ${limited.join(" | ")}`);
     return sid;
   } catch (err: unknown) {
-    console.warn("[BUTTONS] Content API template creation failed:", (err as Error)?.message);
+    const msg = (err as Error)?.message || String(err);
+    console.warn("[BUTTONS] Content API template creation failed:", msg);
+    // Only mark as permanently failed for auth/permission errors, not transient ones
+    if (/authentication|permission|not.*found|invalid|forbidden/i.test(msg)) {
+      _templateFailed.add(key);
+    }
     return null;
   }
 }
 
 /**
  * Send a WhatsApp message with up to 3 quick-reply buttons.
- * Falls back to formatted numbered text automatically.
+ * Always attempts the Twilio Content API first; falls back to inline text if it fails.
  */
 export async function sendWhatsAppButtons(
   to: string,
@@ -72,7 +76,7 @@ export async function sendWhatsAppButtons(
 ): Promise<void> {
   if (!FROM_NUMBER) return;
 
-  if (BUTTONS_ENABLED && buttons.length > 0) {
+  if (buttons.length > 0) {
     const contentSid = await _getOrCreateTemplate(buttons.slice(0, 3));
     if (contentSid) {
       try {
@@ -89,15 +93,14 @@ export async function sendWhatsAppButtons(
     }
   }
 
-  // Text fallback: format as a clear numbered menu
-  const menu = buttons.map((b, i) => `*${i + 1}.* ${b}`).join("\n");
-  const fullBody = buttons.length > 0 ? `${body}\n\n${menu}` : body;
+  // Text fallback: show options inline, clearly labelled
+  const opts = buttons.map((b, i) => `*${i + 1}.* ${b}`).join("\n");
+  const fullBody = buttons.length > 0 ? `${body}\n\n${opts}` : body;
   await twilioClient.messages.create({ from: FROM_NUMBER, to, body: fullBody } as any);
 }
 
 /**
  * Send a WhatsApp button message for a yes/no or binary choice.
- * The two options are always rendered as buttons (or "Yes / No" text).
  */
 export async function sendWhatsAppYesNo(
   to: string,
@@ -110,11 +113,7 @@ export async function sendWhatsAppYesNo(
 
 /**
  * Encode a button reply for use in webhook reply handlers.
- * Returns a string with a [BUTTONS:...] marker that whatsapp.ts detects and
- * sends as interactive tap buttons via REST API (bypasses TwiML limitation).
- *
- * Usage in any handler:
- *   return replyWithButtons("Gym or home training?", ["Gym", "Home", "No equipment"]);
+ * Returns a [BUTTONS:...] marker that whatsapp.ts strips and sends via REST API.
  */
 export function replyWithButtons(body: string, buttons: string[]): string {
   const limited = buttons.slice(0, 3).join("|");
