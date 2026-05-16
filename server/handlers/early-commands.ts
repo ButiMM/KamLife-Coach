@@ -140,6 +140,10 @@ export async function handleEarlyCommands(ctx: {
     return equipQ;
   }
 
+  if (m === "log food" || m === "3") {
+    return `What did you eat? Just tell me — I'll get you the kcal and protein instantly.\n\n_Examples:_\n• "2 eggs and pap for breakfast"\n• "Chicken thigh, rice and spinach for lunch"\n• "Pap and mince for dinner"\n\nInclude the food, rough amount, and which meal.`;
+  }
+
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "today's workout" || m === "1" || m === "workout") {
     const effectiveUser = tempEquipmentMode.has(phone)
       ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
