@@ -216,6 +216,21 @@ export function registerPaymentRoutes(app: Express) {
     }
   });
 
+  // ── Admin: test Twilio button (Content API) ──
+  app.get("/api/admin/test-buttons", async (req: any, res: any) => {
+    const authKey = req.headers["x-coach-key"] || req.query.key;
+    if (authKey !== process.env.COACH_DASHBOARD_KEY) return res.status(403).json({ error: "Forbidden" });
+    const to = req.query.to as string;
+    if (!to) return res.status(400).json({ error: "?to=whatsapp:+27..." });
+    try {
+      const { sendWhatsAppButtons } = await import("../twilio-interactive");
+      await sendWhatsAppButtons(to.startsWith("whatsapp:") ? to : `whatsapp:${to}`, "Button test from Coach K", ["Option A", "Option B", "Option C"]);
+      return res.json({ ok: true, message: "Button send attempted — check WhatsApp and Railway logs for [BUTTONS] lines" });
+    } catch (err: any) {
+      return res.status(500).json({ ok: false, error: err?.message, stack: err?.stack?.split("\n").slice(0, 5) });
+    }
+  });
+
   // ── PayFast payment link generator ──
   // No admin gate — users hit this when clicking their pay link from WhatsApp.
   // Security: PayFast validates the signature on the ITN; this endpoint only builds a URL.
