@@ -18,7 +18,7 @@ import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
 import { sastDayStart } from "../utils";
-import { getTodayWorkoutState } from "../workout-state";
+import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
@@ -133,9 +133,10 @@ export async function handleWorkoutCommands(ctx: {
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     const trainingDays = user.trainingDaysPerWeek || 3;
-    const currentDay = user.programmeDayInWeek || 1;
-    const nextDay = (currentDay % trainingDays) + 1;
-    const weekAdvance = nextDay === 1;
+    // Use today's actual calendar slot — not a blind sequential counter
+    const todaySlot = getTodaySlot(user);
+    const nextDay = (todaySlot % trainingDays) + 1;
+    const weekAdvance = todaySlot === trainingDays; // last slot of the week
     const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
 
     // Workout streak calculation
@@ -154,7 +155,7 @@ export async function handleWorkoutCommands(ctx: {
       workoutStreak: newStreak,
     }).where(eq(users.phoneNumber, phone));
 
-    const doneResponse = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length](newTotal, currentDay);
+    const doneResponse = WORKOUT_DONE_RESPONSES[newTotal % WORKOUT_DONE_RESPONSES.length](newTotal, todaySlot);
 
     let milestoneMsg = "";
     const MILESTONE_TEXTS: Record<number, string> = {

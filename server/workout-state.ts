@@ -27,6 +27,20 @@ const SCHEDULE_MAP: Record<number, number[]> = {
   6: [1, 2, 3, 4, 5, 6],
 };
 
+/**
+ * Which slot (1-indexed) does today's calendar day represent in the training schedule?
+ * e.g. Mon/Wed/Fri schedule: Monday=1, Wednesday=2, Friday=3
+ * Returns user.programmeDayInWeek as fallback on non-training days.
+ */
+export function getTodaySlot(user: any): number {
+  const sastDOW = new Date(Date.now() + 2 * 3_600_000).getDay();
+  const trainingDays = Math.min(6, Math.max(2, user.trainingDaysPerWeek || 3));
+  const schedDOWs = SCHEDULE_MAP[trainingDays] || SCHEDULE_MAP[3];
+  const idx = schedDOWs.indexOf(sastDOW);
+  if (idx === -1) return user.programmeDayInWeek || 1; // rest day — fall back
+  return idx + 1; // 1-indexed
+}
+
 export type WorkoutStateType = "REST" | "NORMAL" | "MISSED" | "ALREADY_DONE";
 
 export type WorkoutState = {

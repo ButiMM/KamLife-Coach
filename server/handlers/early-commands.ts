@@ -13,7 +13,7 @@ import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
 import { sastDayStart } from "../utils";
-import { getTodayWorkoutState } from "../workout-state";
+import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -172,7 +172,9 @@ export async function handleEarlyCommands(ctx: {
     // MISSED SESSION(S)
     if (state.type === "MISSED") {
       const missed = state.missedSessions.join(" and ");
-      const workout = buildDayWorkout(effectiveUser);
+      // Deliver today's actual calendar slot — not the missed slot
+      const todaySlot = getTodaySlot(user);
+      const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
       const poContext = await getProgressiveOverloadContext(user.id);
       const week = user.programmeWeek || 1;
       const sessionNum = user.totalWorkoutsCompleted || 0;
@@ -187,7 +189,8 @@ export async function handleEarlyCommands(ctx: {
     }
 
     // NORMAL — scheduled training day, nothing done yet
-    const workout = buildDayWorkout(effectiveUser);
+    const todaySlot = getTodaySlot(user);
+    const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
     const poContext = await getProgressiveOverloadContext(user.id);
     const week = user.programmeWeek || 1;
     const sessionNum = user.totalWorkoutsCompleted || 0;
