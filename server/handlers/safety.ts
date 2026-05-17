@@ -10,6 +10,7 @@ import {
   users, chatHistory, stepLogs, workoutLogs, weightLogs,
   weeklyCheckins, clothingCheckins, bodyMeasurements,
   mealLogs, progressPhotos, escalations, abAssignments, exerciseLogs,
+  sentProactive, clientActions,
 } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
@@ -141,12 +142,15 @@ export async function runSafetyGuards(
       await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
       await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
       await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(mealLogs).where(eq(mealLogs.userId, uid));
       await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
       await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
       await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
       await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
       await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
       await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
+      await db.delete(clientActions).where(eq(clientActions.userId, uid));
       await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
       await db.delete(users).where(eq(users.id, uid));
     }

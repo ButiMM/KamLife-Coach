@@ -9,6 +9,7 @@ import {
   users, weightLogs, workoutLogs, stepLogs, chatHistory,
   mealLogs, exerciseLogs, bodyMeasurements, clothingCheckins,
   weeklyCheckins, escalations, abAssignments, progressPhotos,
+  sentProactive, clientActions,
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, lt, sql } from "drizzle-orm";
 import {
@@ -590,12 +591,15 @@ export async function handleLifecycle(ctx: {
       await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
       await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
       await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(mealLogs).where(eq(mealLogs.userId, uid));
       await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
       await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
       await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
       await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
       await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
       await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
+      await db.delete(clientActions).where(eq(clientActions.userId, uid));
       await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
       await db.delete(users).where(eq(users.id, uid));
 
@@ -669,9 +673,30 @@ export async function handleLifecycle(ctx: {
 
     if (choice === "2" || /\b(not seeing results|no results|not working|isn.?t working|not losing|not gaining|plateau|stuck)\b/i.test(m)) {
       await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      // Pull actual progress data to make this response concrete
+      const sessions = user.totalWorkoutsCompleted || 0;
+      const daysActive = user.createdAt
+        ? Math.max(1, Math.round((Date.now() - new Date(user.createdAt).getTime()) / 86_400_000))
+        : 0;
+      const firstWeightRow = await db.select({ weight: weightLogs.weight })
+        .from(weightLogs).where(eq(weightLogs.userId, user.id))
+        .orderBy(asc(weightLogs.loggedAt)).limit(1);
+      const startWeight = firstWeightRow[0] ? parseFloat(String(firstWeightRow[0].weight)) : null;
+      const currentWeight = user.currentWeight ? parseFloat(String(user.currentWeight)) : null;
+      const weightDelta = startWeight && currentWeight ? currentWeight - startWeight : null;
+
+      let statsLine = "";
+      if (sessions > 0 || daysActive > 7) {
+        statsLine = `\n\n*Your numbers so far:*\n• ${sessions} training session${sessions === 1 ? "" : "s"} completed\n• ${daysActive} day${daysActive === 1 ? "" : "s"} on the programme`;
+        if (weightDelta !== null) {
+          const direction = weightDelta < 0 ? `↓ ${Math.abs(weightDelta).toFixed(1)}kg lost` : weightDelta > 0 ? `↑ ${weightDelta.toFixed(1)}kg gained` : "weight unchanged";
+          statsLine += `\n• Weight: ${direction} (${startWeight?.toFixed(1)}kg → ${currentWeight?.toFixed(1)}kg)`;
+        }
+      }
+
       const resultsReply = goal === "fat_loss"
-        ? `${name}, results come from hitting *${cals} kcal / ${protein}g protein* consistently — not perfectly, but most days.\n\nIf you're doing that and the scale isn't moving, your targets need adjusting. Log your food for 5 days and send me a message — I'll audit exactly what's not working and fix your numbers. Give it that before you go.`
-        : `${name}, muscle takes longer than fat loss but it compounds hard. Are you hitting *${cals} kcal / ${protein}g protein* and adding reps or weight each session?\n\nLog food for 5 days and message me — I'll look at your numbers and adjust. Give it that before you go.`;
+        ? `${name}, let me be straight with you.${statsLine}\n\nReal fat loss takes 8–12 weeks of consistent eating. The number one reason it stalls: calories are too high, or protein too low. Your targets: *${cals} kcal / ${protein}g protein daily*.\n\nBefore you go — log your food for 5 days and message me. I will audit your numbers personally and fix whatever is not working. If it is the programme's fault, I want to know. Give it 5 days.`
+        : `${name}, muscle is slow — but it compounds hard.${statsLine}\n\nThe question is: are you hitting *${cals} kcal / ${protein}g protein* and adding weight or reps each session? Those two things drive 90% of muscle gain.\n\nLog food for 5 days and message me. I will look at your actual numbers and adjust the programme. 5 days before you decide.`;
       await logChat(user.id, message, resultsReply, "CANCEL_SAVE_RESULTS");
       return resultsReply;
     }
