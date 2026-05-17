@@ -261,7 +261,16 @@ CRITICAL RULES — these are non-negotiable:
     } catch (e) { console.warn("[punct-reply]", e); }
   }
 
-  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "cool", "sharp", "eish", "omg", "wtf", "lol", "wow", "thanks", "thank you", "dankie", "lekker", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "aight", "right"];
+  // Pure reactions — no GPT needed. Just acknowledge and move on.
+  const PURE_REACTIONS = new Set(["wow", "lol", "omg", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "lekker", "cool", "sharp", "eish", "dankie", "aight"]);
+  if (PURE_REACTIONS.has(m)) {
+    const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up."];
+    const ack = acks[Math.floor(Math.random() * acks.length)];
+    await logChat(user.id, message, ack, "REACTION_ACK");
+    return ack;
+  }
+
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "thanks", "thank you", "wtf", "right"];
   if (SHORT_REPLIES.includes(m)) {
     try {
       const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })

@@ -70,6 +70,24 @@ export async function handleFoodContext(ctx: {
     }
   }
 
+  // ---- FOOD LOG REJECTION — "no", "no no no", "wrong" immediately after a food log ----
+  // Catches cases where the bot misidentified the food and the user is pushing back
+  const isSimpleRejection = /^(no[\s!.?]*)+$/i.test(m) || /^(wrong|incorrect|not right|that.?s wrong|not that)[.!?]*$/i.test(m);
+  if (isSimpleRejection) {
+    try {
+      const lastEntry = await db.select({ intent: chatHistory.intent, messageOut: chatHistory.messageOut })
+        .from(chatHistory)
+        .where(eq(chatHistory.userId, user.id))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      if (lastEntry[0]?.intent === "FOOD_LOG" || lastEntry[0]?.intent === "SHORT_REPLY") {
+        const reply = `What was it actually? Just tell me (e.g. "Monster Zero Sugar") and I'll fix the log.`;
+        await logChat(user.id, message, reply, "FOOD_CORRECTION_PROMPT");
+        return reply;
+      }
+    } catch { /* non-fatal — fall through */ }
+  }
+
   // ---- WATER GUARD — messages about water/hydration never reach food scanner ----
   const hasWaterWord = /\b(water|h2o|hydrat(e|ion|ing))\b/i.test(m);
   if (hasWaterWord && /\b(had|drank|drinking|intake|drink|logged|consumed)\b/i.test(m)) {
@@ -268,17 +286,29 @@ export async function handleFoodContext(ctx: {
 
       const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
       if (usableMeals.length > 0) {
-        let matchedMeal = usableMeals[0];
-        if (refBreakfast && usableMeals.length > 0) {
-          matchedMeal = usableMeals[usableMeals.length - 1];
-        } else if (refDinner && usableMeals.length > 0) {
-          matchedMeal = usableMeals[0];
-        } else if (refLunch && usableMeals.length >= 2) {
-          matchedMeal = usableMeals[Math.floor(usableMeals.length / 2)];
-        } else {
-          matchedMeal = usableMeals.find(r =>
-            r.rawMessage && toRepeat && r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase())
-          ) || usableMeals[0];
+        // Always try to match by the chat-message text we identified as the reference meal
+        const textMatch = toRepeat ? usableMeals.find(r =>
+          r.rawMessage && (
+            r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase()) ||
+            toRepeat.toLowerCase().includes((r.rawMessage || "").slice(0, 20).toLowerCase())
+          )
+        ) : null;
+
+        let matchedMeal = textMatch || usableMeals[0];
+        if (!textMatch) {
+          if (refBreakfast) {
+            // Breakfast = oldest substantial meal
+            matchedMeal = usableMeals[usableMeals.length - 1];
+          } else if (refDinner) {
+            // Dinner = most recent substantial meal
+            matchedMeal = usableMeals[0];
+          } else if (refLunch) {
+            // Lunch = highest-calorie meal above 150 kcal (excludes drinks/snacks)
+            const candidates = usableMeals.filter(r => (r.kcalInt || 0) > 150);
+            matchedMeal = candidates.length > 0
+              ? candidates.reduce((a, b) => ((a.kcalInt || 0) >= (b.kcalInt || 0) ? a : b))
+              : usableMeals[0];
+          }
         }
 
         const totalCals = matchedMeal.kcalInt || 0;
