@@ -233,6 +233,7 @@ export async function handleEarlyCommands(ctx: {
           user.gender || "male",
           user.age || 30,
           user.heightCm || 170,
+          user.trainingExperience || "beginner",
         )
       : null;
     await db.update(users).set({

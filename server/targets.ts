@@ -12,6 +12,7 @@ export function calculateTargets(
   gender: string = "male",
   age: number = 30,
   heightCm: number = 170,
+  trainingExperience: string = "beginner",
 ): { calorieTarget: number; proteinTarget: number } {
 
   // ── Mifflin-St Jeor BMR (far more accurate than weight × 22) ──
@@ -41,8 +42,10 @@ export function calculateTargets(
 
   // ── Training calorie addition (spread over 7 days) ──
   // Smaller addition for females — metabolic reality
+  // Beginners work at lower intensity initially; advanced athletes burn more per session
   const calPerSession = isFemale ? 150 : 200;
-  const trainingAdj = Math.round((calPerSession * Math.min(trainingDaysPerWeek, 7)) / 7);
+  const expMult = trainingExperience === "advanced" ? 1.2 : trainingExperience === "intermediate" ? 1.0 : 0.75;
+  const trainingAdj = Math.round((calPerSession * expMult * Math.min(trainingDaysPerWeek, 7)) / 7);
 
   // ── Goal adjustment ──
   // Fat loss deficit is smaller for females to preserve hormonal health

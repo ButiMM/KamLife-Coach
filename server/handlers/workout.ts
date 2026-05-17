@@ -241,7 +241,7 @@ export async function handleWorkoutCommands(ctx: {
       maintenance: "Maintenance",
     };
     const currentWt = parseFloat(String(user.currentWeight || "0")) || 75;
-    const newTargets = calculateTargets(currentWt, goalType, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
+    const newTargets = calculateTargets(currentWt, goalType, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
     await db.update(users).set({ goalType, calorieTarget: newTargets.calorieTarget, proteinTarget: newTargets.proteinTarget }).where(eq(users.phoneNumber, phone));
     const label = goalLabels[goalType] || goalType;
     return `Goal updated to *${label}*.\n\nTargets adjusted: ${newTargets.calorieTarget} kcal/day | ${newTargets.proteinTarget}g protein.\n\n${goalType === "muscle_gain" ? "Eat in a slight surplus. Hit protein every meal. Push weights up every session." : goalType === "fat_loss" ? "Stay in your calorie range. Hit protein first — it preserves muscle while cutting." : "Hold calories at maintenance. Weight training stays the same."}`;

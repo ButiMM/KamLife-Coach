@@ -43,7 +43,7 @@ export function buildContext(user: any): string {
   const steps = user.stepsTarget || 8500;
   // Fix 2 — always use live-calculated targets so GPT sees correct numbers even if DB is stale
   const weight = parseFloat(user.currentWeight || "75");
-  const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
+  const liveTargets = calculateTargets(weight, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
   const calories = liveTargets.calorieTarget;
   const protein = liveTargets.proteinTarget;
   const mode = user.trainingMode || "home";

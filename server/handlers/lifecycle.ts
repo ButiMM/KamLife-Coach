@@ -837,7 +837,7 @@ export async function handleLifecycle(ctx: {
       if (newGoal === "maintenance") {
         newCals = (user.calorieTarget || 2000) + 200;
       } else {
-        const t = calculateTargets(wt, newGoal === "maintenance" ? "fat_loss" : newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170);
+        const t = calculateTargets(wt, newGoal === "maintenance" ? "fat_loss" : newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
         newCals = t.calorieTarget;
         newProt = t.proteinTarget;
       }
@@ -869,7 +869,7 @@ export async function handleLifecycle(ctx: {
       .set({ awaitingInputType: null, goalType: pendingGoal })
       .where(eq(users.phoneNumber, phone));
     const { calorieTarget: newCals, proteinTarget: newProt } = calculateTargets(
-      parseFloat(user.currentWeight || "75"), pendingGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
+      parseFloat(user.currentWeight || "75"), pendingGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner"
     );
     await db.update(users).set({ calorieTarget: newCals, proteinTarget: newProt }).where(eq(users.phoneNumber, phone));
     const goalLabels: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
@@ -972,7 +972,7 @@ export async function handleLifecycle(ctx: {
           const currentWeight = parseFloat(user.currentWeight || "75");
           const newGoal = updates.goalType || user.goalType || "fat_loss";
           const newDays = updates.trainingDaysPerWeek || user.trainingDaysPerWeek || 3;
-          const { calorieTarget, proteinTarget } = calculateTargets(currentWeight, newGoal, user.lifeSituation || "office", newDays);
+          const { calorieTarget, proteinTarget } = calculateTargets(currentWeight, newGoal, user.lifeSituation || "office", newDays, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
           updates.calorieTarget = calorieTarget;
           updates.proteinTarget = proteinTarget;
           updateSummary += ` New targets: ${calorieTarget} kcal/day, ${proteinTarget}g protein.`;

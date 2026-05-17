@@ -429,7 +429,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const trainingDays = u.trainingDaysPerWeek || ((isYouth || isElderly) ? 3 : 4);
 
   const { calorieTarget, proteinTarget } = calculateTargets(
-    actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm
+    actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm, u.trainingExperience || "beginner"
   );
 
   const stepsTarget = age >= 70 ? 6000 : isElderly ? 8000 : 10000;
@@ -991,7 +991,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
 
     const { calorieTarget, proteinTarget } = calculateTargets(
       weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3,
-      u.gender || "male", u.age || 30, u.heightCm || 170
+      u.gender || "male", u.age || 30, u.heightCm || 170, exp
     );
 
     const stepsTarget = exp === "beginner" ? 8500 : 10000;

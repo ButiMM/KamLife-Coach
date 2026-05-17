@@ -19,7 +19,7 @@ export async function handleWeightLog(
 
   const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(
     newKg, user.goalType || "fat_loss", user.lifeSituation || "office",
-    user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170,
+    user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner",
   );
   const prevKg = parseFloat(user.currentWeight || "0");
   const prevCals = user.calorieTarget || newCals;

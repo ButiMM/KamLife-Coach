@@ -287,7 +287,7 @@ export async function handleMediaMessage(ctx: {
       }
 
       const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
-        parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3
+        parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner"
       );
       const foodVisionDecision = selectVisionModel("food_photo", isCoach ? "active" : user.subscriptionStatus);
       if (!foodVisionDecision.allowed) {

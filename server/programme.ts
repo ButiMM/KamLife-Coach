@@ -1300,12 +1300,16 @@ function formatGymDay(
   multiplier: { sets: string; reps: string; rest: string },
   goal = "fat_loss",
   isDumbbell = false,
-  injuries = "none"
+  injuries = "none",
+  experience = ""
 ): string {
   const wCtx = getWeekContext(phase, week);
   const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
+  const isBeginner = experience === "beginner" || experience === "";
   const equipNote = isDumbbell
     ? `_No machine? Each exercise has a modification listed._\n\n`
+    : isBeginner
+    ? `_New to this? Each exercise has a lighter alternative if needed._\n\n`
     : ``;
 
   const { safeEx, skippedNames } = filterInjuredGymExercises(exercises, injuries);
@@ -1327,7 +1331,7 @@ function formatGymDay(
     if (ex.mistake) {
       out += `⚠ ${ex.mistake.split(".")[0]}\n`;
     }
-    if (isDumbbell && ex.modification) {
+    if (ex.modification && (isDumbbell || isBeginner)) {
       out += `_(Alt: ${ex.modification})_\n`;
     }
     out += `\n`;
@@ -1549,7 +1553,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
+      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", true, user.injuries || "none", exp) + safetyNote + walkingFooter;
     }
     const dbTrainingDays = user.trainingDaysPerWeek || 3;
     const dbGender = user.gender || "male";
@@ -1580,7 +1584,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const femaleLabelMap: Record<1 | 2 | 3, string> = { 1: "Glutes + Shoulders", 2: "Back + Hamstrings", 3: "Full Body + Glutes" };
       const phase = user.programmePhase || 1;
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      const fSession = formatGymDay(femaleExMap[slotClamped], femaleLabelMap[slotClamped], phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none");
+      const fSession = formatGymDay(femaleExMap[slotClamped], femaleLabelMap[slotClamped], phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp);
       return prefix + fSession + safetyNote + walkingFooter;
     }
     return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
@@ -1595,7 +1599,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
       const isLower = day % 2 === 0;
       const intExercises = isLower ? INTERMEDIATE_LOWER_EX : INTERMEDIATE_UPPER_EX;
       const intLabel = isLower ? "Lower Body" : "Upper Body";
-      const iSession = formatGymDay(intExercises, intLabel, phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none");
+      const iSession = formatGymDay(intExercises, intLabel, phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp);
       return prefix + iSession + safetyNote + walkingFooter;
     }
     return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
@@ -1611,7 +1615,7 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
     const phase = user.programmePhase || 1;
     const multiplier = getPhaseMultiplier(phase);
     const phaseName = getPhaseNames()[phase] || "Foundation";
-    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss") + safetyNote + walkingFooter;
+    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", false, user.injuries || "none", exp) + safetyNote + walkingFooter;
   }
 
   const trainingDays = user.trainingDaysPerWeek || 3;
@@ -1704,6 +1708,7 @@ export function buildDayWorkout(user: any): string {
   const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
   const isDumbbell = mode === "gym_dumbbell";
   const injuries = user.injuries || "none";
+  const experience = (user.trainingExperience || "beginner").toLowerCase();
 
   // Walk-only users
   if (mode === "walk_only" || mode === "walk") {
@@ -1720,18 +1725,18 @@ export function buildDayWorkout(user: any): string {
   // Dumbbell-only users — full 2/3/4-day programme, gender-specific
   if (mode === "gym_dumbbell") {
     const { exercises, label } = getNewDbDay(trainingDays, day, gender);
-    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", true, injuries);
+    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", true, injuries, experience);
   }
 
   // Home / no-equipment users — full 2/3/4-day programme, gender-specific
   if (mode !== "gym") {
     const { exercises, label } = getNewHomeDay(trainingDays, day, gender);
-    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries);
+    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
   }
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
   const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
 }
 
 // ============================================================
