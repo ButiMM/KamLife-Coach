@@ -534,7 +534,12 @@ export async function handleOnboarding(user: any, message: string, phone: string
   // ---- ASK_POPIA ----
   if (state === "ASK_POPIA") {
     const consentWords = ["yes", "agree", "consent", "ok", "okay", "yebo", "ja", "sure", "accept", "i agree", "i consent", "yes coach", "i do"];
-    if (consentWords.some(k => msg === k || msg.startsWith(k) || msg.includes(k))) {
+    const isConsent = consentWords.some(k => {
+      if (msg === k) return true;
+      if (k.includes(" ")) return msg.includes(k); // multi-word phrases
+      return new RegExp(`\\b${k}\\b`).test(msg);   // single-word: whole-word only
+    });
+    if (isConsent) {
       await db.update(users).set({ popiConsent: true, popiConsentAt: new Date(), onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
       return `Sharp. What's your name?`;
     }

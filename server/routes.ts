@@ -158,7 +158,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- POPIA CONSENT GATE (Item 15) — after onboarding, before all else ----
   if (!user.popiConsent) {
     const consentKeywords = ["yes", "agree", "consent", "i agree", "i consent", "ok", "okay", "yebo", "ja", "sure", "accept"];
-    if (consentKeywords.some(k => m === k || m.includes(k))) {
+    const isConsent = consentKeywords.some(k => {
+      if (m === k) return true;
+      if (k.includes(" ")) return m.includes(k); // multi-word: "i agree", "i consent"
+      return new RegExp(`\\b${k}\\b`).test(m);   // single-word: whole-word only, "ja" must not match "jam"
+    });
+    if (isConsent) {
       await db.update(users).set({ popiConsent: true, popiConsentAt: new Date() }).where(eq(users.phoneNumber, phone));
       return `Thank you — your consent is recorded. Welcome to KamLife Coach. Type *menu* to see what I can help you with, or just tell me what you ate, your steps, or anything on your mind.`;
     }
