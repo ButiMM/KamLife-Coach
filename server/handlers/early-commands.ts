@@ -616,7 +616,6 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
 
     if (logSupp) {
       await logChat(user.id, message, "Supplement logged", "SUPPLEMENT_LOG");
-      // Count today's supplement logs
       const todayStart = sastDayStart();
       const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
@@ -624,7 +623,40 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
       return `Taken ✅${suppStreakLine}\n\nSame time every day beats the perfect supplement stack. Set a phone alarm and make it automatic.`;
     }
 
-    // Otherwise give supplement guide based on their goal
+    // Specific supplement question — give a targeted answer, not the whole guide
+    const isCreatine = /\bcreatine\b/i.test(m);
+    const isWhey = /\b(whey|protein powder|protein shake)\b/i.test(m);
+    const isOmega = /\b(omega|fish oil)\b/i.test(m);
+    const isMagnesium = /\bmagnesium\b/i.test(m);
+    const isVitD = /\b(vitamin d|vit d|vitamin d3)\b/i.test(m);
+    const isCollagen = /\bcollagen\b/i.test(m);
+    const isZinc = /\bzinc\b/i.test(m);
+    const isSpecific = isCreatine || isWhey || isOmega || isMagnesium || isVitD || isCollagen || isZinc;
+
+    if (isSpecific && m !== "supplements" && m !== "supps" && m !== "my supplements") {
+      const goal = user.goalType || "fat_loss";
+      let reply = "";
+      if (isCreatine) {
+        reply = `*Creatine — yes or no?*\n\nYes. It's the most evidence-backed supplement there is — improves strength, muscle volume, recovery, and even brain function.\n\n*How to take it:* 5g/day, any time, with water. No loading phase needed. Takes 2–4 weeks to feel the full effect.\n\n*What to buy:* Creatine monohydrate only. Nothing fancy. Dis-Chem or Takealot — ~R150/month.\n\n*Works for:* fat loss AND muscle gain. You keep more muscle while cutting. It's not just for bulking.`;
+      } else if (isWhey) {
+        const pTarget = user.proteinTarget || 120;
+        reply = `*Whey protein — do you need it?*\n\nOnly if you can't hit *${pTarget}g protein/day* from food.\n\nIf you're eating chicken, eggs, tuna, pilchards regularly — you probably don't need it.\n\nIf you're consistently 40–50g short: 1 scoop of whey post-workout fills that gap (~25g protein, ~120 kcal).\n\n*What to buy:* Any unflavoured whey from Dis-Chem or Takealot. Avoid the fancy branded ones — same product, triple the price.`;
+      } else if (isOmega) {
+        reply = `*Omega 3 / Fish oil*\n\nWorth it for most people — reduces inflammation, supports joint health, improves fat metabolism.\n\n*Dose:* 1–2g EPA+DHA per day (check the label — not just "1000mg fish oil").\n\n*Budget pick:* Any generic fish oil capsules from Clicks or Dis-Chem — R60–R80/month. Works identically to premium brands.`;
+      } else if (isMagnesium) {
+        reply = `*Magnesium*\n\nMost people are deficient. Helps with sleep quality, muscle recovery, and reducing cravings — especially at night.\n\n*Best form:* Magnesium glycinate (absorbed better, easier on stomach). Avoid magnesium oxide — cheap but poorly absorbed.\n\n*When:* Take before bed. R80–R120/month at Dis-Chem.`;
+      } else if (isVitD) {
+        reply = `*Vitamin D3*\n\nMost South Africans are still deficient despite the sun — especially if you work indoors or wear sunscreen all day.\n\nLow vitamin D = lower testosterone, weaker immunity, worse mood, slower recovery.\n\n*Dose:* 2000–4000 IU/day with food. Safe long-term. R50–R80/month.`;
+      } else if (isCollagen) {
+        reply = `*Collagen*\n\nFor joints, skin, and connective tissue. Decent evidence for joint pain reduction — less so for muscle building.\n\nIf you have joint issues or are over 35: worth trying. If you're young and injury-free: protein from food does more.\n\n*If buying:* hydrolysed collagen peptides, 10–15g/day with vitamin C (improves absorption).`;
+      } else if (isZinc) {
+        reply = `*Zinc*\n\nSupports testosterone, immunity, and recovery. Most people get enough from red meat and eggs.\n\nIf you're plant-based or eating very low meat: worth supplementing. 15–25mg/day — don't overdo it, high doses reduce copper absorption.`;
+      }
+      await logChat(user.id, message, reply, "SUPPLEMENT_GUIDE");
+      return reply;
+    }
+
+    // Generic "supplements" query — give the full goal-specific guide
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name?.split(" ")[0] || "";
