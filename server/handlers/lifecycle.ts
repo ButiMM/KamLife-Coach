@@ -583,9 +583,10 @@ export async function handleLifecycle(ctx: {
       m === "restart" || m === "reset" || m === "start over") {
     const currentState = user.onboardingState;
     const wantsFullReset = /start over|start again|begin again|onboard again/i.test(m);
+    const hasData = currentState === "COMPLETE" || (user.totalWorkoutsCompleted ?? 0) > 0;
 
-    if (currentState !== "COMPLETE" || wantsFullReset) {
-      // Full data wipe — delete all FK-dependent rows then nuke + recreate user
+    if (currentState !== "COMPLETE" && !wantsFullReset && !hasData) {
+      // Early-onboarding, no data yet — wipe immediately, no confirmation needed
       const uid = user.id;
       await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
       await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
@@ -602,7 +603,6 @@ export async function handleLifecycle(ctx: {
       await db.delete(clientActions).where(eq(clientActions.userId, uid));
       await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
       await db.delete(users).where(eq(users.id, uid));
-
       await db.insert(users).values({
         phoneNumber: phone,
         subscriptionStatus: "inactive",
@@ -615,11 +615,18 @@ export async function handleLifecycle(ctx: {
         createdAt: new Date(),
         lastActiveAt: new Date(),
       });
-
       return "Fresh start. What is your name?";
     }
-    // COMPLETE users asking "restart" — probably want workout/menu, not full reset
-    return await getMenuText(user);
+
+    if (currentState === "COMPLETE" && !wantsFullReset) {
+      // COMPLETE users saying bare "restart" — probably want menu, not a wipe
+      return await getMenuText(user);
+    }
+
+    // Has data and wants a full reset — require confirmation
+    const sessions = user.totalWorkoutsCompleted || 0;
+    const sessionNote = sessions > 0 ? ` You have *${sessions} session${sessions === 1 ? "" : "s"}* logged.` : "";
+    return `⚠️ This will permanently delete all your data — workouts, food logs, weight history, everything.${sessionNote}\n\nReply *yes reset* to confirm, or anything else to go back.`;
   }
 
   // ---- STOP (WhatsApp Business / POPIA opt-out) ----

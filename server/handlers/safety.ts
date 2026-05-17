@@ -134,8 +134,55 @@ export async function runSafetyGuards(
   }
 
   // ---- HARD RESET (debug / re-onboard) ----
-  if (m === "reset") {
+  // Two-step: bare "reset" asks for confirmation; "yes reset" actually wipes.
+  if (m === "yes reset" || m === "yes, reset" || m === "confirm reset") {
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (existing.length > 0) {
+      const uid = existing[0].id;
+      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
+      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
+      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
+      await db.delete(mealLogs).where(eq(mealLogs.userId, uid));
+      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+      await db.delete(escalations).where(eq(escalations.userId, uid));
+      await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
+      await db.delete(clientActions).where(eq(clientActions.userId, uid));
+      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
+      await db.delete(users).where(eq(users.id, uid));
+    }
+    await db.insert(users).values({
+      phoneNumber: phone,
+      subscriptionStatus: "inactive",
+      onboardingState: "WELCOME",
+      programmePhase: 1,
+      programmeWeek: 1,
+      programmeDayInWeek: 1,
+      trainingMode: "home",
+      stepsTarget: 8500,
+      createdAt: new Date(),
+      lastActiveAt: new Date(),
+    });
+    return "Fresh start. What's your name?";
+  }
+
+  if (m === "reset") {
+    const existing = await db.select({ id: users.id, onboardingState: users.onboardingState, totalWorkoutsCompleted: users.totalWorkoutsCompleted })
+      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const hasData = existing.length > 0 && (
+      existing[0].onboardingState === "COMPLETE" ||
+      (existing[0].totalWorkoutsCompleted ?? 0) > 0
+    );
+    if (hasData) {
+      const sessions = existing[0].totalWorkoutsCompleted || 0;
+      const sessionNote = sessions > 0 ? ` You have *${sessions} session${sessions === 1 ? "" : "s"}* logged.` : "";
+      return `⚠️ This will permanently delete all your data — workouts, food logs, weight history, everything.${sessionNote}\n\nReply *yes reset* to confirm, or anything else to go back.`;
+    }
+    // No meaningful data yet — wipe immediately
     if (existing.length > 0) {
       const uid = existing[0].id;
       await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
