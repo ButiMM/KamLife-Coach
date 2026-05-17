@@ -223,9 +223,11 @@ export async function handleFoodContext(ctx: {
   const isRepeatMeal = /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food))\b/i.test(m);
   if (isRepeatMeal) {
     try {
-      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again|same lunch)\b/i.test(m);
-      const refDinner = /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again|same dinner)\b/i.test(m);
-      const refBreakfast = /\b(same as (my )?breakfast|breakfast again|same breakfast)\b/i.test(m);
+      // Determine WHICH meal to copy FROM — look for the reference meal (after "as", not the target meal)
+      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again|same lunch|as (my )?lunch)\b/i.test(m);
+      const refBreakfast = /\b(same as (my )?breakfast|breakfast again|same breakfast|as (my )?breakfast)\b/i.test(m);
+      // refDinner only fires when message isn't "same X as lunch/breakfast" — i.e. not copying from another meal
+      const refDinner = !refLunch && !refBreakfast && /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again|same dinner|as (my )?dinner)\b/i.test(m);
       const refYesterday = /yesterday/i.test(m);
 
       const todayStart = sastDayStart();
@@ -269,6 +271,8 @@ export async function handleFoodContext(ctx: {
         if (breakfastLog) toRepeat = breakfastLog.messageIn!;
       }
 
+      // For today references, prefer today's meals; only widen to 48h for "yesterday"
+      const mealLookbackMs = refYesterday ? 48 * 3600_000 : 24 * 3600_000;
       const yesterdayMealRows = await db.select({
         kcalInt: mealLogs.kcalInt,
         proteinInt: mealLogs.proteinInt,
@@ -280,9 +284,9 @@ export async function handleFoodContext(ctx: {
         loggedAt: mealLogs.loggedAt,
       }).from(mealLogs).where(and(
         eq(mealLogs.userId, user.id),
-        gte(mealLogs.loggedAt, new Date(Date.now() - 48 * 3600_000)),
+        gte(mealLogs.loggedAt, new Date(Date.now() - mealLookbackMs)),
         lt(mealLogs.loggedAt, new Date()),
-      )).orderBy(desc(mealLogs.loggedAt)).limit(5);
+      )).orderBy(desc(mealLogs.loggedAt)).limit(10);
 
       const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
       if (usableMeals.length > 0) {
