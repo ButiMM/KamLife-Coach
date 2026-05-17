@@ -4,6 +4,64 @@ import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 import { sendWhatsAppButtons } from "../twilio-interactive";
 
+const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
+  ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
+  : "";
+
+async function sendParts(
+  phone: string,
+  parts: string[],
+  replyMediaUrl: string | null,
+): Promise<void> {
+  const fromNum = TWILIO_FROM();
+  if (!fromNum) { console.error("[TEXT_ASYNC] TWILIO_WHATSAPP_NUMBER not set"); return; }
+  const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
+  for (let i = 0; i < parts.length; i++) {
+    if (!parts[i].trim()) continue;
+    const params: Record<string, unknown> = { from: fromNum, to: phone, body: parts[i].trim() };
+    if (i === 0 && replyMediaUrl) params.mediaUrl = [replyMediaUrl];
+    const delays = [0, 2000, 5000, 10000];
+    for (let d = 0; d < delays.length; d++) {
+      if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
+      try { await twilioC.messages.create(params as Parameters<typeof twilioC.messages.create>[0]); break; }
+      catch (e: any) { if (d === delays.length - 1) console.error(`[TEXT_ASYNC] part ${i + 1} failed: ${e.message}`); }
+    }
+  }
+}
+
+// ── Async text processor ──
+// All text messages are handled async so Twilio gets an instant 200 and never times out.
+// The real reply is delivered via outbound Twilio API once handleMessage resolves.
+async function processTextAsync(
+  phone: string,
+  message: string,
+  mediaUrl: string | null,
+  mediaType: string | null,
+  allImageUrls: string[],
+  handleMessage: RouteDeps["handleMessage"],
+): Promise<void> {
+  try {
+    const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
+
+    const buttonsMarkerMatch = reply.match(/\[BUTTONS:([^\]]+)\]/);
+    if (buttonsMarkerMatch) {
+      const buttons = buttonsMarkerMatch[1].split("|").map(b => b.trim()).filter(Boolean);
+      const bodyWithoutMarker = reply.replace(/\s*\[BUTTONS:[^\]]+\]/, "").trim();
+      await sendWhatsAppButtons(phone, bodyWithoutMarker, buttons);
+      return;
+    }
+
+    const mediaMarkerMatch = reply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
+    const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
+    const cleanReply = replyMediaUrl ? reply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : reply;
+    await sendParts(phone, splitMessage(cleanReply), replyMediaUrl);
+  } catch (err: any) {
+    console.error("[TEXT_ASYNC] failed:", err?.message || err);
+    // Deliver error via outbound so user isn't left in silence
+    await sendParts(phone, ["Eish, something went wrong on my side. Give me a second and try again."], null).catch(() => {});
+  }
+}
+
 // ── Async voice processor ──
 // Twilio times out after 15s. Whisper takes 20-38s.
 // Solution: ACK immediately, process in background, deliver via outbound API.
@@ -17,17 +75,7 @@ async function processVoiceAsync(
   try {
     const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
     const parts = reply.split(/\n\n---\n\n/).filter(Boolean);
-    const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-    const fromNum = `whatsapp:${(process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "")}`;
-    if (!fromNum || fromNum === "whatsapp:") {
-      console.error("[VOICE_ASYNC] TWILIO_WHATSAPP_NUMBER not set — cannot deliver async reply");
-      return;
-    }
-    for (const part of parts) {
-      if (part.trim()) {
-        await twilioC.messages.create({ from: fromNum, to: phone, body: part.trim() });
-      }
-    }
+    await sendParts(phone, parts, null);
     console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-6)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
@@ -176,70 +224,16 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         return;
       }
 
-      const reply = await handleMessage(rawPhone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
-
-      // Extract [BUTTONS:Opt1|Opt2|Opt3] marker — sends interactive tap buttons via REST API
-      const buttonsMarkerMatch = reply.match(/\[BUTTONS:([^\]]+)\]/);
-      if (buttonsMarkerMatch) {
-        const buttons = buttonsMarkerMatch[1].split("|").map(b => b.trim()).filter(Boolean);
-        const bodyWithoutMarker = reply.replace(/\s*\[BUTTONS:[^\]]+\]/, "").trim();
-        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-        sendWhatsAppButtons(rawPhone, bodyWithoutMarker, buttons).catch(e =>
-          console.error("[BUTTONS] Failed to send interactive reply:", e?.message)
-        );
-        return;
-      }
-
-      // Extract [MEDIA:url] marker injected by handlers (exercise GIFs, portion plate images)
-      const mediaMarkerMatch = reply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
-      const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
-      const cleanReply = replyMediaUrl ? reply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : reply;
-
-      const parts = splitMessage(cleanReply);
-
-      if (parts.length <= 1) {
-        if (replyMediaUrl) {
-          const safe = escapeXml(cleanReply);
-          const safeMedia = escapeXml(replyMediaUrl);
-          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${safe}</Body><Media>${safeMedia}</Media></Message></Response>`);
-        }
-        const safe = escapeXml(cleanReply);
-        return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${safe}</Message></Response>`);
-      }
-
-      // Multi-part: TwiML can only send one reply, send extra via API
-      const firstPart = escapeXml(parts[0]);
-      if (replyMediaUrl) {
-        const safeMedia = escapeXml(replyMediaUrl);
-        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message><Body>${firstPart}</Body><Media>${safeMedia}</Media></Message></Response>`);
-      } else {
-        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>${firstPart}</Message></Response>`);
-      }
-
-      const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
-        ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
-        : "";
-      if (fromNum) {
-        for (let i = 1; i < parts.length; i++) {
-          const delays = [0, 2000, 5000];
-          let sent = false;
-          for (let d = 0; d < delays.length; d++) {
-            if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
-            try {
-              await twilioC.messages.create({ from: fromNum, to: rawPhone, body: parts[i] });
-              sent = true;
-              break;
-            } catch (e: any) {
-              if (d === delays.length - 1) console.error(`[MULTI-MSG] Part ${i + 1} failed after ${d + 1} attempts: ${e.message}`);
-            }
-          }
-          if (!sent) console.error(`[MULTI-MSG] Part ${i + 1} permanently dropped for ${rawPhone.slice(-6)}`);
-        }
-      }
+      // ── ALL TEXT MESSAGES: ACK immediately, process in background ──
+      // Twilio's 15s hard timeout is a real risk for GPT calls (5-15s each).
+      // Respond instantly with empty TwiML, deliver the real reply via outbound API.
+      res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+      processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage).catch(() => {});
     } catch (err: any) {
       console.error("[WHATSAPP] Webhook error:", err.message);
-      res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
+      if (!res.headersSent) {
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Something went wrong. Try again in a moment.</Message></Response>`);
+      }
     }
   });
 
