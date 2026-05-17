@@ -19,6 +19,7 @@ import {
   buildMediaTrace, withTimeout,
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
+import { askCoachK } from "../gpt";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { recomputeTodayFoodTotals } from "./food-scanner";
@@ -316,7 +317,9 @@ ESTIMATION: State specific calories and protein for the FULL plate as actually s
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
-FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food (selfie, gym mirror, screenshot of an app, document, scenery, body progress photo, scale, supplement bottle, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY this single line and nothing else: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
+FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food — check these specific cases first:
+- If it shows a handwritten or typed grocery/shopping list, a receipt from a grocery store, or a list of items to BUY (not to eat right now) — respond with EXACTLY: GROCERY_LIST: [list the items you can read, comma-separated, in plain English]
+- For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, supplement bottle, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 
 BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
               },
@@ -336,6 +339,29 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       if (/^NOT_FOOD\b/i.test(visionReply)) {
         console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
         return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+      }
+      if (/^GROCERY_LIST:/i.test(visionReply)) {
+        const itemsRaw = visionReply.replace(/^GROCERY_LIST:\s*/i, "").trim();
+        console.log(`[FOOD_VISION] grocery_list photo detected user=${user.id.slice(-6)} items="${itemsRaw.slice(0, 60)}"`);
+        const goal = user.goalType || "fat_loss";
+        const pTarget = user.proteinTarget || 120;
+        const cTarget = user.calorieTarget || 1800;
+        const budget = user.weeklyFoodBudget || "100_300";
+        const budgetLabel: Record<string, string> = { under_100: "under R100/week", "100_300": "R100–R300/week", "300_600": "R300–R600/week", over_600: "over R600/week" };
+        const listReview = await withTimeout("gpt_grocery_photo", 20000, () => askCoachK(
+          `My grocery list: ${itemsRaw}`, user,
+          `The client sent a photo of their grocery/shopping list. I read these items from it: ${itemsRaw}. Budget: ${budgetLabel[budget] || "moderate"}. Goal: ${goal.replace("_", " ")}. Targets: ${cTarget} kcal/day, ${pTarget}g protein/day.
+
+Review their list. Structure exactly like this:
+✅ *What's good:* (1-2 items already right — be specific)
+❌ *What's missing:* (1-2 specific gaps for their ${goal.replace("_", " ")} goal — protein sources especially)
+🔄 *Swap:* (1-2 direct swaps — "X → Y (reason)")
+
+Short. Direct. SA voice. No intro, no fluff.`
+        )).catch(() => null);
+        const reply = listReview || `Got your grocery list (${itemsRaw.slice(0, 80)}${itemsRaw.length > 80 ? "..." : ""}). Type *adjust my list: [your items]* and I'll review it against your ${goal.replace("_", " ")} goal.`;
+        await logChat(user.id, "[Grocery photo]", reply, "GROCERY_REVIEW");
+        return reply;
       }
 
       await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
