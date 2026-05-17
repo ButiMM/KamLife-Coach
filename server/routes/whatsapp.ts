@@ -200,11 +200,13 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       }
 
       // WhatsApp albums arrive as separate webhooks — one per photo. Deduplicate: if this phone
-      // already got a reply for a media-only message within the last 10 seconds, drop silently.
+      // already got a reply for a media-only message within the last 3 seconds, drop silently.
+      // 3s is enough to catch album spam (albums arrive within 1-2s). 10s was too aggressive
+      // and silently dropped legitimate food photos sent right after a step screenshot.
       if (mediaUrl && !message) {
         const lastSent = mediaDedup.get(rawPhone);
         const now = Date.now();
-        if (lastSent && now - lastSent < 10_000) {
+        if (lastSent && now - lastSent < 3_000) {
           return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
         }
         mediaDedup.set(rawPhone, now);
