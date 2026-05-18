@@ -2,7 +2,7 @@ import type { Express } from "express";
 import { pool } from "../db";
 import { sendWhatsApp } from "../scheduler";
 import { requireAdminKey } from "./auth";
-import { isElevenLabsConfigured, getElevenLabsQuota } from "../elevenlabs";
+import { isElevenLabsConfigured, getElevenLabsQuota, textToSpeech } from "../elevenlabs";
 
 const ALLOWED_AUDIO_TYPES = new Set([
   "audio/ogg", "audio/mpeg", "audio/mp4", "audio/webm",
@@ -155,6 +155,17 @@ export function registerVoiceBroadcastRoutes(app: Express) {
     const configured = isElevenLabsConfigured();
     const quota = configured ? await getElevenLabsQuota() : null;
     return res.json({ configured, quota });
+  });
+
+  // ── ElevenLabs live test — actually calls the API with a short phrase ──
+  app.post("/api/admin/voice-recap/test-tts", requireAdminKey, async (_req: any, res: any) => {
+    try {
+      const audio = await textToSpeech("Sharp. Coach K here. Audio is working.");
+      if (!audio) return res.status(500).json({ error: "ElevenLabs returned null — check Railway logs for the exact API error" });
+      return res.json({ ok: true, bytes: audio.length, message: "ElevenLabs is working correctly" });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Preview the script that would be sent to a specific user ──

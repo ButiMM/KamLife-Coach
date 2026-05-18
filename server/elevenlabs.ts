@@ -48,8 +48,8 @@ export async function textToSpeech(text: string): Promise<Buffer | null> {
 
     if (!response.ok) {
       const err = await response.text();
-      console.error(`[ELEVENLABS] API error ${response.status}:`, err.slice(0, 200));
-      return null;
+      console.error(`[ELEVENLABS] API error ${response.status} for voice ${voiceId}:`, err.slice(0, 400));
+      throw new Error(`ElevenLabs ${response.status}: ${err.slice(0, 200)}`);
     }
 
     const arrayBuffer = await response.arrayBuffer();
