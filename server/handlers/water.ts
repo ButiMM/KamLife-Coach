@@ -71,6 +71,18 @@ export async function handleWater(ctx: {
     return waterReply;
   }
 
+  // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
+  // e.g. "I drank water", "drank some water", "had water"
+  if (!waterMatch && hasWaterKeyword && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
+    const wKg = parseFloat(user.currentWeight as string || "0") || 75;
+    const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
+    const todayW = Math.round((parseFloat(user.todayWater as string || "0")) * 10) / 10;
+    const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);
+    const noAmtReply = `How much? Tell me the amount and I will log it.\n\nExamples: "drank 500ml", "had 2 glasses", "1 litre"\n\n_Today so far: ${todayW}L / ${wTarget}L target${remaining > 0 ? ` — ${remaining}L to go` : " — target hit ✅"}_`;
+    await logChat(user.id, message, noAmtReply, "WATER_NO_AMOUNT");
+    return noAmtReply;
+  }
+
   // ---- WATER QUESTION HANDLER ----
   const isWaterQuestion = /\b(how much water|water target|water goal|how many litres|how many liters|water should i drink|daily water|water recommendation|water intake|water per day)\b/i.test(m);
   const isWaterOnlyMsg = /^water\s*$/i.test(m.trim());

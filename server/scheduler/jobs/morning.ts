@@ -12,7 +12,7 @@ import { sendWhatsAppButtons } from "../../twilio-interactive";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
-  const todayDOW = new Date().getDay();
+  const todayDOW = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
   if (todayDOW === 0) { console.log("[SCHEDULER] Morning check-in — skipping Sunday"); return; }
 
   const clients = await getActiveClients();

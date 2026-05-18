@@ -215,7 +215,7 @@ export async function runStreakAtRisk(): Promise<void> {
   console.log("[SCHEDULER] JOB: Streak-at-risk alert (9pm SAST)");
   const clients = await getActiveClients();
   const todayStart = dayStart(0);
-  const todayDOW = new Date().getDay();
+  const todayDOW = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
 
   function computeStreakFromLogs(logs: { loggedAt: Date | null }[]): number {
     const days = new Set<string>();

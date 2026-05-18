@@ -78,7 +78,7 @@ export async function runReferralNudge(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       if (![7, 30, 60, 90].includes(days)) continue;
@@ -101,7 +101,7 @@ export async function runGoalReassessment(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       const name = client.name || "there";

@@ -1,5 +1,5 @@
 import {
-  sendWhatsApp, getActiveClients, isPaused,
+  sendWhatsApp, getActiveClients, isPaused, canSendProactive,
 } from "../shared";
 
 export function getSACulturalEvent(month: number, day: number): ((name: string) => string) | null {
@@ -27,7 +27,7 @@ export async function runCulturalCalendar(): Promise<void> {
   console.log(`[SCHEDULER] JOB: Cultural event — ${month}/${day}`);
   const clients = await getActiveClients();
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
     try {
       await sendWhatsApp(client.phoneNumber, eventFn(client.name || "there"));
     } catch (err) { console.error(`[SCHEDULER] Cultural event error — ${client.phoneNumber}:`, err); }
@@ -42,7 +42,7 @@ export async function runWomensMonth(): Promise<void> {
     ["she", "her", "woman", "female"].some(w => (client.profileNotes || "").toLowerCase().includes(w));
 
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
     try {
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
@@ -59,7 +59,7 @@ export async function runNewYearReset(): Promise<void> {
   console.log("[SCHEDULER] JOB: New Year reset");
   const clients = await getActiveClients();
   for (const client of clients) {
-    if (isPaused(client)) continue;
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
     try {
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
