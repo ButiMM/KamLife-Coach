@@ -725,7 +725,8 @@ export async function handleOnboarding(user: any, message: string, phone: string
     let mode = "home";
     let gymName: string | null = null;
 
-    if (/\b(walk|walking|walk only|no gym|no equipment|just walk)\b/i.test(lower)) {
+    // walk_only = genuine mobility/medical limitation. "no gym"/"no equipment" = home bodyweight, not walk-only.
+    if (/\b(walk only|just walk|walking only|only walk|only walking|can only walk|doctor.*walk|injury.*walk|heart.*walk)\b/i.test(lower)) {
       mode = "walk_only";
     } else if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym)\b/i.test(lower)) {
       mode = "gym_dumbbell";
