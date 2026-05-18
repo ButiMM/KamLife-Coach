@@ -16,3 +16,8 @@ server/.scheduler-state.json
 
 # Voice note cache
 tmp/
+
+# Local documents (not for repo)
+*.md
+!README.md
+!CLAUDE.md
