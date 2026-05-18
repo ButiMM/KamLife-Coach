@@ -271,10 +271,6 @@ CRITICAL RULES — these are non-negotiable:
     return ack;
   }
 
-  // Typing ack — fires before any GPT call so user sees activity immediately.
-  // Skipped for pure reactions (handled above without GPT) and the daily cap (fast return).
-  // The webhook is now fully async so this ack arrives before the real reply.
-  sendWhatsApp(phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`, "✏️").catch(() => {});
 
   const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "thanks", "thank you", "wtf", "right"];
   if (SHORT_REPLIES.includes(m)) {

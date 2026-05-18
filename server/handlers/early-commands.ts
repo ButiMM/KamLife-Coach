@@ -310,8 +310,12 @@ export async function handleEarlyCommands(ctx: {
 
     const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode };
     const programme = buildFullProgramme(updatedUser);
-    const modeLabel = trainingMode === "gym" ? "Gym" : "Home";
-    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}\n\n_Reply *menu* anytime to see all your options — workouts, food log, targets, shopping list, and more._`;
+    const modeLabel = trainingMode === "gym" ? "Gym" : trainingMode === "gym_dumbbell" ? "Dumbbell Gym" : "Home";
+    const cal = user.calorieTarget ? `🔥 *Calories:* ${user.calorieTarget} kcal/day\n` : "";
+    const prot = user.proteinTarget ? `💪 *Protein:* ${user.proteinTarget}g/day\n` : "";
+    const steps = user.stepsTarget ? `👟 *Steps:* ${user.stepsTarget.toLocaleString()}/day\n` : "";
+    const targetsLine = (cal || prot || steps) ? `\n*Your daily targets:*\n${cal}${prot}${steps}` : "";
+    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}${targetsLine}\n\n_Reply *menu* anytime to see all your options — workouts, food log, targets, shopping list, and more._`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
 
     // Day 1 progress photo challenge — fires immediately after programme delivery.
