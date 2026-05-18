@@ -932,6 +932,23 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     return modReply;
   }
 
+  if (/^too easy$/i.test(m) || m === "this is too easy" || m === "way too easy" || m === "too light") {
+    const currentMode = user.trainingMode || "home";
+    if (currentMode === "walk_only" || currentMode === "walk") {
+      // Walk-only user saying it's too easy — upgrade them to home training
+      await db.update(users).set({ trainingMode: "home" }).where(eq(users.phoneNumber, phone));
+      const upgradedUser = { ...user, trainingMode: "home" };
+      const workout = buildDayWorkout(upgradedUser);
+      const upgradeReply = `${firstName ? firstName + ", g" : "G"}ood — that means you're ready for real training.\n\nI've switched you to the full home programme. No equipment needed.\n\n${workout}\n\nSend *done* when you've finished.`;
+      await logChat(user.id, message, upgradeReply, "WORKOUT_UPGRADE_FROM_WALK");
+      return upgradeReply;
+    }
+    // Already on home/gym — give intensity upgrades
+    const intReply = `${firstName ? firstName + ", g" : "G"}ood — here's how to make it harder:\n\n• Add 1 more set to every exercise (3 → 4)\n• Cut rest from 60s to 30s between sets\n• Slow the eccentric down: 3 seconds on the way down, explode up\n• Add a 4th exercise: 3×15 jump squats or 3×10 burpees at the end\n\nIf it still feels easy next session, message me and I'll bump up your programme difficulty permanently.`;
+    await logChat(user.id, message, intReply, "WORKOUT_TOO_EASY");
+    return intReply;
+  }
+
   if (m === "skip today") {
     const streak = user.workoutStreak || 0;
     const streakLine = streak >= 3
