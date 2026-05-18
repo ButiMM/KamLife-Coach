@@ -257,7 +257,8 @@ export async function handleEarlyCommands(ctx: {
     /\b(programme|program|workout|training)\b.{0,30}\b(new|change|different|update|rebuild)\b/i.test(m) ||
     /\b(a new one|different one|another one|new gym|new home|new workout|new training)\b/i.test(m) ||
     /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
-    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m)
+    /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m) ||
+    /\b(i need more|need more|need harder|more challenging|harder workout|upgrade my (programme|program|workout|training)|i want harder|want harder|want more intense|more intense workout|want a harder|need a harder)\b/i.test(m)
   );
 
   if (isNewProgrammeRequest) {
