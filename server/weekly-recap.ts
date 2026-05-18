@@ -265,7 +265,7 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
   const weekStart = monday.toISOString().slice(0, 10);
 
   const { rows: activeUsers } = await pool.query<{ id: string }>(
-    `SELECT id FROM users WHERE subscription_status = 'active' ORDER BY created_at`
+    `SELECT id FROM users WHERE onboarding_state = 'COMPLETE' AND (subscription_status IN ('active','trial') OR (beta_bypass_until IS NOT NULL AND beta_bypass_until >= NOW())) ORDER BY created_at`
   );
 
   console.log(`[RECAP] Starting weekly recaps for ${activeUsers.length} active clients (week ${weekStart})`);
