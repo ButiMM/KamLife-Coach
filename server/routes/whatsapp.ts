@@ -43,17 +43,17 @@ async function processTextAsync(
   try {
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
 
-    const buttonsMarkerMatch = reply.match(/\[BUTTONS:([^\]]+)\]/);
-    if (buttonsMarkerMatch) {
-      const buttons = buttonsMarkerMatch[1].split("|").map(b => b.trim()).filter(Boolean);
-      const bodyWithoutMarker = reply.replace(/\s*\[BUTTONS:[^\]]+\]/, "").trim();
-      await sendWhatsAppButtons(phone, bodyWithoutMarker, buttons);
-      return;
-    }
+    // Strip [BUTTONS:...] — send numbered options inline via proven sendParts path.
+    // Twilio Content API (used by sendWhatsAppButtons) requires Meta template approval
+    // in production and silently drops unapproved messages with no error surfaced.
+    const cleanedReply = reply.replace(/\s*\[BUTTONS:([^\]]+)\]/g, (_, opts) => {
+      const labels = opts.split("|").map((b: string) => b.trim()).filter(Boolean);
+      return `\n\n${labels.map((b: string, i: number) => `*${i + 1}.* ${b}`).join("\n")}`;
+    });
 
-    const mediaMarkerMatch = reply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
+    const mediaMarkerMatch = cleanedReply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
     const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
-    const cleanReply = replyMediaUrl ? reply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : reply;
+    const cleanReply = replyMediaUrl ? cleanedReply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : cleanedReply;
     await sendParts(phone, splitMessage(cleanReply), replyMediaUrl);
   } catch (err: any) {
     console.error("[TEXT_ASYNC] failed:", err?.message || err);
