@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { users, workoutLogs, chatHistory } from "../../shared/schema";
+import { users, workoutLogs, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
@@ -14,6 +14,7 @@ import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
 import { sastDayStart } from "../utils";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
+import { generateMealPlan } from "../meal-plan";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -729,11 +730,59 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     return `*Why these specific foods for you:*\n\n${why}\n\n${budgetWhy}${extras.length > 0 ? "\n\n" + extras.join("\n\n") : ""}`;
   }
 
+  // ---- PERSONALISED MEAL PLAN — built from actual user profile + recent food logs ----
+  // Triggers: "meal plan", "my meal plan", "give me a meal plan", "what should I eat",
+  //           "eating plan", "diet plan", "weekly meals"
+  // Generates a static 3-day rotating plan — no GPT, instant, personalised.
+  const isMealPlanRequest =
+    ["meal plan", "my meal plan", "mealplan", "eating plan", "diet plan", "weekly meals",
+      "what should i eat", "give me a meal plan", "i need a meal plan", "i want a meal plan",
+      "food plan", "my food plan", "weekly meal plan"].includes(m)
+    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals)\b/i.test(m);
+  if (isMealPlanRequest) {
+    // Fetch last 7 days of meal logs to surface recently eaten foods
+    let recentFoods: string[] = [];
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const logs = await db
+        .select({ rawMessage: mealLogs.rawMessage, items: mealLogs.items })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo)));
+      const foodSet = new Set<string>();
+      for (const log of logs) {
+        if (log.rawMessage) {
+          scanForSAFoods(log.rawMessage).forEach((f) => foodSet.add(f.name.toLowerCase()));
+        }
+        if (log.items && Array.isArray(log.items)) {
+          for (const item of log.items as Array<{ name?: string }>) {
+            if (item.name) foodSet.add(item.name.toLowerCase());
+          }
+        }
+      }
+      recentFoods = Array.from(foodSet);
+    } catch {
+      // non-fatal — plan still generates without it
+    }
+
+    const plan = generateMealPlan({
+      calorieTarget: user.calorieTarget || 1800,
+      proteinTarget: user.proteinTarget || 120,
+      weeklyFoodBudget: user.weeklyFoodBudget || "100_300",
+      goalType: user.goalType || "fat_loss",
+      medicalConditions: user.medicalConditions || "",
+      otherMedicalNotes: user.otherMedicalNotes || "",
+      recentFoods,
+      firstName: user.name?.split(" ")[0] || "",
+    });
+
+    await logChat(user.id, message, plan, "MEAL_PLAN_DELIVERY");
+    return plan;
+  }
+
   // ---- DIET PLAN / MEAL PLAN — redirect to goal-adjusted shopping list ----
-  // Clients ask for "diet plans" constantly. Diet plans don't work — people
-  // can't follow them for more than a week. A shopping list changes behaviour.
-  const isDietPlanRequest = ["diet plan", "meal plan", "mealplan", "food plan", "my meal plan", "my food plan", "diet", "my diet", "nutrition plan", "eating plan", "weekly meals", "weekly meal plan", "my nutrition plan", "my eating plan"].includes(m)
-    || /\b(give me a diet plan|i need a diet plan|send.*diet plan|diet plan please|eating plan|nutrition plan|weekly meal plan|food plan|what should i eat this week|i need a meal plan)\b/i.test(m);
+  // Catches remaining nutrition-plan queries that aren't the explicit meal plan triggers above.
+  const isDietPlanRequest = ["nutrition plan", "my nutrition plan", "my eating plan", "my diet", "diet"].includes(m)
+    || /\b(i need a diet plan|send.*diet plan|nutrition plan|food plan|what should i eat this week)\b/i.test(m);
   if (isDietPlanRequest) {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
@@ -744,13 +793,13 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     const intro = goal === "muscle_gain"
       ? `${firstName}, a diet plan tells you what to eat — and most people stop following it by Wednesday. A shopping list builds the habit. Buy the right things and the eating takes care of itself.\n\n`
       : `${firstName}, diet plans don't work long-term — they're too rigid and people fall off. What actually works is buying the right things. Here's your goal-adjusted shopping list:\n\n`;
-    const reply = `${intro}${listText}\n\n_Send me your own grocery list and I'll adjust it for your ${goal === "muscle_gain" ? "muscle building" : "fat loss"} goal. Or reply *7 day meals* if you want a full day-by-day breakdown._`;
+    const reply = `${intro}${listText}\n\n_Send me your own grocery list and I'll adjust it for your ${goal === "muscle_gain" ? "muscle building" : "fat loss"} goal. Or reply *meal plan* for your personalised 3-day eating plan._`;
     await logChat(user.id, message, reply, "DIET_PLAN_REDIRECT");
     return reply;
   }
 
-  // ---- 7 DAY MEALS — explicit request for day-by-day plan ----
-  if (["7 day meals", "7day meals", "full meal plan", "weekly meals breakdown", "what should i eat", "what do i eat"].includes(m)) {
+  // ---- 7 DAY MEALS — explicit request for onboarding-style plan ----
+  if (["7 day meals", "7day meals"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
 

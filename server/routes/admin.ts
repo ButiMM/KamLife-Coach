@@ -624,6 +624,54 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     }
   });
 
+  // ── Food photo training data export ──
+  //
+  // Returns all photo-sourced meal logs as a structured JSON dataset suitable
+  // for model fine-tuning. Never includes photoBase64, userId, or phone numbers.
+  // Only rows where source = 'photo' are included.
+  app.get("/api/admin/export/food-training-data", requireAdminKey, async (_req, res) => {
+    try {
+      const rows = await db
+        .select({
+          loggedAt: mealLogs.loggedAt,
+          source: mealLogs.source,
+          items: mealLogs.items,
+          corrected: mealLogs.corrected,
+          kcal: mealLogs.kcalInt,
+          protein: mealLogs.proteinInt,
+          rawMessage: mealLogs.rawMessage,
+        })
+        .from(mealLogs)
+        .where(eq(mealLogs.source, "photo"))
+        .orderBy(desc(mealLogs.loggedAt));
+
+      const records = rows.map((r) => {
+        const itemsArray = Array.isArray(r.items) ? r.items as Array<{ name?: string }> : [];
+        const identified = itemsArray.map((i) => i?.name).filter(Boolean) as string[];
+        return {
+          logged_at: r.loggedAt ? new Date(r.loggedAt).toISOString() : null,
+          source: r.source,
+          identified_as: identified,
+          corrected: r.corrected,
+          kcal: r.kcal,
+          protein: r.protein,
+          raw_message: r.rawMessage ?? "photo",
+        };
+      });
+
+      console.log(`[ADMIN AUDIT] GET /api/admin/export/food-training-data — ${records.length} records — ${new Date().toISOString()}`);
+
+      res.json({
+        exported_at: new Date().toISOString().slice(0, 10),
+        total_photos: records.length,
+        records,
+      });
+    } catch (err: any) {
+      console.error("[ADMIN] food-training-data export error:", err);
+      res.status(500).json({ error: err.message || "Failed to export training data" });
+    }
+  });
+
   // ── Admin: test voice note generation + optional send ──
   // POST /api/admin/test-voice  { phone?: "+27...", script?: "..." }
   // Returns { url } so you can paste it in a browser to verify audio works.

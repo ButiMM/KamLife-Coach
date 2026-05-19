@@ -43,6 +43,7 @@ import {
 } from "./scheduler/jobs/business";
 import {
   runWeightReminder, runMondayProgress, runMondayGroceries, runDietBreakCheck,
+  runTrainingDataLog,
 } from "./scheduler/jobs/monday";
 
 // Re-export for routes.ts + index.ts consumers
@@ -160,6 +161,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 5 * * 1",     () => runWeeklyKpiReport());         // 7am SAST KPI report to coach
   cron.schedule("0 5 * * 1",     () => runWomensMonth());             // 7am SAST Women's Month (Aug only)
   cron.schedule("0 5 * * 1",     () => runPhaseAdvancement());        // 7am SAST phase check
+  cron.schedule("0 4 * * 1",     () => runTrainingDataLog());          // 6am SAST training data log
   cron.schedule("0 6 * * 1",     async () => {                        // 8am SAST grocery list
     const today = todaySAST();
     if (hasRunToday("monday_groceries", today)) return;

@@ -10,6 +10,7 @@ import { writeFile, unlink } from "fs/promises";
 import { createReadStream } from "fs";
 import { join as pathJoin } from "path";
 import type OpenAI from "openai";
+import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { db } from "../db";
 import {
   users, chatHistory, stepLogs, mealLogs, progressPhotos,
@@ -224,55 +225,63 @@ export async function handleMediaMessage(ctx: {
         await db.insert(progressPhotos).values({ userId: user.id, photoNumber, photoBase64: base64, contentType });
         await logChat(user.id, `[Progress Photo ${photoNumber}]`, "[Photo received]", "PROGRESS_PHOTO");
 
-        if (existingPhotos.length >= 1) {
-          const firstPhoto = existingPhotos[0];
-          const prevPhoto = existingPhotos[existingPhotos.length - 1]; // most recent before this one
-          const daysSinceStart = Math.round((Date.now() - new Date(firstPhoto.loggedAt || "").getTime()) / 86_400_000);
-          const daysSincePrev = Math.round((Date.now() - new Date(prevPhoto.loggedAt || "").getTime()) / 86_400_000);
-          const progressDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
-          console.log(`[VISION][${mediaTrace}] progress model=${progressDecision.model} tier=${user.subscriptionStatus} photos=${photoNumber}`);
+        // ── PROGRESS PHOTO COMPARISON (follow-up via WhatsApp) ──────────────────
+        // Trigger if: user has at least 1 earlier photo AND the earliest is 14+ days old.
+        const earliestPhoto = existingPhotos.length > 0 ? existingPhotos[0] : null;
+        const earliestAgeMs = earliestPhoto ? Date.now() - new Date(earliestPhoto.loggedAt || "").getTime() : 0;
+        const earliestAgeDays = Math.round(earliestAgeMs / 86_400_000);
+        const comparisonEligible = earliestPhoto !== null && earliestAgeDays >= 14;
 
-          const isThirdPlusPhoto = existingPhotos.length >= 2;
-          const imageContent: Array<{ type: "text"; text: string } | { type: "image_url"; image_url: { url: string; detail: string } }> = [];
+        if (comparisonEligible) {
+          // Return an immediate acknowledgment, then fire comparison async.
+          const ackMsg = `Photo ${photoNumber} saved, ${clientName}. Give me a moment to compare it to your baseline — I will send the breakdown right away.`;
+          // Fire async — do not await so the webhook reply is fast.
+          (async () => {
+            try {
+              const progressDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
+              console.log(`[VISION][${mediaTrace}] progress_compare model=${progressDecision.model} tier=${user.subscriptionStatus} photos=${photoNumber} earliestAgeDays=${earliestAgeDays}`);
 
-          if (isThirdPlusPhoto) {
-            const weeksStart = Math.round(daysSinceStart / 7);
-            const weeksPrev = Math.round(daysSincePrev / 7);
-            imageContent.push({
-              type: "text",
-              text: `You have three photos to compare. Photo A is the original baseline (${weeksStart} weeks ago). Photo B is the most recent check-in (${weeksPrev} days ago). Photo C is today's check-in (Photo ${photoNumber}).\n\nStructure your response:\n1. *Since the beginning:* What has changed from Photo A to Photo C in body composition, posture, waist/hip shape, muscle definition?\n2. *Since last check-in:* What is visibly different between Photo B and Photo C? Even small changes.\n3. One specific coaching cue for the next 30 days based on what you see.\n\nBe direct and specific. If you cannot see a change — say why (lighting, angle, clothing) and what would help. SA voice, max 150 words total.`,
-            });
-            imageContent.push({ type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}`, detail: progressDecision.detail } });
-            imageContent.push({ type: "image_url", image_url: { url: `data:${prevPhoto.contentType};base64,${prevPhoto.photoBase64}`, detail: progressDecision.detail } });
-            imageContent.push({ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } });
-          } else {
-            imageContent.push({
-              type: "text",
-              text: `Compare these two progress photos. Photo 1 was taken ${daysSinceStart} days ago (${Math.round(daysSinceStart / 7)} weeks). Photo 2 is today. Describe specifically what has changed in the body. Focus on: body composition, posture, visible muscle, waist and hip shape. Be honest — if nothing has changed say so and say why (lighting, angle, clothing). If it has — describe exactly what you see. End with one specific coaching cue for the next 30 days. SA voice, max 120 words.`,
-            });
-            imageContent.push({ type: "image_url", image_url: { url: `data:${firstPhoto.contentType};base64,${firstPhoto.photoBase64}`, detail: progressDecision.detail } });
-            imageContent.push({ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } });
-          }
+              const goalLabel = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
+              const weeksLabel = Math.round(earliestAgeDays / 7);
+              const weekStr = weeksLabel === 1 ? "1 week" : `${weeksLabel} weeks`;
 
-          const comparisonResponse = await openai.chat.completions.create({
-            model: progressDecision.model,
-            max_tokens: progressDecision.maxTokens,
-            messages: [
-              {
-                role: "system",
-                content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goal}. Direct, warm, specific — SA voice. Focus on visible physical changes only. Never discuss weight unless you can see a scale. Never say "great progress" as a standalone — describe what you actually see.`,
-              },
-              { role: "user", content: imageContent },
-            ],
-          });
-          const progressTokens = comparisonResponse.usage?.completion_tokens || 0;
-          console.log(`[COST][${mediaTrace}] progress_compare ~$${estimateVisionCostUSD(progressDecision, progressTokens).toFixed(5)} (${progressDecision.reason})`);
-          const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
-            || "I can see the photos but could not compare them clearly. Send in good lighting, same pose if possible.";
-          await logChat(user.id, `[Progress Photo ${photoNumber}]`, comparisonText, "PROGRESS_COMPARISON");
-          const weeksLabel = Math.round(daysSinceStart / 7);
-          const weekStr = weeksLabel === 1 ? "1 week" : `${weeksLabel} weeks`;
-          return `Photo ${photoNumber} — ${weekStr} of work.\n\n${comparisonText}\n\n_Next check-in: 30 days. Keep the same pose and lighting — it makes the comparison sharper._`;
+              const imageContent: ChatCompletionContentPart[] = [
+                {
+                  type: "text",
+                  text: `Compare these two progress photos for a client whose goal is ${goalLabel}.\n\nPhoto 1 (baseline) was taken ${earliestAgeDays} days ago (${weekStr}). Photo 2 is today's check-in (Photo ${photoNumber}).\n\nAnalyse:\n- Visible changes in body composition: fat loss, muscle definition, posture\n- Be specific about what is visibly different — shoulders, waist, arms, stomach\n- Reference their goal (${goalLabel})\n- 4–5 sentences, South African coaching voice\n- Never say "I can see significant changes" if there are none — be honest about what you do or do not see, and explain why (lighting, angle, clothing) if comparison is limited\n- End with ONE specific next action they should focus on in the next 30 days`,
+                },
+                { type: "image_url", image_url: { url: `data:${earliestPhoto.contentType};base64,${earliestPhoto.photoBase64}`, detail: progressDecision.detail } },
+                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } },
+              ];
+
+              const comparisonResponse = await openai.chat.completions.create({
+                model: progressDecision.model,
+                max_tokens: progressDecision.maxTokens,
+                messages: [
+                  {
+                    role: "system",
+                    content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goalLabel}. Direct, warm, specific — SA voice. Focus on visible physical changes only. Never discuss weight unless you can see a scale. Never say "great progress" as a standalone — describe what you actually see.`,
+                  },
+                  { role: "user", content: imageContent },
+                ],
+              });
+
+              const progressTokens = comparisonResponse.usage?.completion_tokens || 0;
+              console.log(`[COST][${mediaTrace}] progress_compare ~$${estimateVisionCostUSD(progressDecision, progressTokens).toFixed(5)} (${progressDecision.reason})`);
+
+              const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
+                || "I can see both photos but could not compare them clearly. Send in good lighting, same pose if possible.";
+
+              const followUpMsg = `*${weekStr} comparison — Photo 1 vs Photo ${photoNumber}*\n\n${comparisonText}\n\n_Next check-in: 30 days. Same pose, same lighting — it makes the comparison sharper._`;
+
+              await logChat(user.id, `[Progress Comparison Photo ${photoNumber}]`, followUpMsg, "PROGRESS_COMPARISON");
+              await sendWhatsApp(phone, followUpMsg);
+            } catch (compErr) {
+              console.error(`[MEDIA][${mediaTrace}] progress_compare_error:`, compErr);
+            }
+          })();
+
+          return ackMsg;
         } else {
           return `Saved, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
         }
