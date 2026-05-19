@@ -200,6 +200,30 @@ export async function handleWorkoutCommands(ctx: {
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
+    // Fire referral nudge 60 seconds later on the very first workout
+    if (newTotal === 1) {
+      const userId = user.id;
+      setTimeout(async () => {
+        try {
+          // Fetch current referral code (may have been set by now, or generate one)
+          const [freshUser] = await db.select({ referralCode: users.referralCode }).from(users)
+            .where(eq(users.phoneNumber, phone)).limit(1);
+          let referralCode = freshUser?.referralCode;
+          if (!referralCode) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            const rand = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+            referralCode = `KAM${rand}`;
+            await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
+          }
+          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nThey get their first month for R50. You get R20 off yours. One message to one person is all it takes.`;
+          await sendWhatsApp(phone, referralMsg);
+          await logChat(userId, "", referralMsg, "REFERRAL_NUDGE_POST_WORKOUT");
+        } catch (err) {
+          console.warn("[REFERRAL_NUDGE] Failed to send first-workout referral nudge:", err);
+        }
+      }, 60_000);
+    }
+
     return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 

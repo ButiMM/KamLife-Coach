@@ -14,7 +14,7 @@ import { db } from "../db";
 import {
   users, chatHistory, stepLogs, mealLogs, progressPhotos,
 } from "../../shared/schema";
-import { eq, and, gte, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lt, asc, sql } from "drizzle-orm";
 import {
   buildMediaTrace, withTimeout,
   logMediaFailure, logMediaSuccess, logChat,
@@ -26,6 +26,7 @@ import { recomputeTodayFoodTotals } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
 import { sastDayStart } from "../utils";
+import { sendWhatsApp } from "../scheduler/shared";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
