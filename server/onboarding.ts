@@ -525,8 +525,49 @@ export async function handleOnboarding(user: any, message: string, phone: string
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
-  // ---- START — lead with value, keep legal minimal ----
+  // ---- PRE_ONBOARD — 1-2 conversational exchanges before formal questionnaire ----
+  // People come in talking about cellulite, weekends-only training, referrals, real life.
+  // Engage with that first. Max 2 exchanges, then naturally hand off to signup.
+  if (state === "PRE_ONBOARD") {
+    const isReady = /^(yes|yebo|ja|sure|ok|okay|let.?s go|ready|start|sign|register|get me started|i.?m ready|go ahead|do it|yes coach|yes please)[\s!.]*$/i.test(msg.trim());
+    if (isReady) {
+      await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
+      return `Before I set up your programme, I need your consent to store and process your personal fitness data under POPIA.\n\nYour info is used only for your coaching — never sold. Reply *delete my data* anytime.\n\nReply *yes* to continue.`;
+    }
+    // Another question / more context — answer briefly and re-invite
+    const continuationCtx = `You are Coach K — a direct, warm South African fitness coach on WhatsApp. A potential new client is asking questions before signing up. Reply in 1-2 sentences only. Be specific and helpful. End EVERY response on a new line with exactly: "Reply *yes* when you're ready to build your programme."
+
+Banned: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome"
+SA voice — direct, short, practical. No fluff. No price mentions.`;
+    const preReply = await askCoachK(message, user, continuationCtx);
+    return preReply;
+  }
+
+  // ---- START — if they sent a real message, engage it before pitching ----
   if (state === "START") {
+    const isSimpleStart = /^(yes|yebo|ja|sure|ok|okay|hi|hey|hello|howzit|hola|sawubona|eita|sup|yo|let.?s go|start|begin|go|send|register|join|sign|i want|get me)[\s!.]*$/i.test(msg.trim());
+
+    if (!isSimpleStart && msg.length > 8) {
+      // Real message — engage with their situation first
+      await db.update(users).set({ onboardingState: "PRE_ONBOARD" }).where(eq(users.phoneNumber, phone));
+      const intakeCtx = `You are Coach K — a direct, warm South African fitness and nutrition coach running KamLife Coach on WhatsApp.
+
+A new potential client has just messaged you for the FIRST TIME. Reply in exactly 2-3 short sentences:
+1. Acknowledge their specific situation or concern by name (cellulite, weight, no-gym, weekend training, referral — whatever they said)
+2. Give them one piece of genuine, specific hope based on real fitness principles
+3. Ask ONE follow-up question that will help you understand their situation better
+
+Then on a NEW LINE add: "Reply *yes* when you're ready and I'll build your personalised programme."
+
+Rules: Short sentences. No lists. No bullet points. SA voice — warm, direct, no corporate speak.
+Banned words: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome", "amazing", "fantastic"
+Do NOT mention price. Do NOT mention R149. Just be a helpful coach.
+If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one word is enough.`;
+      const intakeReply = await askCoachK(message, user, intakeCtx);
+      return intakeReply;
+    }
+
+    // Simple greeting or "yes" → standard pitch
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
     return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\nR149/month — R5/day. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
   }
