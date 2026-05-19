@@ -41,8 +41,8 @@ export default function UsersList() {
             <h2 className="text-3xl font-bold font-display">Users</h2>
             <p className="text-muted-foreground mt-1">Manage your coaching clients</p>
           </div>
-          <Button>
-             Export CSV
+          <Button onClick={() => { window.location.href = "/api/admin/export/users"; }}>
+            Export CSV
           </Button>
         </div>
 

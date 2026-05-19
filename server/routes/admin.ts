@@ -224,9 +224,16 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
   // ── Flagged (inactive 3+ days) ──
   app.get("/api/admin/flagged", requireAdminKey, async (_req, res) => {
     try {
-      const threeDaysAgo = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
       const inactive = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
-      const flagged = inactive.filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < threeDaysAgo);
+      const flagged = inactive
+        .filter(u => !u.lastActiveAt || new Date(u.lastActiveAt) < sevenDaysAgo)
+        .map(u => {
+          const lastActive = u.lastActiveAt ? new Date(u.lastActiveAt) : null;
+          const isLongInactive = !lastActive || lastActive < fourteenDaysAgo;
+          return { ...u, flagReason: isLongInactive ? "inactive_7_days" as const : "inactive_7_days" as const };
+        });
       res.json(flagged);
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch flagged users" });
@@ -708,6 +715,58 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       return res.json({ success: true, url, sent, sendError });
     } catch (err: any) {
       return res.status(500).json({ error: err.message || "Failed to generate voice note" });
+    }
+  });
+
+  // ── Export users as CSV ──
+  app.get("/api/admin/export/users", requireAdminKey, async (_req, res) => {
+    try {
+      const all = await db.select({
+        id: users.id,
+        name: users.name,
+        phoneNumber: users.phoneNumber,
+        goalType: users.goalType,
+        trainingMode: users.trainingMode,
+        subscriptionStatus: users.subscriptionStatus,
+        onboardingState: users.onboardingState,
+        calorieTarget: users.calorieTarget,
+        proteinTarget: users.proteinTarget,
+        currentWeight: users.currentWeight,
+        programmeWeek: users.programmeWeek,
+        workoutStreak: users.workoutStreak,
+        totalWorkoutsCompleted: users.totalWorkoutsCompleted,
+        lastActiveAt: users.lastActiveAt,
+        createdAt: users.createdAt,
+        subscriptionRenewsAt: users.subscriptionRenewsAt,
+      }).from(users).orderBy(desc(users.createdAt));
+
+      const header = "id,name,phone,goal,mode,status,onboarding,cal_target,prot_target,weight_kg,programme_week,workout_streak,total_workouts,last_active,created_at,renews_at";
+      const rows = all.map(u => [
+        u.id,
+        `"${(u.name || "").replace(/"/g, '""')}"`,
+        `"${(u.phoneNumber || "").replace(/^whatsapp:/, "")}"`,
+        u.goalType || "",
+        u.trainingMode || "",
+        u.subscriptionStatus || "",
+        u.onboardingState || "",
+        u.calorieTarget || "",
+        u.proteinTarget || "",
+        u.currentWeight || "",
+        u.programmeWeek || "",
+        u.workoutStreak || "",
+        u.totalWorkoutsCompleted || "",
+        u.lastActiveAt ? new Date(u.lastActiveAt).toISOString().slice(0, 10) : "",
+        u.createdAt ? new Date(u.createdAt).toISOString().slice(0, 10) : "",
+        u.subscriptionRenewsAt ? new Date(u.subscriptionRenewsAt).toISOString().slice(0, 10) : "",
+      ].join(","));
+
+      const csv = [header, ...rows].join("\n");
+      const date = new Date().toISOString().slice(0, 10);
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename="kamlife-users-${date}.csv"`);
+      return res.send(csv);
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Export failed" });
     }
   });
 }

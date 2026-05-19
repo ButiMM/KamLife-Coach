@@ -517,6 +517,7 @@ async function activateCoachAccount(): Promise<void> {
     { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard admin access blocked until this is set" },
     { key: "PAYFAST_MERCHANT_ID", warn: true, hint: "Payment links will not work" },
     { key: "PAYFAST_MERCHANT_KEY", warn: true, hint: "PayFast ITN signature validation disabled" },
+    { key: "APP_URL", warn: true, hint: "Payment links and PayFast callbacks will use fallback domain — set to your Railway URL" },
   ];
 
   const missing = REQUIRED_ENV.filter(e => !process.env[e.key]);

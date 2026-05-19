@@ -3,6 +3,7 @@ import { Link, useLocation } from "wouter";
 import { LayoutDashboard, Users, BarChart3, Activity, ShieldAlert, FlaskConical, Mic, LogOut, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import { markLoggedOut } from "@/lib/auth";
 
 export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const [location] = useLocation();
@@ -46,12 +47,18 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
       </nav>
 
       <div className="p-4 border-t border-border">
-        <Link href="/">
-            <Button variant="ghost" className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10">
-            <LogOut className="w-4 h-4 mr-2" />
-            Sign Out
-            </Button>
-        </Link>
+        <Button
+          variant="ghost"
+          className="w-full justify-start text-muted-foreground hover:text-destructive hover:bg-destructive/10"
+          onClick={async () => {
+            markLoggedOut();
+            await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+            window.location.href = "/";
+          }}
+        >
+          <LogOut className="w-4 h-4 mr-2" />
+          Sign Out
+        </Button>
       </div>
     </div>
   );
