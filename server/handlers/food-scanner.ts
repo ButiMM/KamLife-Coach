@@ -372,6 +372,8 @@ export function buildFoodLogReply(p: {
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
+  const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
   let dayAssessment = "";
   if (prevCals > 0 && totalMealCals >= 100) {
     const hourNow = new Date().getUTCHours() + 2;
@@ -379,20 +381,49 @@ export function buildFoodLogReply(p: {
     const expectedCals = calorieTarget * dayProgress;
     const calPace = runningCals / Math.max(expectedCals, 1);
     if (calRemaining <= 0 && effectiveRemaining <= -100) {
-      // Over after steps — if big steps, soften message
       if (extraStepsBurned >= 80) {
-        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${Math.abs(effectiveRemaining)} kcal. Keep dinner light._`;
+        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${Math.abs(effectiveRemaining)} kcal. Keep dinner lean._`;
       } else {
-        dayAssessment = `\n_Calorie target reached — keep dinner light. Protein and vegetables only._`;
+        dayAssessment = `\n_${pick([
+          "Calorie ceiling hit — final meal must be lean. Protein and veg only.",
+          "Target reached. Close the day clean: protein and vegetables, nothing else.",
+          "Done on calories. Dinner = lean protein + veg. No starch.",
+          "Calorie cap hit. Last meal: grilled protein and greens — that's it.",
+          "You've hit the limit. Strip dinner down to protein and vegetables only.",
+        ])}_`;
       }
     } else if (calRemaining <= 0 && effectiveRemaining > -100) {
-      dayAssessment = `\n_Your step count covered the overage — you're effectively on target. Keep the last meal light._`;
+      dayAssessment = `\n_${pick([
+        "Your steps covered the gap — net calories back on target. Keep last meal light.",
+        "Movement offset the surplus. You're clean. Light protein for dinner.",
+        "Walking got you back on track. Last meal: lean and light.",
+        "Steps cancelled the overage — effectively on target. Finish with something lean.",
+      ])}_`;
     } else if (!earlyInDay && calPace < 0.6 && effectiveRemaining < 600) {
-      dayAssessment = `\n_On pace — one more protein-heavy meal and you close out the day well._`;
+      dayAssessment = `\n_${pick([
+        "Solid pace. One high-protein meal closes the day.",
+        "On track — finish it with a protein-heavy dinner.",
+        "Good rhythm. One real protein meal left and you're done.",
+        "Close. One more protein-first meal and the day is yours.",
+        "Running well. Lock it in with a solid final meal.",
+      ])}_`;
     } else if (!earlyInDay && calPace > 1.3) {
-      dayAssessment = `\n_Running high — keep dinner light. Protein and vegetables only tonight._`;
+      dayAssessment = `\n_${pick([
+        "Running over — strip dinner down. Protein only, no starch.",
+        "Over pace. Last meal needs to be lean: protein and veg, nothing else.",
+        "Calorie creep — make dinner strict. Protein and greens only.",
+        "You're high for the pace. Final meal = lean protein and vegetables.",
+        "Over budget. End it clean: grilled chicken, eggs, or fish with veg.",
+      ])}_`;
     } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
-      dayAssessment = `\n_On track for the day. One more solid meal and you're done._`;
+      dayAssessment = `\n_${pick([
+        "Clean day. One more solid meal and you close it out.",
+        "On target. Finish it: one protein meal left.",
+        "Tracking well. Last meal = finish your protein and you're done.",
+        "On point. End it with protein and the day is yours.",
+        "Consistent all day. One more and you've nailed it.",
+        "Solid. Close it with a high-protein final meal.",
+      ])}_`;
     }
   }
 
@@ -408,13 +439,39 @@ export function buildFoodLogReply(p: {
     coachNote = `\n\n${coachNoteOverride}`;
   } else if (totalMealCals >= 100) {
     if (totalMealProtein >= 20) {
-      coachNote = `\n\nSolid protein. ${proteinRemaining > 0 ? `${Math.round(proteinRemaining)}g protein still needed today.` : "Protein target hit for today. ✅"}`;
+      const protOpener = pick([
+        "Solid protein.", "Good protein hit.", "Protein sorted.", "Strong meal.",
+        "Protein locked in.", "That's the protein box ticked.",
+      ]);
+      const protCloser = proteinRemaining > 0
+        ? pick([
+            `${Math.round(proteinRemaining)}g protein still needed today.`,
+            `${Math.round(proteinRemaining)}g left to hit your target.`,
+            `${Math.round(proteinRemaining)}g more to go today.`,
+          ])
+        : pick(["Protein target hit for today. ✅", "Daily protein done. ✅", "Protein goal complete. ✅"]);
+      coachNote = `\n\n${protOpener} ${protCloser}`;
     } else if (hasGoodProteins && totalMealProtein >= 10) {
-      coachNote = `\n\n${Math.round(totalMealProtein)}g protein this meal — good start. Aim for 20g+ per meal to build up your daily total.`;
+      coachNote = `\n\n${pick([
+        `${Math.round(totalMealProtein)}g protein this meal — close. Push for 20g+ next meal.`,
+        `${Math.round(totalMealProtein)}g protein — good start. 20g+ per meal is the target.`,
+        `Getting there — ${Math.round(totalMealProtein)}g this meal. Aim for 20g+ each time.`,
+        `${Math.round(totalMealProtein)}g in. Almost there — push for 20g+ at the next one.`,
+      ])}`;
     } else if (!hasGoodProteins && hasCarbs && !isFruitSnack) {
-      coachNote = `\n\nCarbs without protein — add a protein source to your next meal.`;
+      coachNote = `\n\n${pick([
+        "Carbs without protein — fix it next meal. Add eggs, chicken, or legumes.",
+        "No protein this meal — balance it next time with a real protein source.",
+        "Carb-heavy. Pair the next meal with protein to keep your total on track.",
+        "Protein gap — sort it next meal. Eggs, chicken, or tinned fish.",
+      ])}`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
-      coachNote = `\n\nNext meal: add protein — eggs, chicken, or tuna.`;
+      coachNote = `\n\n${pick([
+        "Next meal needs protein. Pick one: eggs, chicken, or tuna.",
+        "Sort protein next meal — eggs or canned fish are the fastest fix.",
+        "Protein is low. Eggs, chicken, or something real at the next meal.",
+        "Get protein in next meal — eggs, tinned tuna, or grilled chicken.",
+      ])}`;
     }
   }
 
@@ -445,27 +502,45 @@ export function buildFoodLogReply(p: {
     const isEvening = evnHour >= 17;
     const caloriesOnTarget = runningCals <= calorieTarget * 1.1;
     if (isEvening && caloriesOnTarget) {
-      const fn = (user.name || "").split(" ")[0] || "there";
-      proteinTip = `\n\n✅ *Protein target hit, ${fn}.* Calories on track. That is a clean nutrition day — no workout needed to make this count. Same again tomorrow.`;
+      const fn = (user.name || "").split(" ")[0] || "Sharp";
+      proteinTip = `\n\n${pick([
+        `✅ *Protein target hit, ${fn}.* Calories on track. That is a clean nutrition day — same again tomorrow.`,
+        `✅ *${fn}, protein and calories both on target.* That is what a clean day looks like. Repeat it.`,
+        `✅ *Full day nailed — protein hit, calories clean.* That is the standard, ${fn}. Same again.`,
+        `✅ *Protein done, calories locked. ${fn}, that is a complete nutrition day.* Build on this.`,
+      ])}`;
     } else {
-      proteinTip = `\n\nProtein target hit. ✅`;
+      proteinTip = `\n\n${pick([
+        "Protein target hit. ✅",
+        "Daily protein done. ✅",
+        "Protein goal complete. ✅",
+        "Protein sorted for the day. ✅",
+      ])}`;
     }
   }
 
   let variableReinforcement = "";
-  if (Math.random() < 0.15) {
+  if (Math.random() < 0.18) {
     const fn = (user.name || "").split(" ")[0] || "Sharp";
     const daysSinceStart = user.programmeStartDate
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
       : 0;
+    const isMuscleBuild = goal === "muscle_gain";
     const NOTES = [
-      `\n\n👀 _Coach K noticed: you're tracking consistently. That's the part most people skip._`,
-      `\n\n⚡ _Most people at day ${daysSinceStart || "?"} have already stopped logging. You haven't. That matters._`,
-      `\n\n🎯 _${fn}, the consistency you're building right now is worth more than any single perfect meal._`,
-      `\n\n💡 _Clients who log food every day lose 3× more than those who don't — you're doing the right thing._`,
-      `\n\n🔒 _${fn}, locking in the habit. Keep it exactly like this._`,
+      `\n\n👀 _Coach K noticed: you're logging consistently. That's what separates the people who change from the people who try._`,
+      `\n\n⚡ _${daysSinceStart > 7 ? `Day ${daysSinceStart} in` : "Early days"}. Most people have already quit by now. You're still here._`,
+      `\n\n🎯 _${fn}, one logged meal won't change your body. Fifty of them will. You're building the right habit._`,
+      `\n\n💡 _Consistent food logging is the single highest-predictor habit in body transformation. You're doing the one thing that matters most._`,
+      `\n\n🔒 _${fn}, this habit is more valuable than any supplement or gym programme. Keep locking it in._`,
+      `\n\n📊 _Coach K sees everything you log. The picture builds over time — keep feeding it._`,
+      `\n\n🧠 _${fn}, nobody is doing this for you. That's exactly what makes it count._`,
+      isMuscleBuild
+        ? `\n\n💪 _Protein tracking is your edge, ${fn}. Most people guess. You know._`
+        : `\n\n🔥 _${fn}, you're creating the calorie deficit meal by meal. This is how it works._`,
+      `\n\n⏱ _${fn}, the gap between who you are and who you want to be closes one logged meal at a time._`,
+      `\n\n✅ _Every time you log instead of guessing, you're making a decision that adds up._`,
     ];
-    variableReinforcement = NOTES[Math.floor(Math.random() * NOTES.length)];
+    variableReinforcement = pick(NOTES);
   }
 
   const sastNow = new Date(Date.now() + 2 * 3_600_000);

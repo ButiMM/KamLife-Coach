@@ -154,10 +154,18 @@ export async function handleEarlyCommands(ctx: {
 
     const state = await getTodayWorkoutState(user);
 
+    const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
     // REST DAY
     if (state.type === "REST") {
       const preview = buildDayWorkout(effectiveUser);
-      const restReply = `*${state.todayName} — Rest Day.*\n\nRecovery is when your muscles actually grow. No session needed today.\n\nNext training day: *${state.nextTrainingName}*\n\n_Preview of what's coming:_\n\n${preview}\n\n_Want to train anyway? Go for it — send *done* when finished._`;
+      const restNote = pick([
+        "Recovery is when your muscles actually grow. No session today.",
+        "Rest days are part of the programme. Your body rebuilds today.",
+        "Scheduled rest. This is when the adaptation happens — don't skip the recovery.",
+        "Today's job: eat well, sleep well, move lightly. No workout needed.",
+      ]);
+      const restReply = `*${state.todayName} — Rest Day.*\n\n${restNote}\n\nNext training day: *${state.nextTrainingName}*\n\n_Preview of what's coming:_\n\n${preview}\n\n_Want to train anyway? Go for it — send *done* when finished._`;
       await logChat(user.id, message, restReply, "REST_DAY_INFO");
       return restReply;
     }
@@ -165,7 +173,13 @@ export async function handleEarlyCommands(ctx: {
     // ALREADY DONE TODAY
     if (state.type === "ALREADY_DONE") {
       const poCtx = await getProgressiveOverloadContext(user.id);
-      const doneReply = `${firstName ? firstName + ", y" : "Y"}ou already logged today's session ✅${poCtx ? "\n\n" + poCtx.trim() : ""}\n\nWhat's next?[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+      const doneNote = pick([
+        `${firstName ? firstName + ", t" : "T"}oday's session is done ✅`,
+        `${firstName ? firstName + " — s" : "S"}ession logged ✅`,
+        `${firstName ? firstName + ", y" : "Y"}ou've already put today's work in ✅`,
+        `${firstName ? firstName + " — t" : "T"}oday is ticked off ✅`,
+      ]);
+      const doneReply = `${doneNote}${poCtx ? "\n\n" + poCtx.trim() : ""}\n\nWhat's next?[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
       await logChat(user.id, message, doneReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_ALREADY_DONE");
       return doneReply;
     }
@@ -173,7 +187,12 @@ export async function handleEarlyCommands(ctx: {
     // MISSED SESSION(S)
     if (state.type === "MISSED") {
       const missed = state.missedSessions.join(" and ");
-      // Deliver today's actual calendar slot — not the missed slot
+      const catchupIntro = pick([
+        `${firstName ? firstName + ", y" : "Y"}ou missed ${missed}. ${state.todayName} is still a training day — do it now and you're back on track.`,
+        `${firstName ? firstName + " —" : ""} ${missed} missed. But today counts. Get this session done and the week is back on track.`,
+        `${missed} didn't happen. That's done — don't double back. ${state.todayName}'s session is what matters now.`,
+        `${missed} slipped. ${firstName ? firstName + ", " : ""}today is the reset. One session and you're back in it.`,
+      ]);
       const todaySlot = getTodaySlot(user);
       const workout = buildDayWorkout({ ...effectiveUser, programmeDayInWeek: todaySlot });
       const poContext = await getProgressiveOverloadContext(user.id);
@@ -184,7 +203,7 @@ export async function handleEarlyCommands(ctx: {
         : "";
       const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
       const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${firstName ? firstName + ", y" : "Y"}ou missed ${missed}.\n\n*${state.todayName} is still a training day — do it now and you're back on track.*\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }

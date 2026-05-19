@@ -50,14 +50,44 @@ export async function handleProgressCheck(ctx: {
     const weekTotalProt = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
     const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / 7) : 0;
     const protTarget = user.proteinTarget || 120;
-    const sessionSentence = `Training: ${completedSessions} of ${plannedSessions} planned sessions done this week.`;
-    const stepSentence = avgSteps > 0 ? `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.` : `Steps: no step logs this week — start logging daily.`;
-    const weightSentence = weightChange !== null ? (parseFloat(weightChange) < 0 ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.` : parseFloat(weightChange) > 0 ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.` : `Weight: holding steady this week.`) : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
+    const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+    const fn = user.name || "Hey";
+    const stepsAboveTarget = avgSteps >= stepsTarget;
+    const sessionSentence = completedSessions === plannedSessions
+      ? `Training: ${completedSessions}/${plannedSessions} sessions — full week. ✅`
+      : completedSessions === 0
+        ? `Training: 0 of ${plannedSessions} planned sessions done this week.`
+        : `Training: ${completedSessions} of ${plannedSessions} planned sessions done this week.`;
+    const stepSentence = avgSteps > 0
+      ? stepsAboveTarget
+        ? `Steps: averaging ${avgSteps.toLocaleString()}/day ✅ — above your ${stepsTarget.toLocaleString()} target.`
+        : `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.`
+      : `Steps: no step logs this week — start logging daily.`;
+    const weightSentence = weightChange !== null
+      ? parseFloat(weightChange) < 0
+        ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.`
+        : parseFloat(weightChange) > 0
+          ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.`
+          : `Weight: holding steady this week.`
+      : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
     const foodSentence = weekFoodLogDays > 0
       ? `Food: logged ${weekFoodLogDays}/7 days — avg ${avgDailyProt}g protein/day${avgDailyProt >= protTarget * 0.9 ? " ✅" : ` (target ${protTarget}g — ${protTarget - avgDailyProt}g gap)`}`
       : `Food: no meals logged this week — consistency here is what drives results.`;
     const onTrack = completedSessions >= Math.ceil(plannedSessions * 0.75);
-    const verdictSentence = onTrack ? `Overall you are on track — keep the consistency going into next week.` : `${user.name || "Hey"}, ${plannedSessions - completedSessions} sessions missed this week. Get the next one done today.`;
+    const missedCount = plannedSessions - completedSessions;
+    const verdictSentence = onTrack
+      ? pick([
+          `${fn}, you're on track — carry this into next week.`,
+          `Overall on track. Same energy next week.`,
+          `Solid week. Keep this consistency going.`,
+          `${fn}, this is what on-track looks like. Repeat it next week.`,
+        ])
+      : pick([
+          `${fn}, ${missedCount} session${missedCount > 1 ? "s" : ""} missed this week. Get the next one done today.`,
+          `${missedCount} session${missedCount > 1 ? "s" : ""} didn't happen, ${fn}. Today is the reset — do the next one.`,
+          `Behind by ${missedCount}${missedCount > 1 ? " sessions" : " session"}, ${fn}. Stop the bleed today — one session changes the week.`,
+          `${fn}, ${missedCount} session${missedCount > 1 ? "s" : ""} short. No recapping — get today's done and move on.`,
+        ]);
     const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
 
     let winsCard = "";
