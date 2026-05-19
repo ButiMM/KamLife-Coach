@@ -71,7 +71,8 @@ export function sastDayStart(date?: Date): Date {
 }
 
 // Parse time references from food log messages and return the appropriate loggedAt date.
-// Handles: "yesterday", "last night", "this morning", "earlier", "2 days ago"
+// Handles: "yesterday", "last night", "this morning", "earlier", "2 days ago",
+// day-of-week names ("Saturday", "on Sunday"), and time-of-day hints within those.
 // Returns a Date set to a reasonable SAST-anchored time for that meal.
 export function parseMealDate(message: string): Date {
   const m = message.toLowerCase();
@@ -98,6 +99,40 @@ export function parseMealDate(message: string): Date {
     return d;
   }
 
+  // Day-of-week references: "on Saturday", "had this Saturday", "Sunday morning", etc.
+  // Maps to the most recent past occurrence of that day (never future).
+  const DOW_NAMES_MAP: Record<string, number> = {
+    sunday: 0, monday: 1, tuesday: 2, wednesday: 3,
+    thursday: 4, friday: 5, saturday: 6,
+  };
+  const dowMatch = m.match(/\b(on\s+)?(last\s+)?(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/);
+  if (dowMatch) {
+    const targetDow = DOW_NAMES_MAP[dowMatch[3]];
+    const nowSASTDate = new Date(nowSAST);
+    const currentDow = nowSASTDate.getUTCDay();
+    let daysBack = (currentDow - targetDow + 7) % 7;
+    if (daysBack === 0) daysBack = 7; // same day name = last week's occurrence
+    const mealDate = new Date(Date.now() - daysBack * 86_400_000);
+
+    // Try to extract an explicit HH:MM time from the message
+    const timeMatch = m.match(/\b(\d{1,2})[:.h](\d{2})\b/);
+    if (timeMatch) {
+      const hour = parseInt(timeMatch[1]);
+      const min = parseInt(timeMatch[2]);
+      // Convert SAST (UTC+2) to UTC for storage
+      mealDate.setUTCHours(Math.max(0, hour - 2), min, 0, 0);
+    } else if (/\b(morning|breakfast|after gym)\b/.test(m)) {
+      mealDate.setUTCHours(6, 0, 0, 0); // 8am SAST
+    } else if (/\b(lunch|midday|afternoon|around noon)\b/.test(m)) {
+      mealDate.setUTCHours(10, 0, 0, 0); // noon SAST
+    } else if (/\b(night|dinner|supper|evening)\b/.test(m)) {
+      mealDate.setUTCHours(18, 0, 0, 0); // 8pm SAST
+    } else {
+      mealDate.setUTCHours(10, 0, 0, 0); // default noon SAST
+    }
+    return mealDate;
+  }
+
   // "this morning" / "for breakfast" early in message → today at 8am SAST (only if current SAST time is past 11am)
   const sastHour = new Date(nowSAST).getUTCHours();
   if (/\b(this morning|had.*breakfast|breakfast.*was|morning meal)\b/.test(m) && sastHour >= 11) {
@@ -112,6 +147,23 @@ export function parseMealDate(message: string): Date {
   }
 
   return new Date(); // default to now
+}
+
+// Returns true if the message contains a clear retroactive date reference (not today).
+export function isRetroactiveMeal(message: string): boolean {
+  const m = message.toLowerCase();
+  return /\b(yesterday|last night|days? ago|on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|last\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|had this (saturday|sunday|monday|tuesday|wednesday|thursday|friday)|saturday|sunday)\b/.test(m);
+}
+
+// Returns a human-readable label for the date, e.g. "Saturday" or "yesterday".
+export function mealDateLabel(date: Date): string {
+  const nowSAST = new Date(Date.now() + 2 * 3_600_000);
+  const mealSAST = new Date(date.getTime() + 2 * 3_600_000);
+  const diffDays = Math.round((nowSAST.setUTCHours(0,0,0,0) - mealSAST.setUTCHours(0,0,0,0)) / 86_400_000);
+  if (diffDays === 0) return "today";
+  if (diffDays === 1) return "yesterday";
+  const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+  return days[new Date(date).getDay()] || `${diffDays} days ago`;
 }
 
 export function getDisplayName(user: any): string {

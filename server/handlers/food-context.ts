@@ -16,7 +16,7 @@ import {
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { sastDayStart, sastToday } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { invalidatePatternCache } from "../cache";
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
@@ -610,20 +610,24 @@ export async function handleFoodContext(ctx: {
           category: f.category,
         }));
         const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
+        const scannerLoggedAt = parseMealDate(message);
+        const scannerIsRetro = isRetroactiveMeal(message);
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: message.slice(0, 1000),
-          source: "sa_scanner",
+          source: scannerIsRetro ? "retro" : "sa_scanner",
           kcalInt: totalCals,
           proteinInt: Math.round(totalProtein),
           carbsInt: totalCarbs,
           fatInt: totalFat,
           items,
           mealLabel: firstSegLabel,
+          loggedAt: scannerLoggedAt,
         });
         invalidatePatternCache(user.id);
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
+      const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay, foodStreak] = await Promise.all([
         checkFoodPatterns(user.id),
@@ -661,7 +665,7 @@ export async function handleFoodContext(ctx: {
         .find(note => note);
       const upsellNote = comboUpsell ? `\n\n${comboUpsell}` : "";
 
-      return `${reply}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${stepAppend}`;
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${stepAppend}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
@@ -702,16 +706,19 @@ export async function handleFoodContext(ctx: {
           const items = gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
           }));
+          const gptLoggedAt = parseMealDate(message);
+          const gptIsRetro = isRetroactiveMeal(message);
           await db.insert(mealLogs).values({
             userId: user.id,
             rawMessage: message.slice(0, 1000),
-            source: "gpt_fallback",
+            source: gptIsRetro ? "retro" : "gpt_fallback",
             kcalInt: gptFallbackResult.totalKcal,
             proteinInt: gptFallbackResult.totalProtein,
             carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
             fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
             items,
             mealLabel: null,
+            loggedAt: gptLoggedAt,
           });
           invalidatePatternCache(user.id);
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }

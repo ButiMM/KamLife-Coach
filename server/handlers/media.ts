@@ -26,7 +26,7 @@ import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { recomputeTodayFoodTotals } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
-import { sastDayStart } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
 
 // ── SAST today string (YYYY-MM-DD) ──
@@ -434,6 +434,8 @@ Short. Direct. SA voice. No intro, no fluff.`
         }
       }
 
+      const photoLoggedAt = parseMealDate(message || "");
+      const photoIsRetro = isRetroactiveMeal(message || "");
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
         await db.insert(mealLogs).values({
           userId: user.id,
@@ -443,6 +445,7 @@ Short. Direct. SA voice. No intro, no fluff.`
           proteinInt: totalPhotoProt,
           carbsInt: 0,
           fatInt: 0,
+          loggedAt: photoLoggedAt,
         }).catch(e => console.warn("[photo mealLogs write]", e));
       }
 
@@ -465,10 +468,11 @@ Short. Direct. SA voice. No intro, no fluff.`
 
       const extraSection = extraReplies.length > 0 ? `\n\n${extraReplies.join("\n")}` : "";
       const multiPhotoNote = extraReplies.length > 0 ? `\n_${extraReplies.length + 1} photos logged — total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+      const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
       const photoTotalMs = Date.now() - mediaFlowStart;
-      console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs}`);
+      console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      return `${visionReply}${extraSection}${multiPhotoNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      return `${visionReply}${extraSection}${multiPhotoNote}${retroNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
