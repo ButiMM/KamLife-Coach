@@ -180,6 +180,28 @@ export function registerVoiceBroadcastRoutes(app: Express) {
     }
   });
 
+  // ── Force re-run: clears this week's recap logs then re-runs ──
+  app.post("/api/admin/voice-recap/force-rerun", requireAdminKey, async (_req: any, res: any) => {
+    try {
+      const d = new Date();
+      const day = d.getUTCDay();
+      const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
+      const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff));
+      const weekStart = monday.toISOString().slice(0, 10);
+      await pool.query(`DELETE FROM voice_recap_logs WHERE week_start = $1`, [weekStart]);
+      console.log(`[VOICE_RECAP] Force re-run: cleared all recap logs for week ${weekStart}`);
+      const { runWeeklyRecaps } = await import("../weekly-recap");
+      runWeeklyRecaps().then(r => {
+        console.log(`[VOICE_RECAP] Force re-run complete:`, r);
+      }).catch(e => {
+        console.error(`[VOICE_RECAP] Force re-run error:`, e.message);
+      });
+      return res.json({ message: `Cleared recaps for week ${weekStart} — regenerating now. Check back in 30 seconds.` });
+    } catch (e: any) {
+      return res.status(500).json({ error: e.message });
+    }
+  });
+
   // ── Manually trigger weekly recaps (for testing) ──
   app.post("/api/admin/voice-recap/run", requireAdminKey, async (_req: any, res: any) => {
     try {

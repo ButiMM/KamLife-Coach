@@ -341,6 +341,16 @@ function WeeklyRecapSection() {
     onError: (e: any) => toast({ title: "Failed to start", description: e.message, variant: "destructive" }),
   });
 
+  const forceRerunMutation = useMutation({
+    mutationFn: () =>
+      fetch("/api/admin/voice-recap/force-rerun", { method: "POST", credentials: "include" }).then(r => r.json()),
+    onSuccess: (data) => {
+      toast({ title: "Force re-run started", description: data.message || "Cleared old recaps and regenerating now." });
+      setTimeout(() => qc.invalidateQueries({ queryKey: ["/api/admin/voice-recap/logs"] }), 8000);
+    },
+    onError: (e: any) => toast({ title: "Failed", description: e.message, variant: "destructive" }),
+  });
+
   const configured = statusData?.configured ?? false;
   const quota = statusData?.quota;
   const logs = logsData?.logs ?? [];
@@ -358,10 +368,16 @@ function WeeklyRecapSection() {
           </div>
         </div>
         {configured && (
-          <Button variant="outline" size="sm" onClick={() => runMutation.mutate()} disabled={runMutation.isPending}>
-            <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
-            Run now
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => runMutation.mutate()} disabled={runMutation.isPending || forceRerunMutation.isPending}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
+              Run now
+            </Button>
+            <Button variant="destructive" size="sm" onClick={() => forceRerunMutation.mutate()} disabled={runMutation.isPending || forceRerunMutation.isPending}>
+              <RefreshCw className={`w-4 h-4 mr-2 ${forceRerunMutation.isPending ? "animate-spin" : ""}`} />
+              Force re-run
+            </Button>
+          </div>
         )}
       </div>
 
