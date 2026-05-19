@@ -7,7 +7,7 @@
 
 import { db } from "../db";
 import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc } from "drizzle-orm";
+import { eq, and, gte, lt, desc, like } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
@@ -626,7 +626,22 @@ export async function handleFoodContext(ctx: {
         checkPerfectDay(user.id, user.proteinTarget || 130),
         computeFoodLogStreak(user.id),
       ]);
-      const streakCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
+      // Only show streak milestone once per day — check if already shown today
+      let streakCelebration = "";
+      const rawCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
+      if (rawCelebration) {
+        const todayStart = sastDayStart();
+        const alreadyShownToday = await db.select({ id: chatHistory.id })
+          .from(chatHistory)
+          .where(and(
+            eq(chatHistory.userId, user.id),
+            eq(chatHistory.intent, "FOOD_LOG"),
+            gte(chatHistory.createdAt, todayStart),
+            like(chatHistory.messageOut, `%${foodStreak} day%`)
+          ))
+          .limit(1);
+        if (!alreadyShownToday.length) streakCelebration = rawCelebration;
+      }
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
 
       // Combo meal upsell — after logging a high-protein SA combo, suggest a veg side
