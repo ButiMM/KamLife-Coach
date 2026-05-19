@@ -85,6 +85,10 @@ export async function handleFoodContext(ctx: {
         await logChat(user.id, message, reply, "FOOD_CORRECTION_PROMPT");
         return reply;
       }
+      // Not a food correction — give a deterministic reply instead of falling through to GPT
+      const confusedReply = `Not sure what you mean. Reply *menu* to see your options, or tell me what you ate or trained.`;
+      await logChat(user.id, message, confusedReply, "CONFUSED_RECOVERY");
+      return confusedReply;
     } catch { /* non-fatal — fall through */ }
   }
 

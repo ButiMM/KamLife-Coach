@@ -7,7 +7,7 @@ import {
   todaySAST,
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
-import { getKamlifeProgramme } from "../../programme";
+import { buildDayWorkout } from "../../programme";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 
 export async function runMorningCheckin(): Promise<void> {
@@ -250,7 +250,7 @@ export async function runMorningCheckin(): Promise<void> {
 
       if (isTodayTrainingDay) {
         try {
-          const todayWorkout = getKamlifeProgramme(client, true);
+          const todayWorkout = buildDayWorkout(client);
           const previewLines = todayWorkout.split("\n").slice(0, 5).join("\n");
           parts.push(`\n*Today's workout (Day ${client.programmeDayInWeek || 1}):*\n${previewLines}\n\nReply *1* for the full workout.`);
         } catch {
