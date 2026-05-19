@@ -275,7 +275,11 @@ export function registerPaymentRoutes(app: Express) {
         cycles: "0",
       });
 
-      res.json({ url: `${baseUrl}?${params.toString()}`, phone, name });
+      const payfastUrl = `${baseUrl}?${params.toString()}`;
+      // Admin API callers (dashboard) pass ?json=1 to get the URL as JSON
+      if (req.query.json === "1") return res.json({ url: payfastUrl, phone, name });
+      // All other callers (WhatsApp link taps, SMS links) get a direct redirect to PayFast
+      return res.redirect(302, payfastUrl);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }

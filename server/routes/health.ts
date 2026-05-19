@@ -6,9 +6,15 @@ import { eq, sql } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
 
 export function registerHealthRoutes(app: Express) {
-  // ── Simple health check ──
-  app.get("/health", (_req, res) => {
-    res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+  // ── Simple health check — includes DB ping so Railway stops routing to dead instances ──
+  app.get("/health", async (_req, res) => {
+    try {
+      await db.execute(sql`SELECT 1`);
+      res.json({ status: "ok", service: "KamLife Coach", timestamp: new Date().toISOString() });
+    } catch (e: any) {
+      console.error("[HEALTH] DB check failed:", e.message);
+      res.status(503).json({ status: "error", detail: "database unavailable", timestamp: new Date().toISOString() });
+    }
   });
 
   // ── Public stats for landing page (no auth — aggregate only) ──
@@ -24,7 +30,7 @@ export function registerHealthRoutes(app: Express) {
       });
     } catch (e) {
       console.warn("[dashboard-stats]", e);
-      res.json({ activeClients: 200, workoutsLogged: 4800 }); // fallback
+      res.status(503).json({ activeClients: 0, workoutsLogged: 0 });
     }
   });
 

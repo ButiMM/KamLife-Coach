@@ -722,8 +722,15 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     const msg = err?.message ?? "";
 
     if (status === 401 || code === 401 || msg.includes("401")) {
-      console.error("[GPT] OpenAI auth error (401) — check AI_INTEGRATIONS_OPENAI_API_KEY:", msg);
-      return "Coach K is almost ready. Type *menu* to see your options or *calories* for your daily target. Your programme, meal plan, and targets are all set.";
+      console.error("[GPT] OpenAI auth error (401) — check OPENAI_API_KEY env var:", msg);
+      // Alert coach via SMS if configured
+      const alertPhone = process.env.COACH_ALERT_PHONE;
+      if (alertPhone) {
+        import("./scheduler/shared").then(({ sendCriticalAlert }) => {
+          sendCriticalAlert(alertPhone, `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`).catch(() => {});
+        }).catch(() => {});
+      }
+      return "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.";
     }
     if (status === 429 || msg.toLowerCase().includes("rate limit") || msg.toLowerCase().includes("quota")) {
       console.error("[GPT] OpenAI rate limit / quota exceeded:", msg);
