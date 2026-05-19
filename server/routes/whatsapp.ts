@@ -137,6 +137,11 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
   // WhatsApp albums arrive as N separate webhooks — we reply to the first, drop the rest silently.
   const mediaDedup = new Map<string, number>();
 
+  // MessageSid dedup: Twilio retries the webhook if we don't respond within 15s.
+  // Since we ACK immediately with empty TwiML, retries should be rare — but if they
+  // happen (network glitch, slow response), we must not double-process the same message.
+  const processedSids = new Map<string, number>(); // SID → timestamp
+
   // ── Main Twilio WhatsApp webhook ──
   app.post("/twilio/whatsapp", async (req, res) => {
     try {
@@ -163,6 +168,23 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       const phoneKey = rawPhoneEarly.replace(/^(whatsapp:)\s+/, "$1+");
       if (!await checkRateLimit(phoneKey)) {
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Too many messages. Wait 60 seconds.</Message></Response>`);
+      }
+
+      // MessageSid dedup — drop retries that arrive after we already ACK'd
+      const msgSid = (req.body.MessageSid || "") as string;
+      if (msgSid) {
+        const now = Date.now();
+        if (processedSids.has(msgSid)) {
+          console.warn(`[WEBHOOK] Duplicate MessageSid ${msgSid} — dropping retry`);
+          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        }
+        processedSids.set(msgSid, now);
+        // Evict entries older than 24h to prevent unbounded growth
+        if (processedSids.size > 2000) {
+          for (const [k, v] of processedSids) {
+            if (now - v > 86_400_000) processedSids.delete(k);
+          }
+        }
       }
 
       const rawPhone = phoneKey;
