@@ -109,23 +109,6 @@ export async function handleEarlyCommands(ctx: {
     return backMsg;
   }
 
-  // ---- GRADUATION / MILESTONE LIFE EVENT ----
-  // Must fire before the gym-closed check so we can celebrate AND offer alternatives.
-  const isGraduation = /\b(graduating|graduation|grad week|convocation|i.?m graduating|i (am|will be) graduating|graduating (on|this|next)|my graduation|matric farewell|matric (results|dance))\b/i.test(m);
-  if (isGraduation) {
-    const gymMentioned = /\b(gym|training|workout|exercise|programme)\b/i.test(m);
-    const gymClosed = /\b(not functioning|not open|closed|won.?t be|can.?t (make it|go)|not going|no gym)\b/i.test(m);
-    const name = firstName ? `${firstName}, ` : "";
-    let gradReply: string;
-    if (gymClosed || gymMentioned) {
-      gradReply = `${name}congratulations on your graduation — that is a massive achievement. Gym can wait. Celebrate properly this week.\n\nWhen you are back, your programme and logs are all still here. Reply *menu* when you are ready to pick up where you left off.\n\nIf you want to stay moving this week — bodyweight only. 20 squats + 10 push-ups + 20 lunges, 3 rounds. No equipment needed.`;
-    } else {
-      gradReply = `${name}congratulations on your graduation — that is a big deal. Celebrate it fully. Your programme will be here when you are ready to get back to it. Reply *menu* whenever you want to continue.`;
-    }
-    await logChat(user.id, message, gradReply, "GRADUATION_EVENT");
-    return gradReply;
-  }
-
   // ---- HOLIDAY / TRAVEL EQUIPMENT QUESTION ----
   // Must be checked BEFORE the workout delivery so it intercepts correctly.
   const isGymClosed = /\bgym.{0,15}(not (functioning|working|open|available|operational)|is (closed|shut|not)|closed|not open)\b/i.test(m)
