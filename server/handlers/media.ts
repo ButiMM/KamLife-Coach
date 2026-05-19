@@ -348,6 +348,11 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       }
       if (/^NOT_FOOD\b/i.test(visionReply)) {
         console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
+        // Check if this looks like a cooking ingredient/product (spray, oil, sauce, spice, etc.)
+        const isIngredient = /\b(spray|oil|sauce|spice|seasoning|sugar|salt|flour|stock|baking|butter|margarine|cook.?n|cook and bake|spray.?n.?cook)\b/i.test(message || "");
+        if (isIngredient) {
+          return `Got it — that's a cooking ingredient, not a meal to log. If you're adding it to a dish, just tell me what you made: "chicken with non-stick spray" and I'll include it. What did you eat?`;
+        }
         return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
       if (/^GROCERY_LIST:/i.test(visionReply)) {
