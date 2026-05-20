@@ -28,22 +28,27 @@ export async function getMenuText(user: any): Promise<string> {
 
   let workoutDone = false;
   let todayStepCount: number | null = null;
+  let workoutState: Awaited<ReturnType<typeof getTodayWorkoutState>>;
 
   try {
-    const [todayWorkout, todaySteps] = await Promise.all([
+    const [todayWorkout, todaySteps, ws] = await Promise.all([
       db.select().from(workoutLogs)
         .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
         .limit(1),
       db.select().from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStart)))
         .limit(1),
+      getTodayWorkoutState(user),
     ]);
     workoutDone = todayWorkout.length > 0;
     todayStepCount = todaySteps.length > 0 ? todaySteps[0].steps : null;
-  } catch { }
+    workoutState = ws;
+  } catch {
+    workoutState = await getTodayWorkoutState(user);
+  }
 
   const workoutStatus = mode !== "walk_only"
-    ? (workoutDone ? `Workout ✅` : `Today: ${dayLabel}`)
+    ? (workoutDone ? `Workout ✅` : workoutState!.type === "REST" ? `Rest day 🛌` : `Today: ${dayLabel}`)
     : null;
   const stepStatus = todayStepCount !== null
     ? `Steps: ${todayStepCount.toLocaleString()}/${stepsTarget.toLocaleString()}${todayStepCount >= stepsTarget ? " ✅" : ""}`
@@ -66,7 +71,6 @@ export async function getMenuText(user: any): Promise<string> {
     ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}${trialLine}`
     : `*KamLife Coach* 💪${trialLine}`;
 
-  const workoutState = await getTodayWorkoutState(user);
   const footer = `\n\n_Also: shopping list · meal prep · supplements · my water · badges · referral · *connect steps*_`;
 
   const daysSilent = user.lastActiveAt
