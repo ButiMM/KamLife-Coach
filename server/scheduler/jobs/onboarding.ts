@@ -23,7 +23,11 @@ export async function runEarlyOnboarding(): Promise<void> {
         await sendWhatsApp(client.phoneNumber, `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`);
         recordProactiveSend(client.id);
       } else if (days === 3) {
-        await sendWhatsApp(client.phoneNumber, `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead. Send me today's food and keep the momentum going.`);
+        const appUrl = process.env.APP_URL || "https://kamlife.co.za";
+        const encodedPhone = encodeURIComponent(client.phoneNumber.replace(/^whatsapp:/, ""));
+        const webhookUrl = `${appUrl}/webhook/steps?phone=${encodedPhone}`;
+        const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Unlock automatic step tracking*\n\nRight now you're logging steps manually. Take 2 minutes to connect your phone's health app — after that, your steps sync to me automatically every night.\n\n*Android (Google Fit / Samsung Health):*\n1. Install *"Health Connect Webhooks"* — free on Play Store\n2. Open app → Add Webhook → paste this URL:\n\`${webhookUrl}\`\n3. Select Steps · Set to Daily at 9pm · Save\n\n*iPhone (Apple Health):*\n1. Open *Shortcuts* app (already on your phone)\n2. Tap + → Add Action → search "Get My Steps"\n3. Add action → "Get Contents of URL" → paste: \`${webhookUrl}\` → Method: POST → Body: \`{"steps": [Steps Count]}\`\n4. Automation → New → Time of Day → 9pm → Daily → run shortcut\n\nOnce set up, reply *"steps connected"* and I will confirm it is working.`;
+        await sendWhatsApp(client.phoneNumber, day3Msg);
         recordProactiveSend(client.id);
       } else if (days === 5) {
         const fiveDaysAgoOnb = new Date(Date.now() - 5 * 86_400_000);
