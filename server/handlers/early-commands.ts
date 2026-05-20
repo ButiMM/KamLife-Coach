@@ -390,23 +390,45 @@ export async function handleEarlyCommands(ctx: {
     const cTarget = user.calorieTarget || 1800;
     const budget = user.weeklyFoodBudget || "100_300";
     const budgetLabel: Record<string, string> = { under_100: "under R100/week", "100_300": "R100–R300/week", "300_600": "R300–R600/week", over_600: "over R600/week" };
-    const adjustReply = await withTimeout("gpt_adjust", 20000, () => askCoachK(message, user,
-      `The client just shared their personal grocery/shopping list. Your job: give a sharp, SA-specific Coach K review. Budget: ${budgetLabel[budget] || "moderate"}. Goal: ${goal.replace("_", " ")}. Their targets: ${cTarget} kcal/day, ${pTarget}g protein/day.
+    const medicalNotes = [user.medicalConditions, user.otherMedicalNotes].filter(Boolean).join(", ") || "none";
+    const rebuildReply = await withTimeout("gpt_grocery_rebuild", 28000, () => askCoachK(message, user,
+      `The client sent their personal grocery/shopping list. REBUILD it completely — do not review it. Replace it with a fully optimised version for their specific goal.
 
-Structure your response exactly like this (no intro, no fluff):
+Client goal: ${goal.replace("_", " ")}
+Weekly budget: ${budgetLabel[budget] || "R100–R300/week"}
+Daily targets: ${cTarget} kcal, ${pTarget}g protein
+Medical/allergies: ${medicalNotes}
 
-✅ *What's good:* (1-2 items they're already buying right — be specific)
+RULES:
+- Keep items that already fit their goal (note "✓" next to those)
+- Drop items that work against their goal — replace with better alternatives
+- Add any essential missing items for their goal (protein sources, veg, staples)
+- SA products only: Checkers, Pick n Pay, USAVE, Spar. Use SA brand/product names
+- Include quantity for a full week and rough rand price per item
+- Max 20 items total — prioritise by impact
 
-❌ *What's missing:* (1-2 specific gaps for their ${goal.replace("_", " ")} goal — especially protein if under 3 sources)
+RESPOND EXACTLY in this format (start immediately with the header, no intro text):
 
-🔄 *Swap:* (1-2 direct swaps — same price, better for goal. Format: "X → Y (reason)")
+🛒 *Your rebuilt list — ${goal.replace("_", " ")} optimised*
 
-📋 *Add:* (1-2 cheap items that fill the biggest gap — include SA price estimate)
+*Protein (${pTarget}g/day target):*
+• [item] — [quantity] — ~R[price]
 
-Keep entire response under 120 words. Use SA product names. No lectures.`
+*Carbs (slow-release energy):*
+• [item] — [quantity] — ~R[price]
+
+*Vegetables:*
+• [item] — [quantity] — ~R[price]
+
+*Pantry & basics:*
+• [item] — [quantity] — ~R[price]
+
+*Week total: ~R[X]–R[Y]*
+
+${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut sugary drinks, white bread, processed snacks, anything fried. Replace with eggs, pilchards, chicken, spinach, cabbage." : "Muscle gain focus: calorie-dense protein at every meal. Add extra portions of carbs. Remove nothing — just add. Prioritise chicken, eggs, oats, sweet potato, peanut butter."}${medicalNotes !== "none" ? `\n\nALLERGIES/CONDITIONS: ${medicalNotes} — remove ALL items containing these. No exceptions.` : ""}`
     ));
-    await logChat(user.id, message, adjustReply, "SHOPPING_LIST_ADJUST");
-    return adjustReply;
+    await logChat(user.id, message, rebuildReply, "SHOPPING_LIST_REBUILD");
+    return rebuildReply;
   }
 
   // ---- RESTAURANT SURVIVAL GUIDE — "eating at Nando's", "what to order at KFC" ----
@@ -1084,6 +1106,22 @@ Keep entire response under 120 words. Use SA product names. No lectures.`
     const comingBackReply = `${capName}, welcome back. ${daysText} away — everyone has those stretches.\n\nWe don't restart from zero. Your programme, targets, and logs are all still here. Today is just Day 1 of the next streak.\n\n*Here's what to do right now:*\n1. Tell me what you ate today (even if it wasn't perfect)\n2. Log your steps if you walked\n3. Reply *menu* for today's workout\n\nNo catching up. No guilt. Just today. Let's go.`;
     await logChat(user.id, message, comingBackReply, "COMEBACK");
     return comingBackReply;
+  }
+
+  // ---- CONNECT STEPS — sync from health apps ----
+  const isConnectSteps = /\b(connect(ing)?(\s+my)?\s+steps?|sync(ing)?(\s+my)?\s+steps?|link(ing)?(\s+my)?\s+(health\s+app|step\s+tracker|google\s+fit|apple\s+health|samsung\s+health|fitbit)|connect\s+(google\s+fit|apple\s+health|health\s+app|step\s+tracker|fitbit)|auto\s+(sync|track|log)\s+steps?|step\s+(sync|auto|connect)|auto.*steps?)\b/i.test(m);
+  if (isConnectSteps) {
+    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
+    const webhookUrl = `${appUrl}/webhook/steps?phone=${encodeURIComponent(phone)}`;
+    const connectReply = `*Connect your step tracker*\n\nOne-time setup — after that, your steps sync automatically every day.\n\n---\n\n*📱 Android (Google Fit / Samsung Health / Fitbit)*\n\n1. Install *Health Connect Webhooks* — search it on the Play Store (free)\n2. Open the app → Add Webhook\n3. Paste this URL:\n\`${webhookUrl}\`\n4. Select "Steps" as the data type\n5. Set frequency to "Daily at 9pm"\n\nThat's it. From tomorrow, I'll have your steps before morning check-in.\n\n---\n\n*🍎 iPhone (Apple Health)*\n\n1. Open the *Shortcuts* app (pre-installed)\n2. Tap + → Add Action → search "URL"\n3. Paste: \`${webhookUrl}\`\n4. Add another action → "Get My Steps" (search Health)\n5. Add action → "Get Contents of URL" → set Method to POST, Body to \`{"steps": [steps]}\`\n6. Go to Automation → New → Time of Day → 9pm → Daily → run the shortcut\n\nSend me "steps connected" once you've set it up and I'll confirm it's working.`;
+    await logChat(user.id, message, connectReply, "STEPS_CONNECT_GUIDE");
+    return connectReply;
+  }
+
+  if (m === "steps connected" || m === "step connected" || m === "steps synced" || m === "steps set up" || m === "steps linked") {
+    const confirmReply = `${firstName ? firstName + ", " : ""}I'll watch for your first automatic sync tonight. Once I receive it, I'll confirm and your daily steps will show up in morning check-ins without you having to send them.\n\nIf it doesn't arrive by tomorrow morning, double-check the webhook URL is exactly right and that you selected "Steps" as the data type.`;
+    await logChat(user.id, message, confirmReply, "STEPS_CONNECT_CONFIRM");
+    return confirmReply;
   }
 
   // ---- CONFUSION / LOST USER — catch truly unclear messages before GPT ----

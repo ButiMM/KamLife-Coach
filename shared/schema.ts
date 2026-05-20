@@ -419,6 +419,22 @@ export const messages = pgTable("messages", {
 
 // === CLIENT PINNED ACTIONS ===
 // Coach-defined per-client tasks: "Call to check injury", "Review programme week 4", etc.
+// === HEALTH APP INTEGRATIONS — Google Fit / Apple Shortcuts step sync ===
+export const userIntegrations = pgTable("user_integrations", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: uuid("user_id").notNull().references(() => users.id),
+  provider: text("provider").notNull(), // 'google_fit'
+  accessToken: text("access_token"),
+  refreshToken: text("refresh_token"),
+  tokenExpiry: timestamp("token_expiry"),
+  lastSyncAt: timestamp("last_sync_at"),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  userProviderIdx: uniqueIndex("user_integrations_user_provider_idx").on(table.userId, table.provider),
+  userIdx: index("user_integrations_user_idx").on(table.userId),
+}));
+
 export const clientActions = pgTable("client_actions", {
   id: serial("id").primaryKey(),
   userId: uuid("user_id").notNull().references(() => users.id),
@@ -434,6 +450,10 @@ export type ClientAction = typeof clientActions.$inferSelect;
 
 export const clientActionsRelations = relations(clientActions, ({ one }) => ({
   user: one(users, { fields: [clientActions.userId], references: [users.id] }),
+}));
+
+export const userIntegrationsRelations = relations(userIntegrations, ({ one }) => ({
+  user: one(users, { fields: [userIntegrations.userId], references: [users.id] }),
 }));
 
 // === RELATIONS ===

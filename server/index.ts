@@ -376,6 +376,9 @@ async function runMigrations(): Promise<void> {
     `UPDATE users SET awaiting_programme_answers = false WHERE awaiting_programme_answers = true AND last_active_at < NOW() - INTERVAL '24 hours'`,
     `CREATE TABLE IF NOT EXISTS exercise_logs (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), exercise_name TEXT NOT NULL, weight_kg NUMERIC, reps INTEGER, sets INTEGER, logged_at TIMESTAMP DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS exercise_logs_user_idx ON exercise_logs(user_id)`,
+    `CREATE TABLE IF NOT EXISTS user_integrations (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), provider TEXT NOT NULL, access_token TEXT, refresh_token TEXT, token_expiry TIMESTAMP, last_sync_at TIMESTAMP, is_active BOOLEAN NOT NULL DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS user_integrations_user_provider_idx ON user_integrations(user_id, provider)`,
+    `CREATE INDEX IF NOT EXISTS user_integrations_user_idx ON user_integrations(user_id)`,
   ];
 
   let applied = 0;

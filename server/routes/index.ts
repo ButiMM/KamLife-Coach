@@ -14,3 +14,4 @@ export { registerDashboardRoutes } from "./dashboard";
 export { registerPaymentRoutes } from "./payments";
 export { registerCoachRoutes } from "./coach";
 export { registerVoiceBroadcastRoutes } from "./voice-broadcast";
+export { registerHealthSyncRoutes } from "./health-sync";
