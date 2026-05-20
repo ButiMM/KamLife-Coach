@@ -112,111 +112,131 @@ export async function initScheduler(): Promise<void> {
 
   schedulerInitialised = true;
 
+  // Safe job runner — catches and logs errors without crashing the scheduler
+  function safe(name: string, fn: () => Promise<void>): void {
+    fn().catch(e => console.error(`[SCHEDULER] ${name} failed:`, e));
+  }
+
   // ── Daily jobs ────────────────────────────────────────────────────────────
-  cron.schedule("0 4 * * *",    () => runMorningCheckin(),           { timezone: "UTC" }); // 6am SAST
-  cron.schedule("0 17 * * *",   () => runEveningAccountability(),    { timezone: "UTC" }); // 7pm SAST
-  cron.schedule("2 4 * * *",    () => runWeek3Intervention(),        { timezone: "UTC" }); // 6am SAST
-  cron.schedule("0 6 * * *",    () => runMilestoneCelebrations(),    { timezone: "UTC" }); // 8am SAST
-  cron.schedule("0 8 * * *",    () => runEarlyOnboarding(),          { timezone: "UTC" }); // 10am SAST
-  cron.schedule("0 9 * * *",    () => runGoalReassessment(),         { timezone: "UTC" }); // 11am SAST
-  cron.schedule("5 8 * * *",    () => runSubscriptionExpiryCheck(),  { timezone: "UTC" }); // 10am SAST
-  cron.schedule("0 10 * * *",   () => runPaymentFailureRecovery(),   { timezone: "UTC" }); // 12pm SAST
-  cron.schedule("3 9 * * *",    () => runSignupNudge(),              { timezone: "UTC" }); // 11am SAST
-  cron.schedule("0 5 * * *",    () => runCulturalCalendar(),         { timezone: "UTC" }); // 7am SAST
-  cron.schedule("0 19 * * *",   () => runStreakAtRisk(),             { timezone: "UTC" }); // 9pm SAST
-  cron.schedule("0 7 * * *",    () => runReferralNudge(),            { timezone: "UTC" }); // 9am SAST
+  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin),           { timezone: "UTC" }); // 6am SAST
+  cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability),    { timezone: "UTC" }); // 7pm SAST
+  cron.schedule("2 4 * * *",    () => safe("runWeek3Intervention",      runWeek3Intervention),        { timezone: "UTC" }); // 6am SAST
+  cron.schedule("0 6 * * *",    () => safe("runMilestoneCelebrations",  runMilestoneCelebrations),    { timezone: "UTC" }); // 8am SAST
+  cron.schedule("0 8 * * *",    () => safe("runEarlyOnboarding",        runEarlyOnboarding),          { timezone: "UTC" }); // 10am SAST
+  cron.schedule("0 9 * * *",    () => safe("runGoalReassessment",       runGoalReassessment),         { timezone: "UTC" }); // 11am SAST
+  cron.schedule("5 8 * * *",    () => safe("runSubscriptionExpiryCheck",runSubscriptionExpiryCheck),  { timezone: "UTC" }); // 10am SAST
+  cron.schedule("0 10 * * *",   () => safe("runPaymentFailureRecovery", runPaymentFailureRecovery),   { timezone: "UTC" }); // 12pm SAST
+  cron.schedule("3 9 * * *",    () => safe("runSignupNudge",            runSignupNudge),              { timezone: "UTC" }); // 11am SAST
+  cron.schedule("0 5 * * *",    () => safe("runCulturalCalendar",       runCulturalCalendar),         { timezone: "UTC" }); // 7am SAST
+  cron.schedule("0 19 * * *",   () => safe("runStreakAtRisk",           runStreakAtRisk),             { timezone: "UTC" }); // 9pm SAST
+  cron.schedule("0 7 * * *",    () => safe("runReferralNudge",          runReferralNudge),            { timezone: "UTC" }); // 9am SAST
   cron.schedule("0 4 * * *",    async () => {                                               // 6am SAST diet break
-    const today = todaySAST();
-    if (loadState()["diet_break_check"] === today) return;
-    saveState("diet_break_check", today);
-    await runDietBreakCheck();
+    try {
+      const today = todaySAST();
+      if (loadState()["diet_break_check"] === today) return;
+      saveState("diet_break_check", today);
+      await runDietBreakCheck();
+    } catch (e) { console.error("[SCHEDULER] runDietBreakCheck failed:", e); }
   }, { timezone: "UTC" });
   cron.schedule("0 6 * * *",    async () => {                                               // 8am SAST supplement
-    const today = todaySAST();
-    if (loadState()["supplement_reminder"] === today) return;
-    saveState("supplement_reminder", today);
-    await runSupplementReminder();
+    try {
+      const today = todaySAST();
+      if (loadState()["supplement_reminder"] === today) return;
+      saveState("supplement_reminder", today);
+      await runSupplementReminder();
+    } catch (e) { console.error("[SCHEDULER] runSupplementReminder failed:", e); }
   }, { timezone: "UTC" });
 
   // ── Every 12 hours ────────────────────────────────────────────────────────
-  cron.schedule("4 4,16 * * *",  () => runSilenceDetection(),        { timezone: "UTC" });
-  cron.schedule("0 5,18 * * *",  () => runDeepSilenceEscalation(),   { timezone: "UTC" });
+  cron.schedule("4 4,16 * * *",  () => safe("runSilenceDetection",    runSilenceDetection),    { timezone: "UTC" });
+  cron.schedule("0 5,18 * * *",  () => safe("runDeepSilenceEscalation", runDeepSilenceEscalation), { timezone: "UTC" });
 
   // ── Hourly ────────────────────────────────────────────────────────────────
-  cron.schedule("0 * * * *",     () => runBuddyAccountability());
+  cron.schedule("0 * * * *",     () => safe("runBuddyAccountability", runBuddyAccountability));
 
   // ── Weekly — Monday ───────────────────────────────────────────────────────
   cron.schedule("30 4 * * 1",    async () => {                        // 6:30am SAST weight reminder
-    const today = todaySAST();
-    if (hasRunToday("weight_reminder", today)) return;
-    saveState("weight_reminder", today);
-    await runWeightReminder();
+    try {
+      const today = todaySAST();
+      if (hasRunToday("weight_reminder", today)) return;
+      saveState("weight_reminder", today);
+      await runWeightReminder();
+    } catch (e) { console.error("[SCHEDULER] runWeightReminder failed:", e); }
   }, { timezone: "UTC" });
   cron.schedule("0 5 * * 1",     async () => {                        // 7am SAST progress summary
-    const today = todaySAST();
-    if (hasRunToday("monday_progress", today)) return;
-    saveState("monday_progress", today);
-    await runMondayProgress();
+    try {
+      const today = todaySAST();
+      if (hasRunToday("monday_progress", today)) return;
+      saveState("monday_progress", today);
+      await runMondayProgress();
+    } catch (e) { console.error("[SCHEDULER] runMondayProgress failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 5 * * 1",     () => runWeeklyKpiReport());         // 7am SAST KPI report to coach
-  cron.schedule("0 5 * * 1",     () => runWomensMonth());             // 7am SAST Women's Month (Aug only)
-  cron.schedule("0 5 * * 1",     () => runPhaseAdvancement());        // 7am SAST phase check
-  cron.schedule("0 4 * * 1",     () => runTrainingDataLog());          // 6am SAST training data log
+  cron.schedule("0 5 * * 1",     () => safe("runWeeklyKpiReport",     runWeeklyKpiReport));    // 7am SAST KPI report
+  cron.schedule("0 5 * * 1",     () => safe("runWomensMonth",         runWomensMonth));        // 7am SAST Women's Month (Aug only)
+  cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement));   // 7am SAST phase check
+  cron.schedule("0 4 * * 1",     () => safe("runTrainingDataLog",     runTrainingDataLog));    // 6am SAST training data log
   cron.schedule("0 6 * * 1",     async () => {                        // 8am SAST grocery list
-    const today = todaySAST();
-    if (hasRunToday("monday_groceries", today)) return;
-    saveState("monday_groceries", today);
-    await runMondayGroceries();
+    try {
+      const today = todaySAST();
+      if (hasRunToday("monday_groceries", today)) return;
+      saveState("monday_groceries", today);
+      await runMondayGroceries();
+    } catch (e) { console.error("[SCHEDULER] runMondayGroceries failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 6 * * 1",     () => runWeeklyMondayCheckin());     // 8am SAST programme check-in
-  cron.schedule("0 7 * * 1",     () => runGoalCheck());               // 9am SAST goal/programme review
+  cron.schedule("0 6 * * 1",     () => safe("runWeeklyMondayCheckin", runWeeklyMondayCheckin)); // 8am SAST
+  cron.schedule("0 7 * * 1",     () => safe("runGoalCheck",           runGoalCheck));           // 9am SAST
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────
   cron.schedule("0 8 * * 2,4",   async () => {                        // 10am SAST comeback
-    const today = todaySAST();
-    if (hasRunToday("comeback_msg", today)) return;
-    saveState("comeback_msg", today);
-    await runComebackMessages();
+    try {
+      const today = todaySAST();
+      if (hasRunToday("comeback_msg", today)) return;
+      saveState("comeback_msg", today);
+      await runComebackMessages();
+    } catch (e) { console.error("[SCHEDULER] runComebackMessages failed:", e); }
   }, { timezone: "UTC" });
 
   // ── Weekly — Wednesday ────────────────────────────────────────────────────
-  cron.schedule("0 8 * * 3",     () => runInjuryFollowup(),           { timezone: "UTC" }); // 10am SAST
+  cron.schedule("0 8 * * 3",     () => safe("runInjuryFollowup",      runInjuryFollowup),      { timezone: "UTC" }); // 10am SAST
 
   // ── Weekly — Friday ───────────────────────────────────────────────────────
-  cron.schedule("0 14 * * 5",    () => runFridayWeekendStrategy(),    { timezone: "UTC" }); // 4pm SAST
+  cron.schedule("0 14 * * 5",    () => safe("runFridayWeekendStrategy", runFridayWeekendStrategy), { timezone: "UTC" }); // 4pm SAST
 
   // ── Weekly — Saturday ─────────────────────────────────────────────────────
-  cron.schedule("0 8 * * 6",     () => runNsvCheckin(),               { timezone: "UTC" }); // 10am SAST
+  cron.schedule("0 8 * * 6",     () => safe("runNsvCheckin",          runNsvCheckin),          { timezone: "UTC" }); // 10am SAST
 
   // ── Weekly — Sunday ───────────────────────────────────────────────────────
-  cron.schedule("0 6 * * 0",     () => runSundayWeeklyReport(),       { timezone: "UTC" }); // 8am SAST
-  cron.schedule("0 7 * * 0",     () => runPlateauDetection(),         { timezone: "UTC" }); // 9am SAST
-  cron.schedule("0 7 * * 0",     () => runComplianceLevelUpdate(),    { timezone: "UTC" }); // 9am SAST
-  cron.schedule("10 7 * * 0",    () => runComplianceLevelUpdate(),    { timezone: "UTC" }); // slight offset
-  cron.schedule("0 8 * * 0",     () => runWeekendFoodAudit(),         { timezone: "UTC" }); // 10am SAST
+  cron.schedule("0 6 * * 0",     () => safe("runSundayWeeklyReport",  runSundayWeeklyReport),  { timezone: "UTC" }); // 8am SAST
+  cron.schedule("0 7 * * 0",     () => safe("runPlateauDetection",    runPlateauDetection),    { timezone: "UTC" }); // 9am SAST
+  cron.schedule("0 7 * * 0",     () => safe("runComplianceLevelUpdate", runComplianceLevelUpdate), { timezone: "UTC" }); // 9am SAST
+  cron.schedule("0 8 * * 0",     () => safe("runWeekendFoodAudit",    runWeekendFoodAudit),    { timezone: "UTC" }); // 10am SAST
   cron.schedule("0 8 * * 0",     async () => {                        // 10am SAST auto cal adjust
-    const today = todaySAST();
-    if (loadState()["auto_cal_adjust"] === today) return;
-    saveState("auto_cal_adjust", today);
-    await runAutoCalAdjust();
+    try {
+      const today = todaySAST();
+      if (loadState()["auto_cal_adjust"] === today) return;
+      saveState("auto_cal_adjust", today);
+      await runAutoCalAdjust();
+    } catch (e) { console.error("[SCHEDULER] runAutoCalAdjust failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 15 * * 0",    () => runStepLeaderboard());         // 5pm SAST leaderboard
-  cron.schedule("0 16 * * 0",    () => runWeeklyWinsCelebration());   // 6pm SAST wins
-  cron.schedule("0 17 * * 0",    () => runSundayEveningCheckin(),     { timezone: "UTC" }); // 7pm SAST
+  cron.schedule("0 15 * * 0",    () => safe("runStepLeaderboard",    runStepLeaderboard));    // 5pm SAST
+  cron.schedule("0 16 * * 0",    () => safe("runWeeklyWinsCelebration", runWeeklyWinsCelebration)); // 6pm SAST
+  cron.schedule("0 17 * * 0",    () => safe("runSundayEveningCheckin",  runSundayEveningCheckin), { timezone: "UTC" }); // 7pm SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────
-  cron.schedule("0 7 1 * *",     () => runMonthlyMeasurements(),      { timezone: "UTC" }); // 1st 9am SAST
-  cron.schedule("0 8 20 * *",    () => runMonthEndBudget(),           { timezone: "UTC" }); // 20th 10am SAST
-  cron.schedule("0 7 15,25 * *", () => runPaydayShoppingNudge(),      { timezone: "UTC" }); // 15th+25th
+  cron.schedule("0 7 1 * *",     () => safe("runMonthlyMeasurements", runMonthlyMeasurements), { timezone: "UTC" }); // 1st 9am SAST
+  cron.schedule("0 8 20 * *",    () => safe("runMonthEndBudget",      runMonthEndBudget),      { timezone: "UTC" }); // 20th 10am SAST
+  cron.schedule("0 7 15,25 * *", () => safe("runPaydayShoppingNudge", runPaydayShoppingNudge), { timezone: "UTC" }); // 15th+25th
   cron.schedule("0 17 3 * *",    async () => {                        // 3rd 7pm SAST NPS
-    const today = todaySAST();
-    if (loadState()["nps_survey"] === today) return;
-    saveState("nps_survey", today);
-    await runMonthlyNps();
+    try {
+      const today = todaySAST();
+      if (loadState()["nps_survey"] === today) return;
+      saveState("nps_survey", today);
+      await runMonthlyNps();
+    } catch (e) { console.error("[SCHEDULER] runMonthlyNps failed:", e); }
   }, { timezone: "UTC" });
 
   // ── Annual ────────────────────────────────────────────────────────────────
-  cron.schedule("0 5 2 1 *",     () => runNewYearReset(),             { timezone: "UTC" }); // Jan 2
+  cron.schedule("0 5 2 1 *",     () => safe("runNewYearReset",        runNewYearReset),        { timezone: "UTC" }); // Jan 2
 
   console.log("[SCHEDULER] All cron jobs registered.");
 }

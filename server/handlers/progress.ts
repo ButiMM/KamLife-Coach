@@ -48,7 +48,7 @@ export async function handleProgressCheck(ctx: {
       : null;
     const weekFoodLogDays = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
     const weekTotalProt = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
-    const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / 7) : 0;
+    const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / weekFoodLogDays) : 0;
     const protTarget = user.proteinTarget || 120;
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
     const fn = user.name || "Hey";

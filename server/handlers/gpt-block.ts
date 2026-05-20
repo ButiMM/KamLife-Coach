@@ -307,12 +307,16 @@ CRITICAL RULES — these are non-negotiable:
     finalInstruction = `LANGUAGE CONTEXT: This client's primary language is ${langName}. Use SIMPLE English — short sentences, basic words, no jargon. Maximum 8-10 words per sentence. Say "eat" not "consume". Say "belly fat" not "visceral fat". Explain any exercise in one plain sentence.\n\n${finalInstruction}`;
   }
 
-  // ---- MEMORY: retrieve relevant memories for this message ----
+  // ---- MEMORY: retrieve relevant memories — fire and don't block response ----
+  // 500ms timeout so a slow/missing pgvector table never delays coaching replies
   let memoryContext = "";
   try {
-    const memories = await retrieveMemories(phone, message);
+    const memories = await Promise.race([
+      retrieveMemories(phone, message),
+      new Promise<string[]>(r => setTimeout(() => r([]), 500)),
+    ]);
     if (memories.length > 0) memoryContext = memories.join("\n");
-  } catch (e) { console.warn("[non-fatal]", e); }
+  } catch (e) { /* non-fatal — memory is enhancement, not core */ }
 
   // ---- SHORT REPLY HANDLER — "yes", "no", "ok" etc need conversation context ----
   // Pure punctuation / frustration symbols — "!!!!!", "???", "..." — treat as short contextual reply
