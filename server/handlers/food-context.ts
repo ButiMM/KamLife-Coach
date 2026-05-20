@@ -596,6 +596,18 @@ export async function handleFoodContext(ctx: {
       const scannerLoggedAt = parseMealDate(message);
       const scannerIsRetro = isRetroactiveMeal(message);
       try {
+        // Dedup: skip insert if an identical-kcal meal was logged in the last 4 minutes
+        // (catches retries caused by transient errors returning "Eish" while DB write succeeded)
+        const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+        const recentDup = await db.select({ id: mealLogs.id })
+          .from(mealLogs)
+          .where(and(
+            eq(mealLogs.userId, user.id),
+            gte(mealLogs.loggedAt, dedupWindow),
+            eq(mealLogs.kcalInt, totalCals),
+          ))
+          .limit(1);
+        if (recentDup.length === 0) {
         const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f) => {
           const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
           return s + (grams * (f.carbsPer100g || 0) / 100);
@@ -612,19 +624,20 @@ export async function handleFoodContext(ctx: {
           category: f.category,
         }));
         const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
-        await db.insert(mealLogs).values({
-          userId: user.id,
-          rawMessage: message.slice(0, 1000),
-          source: scannerIsRetro ? "retro" : "sa_scanner",
-          kcalInt: totalCals,
-          proteinInt: Math.round(totalProtein),
-          carbsInt: totalCarbs,
-          fatInt: totalFat,
-          items,
-          mealLabel: firstSegLabel,
-          loggedAt: scannerLoggedAt,
-        });
-        invalidatePatternCache(user.id);
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message.slice(0, 1000),
+            source: scannerIsRetro ? "retro" : "sa_scanner",
+            kcalInt: totalCals,
+            proteinInt: Math.round(totalProtein),
+            carbsInt: totalCarbs,
+            fatInt: totalFat,
+            items,
+            mealLabel: firstSegLabel,
+            loggedAt: scannerLoggedAt,
+          });
+          invalidatePatternCache(user.id);
+        }
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
       const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
@@ -708,19 +721,30 @@ export async function handleFoodContext(ctx: {
           }));
           const gptLoggedAt = parseMealDate(message);
           const gptIsRetro = isRetroactiveMeal(message);
-          await db.insert(mealLogs).values({
-            userId: user.id,
-            rawMessage: message.slice(0, 1000),
-            source: gptIsRetro ? "retro" : "gpt_fallback",
-            kcalInt: gptFallbackResult.totalKcal,
-            proteinInt: gptFallbackResult.totalProtein,
-            carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
-            fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
-            items,
-            mealLabel: null,
-            loggedAt: gptLoggedAt,
-          });
-          invalidatePatternCache(user.id);
+          const gptDedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+          const gptRecentDup = await db.select({ id: mealLogs.id })
+            .from(mealLogs)
+            .where(and(
+              eq(mealLogs.userId, user.id),
+              gte(mealLogs.loggedAt, gptDedupWindow),
+              eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
+            ))
+            .limit(1);
+          if (gptRecentDup.length === 0) {
+            await db.insert(mealLogs).values({
+              userId: user.id,
+              rawMessage: message.slice(0, 1000),
+              source: gptIsRetro ? "retro" : "gpt_fallback",
+              kcalInt: gptFallbackResult.totalKcal,
+              proteinInt: gptFallbackResult.totalProtein,
+              carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
+              fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
+              items,
+              mealLabel: null,
+              loggedAt: gptLoggedAt,
+            });
+            invalidatePatternCache(user.id);
+          }
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
@@ -770,18 +794,32 @@ export async function handleFoodContext(ctx: {
         const items = gptFallbackResult.foods.map((f: any) => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
         }));
-        await db.insert(mealLogs).values({
-          userId: user.id,
-          rawMessage: message.slice(0, 1000),
-          source: "gpt_fallback",
-          kcalInt: gptFallbackResult.totalKcal,
-          proteinInt: gptFallbackResult.totalProtein,
-          carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
-          fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
-          items,
-          mealLabel: null,
-        });
-        invalidatePatternCache(user.id);
+        const fb2LoggedAt = parseMealDate(message);
+        const fb2IsRetro = isRetroactiveMeal(message);
+        const fb2DedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+        const fb2RecentDup = await db.select({ id: mealLogs.id })
+          .from(mealLogs)
+          .where(and(
+            eq(mealLogs.userId, user.id),
+            gte(mealLogs.loggedAt, fb2DedupWindow),
+            eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
+          ))
+          .limit(1);
+        if (fb2RecentDup.length === 0) {
+          await db.insert(mealLogs).values({
+            userId: user.id,
+            rawMessage: message.slice(0, 1000),
+            source: fb2IsRetro ? "retro" : "gpt_fallback",
+            kcalInt: gptFallbackResult.totalKcal,
+            proteinInt: gptFallbackResult.totalProtein,
+            carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
+            fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
+            items,
+            mealLabel: null,
+            loggedAt: fb2LoggedAt,
+          });
+          invalidatePatternCache(user.id);
+        }
       } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);

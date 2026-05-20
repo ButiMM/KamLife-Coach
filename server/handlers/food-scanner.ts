@@ -368,8 +368,12 @@ export function buildFoodLogReply(p: {
   const stepsNote = extraStepsBurned > 0 && calRemaining < 0
     ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
     : "";
-  const runningLine = prevCals > 0
+  // Suppress running total if it's clearly impossible (duplicate entries can inflate it)
+  const runningTotalSane = runningCals <= calorieTarget * 2.5;
+  const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
+    : prevCals > 0
+    ? `Remaining today: ~${Math.max(0, calorieTarget - totalMealCals)} kcal`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
