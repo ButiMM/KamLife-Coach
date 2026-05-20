@@ -329,8 +329,9 @@ CRITICAL RULES — these are non-negotiable:
     } catch (e) { console.warn("[punct-reply]", e); }
   }
 
-  // Pure reactions — no GPT needed. Just acknowledge and move on.
-  const PURE_REACTIONS = new Set(["wow", "lol", "omg", "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "lekker", "cool", "sharp", "eish", "dankie", "aight"]);
+  // Pure reactions — only words that are unambiguously positive regardless of context.
+  // Words like "wow", "eish", "omg" are ambiguous (can be sarcasm/frustration) — they fall through to context-aware handling.
+  const PURE_REACTIONS = new Set(["nice", "awesome", "great", "perfect", "noted", "got it", "will do", "lekker", "cool", "dankie", "aight"]);
   if (PURE_REACTIONS.has(m)) {
     const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up."];
     const ack = acks[Math.floor(Math.random() * acks.length)];
@@ -338,9 +339,10 @@ CRITICAL RULES — these are non-negotiable:
     return ack;
   }
 
-
-  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "thanks", "thank you", "wtf", "right"];
-  if (SHORT_REPLIES.includes(m)) {
+  // Ambiguous reactions — "wow", "eish", "omg", "sharp" — route through context to read the room
+  const AMBIGUOUS_REACTIONS = ["wow", "eish", "omg", "oh my god", "yoh", "hayibo", "haibo", "shem", "really", "seriously", "sharp", "lol", "wtf", "right"];
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "thanks", "thank you"];
+  if (SHORT_REPLIES.includes(m) || AMBIGUOUS_REACTIONS.includes(m)) {
     try {
       const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
         .from(chatHistory)
@@ -349,7 +351,13 @@ CRITICAL RULES — these are non-negotiable:
         .limit(1);
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
-      const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This is a direct response to what you said. Respond accordingly — if you asked a question, this is the answer. If you gave advice, "${message}" is acknowledgment. Be specific and move forward. Do not ask "what do you mean" — interpret from context.`;
+      const shortReplyContext = `Client replied "${message}" to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}".
+
+CRITICAL — READ THE TONE FIRST:
+- If your previous message was clearly wrong, confused, or unhelpful AND the client says "wow", "eish", "omg", "really", "seriously", "lol" — they are expressing disbelief or frustration, NOT celebration. Acknowledge the bad response briefly and correct it.
+- If your previous message was good coaching and the client's reaction is positive — acknowledge and move forward.
+- Never respond to sarcasm with cheerfulness. If the context is negative, match it with directness and a correction.
+Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
       const shortReply = sanitizeCoachReply(await withTimeout("gpt_short", 20000, () => askCoachK(message, user, shortReplyContext, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
