@@ -488,14 +488,20 @@ export function buildFoodLogReply(p: {
         `Getting there — ${Math.round(totalMealProtein)}g this meal. Aim for 20g+ each time.`,
         `${Math.round(totalMealProtein)}g in. Almost there — push for 20g+ at the next one.`,
       ])}`;
-    } else if (!hasGoodProteins && hasCarbs && !isFruitSnack) {
+    } else if (!hasGoodProteins && hasCarbs && !isFruitSnack
+        && !earlyInDay
+        && proteinRemaining > proteinTarget * 0.35) {
+      // Only nag about protein if: it's past the first meal of the day AND they're
+      // genuinely behind (>35% of daily target still outstanding). Stops constant
+      // protein lectures on breakfast oats, lunch rice, etc.
       coachNote = `\n\n${pick([
         "Carbs without protein — fix it next meal. Add eggs, chicken, or legumes.",
         "No protein this meal — balance it next time with a real protein source.",
         "Carb-heavy. Pair the next meal with protein to keep your total on track.",
         "Protein gap — sort it next meal. Eggs, chicken, or tinned fish.",
       ])}`;
-    } else if (!hasGoodProteins && !hasCarbs && junkNoteText) {
+    } else if (!hasGoodProteins && !hasCarbs && junkNoteText
+        && proteinRemaining > proteinTarget * 0.35) {
       coachNote = `\n\n${pick([
         "Next meal needs protein. Pick one: eggs, chicken, or tuna.",
         "Sort protein next meal — eggs or canned fish are the fastest fix.",
@@ -510,7 +516,7 @@ export function buildFoodLogReply(p: {
   let proteinTip = "";
   const budgetTier = user.weeklyFoodBudget || "100_300";
   const protRemaining = proteinTarget - runningProtein;
-  if (!coachNote && !hasGoodProteins && !isFruitSnack && protRemaining > 40 && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
+  if (!coachNote && !hasGoodProteins && !isFruitSnack && protRemaining > Math.max(50, proteinTarget * 0.4) && calRemaining > 200 && totalMealCals >= 100 && !earlyInDay) {
     const lowBudget = ["under_100", "under_50", "50_100"].includes(budgetTier);
     const suggestions = lowBudget
       ? [
