@@ -10,18 +10,18 @@ export async function getStepStreak(userId: string): Promise<number> {
     if (logs.length === 0) return 0;
     const days = new Set<string>();
     for (const log of logs) {
-      const d = new Date(log.loggedAt!);
-      days.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`);
+      const d = new Date(new Date(log.loggedAt!).getTime() + 2 * 3_600_000);
+      days.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
     }
     let streak = 0;
-    const checkDate = new Date();
-    const todayKey = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
-    if (!days.has(todayKey)) checkDate.setDate(checkDate.getDate() - 1);
+    const checkDate = new Date(Date.now() + 2 * 3_600_000);
+    const todayKey = `${checkDate.getUTCFullYear()}-${String(checkDate.getUTCMonth() + 1).padStart(2, "0")}-${String(checkDate.getUTCDate()).padStart(2, "0")}`;
+    if (!days.has(todayKey)) checkDate.setUTCDate(checkDate.getUTCDate() - 1);
     while (true) {
-      const key = `${checkDate.getFullYear()}-${String(checkDate.getMonth() + 1).padStart(2, "0")}-${String(checkDate.getDate()).padStart(2, "0")}`;
+      const key = `${checkDate.getUTCFullYear()}-${String(checkDate.getUTCMonth() + 1).padStart(2, "0")}-${String(checkDate.getUTCDate()).padStart(2, "0")}`;
       if (!days.has(key)) break;
       streak++;
-      checkDate.setDate(checkDate.getDate() - 1);
+      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
     }
     return streak;
   } catch { return 0; }

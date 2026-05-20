@@ -169,7 +169,7 @@ export async function runMorningCheckin(): Promise<void> {
           const key = `${stepCheck.getUTCFullYear()}-${stepCheck.getUTCMonth()}-${stepCheck.getUTCDate()}`;
           if (!stepDays.has(key)) break;
           stepStreakCount++;
-          stepCheck.setDate(stepCheck.getDate() - 1);
+          stepCheck.setUTCDate(stepCheck.getUTCDate() - 1);
         }
       }
 

@@ -139,11 +139,14 @@ export async function handleWorkoutCommands(ctx: {
     const weekAdvance = todaySlot === trainingDays; // last slot of the week
     const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
 
-    // Workout streak calculation
+    // Workout streak calculation — SAST-aware (UTC+2)
     const lastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
-    const dayStart = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-    const yesterdayStart = dayStart(new Date(Date.now() - 86_400_000));
-    const wasYesterday = lastWorkout && dayStart(lastWorkout) === yesterdayStart;
+    const dayStartSAST = (d: Date) => {
+      const sast = new Date(d.getTime() + 2 * 3_600_000);
+      return new Date(Date.UTC(sast.getUTCFullYear(), sast.getUTCMonth(), sast.getUTCDate())).getTime();
+    };
+    const yesterdayStart = dayStartSAST(new Date(Date.now() - 86_400_000));
+    const wasYesterday = lastWorkout && dayStartSAST(lastWorkout) === yesterdayStart;
     const newStreak = wasYesterday ? (user.workoutStreak || 0) + 1 : 1;
 
     await db.update(users).set({
