@@ -16,6 +16,10 @@ function sastToday(): string {
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 
+  // Quick-exit: if message has no management keywords at all, skip the whole handler
+  const hasMgmtKeyword = /\b(remove|delete|undo|clear|reset|wipe|scratch|take out|take off|didn.?t (have|eat)|did not (have|eat)|get rid of|cancel.*meal|wrong meal|mistake.*log|log.*mistake|not.*eat|never ate)\b/i.test(m);
+  if (!hasMgmtKeyword) return null;
+
   // ---- RESET ALL OF TODAY'S FOOD ----
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
@@ -48,8 +52,11 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     return `Removed your ${label} from the log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${Math.max(0, (user.calorieTarget || 1800) - recomputed.calories)} kcal | ~${Math.max(0, (user.proteinTarget || 120) - recomputed.protein)}g protein still to go.`;
   }
 
-  // ---- REMOVE LAST LOGGED MEAL ----
-  if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one|meal)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
+  // ---- REMOVE LAST LOGGED MEAL — any natural expression for "that last entry" ----
+  const isRemoveLast = /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal|last entry|the last|the meal|the last one|the last entry|meal|that food|what i just logged|what i logged)$/i.test(m.trim())
+    || /^(remove|delete|undo|scratch)$/i.test(m.trim())
+    || /\b(scratch that|undo that|take that off|remove that|delete that|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m);
+  if (isRemoveLast) {
     const todayStart = sastDayStart();
     const lastMealLog = await db.select({ id: mealLogs.id })
       .from(mealLogs)
@@ -75,10 +82,14 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   }
 
   // ---- REMOVE SPECIFIC FOOD FROM LOG ----
-  const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|didn.?t have|did not have|i didn.?t eat|i did not eat|no )\s+(the\s+)?(.{2,30}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
-  const isRemoveSpecific = !!removeSpecificMatch && !/(last|that|it|this|meal|log)$/.test((removeSpecificMatch[2] || "").trim());
+  const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|take off|scratch|get rid of|didn.?t have|did not have|i didn.?t eat|i did not eat|never ate|i never had|i didn.?t log|no )\s+(the\s+)?(.{2,40}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
+  // Reject generic "that/last/meal" captures — those belong to the remove-last path above
+  // Allow meal-time words only when followed by a food word (e.g. "remove breakfast pasta")
+  const capturedFood = (removeSpecificMatch?.[2] || "").trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
+  const endsWithGeneric = /(^|\s)(last|that|it|this|log)$/.test(capturedFood);
+  const isRemoveSpecific = !!removeSpecificMatch && capturedFood.length >= 2 && !endsWithGeneric;
   if (isRemoveSpecific && removeSpecificMatch) {
-    const foodToRemove = removeSpecificMatch[2].trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
+    const foodToRemove = capturedFood;
     if (foodToRemove.length >= 2) {
       try {
         const todayStart = sastDayStart();

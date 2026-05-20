@@ -3,6 +3,7 @@ import { users, chatHistory } from "../../shared/schema";
 import { eq, desc } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
+import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
@@ -45,6 +46,42 @@ export async function handleGptBlock(ctx: {
   const trainingMode = user.trainingMode || "home";
   const saContext = getSAContextFlags(user);
 
+  // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
+  let todayStatusBlock = "";
+  try {
+    const [todayTotals] = await Promise.all([recomputeTodayFoodTotals(user.id)]);
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 120;
+    const stepTarget = user.stepsTarget || 8500;
+    const todaySteps = user.todaySteps || 0;
+    const sastHour = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
+
+    const calEaten = todayTotals.calories;
+    const protEaten = todayTotals.protein;
+    const calDiff = calEaten - calTarget;
+    const calStatus = calEaten === 0
+      ? "nothing logged yet"
+      : calDiff > 0
+        ? `${calDiff} kcal OVER target — do not encourage more eating`
+        : `${Math.abs(calDiff)} kcal remaining`;
+    const protStatus = protEaten === 0
+      ? "no protein logged yet"
+      : protEaten >= protTarget
+        ? `protein target met (${protEaten}g)`
+        : `${protTarget - protEaten}g short of target`;
+    const stepStatus = todaySteps === 0
+      ? "no steps logged"
+      : todaySteps >= stepTarget
+        ? `step target hit (${todaySteps.toLocaleString()} steps)`
+        : `${(stepTarget - todaySteps).toLocaleString()} steps short (${todaySteps.toLocaleString()} done so far)`;
+
+    todayStatusBlock = `\n\nCLIENT STATUS RIGHT NOW (${sastHour}:00 SAST):
+- Calories: ${calEaten} kcal eaten / ${calTarget} target → ${calStatus}
+- Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
+- Steps today: ${stepStatus}
+USE THIS DATA. If they are over on calories — call it out with the number. If short on protein — give one specific high-protein food. Do not ignore this data.`;
+  } catch (e) { /* non-fatal — context is best-effort */ }
+
   // Fix 9 — Conversation context memory: last 10 exchanges, alternating Client/Coach K format
   let recentConvBlock = "";
   let recentChatText = "";
@@ -75,11 +112,14 @@ export async function handleGptBlock(ctx: {
     }
   }
 
-  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${recentConvBlock}
+  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${todayStatusBlock}${recentConvBlock}
 
 RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
 
 SCENARIO GUIDE — read the message and decide which applies:
+
+FOOD LOG MANAGEMENT (client wants to remove, delete, undo, correct, or change something they logged — any natural phrasing like "remove breakfast", "I didn't eat that", "delete the lunch I logged", "take off the mince", "that was wrong", "scratch that", "undo it", "I made a mistake with my log"):
+  Tell them: "To remove your last meal say 'remove last meal'. To remove a specific food say 'remove [food name]'. To remove a specific meal say 'remove breakfast' (or lunch/dinner/supper). To clear everything today say 'clear food log'." Keep it short — one sentence per option, max 3 options shown.
 
 WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "training plan", "what do I do today", "1", "2", "workout", etc.):
   Tell the client their programme is ready and to reply with the word "programme" to see the full plan. Do not list exercises here.
