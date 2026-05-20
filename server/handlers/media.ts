@@ -363,19 +363,39 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         const cTarget = user.calorieTarget || 1800;
         const budget = user.weeklyFoodBudget || "100_300";
         const budgetLabel: Record<string, string> = { under_100: "under R100/week", "100_300": "R100–R300/week", "300_600": "R300–R600/week", over_600: "over R600/week" };
-        const listReview = await withTimeout("gpt_grocery_photo", 20000, () => askCoachK(
+        const medicalNotes = [user.medicalConditions, user.otherMedicalNotes].filter(Boolean).join(", ") || "none";
+        const listReview = await withTimeout("gpt_grocery_photo", 28000, () => askCoachK(
           `My grocery list: ${itemsRaw}`, user,
-          `The client sent a photo of their grocery/shopping list. I read these items from it: ${itemsRaw}. Budget: ${budgetLabel[budget] || "moderate"}. Goal: ${goal.replace("_", " ")}. Targets: ${cTarget} kcal/day, ${pTarget}g protein/day.
+          `The client sent a photo of their grocery/shopping list. I read these items: ${itemsRaw}. REBUILD it completely — don't review it.
 
-Review their list. Structure exactly like this:
-✅ *What's good:* (1-2 items already right — be specific)
-❌ *What's missing:* (1-2 specific gaps for their ${goal.replace("_", " ")} goal — protein sources especially)
-🔄 *Swap:* (1-2 direct swaps — "X → Y (reason)")
+Client goal: ${goal.replace("_", " ")}
+Weekly budget: ${budgetLabel[budget] || "R100–R300/week"}
+Daily targets: ${cTarget} kcal, ${pTarget}g protein
+Medical/allergies: ${medicalNotes}
 
-Short. Direct. SA voice. No intro, no fluff.`
+RULES: Keep items that fit their goal. Replace what doesn't. Add missing essentials. SA products only with rand prices and weekly quantities. Max 20 items.
+
+FORMAT (start immediately, no intro):
+🛒 *Rebuilt list — ${goal.replace("_", " ")} optimised*
+
+*Protein (${pTarget}g/day target):*
+• [item] — [quantity] — ~R[price]
+
+*Carbs (slow-release energy):*
+• [item] — [quantity] — ~R[price]
+
+*Vegetables:*
+• [item] — [quantity] — ~R[price]
+
+*Pantry & basics:*
+• [item] — [quantity] — ~R[price]
+
+*Week total: ~R[X]–R[Y]*
+
+${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, processed snacks, white bread." : "Muscle gain: calorie-dense protein every meal. Extra carb portions."}${medicalNotes !== "none" ? `\nAllergies: ${medicalNotes} — remove ALL.` : ""}`
         )).catch(() => null);
-        const reply = listReview || `Got your grocery list (${itemsRaw.slice(0, 80)}${itemsRaw.length > 80 ? "..." : ""}). Type *adjust my list: [your items]* and I'll review it against your ${goal.replace("_", " ")} goal.`;
-        await logChat(user.id, "[Grocery photo]", reply, "GROCERY_REVIEW");
+        const reply = listReview || `Got your grocery list (${itemsRaw.slice(0, 80)}${itemsRaw.length > 80 ? "..." : ""}). Type your list as text and I'll rebuild it for your ${goal.replace("_", " ")} goal.`;
+        await logChat(user.id, "[Grocery photo]", reply, "SHOPPING_LIST_REBUILD");
         return reply;
       }
 

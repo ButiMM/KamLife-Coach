@@ -160,14 +160,13 @@ export async function handleEarlyCommands(ctx: {
 
     // REST DAY
     if (state.type === "REST") {
-      const preview = buildDayWorkout(effectiveUser);
       const restNote = pick([
         "Recovery is when your muscles actually grow. No session today.",
         "Rest days are part of the programme. Your body rebuilds today.",
         "Scheduled rest. This is when the adaptation happens — don't skip the recovery.",
         "Today's job: eat well, sleep well, move lightly. No workout needed.",
       ]);
-      const restReply = `*${state.todayName} — Rest Day.*\n\n${restNote}\n\nNext training day: *${state.nextTrainingName}*\n\n_Preview of what's coming:_\n\n${preview}\n\n_Want to train anyway? Go for it — send *done* when finished._`;
+      const restReply = `*${state.todayName} — Rest Day.*\n\n${restNote}\n\nNext training day: *${state.nextTrainingName}*.\n\nHit your food and steps today. Reply *workout* only if you want to train anyway.`;
       await logChat(user.id, message, restReply, "REST_DAY_INFO");
       return restReply;
     }
@@ -372,6 +371,54 @@ export async function handleEarlyCommands(ctx: {
     const reply = formatShoppingList(list, user.name || undefined, goal);
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
+  }
+
+  // ---- SAME-AS-YESTERDAY QUICK LOG — "same breakfast", "same as yesterday", "repeat lunch" ----
+  // Re-logs yesterday's matching meal with zero typing friction.
+  const sameAsMatch = m.match(/\b(?:same|repeat|again|copy|log\s+(?:my\s+)?same)\b.*\b(breakfast|lunch|dinner|supper|snack|meal|yesterday)\b/i)
+    || m.match(/\b(breakfast|lunch|dinner|supper|snack)\b.*\b(?:same|again|repeat|yesterday)\b/i)
+    || /^same$/.test(m);
+  if (sameAsMatch) {
+    const mealKeyword = (sameAsMatch[1] || "").toLowerCase().replace("supper", "dinner");
+    const mealLabel = ["breakfast", "lunch", "dinner", "snack"].find(l => mealKeyword.includes(l)) || null;
+    try {
+      const todayStart = sastDayStart();
+      const yStart = new Date(todayStart.getTime() - 86_400_000);
+      const yesterdayMeals = await db.select().from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, yStart)))
+        .orderBy(desc(mealLogs.loggedAt))
+        .limit(10);
+      // Filter to only yesterday (before todayStart)
+      const yMeals = yesterdayMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
+      const match = mealLabel
+        ? yMeals.find(l => l.mealLabel === mealLabel)
+        : yMeals[0];
+      if (!match || (match.kcalInt === 0 && match.proteinInt === 0)) {
+        const noMatch = mealLabel
+          ? `No ${mealLabel} logged yesterday — tell me what you ate and I'll log it.`
+          : `No meals logged yesterday to repeat. Tell me what you ate.`;
+        await logChat(user.id, message, noMatch, "SAME_AS_YESTERDAY_MISS");
+        return noMatch;
+      }
+      await db.insert(mealLogs).values({
+        userId: user.id,
+        rawMessage: match.rawMessage || "[Repeat meal]",
+        source: "retro",
+        kcalInt: match.kcalInt,
+        proteinInt: match.proteinInt,
+        carbsInt: match.carbsInt || 0,
+        fatInt: match.fatInt || 0,
+        mealLabel: mealLabel || match.mealLabel,
+        items: match.items,
+      });
+      const label = mealLabel ? mealLabel : (match.mealLabel || "meal");
+      const sameReply = `✅ *${label.charAt(0).toUpperCase() + label.slice(1)} logged* — ${match.rawMessage ? match.rawMessage.slice(0, 60) : "same as yesterday"}.\n${match.kcalInt > 0 ? `${match.kcalInt} kcal | ${match.proteinInt}g protein.` : ""}\n\nDone. Log your next meal whenever you're ready.`;
+      await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
+      return sameReply;
+    } catch (err) {
+      console.error("[SAME_AS_YESTERDAY]", err);
+      return `Could not find yesterday's meal. Tell me what you ate and I'll log it now.`;
+    }
   }
 
   // ---- CLIENT SENDS THEIR OWN SHOPPING LIST — "adjust my list", "here's what I buy", "fix my groceries", or raw comma-separated items ----

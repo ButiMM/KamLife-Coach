@@ -246,25 +246,30 @@ export async function runMorningCheckin(): Promise<void> {
       const isTodayTrainingDay = schedule.includes(todayDOW);
       const stepsTarget = client.stepsTarget || 10000;
 
-      parts.push(`\n\n*Walking today: ${stepsTarget.toLocaleString()} steps.* Send a screenshot or tell me your count.`);
+      // Split into two messages: summary | today's action
+      // \n\n---\n\n is the Twilio message splitter — two separate WhatsApps
+      const todaySection: string[] = [];
+      todaySection.push(`*Today:*`);
+      todaySection.push(`👟 ${stepsTarget.toLocaleString()} steps — send your count or a screenshot.`);
 
       if (isTodayTrainingDay) {
         try {
           const todayWorkout = buildDayWorkout(client);
-          const previewLines = todayWorkout.split("\n").slice(0, 5).join("\n");
-          parts.push(`\n*Today's workout (Day ${client.programmeDayInWeek || 1}):*\n${previewLines}\n\nReply *1* for the full workout.`);
+          const previewLines = todayWorkout.split("\n").slice(0, 4).join("\n");
+          todaySection.push(`💪 Training day — *reply 1* for your full workout.\n\n${previewLines}...`);
         } catch {
-          parts.push(`\nTraining day. Reply *1* for your workout.`);
+          todaySection.push(`💪 Training day. Reply *1* for your workout.`);
         }
       } else {
-        parts.push(`\nRest day — no training. Stay on food and steps.`);
+        todaySection.push(`🛌 Rest day. No training — stay on food and steps.`);
       }
 
-      parts.push(`\nWhat's for breakfast?`);
-      if (repeatSuggestion) parts.push(repeatSuggestion);
+      todaySection.push(`🍳 What's for breakfast?`);
+      if (repeatSuggestion) todaySection.push(repeatSuggestion);
 
       if (canSendProactive(client.id)) {
-        await sendWhatsApp(phone, parts.join(" "));
+        const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n");
+        await sendWhatsApp(phone, fullMessage);
         recordProactiveSend(client.id);
       }
     } catch (err) {

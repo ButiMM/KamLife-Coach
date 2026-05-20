@@ -45,6 +45,7 @@ import {
   runWeightReminder, runMondayProgress, runMondayGroceries, runDietBreakCheck,
   runTrainingDataLog,
 } from "./scheduler/jobs/monday";
+import { runWaterReminder } from "./scheduler/jobs/water";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, deliveryStats };
@@ -127,6 +128,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("5 8 * * *",    () => safe("runSubscriptionExpiryCheck",runSubscriptionExpiryCheck),  { timezone: "UTC" }); // 10am SAST
   cron.schedule("0 10 * * *",   () => safe("runPaymentFailureRecovery", runPaymentFailureRecovery),   { timezone: "UTC" }); // 12pm SAST
   cron.schedule("3 9 * * *",    () => safe("runSignupNudge",            runSignupNudge),              { timezone: "UTC" }); // 11am SAST
+  cron.schedule("0 9 * * *",    () => safe("runWaterReminder",           runWaterReminder),            { timezone: "UTC" }); // 11am SAST
   cron.schedule("0 5 * * *",    () => safe("runCulturalCalendar",       runCulturalCalendar),         { timezone: "UTC" }); // 7am SAST
   cron.schedule("0 19 * * *",   () => safe("runStreakAtRisk",           runStreakAtRisk),             { timezone: "UTC" }); // 9pm SAST
   cron.schedule("0 7 * * *",    () => safe("runReferralNudge",          runReferralNudge),            { timezone: "UTC" }); // 9am SAST
