@@ -593,6 +593,8 @@ export async function handleFoodContext(ctx: {
         user, todaySteps: todayStepCount,
       });
 
+      const scannerLoggedAt = parseMealDate(message);
+      const scannerIsRetro = isRetroactiveMeal(message);
       try {
         const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f) => {
           const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
@@ -610,8 +612,6 @@ export async function handleFoodContext(ctx: {
           category: f.category,
         }));
         const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
-        const scannerLoggedAt = parseMealDate(message);
-        const scannerIsRetro = isRetroactiveMeal(message);
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: message.slice(0, 1000),
