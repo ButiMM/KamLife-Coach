@@ -444,6 +444,19 @@ export function buildFoodLogReply(p: {
     }
   }
 
+  // Zero-calorie drinks (Coke Zero, sparkling water, black coffee, rooibos, diet drinks)
+  // get a clean one-liner acknowledgment — no protein coaching, no goal connection.
+  // Threshold <= 5 kcal catches rounding artefacts (Coke Zero stored as 1 kcal).
+  const isZeroCalDrink = totalMealCals <= 5 && totalMealProtein === 0;
+  if (isZeroCalDrink) {
+    const zeroCalLines = [
+      "Zero calories — good choice. Keep the water and zero-cal drinks flowing.",
+      "Logged. Zero calories. That is exactly what you want from a drink.",
+      "Zero calories — sorted. Drink freely.",
+    ];
+    return `${foodLines}\n\n${zeroCalLines[Math.floor(Math.random() * zeroCalLines.length)]}\n\n${runningLine}`;
+  }
+
   // Fruit snacks (apple, pear, banana etc.) are categorised as "carb" but protein
   // lecturing on fruit makes no sense. Suppress when protein ≤ 3g (fruit range) AND
   // total calories < 300 (snack, not a meal). Grain carbs (pap 6g, rice 4-5g, oats 5g)

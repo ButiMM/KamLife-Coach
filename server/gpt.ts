@@ -92,7 +92,16 @@ export function buildContext(user: any): string {
     ageGuidelines = "40+ CLIENT: Recovery matters more. Warm-ups are essential. Mention joint care when relevant. Don't assume they can't perform — many are at their strongest. Respect their time constraints.";
   }
 
-  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
+  // Store tier — derived from weeklyFoodBudget so meal suggestions match where they shop
+  const budgetRaw = user.weeklyFoodBudget || "100_300";
+  const storeTier =
+    ["under_100", "under_50", "50_100", "100_300"].includes(budgetRaw)
+      ? "Shoprite/Boxer (budget R100–R300/week)"
+      : budgetRaw === "300_600"
+      ? "Pick n Pay/Checkers (budget R300–R600/week)"
+      : "Woolworths/Checkers/Spar (budget R600+/week)";
+
+  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\nShopping store tier: ${storeTier}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
 }
 
 // ============================================================
