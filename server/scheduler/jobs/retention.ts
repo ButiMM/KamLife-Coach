@@ -231,7 +231,7 @@ export async function runStreakAtRisk(): Promise<void> {
       const key = `${cur.getUTCFullYear()}-${cur.getUTCMonth()}-${cur.getUTCDate()}`;
       if (!days.has(key)) break;
       streak++;
-      cur.setDate(cur.getDate() - 1);
+      cur.setUTCDate(cur.getUTCDate() - 1);
     }
     return streak;
   }
