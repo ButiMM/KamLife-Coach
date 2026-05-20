@@ -27,6 +27,27 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
   }
 
+  // ---- REMOVE MEAL BY TIME LABEL — "remove breakfast meal", "delete my lunch" ----
+  const mealTimeRemoveMatch = m.trim().match(/^(?:remove|delete|undo)\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\s*(?:meal|log|entry)?$/i);
+  if (mealTimeRemoveMatch) {
+    const label = mealTimeRemoveMatch[1].toLowerCase();
+    const todayStart = sastDayStart();
+    const mealLogRows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(10);
+    const target = mealLogRows.find(l =>
+      (l.mealLabel || "").toLowerCase().includes(label) ||
+      (l.rawMessage || "").toLowerCase().includes(label)
+    ) || mealLogRows[0];
+    if (!target) return `No meal logged yet today to remove.`;
+    await db.delete(mealLogs).where(eq(mealLogs.id, target.id));
+    const recomputed = await recomputeTodayFoodTotals(user.id);
+    await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    return `Removed your ${label} from the log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${Math.max(0, (user.calorieTarget || 1800) - recomputed.calories)} kcal | ~${Math.max(0, (user.proteinTarget || 120) - recomputed.protein)}g protein still to go.`;
+  }
+
   // ---- REMOVE LAST LOGGED MEAL ----
   if (/^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one|meal)$/i.test(m.trim()) || /^(remove|delete|undo)$/i.test(m.trim())) {
     const todayStart = sastDayStart();

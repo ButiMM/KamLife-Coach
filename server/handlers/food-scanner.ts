@@ -368,8 +368,16 @@ export function buildFoodLogReply(p: {
   const stepsNote = extraStepsBurned > 0 && calRemaining < 0
     ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
     : "";
-  // Suppress running total if it's clearly impossible (duplicate entries can inflate it)
-  const runningTotalSane = runningCals <= calorieTarget * 2.5;
+  // Suppress running total if it exceeds what's plausible for the time of day —
+  // guards against inflated counts caused by duplicate entries from retried requests.
+  const sastHourNow = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
+  const maxReasonableCals = calorieTarget * (
+    sastHourNow < 11 ? 0.65 :
+    sastHourNow < 14 ? 0.85 :
+    sastHourNow < 17 ? 1.1 :
+    1.5
+  );
+  const runningTotalSane = runningCals <= maxReasonableCals;
   const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
@@ -385,8 +393,13 @@ export function buildFoodLogReply(p: {
     const expectedCals = calorieTarget * dayProgress;
     const calPace = runningCals / Math.max(expectedCals, 1);
     if (calRemaining <= 0 && effectiveRemaining <= -100) {
+      const overBy = Math.abs(effectiveRemaining);
       if (extraStepsBurned >= 80) {
-        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${Math.abs(effectiveRemaining)} kcal. Keep dinner lean._`;
+        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${overBy} kcal. Keep dinner lean._`;
+      } else if (overBy >= 800) {
+        dayAssessment = `\n_⚠️ You're ~${overBy} kcal over your target. That's a significant surplus. No more food today — water only. One bad day doesn't break progress, but don't add to it._`;
+      } else if (overBy >= 400) {
+        dayAssessment = `\n_You're ${overBy} kcal over. Close the day now — no dinner, or at most a small protein and veg if you're hungry. Don't add to the surplus._`;
       } else {
         dayAssessment = `\n_${pick([
           "Calorie ceiling hit — final meal must be lean. Protein and veg only.",
