@@ -9,7 +9,6 @@ import {
 // received it (existing beta testers signed up before Day 3 auto-message was added).
 export async function runStepSyncCatchup(): Promise<void> {
   console.log("[SCHEDULER] JOB: Step sync catch-up");
-  const appUrl = process.env.APP_URL || "https://kamlife.co.za";
   const clients = await getActiveClients();
   const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
 
@@ -33,11 +32,9 @@ export async function runStepSyncCatchup(): Promise<void> {
       // Use profileNotes as lightweight flag
       if ((client.profileNotes || "").includes("step_sync_sent")) continue;
 
-      const encodedPhone = encodeURIComponent((client.phoneNumber || "").replace(/^whatsapp:/, ""));
-      const webhookUrl = `${appUrl}/webhook/steps?phone=${encodedPhone}`;
       const name = (client.name || "there").split(" ")[0];
 
-      const msg = `${name}, one thing you might not know about — your phone can sync steps to me automatically every night, no manual logging needed.\n\n*📱 Android (Google Fit / Samsung Health):*\n1. Install *"Health Connect Webhooks"* — free on Play Store\n2. Open app → Add Webhook → paste:\n\`${webhookUrl}\`\n3. Select Steps · Daily at 9pm · Save\n\n*🍎 iPhone (Apple Health):*\n1. Open *Shortcuts* app\n2. Tap + → Add Action → "Get My Steps"\n3. Add → "Get Contents of URL" → paste: \`${webhookUrl}\` → POST → Body: \`{"steps": [Steps Count]}\`\n4. Automation → New → 9pm Daily → run shortcut\n\nReply *"steps connected"* once set up.`;
+      const msg = `${name}, quick one — three ways to log your steps:\n\n*1. Just type the number* — send me a number any time. Like: *8500*\n*2. Send a screenshot* — photo of your steps app and I'll read the number\n*3. Auto-sync* — reply *connect steps* for a one-time setup that sends your steps to me automatically every night\n\nPick what works for you.`;
 
       await sendWhatsApp(client.phoneNumber, msg);
       recordProactiveSend(client.id, "step_sync_guide");
@@ -69,10 +66,7 @@ export async function runEarlyOnboarding(): Promise<void> {
         await sendWhatsApp(client.phoneNumber, `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`);
         recordProactiveSend(client.id);
       } else if (days === 3) {
-        const appUrl = process.env.APP_URL || "https://kamlife.co.za";
-        const encodedPhone = encodeURIComponent(client.phoneNumber.replace(/^whatsapp:/, ""));
-        const webhookUrl = `${appUrl}/webhook/steps?phone=${encodedPhone}`;
-        const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Unlock automatic step tracking*\n\nRight now you're logging steps manually. Take 2 minutes to connect your phone's health app — after that, your steps sync to me automatically every night.\n\n*Android (Google Fit / Samsung Health):*\n1. Install *"Health Connect Webhooks"* — free on Play Store\n2. Open app → Add Webhook → paste this URL:\n\`${webhookUrl}\`\n3. Select Steps · Set to Daily at 9pm · Save\n\n*iPhone (Apple Health):*\n1. Open *Shortcuts* app (already on your phone)\n2. Tap + → Add Action → search "Get My Steps"\n3. Add action → "Get Contents of URL" → paste: \`${webhookUrl}\` → Method: POST → Body: \`{"steps": [Steps Count]}\`\n4. Automation → New → Time of Day → 9pm → Daily → run shortcut\n\nOnce set up, reply *"steps connected"* and I will confirm it is working.`;
+        const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Log your steps — pick what works for you:*\n\n*1. Just type the number* (easiest)\nSend me a number any time. Like: *8500*. I'll log it.\n\n*2. Send a screenshot*\nOpen Samsung Health, Apple Health, or Google Fit. Screenshot your step count. Send me the photo and I'll read it.\n\n*3. Auto-sync* (set up once, never log again)\nReply *connect steps* and I'll send you the one-time setup guide.`;
         await sendWhatsApp(client.phoneNumber, day3Msg);
         recordProactiveSend(client.id);
       } else if (days === 5) {
