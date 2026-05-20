@@ -1158,9 +1158,9 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // ---- CONNECT STEPS — sync from health apps ----
   const isConnectSteps = /\b(connect(ing)?(\s+my)?\s+steps?|sync(ing)?(\s+my)?\s+steps?|link(ing)?(\s+my)?\s+(health\s+app|step\s+tracker|google\s+fit|apple\s+health|samsung\s+health|fitbit)|connect\s+(google\s+fit|apple\s+health|health\s+app|step\s+tracker|fitbit)|auto\s+(sync|track|log)\s+steps?|step\s+(sync|auto|connect)|auto.*steps?)\b/i.test(m);
   if (isConnectSteps) {
-    const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-    const webhookUrl = `${appUrl}/webhook/steps?phone=${encodeURIComponent(phone)}`;
-    const connectReply = `*Connect your step tracker*\n\nOne-time setup — after that, your steps sync automatically every day.\n\n---\n\n*📱 Android (Google Fit / Samsung Health / Fitbit)*\n\n1. Install *Health Connect Webhooks* — search it on the Play Store (free)\n2. Open the app → Add Webhook\n3. Paste this URL:\n\`${webhookUrl}\`\n4. Select "Steps" as the data type\n5. Set frequency to "Daily at 9pm"\n\nThat's it. From tomorrow, I'll have your steps before morning check-in.\n\n---\n\n*🍎 iPhone (Apple Health)*\n\n1. Open the *Shortcuts* app (pre-installed)\n2. Tap + → Add Action → search "URL"\n3. Paste: \`${webhookUrl}\`\n4. Add another action → "Get My Steps" (search Health)\n5. Add action → "Get Contents of URL" → set Method to POST, Body to \`{"steps": [steps]}\`\n6. Go to Automation → New → Time of Day → 9pm → Daily → run the shortcut\n\nSend me "steps connected" once you've set it up and I'll confirm it's working.`;
+    const appUrl = process.env.APP_URL || "https://kamlife.co.za";
+    const setupUrl = `${appUrl}/connect-steps?phone=${encodeURIComponent(phone)}`;
+    const connectReply = `Tap this link on your phone — your personal setup page is ready:\n\n${setupUrl}\n\nWorks for both Android and iPhone. Your link is already filled in. Takes 2 minutes.\n\nReply *steps connected* once done and I'll confirm it's working.`;
     await logChat(user.id, message, connectReply, "STEPS_CONNECT_GUIDE");
     return connectReply;
   }
