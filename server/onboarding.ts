@@ -67,7 +67,7 @@ export async function getMenuText(user: any): Promise<string> {
     : `*KamLife Coach* 💪${trialLine}`;
 
   const workoutState = await getTodayWorkoutState(user);
-  const footer = `\n\n_Also: shopping list · meal prep · supplements · my sleep · my water · badges · referral_`;
+  const footer = `\n\n_Also: shopping list · meal prep · supplements · my water · badges · referral · *connect steps*_`;
 
   const daysSilent = user.lastActiveAt
     ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)

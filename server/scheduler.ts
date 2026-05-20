@@ -32,6 +32,7 @@ import {
 } from "./scheduler/jobs/programme";
 import {
   runEarlyOnboarding, runMonthlyMeasurements, runReferralNudge, runGoalReassessment,
+  runStepSyncCatchup,
 } from "./scheduler/jobs/onboarding";
 import {
   runCulturalCalendar, runWomensMonth, runNewYearReset,
@@ -117,6 +118,9 @@ export async function initScheduler(): Promise<void> {
   function safe(name: string, fn: () => Promise<void>): void {
     fn().catch(e => console.error(`[SCHEDULER] ${name} failed:`, e));
   }
+
+  // ── One-time catch-up — runs on startup, self-deactivates via profileNotes flag ──
+  safe("runStepSyncCatchup", runStepSyncCatchup);
 
   // ── Daily jobs ────────────────────────────────────────────────────────────
   cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin),           { timezone: "UTC" }); // 6am SAST

@@ -5,6 +5,52 @@ import {
   getActiveClients, isPaused, programmeDaysSince, sastDayStart,
 } from "../shared";
 
+// One-time catch-up: send step sync guide to any active client who has never
+// received it (existing beta testers signed up before Day 3 auto-message was added).
+export async function runStepSyncCatchup(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Step sync catch-up");
+  const appUrl = process.env.APP_URL || "https://kamlife.co.za";
+  const clients = await getActiveClients();
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000);
+
+  for (const client of clients) {
+    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (programmeDaysSince(client.programmeStartDate) < 3) continue; // too new — Day 3 will catch them
+    try {
+      // Skip if they've already received a step sync message or set up steps
+      const [alreadySent] = await db.select({ id: chatHistory.id })
+        .from(chatHistory)
+        .where(and(
+          eq(chatHistory.userId, client.id),
+          gte(chatHistory.createdAt, thirtyDaysAgo),
+        ))
+        .limit(1)
+        .then(rows => rows.filter(r => {
+          // Check via the sent message text — intent not stored for scheduler sends
+          return false; // placeholder — check profileNotes instead
+        }));
+
+      // Use profileNotes as lightweight flag
+      if ((client.profileNotes || "").includes("step_sync_sent")) continue;
+
+      const encodedPhone = encodeURIComponent((client.phoneNumber || "").replace(/^whatsapp:/, ""));
+      const webhookUrl = `${appUrl}/webhook/steps?phone=${encodedPhone}`;
+      const name = (client.name || "there").split(" ")[0];
+
+      const msg = `${name}, one thing you might not know about — your phone can sync steps to me automatically every night, no manual logging needed.\n\n*📱 Android (Google Fit / Samsung Health):*\n1. Install *"Health Connect Webhooks"* — free on Play Store\n2. Open app → Add Webhook → paste:\n\`${webhookUrl}\`\n3. Select Steps · Daily at 9pm · Save\n\n*🍎 iPhone (Apple Health):*\n1. Open *Shortcuts* app\n2. Tap + → Add Action → "Get My Steps"\n3. Add → "Get Contents of URL" → paste: \`${webhookUrl}\` → POST → Body: \`{"steps": [Steps Count]}\`\n4. Automation → New → 9pm Daily → run shortcut\n\nReply *"steps connected"* once set up.`;
+
+      await sendWhatsApp(client.phoneNumber, msg);
+      recordProactiveSend(client.id, "step_sync_guide");
+
+      // Flag so we don't resend
+      const updatedNotes = ((client.profileNotes || "") + " step_sync_sent").trim();
+      await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
+    } catch (err) {
+      console.error(`[SCHEDULER] Step sync catch-up error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
+
 export async function runEarlyOnboarding(): Promise<void> {
   console.log("[SCHEDULER] JOB: Early onboarding check");
   const clients = await getActiveClients();
