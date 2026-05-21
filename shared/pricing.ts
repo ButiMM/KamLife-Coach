@@ -8,13 +8,13 @@
 
 export const PRICING = {
   /** Monthly subscription price in ZAR */
-  monthlyPriceZAR: 149,
+  monthlyPriceZAR: 199,
 
   /** Display string for UI/messages */
-  monthlyDisplay: "R149/month",
+  monthlyDisplay: "R199/month",
 
   /** Daily equivalent (for marketing) */
-  dailyDisplay: "R5/day",
+  dailyDisplay: "R6.63/day",
 
   /** Currency code */
   currency: "ZAR",

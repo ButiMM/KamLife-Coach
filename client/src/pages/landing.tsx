@@ -133,7 +133,7 @@ const TESTIMONIALS = [
     name: "Ruan v.d.W.",
     location: "Pretoria",
     goal: "Recomp",
-    quote: "The braai coaching alone is worth R149. I go to every family braai and stay on track. The weekly report keeps me honest.",
+    quote: "The braai coaching alone is worth R199. I go to every family braai and stay on track. The weekly report keeps me honest.",
     result: "Lost 6kg, gained visible muscle",
   },
 ];
@@ -211,7 +211,7 @@ export default function LandingPage() {
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
                 <MessageCircle className="w-5 h-5 mr-2" />
-                Start Free Trial — R149/month
+                Start Free Trial — R199/month
               </a>
             </Button>
             <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-base border-2" asChild>
@@ -223,7 +223,7 @@ export default function LandingPage() {
           </div>
 
           <p className="text-sm text-muted-foreground">
-            7 days free · R149/month · Cancel anytime by WhatsApp · Programme sent on Day 1
+            7 days free · R199/month · Cancel anytime by WhatsApp · Programme sent on Day 1
           </p>
         </motion.div>
 
@@ -406,10 +406,10 @@ export default function LandingPage() {
               <span className="text-xs font-bold bg-primary text-white px-3 py-1 rounded-full">Beta price</span>
             </div>
             <div className="flex items-end gap-1 mb-1">
-              <span className="text-6xl font-bold font-display">R149</span>
+              <span className="text-6xl font-bold font-display">R199</span>
               <span className="text-muted-foreground mb-2 text-lg">/month</span>
             </div>
-            <p className="text-muted-foreground text-sm mb-8">R5/day — less than a taxi fare. Cancel anytime on WhatsApp.</p>
+            <p className="text-muted-foreground text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime on WhatsApp.</p>
             <ul className="space-y-3 mb-10">
               {[
                 "Personalised programme — gym, home, or dumbbells",
@@ -437,7 +437,7 @@ export default function LandingPage() {
                 Start your free trial
               </a>
             </Button>
-            <p className="text-xs text-muted-foreground text-center mt-4">7 days free · Then R149/month · Cancel anytime on WhatsApp</p>
+            <p className="text-xs text-muted-foreground text-center mt-4">7 days free · Then R199/month · Cancel anytime on WhatsApp</p>
           </div>
 
           <p className="text-sm text-muted-foreground mt-6">Refer a friend and you both get one month free</p>
@@ -498,7 +498,7 @@ export default function LandingPage() {
               Start Coaching on WhatsApp
             </a>
           </Button>
-          <p className="text-primary-foreground/60 text-sm mt-4">7 days free · R149/month · Cancel anytime · No app needed</p>
+          <p className="text-primary-foreground/60 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
         </div>
       </section>
 
@@ -511,7 +511,7 @@ export default function LandingPage() {
             </div>
             <span className="font-semibold text-foreground">KamLife Coach</span>
           </div>
-          <p>Built for South Africa 🇿🇦 · POPIA compliant · R149/month</p>
+          <p>Built for South Africa 🇿🇦 · POPIA compliant · R199/month</p>
           <Link href="/login" className="hover:text-foreground transition-colors">Coach Login</Link>
         </div>
       </footer>

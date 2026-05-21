@@ -636,8 +636,8 @@ export async function handleMiscCommands(ctx: {
     const waNum = (process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "").replace(/\D/g, "");
     const waLink = waNum ? `https://wa.me/${waNum}?text=Hi%2C+I+was+referred+by+${code}` : null;
     const shareMsg = waLink
-      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R149/month, no app. Try it free for 7 days: ${waLink}"_`
-      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R149/month. Tell them code ${code} — your first month is 50% off and I get a free month."_`;
+      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R199/month, no app. Try it free for 7 days: ${waLink}"_`
+      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R199/month. Tell them code ${code} — your first month is 50% off and I get a free month."_`;
     const referralReply = `*Your referral code: ${code}* 🎯\n\nSend your friend this:\n\n${shareMsg}\n\nWhen they subscribe, you get a free month. They get 50% off their first month. No cap — every friend earns you one.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;
@@ -998,7 +998,7 @@ export async function handleMiscCommands(ctx: {
       `✅ ${totalWorkouts} workouts completed\n` +
       `🔥 ${streak}-session streak${weightLine}\n\n` +
       `_Coached by KamLife Coach on WhatsApp — SA's AI fitness coach._\n` +
-      `_R149/month. Real food. Real workouts. Real results._\n\n` +
+      `_R199/month. Real food. Real workouts. Real results._\n\n` +
       `Copy this and share it in your WhatsApp status or group. Show them what you are building. 💪`;
 
     await logChat(user.id, message, shareCard, "SHARE_CARD");
@@ -1134,7 +1134,7 @@ export async function handleMiscCommands(ctx: {
       `Dehydration drops exercise performance by 25%. If you feel tired during training, drink water before you blame your programme.`,
       `Pap is not the enemy. Pap + pilchards + spinach = a complete meal under R20 with 25g protein. It is how you build the plate that matters.`,
       `Cortisol from stress directly increases belly fat storage. Walking 20 minutes drops cortisol by 14%. Steps are stress management.`,
-      `Creatine monohydrate is the most studied supplement in sports science — safe, effective, and R5/day from Dis-Chem. 5g daily, every day.`,
+      `Creatine monohydrate is the most studied supplement in sports science — safe, effective, and R6.63/day from Dis-Chem. 5g daily, every day.`,
       `Boerewors has 25g protein per 100g but also 26g fat. Grill, do not fry. Drain the fat. Pair with salad, not rolls. Same food, better result.`,
       `Your metabolism does not "break" from dieting. It adapts. When weight stalls, a small 100-calorie adjustment is all you need — not a crash diet.`,
     ];

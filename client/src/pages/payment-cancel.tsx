@@ -30,7 +30,7 @@ export default function PaymentCancel() {
         </div>
 
         <p className="text-gray-500 text-sm">
-          Only R149/month. Cancel anytime. No contracts.
+          Only R199/month. Cancel anytime. No contracts.
         </p>
 
         <div className="space-y-3">

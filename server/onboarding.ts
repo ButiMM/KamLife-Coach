@@ -516,7 +516,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `${shoppingPreview}\n\n*Activate to start coaching — R149/month, cancel anytime:*\n${payLinkOnb}\n\n_R5/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
+  const msg3 = `${shoppingPreview}\n\n*Activate to start coaching — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
   return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
@@ -566,7 +566,7 @@ Then on a NEW LINE add: "Reply *yes* when you're ready and I'll build your perso
 
 Rules: Short sentences. No lists. No bullet points. SA voice — warm, direct, no corporate speak.
 Banned words: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome", "amazing", "fantastic"
-Do NOT mention price. Do NOT mention R149. Just be a helpful coach.
+Do NOT mention price. Do NOT mention R199. Just be a helpful coach.
 If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one word is enough.`;
       const intakeReply = await askCoachK(message, user, intakeCtx);
       return intakeReply;
@@ -574,7 +574,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     // Simple greeting or "yes" → standard pitch
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\nR149/month — R5/day. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
+    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\nR199/month — R6.63/day. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
   }
 
   // ---- ASK_POPIA ----
@@ -1084,7 +1084,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R149/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R199/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
   }
 
   return await getMenuText(user);

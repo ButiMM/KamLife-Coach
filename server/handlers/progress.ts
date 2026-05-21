@@ -108,7 +108,7 @@ export async function handleProgressCheck(ctx: {
       const totalLine = `📊 Total sessions with Coach K: ${totalWorkoutsAll}`;
       const winsLines = [workoutLine, stepsLine, weightLine, streakLine, totalLine].filter(Boolean).join("\n");
       const refLine = user.referralCode ? `\n\nYour referral code: *${user.referralCode}* — they get month 1 for R50, you get R50 credit.` : "";
-      winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R149/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
+      winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R199/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
     }
 
     const fullReply = `${progressReply}${winsCard}`;

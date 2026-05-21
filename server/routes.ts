@@ -199,11 +199,11 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         const cancelDate = new Date(user.cancelledAt!).toLocaleDateString("en-ZA", { day: "numeric", month: "short", year: "numeric" });
         const currentKg = user.currentWeight ? `${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : null;
         const progressNote = workouts > 0 ? `${workouts} session${workouts !== 1 ? "s" : ""}${currentKg ? `, currently at ${currentKg}` : ""} — all saved.` : "";
-        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R149/month — cancel anytime:*\n${payLink}`;
+        gateReply = `${name}, your subscription ended ${cancelDate}. ${progressNote}\n\nReply *pay* to pick up exactly where you left off.\n\n*R199/month — cancel anytime:*\n${payLink}`;
       } else if (workouts > 0) {
-        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
+        gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
       } else {
-        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R149/month (R5/day)*\n${payLink}\n\n_7-day money-back guarantee — if it's not working for you in the first week, full refund. No questions._`;
+        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R199/month (R6.63/day)*\n${payLink}\n\n_7-day money-back guarantee — if it's not working for you in the first week, full refund. No questions._`;
       }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;

@@ -673,7 +673,7 @@ export async function handleLifecycle(ctx: {
         ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
         : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
       await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
-      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nR149 is R5/day. When things ease up, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
+      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nR199 is R6.63/day. When things ease up, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
       await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
       return priceReply;
     }
@@ -722,7 +722,7 @@ export async function handleLifecycle(ctx: {
 
     // Option 4 or unrecognised — route to confirm flow
     await db.update(users).set({ awaitingInputType: "cancel_confirm" }).where(eq(users.phoneNumber, phone));
-    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your R149/month coaching stops. Data saved 90 days._`;
+    const confirmReply = `${name}, last check — reply *yes* to cancel completely, or anything else to keep your subscription.\n\n_Your R199/month coaching stops. Data saved 90 days._`;
     await logChat(user.id, message, confirmReply, "CANCEL_SAVE_TO_CONFIRM");
     return confirmReply;
   }
@@ -784,11 +784,11 @@ export async function handleLifecycle(ctx: {
     if (merchantId && appUrl) {
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
-      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR149/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
+      const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR199/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     } else {
-      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R149/month — cancel anytime.`;
+      const payReply = `Sharp${clientName}. To subscribe or renew, go to ${appUrl} or WhatsApp the team directly. R199/month — cancel anytime.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
       return payReply;
     }

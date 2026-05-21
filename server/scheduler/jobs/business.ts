@@ -97,19 +97,19 @@ export async function runSignupNudge(): Promise<void> {
         const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSince === 1 && client.subscriptionStatus === "inactive") {
-          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R149/month — cancel anytime:*\n${payLink}\n\nR5/day.`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nR6.63/day.`);
         } else if (daysSince === 3 && client.subscriptionStatus === "inactive") {
-          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R149/month — R5/day:\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R199/month — R6.63/day:\n${payLink}`);
         }
       } else if (!isNewSignup && cancelled) {
         const daysSinceCancelled = Math.floor((Date.now() - cancelled.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSinceCancelled === 3) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R149/month:*\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R199/month:*\n${payLink}`);
         } else if (daysSinceCancelled === 7) {
-          await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR149/month. Your data is here:\n${payLink}`);
+          await sendCriticalAlert(client.phoneNumber, `${name}, a week since you left.\n\nThe people who come back after a week are the ones who actually get results — they know what consistency feels like now.\n\nR199/month. Your data is here:\n${payLink}`);
         } else if (daysSinceCancelled === 30) {
-          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR149/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
+          await sendCriticalAlert(client.phoneNumber, `${name} — 30 days. Coach K here.\n\nOne message to say your profile is still here if you want it. ${workouts} sessions logged. Progress saved.\n\nR199/month if you're ready:\n${payLink}\n\nIf not — no hard feelings. Reply STOP and I won't message again.`);
         }
       }
     } catch (err) { console.error(`[SCHEDULER] Signup/win-back error — ${client.phoneNumber}:`, err); }
