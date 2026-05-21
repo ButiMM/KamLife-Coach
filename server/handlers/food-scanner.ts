@@ -8,6 +8,22 @@ import { sastDayStart } from "../utils";
 // Track which users have already received the low-cal warning today (SAST date key)
 const _lowCalWarnedToday = new Map<string, string>();
 
+// Track streak celebration shown today — prevents it firing on every meal log
+const _streakShownToday = new Map<string, string>();
+
+function _todaySastKey(): string {
+  const d = new Date(Date.now() + 2 * 3_600_000);
+  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+}
+
+export function hasShownStreakToday(userId: string): boolean {
+  return _streakShownToday.get(userId) === _todaySastKey();
+}
+
+export function markStreakShownToday(userId: string): void {
+  _streakShownToday.set(userId, _todaySastKey());
+}
+
 export async function computeFoodLogStreak(userId: string): Promise<number> {
   try {
     const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);

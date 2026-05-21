@@ -12,12 +12,35 @@ import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
   computeFoodLogStreak, getFoodStreakCelebration,
+  hasShownStreakToday, markStreakShownToday,
 } from "./food-scanner";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { invalidatePatternCache } from "../cache";
+
+function extractMealLabel(msg: string): string | null {
+  const lo = msg.toLowerCase();
+  if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
+  if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
+  if (/\b(for dinner|for supper|dinner was|supper was|had dinner|had supper|dinner:|supper:|evening meal)\b/i.test(lo)) return "dinner";
+  if (/\bsnack\b/i.test(lo)) return "snack";
+  // Time-of-day fallback — if no keyword, infer from current SAST hour
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  const h = sast.getUTCHours();
+  if (h >= 5 && h < 11) return "breakfast";
+  if (h >= 11 && h < 15) return "lunch";
+  if (h >= 17 && h < 22) return "dinner";
+  return null;
+}
+
+function getStreakNote(userId: string, streak: number, name: string): string {
+  if (hasShownStreakToday(userId)) return "";
+  const note = getFoodStreakCelebration(streak, name);
+  if (note) markStreakShownToday(userId);
+  return note;
+}
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
@@ -623,7 +646,7 @@ export async function handleFoodContext(ctx: {
           protein: f.adjustedProtein,
           category: f.category,
         }));
-        const firstSegLabel = mealSegments.find(s => s.label)?.label || null;
+        const firstSegLabel = mealSegments.find(s => s.label)?.label || extractMealLabel(message);
           await db.insert(mealLogs).values({
             userId: user.id,
             rawMessage: message.slice(0, 1000),
@@ -647,22 +670,7 @@ export async function handleFoodContext(ctx: {
         checkPerfectDay(user.id, user.proteinTarget || 130),
         computeFoodLogStreak(user.id),
       ]);
-      // Only show streak milestone once per day — check if already shown today
-      let streakCelebration = "";
-      const rawCelebration = getFoodStreakCelebration(foodStreak, user.name || "");
-      if (rawCelebration) {
-        const todayStart = sastDayStart();
-        const alreadyShownToday = await db.select({ id: chatHistory.id })
-          .from(chatHistory)
-          .where(and(
-            eq(chatHistory.userId, user.id),
-            eq(chatHistory.intent, "FOOD_LOG"),
-            gte(chatHistory.createdAt, todayStart),
-            like(chatHistory.messageOut, `%${foodStreak} day%`)
-          ))
-          .limit(1);
-        if (!alreadyShownToday.length) streakCelebration = rawCelebration;
-      }
+      const streakCelebration = getStreakNote(user.id, foodStreak, user.name || "");
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
 
       // Combo meal upsell — after logging a high-protein SA combo, suggest a veg side
@@ -740,7 +748,7 @@ export async function handleFoodContext(ctx: {
               carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
               fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
               items,
-              mealLabel: null,
+              mealLabel: extractMealLabel(message),
               loggedAt: gptLoggedAt,
             });
             invalidatePatternCache(user.id);
@@ -749,7 +757,7 @@ export async function handleFoodContext(ctx: {
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fbStreak, user.name || "")}`;
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}`;
       }
     }
   }
@@ -815,7 +823,7 @@ export async function handleFoodContext(ctx: {
             carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
             fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
             items,
-            mealLabel: null,
+            mealLabel: extractMealLabel(message),
             loggedAt: fb2LoggedAt,
           });
           invalidatePatternCache(user.id);
@@ -824,7 +832,7 @@ export async function handleFoodContext(ctx: {
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getFoodStreakCelebration(fb2Streak, user.name || "")}`;
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}`;
     }
   }
 
