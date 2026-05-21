@@ -765,31 +765,72 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
   }
 
-  // ---- ASK_EQUIPMENT — gym or home ----
+  // ---- ASK_EQUIPMENT — route by training location ----
   if (state === "ASK_EQUIPMENT") {
     const lower = msg.toLowerCase();
-    let mode = "home";
-    let gymName: string | null = null;
 
-    // walk_only = genuine mobility/medical limitation. "no gym"/"no equipment" = home bodyweight, not walk-only.
+    // Walk-only: genuine mobility/medical limitation
     if (/\b(walk only|just walk|walking only|only walk|only walking|can only walk|doctor.*walk|injury.*walk|heart.*walk)\b/i.test(lower)) {
-      mode = "walk_only";
-    } else if (/\b(dumbbell|dumbbells|db only|no barbell|no cables|basic gym)\b/i.test(lower)) {
-      mode = "gym_dumbbell";
-      gymName = "Basic Gym";
-    } else if (/\bgym\b/i.test(lower) || lower.includes("virgin") || lower.includes("planet fitness") || lower.includes("curves")) {
-      mode = "gym";
+      await db.update(users).set({ trainingMode: "walk_only", gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+      return `Noted — walking + light bodyweight work only.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    }
+
+    // "No equipment" quick path — bodyweight only, skip sub-question
+    if (/no equipment|bodyweight only|nothing|no gear/i.test(lower)) {
+      await db.update(users).set({ trainingMode: "home", homeEquipment: "bodyweight_only", gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+      return `Bodyweight programme — no equipment needed.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    }
+
+    // Home training → ask what equipment they have
+    if (/\bhome\b/i.test(lower) || /at home|home training|home workout/i.test(lower)) {
+      await db.update(users).set({ gymName: null, onboardingState: "ASK_HOME_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
+      return `What do you have at home?[BUTTONS:Dumbbells|Resistance bands|Bodyweight only|Mix (both)]`;
+    }
+
+    // Gym → ask if full gym or dumbbells only
+    if (/\bgym\b/i.test(lower) || /virgin|planet fitness|curves|fitness/i.test(lower)) {
+      let gymName: string | null = null;
       if (lower.includes("virgin")) gymName = "Virgin Active";
       else if (lower.includes("planet")) gymName = "Planet Fitness";
       else if (lower.includes("curves")) gymName = "Curves";
-      else if (/\bgym\b/i.test(lower)) gymName = "Gym";
+      else gymName = "Gym";
+      await db.update(users).set({ gymName, onboardingState: "ASK_GYM_SETUP" }).where(eq(users.phoneNumber, phone));
+      return `What does your gym have?[BUTTONS:Full gym (machines)|Dumbbells only]`;
     }
 
-    await db.update(users).set({
-      trainingMode: mode,
-      gymName: gymName || null,
-      onboardingState: "ASK_BUDGET",
-    }).where(eq(users.phoneNumber, phone));
+    // Unrecognised — re-ask
+    return `Gym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+  }
+
+  // ---- ASK_HOME_EQUIPMENT — capture home kit ----
+  if (state === "ASK_HOME_EQUIPMENT") {
+    const lower = msg.toLowerCase();
+    let mode = "home";
+    let homeEquipment = "bodyweight_only";
+
+    if ((/dumbbell|dumbbells|weights|weight set|adjustable|db/i.test(lower)) && (/band|resistance/i.test(lower) || /mix|both/i.test(lower))) {
+      mode = "gym_dumbbell"; homeEquipment = "mix";
+    } else if (/dumbbell|dumbbells|weights|weight set|adjustable|db/i.test(lower)) {
+      mode = "gym_dumbbell"; homeEquipment = "dumbbells";
+    } else if (/band|resistance band/i.test(lower)) {
+      mode = "home"; homeEquipment = "bands";
+    } else if (/mix|both/i.test(lower)) {
+      mode = "gym_dumbbell"; homeEquipment = "mix";
+    }
+    // default: bodyweight_only, mode=home
+
+    await db.update(users).set({ trainingMode: mode, homeEquipment, gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+
+    const equipLabel = homeEquipment === "dumbbells" ? "Dumbbell" : homeEquipment === "bands" ? "Resistance band" : homeEquipment === "mix" ? "Dumbbell + band" : "Bodyweight";
+    return `${equipLabel} programme locked in.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+  }
+
+  // ---- ASK_GYM_SETUP — full gym vs dumbbells only ----
+  if (state === "ASK_GYM_SETUP") {
+    const lower = msg.toLowerCase();
+    const mode = /dumbbell|dumbbells only|db only|no machine|basic/i.test(lower) ? "gym_dumbbell" : "gym";
+
+    await db.update(users).set({ trainingMode: mode, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
 
     return `What's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
   }

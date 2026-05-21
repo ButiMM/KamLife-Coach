@@ -135,7 +135,7 @@ export async function handleMediaMessage(ctx: {
             max_tokens: 8,
             temperature: 0,
             messages: [
-              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | other.\n- food: plate of food, drink, snack, meal\n- steps: screenshot showing a step count or pedometer reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise." },
+              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | other.\n- food: plate of food, drink, snack, meal\n- steps: screenshot showing a step count or pedometer reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise." },
               { role: "user", content: [
                 { type: "text", text: "What is this photo?" },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -147,6 +147,7 @@ export async function handleMediaMessage(ctx: {
           else if (raw.includes("steps") || raw.includes("step")) uncaptionedType = "steps";
           else if (raw.includes("exercise")) uncaptionedType = "exercise";
           else if (raw.includes("progress")) uncaptionedType = "progress";
+          else if (raw.includes("equipment")) uncaptionedType = "equipment" as any;
           else uncaptionedType = "other";
           console.log(`[MEDIA][${mediaTrace}] uncaptioned_classified=${uncaptionedType}`);
           if (uncaptionedType === "steps") isStepScreenshot = true;
@@ -154,6 +155,17 @@ export async function handleMediaMessage(ctx: {
             const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
             await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
             return exReply;
+          }
+          if ((uncaptionedType as any) === "equipment") {
+            const hasEquipCaption = /\b(i have|i use|i got|i bought|my equipment|my kit|this is|have this|use this)\b/i.test(message || "");
+            if (hasEquipCaption) {
+              const equipReply = `I can see your equipment. To update your programme, tell me what you have — reply:\n\n*dumbbells* — if you have dumbbells\n*bands* — if you have resistance bands\n*mix* — if you have both\n\nOr just describe it and I will update your profile.`;
+              await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
+              return equipReply;
+            }
+            const equipReply = `Nice setup. If you want me to update your training programme to match your equipment, just reply *dumbbells*, *bands*, or *mix*.\n\nOr reply *workout* for today's session.`;
+            await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
+            return equipReply;
           }
         } catch (e) {
           console.warn(`[MEDIA][${mediaTrace}] uncaptioned_classify_failed:`, e);

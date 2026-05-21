@@ -144,6 +144,38 @@ export async function handleEarlyCommands(ctx: {
     return equipQ;
   }
 
+  // ---- PERMANENT EQUIPMENT UPDATE ----
+  // When user tells us they've changed their setup (joined a gym, bought dumbbells, etc.)
+  const isEquipmentUpdate =
+    /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
+    /\b(joined|signed up|now (go to|at|train at)|started at|going to)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre)\b/i.test(m) ||
+    /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
+    /\bupdate my (equipment|training mode|setup)\b/i.test(m);
+
+  if (isEquipmentUpdate) {
+    const lower = m.toLowerCase();
+    let newMode = user.trainingMode || "home";
+    let newHomeEquipment: string | null = user.homeEquipment || null;
+    let modeLabel = "";
+
+    if (/\b(full gym|gym|machines|cables|virgin|planet fitness|curves|fitness centre)\b/i.test(lower) && !/\b(dumbbell|dumbbells|db|band|bands)\b/i.test(lower)) {
+      newMode = "gym"; newHomeEquipment = null; modeLabel = "full gym";
+    } else if (/\b(dumbbell|dumbbells|db|weights)\b/i.test(lower) && /\b(band|resistance band|bands)\b/i.test(lower)) {
+      newMode = "gym_dumbbell"; newHomeEquipment = "mix"; modeLabel = "dumbbells + resistance bands";
+    } else if (/\b(dumbbell|dumbbells|db|weights|adjustable)\b/i.test(lower)) {
+      newMode = "gym_dumbbell"; newHomeEquipment = "dumbbells"; modeLabel = "dumbbell training";
+    } else if (/\b(band|resistance band|bands)\b/i.test(lower)) {
+      newMode = "home"; newHomeEquipment = "bands"; modeLabel = "resistance band training";
+    }
+
+    if (modeLabel) {
+      await db.update(users).set({ trainingMode: newMode, homeEquipment: newHomeEquipment }).where(eq(users.phoneNumber, phone));
+      const reply = `Got it — programme updated to *${modeLabel}*. Your next session will reflect that.\n\nReply *workout* to see today's updated session.`;
+      await logChat(user.id, message, reply, "EQUIPMENT_UPDATE");
+      return reply;
+    }
+  }
+
   if (m === "log food" || m === "3") {
     return `What did you eat? Just tell me — I'll get you the kcal and protein instantly.\n\n_Examples:_\n• "2 eggs and pap for breakfast"\n• "Chicken thigh, rice and spinach for lunch"\n• "Pap and mince for dinner"\n\nInclude the food, rough amount, and which meal.`;
   }
