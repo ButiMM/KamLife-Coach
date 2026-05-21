@@ -423,14 +423,12 @@ export async function handleEarlyCommands(ctx: {
       // Filter to only yesterday (before todayStart)
       const yMeals = yesterdayMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
       // When user names a meal type (breakfast/lunch/dinner), skip drinks-only entries
-      // — a 5 kcal coffee is not a breakfast, it's a drink logged at breakfast time
+      // — a 5 kcal coffee is not a breakfast, it's a drink logged at breakfast time.
+      // Never return a <50 kcal entry regardless of whether a label was given.
       const findMeal = (meals: typeof yMeals, label: string | null) => {
         const candidates = label ? meals.filter(l => l.mealLabel === label) : meals;
-        if (label) {
-          const substantial = candidates.find(l => (l.kcalInt || 0) >= 50);
-          return substantial || candidates[0] || null;
-        }
-        return candidates[0] || null;
+        const substantial = candidates.find(l => (l.kcalInt || 0) >= 50);
+        return substantial || null;  // never return a drink/trace entry as a meal
       };
       const match = findMeal(yMeals, mealLabel);
       if (!match || (match.kcalInt === 0 && match.proteinInt === 0)) {
@@ -587,6 +585,29 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
     await logChat(user.id, message, alcoholReply, "ALCOHOL_LOG");
     return alcoholReply;
+  }
+
+  // ---- DRINK SWAP — intercept BEFORE food swap so "energy drink switch" doesn't get food alternatives ----
+  const isDrinkSwap = /\b(switch|swap|replace|instead of|alternative|substitute|other option)\b/i.test(m)
+    && /\b(energy drink|red bull|monster|redbull|powerade|sports drink|energy|coffee|fizzy|cold drink|soda|cool drink|juice)\b/i.test(m);
+  const isJustDrinkQuery = /\b(energy drink switch|drink alternatives|what (can|should) i drink|healthier drink|better drink option)\b/i.test(m);
+  if (isDrinkSwap || isJustDrinkQuery) {
+    const goal = user.goalType || "fat_loss";
+    const isEnergyDrink = /\b(energy drink|red bull|monster|redbull|powerade|energy)\b/i.test(m);
+    const isCoffee = /\bcoffee\b/i.test(m);
+    const isJuice = /\bjuice\b/i.test(m);
+    let drinkReply = "";
+    if (isEnergyDrink) {
+      drinkReply = `*Healthier swaps for energy drinks:*\n\n• *Black coffee* — 2 kcal | same caffeine kick, zero sugar\n• *Rooibos tea* — 0 kcal | good for digestion, South African staple\n• *Sparkling water* — 0 kcal | still gives the fizz\n• *Lite iced coffee (no sugar)* — ~30 kcal | caffeine without the 150+ kcal sugar bomb\n• *Electrolyte water* — 0–10 kcal | if you need the minerals post-workout\n\nEnergy drinks pack 150–180 kcal and 40g+ sugar per can — that's almost a full meal in liquid.${goal === "fat_loss" ? " That's a big chunk of your daily budget." : ""}`;
+    } else if (isCoffee) {
+      drinkReply = `*Swap your coffee for:*\n\n• *Rooibos tea* — 0 kcal | zero caffeine, great at night\n• *Green tea* — 2 kcal | light caffeine, antioxidants\n• *Herbal tea (chamomile, peppermint)* — 0 kcal | calming, good before sleep\n• *Black coffee* stays zero if you skip the sugar and milk\n\nIf it's the milk and sugar in coffee causing the calories — just try cutting those first.`;
+    } else if (isJuice) {
+      drinkReply = `*Swap juice for:*\n\n• *Water with lemon* — 5 kcal | feels fancy, basically free\n• *Sparkling water* — 0 kcal | same fizz, no sugar\n• *Rooibos (cold brew)* — 0 kcal | put it in the fridge overnight\n• *Eat the fruit instead* — same vitamins, but the fibre keeps you full longer\n\nOrange juice is ~120 kcal per glass with 23g sugar — the whole fruit is 62 kcal with fibre that keeps you full.`;
+    } else {
+      drinkReply = `*Healthier drink swaps:*\n\n• *Water* — 0 kcal\n• *Sparkling water* — 0 kcal\n• *Rooibos tea* — 0 kcal\n• *Black coffee* — 2 kcal\n• *Herbal teas* — 0 kcal\n\nMost cold drinks, juices, and flavoured drinks pack 100–200 kcal with nothing to show for it nutritionally. Switching to water or rooibos is one of the easiest cuts you can make.`;
+    }
+    await logChat(user.id, message, drinkReply, "DRINK_SWAP");
+    return drinkReply;
   }
 
   // ---- FOOD SWAP — "I don't like pilchards", "what can I have instead of", "swap", "replace" ----
