@@ -173,8 +173,11 @@ export function registerHealthSyncRoutes(app: Express): void {
     const phone = (req.query.phone as string | undefined) || "";
     const appUrl = process.env.APP_URL || "https://kamlife.co.za";
     const webhookUrl = `${appUrl}/webhook/steps?phone=${encodeURIComponent(phone)}`;
-    const html = CONNECT_STEPS_HTML.replace("{{WEBHOOK_URL}}", webhookUrl);
+    const safeUrl = webhookUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const html = CONNECT_STEPS_HTML.replace("{{WEBHOOK_URL}}", safeUrl);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("X-Frame-Options", "DENY");
     res.send(html);
   });
 

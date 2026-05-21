@@ -390,9 +390,17 @@ export async function handleEarlyCommands(ctx: {
         .limit(10);
       // Filter to only yesterday (before todayStart)
       const yMeals = yesterdayMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
-      const match = mealLabel
-        ? yMeals.find(l => l.mealLabel === mealLabel)
-        : yMeals[0];
+      // When user names a meal type (breakfast/lunch/dinner), skip drinks-only entries
+      // — a 5 kcal coffee is not a breakfast, it's a drink logged at breakfast time
+      const findMeal = (meals: typeof yMeals, label: string | null) => {
+        const candidates = label ? meals.filter(l => l.mealLabel === label) : meals;
+        if (label) {
+          const substantial = candidates.find(l => (l.kcalInt || 0) >= 50);
+          return substantial || candidates[0] || null;
+        }
+        return candidates[0] || null;
+      };
+      const match = findMeal(yMeals, mealLabel);
       if (!match || (match.kcalInt === 0 && match.proteinInt === 0)) {
         const noMatch = mealLabel
           ? `No ${mealLabel} logged yesterday — tell me what you ate and I'll log it.`
