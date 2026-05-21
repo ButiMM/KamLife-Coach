@@ -1,4 +1,5 @@
 import "dotenv/config";
+import helmet from "helmet";
 import * as Sentry from "@sentry/node";
 import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
@@ -404,6 +405,11 @@ declare module "http" {
 
 // Progress photo uploads (/api/users) and voice broadcast uploads (/api/admin)
 // can be up to ~8MB base64. All other JSON endpoints get a tight 100kb cap.
+app.use(helmet({
+  contentSecurityPolicy: false, // CSP managed per-page; disabling globally to avoid breaking Vite/WA iframes
+  crossOriginEmbedderPolicy: false,
+}));
+
 app.use(
   ["/api/users", "/api/admin"],
   express.json({

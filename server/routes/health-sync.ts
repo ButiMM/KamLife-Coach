@@ -1,4 +1,5 @@
 import type { Express } from "express";
+import crypto from "crypto";
 import { db } from "../db";
 import { users, stepLogs, userIntegrations } from "../../shared/schema";
 import { eq, and, gte } from "drizzle-orm";
@@ -7,6 +8,18 @@ import { getStepResponse } from "../handlers/steps";
 import { getStepStreak } from "../handlers/steps";
 import { logChat } from "../handlers/chat-log";
 import { sastDayStart } from "../utils";
+
+// HMAC token tied to phone number + server secret — no DB storage needed.
+// Anyone who knows only a phone number cannot fake a step sync.
+function makeStepToken(phone: string): string {
+  const secret = process.env.WEBHOOK_SECRET || process.env.TWILIO_AUTH_TOKEN || "kamlife-dev-secret";
+  return crypto.createHmac("sha256", secret).update(phone).digest("hex").slice(0, 16);
+}
+
+export function buildStepsWebhookUrl(appUrl: string, phone: string): string {
+  const token = makeStepToken(phone);
+  return `${appUrl}/webhook/steps?phone=${encodeURIComponent(phone)}&token=${token}`;
+}
 
 const CONNECT_STEPS_HTML = `<!DOCTYPE html>
 <html lang="en">
@@ -172,7 +185,7 @@ export function registerHealthSyncRoutes(app: Express): void {
   app.get("/connect-steps", (req, res) => {
     const phone = (req.query.phone as string | undefined) || "";
     const appUrl = process.env.APP_URL || "https://kamlife.co.za";
-    const webhookUrl = `${appUrl}/webhook/steps?phone=${encodeURIComponent(phone)}`;
+    const webhookUrl = buildStepsWebhookUrl(appUrl, phone);
     const safeUrl = webhookUrl.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     const html = CONNECT_STEPS_HTML.replace("{{WEBHOOK_URL}}", safeUrl);
     res.setHeader("Content-Type", "text/html; charset=utf-8");
@@ -181,7 +194,7 @@ export function registerHealthSyncRoutes(app: Express): void {
     res.send(html);
   });
 
-  // POST /webhook/steps?phone=+27XXXXXXX
+  // POST /webhook/steps?phone=+27XXXXXXX&token=XXXXXXXXXXXXXXXX
   // Receives step data from Android Health Connect Webhooks app or iOS Shortcut.
   // Body: { steps: number } or { value: number } or { data: { steps: number } }
   app.post("/webhook/steps", async (req, res) => {
@@ -189,6 +202,17 @@ export function registerHealthSyncRoutes(app: Express): void {
       const phone = req.query.phone as string | undefined;
       if (!phone) {
         res.status(400).json({ error: "phone query param required" });
+        return;
+      }
+
+      // Token verification — reject requests without a valid HMAC token
+      const providedToken = (req.query.token as string | undefined) || "";
+      const expectedToken = makeStepToken(phone);
+      const tokensMatch = providedToken.length === expectedToken.length &&
+        crypto.timingSafeEqual(Buffer.from(providedToken), Buffer.from(expectedToken));
+      if (!tokensMatch) {
+        console.warn(`[SECURITY] /webhook/steps rejected — invalid token for ${phone.slice(0, 8)}***`);
+        res.status(403).json({ error: "forbidden" });
         return;
       }
 
