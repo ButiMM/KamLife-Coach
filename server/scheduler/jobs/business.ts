@@ -206,6 +206,8 @@ export async function runWeeklyKpiReport(): Promise<void> {
     const [gptFallbackLogs] = await db.execute(sql`SELECT COUNT(*) as c FROM meal_logs WHERE source = 'gpt_fallback' AND logged_at >= ${sevenDaysAgo}`) as unknown as { rows: { c: number }[] }[];
     const gptFallbackCount = Number((gptFallbackLogs as unknown as { rows?: { c?: number }[] })?.rows?.[0]?.c || 0);
     const fallbackPct = weekFoodLogsCount > 0 ? Math.round((gptFallbackCount / weekFoodLogsCount) * 100) : 0;
+    const scannerHits = weekFoodLogsCount - gptFallbackCount;
+    const scannerPct = weekFoodLogsCount > 0 ? Math.round((scannerHits / weekFoodLogsCount) * 100) : 0;
     const [escNewRow] = await db.select({ c: count() }).from(escalations).where(gte(escalations.createdAt, sevenDaysAgo));
     const [escOpenRow] = await db.select({ c: count() }).from(escalations).where(eq(escalations.status, "open"));
     const [escResolvedRow] = await db.select({ c: count() }).from(escalations).where(and(eq(escalations.status, "resolved"), gte(escalations.resolvedAt as Parameters<typeof gte>[0], sevenDaysAgo)));
@@ -231,7 +233,7 @@ export async function runWeeklyKpiReport(): Promise<void> {
     } catch (e) { console.warn("[KPI] A/B section error:", e); }
     const escSection = `\n\n*Escalations*\nNew this week: ${escNewRow?.c || 0} | Resolved: ${escResolvedRow?.c || 0}\nOpen: ${escOpenRow?.c || 0}${(escUrgentRow?.c || 0) > 0 ? ` ⚠️ ${escUrgentRow?.c} URGENT` : ""}`;
     const foodSourceSection = foodSources.length > 0 ? `\nSources: ${foodSources.join(", ")}` : "";
-    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} (fallback: ${fallbackPct}%)${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
+    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} | SA scanner: ${scannerPct}% | GPT: ${fallbackPct}%${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
     await sendWhatsApp(`whatsapp:${coachPhone}`, report);
     console.log(`[KPI] Weekly report sent to coach`);
   } catch (e) { console.error("[KPI] Weekly report error:", e); }
