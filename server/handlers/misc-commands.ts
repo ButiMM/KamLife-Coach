@@ -662,6 +662,7 @@ export async function handleMiscCommands(ctx: {
 
   // ---- NEW: TODAY'S WORKOUT ----
   if (["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
+    "show me", "show", "send it", "send workout", "show session", "today's session", "todays session",
     "1", "day 1", "day 2", "day 3", "day 4", "day 5", "day 6"].includes(m)) {
     const dayMatch = m.match(/^day\s*([1-6])$/);
     if (dayMatch) {
@@ -683,23 +684,15 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: NEXT WORKOUT ----
-  if (["next", "next workout", "tomorrow", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session"].includes(m)) {
-    const tomorrowDow = (new Date().getDay() + 1) % 7;
-    const tomorrowType = getDayType(tomorrowDow);
-    const dayNames = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-    const dayLabels: Record<string, string> = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥", rest: "Rest 🛌" };
-    const tomorrowName = dayNames[tomorrowDow];
-    if (tomorrowType === "rest") {
-      return `*Tomorrow — ${tomorrowName}: Rest Day 🛌*\n\nYour body builds during rest. Stretch, walk lightly, hit your protein target, and sleep well. Monday is Push day — come in fresh.`;
-    }
-    const nextDayUser = { ...user };
-    // buildDayWorkoutForType only accepts legacy push/pull/legs/core — full body types go via buildDayWorkout
-    const legacyTypes = ["push", "pull", "legs", "core"] as const;
-    const nextWorkout = legacyTypes.includes(tomorrowType as any)
-      ? buildDayWorkoutForType(nextDayUser, tomorrowType as "push" | "pull" | "legs" | "core")
-      : buildDayWorkout(nextDayUser);
-    const tomorrowLabel = dayLabels[tomorrowType] || "Day Session";
-    return `*Tomorrow — ${tomorrowName}: ${tomorrowLabel}*\n\nComplete today's session first, then this is waiting for you.\n\n${nextWorkout}`;
+  if (["next", "next workout", "tomorrow", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow", "what's tomorrow"].includes(m)) {
+    // Build tomorrow's session using the user's actual programme day counter, not calendar day
+    const currentDay = user.programmeDayInWeek || 1;
+    const trainingDays = user.trainingDaysPerWeek || 3;
+    const nextDay = (currentDay % trainingDays) + 1;
+    const nextDayUser = { ...user, programmeDayInWeek: nextDay };
+    const nextWorkout = buildDayWorkout(nextDayUser);
+    const week = user.programmeWeek || 1;
+    return `*Week ${week} — Next Session (Day ${nextDay}):*\n\n${nextWorkout}`;
   }
 
   // ---- NEW: STREAK ----
