@@ -404,7 +404,7 @@ export function buildFoodLogReply(p: {
 
   let dayAssessment = "";
   if (prevCals > 0 && totalMealCals >= 100) {
-    const hourNow = new Date().getUTCHours() + 2;
+    const hourNow = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
     const dayProgress = Math.min(hourNow / 20, 1);
     const expectedCals = calorieTarget * dayProgress;
     const calPace = runningCals / Math.max(expectedCals, 1);

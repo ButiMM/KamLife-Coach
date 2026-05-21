@@ -4,10 +4,17 @@ import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
 
 export const JUNK_WORDS = [
-  "kfc", "kota", "fat cake", "magwinya", "vetkoek", "chips", "niknaks", "cool drink", "coke", "fanta",
-  "hennessy", "henny", "alcohol", "beer", "wine", "chocolate", "sweets", "biscuit", "polony", "viennas",
-  "russian", "steers", "burger", "pizza",
+  "kfc", "kota", "fat cake", "magwinya", "vetkoek", "niknaks", "cool drink", "fanta",
+  "hennessy", "henny", "alcohol", "polony", "viennas", "steers", "burger", "pizza",
+  "chips", "beer", "wine", "chocolate", "sweets", "biscuit",
+  "russian sausage", // "russian salad" is not junk — only the processed sausage is
 ];
+
+function isJunk(msg: string): boolean {
+  // "coke" needs word boundary to avoid matching "artichoke"
+  if (/\bcoke\b/i.test(msg)) return true;
+  return JUNK_WORDS.some(w => msg.includes(w));
+}
 
 export async function checkFoodPatterns(userId: string): Promise<string | null> {
   try {
@@ -21,14 +28,14 @@ export async function checkFoodPatterns(userId: string): Promise<string | null> 
 
     const last3 = recent.slice(0, 3).map(r => (r.messageIn || "").toLowerCase());
 
-    const junkStreak = last3.filter(msg => JUNK_WORDS.some(w => msg.includes(w))).length;
+    const junkStreak = last3.filter(msg => isJunk(msg)).length;
     if (junkStreak >= 3) {
       return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
     }
 
     // Positive reset: if damage control was sent today and the most recent meal is clean, acknowledge the recovery
     const mostRecent = last3[0];
-    const isCleanMeal = !JUNK_WORDS.some(w => mostRecent.includes(w));
+    const isCleanMeal = !isJunk(mostRecent);
     if (isCleanMeal && recent.length >= 2) {
       const damageToday = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "DAMAGE_CONTROL"), gte(chatHistory.createdAt, todayStart)))
@@ -65,14 +72,18 @@ export async function checkFoodPatterns(userId: string): Promise<string | null> 
 }
 
 const DAMAGE_TRIGGERS = [
-  "kfc", "mcdonald", "pizza", "burger", "chips", "vetkoek", "fat cake", "magwinya", "kotas", "pies",
-  "cool drink", "coke", "fanta", "sprite", "energy drink", "biscuit", "chocolate", "sweets", "cake",
+  "kfc", "mcdonald", "pizza", "burger", "vetkoek", "fat cake", "magwinya", "kotas", "pies",
+  "cool drink", "fanta", "sprite", "energy drink", "cake",
   "takeaway", "takeout", "junk", "bad meal", "cheat", "splurge", "ate everything", "binge",
+  "chips", "biscuit", "chocolate", "sweets",
 ];
 
 export async function getDamageControlNote(userId: string, message: string): Promise<string> {
   const lowerMsg = message.toLowerCase();
-  const triggerCount = DAMAGE_TRIGGERS.filter(t => lowerMsg.includes(t)).length;
+  const triggerCount = DAMAGE_TRIGGERS.filter(t => t === "coke"
+    ? /\bcoke\b/i.test(lowerMsg)
+    : lowerMsg.includes(t)
+  ).length;
   if (triggerCount < 2) return "";
   const todayStart = sastDayStart();
   const recentDamage = await db.select({ id: chatHistory.id }).from(chatHistory)

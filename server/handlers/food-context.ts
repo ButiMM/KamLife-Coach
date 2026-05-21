@@ -7,7 +7,7 @@
 
 import { db } from "../db";
 import { users, mealLogs, chatHistory, stepLogs } from "../../shared/schema";
-import { eq, and, gte, lt, desc, like } from "drizzle-orm";
+import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,

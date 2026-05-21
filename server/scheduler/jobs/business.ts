@@ -90,7 +90,8 @@ export async function runSignupNudge(): Promise<void> {
       const name = client.name || "there";
       const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
-      const isNewSignup = !client.totalWorkoutsCompleted && !client.lastWorkoutDate;
+      const onboardingComplete = client.onboardingState === "COMPLETE" && !!client.goalType;
+      const isNewSignup = onboardingComplete && !client.totalWorkoutsCompleted && !client.lastWorkoutDate;
       const created = client.createdAt ? new Date(client.createdAt) : null;
       const cancelled = client.cancelledAt ? new Date(client.cancelledAt) : null;
       if (isNewSignup && created) {
