@@ -60,7 +60,7 @@ export async function checkFoodPatterns(userId: string): Promise<string | null> 
     if (recentMealLogs.length >= 3) {
       const noProteinStreak = recentMealLogs.filter(r => (r.proteinInt || 0) === 0).length;
       if (noProteinStreak >= 3) {
-        return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting your protein. Eggs, pilchards, or beans — pick one for the next meal.`;
+        return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting your protein. Eggs, tinned tuna, chicken, or beans — pick one for the next meal.`;
       }
     }
 
@@ -91,7 +91,7 @@ export async function getDamageControlNote(userId: string, message: string): Pro
     .limit(1);
   if (recentDamage.length > 0) return "";
   await db.insert(chatHistory).values({ userId, messageIn: "[system]", messageOut: "[damage_control_sent]", intent: "DAMAGE_CONTROL" });
-  return `\n\n*Damage control for the next 24 hours:*\nNext meal: lean protein + vegetables only — eggs, chicken, pilchards with cabbage or spinach. No carbs for that one meal. Walk 20 minutes today minimum. Water to 2L. One bad meal is nothing. Back on track right now.`;
+  return `\n\n*Damage control for the next 24 hours:*\nNext meal: lean protein + vegetables only — eggs, chicken, or tinned tuna with cabbage or spinach. No carbs for that one meal. Walk 20 minutes today minimum. Water to 2L. One bad meal is nothing. Back on track right now.`;
 }
 
 export async function getProgressiveOverloadContext(userId: string): Promise<string> {

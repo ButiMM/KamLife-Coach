@@ -6,6 +6,7 @@ import {
   TRAINING_SCHEDULES, isSickOrInjuredToday,
 } from "../shared";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
+import { proteinOptions } from "../../utils";
 
 export async function runEveningAccountability(): Promise<void> {
   console.log("[SCHEDULER] JOB: Evening accountability");
@@ -81,10 +82,11 @@ export async function runEveningAccountability(): Promise<void> {
         const protGap = protTarget - todayProt;
         let dinnerSuggestion: string;
         if (goal === "muscle_gain") {
-          const mealOption = protGap > 40 ? "rice + chicken, or pap + mince + veg" : "eggs + toast, or pilchards on bread";
+          const mealOption = protGap > 40 ? "rice + chicken, or pap + mince + veg" : `eggs + toast, or ${proteinOptions(client).split(",")[0]} on bread`;
           dinnerSuggestion = `${name}, dinner time. Still need ${protGap > 0 ? `${protGap}g protein` : "a solid meal"}. Options: ${mealOption}. What are you working with tonight?`;
         } else {
-          dinnerSuggestion = `${name}, dinner time soon. Keep it light: scrambled eggs + spinach, pilchards on 1 slice toast, or grilled chicken + veg. What do you have at home?`;
+          const opts = proteinOptions(client);
+          dinnerSuggestion = `${name}, dinner time soon. Keep it light: scrambled eggs + spinach, ${opts.split(",")[0].trim()} on 1 slice toast, or grilled chicken + veg. What do you have at home?`;
         }
         await sendWhatsApp(phone, dinnerSuggestion);
         recordProactiveSend(client.id);

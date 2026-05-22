@@ -6,6 +6,7 @@ import {
   TRAINING_SCHEDULES, programmeDaysSince, wasSickOrInjured,
   todaySAST,
 } from "../shared";
+import { proteinHint } from "../../utils";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { buildDayWorkout } from "../../programme";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
@@ -197,7 +198,7 @@ export async function runMorningCheckin(): Promise<void> {
       } else if (totalProtLogged > 0) {
         const gap = proteinTarget - totalProtLogged;
         parts.push(`${totalProtLogged}g protein logged yesterday — ${gap}g short of your ${proteinTarget}g target.`);
-        parts.push(gap > 50 ? `Add pilchards and eggs to every meal today.` : `One extra tin of pilchards or 2 eggs today closes that gap.`);
+        parts.push(proteinHint(client, gap));
       } else {
         parts.push(`Food was logged but protein not tracked.`);
       }

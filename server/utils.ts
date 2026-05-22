@@ -174,6 +174,76 @@ export function getDisplayName(user: any): string {
 // Per-user GPT rate limiter — sliding window, 10 calls per 60 seconds
 const gptCallTimestamps = new Map<string, number[]>();
 
+// Returns a varied SA protein suggestion based on budget tier, dietary restrictions, and day of week.
+// Call with the full user/client object — fields are optional so callers without the full object still work.
+type ProteinUser = { budgetLevel?: string | null; weeklyFoodBudget?: string | null; profileNotes?: string | null };
+type _ProteinOption = { label: string; portion: string };
+
+const _PROTEIN_POOLS: Record<string, _ProteinOption[]> = {
+  low: [
+    { label: "eggs", portion: "3 boiled eggs" },
+    { label: "tinned tuna", portion: "1 tin tuna" },
+    { label: "sugar beans", portion: "1 cup cooked beans" },
+    { label: "chicken thighs", portion: "150g chicken" },
+  ],
+  medium: [
+    { label: "chicken thighs", portion: "150g chicken" },
+    { label: "eggs", portion: "3 boiled eggs" },
+    { label: "tinned tuna", portion: "1 tin tuna" },
+    { label: "beef mince", portion: "100g mince" },
+    { label: "sugar beans", portion: "1 cup beans" },
+  ],
+  high: [
+    { label: "chicken breast", portion: "150g chicken breast" },
+    { label: "eggs", portion: "3 boiled eggs" },
+    { label: "beef mince", portion: "150g mince" },
+    { label: "cottage cheese", portion: "200g cottage cheese" },
+    { label: "tinned tuna", portion: "1 tin tuna" },
+  ],
+};
+
+function _budgetTier(user: ProteinUser): "low" | "medium" | "high" {
+  const b = (user.budgetLevel || "").toLowerCase();
+  const wfb = user.weeklyFoodBudget || "";
+  if (b === "high" || wfb.includes("600") || wfb.includes("woolworths")) return "high";
+  if (b === "medium" || wfb.includes("300")) return "medium";
+  return "low";
+}
+
+export function proteinHint(user: ProteinUser, gap: number): string {
+  const noFish = /fish allergy/i.test(user.profileNotes || "");
+  const tier = _budgetTier(user);
+  const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // 0–6 SAST
+
+  let pool = _PROTEIN_POOLS[tier];
+  if (noFish) pool = pool.filter(o => !o.label.includes("tuna"));
+  if (!pool.length) pool = _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
+
+  const primary = pool[dow % pool.length];
+  const secondary = pool[(dow + 2) % pool.length];
+
+  if (gap > 50) {
+    return `Add ${primary.label} and ${secondary.label} to every meal today.`;
+  }
+  return `${primary.portion} today closes that gap.`;
+}
+
+// Returns two varied protein label strings (comma-separated) for use in coaching messages.
+export function proteinOptions(user: ProteinUser): string {
+  const noFish = /fish allergy/i.test(user.profileNotes || "");
+  const tier = _budgetTier(user);
+  const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay();
+
+  let pool = _PROTEIN_POOLS[tier];
+  if (noFish) pool = pool.filter(o => !o.label.includes("tuna"));
+  if (!pool.length) pool = _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
+
+  const a = pool[dow % pool.length].label;
+  const b = pool[(dow + 1) % pool.length].label;
+  const c = pool[(dow + 3) % pool.length].label;
+  return `${a}, ${b}, or ${c}`;
+}
+
 export function checkGptRateLimit(userId: string, maxCalls = 10, windowMs = 60_000): boolean {
   const now = Date.now();
   const timestamps = (gptCallTimestamps.get(userId) || []).filter(t => now - t < windowMs);
