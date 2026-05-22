@@ -203,7 +203,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       } else if (workouts > 0) {
         gateReply = `${name}, reactivate to get your workouts, food coaching, and full programme back.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nYour ${workouts} session${workouts !== 1 ? "s" : ""} and all progress are saved.`;
       } else {
-        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R199/month (R6.63/day)*\n${payLink}\n\n_7-day money-back guarantee — if it's not working for you in the first week, full refund. No questions._`;
+        gateReply = `${name}, your programme is built and waiting.\n\n*Start today — R199/month (R6.63/day)*\n${payLink}\n\n_Not satisfied after your first week? Message us and we'll make it right._`;
       }
       await logChat(user.id, message, gateReply, "SUBSCRIPTION_GATE");
       return gateReply;

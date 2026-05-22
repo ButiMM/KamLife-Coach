@@ -528,7 +528,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `${shoppingPreview}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not working in the first week? Full refund, no questions. POPIA protected._`;
+  const msg3 = `${shoppingPreview}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
   return `${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
