@@ -72,13 +72,25 @@ export async function handleFoodContext(ctx: {
     } else {
       const todayStartCorr = sastDayStart();
       try {
-        const lastFoodLog = await db.select({ id: chatHistory.id })
-          .from(chatHistory)
-          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
-          .orderBy(desc(chatHistory.createdAt))
-          .limit(1);
+        const [lastFoodLog, lastMealLogCorr] = await Promise.all([
+          db.select({ id: chatHistory.id })
+            .from(chatHistory)
+            .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+            .orderBy(desc(chatHistory.createdAt))
+            .limit(1),
+          db.select({ id: mealLogs.id })
+            .from(mealLogs)
+            .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))
+            .orderBy(desc(mealLogs.loggedAt))
+            .limit(1),
+        ]);
         if (lastFoodLog.length > 0) {
           await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+        }
+        if (lastMealLogCorr.length > 0) {
+          await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr[0].id));
+        }
+        if (lastFoodLog.length > 0 || lastMealLogCorr.length > 0) {
           const recomputed = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({
             todayCalories: recomputed.calories,
@@ -190,7 +202,7 @@ export async function handleFoodContext(ctx: {
     /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
   const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
-  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training)\b/.test(m);
+  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|add|added|put in|putting in)\b/.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
