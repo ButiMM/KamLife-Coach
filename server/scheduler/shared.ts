@@ -308,11 +308,7 @@ export async function getActiveClients() {
   return db.select().from(users).where(
     and(
       eq(users.onboardingState, "COMPLETE"),
-      or(
-        eq(users.subscriptionStatus, "active"),
-        eq(users.subscriptionStatus, "trial"),
-        gte(users.betaBypassUntil, now)
-      )
+      eq(users.subscriptionStatus, "active")
     )
   );
 }

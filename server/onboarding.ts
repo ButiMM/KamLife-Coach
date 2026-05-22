@@ -464,8 +464,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    subscriptionStatus: "trial",
-    betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+    subscriptionStatus: "inactive",
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
@@ -529,7 +528,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `${shoppingPreview}\n\n*You have 7 days free — no payment needed yet.*\n\nWhen you're ready to continue after your trial:\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
+  const msg3 = `${shoppingPreview}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not working in the first week? Full refund, no questions. POPIA protected._`;
   return `${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
@@ -1124,8 +1123,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      subscriptionStatus: "trial",
-      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+      subscriptionStatus: "inactive",
       onboardingState: "COMPLETE",
       popiConsent: true,
       popiConsentAt: new Date(),
@@ -1153,7 +1151,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const legCalExplainer = goal === "muscle_gain"
       ? `*What ${calorieTarget} kcal means:* This is a surplus above maintenance — fuel to build muscle. Don't undershoot it. 1 egg = ~6g protein. 100g chicken = ~31g. Hit ${proteinTarget}g protein daily and the programme works.`
       : `*What ${calorieTarget} kcal means:* A plate of pap with stew is ~550 kcal. Your body burns ~1,200–1,500 kcal just to breathe before you move. Eat at this target and you lose fat without starving. Hit ${proteinTarget}g protein and hunger drops.`;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\n${mealPlan}\n\n*You have 7 days free — no payment needed yet.* When ready:\n*R199/month — cancel anytime:* ${payLinkLeg}`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\n${mealPlan}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkLeg}\n\n_R6.63/day. Not working in the first week? Full refund, no questions._`;
   }
 
   return await getMenuText(user);
