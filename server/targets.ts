@@ -15,8 +15,10 @@ export function calculateTargets(
   trainingExperience: string = "beginner",
 ): { calorieTarget: number; proteinTarget: number } {
 
+  const isBreastfeeding = lifeSituation === "postpartum_breastfeeding";
+
   // ── Mifflin-St Jeor BMR (far more accurate than weight × 22) ──
-  // Male:   10 × weight(kg) + 6.25 × height(cm) − 5 × age − 5 + 5
+  // Male:   10 × weight(kg) + 6.25 × height(cm) − 5 × age + 5
   // Female: 10 × weight(kg) + 6.25 × height(cm) − 5 × age − 161
   const isFemale = gender === "female";
   const bmr = isFemale
@@ -31,6 +33,7 @@ export function calculateTargets(
     retired: 1.2,
     stay_home_parent: 1.3,
     retail_physical: 1.5,
+    postpartum_breastfeeding: 1.35,
     "1": 1.35,  // student
     "2": 1.3,   // office
     "3": 1.5,   // physical job
@@ -49,8 +52,9 @@ export function calculateTargets(
 
   // ── Goal adjustment ──
   // Fat loss deficit is smaller for females to preserve hormonal health
+  // Breastfeeding: never create a large deficit — 200 kcal max to protect milk supply
   const goalAdj: Record<string, number> = {
-    fat_loss: isFemale ? -300 : -400,
+    fat_loss: isBreastfeeding ? -200 : (isFemale ? -300 : -400),
     muscle_gain: isFemale ? 250 : 400,
     recomposition: 0,
     general: isFemale ? 50 : 100,
@@ -60,8 +64,12 @@ export function calculateTargets(
 
   let calorieTarget = Math.round(bmr * mult + trainingAdj + adj);
 
+  // ── Breastfeeding calorie bonus — milk production burns 300–500 kcal/day ──
+  if (isBreastfeeding) calorieTarget += 400;
+
   // ── Safety floors by gender ──
-  const minCal = isFemale ? 1200 : 1500;
+  // Breastfeeding: 1,800 kcal is the clinical minimum — below this, milk supply drops
+  const minCal = isBreastfeeding ? 1800 : (isFemale ? 1200 : 1500);
   calorieTarget = Math.max(minCal, Math.min(4500, calorieTarget));
 
   // ── Protein target ──
@@ -76,6 +84,9 @@ export function calculateTargets(
     health_condition: isFemale ? 1.6 : 2.0,
   };
   let proteinTarget = Math.round(weightKg * (proteinMult[goalType] || 2.0));
+
+  // Breastfeeding: minimum 70g protein — quality matters for breast milk composition
+  if (isBreastfeeding) proteinTarget = Math.max(70, proteinTarget);
 
   // ── Age adjustments ──
   // Youth: don't over-restrict

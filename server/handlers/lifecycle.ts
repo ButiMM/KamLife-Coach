@@ -1784,5 +1784,26 @@ export async function handleLifecycle(ctx: {
     return thanksReply;
   }
 
+  // ---- POSTPARTUM / BREASTFEEDING HANDLER ----
+  const isPostpartumMsg = /\b(breastfeed|breast feed|breast-feed|breastfeeding|breast feeding|just gave birth|recently gave birth|new mom|new mum|new mother|postpartum|post partum|post-partum|just had a baby|just had my baby|had my baby|after birth|after delivery|nursing my baby|nursing a baby|im nursing|i'm nursing|i am nursing)\b/i.test(m);
+
+  if (isPostpartumMsg) {
+    const fn = user.name ? `${user.name}, ` : "";
+    const situation = user.lifeSituation || "";
+    const isTracked = situation === "postpartum_breastfeeding";
+    const calT = user.calorieTarget || 1800;
+    const protT = user.proteinTarget || 100;
+
+    if (isTracked) {
+      const postpartumReply = `${fn}your plan is already set up for breastfeeding — here's what matters most right now:\n\n🍼 *Calories:* Your target is *${calT} kcal/day*. Do not eat less than this — your body needs the extra fuel to make milk. Slow, steady weight loss (0.5kg/week max) is the goal.\n\n💪 *Protein:* Hit *${protT}g daily*. Milk quality depends on it — eggs, chicken, pilchards, Amasi, sugar beans.\n\n🥛 *Calcium:* Amasi, milk, sardines with bones, or yoghurt every day. Your baby draws calcium from your bones if you don't eat enough.\n\n🩸 *Iron:* Red meat, spinach, pilchards. You lost iron during delivery — replenish it.\n\n💧 *Water:* Add at least 500ml to your daily total. Breastfeeding is dehydrating.\n\n🏃 *Training:* Pelvic floor exercises from week 1. Gentle walks from week 2. Return to gym training at 6 weeks — only with doctor clearance. No heavy impact or ab work until cleared.\n\n*You are doing something incredible. Your body's job right now is to feed your baby and heal. The weight will come off — let it take the time it needs.*`;
+      await logChat(user.id, message, postpartumReply, "POSTPARTUM_INFO");
+      return postpartumReply;
+    } else {
+      const postpartumReply = `${fn}thank you for sharing that — this changes your plan.\n\nBreastfeeding burns 300–500 extra calories a day, and your body needs those calories to produce milk. If you eat too little, your milk supply drops first.\n\n*Here's what I recommend:*\n✅ Set your life situation to "breastfeeding" so your calorie and protein targets adjust correctly — type *UPDATE PLAN* and I'll walk you through it.\n✅ Never go below 1,800 kcal/day while breastfeeding\n✅ Priority nutrients: protein (milk quality), calcium (baby's bones), iron (delivery recovery), water (+500ml/day)\n✅ Hold off on intense training until 6 weeks post-delivery — pelvic floor and walks first\n\nYou can absolutely lose weight while breastfeeding — just slowly and safely. Type *UPDATE PLAN* to get started.`;
+      await logChat(user.id, message, postpartumReply, "POSTPARTUM_INFO");
+      return postpartumReply;
+    }
+  }
+
   return null;
 }

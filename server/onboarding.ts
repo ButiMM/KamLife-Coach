@@ -402,15 +402,17 @@ export function getOnboardingMealPlan(user: any): string {
     : "";
   const nightNote = isNightShift ? `\n\n🌙 *Night shift:* All timings are relative to your shift. Pre-shift = your breakfast. Post-shift = your dinner.` : "";
   const hivNote = isHIV ? `\n\n💊 *ARV reminder:* Take your medication with breakfast every day — never on an empty stomach.` : "";
+  const isPostpartumPlan = situation === "postpartum_breastfeeding";
   const domesticNote = (situation === "retail_physical" && !isUnemployed) ? `\n\n🧹 *Active job note:* Your job already burns 300+ extra calories. Plan adjusted. Batch cook Sunday so you have food ready without cooking after long shifts.` : "";
   const studentNote = isStudent ? `\n\n📚 *Student note:* Every meal in this plan is under 10 minutes and under 3 ingredients. Res tuck shop strategy — pilchards + brown bread is one of the best budget meals in SA. Maggi noodles + 1 egg is acceptable when budget is critical.` : "";
   const unemployedNote = isUnemployed ? `\n\n💰 *Budget note:* Every meal here costs under R15. Batch cook beans on Sunday for the week — one 500g bag of sugar beans feeds you protein for 4 days at R5 per serving.` : "";
+  const postpartumNote = isPostpartumPlan ? `\n\n🤱 *Breastfeeding plan:* Your calories are set higher to protect your milk supply — do NOT eat less than your target. Losing 0.5kg/week max is the goal. Priority nutrients: *Protein* (eggs, chicken, pilchards — for milk quality), *Calcium* (Clover Amasi, milk, sardines — for baby's bones and yours), *Iron* (red meat, spinach, pilchards — you lost iron in delivery), *Water* (add an extra 500ml/day — breastfeeding is dehydrating). Training: pelvic floor exercises first, gentle walks from week 1, return to gym training at 6 weeks with doctor clearance. No heavy impact until cleared.` : "";
 
   const trainingDaysStr = Array.from(trainingSet).join(", ");
   const header = `*Your Personalised 7 Day Meal Plan*\n${name} | Goal: ${goalLabels[goal] || goal} | ${adjustedCal} cal/day | ${adjustedProt}g protein/day\nBudget: ${budgetLabels[budget]} per week | Shop at Shoprite or Boxer${medFlags.length > 0 ? `\n⚠️ Medical: ${medFlags.join(" · ")}` : ""}`;
   const trainingLine = `\n*Training Days:* ${trainingDaysStr} (${daysPerWeek} day${daysPerWeek > 1 ? "s" : ""}/week)`;
 
-  const headerBlock = `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}`;
+  const headerBlock = `${header}${trainingLine}${goalNote}${nightNote}${hivNote}${domesticNote}${studentNote}${unemployedNote}${postpartumNote}`;
   const planBlock = plan.trim();
   const shopBlock = `${shopList}\nEstimated total: R${shopTotal}\n🛒 ${proTip}`;
   return `${headerBlock}\n\n---\n\n${planBlock}\n\n---\n\n${shopBlock}\n\n_Reply SWAP [day] to swap a day. Reply SHOPPING LIST for just the shopping list._`;
@@ -475,7 +477,10 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const gymName = u.gymName;
   const modeLabel = mode === "walk_only" ? "Walking + bodyweight" : mode === "gym_dumbbell" ? "Dumbbell gym" : mode === "gym" ? (gymName || "Gym") : "Home training";
 
-  const ageNote = isYouth
+  const isPostpartum = u.lifeSituation === "postpartum_breastfeeding";
+  const ageNote = isPostpartum
+    ? `\n\n_Postpartum note: Your calorie target is set higher than a standard fat loss plan — breastfeeding burns 300–500 kcal/day and cutting too hard reduces milk supply. Aim for 0.5kg/week max. Pelvic floor exercises before any running or heavy lifting. Cleared for gentle training from 6 weeks — get doctor sign-off first._`
+    : isYouth
     ? `\n\n_Note for under-18s: Your programme is designed to be safe and fun. No heavy maximal lifts — we focus on movement, form, and building healthy habits for life._`
     : isElderly
       ? `\n\n_Your programme is joint-friendly with lower-impact alternatives. We focus on mobility, strength maintenance, and keeping you active and independent. Always listen to your body._`
@@ -630,8 +635,20 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const focusArea = isGlutes ? "glutes_legs" : null;
     await db.update(users).set({
       ...(focusArea ? { primaryFocusArea: focusArea } : { primaryFocusArea: null }),
-      onboardingState: "ASK_AGE_NEW",
+      onboardingState: "ASK_POSTPARTUM",
     }).where(eq(users.phoneNumber, phone));
+    return `One more — are you currently pregnant, recently gave birth, or breastfeeding?\n\n1️⃣ Yes — postpartum or breastfeeding\n2️⃣ No — continue`;
+  }
+
+  // ---- ASK_POSTPARTUM ----
+  if (state === "ASK_POSTPARTUM") {
+    const lower = msg.toLowerCase().trim();
+    const isPostpartum = msg.includes("1") || lower.includes("yes") || lower.includes("breastfeed") || lower.includes("postpartum") || lower.includes("gave birth") || lower.includes("nursing") || lower.includes("new mom") || lower.includes("new mum") || lower.includes("baby");
+    if (isPostpartum) {
+      await db.update(users).set({ lifeSituation: "postpartum_breastfeeding", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+      return `Understood — your plan will be adjusted. While breastfeeding your body needs more calories, not fewer. We will lose the weight slowly and safely so your milk supply stays strong.\n\nHow old are you?`;
+    }
+    await db.update(users).set({ onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
     return `How old are you?`;
   }
 
