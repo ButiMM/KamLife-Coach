@@ -199,7 +199,14 @@ export async function handleMiscCommands(ctx: {
       }
     } else if (lowCalBudget && needsProtein) {
       suggestion += `You have ${calLeft} kcal and ${protLeft}g protein left.\n\n`;
-      suggestion += `*Best option:* ${budget === "under_100" ? "Tin of pilchards with lemon (~180 kcal, 22g protein)" : "Grilled chicken breast + salad (~250 kcal, 30g protein)"}\nHigh protein, low calories — exactly what you need to finish the day.`;
+      // Pick a suggestion that actually fits within remaining calories
+      if (calLeft < 150) {
+        suggestion += `*High-protein, low-cal finish:* 2 boiled eggs (~140 kcal, 12g protein)\nOr: 50g biltong (~130 kcal, 20g protein) — fits your budget.`;
+      } else if (calLeft < 220) {
+        suggestion += `*Best fit:* ${budget === "under_100" ? "2 eggs + spinach (~160 kcal, 14g protein)" : "Tuna salad, no dressing (~190 kcal, 25g protein)"}\nProtein first — just fits your remaining calories.`;
+      } else {
+        suggestion += `*Best option:* ${budget === "under_100" ? "Tin of tuna with lemon (~180 kcal, 22g protein)" : "Grilled chicken breast + salad (~250 kcal, 30g protein)"}\nHigh protein, low calories — exactly what you need to finish the day.`;
+      }
     } else if (lowCalBudget && !needsProtein) {
       suggestion += `You have ${calLeft} kcal left and protein is sorted.\n\n`;
       suggestion += `*Best option:* Vegetable stir-fry or salad (~150 kcal)\nOr just call it — you're close to target. ${goal === "fat_loss" ? "Slight deficit is fine for fat loss." : ""}`;
@@ -487,6 +494,136 @@ export async function handleMiscCommands(ctx: {
       await logChat(user.id, message, statsReply, "STATS_LOOKUP");
       return statsReply;
     } catch (e) { console.error("[STATS]", e); }
+  }
+
+  // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
+  // Gives a directional assessment — not a wall of numbers, just honest + specific.
+  if (
+    /\b(where am i going|on track\??|am i on track|will i reach|when will i see results|how long will this take|is this working|where is my body going|any progress|am i making progress|is it working|heading somewhere|see(ing)? results|showing results|progress\??|working\??)\b/i.test(m)
+    || ["trajectory", "on track", "progress check", "am i progressing", "body check", "check in"].includes(m)
+  ) {
+    try {
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const goal = user.goalType || "fat_loss";
+      const protTarget = user.proteinTarget || 120;
+      const calTarget = user.calorieTarget || 1800;
+      const stepsTarget = user.stepsTarget || 8500;
+      const trainingDaysPerWeek = user.trainingDaysPerWeek || 3;
+      const firstName = user.name?.split(" ")[0] || "";
+
+      const [mealRows, weekWorkouts, stepRows, weightRows] = await Promise.all([
+        db.select({ loggedAt: mealLogs.loggedAt, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
+          .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
+        db.select({ id: workoutLogs.id }).from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+        db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+        db.select({ weight: weightLogs.weight }).from(weightLogs)
+          .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2),
+      ]);
+
+      // Aggregate mealLogs by SAST day
+      const dayMap: Record<string, { kcal: number; prot: number }> = {};
+      for (const row of mealRows) {
+        const d = new Date((row.loggedAt?.getTime() || 0) + 2 * 3_600_000);
+        const key = `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        if (!dayMap[key]) dayMap[key] = { kcal: 0, prot: 0 };
+        dayMap[key].kcal += row.kcalInt || 0;
+        dayMap[key].prot += row.proteinInt || 0;
+      }
+      const mealDays = Object.values(dayMap);
+      const daysWithFood = mealDays.length;
+      const daysProtHit = mealDays.filter(d => d.prot >= Math.round(protTarget * 0.9)).length;
+      const avgProt = daysWithFood > 0 ? Math.round(mealDays.reduce((s, d) => s + d.prot, 0) / daysWithFood) : 0;
+      const avgCals = daysWithFood > 0 ? Math.round(mealDays.reduce((s, d) => s + d.kcal, 0) / daysWithFood) : 0;
+
+      const workoutsDone = weekWorkouts.length;
+      const stepsAboveTarget = stepRows.filter(s => s.steps >= stepsTarget).length;
+      const avgSteps = stepRows.length > 0 ? Math.round(stepRows.reduce((s, r) => s + r.steps, 0) / stepRows.length) : 0;
+
+      // Score: 2 = fully hit, 1 = partial, 0 = missed
+      const trainScore = workoutsDone >= trainingDaysPerWeek ? 2 : workoutsDone >= Math.ceil(trainingDaysPerWeek * 0.6) ? 1 : 0;
+      const protScore = daysWithFood === 0 ? 0 : daysProtHit >= Math.round(daysWithFood * 0.8) ? 2 : daysProtHit >= Math.round(daysWithFood * 0.5) ? 1 : 0;
+      const score = trainScore + protScore;
+
+      const out: string[] = [];
+      out.push(`*${firstName ? firstName + " — " : ""}Where you're heading:*\n`);
+
+      const wIcon = trainScore === 2 ? "✅" : trainScore === 1 ? "⚠️" : "❌";
+      out.push(`${wIcon} Training: ${workoutsDone}/${trainingDaysPerWeek} sessions this week`);
+
+      if (daysWithFood > 0) {
+        const pIcon = protScore === 2 ? "✅" : protScore === 1 ? "⚠️" : "❌";
+        out.push(`${pIcon} Protein: hit ${daysProtHit}/${daysWithFood} days (avg ${avgProt}g vs ${protTarget}g target)`);
+      } else {
+        out.push(`❓ Protein: no meals logged this week`);
+      }
+
+      if (stepRows.length > 0) {
+        const sIcon = stepsAboveTarget >= 5 ? "✅" : stepsAboveTarget >= 3 ? "⚠️" : "❌";
+        out.push(`${sIcon} Steps: avg ${avgSteps.toLocaleString()} — ${stepsAboveTarget}/${stepRows.length} days at target`);
+      }
+
+      if (weightRows.length >= 2) {
+        const diff = parseFloat(String(weightRows[0].weight)) - parseFloat(String(weightRows[1].weight));
+        if (!isNaN(diff) && Math.abs(diff) >= 0.3) {
+          out.push(diff < 0 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg since last weigh-in` : `⬆️ Up ${diff.toFixed(1)}kg since last weigh-in`);
+        }
+      }
+
+      out.push(``);
+
+      if (goal === "fat_loss") {
+        if (score >= 4) {
+          const deficit = avgCals > 0 ? Math.max(0, calTarget - avgCals) : 0;
+          const weeklyLossKg = deficit > 0 ? (deficit * 7 / 7700).toFixed(2) : null;
+          const lossLine = weeklyLossKg && parseFloat(weeklyLossKg) > 0.1
+            ? `~${weeklyLossKg}kg per week at this pace.`
+            : `You are eating at target — the process is working.`;
+          out.push(`*On track for fat loss.* ${lossLine} Protein preserved, fat burning.`);
+        } else if (score === 3) {
+          const gap = daysWithFood > 0 && daysProtHit < Math.round(daysWithFood * 0.8) ? "protein consistency" : "training";
+          out.push(`*Progress is happening — but leaving results behind.* The ${gap} gap is the limiter. Fix that one thing and pace improves.`);
+        } else if (score >= 1) {
+          out.push(`*Direction is right, pace is off.* Fat loss needs both training AND protein consistent. Pick the one that is failing and fix it this week.`);
+        } else {
+          out.push(`*Not enough data yet.* ${daysWithFood === 0 ? "No meals logged this week — start there." : "Habits aren't consistent enough to drive fat loss yet. Nothing changes until the daily habits do."}`);
+        }
+      } else if (goal === "muscle_gain") {
+        if (score >= 4) {
+          out.push(`*On track for muscle gain.* Training stimulus + protein = your body has everything it needs to grow. Trust the process.`);
+        } else if (daysWithFood > 0 && daysProtHit < Math.round(daysWithFood * 0.5)) {
+          const shortfall = protTarget - avgProt;
+          out.push(`*Training is there — protein is not.* Muscle growth stalls without enough protein. You are ${shortfall}g/day short. One more protein meal fixes this.`);
+        } else if (workoutsDone < Math.ceil(trainingDaysPerWeek * 0.6)) {
+          out.push(`*Protein is sorted — training needs work.* Muscle requires the stimulus. ${trainingDaysPerWeek - workoutsDone} more session${trainingDaysPerWeek - workoutsDone > 1 ? "s" : ""} this week changes the trajectory.`);
+        } else {
+          out.push(`*Building.* Results show at the 8-week mark — keep the sessions and protein consistent.`);
+        }
+      } else {
+        out.push(score >= 3 ? `*On track.* Consistent habits — keep going.` : `*Building consistency.* That is the only job right now.`);
+      }
+
+      out.push(``);
+      if (daysWithFood === 0) {
+        out.push(`*First step:* Log every meal this week — even one line. Without data, I am coaching blind.`);
+      } else if (daysProtHit < Math.round(daysWithFood * 0.5) && daysWithFood >= 3) {
+        out.push(`*One fix:* Add protein to every breakfast this week. Morning protein sets the daily target in motion.`);
+      } else if (workoutsDone === 0) {
+        out.push(`*One fix:* One session before Sunday. That is it.`);
+      } else if (stepRows.length === 0) {
+        out.push(`*One fix:* Send your step count daily — "8500 steps". That data matters.`);
+      } else {
+        out.push(`*Keep going.* Same habits, compounding results.`);
+      }
+
+      const trajectoryReply = out.join("\n");
+      await logChat(user.id, message, trajectoryReply, "TRAJECTORY");
+      return trajectoryReply;
+    } catch (e) {
+      console.error("[TRAJECTORY]", e);
+      // fall through to GPT
+    }
   }
 
   // ---- WEEKLY PROGRESS CARD ----
