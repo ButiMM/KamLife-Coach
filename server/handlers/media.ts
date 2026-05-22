@@ -135,7 +135,7 @@ export async function handleMediaMessage(ctx: {
             max_tokens: 8,
             temperature: 0,
             messages: [
-              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | other.\n- food: plate of food, drink, snack, meal\n- steps: screenshot showing a step count or pedometer reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise." },
+              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | other.\n- food: plate of food, drink, snack, meal, meal prep container, food packaging, protein shake can/bottle/sachet, protein bar wrapper, supplement tub/bottle showing a food product, grocery item, any branded food or nutrition product\n- steps: screenshot showing a step count or pedometer reading from a fitness app (Samsung Health, Google Fit, Apple Health, Garmin, Fitbit, Huawei Health)\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise. Protein powder tubs, protein shake cans, and any branded food product = food, NOT equipment." },
               { role: "user", content: [
                 { type: "text", text: "What is this photo?" },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -305,8 +305,8 @@ export async function handleMediaMessage(ctx: {
         .from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, todayStartPhoto), eq(chatHistory.intent, "FOOD_LOG"), eq(chatHistory.messageIn, "[Photo]")));
       const photoCountToday = parseInt(String(photoCountResult[0]?.count || 0));
-      if (photoCountToday >= 3) {
-        return `3 food photos logged today — I have a clear picture of how you're eating. Keep it consistent and send me tomorrow's first meal.`;
+      if (photoCountToday >= 6) {
+        return `6 food photos logged today — I have a clear picture of how you're eating. Keep it consistent and send me tomorrow's first meal.`;
       }
 
       const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
@@ -335,13 +335,18 @@ export async function handleMediaMessage(ctx: {
 
 IDENTIFICATION: Always use SA names — pap not polenta, pilchards not sardines, vetkoek not fried dough, morogo not wild spinach, umngqusho not samp-and-beans, kota not bunny chow, magwinya not fat cake, smileys not sheep head, walkie talkies not chicken feet, mogodu not tripe, chakalaka not relish, boerewors not sausage, biltong not dried meat.
 
-ESTIMATION: State specific calories and protein for the FULL plate as actually served. Format: "That plate is roughly 650 kcal and 35g protein." Then immediately say how that leaves them against their ${liveCal} kcal and ${liveProt}g protein daily target. Example: "That leaves 1,150 kcal and 85g protein for the rest of the day."
+PACKAGED PRODUCTS: If the photo shows a branded food or supplement product (protein shake, protein bar, protein snack, cereal box, tin, can, sachet, supplement tub) — FIRST look for a visible nutritional label and read it directly. If no label is visible, identify the brand and product name if readable. Common SA nutrition brands: USN, Evox, Biogen, Pronutro, Jungle Oats, Bokomo, Parmalat, Spar, Pick n Pay, Woolworths. For protein shakes and powders without a visible label: estimate 30g serving = 22g protein, 130 kcal. For protein snack bars/bites without a label: estimate 40g serving = 10g protein, 170 kcal.
+
+MULTIPLE ITEMS: If the photo shows more than one food item — a meal prep container with separate compartments, a snack next to a main meal, multiple dishes — describe and estimate ALL items visible in the frame, not just one. Combine into a single total. Example: "Meal prep box: chicken + spinach + butternut — roughly 420 kcal and 38g protein total."
+
+ESTIMATION: State specific calories and protein for ALL food and drink items visible in the frame as actually served. Format: "That meal is roughly 650 kcal and 35g protein." Then immediately say how that leaves them against their ${liveCal} kcal and ${liveProt}g protein daily target. Example: "That leaves 1,150 kcal and 85g protein for the rest of the day."
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
 FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food — check these specific cases first:
 - If it shows a handwritten or typed grocery/shopping list, a receipt from a grocery store, or a list of items to BUY (not to eat right now) — respond with EXACTLY: GROCERY_LIST: [list the items you can read, comma-separated, in plain English]
-- For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, supplement bottle, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
+- For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
+- IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
 
 BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
               },
