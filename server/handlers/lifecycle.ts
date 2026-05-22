@@ -25,7 +25,7 @@ import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday, sastDayStart } from "../utils";
+import { sastToday, sastDayStart, proteinOptions } from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods } from "./food-scanner";
@@ -1159,7 +1159,6 @@ export async function handleLifecycle(ctx: {
       const mCal = log.kcalInt || 0;
       const mProt = log.proteinInt || 0;
       totalCal += mCal; totalProt += mProt;
-      const label = log.mealLabel ? `${log.mealLabel}: ` : "";
       const isPhoto = log.source === "photo";
       if (isPhoto && mCal === 0) {
         mealLines.push(`• Food photo logged — caption needed for calories`);
@@ -1176,12 +1175,12 @@ export async function handleLifecycle(ctx: {
         || "Food logged";
       if (isPhoto) {
         mealLines.push(mCal > 0
-          ? `• ${label}Food photo — ~${mCal} kcal, ${mProt}g protein`
-          : `• ${label}Food photo logged`);
+          ? `• Food photo — ~${mCal} kcal, ${mProt}g protein`
+          : `• Food photo logged`);
       } else {
         mealLines.push(mCal > 0
-          ? `• ${label}${displayName} — ~${mCal} kcal, ${mProt}g protein`
-          : `• ${label}${displayName}`);
+          ? `• ${displayName} — ~${mCal} kcal, ${mProt}g protein`
+          : `• ${displayName}`);
       }
     }
     const calTarget = user.calorieTarget || 1800;
@@ -1197,7 +1196,7 @@ export async function handleLifecycle(ctx: {
     } else if (totalCal > 0 && calRemaining > 500 && !isLateEnough) {
       diaryCoachNote = `\n\n${calRemaining} kcal still to go. Spread it across your remaining meals — do not leave it all for dinner.`;
     } else if (totalCal > calTarget * 1.1) {
-      diaryCoachNote = `\n\nOver target by ${Math.abs(calRemaining)} kcal. Keep the next meal protein-only — eggs, pilchards, chicken — and skip the starch.`;
+      diaryCoachNote = `\n\nOver target by ${Math.abs(calRemaining)} kcal. Keep the next meal protein-only — ${proteinOptions(user)} — and skip the starch.`;
     }
 
     const diaryLines = [
@@ -1233,7 +1232,7 @@ export async function handleLifecycle(ctx: {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `, ${user.name}` : "";
-    const hungerReply = `Hunger on a deficit is normal${name} — but hunger that feels unbearable means something is off.\n\n*Check these first:*\n🥩 *Protein* — Are you hitting ${prot}g per day? Protein is the most filling macro. Low protein = constant hunger. If you are under, add eggs, pilchards, or chicken to every meal.\n🥬 *Volume* — Vegetables add bulk without calories. Cabbage, spinach, morogo — eat them in big quantities. They physically fill your stomach.\n💧 *Water* — Thirst and hunger feel identical. Drink 500ml of water right now and wait 10 minutes.\n😴 *Sleep* — Under 7 hours spikes ghrelin (hunger hormone) and crashes leptin (fullness hormone). If sleep is poor, hunger is worse — always.\n\n${goal === "fat_loss" ? `At ${cal} kcal you should not be unbearably hungry. If you are — your protein is likely too low. What did you eat today so far?` : `On a surplus hunger is your friend — eat when you are hungry, especially around your training window.`}`;
+    const hungerReply = `Hunger on a deficit is normal${name} — but hunger that feels unbearable means something is off.\n\n*Check these first:*\n🥩 *Protein* — Are you hitting ${prot}g per day? Protein is the most filling macro. Low protein = constant hunger. If you are under, add eggs, chicken, or tinned tuna to every meal.\n🥬 *Volume* — Vegetables add bulk without calories. Cabbage, spinach, morogo — eat them in big quantities. They physically fill your stomach.\n💧 *Water* — Thirst and hunger feel identical. Drink 500ml of water right now and wait 10 minutes.\n😴 *Sleep* — Under 7 hours spikes ghrelin (hunger hormone) and crashes leptin (fullness hormone). If sleep is poor, hunger is worse — always.\n\n${goal === "fat_loss" ? `At ${cal} kcal you should not be unbearably hungry. If you are — your protein is likely too low. What did you eat today so far?` : `On a surplus hunger is your friend — eat when you are hungry, especially around your training window.`}`;
     await logChat(user.id, message, hungerReply, "HUNGER");
     return hungerReply;
   }
@@ -1258,7 +1257,7 @@ export async function handleLifecycle(ctx: {
     };
     const drinkMatch = Object.entries(beerCals).find(([d]) => m.includes(d));
     const drinkNote = drinkMatch ? `${drinkMatch[0].charAt(0).toUpperCase() + drinkMatch[0].slice(1)} is ${drinkMatch[1]} per can.` : "Most beers are 140-180 kcal per can. Spirits are 80-120 kcal per shot.";
-    const alcoholReply = `${drinkNote}\n\nI am not going to lecture you${name} — you are an adult. Here is what to do:\n\n*Tonight:* Protein with your next meal. Eggs, pilchards, or chicken — before or alongside drinks, not after.\n*Drinking rule:* Water between every drink. Not because of hydration theatre — because it naturally slows your drinking and cuts total intake in half.\n*Tomorrow:* ${goal === "fat_loss" ? "Back on your plan, first meal. Alcohol did not destroy your progress. One night never does. Seven nights in a row does." : "Training as planned. Alcohol slows muscle protein synthesis for 24-48 hours — just get the session in anyway."}\n\nAlcohol is not banned. It is a choice with a calorie cost. Make the next meal count.`;
+    const alcoholReply = `${drinkNote}\n\nI am not going to lecture you${name} — you are an adult. Here is what to do:\n\n*Tonight:* Protein with your next meal. Eggs, chicken, or tinned tuna — before or alongside drinks, not after.\n*Drinking rule:* Water between every drink. Not because of hydration theatre — because it naturally slows your drinking and cuts total intake in half.\n*Tomorrow:* ${goal === "fat_loss" ? "Back on your plan, first meal. Alcohol did not destroy your progress. One night never does. Seven nights in a row does." : "Training as planned. Alcohol slows muscle protein synthesis for 24-48 hours — just get the session in anyway."}\n\nAlcohol is not banned. It is a choice with a calorie cost. Make the next meal count.`;
     await logChat(user.id, message, alcoholReply, "ALCOHOL");
     return alcoholReply;
   }
@@ -1434,7 +1433,7 @@ export async function handleLifecycle(ctx: {
   if (isStressMsg) {
     const name = user.name ? ` ${user.name}` : "";
     const goal = user.goalType || "fat_loss";
-    const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, pilchards right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;
+    const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, or tinned tuna right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;
     await logChat(user.id, message, stressReply, "STRESS");
     return stressReply;
   }
