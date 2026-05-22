@@ -764,7 +764,7 @@ export async function handleFoodContext(ctx: {
 
   // ---- GPT FOOD FALLBACK (no SA foods detected but clear food intent) ----
   const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
-  const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal)\b/i.test(m);
+  const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal|had a\b|had some\b|had the\b|had my\b|ate a\b|ate some\b|ate the\b|ate my\b|having a\b|having some\b|having my\b)\b/i.test(m);
   if (!isQuestion && !isEmotionalOnly && hasStrongFoodTrigger && !hasActualFood && !voiceFallbackTooLong) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
