@@ -1072,7 +1072,7 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- "AM I ON TRACK?" STATUS COMMAND — no GPT ----
-  if (/\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status)\b/i.test(m)) {
+  if (/\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status|how.?s my progress|how is my progress|tell me.*progress|my progress on kamlife|kamlife progress|progress.*this week|check my progress|show.*progress|any progress|how far am i)\b/i.test(m)) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
     const todayStart = sastDayStart();
     const [stepLogsWeek, workoutLogsWeek, weightLogsRecent, foodLogsToday] = await Promise.all([
@@ -1107,6 +1107,44 @@ export async function handleLifecycle(ctx: {
     const statusReply = `*7-Day Status — ${user.name || "you"}*\n\nWorkouts: ${workoutsDone}/${workoutsTarget} this week\nAvg steps: ${avgSteps.toLocaleString()} / ${stepsTarget.toLocaleString()} target\nFood logged today: ${foodLogsToday.length} ${foodLogsToday.length === 1 ? "meal" : "meals"}${weightNote ? `\n${weightNote}` : ""}\n\n*Verdict: ${verdict}*\n\n${action}`;
     await logChat(user.id, message, statusReply, "STATUS_CHECK");
     return statusReply;
+  }
+
+  // ---- "WHAT SHOULD I DO NEXT WEEK / COACHING ADVICE?" — no GPT, data-driven ----
+  if (
+    /\b(what should i do (next week|this week|differently|better)|any (suggestions?|advice|tips?) (for next week|for this week|going forward|to improve|coach)|what do you (think|recommend|suggest) (coach|k|next week|this week)?|coach.?k.{0,15}(what|how|should|suggest|recommend|advice|think)|how can i (do better|improve|get better|be better|be more consistent)|what.?s? (my |the )?(focus|priority|plan) (for |this |next )(week|week\?)?|what should i focus on|where should i focus|help me (plan|improve|get better|do better)|what would you (suggest|recommend)|what.?s? (next|the plan|my plan)|give me (advice|a suggestion|a tip)|any (tips?|pointers?) for me)\b/i.test(m) &&
+    !/\b(eat|food|meal|protein|calories|gym|exercise|workout|steps|water|weight|sleep)\b/i.test(m)
+  ) {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    const [recentW, recentS, recentWt] = await Promise.all([
+      db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+      db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+      db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(1),
+    ]);
+    const fn = (user.name || "").split(" ")[0];
+    const namePart = fn ? ` ${fn}` : "";
+    const sessions = recentW.length;
+    const sessionsTarget = user.trainingDaysPerWeek || 3;
+    const avgSteps = recentS.length > 0 ? Math.round(recentS.reduce((s: number, l: any) => s + l.steps, 0) / recentS.length) : 0;
+    const stepsTarget = user.stepsTarget || 8500;
+    const hasWeight = recentWt.length > 0;
+    const todayStr = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }).split("/").reverse().join("-");
+    const todayProtein = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
+    const protTarget = user.proteinTarget || 120;
+    type Gap = { action: string };
+    const gaps: Gap[] = [];
+    if (sessions < sessionsTarget) gaps.push({ action: `Complete your ${sessionsTarget} training sessions this week — you have done ${sessions}. Even a 30-minute session counts.` });
+    if (avgSteps > 0 && avgSteps < stepsTarget * 0.85) gaps.push({ action: `Get your steps up to ${stepsTarget.toLocaleString()}/day — you are averaging ${avgSteps.toLocaleString()}. Park further, walk at lunch, take the stairs.` });
+    if (!hasWeight) gaps.push({ action: `Log your weight. Step on the scale tomorrow morning (after bathroom, before eating) and send me the number. I need data to coach you.` });
+    if (todayProtein > 0 && todayProtein < protTarget * 0.65) gaps.push({ action: `Hit your ${protTarget}g protein target — you are only at ${todayProtein}g today. Eggs, chicken, pilchards, or a protein shake before bed.` });
+    let adviceReply: string;
+    if (gaps.length === 0) {
+      adviceReply = `${fn ? fn + ", you" : "You"} are doing the work — sessions, steps, and data are all consistent.\n\n*Next gear:* Pick one exercise this week and add weight or reps to what you did last time. That is progressive overload. That is where results compound.\n\nKeep it simple. Same programme, slightly harder. Update me after your next session.`;
+    } else {
+      const [top, second] = gaps;
+      adviceReply = `*Top priority for next week${namePart}:*\n\n${top.action}${second ? `\n\n*Also fix:* ${second.action}` : ""}\n\nDo not change five things at once. Fix the top one first. Everything else stays the same.`;
+    }
+    await logChat(user.id, message, adviceReply, "COACHING_ADVICE");
+    return adviceReply;
   }
 
   // ---- FOOD DIARY SUMMARY — "what did I eat today?" / "today's calories?" — no GPT ----
@@ -1449,6 +1487,35 @@ export async function handleLifecycle(ctx: {
     const tiredReply = `Three questions${name} before I give you advice:\n\n1. *Sleep* — How many hours last night? Under 7 means your body is not recovering properly. This is the most common cause of low energy by far.\n\n2. *Food* — What did you eat today? Low energy by afternoon is almost always low carbs or skipped meals. Your muscles need fuel.\n\n3. *Water* — Have you drunk 1.5-2L today? Even mild dehydration drops energy by 20%.\n\nWhich of these is off? Tell me and I will give you a specific fix — not "rest more" or "drink water" in general, the actual solution.`;
     await logChat(user.id, message, tiredReply, "TIRED");
     return tiredReply;
+  }
+
+  // ---- BAD DAY / GENERAL EMOTIONAL SUPPORT — no GPT, data-anchored ----
+  const isBadDay =
+    /\b(having a bad day|bad day today|rough day|having a rough day|tough day|hard day today|having a hard day|today (is|was|has been) (hard|rough|bad|terrible|awful|tough)|not feeling (great|good|well) today|not myself today|off day (today|mentally)|things are (tough|hard|rough)|life is hard|not feeling it today|really struggling today|down today|feeling down today|today (sucked|sucks))\b/i.test(m) &&
+    !/\b(sore|pain|tired|exhausted|stressed|anxious|workout|gym|food|calories)\b/i.test(m);
+
+  if (isBadDay) {
+    const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+    const [recentW, recentS] = await Promise.all([
+      db.select({ id: workoutLogs.id }).from(workoutLogs).where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
+      db.select().from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
+    ]);
+    const fn = (user.name || "").split(" ")[0];
+    const namePart = fn ? `${fn}, ` : "";
+    const sessions = recentW.length;
+    const avgSteps = recentS.length > 0 ? Math.round(recentS.reduce((s: number, l: any) => s + l.steps, 0) / recentS.length) : 0;
+    let anchor = "";
+    if (sessions > 0 && avgSteps > 3000) anchor = `While today feels heavy, your body has been doing the work this week — ${sessions} training session${sessions > 1 ? "s" : ""} and ${avgSteps.toLocaleString()} steps per day on average. That is not nothing.`;
+    else if (sessions > 0) anchor = `Even this week — ${sessions} session${sessions > 1 ? "s" : ""} done. Hard days come, your body is still going.`;
+    else if (avgSteps > 3000) anchor = `You are still moving — ${avgSteps.toLocaleString()} steps today. Movement on hard days counts more than on easy ones.`;
+    else anchor = `Reaching out when you are having a bad day takes something. That matters.`;
+    const goal = user.goalType || "fat_loss";
+    const oneAction = goal === "muscle_gain"
+      ? "One thing for today: eat your protein. Hard days still need fuel — the muscle does not take days off."
+      : "One thing for today: eat one proper meal with protein. Not perfect, not a full reset — just one meal.";
+    const badDayReply = `${namePart}bad days are part of this. Not the exception — part of the process.\n\n${anchor}\n\nYou do not have to be on fire today. You just have to not quit.\n\n${oneAction}\n\nWhat's actually going on?`;
+    await logChat(user.id, message, badDayReply, "BAD_DAY");
+    return badDayReply;
   }
 
   // ---- REST DAY HANDLER ----
