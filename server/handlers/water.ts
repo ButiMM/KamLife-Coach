@@ -20,7 +20,8 @@ export async function handleWater(ctx: {
   // ---- WATER LOGGING HANDLER — no GPT ----
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
   const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
-  if (waterMatch && hasWaterKeyword) {
+  const isNonWaterDrink = /\b(wine|beer|whisky|brandy|rum|vodka|gin|shots?|alcohol|henny|hennessy|smirnoff|hunters|savanna|castle|black label|flying fish|brutal fruit|cider|juice|coffee|tea|milo|milk|cooldrink|cool drink|fanta|sprite|coke|pepsi|energy drink|redbull|monster|cream soda|softdrink|soda water|tonic)\b/i.test(m);
+  if (waterMatch && hasWaterKeyword && !isNonWaterDrink) {
     const amount = parseFloat(waterMatch[1]);
     const unit = waterMatch[2].toLowerCase();
     let litres = amount;
