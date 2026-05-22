@@ -519,10 +519,18 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const cleanPhoneOnb = u.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
   const payLinkOnb = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneOnb)}` : appUrl;
 
+  const goalCalExplainer: Record<string, string> = {
+    fat_loss: `*What ${calorieTarget} kcal means:* A banana is ~100 kcal. A plate of pap with stew is ~550 kcal. A Viennie on white bread is ~350 kcal. Your body burns ~1,200–1,500 kcal just to breathe and run your organs — before you move a single step. Eat at your target and you lose fat without starving.\n\n*What ${proteinTarget}g protein means:* 1 egg = ~6g. 1 tin of pilchards = ~25g. 100g chicken breast = ~31g. Two eggs and a tin of pilchards gets you 37g — a third of your daily target. Hit this number and hunger drops, muscle stays.`,
+    muscle_gain: `*What ${calorieTarget} kcal means:* This is a small surplus above what you burn — enough to build muscle without unnecessary fat gain. A plate of pap with chicken is ~600 kcal. Three eggs is ~210 kcal. Don't undershoot this target — you can't build with an empty tank.\n\n*What ${proteinTarget}g protein means:* This is the actual driver of muscle growth — more important than what exercises you do. 1 egg = ~6g. 100g chicken = ~31g. 1 tin of tuna = ~26g. Spread it across 3–4 meals and hit the number daily.`,
+    recomposition: `*What ${calorieTarget} kcal means:* This is your maintenance level — we build muscle and lose fat simultaneously. A banana is ~100 kcal. A plate of pap with chicken is ~600 kcal. The key is consistency — day-to-day variation is fine, weekly average is what counts.\n\n*What ${proteinTarget}g protein means:* Protein is the whole mechanism here. It repairs muscle after training and keeps you full so you don't overeat. 1 egg = ~6g. 100g chicken = ~31g. Amasi (250ml) = ~9g. Hit this number and the recomp happens.`,
+  };
+  const calExplainer = goalCalExplainer[defaultGoal] || goalCalExplainer.fat_loss;
+
   const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
+  const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `${shoppingPreview}\n\n*Activate to start coaching — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
-  return `${msg1}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
+  const msg3 = `${shoppingPreview}\n\n*You have 7 days free — no payment needed yet.*\n\nWhen you're ready to continue after your trial:\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. POPIA protected. Cancel by replying *cancel*._`;
+  return `${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
 // ============================================================
@@ -1142,7 +1150,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
     const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
     const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice. Consult your doctor before starting if you have any health concerns._\n\nActivate coaching to get Day 1 and start:\n\n*R199/month — cancel anytime:*\n${payLinkLeg}\n\nPay now and Day 1 drops immediately.`;
+    const legCalExplainer = goal === "muscle_gain"
+      ? `*What ${calorieTarget} kcal means:* This is a surplus above maintenance — fuel to build muscle. Don't undershoot it. 1 egg = ~6g protein. 100g chicken = ~31g. Hit ${proteinTarget}g protein daily and the programme works.`
+      : `*What ${calorieTarget} kcal means:* A plate of pap with stew is ~550 kcal. Your body burns ~1,200–1,500 kcal just to breathe before you move. Eat at this target and you lose fat without starving. Hit ${proteinTarget}g protein and hunger drops.`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\n${mealPlan}\n\n*You have 7 days free — no payment needed yet.* When ready:\n*R199/month — cancel anytime:* ${payLinkLeg}`;
   }
 
   return await getMenuText(user);
