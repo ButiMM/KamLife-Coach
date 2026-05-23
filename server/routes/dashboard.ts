@@ -112,55 +112,80 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
   // ── Funnel metrics ──
   app.get("/api/dashboard/funnel", requireAdminKey, async (_req, res) => {
     try {
-      const allUsers = await db.select().from(users);
-      const now = Date.now();
-      const sevenDays = 7 * 86_400_000;
-      const thirtyDays = 30 * 86_400_000;
+      // Single-pass SQL aggregate — avoids loading all users into RAM
+      const [agg, weekChats] = await Promise.all([
+        db.execute(sql`
+          SELECT
+            COUNT(*)::int                                                                    AS total_signups,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE')::int                     AS onboarding_complete,
+            COUNT(*) FILTER (WHERE total_workouts_completed >= 1)::int                     AS first_workout_done,
+            COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '7 days')::int           AS signups_with_week1,
+            COUNT(*) FILTER (WHERE created_at    <= NOW() - INTERVAL '7 days'
+                              AND  last_active_at >= NOW() - INTERVAL '14 days')::int       AS active_week1,
+            COUNT(*) FILTER (WHERE subscription_status = 'active')::int                   AS paying,
+            COUNT(*) FILTER (WHERE subscription_status = 'trial')::int                    AS trial,
+            COUNT(*) FILTER (WHERE subscription_status = 'inactive')::int                 AS inactive,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE'
+                              AND  subscription_status = 'inactive'
+                              AND  cancelled_at IS NOT NULL)::int                          AS churned,
+            COUNT(*) FILTER (WHERE today_calories > 0
+                              OR   total_workouts_completed >= 1)::int                     AS first_food_logged,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE'
+                              AND  last_active_at >= NOW() - INTERVAL '5 days'
+                              AND  last_active_at <  NOW() - INTERVAL '2 days')::int       AS at_risk_48h,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE'
+                              AND  last_active_at >= NOW() - INTERVAL '14 days'
+                              AND  last_active_at <  NOW() - INTERVAL '5 days')::int       AS at_risk_5d,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE'
+                              AND  (last_active_at IS NULL
+                                   OR last_active_at < NOW() - INTERVAL '14 days'))::int   AS at_risk_14d,
+            COUNT(*) FILTER (WHERE created_at <= NOW() - INTERVAL '1 day')::int           AS d1_eligible,
+            COUNT(*) FILTER (WHERE created_at  <= NOW() - INTERVAL '1 day'
+                              AND  last_active_at IS NOT NULL
+                              AND  last_active_at >= created_at
+                              AND  last_active_at <  created_at + INTERVAL '1 day')::int   AS d1_retained,
+            COUNT(*) FILTER (WHERE created_at  <= NOW() - INTERVAL '7 days')::int         AS d7_eligible,
+            COUNT(*) FILTER (WHERE created_at  <= NOW() - INTERVAL '7 days'
+                              AND  last_active_at IS NOT NULL
+                              AND  last_active_at >= created_at + INTERVAL '6 days')::int  AS d7_retained,
+            COUNT(*) FILTER (WHERE created_at  <= NOW() - INTERVAL '30 days')::int        AS d30_eligible,
+            COUNT(*) FILTER (WHERE created_at  <= NOW() - INTERVAL '30 days'
+                              AND  last_active_at IS NOT NULL
+                              AND  last_active_at >= created_at + INTERVAL '23 days')::int AS d30_retained,
+            COUNT(*) FILTER (WHERE onboarding_state = 'COMPLETE'
+                              AND  last_active_at >= NOW() - INTERVAL '7 days')::int       AS active_clients_this_week,
+            COALESCE(SUM(total_workouts_completed) FILTER (
+                              WHERE onboarding_state = 'COMPLETE'
+                              AND   last_active_at >= NOW() - INTERVAL '7 days'), 0)::int  AS total_workouts_active
+          FROM users
+        `),
+        db.select({ c: count() }).from(chatHistory).where(gte(chatHistory.createdAt, new Date(Date.now() - 7 * 86_400_000))),
+      ]);
 
-      const totalSignups = allUsers.length;
-      const onboardingComplete = allUsers.filter(u => u.onboardingState === "COMPLETE").length;
-      const firstWorkoutDone = allUsers.filter(u => (u.totalWorkoutsCompleted || 0) >= 1).length;
-      const activeWeek1 = allUsers.filter(u => {
-        if (!u.createdAt) return false;
-        const age = now - new Date(u.createdAt).getTime();
-        return age >= sevenDays && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < sevenDays * 2;
-      }).length;
-      const signupsWithWeek1 = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays).length;
+      const r = agg.rows[0] as Record<string, number>;
+      const g = (k: string) => Number(r[k] || 0);
 
-      // Retention cohorts
-      const d1Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= 86_400_000);
-      const d1Retained = d1Eligible.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < now - new Date(u.createdAt!).getTime() + 86_400_000);
-      const d7Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= sevenDays);
-      const d7Retained = d7Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + sevenDays - 86_400_000));
-      const d30Eligible = allUsers.filter(u => u.createdAt && (now - new Date(u.createdAt).getTime()) >= thirtyDays);
-      const d30Retained = d30Eligible.filter(u => u.lastActiveAt && new Date(u.lastActiveAt) >= new Date(new Date(u.createdAt!).getTime() + thirtyDays - sevenDays));
+      const totalSignups = g("total_signups");
+      const onboardingComplete = g("onboarding_complete");
+      const firstWorkoutDone = g("first_workout_done");
+      const signupsWithWeek1 = g("signups_with_week1");
+      const activeWeek1 = g("active_week1");
+      const payingClients = g("paying");
+      const trialUsers = g("trial");
+      const inactiveUsers = g("inactive");
+      const churned = g("churned");
+      const firstFoodLogged = g("first_food_logged");
+      const atRisk48h = g("at_risk_48h");
+      const atRisk5d = g("at_risk_5d");
+      const atRisk14d = g("at_risk_14d");
+      const d1Eligible = g("d1_eligible"), d1Retained = g("d1_retained");
+      const d7Eligible = g("d7_eligible"), d7Retained = g("d7_retained");
+      const d30Eligible = g("d30_eligible"), d30Retained = g("d30_retained");
+      const activeClientsCount = g("active_clients_this_week");
+      const totalWorkoutsActive = g("total_workouts_active");
 
-      // At-risk breakdown
-      const atRisk48h = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 2 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 5 * 86_400_000).length;
-      const atRisk5d = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 5 * 86_400_000 && (now - new Date(u.lastActiveAt).getTime()) < 14 * 86_400_000).length;
-      const atRisk14d = allUsers.filter(u => u.onboardingState === "COMPLETE" && (!u.lastActiveAt || (now - new Date(u.lastActiveAt).getTime()) >= 14 * 86_400_000)).length;
-
-      const payingClients = allUsers.filter(u => u.subscriptionStatus === "active").length;
-      const trialUsers = allUsers.filter(u => u.subscriptionStatus === "trial").length;
-      const inactiveUsers = allUsers.filter(u => u.subscriptionStatus === "inactive").length;
-      const firstFoodLogged = allUsers.filter(u => (u.todayCalories || 0) > 0 || (u.totalWorkoutsCompleted || 0) >= 1).length;
-      const churned = allUsers.filter(u =>
-        u.onboardingState === "COMPLETE" &&
-        u.subscriptionStatus === "inactive" &&
-        u.cancelledAt
-      ).length;
-
-      // Avg workouts per client per week
-      const activeClients = allUsers.filter(u => u.onboardingState === "COMPLETE" && u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) < 7 * 86_400_000);
-      const totalWorkoutsActiveClients = activeClients.reduce((sum, u) => sum + (u.totalWorkoutsCompleted || 0), 0);
-      const avgWorkoutsPerWeek = activeClients.length > 0
-        ? Math.round(totalWorkoutsActiveClients / activeClients.length / Math.max(1, activeClients.reduce((sum, u) => sum + Math.max(1, Math.floor((now - new Date(u.createdAt!).getTime()) / sevenDays)), 0) / activeClients.length) * 10) / 10
-        : 0;
-
-      // Avg messages per day (last 7 days)
-      const weekAgo = new Date(now - sevenDays);
-      const weekChats = await db.select({ c: count() }).from(chatHistory).where(gte(chatHistory.createdAt, weekAgo));
-      const avgMessagesPerDay = activeClients.length > 0 ? Math.round((weekChats[0]?.c || 0) / 7 / activeClients.length * 10) / 10 : 0;
+      const avgWorkoutsPerWeek = activeClientsCount > 0 ? Math.round(totalWorkoutsActive / activeClientsCount * 10) / 10 : 0;
+      const avgMessagesPerDay = activeClientsCount > 0 ? Math.round((weekChats[0]?.c || 0) / 7 / activeClientsCount * 10) / 10 : 0;
 
       res.json({
         computedAt: new Date().toISOString(),
@@ -185,12 +210,12 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
           trialToPaid: calculateTrialConversion(trialUsers, payingClients),
         },
         retention: {
-          d1: { eligible: d1Eligible.length, retained: d1Retained.length, rate: d1Eligible.length > 0 ? Math.round(d1Retained.length / d1Eligible.length * 100) : 0 },
-          d7: { eligible: d7Eligible.length, retained: d7Retained.length, rate: d7Eligible.length > 0 ? Math.round(d7Retained.length / d7Eligible.length * 100) : 0 },
-          d30: { eligible: d30Eligible.length, retained: d30Retained.length, rate: d30Eligible.length > 0 ? Math.round(d30Retained.length / d30Eligible.length * 100) : 0 },
+          d1: { eligible: d1Eligible, retained: d1Retained, rate: d1Eligible > 0 ? Math.round(d1Retained / d1Eligible * 100) : 0 },
+          d7: { eligible: d7Eligible, retained: d7Retained, rate: d7Eligible > 0 ? Math.round(d7Retained / d7Eligible * 100) : 0 },
+          d30: { eligible: d30Eligible, retained: d30Retained, rate: d30Eligible > 0 ? Math.round(d30Retained / d30Eligible * 100) : 0 },
         },
         atRisk: { warning48h: atRisk48h, high5d: atRisk5d, severe14d: atRisk14d },
-        engagement: { avgWorkoutsPerWeek, avgMessagesPerDay, activeClientsThisWeek: activeClients.length, payingClients },
+        engagement: { avgWorkoutsPerWeek, avgMessagesPerDay, activeClientsThisWeek: activeClientsCount, payingClients },
       });
     } catch (err) {
       res.status(500).json({ error: "Failed to fetch funnel metrics" });

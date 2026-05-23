@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, chatHistory, paymentEvents } from "../../shared/schema";
+import { users, chatHistory, paymentEvents, adminEvents } from "../../shared/schema";
 import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
@@ -240,6 +240,12 @@ export function registerPaymentRoutes(app: Express) {
         subscriptionRenewsAt: renewsAt,
         cancelledAt: null,
       }).where(eq(users.phoneNumber, normalisedPhone));
+      await db.insert(adminEvents).values({
+        action: "force_activate",
+        targetPhone: normalisedPhone,
+        reason: reason || "manual",
+        meta: { renewsAt: renewsAt.toISOString(), userId: targetUser.id } as Record<string, unknown>,
+      }).catch(e => console.error("[ADMIN_EVENTS] Insert failed:", e));
       console.log(`[PAYFAST] FORCE-ACTIVATE — ${normalisedPhone} | reason: ${reason || "manual"} | renews: ${renewsAt.toISOString().slice(0, 10)}`);
       return res.json({ ok: true, phone: normalisedPhone, renewsAt: renewsAt.toISOString().slice(0, 10) });
     } catch (err) {
@@ -314,6 +320,40 @@ export function registerPaymentRoutes(app: Express) {
       return res.redirect(302, payfastUrl);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ── Admin: payment reconciliation ──
+  // Lists active subscribers who have no payment_events record — likely manually activated.
+  // Also lists admin_events history so every force-activate is visible.
+  app.get("/api/admin/reconcile", async (req: any, res: any) => {
+    const authKey = req.headers["x-coach-key"];
+    if (authKey !== process.env.COACH_DASHBOARD_KEY) return res.status(403).json({ error: "Forbidden" });
+    try {
+      const { pool } = await import("../db");
+      // Active users with no matching payment event
+      const unpairedResult = await pool.query(`
+        SELECT u.id, u.phone_number, u.name, u.subscription_status,
+               u.subscription_renews_at, u.payment_reference, u.created_at
+        FROM users u
+        LEFT JOIN payment_events pe ON pe.phone = u.phone_number
+        WHERE u.subscription_status = 'active' AND pe.id IS NULL
+        ORDER BY u.subscription_renews_at ASC
+        LIMIT 100
+      `);
+      // Recent admin events
+      const eventsResult = await pool.query(`
+        SELECT action, target_phone, reason, meta, performed_at
+        FROM admin_events
+        ORDER BY performed_at DESC
+        LIMIT 50
+      `);
+      return res.json({
+        activeWithNoPaymentEvent: unpairedResult.rows,
+        adminActions: eventsResult.rows,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message });
     }
   });
 }

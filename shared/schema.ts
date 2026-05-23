@@ -335,6 +335,19 @@ export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
 }));
 
+// === ADMIN EVENTS — immutable audit log for admin/manual interventions ===
+export const adminEvents = pgTable("admin_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  action: text("action").notNull(), // 'force_activate', 'manual_cancel', etc.
+  targetPhone: text("target_phone"),
+  reason: text("reason"),
+  meta: jsonb("meta"),
+  performedAt: timestamp("performed_at").defaultNow().notNull(),
+}, (table) => ({
+  actionIdx: index("admin_events_action_idx").on(table.action),
+  performedAtIdx: index("admin_events_performed_at_idx").on(table.performedAt),
+}));
+
 // === PAYMENT EVENTS — idempotency log for payment provider webhooks ===
 // Unique on (provider, providerPaymentId) — duplicate ITNs are silently skipped.
 export const paymentEvents = pgTable("payment_events", {
