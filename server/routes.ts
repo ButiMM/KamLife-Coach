@@ -41,9 +41,12 @@ import { handleGptBlock } from "./handlers/gpt-block";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
-});
+const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+if (!openaiKey) {
+  console.error("[FATAL] OPENAI_API_KEY is not set. Server cannot start without it.");
+  process.exit(1);
+}
+const openai = new OpenAI({ apiKey: openaiKey });
 
 // COACH_K_SYSTEM imported from ./coach-prompt
 

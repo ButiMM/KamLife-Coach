@@ -114,9 +114,25 @@ export async function initScheduler(): Promise<void> {
 
   schedulerInitialised = true;
 
-  // Safe job runner — catches and logs errors without crashing the scheduler
+  // Safe job runner — catches, logs, and alerts coach on repeated failures
+  const jobFailureCounts: Record<string, number> = {};
   function safe(name: string, fn: () => Promise<void>): void {
-    fn().catch(e => console.error(`[SCHEDULER] ${name} failed:`, e));
+    fn().then(() => {
+      jobFailureCounts[name] = 0; // reset on success
+    }).catch(async (e) => {
+      jobFailureCounts[name] = (jobFailureCounts[name] || 0) + 1;
+      const failures = jobFailureCounts[name];
+      console.error(`[SCHEDULER] ${name} failed (x${failures}):`, e);
+      // Alert coach after 2 consecutive failures on any critical job
+      const criticalJobs = ["runMorningCheckin", "runEveningAccountability", "runSundayWeeklyReport", "runPhaseAdvancement", "runSubscriptionExpiryCheck"];
+      if (failures >= 2 && criticalJobs.includes(name)) {
+        const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+        if (coachPhone) {
+          const alertMsg = `⚠️ KamLife Scheduler Alert: "${name}" has failed ${failures} times in a row.\n\nError: ${String(e).slice(0, 200)}\n\nCheck Railway logs immediately.`;
+          sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, alertMsg).catch(() => {});
+        }
+      }
+    });
   }
 
   // ── One-time catch-up — runs on startup, self-deactivates via profileNotes flag ──

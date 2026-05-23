@@ -58,14 +58,18 @@ export function registerPaymentRoutes(app: Express) {
         return;
       }
 
-      // Validate signature
+      // Validate signature — passphrase is REQUIRED; reject if not configured
       const crypto = require("crypto");
-      const passphrase = process.env.PAYFAST_PASSPHRASE || "";
+      const passphrase = process.env.PAYFAST_PASSPHRASE;
+      if (!passphrase) {
+        console.error(`[PAYFAST:${itnId}] REJECTED — PAYFAST_PASSPHRASE env var not set. Cannot validate ITN signature safely. Configure it in Railway.`);
+        return;
+      }
       const paramString = Object.entries(data)
         .filter(([k]) => k !== "signature")
         .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, "+")}`)
         .join("&");
-      const signatureBase = passphrase ? `${paramString}&passphrase=${encodeURIComponent(passphrase)}` : paramString;
+      const signatureBase = `${paramString}&passphrase=${encodeURIComponent(passphrase)}`;
       const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
       if (!data.signature || data.signature !== expectedSig) {
         console.error(`[PAYFAST:${itnId}] REJECTED — signature ${!data.signature ? "missing" : "mismatch"} for ${safePhone}. Got: ${data.signature?.slice(0, 8)}... Expected: ${expectedSig.slice(0, 8)}...`);

@@ -113,21 +113,24 @@ export async function handleFoodContext(ctx: {
             .orderBy(desc(mealLogs.loggedAt))
             .limit(1),
         ]);
-        if (lastFoodLog.length > 0) {
-          await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
-        }
-        if (lastMealLogCorr.length > 0) {
-          await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr[0].id));
-        }
-        if (lastFoodLog.length > 0 || lastMealLogCorr.length > 0) {
-          const recomputed = await recomputeTodayFoodTotals(user.id);
-          await db.update(users).set({
-            todayCalories: recomputed.calories,
-            todayProteinG: recomputed.protein,
-            todayCaloriesDate: sastToday(),
-          }).where(eq(users.id, user.id));
-        }
-      } catch (e) { console.warn("[non-fatal]", e); }
+        // Wrap delete + recount + cache update in a transaction — all succeed or none do
+        await db.transaction(async (tx) => {
+          if (lastFoodLog.length > 0) {
+            await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+          }
+          if (lastMealLogCorr.length > 0) {
+            await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr[0].id));
+          }
+          if (lastFoodLog.length > 0 || lastMealLogCorr.length > 0) {
+            const recomputed = await recomputeTodayFoodTotals(user.id);
+            await tx.update(users).set({
+              todayCalories: recomputed.calories,
+              todayProteinG: recomputed.protein,
+              todayCaloriesDate: sastToday(),
+            }).where(eq(users.id, user.id));
+          }
+        });
+      } catch (e) { console.warn("[food-correction-tx]", e); }
       if (correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
         return await handleMessage(phone, correctedMsgCandidate);
       }
