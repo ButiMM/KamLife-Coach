@@ -306,6 +306,17 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS voice_recap_logs_user_idx ON voice_recap_logs(user_id)`,
     `CREATE INDEX IF NOT EXISTS voice_recap_logs_week_idx ON voice_recap_logs(week_start DESC)`,
+    `CREATE TABLE IF NOT EXISTS payment_events (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      provider TEXT NOT NULL,
+      provider_payment_id TEXT NOT NULL,
+      phone TEXT NOT NULL,
+      amount_gross NUMERIC,
+      payment_status TEXT NOT NULL,
+      raw_body JSONB,
+      processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE UNIQUE INDEX IF NOT EXISTS payment_events_unique_idx ON payment_events(provider, provider_payment_id)`,
   ];
 
   let created = 0;

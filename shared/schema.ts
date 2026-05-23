@@ -335,6 +335,21 @@ export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
 }));
 
+// === PAYMENT EVENTS — idempotency log for payment provider webhooks ===
+// Unique on (provider, providerPaymentId) — duplicate ITNs are silently skipped.
+export const paymentEvents = pgTable("payment_events", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  provider: text("provider").notNull(), // "payfast"
+  providerPaymentId: text("provider_payment_id").notNull(),
+  phone: text("phone").notNull(),
+  amountGross: numeric("amount_gross"),
+  paymentStatus: text("payment_status").notNull(),
+  rawBody: jsonb("raw_body"),
+  processedAt: timestamp("processed_at").defaultNow(),
+}, (table) => ({
+  uniqueEvent: uniqueIndex("payment_events_unique_idx").on(table.provider, table.providerPaymentId),
+}));
+
 // === SENT PROACTIVE — durable dedupe for scheduled messages ===
 // Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
 // The unique index below guarantees the same (user, messageKey, window) can only

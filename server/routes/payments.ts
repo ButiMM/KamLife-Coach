@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, chatHistory } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { users, chatHistory, paymentEvents } from "../../shared/schema";
+import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
 
@@ -98,6 +98,28 @@ export function registerPaymentRoutes(app: Express) {
       }
       console.log(`[PAYFAST:${itnId}] User found — id=${targetUser.id} current_status=${targetUser.subscriptionStatus}`);
 
+      // Idempotency guard — if we have already processed this pf_payment_id, skip entirely.
+      // PayFast retries ITNs multiple times; without this, a retry causes duplicate rewards/messages.
+      const eventKey = pfPaymentId || `${phone}-${amountGross}-${Date.now()}`;
+      try {
+        await db.insert(paymentEvents).values({
+          provider: "payfast",
+          providerPaymentId: eventKey,
+          phone: normalisedPhone,
+          amountGross: String(amountGross),
+          paymentStatus,
+          rawBody: data as Record<string, unknown>,
+        });
+      } catch (idempErr: any) {
+        // Postgres unique violation code 23505 means already processed
+        if (idempErr?.code === "23505" || idempErr?.message?.includes("unique")) {
+          console.log(`[PAYFAST:${itnId}] SKIPPED — duplicate ITN for pf_id=${pfPaymentId || "no-id"}`);
+          return;
+        }
+        // Any other insert error is unexpected — log but continue processing
+        console.error(`[PAYFAST:${itnId}] idempotency insert failed (non-duplicate):`, idempErr);
+      }
+
       const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
       const fromNum = process.env.TWILIO_WHATSAPP_NUMBER
         ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
@@ -105,41 +127,47 @@ export function registerPaymentRoutes(app: Express) {
 
       if (paymentStatus === "COMPLETE") {
         const renewsAt = new Date(Date.now() + 30 * 86_400_000);
-        await db.update(users).set({
-          subscriptionStatus: "active",
-          subscriptionRenewsAt: renewsAt,
-          paymentReference: pfPaymentId || null,
-          cancelledAt: null,
-        }).where(eq(users.phoneNumber, normalisedPhone));
-
-        console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
-
-        // Referral reward
         const wasInactive = targetUser.subscriptionStatus !== "active";
-        if (wasInactive && targetUser.referredBy) {
-          try {
-            const [referrer] = await db.select().from(users)
+
+        // All DB state changes in one transaction — subscription update + referral reward
+        let referrerData: { phone: string; name: string | null; newExpiry: Date } | null = null;
+        await db.transaction(async (tx) => {
+          await tx.update(users).set({
+            subscriptionStatus: "active",
+            subscriptionRenewsAt: renewsAt,
+            paymentReference: pfPaymentId || null,
+            cancelledAt: null,
+          }).where(eq(users.phoneNumber, normalisedPhone));
+
+          if (wasInactive && targetUser.referredBy) {
+            const [referrer] = await tx.select().from(users)
               .where(eq(users.referralCode, targetUser.referredBy))
               .limit(1);
             if (referrer && referrer.subscriptionStatus === "active") {
-              const referrerNewExpiry = new Date(
+              const newExpiry = new Date(
                 Math.max(Date.now(), new Date(referrer.subscriptionRenewsAt || Date.now()).getTime()) + 30 * 86_400_000
               );
-              await db.update(users)
-                .set({ subscriptionRenewsAt: referrerNewExpiry })
+              await tx.update(users)
+                .set({ subscriptionRenewsAt: newExpiry })
                 .where(eq(users.id, referrer.id));
-              if (fromNum) {
-                await twilioC.messages.create({
-                  from: fromNum,
-                  to: referrer.phoneNumber.startsWith("whatsapp:") ? referrer.phoneNumber : `whatsapp:${referrer.phoneNumber}`,
-                  body: `${referrer.name || "Hey"} Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${referrerNewExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`,
-                });
-              }
-              console.log(`[REFERRAL] Rewarded ${referrer.phoneNumber} — extended to ${referrerNewExpiry.toISOString().slice(0, 10)}`);
+              referrerData = { phone: referrer.phoneNumber, name: referrer.name, newExpiry };
             }
-          } catch (refErr) {
-            console.error("[REFERRAL] Reward error:", refErr);
           }
+        });
+
+        console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
+
+        // Send notifications AFTER the transaction commits (Twilio calls can't be rolled back)
+        if (referrerData) {
+          const { phone: refPhone, name: refName, newExpiry } = referrerData as { phone: string; name: string | null; newExpiry: Date };
+          const refTo = refPhone.startsWith("whatsapp:") ? refPhone : `whatsapp:${refPhone}`;
+          if (fromNum) {
+            await twilioC.messages.create({
+              from: fromNum, to: refTo,
+              body: `${refName || "Hey"} Your referral just joined KamLife Coach! You have earned one free month — your subscription has been extended to ${newExpiry.toISOString().slice(0, 10)}. Keep sharing your code and keep stacking free months.`,
+            }).catch(e => console.error("[REFERRAL] Notify error:", e));
+          }
+          console.log(`[REFERRAL] Rewarded ${refPhone} — extended to ${(referrerData as any).newExpiry.toISOString().slice(0, 10)}`);
         }
 
         // Welcome / renewal WhatsApp
@@ -196,7 +224,7 @@ export function registerPaymentRoutes(app: Express) {
   // Use when PayFast ITN fires but webhook fails (network blip, etc.) and user paid but DB didn't update.
   // Protected by COACH_DASHBOARD_KEY so only the coach can call it.
   app.post("/api/admin/force-activate", async (req: any, res: any) => {
-    const authKey = req.headers["x-coach-key"] || req.query.key;
+    const authKey = req.headers["x-coach-key"];
     if (authKey !== process.env.COACH_DASHBOARD_KEY) {
       return res.status(403).json({ error: "Forbidden" });
     }
@@ -222,7 +250,7 @@ export function registerPaymentRoutes(app: Express) {
 
   // ── Admin: test Twilio button (Content API) ──
   app.get("/api/admin/test-buttons", async (req: any, res: any) => {
-    const authKey = req.headers["x-coach-key"] || req.query.key;
+    const authKey = req.headers["x-coach-key"];
     if (authKey !== process.env.COACH_DASHBOARD_KEY) return res.status(403).json({ error: "Forbidden" });
     const to = req.query.to as string;
     if (!to) return res.status(400).json({ error: "?to=whatsapp:+27..." });
