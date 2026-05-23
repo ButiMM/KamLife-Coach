@@ -490,9 +490,6 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const updatedUser = { ...u, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: u.age || 30, primaryFocusArea: u.primaryFocusArea };
   const firstWorkout = getKamlifeProgramme(updatedUser, true);
 
-  const weekOneList = getShoppingList(budget, 1, defaultGoal);
-  const shoppingPreview = formatShoppingList(weekOneList, u.name || undefined, defaultGoal);
-
   const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
   const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
   const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
@@ -527,8 +524,9 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
+
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `${shoppingPreview}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
+  const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
   return `${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}`;
 }
 
@@ -1132,7 +1130,6 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const f = finalUser[0];
     const programme = getKamlifeProgramme(f);
-    const mealPlan = getOnboardingMealPlan(f);
     const goalLabel: Record<string, string> = {
       fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
       general: "General fitness", health_condition: "Health management",
@@ -1151,7 +1148,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const legCalExplainer = goal === "muscle_gain"
       ? `*What ${calorieTarget} kcal means:* This is a surplus above maintenance — fuel to build muscle. Don't undershoot it. 1 egg = ~6g protein. 100g chicken = ~31g. Hit ${proteinTarget}g protein daily and the programme works.`
       : `*What ${calorieTarget} kcal means:* A plate of pap with stew is ~550 kcal. Your body burns ~1,200–1,500 kcal just to breathe before you move. Eat at this target and you lose fat without starving. Hit ${proteinTarget}g protein and hunger drops.`;
-    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\n${mealPlan}\n\n*Start coaching today — R199/month, cancel anytime:*\n${payLinkLeg}\n\n_R6.63/day. Not working in the first week? Full refund, no questions._`;
+    return `Sharp. Your programme is built.\n\n*Goal:* ${goalLabel[goal] || goal}\n*Training:* ${f.trainingMode || "Home"} · ${f.trainingDaysPerWeek || 3} days/week\n*Calorie target:* ${calorieTarget} kcal/day\n*Protein target:* ${proteinTarget}g/day${nightNote}${heartNote}\n\n${legCalExplainer}\n\n_Coach K is AI-powered coaching — not a substitute for medical advice._\n\n---\n\n${programme}\n\n---\n\nYour personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkLeg}\n\n_R6.63/day. Not satisfied after your first week? Message us and we'll make it right._`;
   }
 
   return await getMenuText(user);
