@@ -231,35 +231,43 @@ export async function handleMediaMessage(ctx: {
             const albumExtras = (allMediaUrls || []).filter(u => u !== mediaUrl);
             if (albumExtras.length > 0) {
               const albumAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+              console.log(`[ALBUM_FOOD] processing ${albumExtras.length} extra image(s) for user=${user.id.slice(-6)}`);
               (async () => {
                 try {
                   let albumKcal = 0, albumProt = 0;
                   const albumParts: string[] = [];
                   for (const extraUrl of albumExtras.slice(0, 3)) {
                     const r = await fetch(extraUrl, { headers: { Authorization: albumAuthHeader } }).catch(() => null);
-                    if (!r?.ok) continue;
+                    if (!r?.ok) { console.warn(`[ALBUM_FOOD] download failed url=${extraUrl.slice(-20)}`); continue; }
                     const buf = await r.arrayBuffer();
                     if (buf.byteLength > 10 * 1024 * 1024) continue;
                     const b64 = Buffer.from(buf).toString("base64");
                     const ct = r.headers.get("content-type") || "image/jpeg";
-                    const vis = await withTimeout("album_food_vision", 18000, () => openai.chat.completions.create({
-                      model: "gpt-4o-mini", max_tokens: 200,
+                    const vis = await withTimeout("album_food_vision", 22000, () => openai.chat.completions.create({
+                      model: "gpt-4o-mini", max_tokens: 250,
                       messages: [
-                        { role: "system", content: `You are Coach K, a South African fitness coach. Estimate calories and protein in this food photo. Format: "roughly X kcal and Yg protein." If no food is visible, reply "No food visible."` },
+                        { role: "system", content: `You are Coach K, a South African fitness coach. Analyse this food photo and estimate calories and protein. Always end with a line in this exact format: "TOTAL: X kcal | Yg protein". If the image is clearly not food (fitness app screenshot, step counter, person, gym equipment), reply exactly: NOT_FOOD` },
                         { role: "user", content: [
-                          { type: "text", text: "Estimate the calories and protein in this image." },
-                          { type: "image_url", image_url: { url: `data:${ct};base64,${b64}`, detail: "low" } },
+                          { type: "text", text: "Estimate calories and protein in this photo." },
+                          { type: "image_url", image_url: { url: `data:${ct};base64,${b64}`, detail: "auto" } },
                         ]},
                       ],
-                    })).catch(() => null);
+                    })).catch((e) => { console.warn("[ALBUM_FOOD] vision error:", e?.message); return null; });
                     const text = vis?.choices[0]?.message?.content?.trim() || "";
-                    const kcalMatch = text.match(/\b(\d{2,4})\s*kcal/i);
-                    const protMatch = text.match(/\b(\d{1,3})\s*g\s*protein/i);
-                    const kcal = kcalMatch ? Math.min(3000, Math.max(50, parseInt(kcalMatch[1], 10))) : 0;
-                    const prot = protMatch ? Math.min(200, Math.max(0, parseInt(protMatch[1], 10))) : 0;
-                    if (kcal <= 0 && prot <= 0) continue; // step screenshot or non-food — skip
+                    console.log(`[ALBUM_FOOD] vision reply: ${text.slice(0, 100)}`);
+                    if (/^NOT_FOOD\b/i.test(text)) continue;
+                    // Parse TOTAL: line first, fall back to first kcal mention
+                    const totalLine = text.match(/TOTAL:\s*([\d,]+)\s*kcal\s*\|\s*(\d+)\s*g\s*protein/i);
+                    const kcalRaw = totalLine ? parseInt(totalLine[1].replace(/,/g, ""), 10)
+                      : (() => { const m = text.match(/\b([\d,]{2,7})\s*kcal/i); return m ? parseInt(m[1].replace(/,/g, ""), 10) : 0; })();
+                    const protRaw = totalLine ? parseInt(totalLine[2], 10)
+                      : (() => { const m = text.match(/\b(\d{1,3})\s*g\s*protein/i); return m ? parseInt(m[1], 10) : 0; })();
+                    const kcal = Number.isFinite(kcalRaw) ? Math.min(3000, Math.max(0, kcalRaw)) : 0;
+                    const prot = Number.isFinite(protRaw) ? Math.min(200, Math.max(0, protRaw)) : 0;
+                    console.log(`[ALBUM_FOOD] extracted kcal=${kcal} prot=${prot}`);
+                    if (kcal <= 0 && prot <= 0) continue; // non-food image — skip
                     albumKcal += kcal; albumProt += prot;
-                    albumParts.push(text);
+                    albumParts.push(text.replace(/\nTOTAL:.*$/i, "").trim());
                     await db.insert(mealLogs).values({
                       userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
                       loggedAt: new Date(), rawMessage: "[Album photo]", mealLabel: "Album meal",
@@ -269,9 +277,16 @@ export async function handleMediaMessage(ctx: {
                   if (albumKcal > 0) {
                     invalidateFoodTotalsCache(user.id);
                     const suffix = albumParts.length > 1 ? "s" : "";
-                    await sendWhatsApp(phone, `Also logged your meal${suffix} from the photo${suffix}:\n\n${albumParts.join("\n\n")}\n\n*~${albumKcal} kcal | ~${albumProt}g protein*`);
+                    const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
+                    const totalNote = totals && totals.calories > 0
+                      ? `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein._`
+                      : "";
+                    await sendWhatsApp(phone, `Also logged your meal${suffix} from the photo${suffix}:\n\n${albumParts.join("\n\n")}\n\n*~${albumKcal} kcal | ~${albumProt}g protein*${totalNote}`);
+                    console.log(`[ALBUM_FOOD] sent food response albumKcal=${albumKcal} albumProt=${albumProt}`);
+                  } else {
+                    console.warn(`[ALBUM_FOOD] no food detected in any extra image — nothing sent`);
                   }
-                } catch (albumErr) { console.error("[ALBUM_FOOD]", albumErr); }
+                } catch (albumErr) { console.error("[ALBUM_FOOD] fatal:", albumErr); }
               })();
             }
 
@@ -533,26 +548,27 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             if (extraBuf.byteLength > 10 * 1024 * 1024) continue;
             const extraB64 = Buffer.from(extraBuf).toString("base64");
             const extraCtype = extraResp.headers.get("content-type") || "image/jpeg";
-            const extraVision = await withTimeout("food_vision_extra", 18000, () => openai.chat.completions.create({
+            const extraVision = await withTimeout("food_vision_extra", 22000, () => openai.chat.completions.create({
               model: foodVisionDecision.model,
-              max_tokens: Math.min(foodVisionDecision.maxTokens, 200),
+              max_tokens: Math.min(foodVisionDecision.maxTokens, 250),
               messages: [
-                { role: "system", content: `You are Coach K, a South African fitness coach. Client: ${clientName}. Give calories and protein only for this food photo. Format: "Photo X: [food name] — roughly Y kcal and Zg protein." One sentence max.` },
+                { role: "system", content: `You are Coach K, a South African fitness coach. Client: ${clientName}. Estimate calories and protein in this food photo. End with: "TOTAL: X kcal | Yg protein". If not food, reply: NOT_FOOD` },
                 { role: "user", content: [
                   { type: "text", text: "Estimate calories and protein in this food photo." },
-                  { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "low" } },
+                  { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "auto" } },
                 ]},
               ],
             }));
             const extraText = extraVision.choices[0]?.message?.content?.trim() || "";
+            if (/^NOT_FOOD\b/i.test(extraText)) { /* step OCR fallback below */ }
             const extraKcal = extractKcal(extraText);
             const extraProt = extractProt(extraText);
-            if (extraKcal > 0 || extraProt > 0) {
-              extraReplies.push(extraText);
+            if (!(/^NOT_FOOD\b/i.test(extraText)) && (extraKcal > 0 || extraProt > 0)) {
+              extraReplies.push(extraText.replace(/\nTOTAL:.*$/i, "").trim());
               totalPhotoKcal += extraKcal;
               totalPhotoProt += extraProt;
               await logChat(user.id, "[Photo]", extraText, "FOOD_LOG");
-            } else if (extraText.length > 5) {
+            } else if (/^NOT_FOOD\b/i.test(extraText) || extraText.length > 5) {
               // Food vision found nothing — this extra image might be a step screenshot
               const stepVis = await withTimeout("extra_step_ocr", 10000, () => openai.chat.completions.create({
                 model: "gpt-4o-mini", max_tokens: 20,
