@@ -21,3 +21,4 @@ tmp/
 *.md
 !README.md
 !CLAUDE.md
+!LAUNCH_BLOCKERS.md
