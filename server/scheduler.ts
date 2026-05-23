@@ -11,7 +11,7 @@ import {
   loadState, saveState, todaySAST, hasRunToday,
   weeklyKeyedSent, dailySentThisProcess, dailyKey,
   escalations, sentProactive,
-  db, lt, eq,
+  db, lt, eq, lte, and,
 } from "./scheduler/shared";
 
 // Job imports
@@ -68,13 +68,18 @@ cron.schedule("0 22 * * *", async () => {
   } catch { /* non-fatal */ }
   console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size);
 
-  // Escalation SLA check
+  // Daily SLA digest — all priorities past deadline
   try {
+    const now = new Date();
     const overdueEscalations = await db.select({
       id: escalations.id, userId: escalations.userId,
       reason: escalations.reason, priority: escalations.priority,
+      slaDeadline: escalations.slaDeadline,
     }).from(escalations).where(
-      eq(escalations.status, "open") as Parameters<typeof db.select>[0]
+      and(
+        eq(escalations.status, "open"),
+        lte(escalations.slaDeadline, now),
+      )
     ).limit(20);
     if (overdueEscalations.length > 0) {
       const coachPhone = process.env.COACH_ALERT_PHONE || process.env.COACH_PHONE;
@@ -87,6 +92,35 @@ cron.schedule("0 22 * * *", async () => {
       }
     }
   } catch (slaErr) { console.error("[SCHEDULER] SLA check failed:", slaErr); }
+}, { timezone: "UTC" });
+
+// ============================================================
+// URGENT SLA MONITOR — checks urgent/high escalations every 30 min
+// ============================================================
+cron.schedule("*/30 * * * *", async () => {
+  try {
+    const now = new Date();
+    const urgent = await db.select({
+      id: escalations.id, userId: escalations.userId,
+      reason: escalations.reason, priority: escalations.priority,
+    }).from(escalations).where(
+      and(
+        eq(escalations.status, "open"),
+        lte(escalations.slaDeadline, now),
+        // Only urgent/high — normal and low are covered by the daily digest
+        eq(escalations.priority, "urgent"),
+      )
+    ).limit(5);
+    if (urgent.length > 0) {
+      const coachPhone = process.env.COACH_ALERT_PHONE || process.env.COACH_PHONE;
+      if (coachPhone) {
+        const details = urgent.map(e => `• ${e.reason}`).join("\n");
+        await sendWhatsApp(`whatsapp:${coachPhone}`,
+          `🆘 URGENT escalation past 1h SLA — action required now\n\n${details}\n\nOpen dashboard immediately.`
+        ).catch(e => console.error("[SLA URGENT]", e));
+      }
+    }
+  } catch (e) { console.error("[SCHEDULER] Urgent SLA check failed:", e); }
 }, { timezone: "UTC" });
 
 // ============================================================
