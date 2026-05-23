@@ -226,6 +226,55 @@ export async function handleMediaMessage(ctx: {
             const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak);
             await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
             console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
+
+            // Album: if other images were sent in the same message, process them as food photos
+            const albumExtras = (allMediaUrls || []).filter(u => u !== mediaUrl);
+            if (albumExtras.length > 0) {
+              const albumAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+              (async () => {
+                try {
+                  let albumKcal = 0, albumProt = 0;
+                  const albumParts: string[] = [];
+                  for (const extraUrl of albumExtras.slice(0, 3)) {
+                    const r = await fetch(extraUrl, { headers: { Authorization: albumAuthHeader } }).catch(() => null);
+                    if (!r?.ok) continue;
+                    const buf = await r.arrayBuffer();
+                    if (buf.byteLength > 10 * 1024 * 1024) continue;
+                    const b64 = Buffer.from(buf).toString("base64");
+                    const ct = r.headers.get("content-type") || "image/jpeg";
+                    const vis = await withTimeout("album_food_vision", 18000, () => openai.chat.completions.create({
+                      model: "gpt-4o-mini", max_tokens: 200,
+                      messages: [
+                        { role: "system", content: `You are Coach K, a South African fitness coach. Estimate calories and protein in this food photo. Format: "roughly X kcal and Yg protein." If no food is visible, reply "No food visible."` },
+                        { role: "user", content: [
+                          { type: "text", text: "Estimate the calories and protein in this image." },
+                          { type: "image_url", image_url: { url: `data:${ct};base64,${b64}`, detail: "low" } },
+                        ]},
+                      ],
+                    })).catch(() => null);
+                    const text = vis?.choices[0]?.message?.content?.trim() || "";
+                    const kcalMatch = text.match(/\b(\d{2,4})\s*kcal/i);
+                    const protMatch = text.match(/\b(\d{1,3})\s*g\s*protein/i);
+                    const kcal = kcalMatch ? Math.min(3000, Math.max(50, parseInt(kcalMatch[1], 10))) : 0;
+                    const prot = protMatch ? Math.min(200, Math.max(0, parseInt(protMatch[1], 10))) : 0;
+                    if (kcal <= 0 && prot <= 0) continue; // step screenshot or non-food — skip
+                    albumKcal += kcal; albumProt += prot;
+                    albumParts.push(text);
+                    await db.insert(mealLogs).values({
+                      userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
+                      loggedAt: new Date(), rawMessage: "[Album photo]", mealLabel: "Album meal",
+                    }).catch(() => {});
+                    await logChat(user.id, "[Photo - album meal]", text, "FOOD_LOG");
+                  }
+                  if (albumKcal > 0) {
+                    invalidateFoodTotalsCache(user.id);
+                    const suffix = albumParts.length > 1 ? "s" : "";
+                    await sendWhatsApp(phone, `Also logged your meal${suffix} from the photo${suffix}:\n\n${albumParts.join("\n\n")}\n\n*~${albumKcal} kcal | ~${albumProt}g protein*`);
+                  }
+                } catch (albumErr) { console.error("[ALBUM_FOOD]", albumErr); }
+              })();
+            }
+
             return stepReply + (perfectDay || "");
           }
         } catch (e) {
@@ -496,11 +545,43 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               ],
             }));
             const extraText = extraVision.choices[0]?.message?.content?.trim() || "";
-            if (extraText && extraText.length > 5) {
+            const extraKcal = extractKcal(extraText);
+            const extraProt = extractProt(extraText);
+            if (extraKcal > 0 || extraProt > 0) {
               extraReplies.push(extraText);
-              totalPhotoKcal += extractKcal(extraText);
-              totalPhotoProt += extractProt(extraText);
+              totalPhotoKcal += extraKcal;
+              totalPhotoProt += extraProt;
               await logChat(user.id, "[Photo]", extraText, "FOOD_LOG");
+            } else if (extraText.length > 5) {
+              // Food vision found nothing — this extra image might be a step screenshot
+              const stepVis = await withTimeout("extra_step_ocr", 10000, () => openai.chat.completions.create({
+                model: "gpt-4o-mini", max_tokens: 20,
+                messages: [
+                  { role: "system", content: "Extract the step count from this fitness app screenshot. Reply with ONLY the number, or NOT_STEPS if no step count is visible." },
+                  { role: "user", content: [
+                    { type: "text", text: "Step count?" },
+                    { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "low" } },
+                  ]},
+                ],
+              })).catch(() => null);
+              const stepTxt = stepVis?.choices[0]?.message?.content?.trim() || "NOT_STEPS";
+              if (!/NOT_STEPS|UNKNOWN/i.test(stepTxt)) {
+                const extraSteps = parseInt(stepTxt.replace(/[^0-9]/g, ""), 10);
+                if (extraSteps >= 500 && extraSteps <= 60000) {
+                  const todayStartExtra = sastDayStart();
+                  const existingExtraStep = await db.select({ id: stepLogs.id }).from(stepLogs)
+                    .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartExtra))).limit(1);
+                  if (existingExtraStep.length > 0) {
+                    await db.update(stepLogs).set({ steps: extraSteps }).where(eq(stepLogs.id, existingExtraStep[0].id));
+                  } else {
+                    await db.insert(stepLogs).values({ userId: user.id, steps: extraSteps });
+                  }
+                  const stepTarget = user.stepsTarget || 10000;
+                  const stepStreak = await getStepStreak(user.id);
+                  extraReplies.push(getStepResponse(extraSteps, stepTarget, parseFloat(user.currentWeight as string || "75") || 75, stepStreak));
+                  await logChat(user.id, `[Step Screenshot: ${extraSteps}]`, `Steps logged: ${extraSteps}`, "STEP_LOG");
+                }
+              }
             }
           } catch (e) { console.warn("[multi-photo extra vision]", e); }
         }
