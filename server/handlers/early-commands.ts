@@ -7,7 +7,7 @@ import { calculateTargets } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { sendWhatsApp } from "../scheduler";
-import { scanForSAFoods, recomputeTodayFoodTotals } from "./food-scanner";
+import { scanForSAFoods, recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
@@ -125,6 +125,8 @@ export async function handleEarlyCommands(ctx: {
     else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
     else if (/\b(nothing|no equipment|bodyweight|hotel room|3)\b/i.test(m)) tempMode = "home";
     tempEquipmentMode.set(phone, tempMode);
+    // Persist to DB so the mode survives a server restart
+    await db.update(users).set({ awaitingInputType: `holiday_equipment:${tempMode}` }).where(eq(users.phoneNumber, phone)).catch(() => {});
     const tempUser = { ...user, trainingMode: tempMode };
     const workout = buildDayWorkout(tempUser);
     const gifUrl = getPrimaryWorkoutGifUrl(workout);
@@ -181,9 +183,18 @@ export async function handleEarlyCommands(ctx: {
   }
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
+    // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
+    if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
+      const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);
+      if (persistedMode) tempEquipmentMode.set(phone, persistedMode);
+    }
     const effectiveUser = tempEquipmentMode.has(phone)
       ? { ...user, trainingMode: tempEquipmentMode.get(phone) }
       : user;
+    // Clear the persisted holiday mode from DB now that we've consumed it
+    if (tempEquipmentMode.has(phone)) {
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    }
     tempEquipmentMode.delete(phone);
 
     const state = await getTodayWorkoutState(user);
@@ -449,6 +460,7 @@ export async function handleEarlyCommands(ctx: {
         mealLabel: mealLabel || match.mealLabel,
         items: match.items,
       });
+      invalidateFoodTotalsCache(user.id);
       const label = mealLabel ? mealLabel : (match.mealLabel || "meal");
       const sameReply = `✅ *${label.charAt(0).toUpperCase() + label.slice(1)} logged* — ${match.rawMessage ? match.rawMessage.slice(0, 60) : "same as yesterday"}.\n${match.kcalInt > 0 ? `${match.kcalInt} kcal | ${match.proteinInt}g protein.` : ""}\n\nDone. Log your next meal whenever you're ready.`;
       await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
@@ -589,6 +601,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
       mealLabel: "alcohol",
       loggedAt: alcoholLoggedAt,
     }).catch(e => console.warn("[alcohol mealLog insert]", e));
+    invalidateFoodTotalsCache(user.id);
 
     let alcoholReply: string;
     if (isRetroAlcohol) {

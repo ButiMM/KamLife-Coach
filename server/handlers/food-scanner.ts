@@ -5,6 +5,30 @@ import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
 
+// ── Per-user in-memory cache for recomputeTodayFoodTotals ──────────────────
+// Prevents redundant DB queries when the same totals are read multiple times
+// within a single request pipeline (food-context, gpt-block, media, routes).
+const FOOD_TOTALS_CACHE_TTL_MS = 30_000; // 30 seconds
+interface FoodTotalsEntry {
+  calories: number;
+  protein: number;
+  cachedAt: number;
+}
+const _foodTotalsCache = new Map<string, FoodTotalsEntry>();
+
+/** Invalidate cached totals for a user after any food log INSERT or DELETE. */
+export function invalidateFoodTotalsCache(userId: string): void {
+  _foodTotalsCache.delete(userId);
+}
+
+// Periodic cleanup to avoid stale entries accumulating in long-running process
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, entry] of _foodTotalsCache) {
+    if (now - entry.cachedAt > FOOD_TOTALS_CACHE_TTL_MS) _foodTotalsCache.delete(key);
+  }
+}, 60_000).unref();
+
 // Track which users have already received the low-cal warning today (SAST date key)
 const _lowCalWarnedToday = new Map<string, string>();
 
@@ -303,6 +327,12 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 }
 
 export async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {
+  // Cache hit: return cached value if still within TTL
+  const cached = _foodTotalsCache.get(userId);
+  if (cached && Date.now() - cached.cachedAt < FOOD_TOTALS_CACHE_TTL_MS) {
+    return { calories: cached.calories, protein: cached.protein };
+  }
+
   const todayStart = sastDayStart();
 
   const [mealLogSum, legacyLogs] = await Promise.all([
@@ -325,7 +355,9 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
   ]);
 
   if (mealLogSum && (mealLogSum.calories > 0 || mealLogSum.protein > 0)) {
-    return { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
+    const result = { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
+    _foodTotalsCache.set(userId, { ...result, cachedAt: Date.now() });
+    return result;
   }
 
   // Fallback: legacy chatHistory scanning (pre-meal_logs users)
@@ -342,7 +374,9 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
     calories += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
     protein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
   }
-  return { calories, protein };
+  const legacyResult = { calories, protein };
+  _foodTotalsCache.set(userId, { ...legacyResult, cachedAt: Date.now() });
+  return legacyResult;
 }
 
 export function buildFoodLogReply(p: {

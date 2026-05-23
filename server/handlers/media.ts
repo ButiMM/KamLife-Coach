@@ -15,7 +15,7 @@ import { db } from "../db";
 import {
   users, chatHistory, stepLogs, mealLogs, progressPhotos,
 } from "../../shared/schema";
-import { eq, and, gte, lt, asc, sql } from "drizzle-orm";
+import { eq, and, gte, lt, asc, desc, sql } from "drizzle-orm";
 import {
   buildMediaTrace, withTimeout,
   logMediaFailure, logMediaSuccess, logChat,
@@ -23,7 +23,7 @@ import {
 import { askCoachK } from "../gpt";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
-import { recomputeTodayFoodTotals } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
@@ -201,6 +201,17 @@ export async function handleMediaMessage(ctx: {
           if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
             const target = user.stepsTarget || 10000;
             const todayStartSteps = sastDayStart();
+            // Dedup: if the exact same step count was already logged within the last 5 minutes, skip
+            const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+            const recentDup = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
+              .from(stepLogs)
+              .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, fiveMinAgo)))
+              .orderBy(desc(stepLogs.loggedAt))
+              .limit(1);
+            if (recentDup.length > 0 && recentDup[0].steps === extractedSteps) {
+              console.log(`[MEDIA][${mediaTrace}] step_dedup skipped value=${extractedSteps}`);
+              return `Already logged ${extractedSteps.toLocaleString()} steps for today. ✅`;
+            }
             const existingStep = await db.select({ id: stepLogs.id })
               .from(stepLogs)
               .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
@@ -498,6 +509,21 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoLoggedAt = parseMealDate(message || "");
       const photoIsRetro = isRetroactiveMeal(message || "");
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
+        // Dedup: if the same kcal amount was already logged from a photo in the last 3 minutes, skip
+        const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
+        const recentMealDup = await db.select({ id: mealLogs.id, kcalInt: mealLogs.kcalInt })
+          .from(mealLogs)
+          .where(and(
+            eq(mealLogs.userId, user.id),
+            eq(mealLogs.source, "photo"),
+            gte(mealLogs.loggedAt, threeMinAgo),
+          ))
+          .orderBy(desc(mealLogs.loggedAt))
+          .limit(1);
+        if (recentMealDup.length > 0 && recentMealDup[0].kcalInt === totalPhotoKcal) {
+          console.log(`[MEDIA][${mediaTrace}] photo_meal_dedup skipped kcal=${totalPhotoKcal}`);
+          return `Already logged that meal (~${totalPhotoKcal} kcal). Send your next photo when you eat again.`;
+        }
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: message || "[Photo]",
@@ -508,6 +534,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           fatInt: 0,
           loggedAt: photoLoggedAt,
         }).catch(e => console.warn("[photo mealLogs write]", e));
+        invalidateFoodTotalsCache(user.id);
       }
 
       const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);

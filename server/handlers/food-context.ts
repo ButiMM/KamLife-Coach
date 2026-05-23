@@ -13,6 +13,7 @@ import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
   computeFoodLogStreak, getFoodStreakCelebration,
   hasShownStreakToday, markStreakShownToday,
+  invalidateFoodTotalsCache,
 } from "./food-scanner";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, askCoachK } from "../gpt";
@@ -205,6 +206,7 @@ export async function handleFoodContext(ctx: {
             fatInt: 0,
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
           invalidatePatternCache(user.id);
+          invalidateFoodTotalsCache(user.id);
           const recomputed3 = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({
             todayCalories: recomputed3.calories,
@@ -400,6 +402,7 @@ export async function handleFoodContext(ctx: {
           items: matchedMeal.items,
         }).catch(() => {});
         invalidatePatternCache(user.id);
+        invalidateFoodTotalsCache(user.id);
         const calorieTarget = user.calorieTarget || 2000;
         const proteinTarget = user.proteinTarget || 120;
         const relogged = await recomputeTodayFoodTotals(user.id);
@@ -704,6 +707,7 @@ export async function handleFoodContext(ctx: {
             loggedAt: scannerLoggedAt,
           });
           invalidatePatternCache(user.id);
+          invalidateFoodTotalsCache(user.id);
         }
       } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
 
@@ -796,6 +800,7 @@ export async function handleFoodContext(ctx: {
               loggedAt: gptLoggedAt,
             });
             invalidatePatternCache(user.id);
+            invalidateFoodTotalsCache(user.id);
           }
         } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
@@ -871,6 +876,7 @@ export async function handleFoodContext(ctx: {
             loggedAt: fb2LoggedAt,
           });
           invalidatePatternCache(user.id);
+          invalidateFoodTotalsCache(user.id);
         }
       } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");

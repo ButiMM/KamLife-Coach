@@ -44,10 +44,22 @@ export async function handleWater(ctx: {
 
     const yesterdaySAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
     const crossedTarget = newTotal >= waterTarget && currentWater < waterTarget;
+    // A day is "consecutive" if last reset was today or yesterday (SAST).
+    // If it was 2+ days ago the streak is broken — must reset even if not crossing target today.
+    const missedADay = lastReset !== null && lastReset !== undefined
+      && lastReset !== today && lastReset !== yesterdaySAST;
     const isConsecutive = lastReset === today || lastReset === yesterdaySAST;
-    const newWaterStreak = crossedTarget
-      ? (isConsecutive ? (user.waterStreak || 0) + 1 : 1)
-      : (user.waterStreak || 0);
+    let newWaterStreak: number;
+    if (crossedTarget) {
+      // Target hit today: increment if consecutive, else start fresh at 1
+      newWaterStreak = isConsecutive ? (user.waterStreak || 0) + 1 : 1;
+    } else if (missedADay) {
+      // Missed at least one day without hitting target — streak resets to 0
+      newWaterStreak = 0;
+    } else {
+      // Same or consecutive day, target not hit yet — keep current streak
+      newWaterStreak = user.waterStreak || 0;
+    }
 
     await db.update(users).set({ waterStreak: newWaterStreak }).where(eq(users.phoneNumber, phone));
 
