@@ -54,6 +54,35 @@ export async function handleFoodContext(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
 
+  // ---- BOT MISSED A MEAL — "you missed a meal", "you didn't log that", "you forgot my lunch" ----
+  // Must be caught BEFORE the correction detector which would re-route "you missed a meal" as food
+  const isBotMissedMeal = /\b(you (missed|forgot|skipped|left out|didn.?t (log|count|track|record))|bot (missed|forgot)|you never logged|didn.?t log (my|the|that|a))\b/i.test(m);
+  if (isBotMissedMeal) {
+    const todayStartMissed = sastDayStart();
+    const recentLogs = await db.select({ mealLabel: mealLogs.mealLabel, kcalInt: mealLogs.kcalInt, loggedAt: mealLogs.loggedAt })
+      .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMissed)))
+      .orderBy(desc(mealLogs.loggedAt)).limit(5);
+    const logSummary = recentLogs.length > 0
+      ? `Today I have logged: ${recentLogs.map(l => `${l.mealLabel || "meal"} (${l.kcalInt} kcal)`).join(", ")}.`
+      : `I have not logged any meals for you today yet.`;
+    const missedReply = `${logSummary}\n\nWhich meal did I miss? Just tell me what it was — e.g. *"oats and eggs for breakfast"* — and I'll add it now.`;
+    await logChat(user.id, message, missedReply, "MISSED_MEAL_QUERY");
+    return missedReply;
+  }
+
+  // ---- CALORIE COMPLAINT — "the calories are wrong", "wrong calories", "those numbers are off" ----
+  const isCalorieComplaint = /\b(calories?\s*(are?|is|look|seem|appear)?\s*(wrong|off|incorrect|not right|too (high|low)|inaccurate|don.?t look right)|wrong\s*calories?|calorie\s*(count|total|number)\s*(is|are|seems?|looks?)\s*(wrong|off|high|low|incorrect)|that.?s not (right|correct).{0,20}calorie|numbers?\s*(are?|is|look|seem)\s*(off|wrong))\b/i.test(m);
+  if (isCalorieComplaint) {
+    const todayStartCal = sastDayStart();
+    const lastLog = await db.select({ mealLabel: mealLogs.mealLabel, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
+      .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCal)))
+      .orderBy(desc(mealLogs.loggedAt)).limit(1);
+    const lastMealDesc = lastLog.length > 0 ? `The last meal I logged was ${lastLog[0].mealLabel || "your meal"} at ${lastLog[0].kcalInt} kcal / ${lastLog[0].proteinInt}g protein.` : `I do not have a recent meal logged for today.`;
+    const calComplaintReply = `${lastMealDesc}\n\nTell me what the correct calories should be — e.g. *"that wrap was 350 kcal not 500"* — and I'll fix it.`;
+    await logChat(user.id, message, calComplaintReply, "CALORIE_COMPLAINT");
+    return calComplaintReply;
+  }
+
   // ---- CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
   const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
   const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").trim();

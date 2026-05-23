@@ -12,7 +12,7 @@ import { logChat, withTimeout } from "./chat-log";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
 
@@ -554,7 +554,6 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const isDirectAlcoholQty = /^(\d+\s*)?(beers?|wines?|glasses?\s*(of\s*)?(wine|beer|brandy|whisky|whiskey|vodka|gin|rum|cider)|shots?|doubles?)\b/i.test(m.trim());
   const isAlcoholLog = alcoholMatch && (hasAlcoholVerb || isDirectAlcoholQty);
   if (isAlcoholLog) {
-    // Extract drink count
     const qtyMatch = m.match(/(\d+)\s*(?:beers?|wines?|glasses?|brandies?|ciders?|shots?|doubles?|bottles?)/i);
     const qty = qtyMatch ? parseInt(qtyMatch[1]) : 1;
 
@@ -573,16 +572,40 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const calTarget = user.calorieTarget || 1800;
     const pctOfDay = Math.round((totalCal / calTarget) * 100);
 
-    let alcoholReply = `${qty} ${drinkName}${qty > 1 ? "s" : ""} = ~${totalCal} kcal. That's ${pctOfDay}% of your daily target.\n\n`;
+    const isRetroAlcohol = isRetroactiveMeal(m);
+    const alcoholLoggedAt = parseMealDate(m);
+    const alcoholDateLabel = mealDateLabel(alcoholLoggedAt);
 
-    if (totalCal > 600) {
-      alcoholReply += `That's a full meal's worth of calories with zero protein and zero nutrition. Your body also stops burning fat while it processes alcohol — so the food you eat WITH alcohol is more likely to be stored as fat.\n\n`;
-      alcoholReply += `*Damage control:* High protein meals tomorrow. Extra water tonight (1 glass per drink). Walk 30 min extra tomorrow.`;
-    } else if (totalCal > 300) {
-      alcoholReply += `Not ideal, but manageable. Cut one carb serving from dinner to balance it out. Drink water between rounds.\n\n`;
-      alcoholReply += `*Tomorrow:* Extra protein at breakfast. Get your walk in.`;
+    // Always insert into mealLogs — alcohol calories must actually be tracked
+    await db.insert(mealLogs).values({
+      userId: user.id,
+      rawMessage: message.slice(0, 1000),
+      source: "alcohol_log",
+      kcalInt: totalCal,
+      proteinInt: 0,
+      carbsInt: Math.round(totalCal * 0.85 / 4),
+      fatInt: 0,
+      items: [{ name: `${drinkName} ×${qty}`, kcal: totalCal, protein: 0 }],
+      mealLabel: "alcohol",
+      loggedAt: alcoholLoggedAt,
+    }).catch(e => console.warn("[alcohol mealLog insert]", e));
+
+    let alcoholReply: string;
+    if (isRetroAlcohol) {
+      // Past tense — advice about what to do TODAY, not "tomorrow"
+      const todayAction = totalCal > 400
+        ? `Today: high-protein meals, extra water, and get your steps in to compensate.`
+        : `Back on track today — hit your protein target and get your steps in.`;
+      alcoholReply = `${qty} ${drinkName}${qty > 1 ? "s" : ""} logged for ${alcoholDateLabel} — ~${totalCal} kcal (${pctOfDay}% of your daily target).\n\n${todayAction}`;
     } else {
-      alcoholReply += `Manageable. Stay hydrated — 1 glass of water per drink. Don't let it become 3 more.`;
+      alcoholReply = `${qty} ${drinkName}${qty > 1 ? "s" : ""} = ~${totalCal} kcal. That's ${pctOfDay}% of your daily target.\n\n`;
+      if (totalCal > 600) {
+        alcoholReply += `That's a full meal's worth of calories with zero protein. Your body stops burning fat while it processes alcohol.\n\n*Damage control:* High protein meals the rest of today. 1 glass of water per drink. 30 min walk tomorrow.`;
+      } else if (totalCal > 300) {
+        alcoholReply += `Manageable. Cut one carb serving from your next meal to balance it out. Drink water between rounds.\n\n*Tomorrow:* Extra protein at breakfast. Get your walk in.`;
+      } else {
+        alcoholReply += `Manageable. Stay hydrated — 1 glass of water per drink. Don't let it become 3 more.`;
+      }
     }
 
     await logChat(user.id, message, alcoholReply, "ALCOHOL_LOG");

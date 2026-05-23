@@ -135,7 +135,7 @@ export async function handleMediaMessage(ctx: {
             max_tokens: 8,
             temperature: 0,
             messages: [
-              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | other.\n- food: plate of food, drink, snack, meal, meal prep container, food packaging, protein shake can/bottle/sachet, protein bar wrapper, supplement tub/bottle showing a food product, grocery item, any branded food or nutrition product\n- steps: screenshot showing a step count or pedometer reading from a fitness app (Samsung Health, Google Fit, Apple Health, Garmin, Fitbit, Huawei Health)\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise. Protein powder tubs, protein shake cans, and any branded food product = food, NOT equipment." },
+              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | collage | other.\n- food: plate of food, drink, snack, meal, meal prep container, food packaging, protein shake can/bottle/sachet, protein bar wrapper, supplement tub/bottle showing a food product, grocery item, any branded food or nutrition product\n- steps: screenshot showing a step count or pedometer reading from a fitness app (Samsung Health, Google Fit, Apple Health, Garmin, Fitbit, Huawei Health)\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- collage: image containing MULTIPLE different panels — e.g. food photos combined with a step count screenshot, a grid of multiple meal photos, or any image where different sections show different types of content (food AND stats, multiple meals arranged together)\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise. Protein powder tubs, protein shake cans, and any branded food product = food, NOT equipment. A grid or collage with mixed content types = collage." },
               { role: "user", content: [
                 { type: "text", text: "What is this photo?" },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -143,7 +143,8 @@ export async function handleMediaMessage(ctx: {
             ],
           }));
           const raw = (classifyResp.choices[0]?.message?.content || "").trim().toLowerCase();
-          if (raw.includes("food")) uncaptionedType = "food";
+          if (raw.includes("collage")) uncaptionedType = "collage" as any;
+          else if (raw.includes("food")) uncaptionedType = "food";
           else if (raw.includes("steps") || raw.includes("step")) uncaptionedType = "steps";
           else if (raw.includes("exercise")) uncaptionedType = "exercise";
           else if (raw.includes("progress")) uncaptionedType = "progress";
@@ -151,6 +152,11 @@ export async function handleMediaMessage(ctx: {
           else uncaptionedType = "other";
           console.log(`[MEDIA][${mediaTrace}] uncaptioned_classified=${uncaptionedType}`);
           if (uncaptionedType === "steps") isStepScreenshot = true;
+          // Collage: treat as food (runs food vision below) AND also extract steps
+          if ((uncaptionedType as any) === "collage") {
+            uncaptionedType = "food";
+            isStepScreenshot = true; // run step OCR too — steps panel may be in same image
+          }
           if (uncaptionedType === "exercise") {
             const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
             await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
@@ -339,7 +345,7 @@ PACKAGED PRODUCTS: If the photo shows a branded food or supplement product (prot
 
 MULTIPLE ITEMS: If the photo shows more than one food item — a meal prep container with separate compartments, a snack next to a main meal, multiple dishes — describe and estimate ALL items visible in the frame, not just one. Combine into a single total. Example: "Meal prep box: chicken + spinach + butternut — roughly 420 kcal and 38g protein total."
 
-ESTIMATION: State specific calories and protein for ALL food and drink items visible in the frame as actually served. Format: "That meal is roughly 650 kcal and 35g protein." Then immediately say how that leaves them against their ${liveCal} kcal and ${liveProt}g protein daily target. Example: "That leaves 1,150 kcal and 85g protein for the rest of the day."
+ESTIMATION: State specific calories and protein for ALL food and drink items visible in the frame as actually served. If multiple items, list them individually then end with a combined total on its own line in this exact format: "TOTAL: X kcal | Xg protein" — e.g. "TOTAL: 950 kcal | 65g protein". This format is required for accurate logging. Then say how that total compares to their ${liveCal} kcal and ${liveProt}g protein daily target.
 
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
@@ -419,18 +425,36 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
 
       const extractKcal = (text: string) => {
-        const mx = text.match(/roughly\s+(\d[\d,]*)\s*kcal/i) || text.match(/\b(\d{2,4})\s*kcal/i);
-        if (!mx) return 0;
-        const n = parseInt(mx[1].replace(/,/g, ""), 10);
-        if (!Number.isFinite(n) || n < 50 || n > 3000) return 0;
-        return n;
+        // Prefer explicit TOTAL: line added by the updated prompt
+        const totalFmt = text.match(/TOTAL:\s*(\d[\d,]*)\s*kcal/i);
+        if (totalFmt) {
+          const n = parseInt(totalFmt[1].replace(/,/g, ""), 10);
+          if (Number.isFinite(n) && n >= 50 && n <= 6000) return n;
+        }
+        // Strip "leaves/remaining X kcal" context to avoid counting daily-remaining figures
+        const cleaned = text.replace(/(?:leaves?|leaving|that'?s?\s+\d)|remaining[^.]*?[\d,]+\s*kcal[^.]*/gi, "");
+        // Sum all "roughly/about/is X kcal" estimation phrases
+        const all = [...cleaned.matchAll(/\b(?:roughly|about|approximately|around|is)\s+(\d[\d,]{1,4})\s*kcal/gi)];
+        const vals = all.map(mx => parseInt(mx[1].replace(/,/g, ""), 10)).filter(n => Number.isFinite(n) && n >= 50 && n <= 3000);
+        if (vals.length > 0) return vals.reduce((a, b) => a + b, 0);
+        // Last resort: first bare kcal number
+        const bare = text.match(/\b(\d{2,4})\s*kcal/i);
+        if (!bare) return 0;
+        const n = parseInt(bare[1], 10);
+        return (Number.isFinite(n) && n >= 50 && n <= 3000) ? n : 0;
       };
       const extractProt = (text: string) => {
-        const mx = text.match(/\b(\d{1,3})\s*g\s*protein/i);
-        if (!mx) return 0;
-        const n = parseInt(mx[1], 10);
-        if (!Number.isFinite(n) || n < 0 || n > 200) return 0;
-        return n;
+        // Prefer explicit TOTAL: line
+        const totalFmt = text.match(/TOTAL:\s*[\d,]+\s*kcal\s*\|\s*(\d{1,3})\s*g\s*protein/i);
+        if (totalFmt) {
+          const n = parseInt(totalFmt[1], 10);
+          if (Number.isFinite(n) && n >= 0 && n <= 300) return n;
+        }
+        // Strip "leaves/remaining X g protein" context
+        const cleaned = text.replace(/(?:leaves?|leaving|remaining)[^.]*?[\d]+\s*g\s*protein[^.]*/gi, "");
+        const all = [...cleaned.matchAll(/\b(\d{1,3})\s*g\s*protein/gi)];
+        const vals = all.map(mx => parseInt(mx[1], 10)).filter(n => Number.isFinite(n) && n >= 0 && n <= 200);
+        return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) : 0;
       };
 
       let totalPhotoKcal = extractKcal(visionReply);
