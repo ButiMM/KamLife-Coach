@@ -416,36 +416,43 @@ export async function handleEarlyCommands(ctx: {
     return reply;
   }
 
-  // ---- SAME-AS-YESTERDAY QUICK LOG — "same breakfast", "same as yesterday", "repeat lunch" ----
-  // Re-logs yesterday's matching meal with zero typing friction.
+  // ---- SAME-AS-YESTERDAY QUICK LOG — "same breakfast", "same as yesterday", "repeat lunch", "dinner is same as lunch" ----
+  // Re-logs a matching meal with zero typing friction.
   const sameAsMatch = m.match(/\b(?:same|repeat|again|copy|log\s+(?:my\s+)?same)\b.*\b(breakfast|lunch|dinner|supper|snack|meal|yesterday)\b/i)
     || m.match(/\b(breakfast|lunch|dinner|supper|snack)\b.*\b(?:same|again|repeat|yesterday)\b/i)
     || /^same$/.test(m);
   if (sameAsMatch) {
+    // Detect cross-meal: "dinner is same as lunch" → target=dinner, source=lunch
+    const crossMealM = m.match(/\b(breakfast|lunch|dinner|supper|snack)\b.{0,60}?\bsame\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i)
+      || m.match(/\bsame\s+(breakfast|lunch|dinner|supper|snack)\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i);
     const mealKeyword = (sameAsMatch[1] || "").toLowerCase().replace("supper", "dinner");
     const mealLabel = ["breakfast", "lunch", "dinner", "snack"].find(l => mealKeyword.includes(l)) || null;
+    // targetLabel = what to log; sourceLabel = what to copy from
+    const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner") : mealLabel;
+    const sourceLabel = crossMealM ? crossMealM[2].toLowerCase().replace("supper", "dinner") : mealLabel;
+    const isYesterdayRef = /yesterday/i.test(m);
     try {
       const todayStart = sastDayStart();
       const yStart = new Date(todayStart.getTime() - 86_400_000);
-      const yesterdayMeals = await db.select().from(mealLogs)
+      const allRecentMeals = await db.select().from(mealLogs)
         .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, yStart)))
         .orderBy(desc(mealLogs.loggedAt))
-        .limit(10);
-      // Filter to only yesterday (before todayStart)
-      const yMeals = yesterdayMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
-      // When user names a meal type (breakfast/lunch/dinner), skip drinks-only entries
-      // — a 5 kcal coffee is not a breakfast, it's a drink logged at breakfast time.
-      // Never return a <50 kcal entry regardless of whether a label was given.
-      const findMeal = (meals: typeof yMeals, label: string | null) => {
+        .limit(15);
+      const todayMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
+      const yMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
+      // Skip drinks-only entries (<50 kcal) — a black coffee is not a meal.
+      const findMeal = (meals: typeof allRecentMeals, label: string | null) => {
         const candidates = label ? meals.filter(l => l.mealLabel === label) : meals;
-        const substantial = candidates.find(l => (l.kcalInt || 0) >= 50);
-        return substantial || null;  // never return a drink/trace entry as a meal
+        return candidates.find(l => (l.kcalInt || 0) >= 50) || null;
       };
-      const match = findMeal(yMeals, mealLabel);
+      // When "yesterday" explicitly requested, skip today; otherwise check today first (e.g. "dinner same as lunch")
+      const match = isYesterdayRef
+        ? findMeal(yMeals, sourceLabel)
+        : (findMeal(todayMeals, sourceLabel) || findMeal(yMeals, sourceLabel));
       if (!match || (match.kcalInt === 0 && match.proteinInt === 0)) {
-        const noMatch = mealLabel
-          ? `No ${mealLabel} logged yesterday — tell me what you ate and I'll log it.`
-          : `No meals logged yesterday to repeat. Tell me what you ate.`;
+        const noMatch = sourceLabel
+          ? `No ${sourceLabel} logged ${isYesterdayRef ? "yesterday" : "today or yesterday"} — tell me what you ate and I'll log it.`
+          : `No meals found to repeat. Tell me what you ate.`;
         await logChat(user.id, message, noMatch, "SAME_AS_YESTERDAY_MISS");
         return noMatch;
       }
@@ -457,17 +464,21 @@ export async function handleEarlyCommands(ctx: {
         proteinInt: match.proteinInt,
         carbsInt: match.carbsInt || 0,
         fatInt: match.fatInt || 0,
-        mealLabel: mealLabel || match.mealLabel,
+        mealLabel: targetLabel || match.mealLabel,
         items: match.items,
       });
       invalidateFoodTotalsCache(user.id);
-      const label = mealLabel ? mealLabel : (match.mealLabel || "meal");
-      const sameReply = `✅ *${label.charAt(0).toUpperCase() + label.slice(1)} logged* — ${match.rawMessage ? match.rawMessage.slice(0, 60) : "same as yesterday"}.\n${match.kcalInt > 0 ? `${match.kcalInt} kcal | ${match.proteinInt}g protein.` : ""}\n\nDone. Log your next meal whenever you're ready.`;
+      const logLabel = targetLabel || match.mealLabel || "meal";
+      const mealWasToday = match.loggedAt && new Date(match.loggedAt) >= todayStart;
+      const fromNote = crossMealM
+        ? `copied from today's ${sourceLabel}`
+        : mealWasToday ? "from earlier today" : "from yesterday";
+      const sameReply = `✅ *${logLabel.charAt(0).toUpperCase() + logLabel.slice(1)} logged* (${fromNote}) — ${match.rawMessage ? match.rawMessage.slice(0, 60) : "same meal"}.\n${match.kcalInt > 0 ? `${match.kcalInt} kcal | ${match.proteinInt}g protein.` : ""}\n\nDone. Log your next meal whenever you're ready.`;
       await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
       return sameReply;
     } catch (err) {
       console.error("[SAME_AS_YESTERDAY]", err);
-      return `Could not find yesterday's meal. Tell me what you ate and I'll log it now.`;
+      return `Could not find that meal. Tell me what you ate and I'll log it now.`;
     }
   }
 
