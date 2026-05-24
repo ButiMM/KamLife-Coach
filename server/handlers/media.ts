@@ -579,6 +579,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       let totalPhotoKcal = extractKcal(visionReply);
       let totalPhotoProt = extractProt(visionReply);
+      // Strip internal TOTAL: line — used for extraction only, not shown to user
+      const visionDisplay = visionReply.replace(/\nTOTAL:[^\n]*/i, "").trim();
 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──
       const extraImageUrls = (allMediaUrls || []).filter(u => u !== mediaUrl);
@@ -702,7 +704,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      return `${visionReply}${extraSection}${multiPhotoNote}${retroNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      return `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
