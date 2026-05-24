@@ -198,7 +198,7 @@ export async function handleMediaMessage(ctx: {
           const visionRejected = /\b(NOT_STEPS|UNKNOWN)\b/i.test(stepText);
           const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
           const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
-          const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 60000;
+          const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 35000;
           const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
           if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
             const target = user.stepsTarget || 10000;
@@ -214,12 +214,22 @@ export async function handleMediaMessage(ctx: {
               console.log(`[MEDIA][${mediaTrace}] step_dedup skipped value=${extractedSteps}`);
               return `Already logged ${extractedSteps.toLocaleString()} steps for today. ✅`;
             }
-            const existingStep = await db.select({ id: stepLogs.id })
+            const existingStep = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
               .from(stepLogs)
               .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
               .limit(1);
             if (existingStep.length > 0) {
-              await db.update(stepLogs).set({ steps: extractedSteps }).where(eq(stepLogs.id, existingStep[0].id));
+              const currentSteps = existingStep[0].steps ?? 0;
+              if (extractedSteps > currentSteps) {
+                // Steps went up — valid update (cumulative daily total increasing)
+                await db.update(stepLogs).set({ steps: extractedSteps }).where(eq(stepLogs.id, existingStep[0].id));
+                console.log(`[MEDIA][${mediaTrace}] step_updated prev=${currentSteps} new=${extractedSteps}`);
+              } else {
+                // New value is lower than today's logged max — keep the higher value, still acknowledge
+                console.log(`[MEDIA][${mediaTrace}] step_kept_max existing=${currentSteps} submitted=${extractedSteps}`);
+                await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, `[kept existing max: ${currentSteps}]`, "STEP_LOG");
+                return `Steps already logged higher today (${currentSteps.toLocaleString()}). If that's wrong, let me know and I'll fix it.`;
+              }
             } else {
               await db.insert(stepLogs).values({ userId: user.id, steps: extractedSteps });
             }
@@ -632,10 +642,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
                 const extraSteps = parseInt(stepTxt.replace(/[^0-9]/g, ""), 10);
                 if (extraSteps >= 500 && extraSteps <= 60000) {
                   const todayStartExtra = sastDayStart();
-                  const existingExtraStep = await db.select({ id: stepLogs.id }).from(stepLogs)
+                  const existingExtraStep = await db.select({ id: stepLogs.id, steps: stepLogs.steps }).from(stepLogs)
                     .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartExtra))).limit(1);
                   if (existingExtraStep.length > 0) {
-                    await db.update(stepLogs).set({ steps: extraSteps }).where(eq(stepLogs.id, existingExtraStep[0].id));
+                    if (extraSteps > (existingExtraStep[0].steps ?? 0)) {
+                      await db.update(stepLogs).set({ steps: extraSteps }).where(eq(stepLogs.id, existingExtraStep[0].id));
+                    }
                   } else {
                     await db.insert(stepLogs).values({ userId: user.id, steps: extraSteps });
                   }
