@@ -127,6 +127,7 @@ export async function handleMediaMessage(ctx: {
         || (user.awaitingInputType === "steps");
 
       // ---- UNCAPTIONED IMAGE PRE-CLASSIFIER ----
+      let isCollage = false;
       let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
       if (noCaption && !isStepScreenshot) {
         try {
@@ -152,10 +153,11 @@ export async function handleMediaMessage(ctx: {
           else uncaptionedType = "other";
           console.log(`[MEDIA][${mediaTrace}] uncaptioned_classified=${uncaptionedType}`);
           if (uncaptionedType === "steps") isStepScreenshot = true;
-          // Collage: treat as food (runs food vision below) AND also extract steps
+          // Collage: extract steps AND run food vision on the same image
           if ((uncaptionedType as any) === "collage") {
-            uncaptionedType = "food";
-            isStepScreenshot = true; // run step OCR too — steps panel may be in same image
+            isCollage = true;
+            isStepScreenshot = true;
+            uncaptionedType = "food"; // fallback if step OCR fails
           }
           if (uncaptionedType === "exercise") {
             const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
@@ -226,6 +228,49 @@ export async function handleMediaMessage(ctx: {
             const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak);
             await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
             console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
+
+            // Collage: run food vision on the same image async — food panel was ignored until now
+            if (isCollage) {
+              (async () => {
+                try {
+                  const { calorieTarget: cCal, proteinTarget: cProt } = calculateTargets(
+                    parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office",
+                    user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30,
+                    user.heightCm || 170, user.trainingExperience || "beginner"
+                  );
+                  const fvDecision = selectVisionModel("food_photo", isCoach ? "active" : user.subscriptionStatus);
+                  if (!fvDecision.allowed) return;
+                  const vis = await withTimeout("collage_food_vision", 22000, () => openai.chat.completions.create({
+                    model: fvDecision.model, max_tokens: fvDecision.maxTokens,
+                    messages: [
+                      { role: "system", content: `You are Coach K, a South African fitness and nutrition coach. Client: ${clientName}. Goal: ${goal}. Daily targets: ${cCal} kcal and ${cProt}g protein. This is a collage image — analyse only the FOOD panels. Ignore any step-counter or fitness app panels. End with: "TOTAL: X kcal | Yg protein". If there is no food visible (only health stats), reply exactly: NOT_FOOD` },
+                      { role: "user", content: [
+                        { type: "text", text: "Identify and estimate all food visible in this collage." },
+                        { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: "auto" } },
+                      ]},
+                    ],
+                  })).catch(() => null);
+                  const txt = vis?.choices[0]?.message?.content?.trim() || "";
+                  console.log(`[COLLAGE_FOOD] vision reply: ${txt.slice(0, 120)}`);
+                  if (!txt || /^NOT_FOOD\b/i.test(txt)) return;
+                  const tl = txt.match(/TOTAL:\s*([\d,]+)\s*kcal\s*\|\s*(\d+)\s*g\s*protein/i);
+                  const kcal = tl ? parseInt(tl[1].replace(/,/g, ""), 10) : 0;
+                  const prot = tl ? parseInt(tl[2], 10) : 0;
+                  if (kcal <= 0 && prot <= 0) return;
+                  await db.insert(mealLogs).values({
+                    userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
+                    loggedAt: new Date(), rawMessage: "[Collage food]", mealLabel: "Collage meal",
+                  }).catch(() => {});
+                  await logChat(user.id, "[Photo - collage meal]", txt, "FOOD_LOG");
+                  invalidateFoodTotalsCache(user.id);
+                  const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
+                  const totalNote = totals?.calories ? `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein._` : "";
+                  const displayTxt = txt.replace(/\nTOTAL:.*$/im, "").trim();
+                  await sendWhatsApp(phone, `Also logged your meal from the photo:\n\n${displayTxt}\n\n*~${kcal} kcal | ~${prot}g protein*${totalNote}`);
+                  console.log(`[COLLAGE_FOOD] food logged and sent kcal=${kcal} prot=${prot}`);
+                } catch (ce) { console.error("[COLLAGE_FOOD] error:", ce); }
+              })();
+            }
 
             // Album: if other images were sent in the same message, process them as food photos
             const albumExtras = (allMediaUrls || []).filter(u => u !== mediaUrl);
