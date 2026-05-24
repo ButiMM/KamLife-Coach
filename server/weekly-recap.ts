@@ -252,9 +252,11 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
   }
 
   const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+  const appUrlIsPublicHttps = appUrl.startsWith("https://");
   if (!appUrl) {
-    console.warn("[RECAP] APP_URL not set — cannot generate media URLs for Twilio");
-    return { sent: 0, failed: 0, skipped: 0 };
+    console.warn("[RECAP] APP_URL not set — recaps will send as text only");
+  } else if (!appUrlIsPublicHttps) {
+    console.warn(`[RECAP] APP_URL (${appUrl}) is not HTTPS — audio URLs will be skipped, recaps sent as text`);
   }
 
   // Get Monday of current week as the week identifier
@@ -292,10 +294,21 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
       const recapId = await storeRecapAudio(id, weekStart, script, audio);
       if (!recapId) { failed++; continue; }
 
-      const mediaUrl = audio ? `${appUrl}/api/voice-recap/${recapId}/audio` : undefined;
-      const caption = audio ? "" : script; // fall back to text if audio failed
+      const mediaUrl = (audio && appUrlIsPublicHttps) ? `${appUrl}/api/voice-recap/${recapId}/audio` : undefined;
 
-      await sendWhatsApp(data.phoneNumber, caption, mediaUrl);
+      let sendSucceeded = false;
+      if (mediaUrl) {
+        try {
+          // WhatsApp requires a non-empty body even with media — include the script text
+          await sendWhatsApp(data.phoneNumber, script, mediaUrl);
+          sendSucceeded = true;
+        } catch (mediaErr: any) {
+          console.warn(`[RECAP] Audio send failed for ${data.name ?? id.slice(-6)} (${mediaErr.message}) — falling back to text`);
+        }
+      }
+      if (!sendSucceeded) {
+        await sendWhatsApp(data.phoneNumber, script);
+      }
 
       await pool.query(
         `UPDATE voice_recap_logs SET sent_at = NOW() WHERE id = $1`,
