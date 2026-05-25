@@ -436,6 +436,10 @@ export async function handleMediaMessage(ctx: {
       }
 
       // ---- FOOD PHOTO ----
+      // Detect "is this okay?" captions — client is asking for approval, not just logging
+      const isApprovalCaption = /^[?!¿]+$/.test((message || "").trim())
+        || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
+
       const todayStartPhoto = sastDayStart();
       const photoCountResult = await db.select({ count: sql`count(*)` })
         .from(chatHistory)
@@ -460,7 +464,7 @@ export async function handleMediaMessage(ctx: {
         messages: [
           {
             role: "system",
-            content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein. SA voice — direct, warm, specific. Never generic. Max 3 sentences. End with exactly one specific action. Never say "Reply MENU". Never say "I hope this helps".`,
+            content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein. SA voice — direct, warm, specific. Never generic. Max 3 sentences. End with exactly one specific action. Never say "Reply MENU". Never say "I hope this helps".${isApprovalCaption ? ` IMPORTANT: This client is asking "is this okay to eat?" — after identifying the food and its calories/protein, give a DIRECT yes/no verdict for their ${goal} goal, explain why in one sentence, and tell them exactly how much to eat or what to pair it with. Log it.` : ""}`,
           },
           {
             role: "user",
@@ -484,7 +488,7 @@ FOOD CHECK FIRST: Before anything else, verify this image actually shows food or
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
 
-BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : ""}`,
+BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. A bowl of white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message && !isApprovalCaption ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : isApprovalCaption ? `\n\nCLIENT IS ASKING: "Is this food okay for my goal?" — identify the food from the photo, estimate calories/protein, give a verdict (yes/no/how much), and log it.` : ""}`,
               },
               { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
             ],

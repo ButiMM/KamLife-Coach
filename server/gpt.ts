@@ -625,42 +625,44 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   let todayFoodContext = "";
   try {
     const todayStart = sastDayStart();
-    const todayFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
-      .from(chatHistory)
-      .where(and(
-        eq(chatHistory.userId, user.id),
-        eq(chatHistory.intent, "FOOD_LOG"),
-        gte(chatHistory.createdAt, todayStart),
-      ))
-      .orderBy(chatHistory.createdAt)
-      .limit(20);
+    const todayMeals = await db.select({
+      kcal: mealLogs.kcalInt,
+      protein: mealLogs.proteinInt,
+      carbs: mealLogs.carbsInt,
+      fat: mealLogs.fatInt,
+      mealLabel: mealLogs.mealLabel,
+      rawMessage: mealLogs.rawMessage,
+      loggedAt: mealLogs.loggedAt,
+    }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart), eq(mealLogs.corrected, false)))
+      .orderBy(mealLogs.loggedAt);
 
-    if (todayFoodLogs.length > 0) {
-      let totalCalToday = 0;
-      let totalProtToday = 0;
-      const mealSummaries: string[] = [];
+    if (todayMeals.length > 0) {
+      const totalCalToday = todayMeals.reduce((s, m) => s + (m.kcal || 0), 0);
+      const totalProtToday = todayMeals.reduce((s, m) => s + (m.protein || 0), 0);
+      const totalCarbsToday = todayMeals.reduce((s, m) => s + (m.carbs || 0), 0);
+      const totalFatToday = todayMeals.reduce((s, m) => s + (m.fat || 0), 0);
 
-      for (const log of todayFoodLogs) {
-        const msgIn = log.messageIn || "";
-        const msgOut = log.messageOut || "";
-        const runningMatch = msgOut.match(/Running total[^\d]*(\d{3,4})\s*kcal\s*|\s*(\d{2,3})g/i);
-        const mealTotalMatch = msgOut.match(/Meal total[^\d]*(\d{3,4})\s*kcal\s*|\s*~?(\d{2,3})g/i);
-        if (runningMatch) {
-          totalCalToday = parseInt(runningMatch[1]);
-          totalProtToday = parseInt(runningMatch[2]);
-        } else if (mealTotalMatch && !totalCalToday) {
-          totalCalToday += parseInt(mealTotalMatch[1]);
-          totalProtToday += parseInt(mealTotalMatch[2]);
-        }
-        if (msgIn && msgIn.length > 3) mealSummaries.push(msgIn.slice(0, 80));
+      const byMeal: Record<string, { kcal: number; prot: number }> = {};
+      for (const m of todayMeals) {
+        const label = m.mealLabel || "meal";
+        byMeal[label] = byMeal[label] || { kcal: 0, prot: 0 };
+        byMeal[label].kcal += m.kcal || 0;
+        byMeal[label].prot += m.protein || 0;
       }
+      const mealBreakdown = Object.entries(byMeal)
+        .map(([label, v]) => `${label}: ${v.kcal} kcal / ${v.prot}g protein`)
+        .join(" | ");
 
       const calTarget = user.calorieTarget || 1800;
       const protTarget = user.proteinTarget || 120;
       const calRemaining = calTarget - totalCalToday;
       const protRemaining = protTarget - totalProtToday;
 
-      todayFoodContext = `\n\nTODAY'S FOOD LOG (use these exact numbers — NEVER ignore them):\nMeals logged today: ${mealSummaries.join(" | ")}\nRunning total: ${totalCalToday} kcal | ${totalProtToday}g protein\nCalorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}\nProtein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}\nCRITICAL: When suggesting meals or snacks, account for these already-consumed calories. Never suggest a meal that would push them significantly over their calorie target.`;
+      todayFoodContext = `\n\nTODAY'S FOOD LOG — AUTHORITATIVE (from database, use these exact numbers):\n${mealBreakdown}\nRunning total: ${totalCalToday} kcal | ${totalProtToday}g protein | ${totalCarbsToday}g carbs | ${totalFatToday}g fat\nCalorie target: ${calTarget} kcal → ${calRemaining > 0 ? calRemaining + " kcal remaining" : Math.abs(calRemaining) + " kcal OVER target"}\nProtein target: ${protTarget}g → ${protRemaining > 0 ? protRemaining + "g still needed" : "protein target MET ✅"}\nCRITICAL: When suggesting meals or answering portion questions, account for these calories. Never suggest something that pushes them significantly over target.`;
+    } else {
+      const calTarget = user.calorieTarget || 1800;
+      todayFoodContext = `\n\nTODAY'S FOOD LOG: Nothing logged yet today. Calorie target: ${calTarget} kcal.`;
     }
   } catch (foodErr) {
     console.warn("[GPT] Could not fetch today's food context:", foodErr);
