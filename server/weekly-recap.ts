@@ -175,29 +175,39 @@ export async function generateRecapScript(data: ClientWeekData): Promise<string>
     ? `\n\nIMPORTANT LIFE CONTEXT: ${data.lifeContext}`
     : "";
 
+  const stepsVsTarget = data.avgStepsThisWeek >= stepsTarget
+    ? `steps ABOVE target (${data.avgStepsThisWeek.toLocaleString()} vs ${stepsTarget.toLocaleString()} target)`
+    : `steps BELOW target (${data.avgStepsThisWeek.toLocaleString()} vs ${stepsTarget.toLocaleString()} target)`;
+  const workoutsVsTarget = data.workoutsThisWeek >= trainingTarget
+    ? `hit training target (${data.workoutsThisWeek}/${trainingTarget})`
+    : `missed ${trainingTarget - data.workoutsThisWeek} session${trainingTarget - data.workoutsThisWeek > 1 ? "s" : ""} (${data.workoutsThisWeek}/${trainingTarget})`;
+
   const toneRules = data.lifeContext
-    ? `- TONE: Compassionate and human. This client had a hard week outside of fitness.
-- DO NOT reference their numbers as failures or missed targets.
-- Acknowledge that life comes first. Give them permission to have had a slow week.
-- End with a warm, gentle invitation to come back at their own pace — no pressure.
-- Do NOT mention specific workout counts or steps as things they failed at.`
-    : `- If they had a strong week: celebrate it and raise the bar
-- If they had a weak week: be honest but not harsh, redirect forward
-- End with ONE specific thing to focus on next week`;
+    ? `TONE: Compassionate. Life comes first. Do NOT frame missed targets as failures.
+- Acknowledge the hard week directly. One sentence.
+- Give them permission to have had a slow week.
+- End with one warm, specific invitation to restart — no pressure, no urgency.`
+    : `TONE: Direct South African coach. No cheerleading. No corporate speak.
+STRUCTURE (follow this exactly):
+1. Name the biggest NUMBER (one stat — workouts or steps). One sentence, no adjectives.
+2. Tell them what that number MEANS for their ${data.goalType || "fat loss"} goal. One sentence of real analysis — cause and effect. E.g. "That deficit means your body had to tap into fat stores" or "Missing those sessions means your muscle stimulus was below what we need for growth this month."
+3. ONE specific instruction for next week. Tied to their goal. Not vague. E.g. "This week: hit all ${trainingTarget} sessions AND log your weight every morning so I can tell if the recomp is actually shifting."
 
-  const prompt = `You are Coach K — a direct, warm, results-focused South African fitness coach.
-Write a personal voice note script for a client's weekly recap. 60–80 words MAX.
+BANNED PHRASES — if any of these appear, rewrite: "keep pushing", "keep the momentum going", "you've got this", "let's keep pushing", "stay focused", "keep it up", "great effort", "fantastic effort", "well done", "amazing", "impressive", "that's great"`;
 
-Client data:
+  const prompt = `You are Coach K — a direct South African fitness coach. Write a weekly voice note script. Max 75 words. No fluff.
+
+CLIENT DATA:
 ${context}${lifeNote}
+Steps context: ${stepsVsTarget}
+Workouts context: ${workoutsVsTarget}
 
-Rules:
-- Start with exactly: "Hey ${firstName}, it's Coach K."
-- Reference 1–2 real numbers from their data (workouts, steps, or weight)
-- Be specific, not generic — make them feel seen
-${toneRules}
-- South African voice — direct, no corporate speak, no emojis
-- Max 80 words, no filler phrases like "I'm proud of you" or "amazing job"`;
+RULES:
+- Start with EXACTLY: "Hey ${firstName}, it's Coach K."
+- Follow the STRUCTURE above — analysis then direction, not narration
+- Use real numbers. Say what they mean. Tell them what to do next week.
+- South African voice. Speak to them like a person, not a report card.
+- Hard limit: 75 words. No filler. No banned phrases.`;
 
   try {
     const res = await openai.chat.completions.create({
@@ -216,10 +226,17 @@ ${toneRules}
 function fallbackScript(firstName: string, data: ClientWeekData): string {
   const w = data.workoutsThisWeek;
   const s = data.avgStepsThisWeek.toLocaleString();
-  if (w >= data.trainingDaysPerWeek) {
-    return `Hey ${firstName}, it's Coach K. You hit your workouts this week — ${w} sessions logged. Steps averaged ${s}. That consistency is building real results. This week, keep the same energy and focus on hitting your protein target every day.`;
+  const target = data.trainingDaysPerWeek;
+  const stepsTarget = data.stepsTarget ?? 8500;
+  const goal = data.goalType || "fat_loss";
+  if (w >= target) {
+    const stepLine = data.avgStepsThisWeek >= stepsTarget
+      ? `${s} steps a day on top of that means your daily deficit is real.`
+      : `Steps at ${s} — that needs to come up to ${stepsTarget.toLocaleString()} to support the deficit.`;
+    return `Hey ${firstName}, it's Coach K. ${w} out of ${target} sessions this week — you earned that. ${stepLine} This week: log your weight every morning. I need that data to tell if the ${goal === "muscle_gain" ? "muscle" : "fat"} is actually moving.`;
   }
-  return `Hey ${firstName}, it's Coach K. This week averaged ${s} steps and ${w} workouts. Let's push harder next week — I want you hitting every training day. Show up, log your food, and trust the process.`;
+  const missed = target - w;
+  return `Hey ${firstName}, it's Coach K. ${w} out of ${target} sessions — ${missed} missed. For ${goal === "muscle_gain" ? "muscle growth" : "fat loss"}, that shortfall matters. Your body needed that stimulus. This week: no skipping. Set an alarm for every training day and treat it like a meeting you can't move.`;
 }
 
 async function storeRecapAudio(
