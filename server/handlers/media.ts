@@ -196,6 +196,7 @@ export async function handleMediaMessage(ctx: {
                 return scaleReply;
               }
             } catch {}
+            await db.update(users).set({ awaitingInputType: "weight" }).where(eq(users.phoneNumber, phone));
             const scaleAskReply = `I can see the scale — what does it read? Send me the number (e.g. *82.4 kg*) and I'll log it.`;
             await logChat(user.id, "[Scale Photo]", scaleAskReply, "WEIGHT_PROMPT");
             return scaleAskReply;

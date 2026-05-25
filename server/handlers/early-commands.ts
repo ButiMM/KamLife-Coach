@@ -115,6 +115,21 @@ export async function handleEarlyCommands(ctx: {
     || /\bno gym (this|next|for the) week\b/i.test(m);
   const isHolidayMention = isGymClosed || /\b(on holiday|on vacation|travelling|traveling|i.?m away|hotel gym|hotel|away this week|going away|on a trip|at home today|only have dumbbells|no gym today|training at home today|can.?t get to the gym|went home to|going home\b|back home (for|this|next)|coming back (on )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday|next week|tomorrow|in a few days))\b/i.test(m);
 
+  // If awaiting weight entry (after scale photo couldn't OCR a number)
+  if (user.awaitingInputType === "weight") {
+    const weightMatch = m.match(/^(\d{2,3}(?:\.\d+)?)\s*(?:kgs?)?[.!]?$/i);
+    if (weightMatch) {
+      const kg = parseFloat(weightMatch[1]);
+      if (Number.isFinite(kg) && kg >= 30 && kg <= 250) {
+        await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+        const { handleWeightLog } = await import("./weight");
+        return handleWeightLog(phone, user, kg);
+      }
+    }
+    // Not a valid weight — clear the prompt state and let the message flow normally
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+  }
+
   // If awaiting equipment answer — check in-memory map AND db field (survives restart)
   const isAwaitingEquipment = awaitingEquipmentAnswer.get(phone) || user.awaitingInputType === "equipment";
   if (isAwaitingEquipment) {
