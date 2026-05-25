@@ -155,7 +155,8 @@ export function registerVoiceBroadcastRoutes(app: Express) {
     const configured = isElevenLabsConfigured();
     const quota = configured ? await getElevenLabsQuota() : null;
     const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null;
-    const appUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
+    const rawUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
+    const appUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
     const appUrlIsHttps = appUrl.startsWith("https://");
     return res.json({ configured, quota, appUrl, appUrlIsHttps });
   });

@@ -254,7 +254,9 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
   const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN
     ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
     : null;
-  const appUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
+  const rawUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
+  // Auto-prepend https:// if the URL has no protocol (e.g. APP_URL set without it in Railway)
+  const appUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
   const appUrlIsPublicHttps = appUrl.startsWith("https://");
   console.log(`[RECAP] Base URL: ${appUrl} | source: ${process.env.APP_URL ? "APP_URL" : railwayDomain ? "RAILWAY_PUBLIC_DOMAIN" : "fallback"} | HTTPS: ${appUrlIsPublicHttps} | ElevenLabs: ${elevenLabsReady}`);
 

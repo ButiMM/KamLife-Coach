@@ -288,7 +288,8 @@ export function registerPaymentRoutes(app: Express) {
       const isSandbox = process.env.PAYFAST_SANDBOX === "true";
       const baseUrl = isSandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process";
       const railwayBase = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null;
-      const appBase = (process.env.APP_URL || railwayBase || "https://kamlifecoach.co.za").replace(/\/$/, "");
+      const rawBase = (process.env.APP_URL || railwayBase || "https://kamlifecoach.co.za").replace(/\/$/, "");
+      const appBase = /^https?:\/\//i.test(rawBase) ? rawBase : `https://${rawBase}`;
       const returnUrl = `${appBase}/payment-success`;
       const cancelUrl = `${appBase}/payment-cancel`;
       const notifyUrl = `${appBase}/webhook/payfast`;
