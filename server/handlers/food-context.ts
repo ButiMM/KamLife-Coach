@@ -582,7 +582,7 @@ export async function handleFoodContext(ctx: {
           todayProteinG: runningProtein,
           todayCaloriesDate: todayStr,
         }).where(eq(users.phoneNumber, phone));
-      } catch (e) { console.warn("[non-fatal] calorie update:", e); }
+      } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", user.id?.slice(-6), e); }
       const prevCals = Math.max(0, runningCals - totalCals);
 
       let junkNoteText = "";
@@ -709,7 +709,7 @@ export async function handleFoodContext(ctx: {
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
         }
-      } catch (e) { console.warn("[non-fatal] meal_logs insert:", e); }
+      } catch (e) { console.error("[MEAL_LOG] mealLogs insert failed — user:", user.id?.slice(-6), "kcal:", e); }
 
       const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
       await logChat(user.id, message, reply, "FOOD_LOG");
@@ -758,7 +758,7 @@ export async function handleFoodContext(ctx: {
             todayProteinG: runningProtein,
             todayCaloriesDate: todayStr,
           }).where(eq(users.phoneNumber, phone));
-        } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+        } catch (e) { console.error("[MEAL_LOG] gpt-fallback calorie update failed — user:", user.id?.slice(-6), e); }
         const fbPrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
         const fbIsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
         const fbIsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
@@ -793,8 +793,8 @@ export async function handleFoodContext(ctx: {
               source: gptIsRetro ? "retro" : "gpt_fallback",
               kcalInt: gptFallbackResult.totalKcal,
               proteinInt: gptFallbackResult.totalProtein,
-              carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
-              fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
+              carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
+              fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
               items,
               mealLabel: extractMealLabel(message),
               loggedAt: gptLoggedAt,
@@ -802,7 +802,7 @@ export async function handleFoodContext(ctx: {
             invalidatePatternCache(user.id);
             invalidateFoodTotalsCache(user.id);
           }
-        } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+        } catch (e) { console.error("[MEAL_LOG] gpt-fallback mealLogs insert failed — user:", user.id?.slice(-6), e); }
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
@@ -833,7 +833,7 @@ export async function handleFoodContext(ctx: {
           todayProteinG: runningProtein,
           todayCaloriesDate: todayStr,
         }).where(eq(users.phoneNumber, phone));
-      } catch (e) { console.warn("[non-fatal] gpt-fallback calorie update:", e); }
+      } catch (e) { console.error("[MEAL_LOG] gpt-fallback calorie update failed — user:", user.id?.slice(-6), e); }
       const fb2PrevCals = Math.max(0, runningCals - gptFallbackResult.totalKcal);
       const fb2IsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
       const fb2IsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
@@ -869,8 +869,8 @@ export async function handleFoodContext(ctx: {
             source: fb2IsRetro ? "retro" : "gpt_fallback",
             kcalInt: gptFallbackResult.totalKcal,
             proteinInt: gptFallbackResult.totalProtein,
-            carbsInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.carbs_g, 0),
-            fatInt: gptFallbackResult.foods.reduce((s: number, f: any) => s + f.fat_g, 0),
+            carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
+            fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
             items,
             mealLabel: extractMealLabel(message),
             loggedAt: fb2LoggedAt,
@@ -878,7 +878,7 @@ export async function handleFoodContext(ctx: {
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
         }
-      } catch (e) { console.warn("[non-fatal] gpt-fallback meal_logs:", e); }
+      } catch (e) { console.error("[MEAL_LOG] gpt-fallback mealLogs insert failed — user:", user.id?.slice(-6), e); }
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
