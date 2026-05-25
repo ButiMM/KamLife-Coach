@@ -536,10 +536,6 @@ SA PORTION STANDARDS (use these — not US defaults):
 - Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
 
 Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
-- Egg (large): 65g = ~85 kcal, 7g protein
-- Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
-
-Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
         },
         {
           role: "user",
