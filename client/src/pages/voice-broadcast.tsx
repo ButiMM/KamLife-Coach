@@ -318,7 +318,10 @@ function WeeklyRecapSection() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const { data: statusData } = useQuery<{ configured: boolean; quota: { used: number; limit: number } | null }>({
+  const [testResult, setTestResult] = useState<{ ok: boolean; bytes?: number; error?: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+
+  const { data: statusData } = useQuery<{ configured: boolean; quota: { used: number; limit: number } | null; appUrl?: string; appUrlIsHttps?: boolean }>({
     queryKey: ["/api/admin/voice-recap/status"],
     queryFn: () => fetch("/api/admin/voice-recap/status", { credentials: "include" }).then(r => r.json()),
     refetchInterval: 30_000,
@@ -369,6 +372,19 @@ function WeeklyRecapSection() {
         </div>
         {configured && (
           <div className="flex gap-2">
+            <Button variant="ghost" size="sm" disabled={testing} onClick={async () => {
+              setTesting(true); setTestResult(null);
+              try {
+                const r = await fetch("/api/admin/voice-recap/test-tts", { method: "POST", credentials: "include" });
+                const d = await r.json();
+                setTestResult(d);
+                toast({ title: d.ok ? "ElevenLabs working" : "ElevenLabs failed", description: d.ok ? `Generated ${d.bytes?.toLocaleString()} bytes of audio` : d.error, variant: d.ok ? "default" : "destructive" });
+              } catch (e: any) { setTestResult({ ok: false, error: e.message }); }
+              finally { setTesting(false); }
+            }}>
+              {testing ? <RefreshCw className="w-4 h-4 mr-2 animate-spin" /> : <Mic className="w-4 h-4 mr-2" />}
+              Test voice
+            </Button>
             <Button variant="outline" size="sm" onClick={() => runMutation.mutate()} disabled={runMutation.isPending || forceRerunMutation.isPending}>
               <RefreshCw className={`w-4 h-4 mr-2 ${runMutation.isPending ? "animate-spin" : ""}`} />
               Run now
@@ -398,20 +414,34 @@ function WeeklyRecapSection() {
         </Card>
       ) : (
         <>
-          {quota && (
-            <Card className="p-4 border-border/50">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">ElevenLabs quota this month</span>
-                <span className="font-medium">{quota.used.toLocaleString()} / {quota.limit.toLocaleString()} chars used</span>
+          <Card className="p-4 border-border/50 space-y-3">
+            {quota && (
+              <div>
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">ElevenLabs quota this month</span>
+                  <span className="font-medium">{quota.used.toLocaleString()} / {quota.limit.toLocaleString()} chars used</span>
+                </div>
+                <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
+                  <div className="h-full bg-violet-500 rounded-full transition-all" style={{ width: `${Math.min(100, (quota.used / quota.limit) * 100)}%` }} />
+                </div>
               </div>
-              <div className="mt-2 h-2 bg-muted rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-violet-500 rounded-full transition-all"
-                  style={{ width: `${Math.min(100, (quota.used / quota.limit) * 100)}%` }}
-                />
+            )}
+            {statusData?.appUrl && (
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-muted-foreground">Audio URL base</span>
+                <span className={`font-mono ${statusData.appUrlIsHttps ? "text-emerald-600" : "text-red-500"}`}>
+                  {statusData.appUrl}
+                  {!statusData.appUrlIsHttps && " ⚠ not HTTPS — audio won't attach"}
+                </span>
               </div>
-            </Card>
-          )}
+            )}
+            {testResult && (
+              <div className={`flex items-center gap-2 text-xs px-3 py-2 rounded-lg ${testResult.ok ? "bg-emerald-50 text-emerald-700" : "bg-red-50 text-red-700"}`}>
+                {testResult.ok ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0" /> : <AlertCircle className="w-3.5 h-3.5 shrink-0" />}
+                {testResult.ok ? `ElevenLabs OK — ${testResult.bytes?.toLocaleString()} bytes` : `Failed: ${testResult.error}`}
+              </div>
+            )}
+          </Card>
 
           {logsLoading ? (
             <div className="space-y-3">

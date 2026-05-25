@@ -154,17 +154,20 @@ export function registerVoiceBroadcastRoutes(app: Express) {
   app.get("/api/admin/voice-recap/status", requireAdminKey, async (_req: any, res: any) => {
     const configured = isElevenLabsConfigured();
     const quota = configured ? await getElevenLabsQuota() : null;
-    return res.json({ configured, quota });
+    const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null;
+    const appUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
+    const appUrlIsHttps = appUrl.startsWith("https://");
+    return res.json({ configured, quota, appUrl, appUrlIsHttps });
   });
 
   // ── ElevenLabs live test — actually calls the API with a short phrase ──
   app.post("/api/admin/voice-recap/test-tts", requireAdminKey, async (_req: any, res: any) => {
     try {
       const audio = await textToSpeech("Sharp. Coach K here. Audio is working.");
-      if (!audio) return res.status(500).json({ error: "ElevenLabs returned null — check Railway logs for the exact API error" });
-      return res.json({ ok: true, bytes: audio.length, message: "ElevenLabs is working correctly" });
+      if (!audio) return res.status(500).json({ ok: false, error: "ElevenLabs returned null — check voiceId and API key in Railway" });
+      return res.json({ ok: true, bytes: audio.length });
     } catch (e: any) {
-      return res.status(500).json({ error: e.message });
+      return res.status(500).json({ ok: false, error: e.message });
     }
   });
 
