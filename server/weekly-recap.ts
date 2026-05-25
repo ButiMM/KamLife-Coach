@@ -251,14 +251,12 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
     console.warn("[RECAP] ElevenLabs not configured — sending text-only recaps (set ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID for voice)");
   }
 
-  const appUrl = (process.env.APP_URL || "https://kamlifecoach.co.za").replace(/\/$/, "");
+  const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN
+    ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}`
+    : null;
+  const appUrl = (process.env.APP_URL || railwayDomain || "https://kamlifecoach.co.za").replace(/\/$/, "");
   const appUrlIsPublicHttps = appUrl.startsWith("https://");
-  if (!process.env.APP_URL) {
-    console.warn("[RECAP] APP_URL not set — defaulting to https://kamlifecoach.co.za for audio URLs");
-  } else if (!appUrlIsPublicHttps) {
-    console.warn(`[RECAP] APP_URL (${appUrl}) is not HTTPS — audio URLs will be skipped, recaps sent as text`);
-  }
-  console.log(`[RECAP] Audio URL base: ${appUrl} (HTTPS: ${appUrlIsPublicHttps}), ElevenLabs ready: ${elevenLabsReady}`);
+  console.log(`[RECAP] Base URL: ${appUrl} | source: ${process.env.APP_URL ? "APP_URL" : railwayDomain ? "RAILWAY_PUBLIC_DOMAIN" : "fallback"} | HTTPS: ${appUrlIsPublicHttps} | ElevenLabs: ${elevenLabsReady}`);
 
   // Get Monday of current week as the week identifier
   const d = new Date();
