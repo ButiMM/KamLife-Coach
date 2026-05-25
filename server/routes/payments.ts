@@ -287,9 +287,11 @@ export function registerPaymentRoutes(app: Express) {
       const name = user?.name || "KamLife Client";
       const isSandbox = process.env.PAYFAST_SANDBOX === "true";
       const baseUrl = isSandbox ? "https://sandbox.payfast.co.za/eng/process" : "https://www.payfast.co.za/eng/process";
-      const returnUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-success` : "https://kamlifecoach.co.za/payment-success";
-      const cancelUrl = process.env.APP_URL ? `${process.env.APP_URL}/payment-cancel` : "https://kamlifecoach.co.za/payment-cancel";
-      const notifyUrl = process.env.APP_URL ? `${process.env.APP_URL}/webhook/payfast` : "";
+      const railwayBase = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null;
+      const appBase = (process.env.APP_URL || railwayBase || "https://kamlifecoach.co.za").replace(/\/$/, "");
+      const returnUrl = `${appBase}/payment-success`;
+      const cancelUrl = `${appBase}/payment-cancel`;
+      const notifyUrl = `${appBase}/webhook/payfast`;
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
 
       const params = new URLSearchParams({
