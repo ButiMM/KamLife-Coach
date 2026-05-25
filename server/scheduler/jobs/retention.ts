@@ -56,28 +56,34 @@ export async function runSilenceDetection(): Promise<void> {
       const workouts = client.totalWorkoutsCompleted || 0;
       const week = client.programmeWeek || 1;
 
-      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
-        );
-        try {
-          const existingEsc = await db.select({ id: escalations.id })
-            .from(escalations).where(and(eq(escalations.userId, client.id), eq(escalations.status, "open"))).limit(1);
-          if (existingEsc.length === 0) {
-            await db.insert(escalations).values({
-              userId: client.id, reason: "14_day_silence", status: "open",
-              priority: "urgent", slaDeadline: new Date(Date.now() + 48 * HOUR),
-            });
+      const today = todaySAST();
+      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 15 * 24 * HOUR) {
+        const ok = await claimProactive(client.id, "silence_14d", today);
+        if (ok) {
+          await sendWhatsApp(client.phoneNumber,
+            `${name}, two weeks. ${workouts} sessions logged. Week ${week} of your programme. All saved.\n\nI am not going anywhere. When you are ready, just say Hi — I will tell you exactly where you left off and what to do next. No judgement. No starting over.`
+          );
+          try {
+            const existingEsc = await db.select({ id: escalations.id })
+              .from(escalations).where(and(eq(escalations.userId, client.id), eq(escalations.status, "open"))).limit(1);
+            if (existingEsc.length === 0) {
+              await db.insert(escalations).values({
+                userId: client.id, reason: "14_day_silence", status: "open",
+                priority: "urgent", slaDeadline: new Date(Date.now() + 48 * HOUR),
+              });
+            }
+          } catch (flagErr) {
+            console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
           }
-        } catch (flagErr) {
-          console.error(`[SCHEDULER] Failed to create escalation for ${client.phoneNumber}:`, flagErr);
         }
-      } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 7 * 24 * HOUR + 12 * HOUR) {
-        await sendWhatsApp(client.phoneNumber,
+      } else if (silenceMs >= 7 * 24 * HOUR && silenceMs < 8 * 24 * HOUR) {
+        const ok = await claimProactive(client.id, "silence_7d", today);
+        if (ok) await sendWhatsApp(client.phoneNumber,
           `${name}, a week since we spoke. ${workouts > 0 ? `You have ${workouts} sessions in the bank — that does not disappear.` : "Your programme is ready and waiting."} Life gets busy — I get it.\n\nReply *1* to see today's workout. That is all — one session.`
         );
-      } else if (silenceMs >= 48 * HOUR && silenceMs < 48 * HOUR + 12 * HOUR) {
-        await sendWhatsApp(client.phoneNumber, `${name}, two days quiet. Everything okay? No pressure. Just checking.`);
+      } else if (silenceMs >= 48 * HOUR && silenceMs < 72 * HOUR) {
+        const ok = await claimProactive(client.id, "silence_2d", today);
+        if (ok) await sendWhatsApp(client.phoneNumber, `${name}, two days quiet. Everything okay? No pressure. Just checking.`);
       }
     } catch (err) {
       console.error(`[SCHEDULER] Silence detection error — ${client.phoneNumber}:`, err);
@@ -100,15 +106,10 @@ export async function runDeepSilenceEscalation(): Promise<void> {
       const workouts = client.totalWorkoutsCompleted || 0;
       const week = client.programmeWeek || 1;
 
-      if (silenceMs >= 14 * 24 * HOUR && silenceMs < 14 * 24 * HOUR + 12 * HOUR) {
-        const historyNote = workouts > 0
-          ? `You have ${workouts} session${workouts !== 1 ? "s" : ""} logged. That work does not disappear.`
-          : `Your programme is still here waiting.`;
-        await sendWhatsApp(client.phoneNumber,
-          `${name}, two weeks since I heard from you. ${historyNote} Life is not always linear — I know that. When you are ready, just reply with one word: "back". We go from exactly where you left off, week ${week}, no questions asked.`
-        );
-      } else if (silenceMs >= 30 * 24 * HOUR && silenceMs < 30 * 24 * HOUR + 12 * HOUR) {
-        await sendWhatsApp(client.phoneNumber,
+      // 30-day final message — one send only, then Coach K stops proactively reaching out
+      if (silenceMs >= 30 * 24 * HOUR && silenceMs < 31 * 24 * HOUR) {
+        const ok = await claimProactive(client.id, "deep_silence_30d", todaySAST());
+        if (ok) await sendWhatsApp(client.phoneNumber,
           `${name}, a month of silence. I am not going to keep messaging you after this. Your profile is saved, your programme is saved, everything is exactly as you left it. When life settles and you are ready — just say "back" and we go again. No judgment.`
         );
       }
@@ -126,6 +127,7 @@ export async function runComebackMessages(): Promise<void> {
   const silentClients = await db.select().from(users)
     .where(and(
       eq(users.onboardingState, "COMPLETE"),
+      eq(users.subscriptionStatus, "active"),
       lt(users.lastActiveAt, threeDaysAgo),
       gte(users.lastActiveAt, sevenDaysAgo)
     ));

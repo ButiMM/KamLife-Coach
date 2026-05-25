@@ -540,6 +540,11 @@ export async function handleOnboarding(user: any, message: string, phone: string
   const state = user.onboardingState || "START";
   const msg = message.trim();
 
+  // ---- BLOCKED states — hard exits ----
+  if (state === "BLOCKED_UNDERAGE") {
+    return `Coach K is for ages 14 and up. When you're ready, message again and we'll build your programme.`;
+  }
+
   // ---- PRE_ONBOARD — 1-2 conversational exchanges before formal questionnaire ----
   // People come in talking about cellulite, weekends-only training, referrals, real life.
   // Engage with that first. Max 2 exchanges, then naturally hand off to signup.
@@ -598,6 +603,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     if (isConsent) {
       await db.update(users).set({ popiConsent: true, popiConsentAt: new Date(), onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));
       return `Sharp. What's your name?`;
+    }
+    const isRefusal = /\b(no|nope|refuse|disagree|don.?t|not|never|nah|nay)\b/i.test(msg) || msg.trim().toLowerCase() === "no";
+    if (isRefusal) {
+      // POPIA requires we delete data when consent is refused
+      await db.delete(users).where(eq(users.phoneNumber, phone));
+      return `Understood. Without consent I cannot store your data or coach you. If you change your mind, message me again and we can start fresh.`;
     }
     return `I need your agreement before I can coach you. Your data is used only for your coaching — never sold. Reply *yes* to continue.`;
   }
@@ -664,6 +675,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       return `Just your age — for example: 28`;
     }
     if (age < 14) {
+      await db.update(users).set({ onboardingState: "BLOCKED_UNDERAGE" }).where(eq(users.phoneNumber, phone));
       return `Coach K is designed for ages 14 and up. Chat to a parent or guardian about getting started together.`;
     }
     const isElderly = age >= 60;

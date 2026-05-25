@@ -337,7 +337,10 @@ export async function runWeeklyWinsCelebration(): Promise<void> {
   if (hasRunToday("weekly_wins", today)) return;
   saveState("weekly_wins", today);
 
-  const allClients = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+  const allClients = await db.select().from(users).where(and(
+    eq(users.onboardingState, "COMPLETE"),
+    eq(users.subscriptionStatus, "active"),
+  ));
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
   let sent = 0;
 
