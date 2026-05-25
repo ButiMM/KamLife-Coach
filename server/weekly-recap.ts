@@ -246,9 +246,9 @@ async function storeRecapAudio(
 }
 
 export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number; skipped: number }> {
-  if (!isElevenLabsConfigured()) {
-    console.warn("[RECAP] ElevenLabs not configured — set ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID to enable voice recaps");
-    return { sent: 0, failed: 0, skipped: 0 };
+  const elevenLabsReady = isElevenLabsConfigured();
+  if (!elevenLabsReady) {
+    console.warn("[RECAP] ElevenLabs not configured — sending text-only recaps (set ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID for voice)");
   }
 
   const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
@@ -289,7 +289,7 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
       if (!data) { failed++; continue; }
 
       const script = await generateRecapScript(data);
-      const audio = await textToSpeech(script);
+      const audio = elevenLabsReady ? await textToSpeech(script) : null;
 
       const recapId = await storeRecapAudio(id, weekStart, script, audio);
       if (!recapId) { failed++; continue; }
