@@ -13,7 +13,7 @@ import type OpenAI from "openai";
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { db } from "../db";
 import {
-  users, chatHistory, stepLogs, mealLogs, progressPhotos,
+  users, chatHistory, stepLogs, mealLogs, progressPhotos, weightLogs,
 } from "../../shared/schema";
 import { eq, and, gte, lt, asc, desc, sql } from "drizzle-orm";
 import {
@@ -136,7 +136,7 @@ export async function handleMediaMessage(ctx: {
             max_tokens: 8,
             temperature: 0,
             messages: [
-              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | collage | other.\n- food: plate of food, drink, snack, meal, meal prep container, food packaging, protein shake can/bottle/sachet, protein bar wrapper, supplement tub/bottle showing a food product, grocery item, any branded food or nutrition product\n- steps: screenshot showing a step count or pedometer reading from a fitness app (Samsung Health, Google Fit, Apple Health, Garmin, Fitbit, Huawei Health)\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- collage: image containing MULTIPLE different panels — e.g. food photos combined with a step count screenshot, a grid of multiple meal photos, or any image where different sections show different types of content (food AND stats, multiple meals arranged together)\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise. Protein powder tubs, protein shake cans, and any branded food product = food, NOT equipment. A grid or collage with mixed content types = collage." },
+              { role: "system", content: "Classify a WhatsApp photo sent to a fitness coach. Reply with ONE word only, lowercase: food | steps | exercise | progress | equipment | scale | collage | other.\n- food: plate of food, drink, snack, meal, meal prep container, food packaging, protein shake can/bottle/sachet, protein bar wrapper, supplement tub/bottle showing a food product, grocery item, any branded food or nutrition product\n- steps: screenshot showing a step count or pedometer reading from a fitness app (Samsung Health, Google Fit, Apple Health, Garmin, Fitbit, Huawei Health)\n- scale: a bathroom scale or body weight scale showing a number — the person is standing on it or it is held up showing a kg/lb reading\n- exercise: person actively performing an exercise movement (mid-squat, lifting, running)\n- progress: person standing/posing still to show body shape — front, side or back pose, even if wearing gym clothes. Before/after transformation photos. Multiple people posing.\n- equipment: photo of gym equipment, dumbbells, resistance bands, treadmill, exercise machines, home gym setup, weight sets — NO person in the photo or person is incidental\n- collage: image containing MULTIPLE different panels — e.g. food photos combined with a step count screenshot, a grid of multiple meal photos, or any image where different sections show different types of content (food AND stats, multiple meals arranged together)\n- other: none of the above\nIMPORTANT: If a person is POSING or STANDING STILL (not mid-movement), classify as progress, not exercise. Protein powder tubs, protein shake cans, and any branded food product = food, NOT equipment. A grid or collage with mixed content types = collage." },
               { role: "user", content: [
                 { type: "text", text: "What is this photo?" },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -147,6 +147,7 @@ export async function handleMediaMessage(ctx: {
           if (raw.includes("collage")) uncaptionedType = "collage" as any;
           else if (raw.includes("food")) uncaptionedType = "food";
           else if (raw.includes("steps") || raw.includes("step")) uncaptionedType = "steps";
+          else if (raw.includes("scale")) uncaptionedType = "scale" as any;
           else if (raw.includes("exercise")) uncaptionedType = "exercise";
           else if (raw.includes("progress")) uncaptionedType = "progress";
           else if (raw.includes("equipment")) uncaptionedType = "equipment" as any;
@@ -174,6 +175,30 @@ export async function handleMediaMessage(ctx: {
             const equipReply = `Nice setup. If you want me to update your training programme to match your equipment, just reply *dumbbells*, *bands*, or *mix*.\n\nOr reply *workout* for today's session.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
             return equipReply;
+          }
+          // ---- SCALE / BODY WEIGHT PHOTO ----
+          if ((uncaptionedType as any) === "scale") {
+            try {
+              const scaleOcr = await withTimeout("scale_ocr", 10000, () => openai.chat.completions.create({
+                model: "gpt-4o-mini", max_tokens: 10, temperature: 0,
+                messages: [
+                  { role: "system", content: "Read the body weight number shown on this bathroom scale. Reply with ONLY the number in kg (e.g. 82.4). If you cannot read it clearly, reply NOT_VISIBLE." },
+                  { role: "user", content: [{ type: "text", text: "What weight does this scale show?" }, { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
+                ],
+              }));
+              const scaleText = (scaleOcr.choices[0]?.message?.content || "").trim();
+              const weightKg = parseFloat(scaleText.replace(/[^0-9.]/g, ""));
+              if (!isNaN(weightKg) && weightKg > 30 && weightKg < 300) {
+                await db.insert(weightLogs).values({ userId: user.id, weight: String(weightKg) });
+                await db.update(users).set({ currentWeight: String(weightKg) }).where(eq(users.id, user.id));
+                const scaleReply = `Logged — ${weightKg} kg. Consistent weigh-ins are how we track real progress. Same time each week for an accurate comparison.`;
+                await logChat(user.id, "[Scale Photo]", scaleReply, "WEIGHT_LOG");
+                return scaleReply;
+              }
+            } catch {}
+            const scaleAskReply = `I can see the scale — what does it read? Send me the number (e.g. *82.4 kg*) and I'll log it.`;
+            await logChat(user.id, "[Scale Photo]", scaleAskReply, "WEIGHT_PROMPT");
+            return scaleAskReply;
           }
         } catch (e) {
           console.warn(`[MEDIA][${mediaTrace}] uncaptioned_classify_failed:`, e);
@@ -432,6 +457,32 @@ export async function handleMediaMessage(ctx: {
           return ackMsg;
         } else {
           return `Saved, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
+        }
+      }
+
+      // ---- EQUIPMENT DECLARATION WITH CAPTION ----
+      // Client sends "I have this set" / "these are my weights" + equipment photo → update profile
+      const isEquipCaption = /\b(i have (this|these|this set|a set|dumbbells?|bands?|weights?|kettlebell|barbell)|these are my (weights?|equipment|kit|dumbbells?)|this is my (equipment|kit|set)|i (use|got|bought) (this|these|dumbbells?|bands?|weights?)|my (home )?equipment|i train with (these|this|dumbbells?|bands?))\b/i.test(message || "");
+      if (isEquipCaption) {
+        try {
+          const equipVision = await withTimeout("equip_vision", 10000, () => openai.chat.completions.create({
+            model: "gpt-4o-mini", max_tokens: 20, temperature: 0,
+            messages: [
+              { role: "system", content: "Identify gym equipment in this image. Reply with ONE word only: dumbbells | bands | barbell | kettlebell | machine | mixed | other" },
+              { role: "user", content: [{ type: "text", text: "What equipment is shown?" }, { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
+            ],
+          }));
+          const equipType = (equipVision.choices[0]?.message?.content || "").trim().toLowerCase();
+          const hasDumbbells = equipType.includes("dumbbell") || equipType.includes("mixed");
+          const hasBands = equipType.includes("band");
+          const newMode = "home";
+          await db.update(users).set({ trainingMode: newMode }).where(eq(users.id, user.id));
+          const equipLabel = hasDumbbells ? "dumbbells" : hasBands ? "resistance bands" : "home equipment";
+          const equipReply = `Got it — updated to home training with ${equipLabel}. Your programme will use what you have.\n\nReply *workout* for today's session and I'll send a dumbbell-based session that fits your goal.`;
+          await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_UPDATE");
+          return equipReply;
+        } catch {
+          // fall through to food vision if vision fails
         }
       }
 
