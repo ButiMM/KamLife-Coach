@@ -320,15 +320,19 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- STEP LOG DETECTION (direct — no GPT cost) ----
   // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
   // we log steps but do NOT return early — let it fall through to food scanning
-  const stepNumMatch = m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
-    || m.match(/(?:walked|done|did|logged)\s+([\d,]+)\s*(?:steps?|staps?)/i);
+  // "12k steps", "8.5k steps", "12,000 steps", "12000 steps" — all valid
+  const stepNumMatch = m.match(/\b([\d,]+(?:\.\d+)?)\s*k\s*(?:steps?|staps?)\b/i)
+    || m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
+    || m.match(/(?:walked|done|did|logged)\s+([\d,]+(?:\.\d+)?k?)\s*(?:steps?|staps?)/i);
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
   const hasDurationWalk = !stepNumMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
+  const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
   if (stepNumMatch || hasKmWalk || hasDurationWalk) {
     let steps = 0;
     if (stepNumMatch) {
-      steps = parseInt(stepNumMatch[1].replace(/,/g, ""));
+      const raw = stepNumMatch[1].replace(/,/g, "");
+      steps = stepIsKShorthand ? Math.round(parseFloat(raw) * 1000) : parseInt(raw);
     } else if (hasKmWalk) {
       const km = Math.min(parseFloat(hasKmWalk[1]), 50); // cap at 50km (marathon+)
       steps = Math.round(km * 1300);
