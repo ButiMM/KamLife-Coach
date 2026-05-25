@@ -1101,9 +1101,33 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return aboveNeckReply;
   }
   if (isSick) {
-    const sickReply = `${capName}, *no training today.* Full stop.\n\nFever, nausea, chest or stomach — below the neck means your body is in emergency mode. Pushing through makes it worse and longer. Rest IS the training right now.\n\n*What to do:*\n• Sleep as much as you can\n• Fluids — water, Energade, soup, juice\n• Eat small: pap, eggs, toast, yoghurt — whatever you can stomach\n• No steps target, no calorie pressure today\n\nMessage me when you're properly better. Programme and targets are saved — you pick up exactly where you left off.`;
+    const goal = user.goalType || "fat_loss";
+    const programmeRef = user.trainingMode
+      ? `Your ${user.trainingMode.replace(/_/g, " ")} programme is saved`
+      : "Your programme and targets are saved";
+    const weekendSick = /\b(over the weekend|since (friday|saturday|sunday|the weekend)|few days|couple of days|days now|since last week)\b/i.test(m);
+    const nutritionLine = goal === "muscle_gain"
+      ? `*Eat even if you have no appetite:* protein matters most right now — muscle breaks down fast when sick. Eggs, protein shake, yoghurt, chicken soup. Even small amounts help.`
+      : `*Eat small, real food:* pap, eggs, toast, yoghurt, soup — whatever you can keep down. No calorie pressure today.`;
+    const sickReply = `${capName}, no training${weekendSick ? " — and rest of this week if needed" : " today"}. Your body is fighting right now and that takes everything.\n\n${nutritionLine}\n\n• Sleep as much as you can\n• Fluids — water, Energade, soup, juice\n• No steps target today\n\n${programmeRef} — you pick up exactly where you left off when you're properly better. Don't rush back. Message me when you're ready.`;
     await logChat(user.id, message, sickReply, "SICK_DAY");
     return sickReply;
+  }
+
+  // ---- RETURN PLANNING ("I'll be back Wednesday", "let's confirm I go back Monday") ----
+  const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)
+    && !isSick
+    && /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week|next month)\b/i.test(m);
+  if (isReturnPlanning) {
+    const dayMatch = m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i);
+    const returnDay = dayMatch ? dayMatch[0].charAt(0).toUpperCase() + dayMatch[0].slice(1).toLowerCase() : "then";
+    const goal = user.goalType || "fat_loss";
+    const protTip = goal === "muscle_gain"
+      ? `Keep your protein up until then — your muscles are still recovering.`
+      : `Eat clean until then — no point starting strong on an empty tank.`;
+    const returnReply = `${returnDay} confirmed, ${capName}. Rest up until then.\n\n${protTip}\n\nYour programme and targets are exactly where you left them. When you're back, message me and I'll send today's session.`;
+    await logChat(user.id, message, returnReply, "RETURN_PLAN");
+    return returnReply;
   }
 
   // ---- OVER-TRAINING SIGNAL ----
