@@ -35,7 +35,7 @@ export async function handleEarlyCommands(ctx: {
     /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||
     /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
     /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
-    /\b(calories today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over)\b/i.test(m) ||
+    /\b(calories today|today.?s calories|today calories|calories for today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over|what (have|did) i (eat|ate|log|track)|food today|what i (ate|ate today|had today)|today.?s food|today.?s intake|today.?s totals?|total today|totals today|macros today|today.?s macros?)\b/i.test(m) ||
     m === "calories" || m === "calorie" || m === "kcal" || m === "remaining" || m === "what's left"
   ) {
     const cal = user.calorieTarget || 1800;
