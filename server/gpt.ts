@@ -512,7 +512,27 @@ export async function gptFoodFallback(
       messages: [
         {
           role: "system",
-          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.\n\nCRITICAL RULES for compound food names:\n- "steak wrap" = ONE item: a wrap/tortilla filled with beef steak. NOT "beef steak" + "chicken wrap". Log it as "steak wrap (beef)" ~450-550 kcal.\n- "chicken wrap" = ONE item: a tortilla with chicken filling\n- "X wrap" means the wrap is filled with X — never split into two items\n- "chicken rice" = ONE meal: chicken served with rice (not two separate items)\n- Only split at commas, "and", "plus", "with" when clearly listing separate dishes\n\nUse realistic SA portion sizes. When user says "Nando's" use their actual menu item calories. Be precise — never round to nearest 100.`,
+          content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
+
+COMPOUND FOOD NAMES — treat these as ONE single item, never split on the adjective:
+- "lemon cream biscuits" = biscuits with lemon cream filling (~100 kcal each), NOT a lemon + biscuits
+- "steak wrap" = ONE wrap filled with steak (~480 kcal), NOT "steak" + "wrap"
+- "chicken rice" = ONE meal with chicken and rice (~500 kcal), NOT two separate items
+- "sweet potato" = sweet potato, NOT regular potato
+- "brown rice" = brown rice, NOT white rice
+- "peanut butter toast" = toast with peanut butter (~300 kcal), NOT two items
+- "chocolate milk" = chocolate-flavoured milk, NOT chocolate + milk
+- Only split into separate items at: commas, "and", "plus", "with" between CLEARLY separate dishes
+
+SA PORTION STANDARDS (use these — not US defaults):
+- Chicken portion: 200-250g (SA braai thigh or breast), not 150g USA
+- Pap/maize: 250-300g cooked (1 cup), not 150g
+- Pilchards (whole tin, 215g drained): ~215 kcal, 26g protein
+- Bread slice (SA standard): 70g white = ~170 kcal, 65g brown = ~155 kcal
+- Egg (large): 65g = ~85 kcal, 7g protein
+- Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
+
+Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
         },
         {
           role: "user",

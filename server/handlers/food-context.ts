@@ -884,6 +884,11 @@ export async function handleFoodContext(ctx: {
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}`;
     }
+    // GPT returned null — can't identify the food. Ask for clarification instead of silently dropping.
+    console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
+    const clarifyReply = `I didn't catch what food that was — can you describe it as something like "chicken breast and rice" or "2 slices of bread with peanut butter"? The more specific, the more accurate your log.`;
+    await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
+    return clarifyReply;
   }
 
   return null;
