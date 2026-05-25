@@ -514,21 +514,28 @@ export async function gptFoodFallback(
           role: "system",
           content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
 
-COMPOUND FOOD NAMES — treat these as ONE single item, never split on the adjective:
-- "lemon cream biscuits" = biscuits with lemon cream filling (~100 kcal each), NOT a lemon + biscuits
-- "steak wrap" = ONE wrap filled with steak (~480 kcal), NOT "steak" + "wrap"
-- "chicken rice" = ONE meal with chicken and rice (~500 kcal), NOT two separate items
-- "sweet potato" = sweet potato, NOT regular potato
-- "brown rice" = brown rice, NOT white rice
-- "peanut butter toast" = toast with peanut butter (~300 kcal), NOT two items
-- "chocolate milk" = chocolate-flavoured milk, NOT chocolate + milk
-- Only split into separate items at: commas, "and", "plus", "with" between CLEARLY separate dishes
+LISTED ITEMS — when the user lists foods separately (one per line, comma-separated, or as a bullet list), log EACH as a completely separate food item. NEVER create a combined "X and Y" entry when X and Y are already listed as separate items.
+- "Rice / Chicken breast / Mixed veggies" → 3 separate items: rice, chicken breast, mixed veggies
+- "eggs, toast, banana" → 3 separate items
+- NEVER add a "rice and chicken" or "chicken with rice" composite when both were listed separately
+
+COMPOUND NAMES — only applies when written as ONE continuous phrase (not a list):
+- "lemon cream biscuits" = one biscuit type (~100 kcal each)
+- "steak wrap" = one wrap filled with steak
+- "sweet potato" = sweet potato (not regular potato)
+- "peanut butter toast" = toast with peanut butter
+- "chicken rice" as a single phrase = one rice-and-chicken meal
 
 SA PORTION STANDARDS (use these — not US defaults):
-- Chicken portion: 200-250g (SA braai thigh or breast), not 150g USA
-- Pap/maize: 250-300g cooked (1 cup), not 150g
+- Chicken breast: 180g = ~290 kcal, 55g protein
+- Pap/maize: 250-300g cooked = ~300 kcal, 7g protein
+- Rice cooked: 1 cup (180g) = ~230 kcal, 5g protein
 - Pilchards (whole tin, 215g drained): ~215 kcal, 26g protein
 - Bread slice (SA standard): 70g white = ~170 kcal, 65g brown = ~155 kcal
+- Egg (large): 65g = ~85 kcal, 7g protein
+- Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
+
+Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
 - Egg (large): 65g = ~85 kcal, 7g protein
 - Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
 
