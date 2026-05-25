@@ -251,13 +251,14 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
     console.warn("[RECAP] ElevenLabs not configured — sending text-only recaps (set ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID for voice)");
   }
 
-  const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+  const appUrl = (process.env.APP_URL || "https://kamlifecoach.co.za").replace(/\/$/, "");
   const appUrlIsPublicHttps = appUrl.startsWith("https://");
-  if (!appUrl) {
-    console.warn("[RECAP] APP_URL not set — recaps will send as text only");
+  if (!process.env.APP_URL) {
+    console.warn("[RECAP] APP_URL not set — defaulting to https://kamlifecoach.co.za for audio URLs");
   } else if (!appUrlIsPublicHttps) {
     console.warn(`[RECAP] APP_URL (${appUrl}) is not HTTPS — audio URLs will be skipped, recaps sent as text`);
   }
+  console.log(`[RECAP] Audio URL base: ${appUrl} (HTTPS: ${appUrlIsPublicHttps}), ElevenLabs ready: ${elevenLabsReady}`);
 
   // Get Monday of current week as the week identifier
   const d = new Date();
@@ -290,6 +291,7 @@ export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number;
 
       const script = await generateRecapScript(data);
       const audio = elevenLabsReady ? await textToSpeech(script) : null;
+      console.log(`[RECAP] ${data.name ?? id.slice(-6)} — audio: ${audio ? `${audio.length} bytes` : "null"}, mediaUrl will be: ${(audio && appUrlIsPublicHttps) ? "set" : "none (text fallback)"}`);
 
       const recapId = await storeRecapAudio(id, weekStart, script, audio);
       if (!recapId) { failed++; continue; }
