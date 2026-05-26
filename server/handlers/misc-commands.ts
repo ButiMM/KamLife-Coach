@@ -388,14 +388,9 @@ export async function handleMiscCommands(ctx: {
     const name2 = user.name ? `${user.name} — ` : "";
     return `${name2}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.`;
   }
-  if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m)) {
-    const stepsT = user.stepsTarget || 8500;
-    const name2 = user.name ? `${user.name} — ` : "";
-    return `${name2}${stepsT.toLocaleString()} steps is your target. Log your steps tonight — "8500 steps" or "I walked 6km".`;
-  }
-
-  // ---- STEPS TODAY — "how many steps today?", "steps today", "did I hit my steps" ----
-  if (/\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m)) {
+  // ---- STEPS QUERY (bare "steps", "my steps", or explicit today query) ----
+  if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m) ||
+      /\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m)) {
     try {
       const [todayStep] = await db.select({ steps: stepLogs.steps })
         .from(stepLogs)
@@ -406,10 +401,14 @@ export async function handleMiscCommands(ctx: {
       const target = user.stepsTarget || 8500;
       const remaining = Math.max(0, target - logged);
       const name2 = user.name?.split(" ")[0] || "";
-      if (!logged) return `${name2 ? name2 + ", n" : "N"}o steps logged yet today. Send your count — "8500 steps" or "walked 5km".`;
+      if (!logged) return `${name2 ? name2 + " — " : ""}${target.toLocaleString()} steps is your target. No steps logged yet today — send your count: "8,500 steps" or "walked 5km".`;
       if (remaining === 0) return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps today. Target hit ✅`;
       return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps logged today. ${remaining.toLocaleString()} to go to hit your ${target.toLocaleString()} target.`;
-    } catch { /* fall through */ }
+    } catch {
+      const stepsT = user.stepsTarget || 8500;
+      const name2 = user.name ? `${user.name} — ` : "";
+      return `${name2}${stepsT.toLocaleString()} steps is your target. Log your steps — "8500 steps" or "I walked 6km".`;
+    }
   }
 
   // ---- WEIGHT HISTORY — "weight history", "weight trend", "how much have I lost" ----

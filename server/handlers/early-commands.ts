@@ -36,21 +36,27 @@ export async function handleEarlyCommands(ctx: {
     /\b(daily|my|total|remaining)\b.*\b(calorie|calories|kcal)\b/i.test(m) ||
     /\b(how many|how much).*(calorie|calories|kcal|left|remaining)\b/i.test(m) ||
     /\b(calories today|today.?s calories|today calories|calories for today|protein today|what.?s left|whats left|calories left|calories remaining|remaining calories|total remaining|how much.*left|how much.*remaining|can i still eat|what can i eat|how much more|am i over|what (have|did) i (eat|ate|log|track)|food today|what i (ate|ate today|had today)|today.?s food|today.?s intake|today.?s totals?|total today|totals today|macros today|today.?s macros?)\b/i.test(m) ||
-    m === "calories" || m === "calorie" || m === "kcal" || m === "remaining" || m === "what's left"
+    m === "calories" || m === "calorie" || m === "kcal" || m === "remaining" || m === "what's left" ||
+    m === "today's calories" || m === "todays calories" || m === "today's food" || m === "today's intake"
   ) {
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
     const name = user.name ? `${user.name}, ` : "";
-    // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
-    const totals = await recomputeTodayFoodTotals(user.id);
-    const todayCals = totals.calories;
-    const todayProt = totals.protein;
-    const remaining = cal - todayCals;
-    const protRemaining = prot - todayProt;
-    if (todayCals > 0) {
-      return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅`}\n\nHit protein first — everything else follows.`;
+    try {
+      // Always recompute from mealLogs (primary) — covers quick_relog, GPT logs, scanner logs
+      const totals = await recomputeTodayFoodTotals(user.id);
+      const todayCals = totals.calories;
+      const todayProt = totals.protein;
+      const remaining = cal - todayCals;
+      const protRemaining = prot - todayProt;
+      if (todayCals > 0) {
+        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅`}\n\nHit protein first — everything else follows.`;
+      }
+      return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
+    } catch (err) {
+      console.error("[CALORIE_QUERY] recomputeTodayFoodTotals failed:", err);
+      return `${name}Target: ${cal} kcal | ${prot}g protein daily.\n\nCouldn't load today's totals right now — try again in a moment.`;
     }
-    return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
   }
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
