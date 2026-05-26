@@ -431,7 +431,7 @@ export function buildFoodLogReply(p: {
   const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
-    ? `Remaining today: ~${Math.max(0, calorieTarget - totalMealCals)} kcal`
+    ? `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
