@@ -21,6 +21,7 @@ import { runMilestoneCelebrations } from "./scheduler/jobs/milestones";
 import {
   runWeek3Intervention, runSilenceDetection, runDeepSilenceEscalation,
   runComebackMessages, runBuddyAccountability, runStreakAtRisk,
+  runPausedClientLite,
 } from "./scheduler/jobs/retention";
 import {
   runFridayWeekendStrategy, runSundayWeeklyReport, runSundayEveningCheckin,
@@ -254,6 +255,7 @@ export async function initScheduler(): Promise<void> {
 
   // ── Weekly — Wednesday ────────────────────────────────────────────────────
   cron.schedule("0 8 * * 3",     () => safe("runInjuryFollowup",      runInjuryFollowup),      { timezone: "UTC" }); // 10am SAST
+  cron.schedule("30 9 * * 3",    () => safe("runPausedClientLite",    runPausedClientLite),    { timezone: "UTC" }); // 11:30am SAST
 
   // ── Weekly — Friday ───────────────────────────────────────────────────────
   cron.schedule("0 14 * * 5",    () => safe("runFridayWeekendStrategy", runFridayWeekendStrategy), { timezone: "UTC" }); // 4pm SAST

@@ -300,3 +300,51 @@ export async function runStreakAtRisk(): Promise<void> {
   }
   console.log(`[SCHEDULER] Streak-at-risk: ${streakAlertsSent} alerts sent`);
 }
+
+export async function runPausedClientLite(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Paused client lite check-in");
+  const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
+
+  // Compute ISO week start (Monday) in SAST — used as weekly dedup key
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  const dow = sast.getUTCDay();
+  const thisWeek = new Date(sast.getTime() - (dow === 0 ? 6 : dow - 1) * 86_400_000)
+    .toISOString().slice(0, 10);
+
+  // Clients who paused/lapsed but interacted within 60 days — still warm
+  const lapsedClients = await db.select({
+    id: users.id,
+    name: users.name,
+    phoneNumber: users.phoneNumber,
+    lastActiveAt: users.lastActiveAt,
+  }).from(users).where(and(
+    sql`${users.onboardingState} = 'COMPLETE'`,
+    sql`${users.subscriptionStatus} != 'active'`,
+    gte(users.lastActiveAt, sixtyDaysAgo),
+  ));
+
+  const MSGS = [
+    (n: string) => `${n ? n + ", just" : "Just"} checking in. How have you been?`,
+    (n: string) => `Hey${n ? " " + n : ""}. How's the week going?`,
+    (n: string) => `${n ? n + " — " : ""}quick check-in. You doing okay?`,
+    (n: string) => `${n ? n + ", " : ""}haven't heard from you in a bit. How are you keeping?`,
+  ];
+  const msgIdx = Math.floor(Date.now() / 604_800_000) % MSGS.length;
+
+  let sent = 0;
+  for (const client of lapsedClients) {
+    try {
+      const stateKey = `paused_lite_${client.id}`;
+      if (loadState()[stateKey] === thisWeek) continue;
+      const name = client.name?.split(" ")[0] || "";
+      await sendWhatsApp(client.phoneNumber, MSGS[msgIdx](name));
+      saveState(stateKey, thisWeek);
+      sent++;
+      await new Promise(r => setTimeout(r, 300));
+      if (sent >= 50) break;
+    } catch (err) {
+      console.error(`[SCHEDULER] Paused lite error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Paused client lite sent: ${sent}`);
+}
