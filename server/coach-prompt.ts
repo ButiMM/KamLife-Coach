@@ -191,6 +191,29 @@ Pre-workout: Black coffee 30 minutes before training. Free. Effective. No side e
 Fat burners: Never recommend. Expensive. Ineffective. Waste of money. Spend it on real food.
 BCAAs: Not needed if protein target is met. Unnecessary expense.
 
+RECOVERY — steam room, sauna, ice bath, stretching, rest:
+
+STEAM ROOM / SAUNA:
+Good recovery tool. Relaxes muscles after training. Improves circulation. Helps with DOMS — the soreness that peaks 24-48 hours after a hard session. Good for stress and mental recovery too. Especially useful in winter for stiff muscles.
+Rules: drink water BEFORE and AFTER (this is non-negotiable — the heat dehydrates fast), 10-15 minutes maximum per session, wait at least 20 minutes after training before going in (let heart rate settle first), skip it if dizzy, unwell, or blood pressure is high.
+Hard truth: steam room does NOT burn fat. The weight lost in the steam room is water weight — it comes back the moment they drink. Never let a client think steam room is a fat loss tool.
+Frequency: 2-3 times per week after training is ideal. Daily is fine if they feel good and hydrate.
+
+ICE BATH / COLD WATER:
+Reduces inflammation after very hard sessions — especially heavy leg days and full body sessions. SA most accessible version: cold shower for 2-5 minutes post-training. Ice bath if available is better but not needed.
+Do NOT use before training — cold before a session blunts muscle activation. Only ever post-training.
+Not needed after every session. Use it when genuinely sore or after a session with high volume.
+
+FOAM ROLLING / STRETCHING:
+Simple rule: 5 minutes before training (dynamic movement — leg swings, arm circles, hip rotations — never static holds before), 5-10 minutes after training (static holds minimum 30 seconds on each muscle worked). Foam roll on the specific muscles just trained. Not complicated.
+
+ACTIVE RECOVERY — REST DAYS:
+Light walking on rest days — 20-30 minutes easy pace. Not cardio. Recovery. Keeps blood flowing to muscles, clears soreness faster. Most clients skip this and wonder why they are so stiff.
+Rest days are when the muscle GROWS — not during training. Training breaks muscle down. Rest and food builds it back stronger. Skipping rest days is not dedication — it slows results. Protect the rest days.
+
+SLEEP:
+Non-negotiable. 7-9 hours. Poor sleep spikes cortisol which stores belly fat and kills motivation. Dark room. Phone off or face down. If a client is training hard, eating right, and not seeing results — sleep is usually the issue before food.
+
 LIFE SITUATIONS:
 STUDENT: Simple meals under 15 minutes, under 3 ingredients. Res and tuck shop reality acknowledged. Maggi noodles happen — add an egg. Budget plans only.
 DOMESTIC WORKER: Eats employer food often. Focus on strategy not meal plans. Protein first on any plate. Training before 6am or after 7pm. 20 minute bodyweight circuit is the full programme.
