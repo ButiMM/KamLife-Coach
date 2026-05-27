@@ -462,8 +462,11 @@ export async function handleEarlyCommands(ctx: {
       const todayMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
       const yMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
       // Skip drinks-only entries (<50 kcal) — a black coffee is not a meal.
+      // Case-insensitive label comparison: stored labels may be "Lunch" or "lunch" depending on path.
       const findMeal = (meals: typeof allRecentMeals, label: string | null) => {
-        const candidates = label ? meals.filter(l => l.mealLabel === label) : meals;
+        const candidates = label
+          ? meals.filter(l => (l.mealLabel || "").toLowerCase() === label.toLowerCase())
+          : meals;
         return candidates.find(l => (l.kcalInt || 0) >= 50) || null;
       };
       // When "yesterday" explicitly requested, skip today; otherwise check today first (e.g. "dinner same as lunch")

@@ -27,6 +27,14 @@ function extractMealLabel(msg: string): string | null {
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
   if (/\b(for dinner|for supper|dinner was|supper was|had dinner|had supper|dinner:|supper:|evening meal)\b/i.test(lo)) return "dinner";
   if (/\bsnack\b/i.test(lo)) return "snack";
+  // Bare keyword at message start — "Lunch rice and beef", "Dinner pap and wors", "Breakfast: eggs"
+  if (/^lunch\b/i.test(lo)) return "lunch";
+  if (/^(?:dinner|supper)\b/i.test(lo)) return "dinner";
+  if (/^breakfast\b/i.test(lo)) return "breakfast";
+  // Bare keyword anywhere in message — "Rice and beef for my lunch", "Had eggs breakfast"
+  if (/\blunch\b/i.test(lo)) return "lunch";
+  if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
+  if (/\bbreakfast\b/i.test(lo)) return "breakfast";
   // Time-of-day fallback — if no keyword, infer from current SAST hour
   const sast = new Date(Date.now() + 2 * 3_600_000);
   const h = sast.getUTCHours();
@@ -501,6 +509,22 @@ export async function handleFoodContext(ctx: {
 
     function adjustFoodsForSegment(foods: SAFood[], segText: string) {
       const normText = normaliseWordNumbers(segText);
+
+      // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
+      // Applied globally across all foods in the segment (whole meal was described as big/small)
+      let sizeMultiplier = 1;
+      if (/(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b)/i.test(normText)
+        || /\b(double|extra\s+helping|extra\s+large\b)/i.test(normText)) {
+        sizeMultiplier = 1.5;
+      } else if (/(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving)/i.test(normText)
+        || /\ba\s+(?:small|tiny|little)\s+bit\s+of\b/i.test(normText)
+        || /\bsmall\s+amount\s+of\b/i.test(normText)) {
+        sizeMultiplier = 0.7;
+      } else if (/\b(?:half|halved)\s+(?:a\s+)?(?:plate|bowl|portion|serving|of\b)/i.test(normText)
+        || /\b(?:half\s+(?:the\s+)?(?:pap|rice|pasta|meal|food)\b)/i.test(normText)) {
+        sizeMultiplier = 0.5;
+      }
+
       return foods.map(f => {
         const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
         let quantity = 1;
@@ -518,6 +542,7 @@ export async function handleFoodContext(ctx: {
             break;
           }
         }
+        quantity = quantity * sizeMultiplier;
         return {
           ...f,
           adjustedCalories: Math.round(f.typicalPortionCalories * quantity),

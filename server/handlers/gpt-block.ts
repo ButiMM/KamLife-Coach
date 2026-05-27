@@ -300,11 +300,11 @@ CRITICAL RULES — these are non-negotiable:
     if (cycleContext) finalInstruction = `${cycleContext}\n\n${finalInstruction}`;
   }
 
-  // ---- LANGUAGE-AWARE COACHING — simplify English for non-English speakers ----
+  // ---- LANGUAGE-AWARE COACHING — translate + simplify for non-English speakers ----
   if (activeLang !== "en") {
     const langNames: Record<string, string> = { zu: "Zulu", xh: "Xhosa", st: "Sesotho", tn: "Setswana", ts: "Xitsonga", af: "Afrikaans" };
     const langName = langNames[activeLang] || "non-English";
-    finalInstruction = `LANGUAGE CONTEXT: This client's primary language is ${langName}. Use SIMPLE English — short sentences, basic words, no jargon. Maximum 8-10 words per sentence. Say "eat" not "consume". Say "belly fat" not "visceral fat". Explain any exercise in one plain sentence.\n\n${finalInstruction}`;
+    finalInstruction = `LANGUAGE CONTEXT: This client's primary language is ${langName}. Their message may be written in ${langName}, Tsotsitaal, or a mix with English. FIRST translate their message to English in your head, THEN identify the coaching intent and respond. Use SIMPLE English in your reply — short sentences, basic words, no jargon. Maximum 8-10 words per sentence. Say "eat" not "consume". Say "belly fat" not "visceral fat". Explain any exercise in one plain sentence.\n\n${finalInstruction}`;
   }
 
   // ---- MEMORY: retrieve relevant memories — fire and don't block response ----
@@ -426,6 +426,21 @@ SA voice. Direct. Coach forward, not backward.`;
   const intentResult = await intentPromise;
   const classifiedIntent = intentResult.intent;
   const intentConfidence = intentResult.confidence;
+
+  // ---- LOW-CONFIDENCE INTENT — ask for clarification rather than guessing wrong ----
+  // A confident wrong answer is worse than a clarifying question.
+  // Only fires when the message is genuinely ambiguous AND has no obvious handler signal.
+  if (intentConfidence < 0.5 && message.trim().length > 20) {
+    const hasObviousFoodSignal = /\b(?:ate|had|food|meal|eating|breakfast|lunch|dinner|supper|kcal|calorie|protein|gram)\b/i.test(m);
+    const hasObviousStepSignal = /\b(?:\d[\d,]*\s*steps?|walked\s+\d|km\b)\b/i.test(m);
+    const hasObviousWeightSignal = /\b(?:\d{2,3}(?:\.\d+)?\s*kg\b|weigh|scale|body weight)\b/i.test(m);
+    const hasObviousWorkout = /\b(?:gym|workout|training|trained|session|lift|squat|bench|press|done|finished)\b/i.test(m);
+    if (!hasObviousFoodSignal && !hasObviousStepSignal && !hasObviousWeightSignal && !hasObviousWorkout) {
+      const clarifyReply = `Didn't catch that — was that a *food log*, *workout update*, or a question?\n\nReply:\n• *food* then what you ate (e.g. "food — 2 eggs and toast")\n• *done* if you just trained\n• Or just ask me anything directly`;
+      await logChat(user.id, message, clarifyReply, "UNCLEAR");
+      return clarifyReply;
+    }
+  }
 
   // Determine effective agent type:
   // 1. RANT with high confidence → mindset agent (empathetic, doesn't lecture on nutrition)

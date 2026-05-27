@@ -6,7 +6,7 @@
  */
 
 import { db } from "../db";
-import { users, workoutLogs, exerciseLogs } from "../../shared/schema";
+import { users, workoutLogs, exerciseLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import {
   buildDayWorkout, buildDay2Workout, buildDay3Workout,
@@ -106,6 +106,165 @@ export async function handleWorkoutCommands(ctx: {
         return handleWeightLog(phone, user, kg);
       }
     }
+  }
+
+  // ---- CARDIO LOG — running, walking, cycling, yoga, HIIT, Zumba, parkrun, etc. ----
+  // Fat-loss clients (the majority) do cardio-only sessions that isDone/EXERCISE_PATTERN never catches.
+  // Catches these and logs a workout session + converts km distance to step count where applicable.
+  const isCardioLog = (
+    // "went for a {activity}"
+    /\b(?:went\s+for\s+(?:a\s+)?(?:run|jog|walk|swim|cycle|hike))\b/i.test(m)
+    // "I ran / jogged / cycled / swam" (exercise-specific verbs — no context required)
+    || /\b(?:i(?:\s+just)?)\s+(?:ran|jogged|cycled|biked|swam|hiked)\b/i.test(m)
+    // "I walked + km distance" (require distance to distinguish from "walked to kitchen")
+    || (/\bi(?:\s+just)?\s+walked\b/i.test(m) && /\b\d+(?:\.\d+)?\s*km\b/i.test(m))
+    // "did / done / finished / completed [a] {cardio activity}"
+    || /\b(?:just\s+)?(?:did|done|finished|completed)\s+(?:a\s+|my\s+)?(?:run|jog|walk|swim|hike|hiit|yoga|pilates|zumba|spinning|bootcamp|crossfit|aerobics|cardio|parkrun|park\s*run|gym\s*class|fitness\s*class|dance\s*class)\b/i.test(m)
+    // Stand-alone cardio declarations: "parkrun", "HIIT done", "yoga class"
+    || /^(?:hiit|yoga|pilates|zumba|spinning|parkrun|park\s*run|bootcamp|crossfit|aerobics)(?:\s+(?:done|complete[d]?|finished|class|session|today))?[.!?]?\s*$/i.test(m)
+    // "{X}km" — distance-based logging (run/walk/cycle)
+    || /\b\d+(?:\.\d+)?\s*km\b/i.test(m)
+    // "X minutes of {cardio type}" or "{cardio type} X minutes"
+    || /\b\d+\s*(?:min(?:utes?)?)\s+(?:of\s+)?(?:cardio|running|jogging|walking|yoga|hiit|zumba|cycling|spinning|aerobics)\b/i.test(m)
+    || /\b(?:cardio|running|jogging|yoga|hiit|zumba|cycling|spinning|aerobics)\s+\d+\s*(?:min(?:utes?)?)\b/i.test(m)
+  ) && !EXERCISE_PATTERN.test(m)  // not a weight training message
+    && !/\b(?:ate|had|food|meal|eaten|eating|calories|breakfast|lunch|dinner|supper)\b/i.test(m)
+    && !/\b\d[\d,]*\s*steps?\b/i.test(m); // explicit step counts go to the step handler
+
+  if (isCardioLog) {
+    const todayStart = sastDayStart();
+    const existingToday = await db.select({ id: workoutLogs.id }).from(workoutLogs)
+      .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
+      .limit(1);
+
+    if (existingToday.length > 0) {
+      return `${firstName ? firstName + ", " : ""}session already logged today. Good work staying active.`;
+    }
+
+    // Detect activity type for personalised response
+    const cardioType = /parkrun|park\s*run/i.test(m) ? "parkrun"
+      : /\bhiit\b|interval\s*training/i.test(m) ? "HIIT"
+      : /\byoga\b/i.test(m) ? "yoga"
+      : /\bpilates\b/i.test(m) ? "Pilates"
+      : /\bzumba\b/i.test(m) ? "Zumba"
+      : /spinning|spin\s*class/i.test(m) ? "spinning"
+      : /bootcamp|boot\s*camp/i.test(m) ? "bootcamp"
+      : /crossfit/i.test(m) ? "CrossFit"
+      : /aerobics/i.test(m) ? "aerobics"
+      : /run|ran|jog/i.test(m) ? "run"
+      : /swim|swam/i.test(m) ? "swim"
+      : /cycl|bike|bik/i.test(m) ? "cycle"
+      : /walk|walked/i.test(m) ? "walk"
+      : /danc/i.test(m) ? "dance class"
+      : "cardio";
+
+    // Extract duration and distance from message
+    const durationMatch = m.match(/(\d+)\s*(?:min(?:utes?)?|mins?)\b/i);
+    const hourMatch = m.match(/(\d+(?:\.\d+)?)\s*(?:hrs?|hours?)\b/i);
+    const distanceMatch = m.match(/(\d+(?:\.\d+)?)\s*km\b/i);
+    const durationMin = durationMatch ? parseInt(durationMatch[1])
+      : hourMatch ? Math.round(parseFloat(hourMatch[1]) * 60)
+      : null;
+    const distanceKm = distanceMatch ? parseFloat(distanceMatch[1]) : null;
+
+    // Calorie burn estimate (kcal/min × body-weight factor)
+    const BURN_RATE: Record<string, number> = {
+      run: 10, parkrun: 10, HIIT: 11, bootcamp: 11, CrossFit: 11,
+      swim: 9, cycle: 8, spinning: 9,
+      Zumba: 7, aerobics: 7, "dance class": 7,
+      walk: 5, yoga: 4, Pilates: 4, cardio: 8,
+    };
+    const burnPerMin = BURN_RATE[cardioType] || 8;
+    const weightKg = parseFloat(String(user.currentWeight || 75));
+    const weightFactor = weightKg / 75;
+    const burnEstimate = durationMin
+      ? Math.round(durationMin * burnPerMin * weightFactor)
+      : distanceKm
+        ? Math.round(distanceKm * (/run|ran|jog|parkrun/i.test(m) ? 72 : 55) * weightFactor)
+        : null;
+
+    // km → steps: log to stepLogs so step streak / target tracking reflects the activity
+    if (distanceKm && distanceKm > 0 && distanceKm < 120) {
+      const stepsPerKm = /run|ran|jog|parkrun/i.test(m) ? 1100 : 1300;
+      const derivedSteps = Math.round(distanceKm * stepsPerKm);
+      try {
+        await db.insert(stepLogs).values({ userId: user.id, steps: derivedSteps });
+      } catch (e) { console.warn("[CARDIO] step insert failed:", e); }
+    }
+
+    // Log workout session
+    await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+
+    const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+    const trainingDays = user.trainingDaysPerWeek || 3;
+    const todaySlot = getTodaySlot(user);
+    const nextDay = (todaySlot % trainingDays) + 1;
+    const weekAdvance = todaySlot === trainingDays;
+    const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
+
+    const lastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
+    const toSASTDayStart = (d: Date) => {
+      const s = new Date(d.getTime() + 2 * 3_600_000);
+      return new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth(), s.getUTCDate())).getTime();
+    };
+    const yestStart = toSASTDayStart(new Date(Date.now() - 86_400_000));
+    const wasYesterday = lastWorkout && toSASTDayStart(lastWorkout) === yestStart;
+    const newStreak = wasYesterday ? (user.workoutStreak || 0) + 1 : 1;
+
+    await db.update(users).set({
+      totalWorkoutsCompleted: newTotal,
+      programmeDayInWeek: nextDay,
+      programmeWeek: newWeek,
+      lastWorkoutDate: new Date(),
+      lastActiveAt: new Date(),
+      workoutStreak: newStreak,
+    }).where(eq(users.phoneNumber, phone));
+
+    // Build response
+    const typeLabel = { run: "Run", walk: "Walk", cycle: "Cycle", swim: "Swim",
+      parkrun: "Parkrun", HIIT: "HIIT", yoga: "Yoga", Pilates: "Pilates",
+      Zumba: "Zumba", spinning: "Spinning", bootcamp: "Bootcamp", CrossFit: "CrossFit",
+      aerobics: "Aerobics", "dance class": "Dance class", cardio: "Cardio" }[cardioType] || cardioType;
+    const distNote = distanceKm ? ` — ${distanceKm}km` : "";
+    const durNote = !distanceKm && durationMin ? ` — ${durationMin}min` : "";
+    const burnNote = burnEstimate ? ` (~${burnEstimate} kcal)` : "";
+    const stepsNote = distanceKm
+      ? `\n\nStep count from ${distanceKm}km: ~${Math.round(distanceKm * (/run|ran|jog|parkrun/i.test(m) ? 1100 : 1300)).toLocaleString()} steps added.`
+      : "";
+    const streakNote = newStreak >= 3 ? `\n\n🔥 *${newStreak}-session streak.* Keep it going.` : "";
+
+    const CARDIO_RESPONSES = [
+      `${typeLabel}${distNote || durNote} done. ✅${burnNote} Session ${newTotal} logged.`,
+      `${typeLabel}${distNote || durNote} complete. 💪${burnNote} ${newTotal} sessions in.`,
+      `Session ${newTotal} — ${typeLabel}${distNote || durNote}.${burnNote} Logged. ✅`,
+      `${typeLabel}${distNote || durNote} — logged. ✅${burnNote} ${newTotal} sessions done.`,
+    ];
+    const cardioReply = CARDIO_RESPONSES[newTotal % CARDIO_RESPONSES.length];
+
+    await logChat(user.id, message, cardioReply, "WORKOUT_DONE");
+
+    // Fire first-workout referral nudge (same as isDone handler)
+    if (newTotal === 1) {
+      const userId = user.id;
+      setTimeout(async () => {
+        try {
+          const [freshUser] = await db.select({ referralCode: users.referralCode }).from(users)
+            .where(eq(users.phoneNumber, phone)).limit(1);
+          let referralCode = freshUser?.referralCode;
+          if (!referralCode) {
+            const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+            const rand = Array.from({ length: 3 }, () => chars[Math.floor(Math.random() * chars.length)]).join("");
+            referralCode = `KAM${rand}`;
+            await db.update(users).set({ referralCode }).where(eq(users.phoneNumber, phone));
+          }
+          const referralMsg = `One more thing — you just completed your first session. That already puts you ahead of most people who sign up and never start.\n\nIf you know someone who needs this, share your code: *${referralCode}*\n\nThey get their first month for R50. You get R20 off yours.`;
+          await sendWhatsApp(phone, referralMsg);
+          await logChat(userId, "", referralMsg, "REFERRAL_NUDGE_POST_WORKOUT");
+        } catch (err) { console.warn("[REFERRAL_NUDGE] Cardio first-workout:", err); }
+      }, 60_000);
+    }
+
+    return `${cardioReply}${stepsNote}${streakNote}\n\nLog your food: tell me what you ate today.[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
   // ---- WORKOUT DONE — log completion ----
