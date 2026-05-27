@@ -183,8 +183,7 @@ export default function LandingPage() {
         {/* Video background — autoplay, muted, looping (per best-practice) */}
         {HERO_VIDEO_URL ? (
           <video
-            className="absolute inset-0 w-full h-full object-cover scale-110"
-            style={{ filter: "blur(8px)" }}
+            className="absolute inset-0 w-full h-full object-cover object-center"
             src={HERO_VIDEO_URL}
             autoPlay
             muted          // always mute on load — audio rarely plays anyway
@@ -198,7 +197,7 @@ export default function LandingPage() {
         )}
 
         {/* Dark overlay so text stays readable over any video */}
-        <div className="absolute inset-0 bg-black/55" />
+        <div className="absolute inset-0 bg-black/40" />
 
         {/* Bottom fade to blend into next section */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
