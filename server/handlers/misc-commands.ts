@@ -822,10 +822,9 @@ export async function handleMiscCommands(ctx: {
 
   // ---- NEW: NEXT WORKOUT ----
   if (["next", "next workout", "tomorrow", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow", "what's tomorrow"].includes(m)) {
-    // Build tomorrow's session using the user's actual programme day counter, not calendar day
-    const currentDay = user.programmeDayInWeek || 1;
-    const trainingDays = user.trainingDaysPerWeek || 3;
-    const nextDay = (currentDay % trainingDays) + 1;
+    // programmeDayInWeek is already set to the NEXT session after each "done" log —
+    // just use it directly instead of advancing by one more step.
+    const nextDay = user.programmeDayInWeek || 1;
     const nextDayUser = { ...user, programmeDayInWeek: nextDay };
     const nextWorkout = buildDayWorkout(nextDayUser);
     const week = user.programmeWeek || 1;
