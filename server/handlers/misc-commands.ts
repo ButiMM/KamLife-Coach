@@ -390,18 +390,51 @@ export async function handleMiscCommands(ctx: {
     return `${name2}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.`;
   }
   // ---- STEPS QUERY (bare "steps", "my steps", or explicit today query) ----
+  const isStepWeekQuery = /\b(steps?\s*(?:this\s+)?week|my\s+step\s*(?:history|stats?|average|trend)|step\s*(?:history|stats?|average|trend|report)|weekly\s*steps?|7[\s-]day\s*steps?)\b/i.test(m);
   if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m) ||
-      /\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m)) {
+      /\b(steps?\s*today|how many steps|steps?\s*logged|did i hit my steps?|steps?\s*(count|so far|this morning|tonight)|today.?s steps?)\b/i.test(m) ||
+      isStepWeekQuery) {
     try {
+      const target = user.stepsTarget || 8500;
+      const name2 = user.name?.split(" ")[0] || "";
+
+      if (isStepWeekQuery) {
+        // 7-day step history
+        const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+        const weekSteps = await db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
+          .orderBy(desc(stepLogs.loggedAt))
+          .limit(14); // up to 2 per day (update + insert edge case)
+        // Deduplicate to most recent per day (SAST)
+        const byDay = new Map<string, number>();
+        for (const row of weekSteps) {
+          const sast = new Date(new Date(row.loggedAt!).getTime() + 2 * 3_600_000);
+          const day = sast.toISOString().slice(0, 10);
+          if (!byDay.has(day)) byDay.set(day, row.steps);
+        }
+        if (byDay.size === 0) return `${name2 ? name2 + " — " : ""}No steps logged this week. Send your count daily: "8,500 steps" or "walked 5km".`;
+        const days = [...byDay.entries()].sort(([a], [b]) => b.localeCompare(a));
+        const avg = Math.round(days.reduce((s, [, v]) => s + v, 0) / days.length);
+        const hitDays = days.filter(([, v]) => v >= target).length;
+        const lines = days.slice(0, 7).map(([day, steps]) => {
+          const d = new Date(day + "T00:00:00Z");
+          const label = d.toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" });
+          const status = steps >= target ? "✅" : steps >= target * 0.75 ? "⚠️" : "🔴";
+          return `${label}: ${steps.toLocaleString()} ${status}`;
+        }).join("\n");
+        const verdict = avg >= target ? "Above target — keep it up." : avg >= target * 0.75 ? "Close to target. Push a bit more daily." : "Below target — add a 20-min walk each day.";
+        return `*Steps — Last 7 Days*\n\n${lines}\n\nAvg: *${avg.toLocaleString()} steps/day* | Target: ${target.toLocaleString()}\n${hitDays}/${days.length} days hit target. ${verdict}`;
+      }
+
+      // Today only
       const [todayStep] = await db.select({ steps: stepLogs.steps })
         .from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
         .orderBy(desc(stepLogs.loggedAt))
         .limit(1);
       const logged = todayStep?.steps || 0;
-      const target = user.stepsTarget || 8500;
       const remaining = Math.max(0, target - logged);
-      const name2 = user.name?.split(" ")[0] || "";
       if (!logged) return `${name2 ? name2 + " — " : ""}${target.toLocaleString()} steps is your target. No steps logged yet today — send your count: "8,500 steps" or "walked 5km".`;
       if (remaining === 0) return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps today. Target hit ✅`;
       return `${name2 ? name2 + " — " : ""}${logged.toLocaleString()} steps logged today. ${remaining.toLocaleString()} to go to hit your ${target.toLocaleString()} target.`;
