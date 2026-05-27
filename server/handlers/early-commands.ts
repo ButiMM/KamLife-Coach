@@ -462,12 +462,29 @@ export async function handleEarlyCommands(ctx: {
       const todayMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
       const yMeals = allRecentMeals.filter(l => l.loggedAt && new Date(l.loggedAt) < todayStart);
       // Skip drinks-only entries (<50 kcal) — a black coffee is not a meal.
-      // Case-insensitive label comparison: stored labels may be "Lunch" or "lunch" depending on path.
+      // Three-tier lookup so mislabelled meals (label stored as "breakfast" instead of "lunch"
+      // because of old time-of-day fallback bug) are still found via rawMessage scan.
       const findMeal = (meals: typeof allRecentMeals, label: string | null) => {
-        const candidates = label
-          ? meals.filter(l => (l.mealLabel || "").toLowerCase() === label.toLowerCase())
-          : meals;
-        return candidates.find(l => (l.kcalInt || 0) >= 50) || null;
+        if (!label) return meals.find(l => (l.kcalInt || 0) >= 50) || null;
+        // Tier 1: exact label match (case-insensitive)
+        const byLabel = meals.filter(l => (l.mealLabel || "").toLowerCase() === label.toLowerCase());
+        const labelHit = byLabel.find(l => (l.kcalInt || 0) >= 50);
+        if (labelHit) return labelHit;
+        // Tier 2: rawMessage contains the keyword — catches meals logged as "Lunch rice and beef"
+        // where mealLabel was mis-stored due to time-of-day fallback
+        const byRaw = meals.filter(l =>
+          (l.kcalInt || 0) >= 50 &&
+          l.rawMessage &&
+          new RegExp(`\\b${label}\\b`, "i").test(l.rawMessage)
+        );
+        if (byRaw.length > 0) return byRaw[0];
+        // Tier 3: positional fallback — breakfast=oldest, dinner=newest, lunch=middle
+        const sub = meals.filter(l => (l.kcalInt || 0) >= 150);
+        if (sub.length === 0) return null;
+        if (label === "breakfast") return sub[sub.length - 1];
+        if (label === "dinner") return sub[0];
+        if (label === "lunch" && sub.length >= 2) return sub[1];
+        return null;
       };
       // When "yesterday" explicitly requested, skip today; otherwise check today first (e.g. "dinner same as lunch")
       const match = isYesterdayRef
