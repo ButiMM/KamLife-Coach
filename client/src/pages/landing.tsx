@@ -265,10 +265,10 @@ export default function LandingPage() {
           className="relative z-10 mt-16 mb-8 flex flex-wrap justify-center gap-10 text-sm"
         >
           {[
-            { label: "Active clients", value: stats ? `${stats.activeClients}+` : "200+" },
-            { label: "Workouts logged", value: stats ? `${stats.workoutsLogged.toLocaleString()}+` : "4,800+" },
-            { label: "Cost per day", value: "R5" },
-            { label: "Setup time", value: "Under 3 mins" },
+            { label: "Free trial", value: "7 days" },
+            { label: "Cost per day", value: "R6.63" },
+            { label: "Setup time", value: "3 mins" },
+            { label: "Cancel anytime", value: "WhatsApp" },
           ].map((s) => (
             <div key={s.label} className="text-center">
               <div className="text-3xl font-bold font-display text-white">{s.value}</div>
