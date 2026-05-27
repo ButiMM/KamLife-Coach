@@ -589,6 +589,126 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
   }
 }
 
+/**
+ * Supplement the SA scanner's matches with GPT for any food items it missed.
+ * Only identifies items NOT already in `alreadyIdentified` — no double counting.
+ * Returns extra GptFoodItem[] or null if nothing new was found.
+ */
+export async function gptFoodSupplement(
+  message: string,
+  user: { goalType?: string | null; calorieTarget?: number | null; proteinTarget?: number | null },
+  alreadyIdentified: string[],
+): Promise<GptFoodItem[] | null> {
+  if (alreadyIdentified.length === 0) return null;
+
+  // Cache key includes message + which foods are already matched (to avoid stale hits)
+  const shortIds = alreadyIdentified.map(n => n.slice(0, 8).toLowerCase().replace(/\s/g, '')).sort().join(',');
+  const suppKey = `supp:${normaliseFoodCacheKey(message)}:${shortIds}`;
+  const cached = foodFallbackCache.get(suppKey);
+  if (cached && cached.expiresAt > Date.now()) {
+    return cached.result.foods.length > 0 ? cached.result.foods : null;
+  }
+
+  try {
+    const resp = await withOpenAIRetry(() => openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 250,
+      tools: [
+        {
+          type: "function",
+          function: {
+            name: "log_food",
+            description: "Extract ONLY the nutritional data for food items NOT already identified by the database scanner. Leave foods empty if all items are already covered.",
+            parameters: {
+              type: "object",
+              properties: {
+                is_food: {
+                  type: "boolean",
+                  description: "true if there are genuinely new unidentified food items remaining. false if all foods are already covered.",
+                },
+                foods: {
+                  type: "array",
+                  items: {
+                    type: "object",
+                    properties: {
+                      name: { type: "string" },
+                      kcal: { type: "integer" },
+                      protein_g: { type: "integer" },
+                      carbs_g: { type: "integer" },
+                      fat_g: { type: "integer" },
+                      portion_desc: { type: "string" },
+                      category: { type: "string", enum: ["protein", "carb", "fat", "vegetable", "junk", "dairy", "beverage", "other"] },
+                    },
+                    required: ["name", "kcal", "protein_g", "carbs_g", "fat_g", "portion_desc", "category"],
+                  },
+                },
+              },
+              required: ["is_food"],
+            },
+          },
+        },
+      ],
+      tool_choice: { type: "function", function: { name: "log_food" } },
+      messages: [
+        {
+          role: "system",
+          content: `You supplement a South African food log that was partially identified by a database scanner.
+
+ALREADY IDENTIFIED (do NOT re-add these or variations of them): ${alreadyIdentified.join(', ')}
+
+Your task: Identify ONLY the food items in the user's message that are completely absent from the above list.
+- Do NOT re-add items already covered, even under a different name (e.g. if "chicken" is listed, skip "chicken breast" or "grilled chicken")
+- Sauces, gravies, dressings, and condiments ONLY if >20 kcal per typical portion
+- Omit: spices (salt, pepper, cumin, etc.), garnishes, water, condiments <20 kcal
+- If all foods are already identified, set is_food=true with an empty foods array
+- Use SA food names and portions (pap not polenta, pilchards not sardines)`,
+        },
+        { role: "user", content: message.slice(0, 500) },
+      ],
+    }), "gptFoodSupplement");
+
+    const toolCall = resp.choices[0]?.message?.tool_calls?.[0];
+    if (!toolCall || toolCall.type !== "function" || toolCall.function.name !== "log_food") return null;
+
+    const parsed = JSON.parse(toolCall.function.arguments);
+
+    // Cache empty result too — so we don't re-call for the same message
+    if (!parsed.is_food || !parsed.foods || parsed.foods.length === 0) {
+      foodFallbackCache.set(suppKey, {
+        result: { foods: [], totalKcal: 0, totalProtein: 0, coachNote: "", fromCache: false },
+        expiresAt: Date.now() + FOOD_CACHE_TTL_MS,
+      });
+      return null;
+    }
+
+    const foods: GptFoodItem[] = (parsed.foods as any[]).map(f => ({
+      name: String(f.name || "food"),
+      kcal: Math.max(0, Number(parseInt(String(f.kcal ?? 0))) || 0),
+      protein_g: Math.max(0, Number(parseInt(String(f.protein_g ?? 0))) || 0),
+      carbs_g: Math.max(0, Number(parseInt(String(f.carbs_g ?? 0))) || 0),
+      fat_g: Math.max(0, Number(parseInt(String(f.fat_g ?? 0))) || 0),
+      portion_desc: String(f.portion_desc || ""),
+      category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
+    })).filter(f => f.kcal > 15); // drop spice-level items
+
+    const result: GptFoodFallbackResult = {
+      foods,
+      totalKcal: foods.reduce((s, f) => s + f.kcal, 0),
+      totalProtein: foods.reduce((s, f) => s + f.protein_g, 0),
+      coachNote: "",
+      fromCache: false,
+    };
+
+    foodFallbackCache.set(suppKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
+    console.log(`[gptFoodSupplement] Found ${foods.length} extras: ${foods.map(f => f.name).join(', ')}`);
+    return foods.length > 0 ? foods : null;
+  } catch (err) {
+    console.warn("[gptFoodSupplement] error:", err);
+    return null;
+  }
+}
+
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of foodFallbackCache) {

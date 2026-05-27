@@ -16,7 +16,7 @@ import {
   invalidateFoodTotalsCache,
 } from "./food-scanner";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
-import { gptFoodFallback, askCoachK } from "../gpt";
+import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { invalidatePatternCache } from "../cache";
@@ -42,6 +42,39 @@ function extractMealLabel(msg: string): string | null {
   if (h >= 11 && h < 15) return "lunch";
   if (h >= 17 && h < 22) return "dinner";
   return null;
+}
+
+/**
+ * Check if the message likely has food items beyond what the SA scanner matched.
+ * Returns true if there are substantive unmatched tokens that could be food.
+ */
+function hasUnmatchedFoodContent(message: string, matchedFoods: Array<{ name: string; aliases: string[] }>): boolean {
+  let remaining = message.toLowerCase();
+
+  // Remove matched food names and aliases from message text
+  for (const food of matchedFoods) {
+    const terms = [food.name, ...food.aliases];
+    for (const term of terms) {
+      if (term.length > 2) {
+        remaining = remaining.replace(new RegExp(`\\b${escapeRegex(term.toLowerCase())}\\b`, "g"), " ");
+      }
+    }
+  }
+
+  // Strip stop words, connectors, meal labels, portion words, and negligible spices
+  remaining = remaining
+    .replace(/\b(i|me|my|had|ate|have|having|eating|was|were|is|are|for|at|in|on|to|and|or|with|some|a|an|the|of|also|just|plus|about|around|only|too|today|yesterday|this|that|it|its|them|then|after|before|along|very|quite|really|all|mixed|cooked|raw|grilled|fried|boiled|steamed|baked|roasted|hot|cold|fresh|leftover|homemade)\b/gi, " ")
+    .replace(/\b(breakfast|lunch|dinner|supper|snack|meal|morning|evening|afternoon|night|brunch)\b/gi, " ")
+    .replace(/\b(big|large|small|tiny|little|extra|full|half|quarter|whole|double|triple)\b/gi, " ")
+    .replace(/\b(piece|pieces|slice|slices|cup|cups|bowl|bowls|plate|plates|portion|portions|serving|servings|tablespoon|tablespoons|tbsp|tsp|gram|grams|g|kg|ml|litre|liters|liter|l|scoop|scoops|handful|pack|packet)\b/gi, " ")
+    .replace(/\b(salt|pepper|spices?|seasoning|herbs?|paprika|cumin|coriander|cinnamon|turmeric|chilli|chili|chillies)\b/gi, " ")
+    .replace(/\d+(?:\.\d+)?/g, " ")
+    .replace(/[.,!?:;'"]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  const tokens = remaining.split(" ").filter(t => t.length > 2);
+  return tokens.length > 0;
 }
 
 function getStreakNote(userId: string, streak: number, name: string): string {
@@ -568,6 +601,47 @@ export async function handleFoodContext(ctx: {
         const segProt = adjusted.reduce((s, f) => s + f.adjustedProtein, 0);
         const lines = adjusted.map(f => `  • ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein`).join("\n");
         mealLines.push(`*${seg.label}:* ~${segCals} kcal | ${segProt}g protein\n${lines}`);
+      }
+    }
+
+    // ---- PARTIAL MATCH SUPPLEMENT — catch food items SA scanner missed ----
+    // Only fires when the message has substantive unmatched content (e.g. "mushroom sauce" with "pap")
+    if (allAdjustedFoods.length > 0 && hasUnmatchedFoodContent(m, allAdjustedFoods)) {
+      try {
+        const suppItems = await gptFoodSupplement(message, user, allAdjustedFoods.map(f => f.name));
+        if (suppItems && suppItems.length > 0) {
+          // Dedup: skip GPT items whose name overlaps with an already-matched SA food
+          const filtered = suppItems.filter((si: GptFoodItem) => {
+            const siWords = si.name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+            return !allAdjustedFoods.some(saF => {
+              const saTerms = [saF.name.toLowerCase(), ...saF.aliases.map((a: string) => a.toLowerCase())];
+              return siWords.some((w: string) => saTerms.some(t => t.includes(w)));
+            });
+          });
+          for (const sf of filtered) {
+            allAdjustedFoods.push({
+              name: sf.name,
+              aliases: [],
+              caloriesPer100g: 0,
+              proteinPer100g: 0,
+              carbsPer100g: sf.carbs_g,
+              fatPer100g: sf.fat_g,
+              typicalPortionDescription: sf.portion_desc,
+              typicalPortionGrams: 0,
+              typicalPortionCalories: sf.kcal,
+              typicalPortionProtein: sf.protein_g,
+              category: sf.category,
+              budgetTier: 2,
+              notes: "",
+              adjustedCalories: sf.kcal,
+              adjustedProtein: sf.protein_g,
+              adjustedDescription: sf.portion_desc,
+              quantity: 1,
+            });
+          }
+        }
+      } catch (e) {
+        console.warn("[PARTIAL-MATCH SUPP] error:", e);
       }
     }
 
