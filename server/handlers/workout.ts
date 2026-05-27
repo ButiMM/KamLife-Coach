@@ -25,7 +25,7 @@ import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { sendWhatsApp, saveState } from "../scheduler/shared";
 
 // Exercise name keywords used to identify lift-format messages
-const EXERCISE_PATTERN = /\b(?:bench\s*press?|squat|deadlift|leg\s*press?|leg\s*curl|leg\s*extension|hip\s*thrust|rdl|romanian|lunge|lateral\s*raise|shoulder\s*press?|overhead\s*press?|lat\s*pull[- ]?down|seated\s*row|cable\s*row|face\s*pull|bicep\s*curl|tricep|pushdown|push[- ]?up|pull[- ]?up|dip|plank|fly|chest\s*press?|incline|decline|cable|barbell|dumbbell|db|calf\s*raise|glute|hip|press)\b/i;
+const EXERCISE_PATTERN = /\b(?:bench\s*press?|squat|deadlift|leg\s*press?|leg\s*curl|leg\s*extension|hip\s*thrust|rdl|romanian|lunge|lateral\s*raise|shoulder\s*press?|overhead\s*press?|ohp|lat\s*pull[- ]?down|seated\s*row|cable\s*row|face\s*pull|bicep\s*curl|tricep|pushdown|push[- ]?ups?|pull[- ]?ups?|chin[- ]?ups?|dip|plank|fly|chest\s*press?|incline|decline|cable|barbell|bb|dumbbell|db|calf\s*raise|glute|hip|press|rows?|rdls?)\b/i;
 
 function parseLiftLog(m: string): Array<{ name: string; weight: number; sets?: number; reps?: number }> {
   const results: Array<{ name: string; weight: number; sets?: number; reps?: number }> = [];
