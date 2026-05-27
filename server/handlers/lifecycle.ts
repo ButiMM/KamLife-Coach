@@ -326,12 +326,16 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- SLEEP LOGGING — hardcoded + weekly trend, no GPT ----
-  const sleepMatch = m.match(/\b(slept|sleep|sleeping)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)/i)
-    || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
-    || m.match(/\b(bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia)\b/i);
+  // Catches: "slept 7 hours", "slaap 7 ure" (Afrikaans), "got about 6 hours",
+  // "only managed 5 hours last night", "bad night", "couldn't sleep" etc.
+  const hasSleepCtx = /\b(?:sleep|slept|sleeping|slaap|geslaap|nag|night|rest|tired|insomnia|woke)\b/i.test(m);
+  const sleepMatch = m.match(/\b(slept|sleep|sleeping|geslaap|slaap)\b.*?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
+    || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\s*(?:of\s*)?(?:sleep|slept|rest)/i)
+    || (hasSleepCtx && m.match(/\b(?:got|managed|only\s+got|only\s+managed|got\s+about|got\s+around|got\s+maybe|just\s+got)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i))
+    || m.match(/\b(bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap)\b/i);
 
   if (sleepMatch) {
-    const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+    const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
     const hours = hoursStr ? parseFloat(hoursStr[1]) : null;
     const isBadSleep = /bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia/i.test(m);
 
@@ -345,7 +349,7 @@ export async function handleLifecycle(ctx: {
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SLEEP_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
       const sleepHours: number[] = [];
       for (const log of recentSleepLogs) {
-        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
         if (hMatch) sleepHours.push(parseFloat(hMatch[1]));
       }
       if (hours !== null) sleepHours.push(hours); // include today
@@ -370,12 +374,12 @@ export async function handleLifecycle(ctx: {
 
       const entries: { date: string; hours: number }[] = [];
       for (const log of sleepEntries) {
-        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)/i);
+        const hMatch = (log.messageIn || "").match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
         if (hMatch && log.date) entries.push({ date: new Date(log.date).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" }), hours: parseFloat(hMatch[1]) });
       }
 
       if (entries.length === 0) {
-        return `No sleep logs in the last 14 days. Start logging: just say "I slept 7 hours" and I will track your recovery over time.`;
+        return `No sleep logs in the last 14 days. Start logging: just say "I slept 7 hours" (or "geslaap 7 ure") and I will track your recovery over time.`;
       }
 
       const avg = entries.reduce((s, e) => s + e.hours, 0) / entries.length;

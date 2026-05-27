@@ -346,7 +346,10 @@ export async function handleWorkoutCommands(ctx: {
       } catch { /* non-fatal */ }
     }
 
-    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
+    const [perfectDay, poCtxDone] = await Promise.all([
+      checkPerfectDay(user.id, user.proteinTarget || 130),
+      getProgressiveOverloadContext(user.id),
+    ]);
 
     // Week 1 Complete badge — fires once when programme week advances from 1 to 2
     let week1Badge = "";
@@ -359,6 +362,11 @@ export async function handleWorkoutCommands(ctx: {
     const bonusNote = wState.type === "REST"
       ? `\n\n_${wState.todayName} is your rest day — but you trained anyway. Extra credit._`
       : "";
+
+    // Show last session's targets so user knows what to log (only if they have exercise history)
+    const liftPrompt = poCtxDone
+      ? `${poCtxDone.trim()}\n\nLog today's actual weights: "bench 80kg 3x10" (or skip if cardio/bodyweight)`
+      : `Log your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)`;
 
     await logChat(user.id, message, doneResponse, "WORKOUT_DONE");
 
@@ -386,7 +394,7 @@ export async function handleWorkoutCommands(ctx: {
       }, 60_000);
     }
 
-    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\nLog your lifts: "bench 80kg 3x10" (or skip if cardio/bodyweight)[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----

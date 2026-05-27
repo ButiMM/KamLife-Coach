@@ -321,16 +321,27 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // NOTE: If message also contains food (e.g. voice note: "I had eggs for breakfast and walked 3000 steps"),
   // we log steps but do NOT return early — let it fall through to food scanning
   // "12k steps", "8.5k steps", "12,000 steps", "12000 steps" — all valid
+  // Also: "Fitbit says 8500", "health app: 9000", "steps today: 7500"
   const stepNumMatch = m.match(/\b([\d,]+(?:\.\d+)?)\s*k\s*(?:steps?|staps?)\b/i)
     || m.match(/\b([\d,]+)\s*(?:steps?|staps?)\b/i)
     || m.match(/(?:walked|done|did|logged)\s+([\d,]+(?:\.\d+)?k?)\s*(?:steps?|staps?)/i);
+  // Device/app references without explicit "steps" keyword after the number
+  // e.g. "Fitbit says 8500", "Health app: 9000", "steps today: 7500", "step count: 12k"
+  const _devMatch = !stepNumMatch ? (
+    m.match(/\b(?:fitbit|garmin|apple\s*health|health\s*app|samsung\s*health|google\s*fit|my\s*(?:watch|tracker|band|phone)|strava|polar|whoop|oura|mi\s*band|galaxy\s*watch)\b[^.!?]*?([\d,]+(?:\.\d+)?)\s*(k)?\s*(?:steps?|staps?)?/i)
+    || m.match(/\bsteps?\s*(?:today|count|total|for\s*today)?\s*[:=]\s*([\d,]+(?:\.\d+)?)\s*(k)?\b/i)
+  ) : null;
+  const deviceStepMatch = (_devMatch && !/\b(?:heart\s*rate|bpm|pulse|calories?\s*burned|sleep\s*score|blood|oxygen)\b/i.test(m)) ? _devMatch : null;
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
-  const hasDurationWalk = !stepNumMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
+  const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
   const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
-  if (stepNumMatch || hasKmWalk || hasDurationWalk) {
+  if (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch) {
     let steps = 0;
-    if (stepNumMatch) {
+    if (deviceStepMatch) {
+      const num = parseFloat(deviceStepMatch[1].replace(/,/g, ""));
+      steps = deviceStepMatch[2] ? Math.round(num * 1000) : Math.round(num);
+    } else if (stepNumMatch) {
       const raw = stepNumMatch[1].replace(/,/g, "");
       steps = stepIsKShorthand ? Math.round(parseFloat(raw) * 1000) : parseInt(raw);
     } else if (hasKmWalk) {
