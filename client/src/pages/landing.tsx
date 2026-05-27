@@ -183,7 +183,8 @@ export default function LandingPage() {
         {/* Video background — autoplay, muted, looping (per best-practice) */}
         {HERO_VIDEO_URL ? (
           <video
-            className="absolute inset-0 w-full h-full object-cover"
+            className="absolute inset-0 w-full h-full object-cover scale-110"
+            style={{ filter: "blur(8px)" }}
             src={HERO_VIDEO_URL}
             autoPlay
             muted          // always mute on load — audio rarely plays anyway
