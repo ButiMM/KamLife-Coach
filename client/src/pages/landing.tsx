@@ -158,13 +158,12 @@ export default function LandingPage() {
     <div className="min-h-screen bg-background text-foreground overflow-hidden">
       {/* Nav */}
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between py-4 sticky top-0 bg-background/90 backdrop-blur-md z-50 border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <div className="flex flex-col leading-none">
-            <span className="font-bold font-display text-xl tracking-tight">
-              <span className="text-orange-500">Kam</span><span className="text-blue-600">Life</span>
-            </span>
-            <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Lifestyle Coach</span>
-          </div>
+        <div className="flex items-center">
+          <img
+            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_56,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+            alt="KamLife Lifestyle Coach"
+            className="h-12 w-auto object-contain"
+          />
         </div>
         <div className="flex items-center gap-3">
           <Link href="/login">
@@ -537,11 +536,12 @@ export default function LandingPage() {
       {/* Footer */}
       <footer className="border-t border-border py-10 px-4 text-center text-muted-foreground text-sm">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 rounded bg-primary flex items-center justify-center">
-              <span className="text-white font-bold text-xs">K</span>
-            </div>
-            <span className="font-semibold text-foreground">KamLife Coach</span>
+          <div className="flex items-center">
+            <img
+              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_40,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+              alt="KamLife Lifestyle Coach"
+              className="h-8 w-auto object-contain"
+            />
           </div>
           <p>Built for South Africa 🇿🇦 · POPIA compliant · R199/month</p>
           <Link href="/login" className="hover:text-foreground transition-colors">Coach Login</Link>
