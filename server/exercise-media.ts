@@ -1,86 +1,97 @@
 /**
- * Exercise media — GIF URLs and portion plate images.
+ * Exercise media — GIF/image URLs and portion plate images.
  *
- * How it works:
- *   1. Set MEDIA_BASE_URL in Railway to your CDN or server root (e.g. https://media.kamlife.co.za)
- *   2. Upload exercise GIFs to: MEDIA_BASE_URL/ex/<slug>.gif
- *   3. Upload portion images to: MEDIA_BASE_URL/portions/breakfast.jpg  /lunch.jpg  /dinner.jpg
- *   4. Everything else is automatic — the bot attaches media when available, falls back to text when not.
+ * How it works — TWO-TIER URL resolution (no upload required for basic operation):
+ *
+ *   TIER 1 — Custom animated GIFs (optional):
+ *     Set MEDIA_BASE_URL in Railway and upload <slug>.gif to MEDIA_BASE_URL/ex/<slug>.gif
+ *     These override the fallback images below.
+ *
+ *   TIER 2 — Free fallback images (automatic, no upload):
+ *     Direct JPG images from the free-exercise-db public domain dataset on GitHub.
+ *     These work immediately with zero configuration.
+ *     Source: github.com/yuhonas/free-exercise-db (public domain / CC0)
  *
  * GIF naming: use the slug column from EXERCISE_SLUGS below.
  *
- * ── COMPLETE FILE UPLOAD LIST ─────────────────────────────────────────────────
- * Upload these files to MEDIA_BASE_URL/ex/<slug>.gif
+ * ── TO UPGRADE FROM JPG STILLS TO ANIMATED GIFS ─────────────────────────────
+ * 1. Set MEDIA_BASE_URL in Railway (e.g. https://res.cloudinary.com/dkxpypiak/image/upload)
+ * 2. Upload animated GIFs to MEDIA_BASE_URL/ex/<slug>.gif  (e.g. via Cloudinary upload)
+ * 3. The bot will automatically use your GIF over the fallback still image.
+ *
  * Quality requirement: clear full range-of-motion demonstration, correct form.
- * Recommended sources: ExerciseDB Pro, GymVisual, or licensed fitness GIF libraries.
- *
- * LOWER BODY
- *   squat.gif                     — barbell back squat or Smith squat, full depth, heels on floor
- *   leg-press.gif                 — 45-degree leg press, full range, heels mid-platform
- *   leg-extension.gif             — seated leg extension, full extension, controlled descent
- *   leg-curl.gif                  — prone/lying leg curl, full range, hips pinned
- *   calf-raise.gif                — standing calf raise, full heel drop and toe rise
- *   seated-calf-raise.gif         — seated calf raise machine, full range
- *   rdl.gif                       — Romanian deadlift, hip hinge, flat back, hamstring stretch
- *   bulgarian-split-squat.gif     — back foot elevated, front foot forward, full range
- *   goblet-squat.gif              — dumbbell held at chest, full depth squat
- *   hack-squat.gif                — hack squat machine, deep range
- *   smith-squat.gif               — Smith machine squat (same as squat.gif is fine)
- *   barbell-back-squat.gif        — classic high-bar back squat with barbell
- *   glute-bridge.gif              — floor glute bridge, hips driven up, glute squeeze
- *   hip-thrust.gif                — barbell or dumbbell hip thrust, bench supported
- *   sumo-squat.gif                — wide stance sumo squat, knees out over toes
- *   reverse-lunge.gif             — step back lunge, controlled descent
- *   step-up.gif                   — box step-up, full hip extension at top
- *
- * UPPER — PUSH
- *   chest-press.gif               — machine or dumbbell chest press, 45° elbows
- *   chest-fly.gif                 — dumbbell fly, arc motion, chest squeeze at top
- *   shoulder-press.gif            — dumbbell or machine shoulder press overhead
- *   lateral-raise.gif             — dumbbell lateral raise to shoulder height only
- *   push-up.gif                   — standard push-up, full range, body rigid
- *   incline-dumbbell-press.gif    — incline bench dumbbell press, 30–45 degrees
- *   dumbbell-floor-press.gif      — floor press, triceps touch floor, pause and press
- *   barbell-bench-press.gif       — flat barbell bench press, bar to lower chest
- *   tricep-pushdown.gif           — cable tricep pushdown, elbows pinned
- *   tricep-overhead-extension.gif — overhead dumbbell tricep extension, elbows close
- *   tricep-kickback.gif           — dumbbell kickback, elbow pinned, forearm extends
- *   chair-tricep-dip.gif          — hands on chair edge, dip and press
- *
- * UPPER — PULL
- *   lat-pulldown.gif              — wide-grip lat pulldown, elbows drive to pockets
- *   seated-row.gif                — cable seated row, shoulder blades squeeze
- *   face-pull.gif                 — cable face pull, elbows high and wide
- *   bent-over-row.gif             — bent-over dumbbell row, both arms, torso parallel
- *   single-arm-row.gif            — dumbbell single-arm row with knee on bench
- *   chest-supported-row.gif       — chest-supported incline dumbbell row
- *   barbell-row.gif               — barbell bent-over row, bar to lower chest
- *   resistance-band-row.gif       — resistance band row, anchored at waist height
- *   door-frame-row.gif            — doorframe/door-frame row, lean back and pull
- *   table-row.gif                 — under-table row, body rigid, pull chest to table
- *   bicep-curl.gif                — dumbbell bicep curl, elbows pinned
- *   cable-bicep-curl.gif          — cable bicep curl, elbows fixed, full range
- *   doorframe-curl.gif            — underhand doorframe curl, lean back slightly
- *
- * CORE / BODYWEIGHT
- *   plank.gif                     — forearm plank, body straight, core braced
- *   dead-bug.gif                  — dead bug, opposite arm/leg, lower back flat
- *   plank-leg-raise.gif           — forearm plank with alternating leg raise
- *   plank-shoulder-tap.gif        — plank with alternating shoulder taps, hips stable
- *   cable-crunch.gif              — kneeling cable crunch, rope overhead
- *   cable-kickback.gif            — cable ankle-strap glute kickback
- *
- * That is 54 unique GIF files.
+ * Good sources: ExerciseDB Pro, GymVisual, or record your own and upload to Cloudinary.
  * ──────────────────────────────────────────────────────────────────────────────
  */
 
 const BASE = (process.env.MEDIA_BASE_URL || "").replace(/\/$/, "");
+// Only use custom CDN if BASE is set and not the placeholder
+const CUSTOM_CDN = BASE && !BASE.includes("placeholder") ? BASE : "";
+
+// ── Free-exercise-db fallback images (public domain, no upload needed) ────────
+// Source: github.com/yuhonas/free-exercise-db — CC0 / public domain
+// If a URL 404s the image silently won't send — no crash, no error.
+const GH = "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises";
+
+const EXERCISE_MEDIA: Record<string, string> = {
+  // ── Lower body ──────────────────────────────────────────────────────────────
+  "squat":                      `${GH}/Barbell_Back_Squat/0.jpg`,
+  "barbell-back-squat":         `${GH}/Barbell_Back_Squat/0.jpg`,
+  "smith-squat":                `${GH}/Barbell_Back_Squat/0.jpg`,
+  "leg-press":                  `${GH}/Leg_Press/0.jpg`,
+  "leg-extension":              `${GH}/Leg_Extension/0.jpg`,
+  "leg-curl":                   `${GH}/Lying_Leg_Curls/0.jpg`,
+  "calf-raise":                 `${GH}/Standing_Calf_Raises/0.jpg`,
+  "seated-calf-raise":          `${GH}/Seated_Calf_Raise/0.jpg`,
+  "rdl":                        `${GH}/Romanian_Deadlift/0.jpg`,
+  "bulgarian-split-squat":      `${GH}/Bulgarian_Split_Squat/0.jpg`,
+  "hack-squat":                 `${GH}/Hack_Squat/0.jpg`,
+  "goblet-squat":               `${GH}/Goblet_Squat/0.jpg`,
+  "sumo-squat":                 `${GH}/Sumo_Squat/0.jpg`,
+  "glute-bridge":               `${GH}/Glute_Bridge/0.jpg`,
+  "hip-thrust":                 `${GH}/Barbell_Hip_Thrust/0.jpg`,
+  "reverse-lunge":              `${GH}/Reverse_Lunge/0.jpg`,
+  "step-up":                    `${GH}/Dumbbell_Step-up/0.jpg`,
+  // ── Upper — push ────────────────────────────────────────────────────────────
+  "chest-press":                `${GH}/Dumbbell_Bench_Press/0.jpg`,
+  "barbell-bench-press":        `${GH}/Barbell_Bench_Press/0.jpg`,
+  "incline-dumbbell-press":     `${GH}/Incline_Dumbbell_Press/0.jpg`,
+  "dumbbell-floor-press":       `${GH}/Floor_Press/0.jpg`,
+  "chest-fly":                  `${GH}/Dumbbell_Fly/0.jpg`,
+  "lateral-raise":              `${GH}/Dumbbell_Lateral_Raise/0.jpg`,
+  "shoulder-press":             `${GH}/Dumbbell_Shoulder_Press/0.jpg`,
+  "push-up":                    `${GH}/Pushup/0.jpg`,
+  "tricep-pushdown":            `${GH}/Triceps_Pushdown/0.jpg`,
+  "tricep-overhead-extension":  `${GH}/Triceps_Extension/0.jpg`,
+  "tricep-kickback":            `${GH}/Dumbbell_Kickback/0.jpg`,
+  "cable-kickback":             `${GH}/Cable_Kickback/0.jpg`,
+  "chair-tricep-dip":           `${GH}/Tricep_Dips/0.jpg`,
+  // ── Upper — pull ────────────────────────────────────────────────────────────
+  "lat-pulldown":               `${GH}/Wide-Grip_Lat_Pulldown/0.jpg`,
+  "seated-row":                 `${GH}/Seated_Cable_Row/0.jpg`,
+  "face-pull":                  `${GH}/Face_Pull/0.jpg`,
+  "bent-over-row":              `${GH}/Barbell_Bent_Over_Row/0.jpg`,
+  "single-arm-row":             `${GH}/Dumbbell_One-Arm_Row/0.jpg`,
+  "chest-supported-row":        `${GH}/Dumbbell_Incline_Row/0.jpg`,
+  "barbell-row":                `${GH}/Barbell_Bent_Over_Row/0.jpg`,
+  "resistance-band-row":        `${GH}/Resistance_Band_Pull_Apart/0.jpg`,
+  "door-frame-row":             `${GH}/Dumbbell_One-Arm_Row/0.jpg`,
+  "table-row":                  `${GH}/Inverted_Row/0.jpg`,
+  "bicep-curl":                 `${GH}/Barbell_Curl/0.jpg`,
+  "cable-bicep-curl":           `${GH}/Cable_Curl/0.jpg`,
+  "doorframe-curl":             `${GH}/Dumbbell_Alternate_Bicep_Curl/0.jpg`,
+  // ── Core / bodyweight ────────────────────────────────────────────────────────
+  "plank":                      `${GH}/Plank/0.jpg`,
+  "dead-bug":                   `${GH}/Dead_Bug/0.jpg`,
+  "cable-crunch":               `${GH}/Cable_Crunch/0.jpg`,
+  "plank-leg-raise":            `${GH}/Plank_Leg_Raise/0.jpg`,
+  "plank-shoulder-tap":         `${GH}/Plank_Shoulder_Taps/0.jpg`,
+};
 
 // ── Exercise name → URL slug ──────────────────────────────────────────────────
 //
 // Keys: exact programme exercise names (lowercase) + short-form client phrases.
-// Values: the GIF slug (filename without .gif).
-// When BASE is set, any matched name resolves to BASE/ex/<slug>.gif
+// Values: the slug (matches EXERCISE_MEDIA key and MEDIA_BASE_URL filename).
 
 const EXERCISE_SLUGS: Record<string, string> = {
 
@@ -183,7 +194,7 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "single-leg glute bridge":                              "glute-bridge",
   "single leg glute bridge":                              "glute-bridge",
   "reverse lunge":                                        "reverse-lunge",
-  "hip abduction machine":                                "hip-thrust",   // closest visual equivalent
+  "hip abduction machine":                                "hip-thrust",
   "hip abduction machine (burnout)":                      "hip-thrust",
   "step up":                                              "step-up",
   "push-up":                                              "push-up",
@@ -196,7 +207,6 @@ const EXERCISE_SLUGS: Record<string, string> = {
 
   // ════════════════════════════════════════════════════════════════
   // SHORT-FORM PHRASES — what clients type when asking "show me X"
-  // (only keys not already defined in the exact-names section above)
   // ════════════════════════════════════════════════════════════════
 
   // ── Lower body ───────────────────────────────────────────────────
@@ -309,7 +319,11 @@ const EXERCISE_SLUGS: Record<string, string> = {
 };
 
 /**
- * Returns the GIF URL for a given exercise name, or null if not configured / not found.
+ * Returns the image URL for a given exercise name, or null if not found.
+ *
+ * Resolution order:
+ *   1. Custom CDN GIF  — MEDIA_BASE_URL/ex/<slug>.gif  (if MEDIA_BASE_URL is set and valid)
+ *   2. Free fallback   — direct JPG from free-exercise-db on GitHub (no upload needed)
  *
  * Handles:
  *  - "Exercise A / Exercise B" compound names — tries each alternative left to right
@@ -318,18 +332,22 @@ const EXERCISE_SLUGS: Record<string, string> = {
  *  - Trailing noise words like "machine", "with dumbbell"
  */
 export function getExerciseGifUrl(exerciseName: string): string | null {
-  if (!BASE) return null;
   const name = exerciseName.toLowerCase().trim();
+
+  function urlForSlug(slug: string): string | null {
+    if (CUSTOM_CDN) return `${CUSTOM_CDN}/ex/${slug}.gif`;
+    return EXERCISE_MEDIA[slug] || null;
+  }
 
   // 1. Direct lookup
   let slug = EXERCISE_SLUGS[name];
-  if (slug) return `${BASE}/ex/${slug}.gif`;
+  if (slug) return urlForSlug(slug);
 
   // 2. Handle "Exercise A / Exercise B" — try each alternative left to right
   if (name.includes(" / ")) {
     for (const part of name.split(" / ")) {
       slug = EXERCISE_SLUGS[part.trim()];
-      if (slug) return `${BASE}/ex/${slug}.gif`;
+      if (slug) return urlForSlug(slug);
     }
   }
 
@@ -337,19 +355,19 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
   const noParens = name.replace(/\s*\([^)]*\)\s*/g, "").trim();
   if (noParens !== name) {
     slug = EXERCISE_SLUGS[noParens];
-    if (slug) return `${BASE}/ex/${slug}.gif`;
+    if (slug) return urlForSlug(slug);
   }
 
   // 4. Strip common equipment prefixes and retry
   const prefixStripped = name.replace(/^(machine|cable|smith|barbell|assisted|seated|standing|lying|dumbbell|resistance band|bodyweight)\s+/, "");
   if (prefixStripped !== name) {
     slug = EXERCISE_SLUGS[prefixStripped];
-    if (slug) return `${BASE}/ex/${slug}.gif`;
+    if (slug) return urlForSlug(slug);
     // Also try splitting on " / " after stripping
     if (prefixStripped.includes(" / ")) {
       for (const part of prefixStripped.split(" / ")) {
         slug = EXERCISE_SLUGS[part.trim()];
-        if (slug) return `${BASE}/ex/${slug}.gif`;
+        if (slug) return urlForSlug(slug);
       }
     }
   }
@@ -360,7 +378,7 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
     .trim();
   if (noTrail !== name) {
     slug = EXERCISE_SLUGS[noTrail];
-    if (slug) return `${BASE}/ex/${slug}.gif`;
+    if (slug) return urlForSlug(slug);
   }
 
   return null;
@@ -368,10 +386,9 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
 
 /**
  * Scans a workout text block for the first bolded exercise name (*Exercise Name*)
- * and returns its GIF URL, or null.
+ * and returns its image URL, or null.
  */
 export function getPrimaryWorkoutGifUrl(workoutText: string): string | null {
-  if (!BASE) return null;
   const boldMatches = workoutText.match(/\*([^*]+)\*/g) || [];
   for (const match of boldMatches) {
     const name = match.replace(/\*/g, "").trim();
@@ -391,9 +408,9 @@ export function getPrimaryWorkoutGifUrl(workoutText: string): string | null {
 // ── Portion plate images ──────────────────────────────────────────────────────
 
 export const PORTION_IMAGES = {
-  breakfast: BASE ? `${BASE}/portions/breakfast.jpg` : null,
-  lunch:     BASE ? `${BASE}/portions/lunch.jpg`     : null,
-  dinner:    BASE ? `${BASE}/portions/dinner.jpg`    : null,
+  breakfast: CUSTOM_CDN ? `${CUSTOM_CDN}/portions/breakfast.jpg` : null,
+  lunch:     CUSTOM_CDN ? `${CUSTOM_CDN}/portions/lunch.jpg`     : null,
+  dinner:    CUSTOM_CDN ? `${CUSTOM_CDN}/portions/dinner.jpg`    : null,
 };
 
 /**
