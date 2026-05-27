@@ -28,6 +28,8 @@ import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
+import { getExerciseGifUrl } from "../exercise-media";
+import { buildDayWorkout } from "../programme";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -59,6 +61,65 @@ export function bumpVoiceFailure(userId: string): number {
 
 export function clearVoiceFailure(userId: string): void {
   voiceFailureMap.delete(userId);
+}
+
+// ============================================================
+// EQUIPMENT VISION HELPERS
+// ============================================================
+
+/** Maps a vision-identified machine description to an exercise slug. */
+function getMachineSlug(machineId: string): string | null {
+  const m = machineId.toLowerCase();
+  if (m.includes("leg press"))                                   return "leg-press";
+  if (m.includes("hack squat"))                                  return "hack-squat";
+  if (m.includes("smith"))                                       return "squat";
+  if (m.includes("squat rack") || m.includes("power rack"))     return "barbell-back-squat";
+  if (m.includes("lat pulldown") || m.includes("pull-down") || m.includes("pull down")) return "lat-pulldown";
+  if (m.includes("seated row") || (m.includes("cable") && m.includes("row"))) return "seated-row";
+  if (m.includes("pec deck") || m.includes("chest fly") || m.includes("pec fly")) return "chest-fly";
+  if (m.includes("chest press") || m.includes("bench press"))   return "chest-press";
+  if (m.includes("incline") && m.includes("press"))             return "incline-dumbbell-press";
+  if (m.includes("shoulder press") || m.includes("overhead press")) return "shoulder-press";
+  if (m.includes("leg extension"))                               return "leg-extension";
+  if (m.includes("leg curl") || m.includes("hamstring curl"))   return "leg-curl";
+  if (m.includes("hip thrust") || m.includes("glute machine"))  return "hip-thrust";
+  if (m.includes("calf raise") || m.includes("calf machine"))   return "calf-raise";
+  if (m.includes("face pull") || (m.includes("cable") && m.includes("rear"))) return "face-pull";
+  if (m.includes("tricep") || m.includes("pushdown"))           return "tricep-pushdown";
+  if (m.includes("cable") && m.includes("bicep"))               return "cable-bicep-curl";
+  if (m.includes("cable") && m.includes("lateral"))             return "lateral-raise";
+  if (m.includes("cable"))                                       return "lat-pulldown"; // generic cable → lat pulldown default
+  if (m.includes("rdl") || m.includes("romanian deadlift"))     return "rdl";
+  if (m.includes("barbell"))                                     return "barbell-back-squat";
+  if (m.includes("pull-up") || m.includes("pull up") || m.includes("assisted pull")) return "lat-pulldown";
+  if (m.includes("resistance band"))                             return "resistance-band-row";
+  return null;
+}
+
+/** Returns a 1-2 sentence form cue for the identified machine/slug. */
+function getMachineFormCue(slugOrName: string): string {
+  const s = slugOrName.toLowerCase();
+  if (s.includes("leg-press")     || s.includes("leg press"))      return "Feet mid-platform, shoulder width. Full range — thighs past parallel. Drive through heels, not toes.";
+  if (s.includes("hack-squat")    || s.includes("hack squat"))      return "Shoulders back against the pad. Full range of motion. Drive through heels, core tight.";
+  if (s.includes("barbell-back-squat") || s.includes("squat rack") || s.includes("barbell")) return "Bar on upper traps. Feet shoulder width. Full depth. Drive through heels. Chest up throughout.";
+  if (s.includes("squat")         || s.includes("smith"))           return "Feet shoulder width. Lower until thighs parallel. Drive through heels. Core tight throughout.";
+  if (s.includes("lat-pulldown")  || s.includes("lat pulldown") || s.includes("pull")) return "Drive elbows down to your back pockets — not your hands. Squeeze shoulder blades at the bottom. Full stretch at the top.";
+  if (s.includes("seated-row")    || s.includes("seated row") || s.includes("cable row")) return "Pull to your lower chest. Squeeze shoulder blades hard together. Full stretch forward — do not round the back.";
+  if (s.includes("chest-press")   || s.includes("chest press") || s.includes("bench press")) return "Elbows at 45 degrees from your torso — not flared wide. Drive to full extension. Slow 2-second lowering.";
+  if (s.includes("incline"))                                         return "30-45 degree incline. Same rules — elbows at 45 degrees. Feel the upper chest working.";
+  if (s.includes("shoulder-press") || s.includes("shoulder press")) return "Press overhead until arms nearly extended. Core braced throughout. Lower slowly — do not crash the weight.";
+  if (s.includes("leg-extension") || s.includes("leg extension"))   return "Full extension at the top — squeeze quads hard. Slow 2-second lowering. No swinging.";
+  if (s.includes("leg-curl")      || s.includes("leg curl"))        return "Curl heels all the way toward glutes. Slow 2-second lowering. Hips stay pinned down.";
+  if (s.includes("hip-thrust")    || s.includes("hip thrust") || s.includes("glute")) return "Drive hips up explosively. Squeeze glutes hard at the top for 1 full second. Lower slowly.";
+  if (s.includes("calf"))                                            return "Full range — heel as low as possible, rise all the way up on toes. Pause at the top. No bouncing.";
+  if (s.includes("face-pull")     || s.includes("face pull"))       return "Elbows high and wide. Pull rope toward your forehead. Squeeze rear delts at the back. No neck tension.";
+  if (s.includes("pec-deck")      || s.includes("chest-fly") || s.includes("chest fly") || s.includes("pec")) return "Wide arc, slight elbow bend throughout. Squeeze chest hard at the top. Feel the stretch at the bottom — do not let it slam.";
+  if (s.includes("tricep-pushdown") || s.includes("tricep pushdown") || s.includes("pushdown")) return "Elbows pinned tight to your sides — they do not move. Extend to fully straight. Squeeze triceps at the bottom.";
+  if (s.includes("rdl")           || s.includes("deadlift"))        return "Push hips back — not down. Flat back throughout. Feel the hamstring stretch at the bottom. Drive hips forward to stand.";
+  if (s.includes("lateral-raise") || s.includes("lateral raise"))   return "Arms slightly bent. Raise to shoulder height only — no higher. Slow 2-second lowering. No shrugging.";
+  if (s.includes("cable-bicep")   || s.includes("cable bicep"))     return "Elbows pinned at your sides. Curl to full contraction. Slow lowering — feel the stretch at the bottom.";
+  if (s.includes("cable"))                                           return "Control the weight both directions. Full range of motion. The cable keeps tension throughout — use it.";
+  return "Full range of motion on every rep. Control the weight — slow on the lowering. No momentum.";
 }
 
 // ============================================================
@@ -172,8 +233,58 @@ export async function handleMediaMessage(ctx: {
               await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
               return equipReply;
             }
-            const equipReply = `Nice setup. If you want me to update your training programme to match your equipment, just reply *dumbbells*, *bands*, or *mix*.\n\nOr reply *workout* for today's session.`;
-            await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
+
+            // ── Smart machine identification + programme link ──────────────
+            let equipReply = ``;
+            try {
+              const machineIdRes = await withTimeout("equipment_id", 8000, () =>
+                openai.chat.completions.create({
+                  model: "gpt-4o-mini", max_tokens: 15, temperature: 0,
+                  messages: [
+                    {
+                      role: "system",
+                      content: `Identify the gym machine or equipment in this photo. Reply with ONLY the equipment name, 2-5 words. Use these terms: leg press, smith machine, lat pulldown, cable machine, chest press machine, shoulder press machine, leg extension machine, leg curl machine, hip thrust machine, seated row machine, hack squat machine, pec deck, squat rack, dumbbells, barbell, resistance bands, pull-up bar, calf raise machine, cable bicep curl, cable lateral raise, face pull. If unclear, reply: unknown.`
+                    },
+                    { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] }
+                  ]
+                })
+              );
+
+              const machineRaw = machineIdRes.choices[0]?.message?.content?.trim().toLowerCase() || "unknown";
+              console.log(`[EQUIPMENT_ID] identified="${machineRaw}" user=${user.id}`);
+
+              if (machineRaw !== "unknown" && machineRaw.length > 2) {
+                const slug = getMachineSlug(machineRaw);
+                const imageUrl = slug ? getExerciseGifUrl(slug) : null;
+                const displayName = machineRaw.replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+                // Check if this machine appears in the client's programme today
+                let todayText = "";
+                try { todayText = buildDayWorkout(user).toLowerCase(); } catch { /* no programme yet */ }
+                const isInToday = !!(slug && todayText && slug.replace(/-/g, " ").split(" ").filter(w => w.length > 3).some(w => todayText.includes(w)));
+
+                const cue = getMachineFormCue(slug || machineRaw);
+
+                if (machineRaw.includes("dumbbell")) {
+                  equipReply = `*Dumbbells* — your programme uses these.\n\nReply *workout* to see exactly what you are doing today with them.\n\nOr type *show me* followed by any exercise name for a form demo.`;
+                  const dumbbellImg = getExerciseGifUrl("bicep-curl");
+                  if (dumbbellImg) equipReply += `\n[MEDIA:${dumbbellImg}]`;
+                } else if (isInToday) {
+                  equipReply = `*${displayName}* — this is in your session today.\n\n${cue}\n\nReply *workout* for your full session with all sets and reps.`;
+                  if (imageUrl) equipReply += `\n[MEDIA:${imageUrl}]`;
+                } else {
+                  equipReply = `*${displayName}*\n\n${cue}`;
+                  if (todayText) equipReply += `\n\nNot in today's session — reply *workout* to see what you are doing today.`;
+                  else equipReply += `\n\nReply *workout* to get your programme.`;
+                  if (imageUrl) equipReply += `\n[MEDIA:${imageUrl}]`;
+                }
+              }
+            } catch (e) {
+              console.warn("[EQUIPMENT_ID] vision failed:", e);
+            }
+
+            if (!equipReply) equipReply = `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
+            await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
             return equipReply;
           }
           // ---- SCALE / BODY WEIGHT PHOTO ----
