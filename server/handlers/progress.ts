@@ -43,6 +43,9 @@ export async function handleProgressCheck(ctx: {
     const completedSessions = recentWorkouts.length;
     const avgSteps = recentSteps.length > 0 ? Math.round(recentSteps.reduce((s, r) => s + r.steps, 0) / recentSteps.length) : 0;
     const stepsTarget = user.stepsTarget || 8500;
+    const latestWeight = recentWeights.length >= 1
+      ? parseFloat(String(recentWeights[recentWeights.length - 1].weight))
+      : null;
     const weightChange = recentWeights.length >= 2
       ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
       : null;
@@ -69,7 +72,9 @@ export async function handleProgressCheck(ctx: {
         : parseFloat(weightChange) > 0
           ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.`
           : `Weight: holding steady this week.`
-      : `Weight: no weigh-ins logged — step on the scale and send me the number.`;
+      : latestWeight !== null
+        ? `Weight: ${latestWeight}kg logged — keep weighing in daily to track your trend.`
+        : `Weight: no weigh-ins this week — step on the scale and send me the number.`;
     const foodSentence = weekFoodLogDays > 0
       ? `Food: logged ${weekFoodLogDays}/7 days — avg ${avgDailyProt}g protein/day${avgDailyProt >= protTarget * 0.9 ? " ✅" : ` (target ${protTarget}g — ${protTarget - avgDailyProt}g gap)`}`
       : `Food: no meals logged this week — consistency here is what drives results.`;
@@ -99,7 +104,9 @@ export async function handleProgressCheck(ctx: {
         ? `⬇️ Weight: -${Math.abs(parseFloat(weightChange))}kg this week`
         : weightChange !== null && parseFloat(weightChange) === 0
           ? `⚖️ Weight: holding steady`
-          : "";
+          : latestWeight !== null
+            ? `⚖️ Weight: ${latestWeight}kg`
+            : "";
       const stepsLine = avgSteps >= stepsTarget
         ? `👟 Steps: ${avgSteps.toLocaleString()} avg/day ✅`
         : avgSteps > 0 ? `👟 Steps: ${avgSteps.toLocaleString()} avg/day` : "";
