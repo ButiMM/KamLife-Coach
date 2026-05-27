@@ -337,7 +337,7 @@ export async function handleLifecycle(ctx: {
   if (sleepMatch) {
     const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
     const hours = hoursStr ? parseFloat(hoursStr[1]) : null;
-    const isBadSleep = /bad sleep|poor sleep|no sleep|couldn't sleep|can't sleep|couldnt sleep|insomnia/i.test(m);
+    const isBadSleep = /bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap/i.test(m);
 
     const sleepReply = getSleepResponse(hours, isBadSleep);
 
