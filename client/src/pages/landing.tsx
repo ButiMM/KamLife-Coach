@@ -11,6 +11,10 @@ import { useQuery } from "@tanstack/react-query";
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
 
+// Set VITE_HERO_VIDEO_URL in Railway env to point to your compressed .mp4
+// Rules: autoplay, muted, looping — compress to <5MB for performance
+const HERO_VIDEO_URL = import.meta.env.VITE_HERO_VIDEO_URL || "";
+
 const GOALS = [
   {
     icon: Flame,
@@ -173,40 +177,62 @@ export default function LandingPage() {
         </div>
       </nav>
 
-      {/* Hero */}
-      <main className="relative pt-20 pb-16 flex flex-col items-center text-center px-4">
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[900px] h-[600px] bg-gradient-to-b from-primary/8 to-transparent -z-10 blur-3xl rounded-full pointer-events-none" />
+      {/* ── HERO — full-screen video background ── */}
+      <main className="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-4 overflow-hidden">
 
+        {/* Video background — autoplay, muted, looping (per best-practice) */}
+        {HERO_VIDEO_URL ? (
+          <video
+            className="absolute inset-0 w-full h-full object-cover"
+            src={HERO_VIDEO_URL}
+            autoPlay
+            muted          // always mute on load — audio rarely plays anyway
+            loop           // loop for continuous feel
+            playsInline    // required for iOS autoplay
+            preload="metadata"
+          />
+        ) : (
+          /* Fallback gradient when no video is uploaded yet */
+          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950" />
+        )}
+
+        {/* Dark overlay so text stays readable over any video */}
+        <div className="absolute inset-0 bg-black/55" />
+
+        {/* Bottom fade to blend into next section */}
+        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
+
+        {/* Hero content */}
         <motion.div
-          initial={{ opacity: 0, y: 24 }}
+          initial={{ opacity: 0, y: 28 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5 }}
-          className="max-w-4xl mx-auto space-y-6"
+          transition={{ duration: 0.6 }}
+          className="relative z-10 max-w-4xl mx-auto space-y-7 pt-20"
         >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-sm font-semibold border border-emerald-200 dark:border-emerald-800">
+          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-semibold border border-white/20">
             <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-500 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
             </span>
             Now Accepting Clients — South Africa
           </div>
 
-          <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.08] tracking-tight">
+          <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
             Your personal SA fitness coach,{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-primary to-emerald-500">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
               right in WhatsApp
             </span>
           </h1>
 
-          <p className="text-xl text-muted-foreground max-w-2xl mx-auto leading-relaxed">
+          <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
             Lose fat. Build muscle. Get healthier. Programmes for every body, every budget, every lifestyle —
             built specifically for South Africa. No app to download. No gym required.
           </p>
 
-          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-6">
+          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
             <Button
               size="lg"
-              className="h-14 px-8 rounded-2xl text-base font-bold shadow-xl shadow-primary/20 hover:shadow-2xl hover:scale-[1.02] transition-all"
+              className="h-14 px-8 rounded-2xl text-base font-bold bg-emerald-500 hover:bg-emerald-400 text-white shadow-2xl shadow-emerald-500/30 hover:scale-[1.02] transition-all border-0"
               asChild
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
@@ -214,7 +240,11 @@ export default function LandingPage() {
                 Start Free Trial — R199/month
               </a>
             </Button>
-            <Button size="lg" variant="outline" className="h-14 px-8 rounded-2xl text-base border-2" asChild>
+            <Button
+              size="lg"
+              className="h-14 px-8 rounded-2xl text-base font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/30 backdrop-blur-sm transition-all"
+              asChild
+            >
               <a href="#goals">
                 See all goals
                 <ChevronRight className="w-4 h-4 ml-1" />
@@ -222,17 +252,17 @@ export default function LandingPage() {
             </Button>
           </div>
 
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-white/50">
             7 days free · R199/month · Cancel anytime by WhatsApp · Programme sent on Day 1
           </p>
         </motion.div>
 
-        {/* Social proof bar */}
+        {/* Social proof bar — anchored to bottom of hero */}
         <motion.div
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
-          transition={{ delay: 0.4 }}
-          className="mt-16 flex flex-wrap justify-center gap-8 text-sm text-muted-foreground"
+          transition={{ delay: 0.5 }}
+          className="relative z-10 mt-16 mb-8 flex flex-wrap justify-center gap-10 text-sm"
         >
           {[
             { label: "Active clients", value: stats ? `${stats.activeClients}+` : "200+" },
@@ -241,8 +271,8 @@ export default function LandingPage() {
             { label: "Setup time", value: "Under 3 mins" },
           ].map((s) => (
             <div key={s.label} className="text-center">
-              <div className="text-2xl font-bold font-display text-foreground">{s.value}</div>
-              <div className="text-xs mt-0.5">{s.label}</div>
+              <div className="text-3xl font-bold font-display text-white">{s.value}</div>
+              <div className="text-xs mt-0.5 text-white/60">{s.label}</div>
             </div>
           ))}
         </motion.div>
