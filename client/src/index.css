@@ -8,29 +8,29 @@
   --font-sans: 'DM Sans', sans-serif;
   --font-display: 'Outfit', sans-serif;
 
-  /* KamLife Teal/Emerald Theme - Vibrant & Energetic */
-  --background: 180 20% 99%;
-  --foreground: 180 50% 10%;
-  
-  --primary: 170 85% 35%;
+  /* KamLife Brand — Orange energy + Blue trust (matches logo) */
+  --background: 0 0% 99%;
+  --foreground: 220 40% 10%;
+
+  --primary: 24 95% 50%;
   --primary-foreground: 0 0% 100%;
-  
-  --secondary: 180 30% 96%;
-  --secondary-foreground: 170 85% 35%;
-  
-  --muted: 180 20% 94%;
-  --muted-foreground: 180 15% 50%;
-  
-  --accent: 35 90% 60%;
+
+  --secondary: 217 91% 55%;
+  --secondary-foreground: 0 0% 100%;
+
+  --muted: 220 15% 95%;
+  --muted-foreground: 220 10% 50%;
+
+  --accent: 217 91% 55%;
   --accent-foreground: 0 0% 100%;
-  
+
   --destructive: 0 84% 60%;
   --destructive-foreground: 0 0% 98%;
 
-  --border: 180 20% 90%;
-  --input: 180 20% 90%;
-  --ring: 170 85% 35%;
-  
+  --border: 220 15% 88%;
+  --input: 220 15% 88%;
+  --ring: 24 95% 50%;
+
   --radius: 0.75rem;
 }
 

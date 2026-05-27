@@ -159,10 +159,12 @@ export default function LandingPage() {
       {/* Nav */}
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between py-4 sticky top-0 bg-background/90 backdrop-blur-md z-50 border-b border-border/50">
         <div className="flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
-            <span className="text-white font-bold font-display text-sm">K</span>
+          <div className="flex flex-col leading-none">
+            <span className="font-bold font-display text-xl tracking-tight">
+              <span className="text-orange-500">Kam</span><span className="text-blue-600">Life</span>
+            </span>
+            <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">Lifestyle Coach</span>
           </div>
-          <span className="font-bold font-display text-xl tracking-tight">KamLife Coach</span>
         </div>
         <div className="flex items-center gap-3">
           <Link href="/login">
@@ -219,7 +221,7 @@ export default function LandingPage() {
 
           <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
             Your personal SA fitness coach,{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-emerald-400 to-teal-300">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-blue-400">
               right in WhatsApp
             </span>
           </h1>
@@ -232,7 +234,7 @@ export default function LandingPage() {
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
             <Button
               size="lg"
-              className="h-14 px-8 rounded-2xl text-base font-bold bg-emerald-500 hover:bg-emerald-400 text-white shadow-2xl shadow-emerald-500/30 hover:scale-[1.02] transition-all border-0"
+              className="h-14 px-8 rounded-2xl text-base font-bold bg-orange-500 hover:bg-orange-400 text-white shadow-2xl shadow-orange-500/30 hover:scale-[1.02] transition-all border-0"
               asChild
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
