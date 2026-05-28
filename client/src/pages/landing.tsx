@@ -255,7 +255,11 @@ export default function LandingPage() {
             </Button>
           </div>
 
-          <p className="text-sm text-white/50">
+          <div className="flex flex-wrap justify-center gap-1.5 text-xs text-white/60">
+            <span>⭐⭐⭐⭐⭐ Trusted by clients in</span>
+            <span className="text-white/80 font-medium">Soweto · Cape Town · Durban · Pretoria</span>
+          </div>
+          <p className="text-sm text-white/40">
             7 days free · R199/month · Cancel anytime by WhatsApp · Programme sent on Day 1
           </p>
         </motion.div>
@@ -435,8 +439,8 @@ export default function LandingPage() {
           <div className="bg-card rounded-3xl border-2 border-primary p-10 relative overflow-hidden text-left shadow-xl shadow-primary/10">
             <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 to-amber-400 rounded-t-3xl" />
             <div className="flex items-center justify-between mb-4">
-              <div className="text-sm font-semibold text-primary uppercase tracking-wide">KamLife Coach</div>
-              <span className="text-xs font-bold bg-primary text-white px-3 py-1 rounded-full">Beta price</span>
+              <div className="text-sm font-semibold text-primary uppercase tracking-wide">Coach K</div>
+              <span className="text-xs font-bold bg-amber-500 text-white px-3 py-1 rounded-full">Founding Member Price</span>
             </div>
             <div className="flex items-end gap-1 mb-1">
               <span className="text-6xl font-bold font-display">R199</span>
@@ -534,20 +538,20 @@ export default function LandingPage() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-24 px-4 bg-primary text-white text-center">
+      <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center">
         <div className="max-w-2xl mx-auto">
           <h2 className="text-4xl font-bold font-display mb-4">Your programme is waiting.</h2>
-          <p className="text-primary-foreground/80 text-lg mb-8">
+          <p className="text-white/75 text-lg mb-8">
             3 questions on WhatsApp. Programme built in 2 minutes. Day 1 delivered immediately.
             Whatever your goal, whatever your budget — Coach K is built for you.
           </p>
-          <Button size="lg" variant="secondary" className="h-14 px-10 rounded-2xl text-base font-bold" asChild>
+          <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-orange-500 hover:bg-orange-400 text-white border-0 shadow-2xl shadow-orange-500/30" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
               <Phone className="w-5 h-5 mr-2" />
               Start Coaching on WhatsApp
             </a>
           </Button>
-          <p className="text-primary-foreground/60 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
+          <p className="text-white/50 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
         </div>
       </section>
 
