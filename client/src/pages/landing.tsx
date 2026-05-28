@@ -338,41 +338,133 @@ export default function LandingPage() {
 
       {/* How It Works */}
       <section id="how-it-works" className="py-24 px-4 bg-muted/30">
-        <div className="max-w-5xl mx-auto">
+        <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold font-display mb-4">How it works</h2>
             <p className="text-muted-foreground text-lg">Three steps. No new apps. Under 3 minutes.</p>
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {[
-              {
-                step: "01",
-                title: "WhatsApp Coach K",
-                desc: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in under 3 minutes.",
-                icon: MessageCircle,
-              },
-              {
-                step: "02",
-                title: "Get your programme",
-                desc: "Personalised workout plan — gym, home, or dumbbells. Meal plan with SA foods at real SA prices. Day 1 drops the moment you activate.",
-                icon: Zap,
-              },
-              {
-                step: "03",
-                title: "Coach K keeps you going",
-                desc: "Daily morning check-ins. Evening nudges. Water reminders. Weekly progress reports. Automatic accountability every single day.",
-                icon: TrendingUp,
-              },
-            ].map((item) => (
-              <div key={item.step} className="relative p-8 rounded-3xl bg-card border border-border/60 hover:border-primary/30 hover:shadow-lg transition-all">
-                <div className="text-6xl font-bold font-display text-primary/10 absolute top-4 right-6">{item.step}</div>
-                <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary mb-6">
-                  <item.icon className="w-6 h-6" />
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+
+            {/* Steps — vertical list */}
+            <div className="space-y-0">
+              {[
+                { step: "01", icon: MessageCircle, title: "WhatsApp Coach K", desc: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in under 3 minutes." },
+                { step: "02", icon: Zap, title: "Get your programme", desc: "Personalised workout plan — gym, home, or dumbbells. Meal plan with SA foods at real SA prices. Day 1 drops the moment you activate." },
+                { step: "03", icon: TrendingUp, title: "Coach K keeps you going", desc: "Daily morning check-ins. Evening nudges. Water reminders. Weekly progress reports. Automatic accountability every single day." },
+              ].map((item, i) => (
+                <div key={item.step} className="flex gap-5">
+                  <div className="flex flex-col items-center">
+                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
+                      <item.icon className="w-6 h-6" />
+                    </div>
+                    {i < 2 && <div className="w-px flex-1 bg-border my-3" />}
+                  </div>
+                  <div className={i < 2 ? "pb-10" : ""}>
+                    <div className="text-xs font-bold text-primary/50 uppercase tracking-widest mb-1 mt-1">{item.step}</div>
+                    <h3 className="text-xl font-bold mb-2">{item.title}</h3>
+                    <p className="text-muted-foreground leading-relaxed">{item.desc}</p>
+                  </div>
                 </div>
-                <h3 className="text-xl font-bold mb-3">{item.title}</h3>
-                <p className="text-muted-foreground leading-relaxed">{item.desc}</p>
+              ))}
+            </div>
+
+            {/* WhatsApp phone mockup */}
+            <div className="flex justify-center">
+              <div className="relative w-[272px] sm:w-[300px]">
+                {/* Glow behind phone */}
+                <div className="absolute -inset-6 bg-primary/8 rounded-full blur-3xl" />
+                {/* Phone shell */}
+                <div className="relative bg-[#1C1C1E] rounded-[52px] p-[10px] shadow-2xl ring-1 ring-white/10">
+                  <div className="bg-white rounded-[44px] overflow-hidden">
+
+                    {/* WhatsApp green header */}
+                    <div className="bg-[#075E54]">
+                      <div className="h-8" /> {/* status bar space */}
+                      <div className="px-4 pb-3 flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white text-sm font-bold shrink-0">K</div>
+                        <div className="flex-1 min-w-0">
+                          <div className="text-white text-sm font-semibold">Coach K</div>
+                          <div className="text-green-300 text-[10px]">online</div>
+                        </div>
+                        <Phone className="w-4 h-4 text-white/70 shrink-0" />
+                      </div>
+                    </div>
+
+                    {/* Chat area */}
+                    <div className="bg-[#ECE5DD] px-2 py-3 space-y-2 text-[10.5px] leading-snug" style={{ minHeight: 390 }}>
+
+                      {/* Morning check-in from Coach K */}
+                      <div className="flex">
+                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[78%] shadow-sm">
+                          <p className="font-medium">Good morning Sipho! 🌅</p>
+                          <p className="mt-0.5 text-gray-700">Yesterday: <strong>7,842 steps</strong> ✅</p>
+                          <p className="text-gray-700">Food on point. Today is <strong>chest day.</strong></p>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:01 ✓✓</p>
+                        </div>
+                      </div>
+
+                      {/* User reply */}
+                      <div className="flex justify-end">
+                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] px-2.5 py-2 max-w-[68%] shadow-sm">
+                          <p>Ready! Had eggs &amp; pap 💪</p>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:03 ✓✓</p>
+                        </div>
+                      </div>
+
+                      {/* Coach K reply */}
+                      <div className="flex">
+                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[78%] shadow-sm">
+                          <p>💪 <strong>Perfect pre-workout.</strong> Drink 500ml water before training. Let's go.</p>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:04 ✓✓</p>
+                        </div>
+                      </div>
+
+                      {/* User sends food photo */}
+                      <div className="flex justify-end">
+                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] p-1.5 max-w-[60%] shadow-sm">
+                          <div className="bg-gray-300/80 rounded-[10px] w-full h-16 flex items-center justify-center text-gray-500 text-xs">
+                            📸 lunch.jpg
+                          </div>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-0.5 pr-1">13:22 ✓✓</p>
+                        </div>
+                      </div>
+
+                      {/* Coach K macro breakdown */}
+                      <div className="flex">
+                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[80%] shadow-sm">
+                          <p>~430 cal · 31g protein · 40g carbs</p>
+                          <p className="mt-0.5 text-gray-700">Total today: <strong>1,710/2,200 cal</strong> 🎯</p>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-1">13:23 ✓✓</p>
+                        </div>
+                      </div>
+
+                      {/* Weekly Sunday report */}
+                      <div className="flex">
+                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[82%] shadow-sm">
+                          <p className="font-bold text-[#075E54]">📊 Week 3 Report</p>
+                          <p className="mt-1">Steps: 52,420 ✅</p>
+                          <p>Workouts: 4/4 ✅</p>
+                          <p>Weight: <strong>-0.8kg</strong> this week</p>
+                          <p>Food: 85% on track 🔥</p>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-1">Sun 20:00 ✓✓</p>
+                        </div>
+                      </div>
+
+                    </div>
+
+                    {/* Input bar */}
+                    <div className="bg-[#F0F0F0] px-2.5 py-2 flex items-center gap-2 border-t border-gray-200">
+                      <div className="flex-1 bg-white rounded-full px-3 py-1.5 text-[10px] text-gray-400">Message</div>
+                      <div className="w-7 h-7 rounded-full bg-[#075E54] flex items-center justify-center shrink-0">
+                        <MessageCircle className="w-3.5 h-3.5 text-white" />
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
               </div>
-            ))}
+            </div>
+
           </div>
         </div>
       </section>
