@@ -172,7 +172,7 @@ export default function LandingPage() {
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between py-4 sticky top-0 bg-background/90 backdrop-blur-md z-50 border-b border-border/50">
         <div className="flex items-center">
           <img
-            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_96,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_96,c_fit,f_auto/image-1779985068852_v6rnbe"
             alt="KamLife Lifestyle Coach"
             className="h-16 w-auto object-contain"
           />
@@ -683,7 +683,7 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center">
             <img
-              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_60,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_60,c_fit,f_auto/image-1779985068852_v6rnbe"
               alt="KamLife Lifestyle Coach"
               className="h-10 w-auto object-contain"
             />
