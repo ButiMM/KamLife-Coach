@@ -169,19 +169,17 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background text-foreground overflow-hidden">
       {/* Nav */}
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between py-4 sticky top-0 bg-background/90 backdrop-blur-md z-50 border-b border-border/50">
+      <nav className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between py-3 sticky top-0 bg-white/95 backdrop-blur-md z-50 border-b border-border/50">
         <div className="flex items-center">
           <img
-            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_96,c_fit,f_auto/image-1779985068852_v6rnbe"
+            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_120,c_fit,f_auto/image-1779985068852_v6rnbe"
             alt="KamLife Lifestyle Coach"
-            className="h-16 w-auto object-contain"
+            className="h-20 w-auto object-contain"
+            style={{ mixBlendMode: "multiply" }}
           />
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/login">
-            <Button variant="ghost" size="sm" className="font-medium hidden sm:flex">Coach Login</Button>
-          </Link>
-          <Button size="sm" className="rounded-full font-semibold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0" asChild>
+          <Button size="sm" className="rounded-full font-semibold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 px-5" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
               <WhatsAppIcon className="w-4 h-4 mr-1.5" />
               Start Free Trial
@@ -679,17 +677,18 @@ export default function LandingPage() {
       </section>
 
       {/* Footer */}
-      <footer className="border-t border-border py-10 px-4 text-center text-muted-foreground text-sm">
+      <footer className="border-t border-border py-10 px-4 text-center text-muted-foreground text-sm bg-white">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center">
             <img
-              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_60,c_fit,f_auto/image-1779985068852_v6rnbe"
+              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_100,c_fit,f_auto/image-1779985068852_v6rnbe"
               alt="KamLife Lifestyle Coach"
-              className="h-10 w-auto object-contain"
+              className="h-14 w-auto object-contain"
+              style={{ mixBlendMode: "multiply" }}
             />
           </div>
-          <p>Built for South Africa 🇿🇦 · POPIA compliant · R199/month</p>
-          <Link href="/login" className="hover:text-foreground transition-colors">Coach Login</Link>
+          <p>Built for South Africa · POPIA compliant · R199/month</p>
+          <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
         </div>
       </footer>
     </div>
