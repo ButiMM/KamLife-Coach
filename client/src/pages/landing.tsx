@@ -9,6 +9,12 @@ import { motion } from "framer-motion";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
+
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
 
@@ -20,7 +26,8 @@ const GOALS = [
   {
     icon: Flame,
     color: "text-orange-500",
-    bg: "bg-orange-50 dark:bg-orange-900/20",
+    headerGradient: "from-orange-100 to-amber-50 dark:from-orange-900/40 dark:to-orange-800/20",
+    iconBg: "bg-white dark:bg-black/30",
     border: "border-orange-200 dark:border-orange-800",
     title: "Lose fat",
     who: "Overweight · Post-baby · Slow metabolism · Diabetic",
@@ -29,7 +36,8 @@ const GOALS = [
   {
     icon: Dumbbell,
     color: "text-secondary",
-    bg: "bg-secondary/5 dark:bg-secondary/20",
+    headerGradient: "from-slate-100 to-blue-50 dark:from-secondary/40 dark:to-secondary/20",
+    iconBg: "bg-white dark:bg-black/30",
     border: "border-secondary/20 dark:border-secondary/40",
     title: "Build muscle",
     who: "Skinny · Underweight · Wants to bulk · Men and women",
@@ -38,7 +46,8 @@ const GOALS = [
   {
     icon: Heart,
     color: "text-orange-500",
-    bg: "bg-orange-50 dark:bg-orange-900/20",
+    headerGradient: "from-orange-100 to-rose-50 dark:from-orange-900/40 dark:to-rose-900/20",
+    iconBg: "bg-white dark:bg-black/30",
     border: "border-orange-200 dark:border-orange-800",
     title: "Get healthy",
     who: "Hypertension · PCOS · ARVs · Over 40 · Sedentary lifestyle",
@@ -47,7 +56,8 @@ const GOALS = [
   {
     icon: Target,
     color: "text-secondary",
-    bg: "bg-secondary/5 dark:bg-secondary/20",
+    headerGradient: "from-slate-100 to-indigo-50 dark:from-secondary/40 dark:to-secondary/20",
+    iconBg: "bg-white dark:bg-black/30",
     border: "border-secondary/20 dark:border-secondary/40",
     title: "Body recomp",
     who: "Wants to lose fat AND gain muscle · Plateau · Frustrated with the scale",
@@ -72,8 +82,8 @@ const FEATURES = [
   },
   {
     icon: Dumbbell,
-    title: "3–5 day programme — all levels",
-    desc: "Home, dumbbells, or full gym. Beginners through advanced. Coach K assigns your programme on Day 1 and adjusts as you improve.",
+    title: "2–5 day programme — all levels",
+    desc: "Home, dumbbells, or full gym. 2 days or 5 days — you choose. Coach K assigns your programme on Day 1 and adjusts as you improve.",
   },
   {
     icon: Footprints,
@@ -171,9 +181,9 @@ export default function LandingPage() {
           <Link href="/login">
             <Button variant="ghost" size="sm" className="font-medium hidden sm:flex">Coach Login</Button>
           </Link>
-          <Button size="sm" className="rounded-full font-semibold" asChild>
+          <Button size="sm" className="rounded-full font-semibold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-              <MessageCircle className="w-4 h-4 mr-1.5" />
+              <WhatsAppIcon className="w-4 h-4 mr-1.5" />
               Start Free Trial
             </a>
           </Button>
@@ -235,11 +245,11 @@ export default function LandingPage() {
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
             <Button
               size="lg"
-              className="h-14 px-8 rounded-2xl text-base font-bold bg-orange-500 hover:bg-orange-400 text-white shadow-2xl shadow-orange-500/30 hover:scale-[1.02] transition-all border-0"
+              className="h-14 px-8 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white shadow-2xl shadow-green-500/30 hover:scale-[1.02] transition-all border-0"
               asChild
             >
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="w-5 h-5 mr-2" />
+                <WhatsAppIcon className="w-5 h-5 mr-2" />
                 Start Free Trial — R199/month
               </a>
             </Button>
@@ -315,21 +325,25 @@ export default function LandingPage() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {GOALS.map((g) => (
-              <div key={g.title} className={`p-7 rounded-3xl border ${g.border} ${g.bg} hover:shadow-lg transition-all`}>
-                <div className={`w-12 h-12 rounded-2xl bg-white/60 dark:bg-black/20 flex items-center justify-center mb-5`}>
-                  <g.icon className={`w-6 h-6 ${g.color}`} />
+              <div key={g.title} className={`rounded-3xl border ${g.border} overflow-hidden hover:shadow-lg transition-all`}>
+                <div className={`bg-gradient-to-br ${g.headerGradient} px-7 py-8 flex items-center justify-center`}>
+                  <div className={`w-16 h-16 rounded-2xl ${g.iconBg} shadow-sm flex items-center justify-center`}>
+                    <g.icon className={`w-8 h-8 ${g.color}`} />
+                  </div>
                 </div>
-                <h3 className="text-xl font-bold mb-2">{g.title}</h3>
-                <p className={`text-xs font-semibold uppercase tracking-wide mb-3 ${g.color} opacity-80`}>{g.who}</p>
-                <p className="text-sm text-muted-foreground leading-relaxed">{g.what}</p>
+                <div className="bg-card px-7 py-6">
+                  <h3 className="text-xl font-bold mb-1">{g.title}</h3>
+                  <p className={`text-xs font-semibold uppercase tracking-wide mb-3 ${g.color}`}>{g.who}</p>
+                  <p className="text-sm text-muted-foreground leading-relaxed">{g.what}</p>
+                </div>
               </div>
             ))}
           </div>
           <div className="text-center mt-10">
-            <Button size="lg" className="h-14 px-8 rounded-2xl font-bold text-base" asChild>
+            <Button size="lg" className="h-14 px-8 rounded-2xl font-bold text-base bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-lg shadow-green-500/20" asChild>
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="w-5 h-5 mr-2" />
-                Start — Coach K asks your goal on Day 1
+                <WhatsAppIcon className="w-5 h-5 mr-2" />
+                Start on WhatsApp — Coach K asks your goal on Day 1
               </a>
             </Button>
           </div>
@@ -541,7 +555,7 @@ export default function LandingPage() {
             <p className="text-muted-foreground text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime on WhatsApp.</p>
             <ul className="space-y-3 mb-10">
               {[
-                "Personalised programme — gym, home, or dumbbells",
+                "Personalised 2–5 day programme — gym, home, or dumbbells",
                 "All goal types: fat loss · muscle gain · recomp · health",
                 "SA meal plans at Shoprite, Boxer & Pick n Pay prices",
                 "Daily WhatsApp coaching — morning + evening",
@@ -560,10 +574,10 @@ export default function LandingPage() {
                 </li>
               ))}
             </ul>
-            <Button size="lg" className="w-full h-14 rounded-2xl font-bold text-base" asChild>
+            <Button size="lg" className="w-full h-14 rounded-2xl font-bold text-base bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-lg shadow-green-500/20" asChild>
               <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <MessageCircle className="w-5 h-5 mr-2" />
-                Start your free trial
+                <WhatsAppIcon className="w-5 h-5 mr-2" />
+                Start your free trial on WhatsApp
               </a>
             </Button>
             <p className="text-xs text-muted-foreground text-center mt-4">7 days free · Then R199/month · Cancel anytime on WhatsApp</p>
@@ -637,9 +651,9 @@ export default function LandingPage() {
             3 questions on WhatsApp. Programme built in 2 minutes. Day 1 delivered immediately.
             Whatever your goal, whatever your budget — Coach K is built for you.
           </p>
-          <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-orange-500 hover:bg-orange-400 text-white border-0 shadow-2xl shadow-orange-500/30" asChild>
+          <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-2xl shadow-green-500/30" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-              <Phone className="w-5 h-5 mr-2" />
+              <WhatsAppIcon className="w-5 h-5 mr-2" />
               Start Coaching on WhatsApp
             </a>
           </Button>
