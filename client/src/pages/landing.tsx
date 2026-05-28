@@ -27,27 +27,27 @@ const GOALS = [
   },
   {
     icon: Dumbbell,
-    color: "text-blue-500",
-    bg: "bg-blue-50 dark:bg-blue-900/20",
-    border: "border-blue-200 dark:border-blue-800",
+    color: "text-secondary",
+    bg: "bg-secondary/5 dark:bg-secondary/20",
+    border: "border-secondary/20 dark:border-secondary/40",
     title: "Build muscle",
     who: "Skinny · Underweight · Wants to bulk · Men and women",
     what: "Progressive overload programme. High-protein SA meal plans. Weekly strength check-ins. Built for home, dumbbells, or a full gym.",
   },
   {
     icon: Heart,
-    color: "text-rose-500",
-    bg: "bg-rose-50 dark:bg-rose-900/20",
-    border: "border-rose-200 dark:border-rose-800",
+    color: "text-orange-500",
+    bg: "bg-orange-50 dark:bg-orange-900/20",
+    border: "border-orange-200 dark:border-orange-800",
     title: "Get healthy",
     who: "Hypertension · PCOS · ARVs · Over 40 · Sedentary lifestyle",
     what: "Coach K knows your condition. Adjusts for medication, doctor clearance, and lifestyle. No dangerous advice. Practical and safe.",
   },
   {
     icon: Target,
-    color: "text-emerald-500",
-    bg: "bg-emerald-50 dark:bg-emerald-900/20",
-    border: "border-emerald-200 dark:border-emerald-800",
+    color: "text-secondary",
+    bg: "bg-secondary/5 dark:bg-secondary/20",
+    border: "border-secondary/20 dark:border-secondary/40",
     title: "Body recomp",
     who: "Wants to lose fat AND gain muscle · Plateau · Frustrated with the scale",
     what: "Protein-high, calorie-controlled, training-heavy. The hardest goal done right. Requires consistency — Coach K makes that easy.",
@@ -220,7 +220,7 @@ export default function LandingPage() {
 
           <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
             Your personal SA fitness coach,{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-blue-400">
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-200">
               right in WhatsApp
             </span>
           </h1>
@@ -280,19 +280,19 @@ export default function LandingPage() {
       </main>
 
       {/* Who is this for */}
-      <section className="py-20 px-4 bg-muted/30">
+      <section className="py-20 px-4 bg-[#1E3A6E]">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold font-display mb-3">Who is Coach K for?</h2>
-            <p className="text-muted-foreground">If you've tried before and it didn't stick — this is built for you.</p>
+            <h2 className="text-3xl font-bold font-display mb-3 text-white">Who is Coach K for?</h2>
+            <p className="text-white/70">If you've tried before and it didn't stick — this is built for you.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {PERSONAS.map((p) => (
-              <div key={p.label} className="flex gap-4 p-5 rounded-2xl bg-card border border-border/50 hover:border-primary/20 transition-all">
+              <div key={p.label} className="flex gap-4 p-5 rounded-2xl bg-white/10 border border-white/20 hover:border-orange-400/60 hover:bg-white/15 transition-all">
                 <div className="text-3xl shrink-0">{p.emoji}</div>
                 <div>
-                  <div className="font-semibold text-sm mb-1">{p.label}</div>
-                  <p className="text-muted-foreground text-sm leading-relaxed">{p.desc}</p>
+                  <div className="font-semibold text-sm mb-1 text-white">{p.label}</div>
+                  <p className="text-white/70 text-sm leading-relaxed">{p.desc}</p>
                 </div>
               </div>
             ))}
@@ -414,7 +414,7 @@ export default function LandingPage() {
                   </div>
                 </div>
                 <p className="text-muted-foreground text-sm leading-relaxed italic">"{t.quote}"</p>
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-emerald-50 dark:bg-emerald-900/20 text-emerald-700 dark:text-emerald-400 text-xs font-semibold w-fit border border-emerald-200 dark:border-emerald-800">
+                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 text-xs font-semibold w-fit border border-orange-200 dark:border-orange-800">
                   <CheckCircle className="w-3.5 h-3.5" />
                   {t.result}
                 </div>
@@ -431,7 +431,7 @@ export default function LandingPage() {
           <p className="text-muted-foreground mb-12">All goals. All fitness levels. WhatsApp only. Cancel anytime.</p>
 
           <div className="bg-card rounded-3xl border-2 border-primary p-10 relative overflow-hidden text-left shadow-xl shadow-primary/10">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary to-emerald-500 rounded-t-3xl" />
+            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 to-amber-400 rounded-t-3xl" />
             <div className="flex items-center justify-between mb-4">
               <div className="text-sm font-semibold text-primary uppercase tracking-wide">KamLife Coach</div>
               <span className="text-xs font-bold bg-primary text-white px-3 py-1 rounded-full">Beta price</span>
