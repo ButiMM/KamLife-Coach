@@ -293,24 +293,6 @@ export default function LandingPage() {
         </motion.div>
       </main>
 
-      {/* Trust strip — immediately below hero */}
-      <div className="border-y border-border/40 bg-background py-5 px-4">
-        <div className="max-w-4xl mx-auto flex flex-wrap justify-center items-center gap-x-10 gap-y-3 text-sm text-muted-foreground">
-          {[
-            { icon: "SA", text: "Built for South Africa" },
-            { icon: "🔒", text: "POPIA compliant" },
-            { icon: "✅", text: "No long-term contract" },
-            { icon: "📱", text: "Works on any phone — no app needed" },
-            { icon: "💬", text: "Cancel anytime by WhatsApp" },
-          ].map((item) => (
-            <div key={item.text} className="flex items-center gap-1.5 font-medium">
-              <span>{item.icon}</span>
-              <span>{item.text}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
       {/* Who is this for */}
       <section className="py-20 px-4 bg-[#1E3A6E]">
         <div className="max-w-5xl mx-auto">
