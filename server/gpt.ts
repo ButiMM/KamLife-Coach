@@ -9,24 +9,48 @@ import { getDisplayName, sastDayStart } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 
 // ============================================================
+// CONCURRENCY LIMITER — max 25 simultaneous OpenAI calls
+// Prevents thundering-herd when 100s of messages arrive at once.
+// Callers beyond the limit wait in line rather than all hitting
+// the API simultaneously and getting rate-limited together.
+// ============================================================
+let _openaiSlots = 25;
+const _openaiQueue: Array<() => void> = [];
+
+function acquireSlot(): Promise<void> {
+  if (_openaiSlots > 0) { _openaiSlots--; return Promise.resolve(); }
+  return new Promise(resolve => _openaiQueue.push(resolve));
+}
+function releaseSlot(): void {
+  const next = _openaiQueue.shift();
+  if (next) { next(); } else { _openaiSlots++; }
+}
+
+// ============================================================
 // EXPONENTIAL BACKOFF WRAPPER — retries on OpenAI 429 rate limits
+// Wrapped inside concurrency limiter so max 25 calls run at once.
 // ============================================================
 async function withOpenAIRetry<T>(fn: () => Promise<T>, label = "openai"): Promise<T> {
-  const MAX_RETRIES = 3;
-  for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-    try {
-      return await fn();
-    } catch (err: any) {
-      const status = err?.status ?? err?.statusCode ?? 0;
-      const msg = (err?.message ?? "").toLowerCase();
-      const isRateLimit = status === 429 || msg.includes("rate limit") || msg.includes("quota");
-      if (!isRateLimit || attempt === MAX_RETRIES) throw err;
-      const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
-      console.warn(`[${label}] rate-limited — retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
-      await new Promise(r => setTimeout(r, delayMs));
+  await acquireSlot();
+  try {
+    const MAX_RETRIES = 3;
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        return await fn();
+      } catch (err: any) {
+        const status = err?.status ?? err?.statusCode ?? 0;
+        const msg = (err?.message ?? "").toLowerCase();
+        const isRateLimit = status === 429 || msg.includes("rate limit") || msg.includes("quota");
+        if (!isRateLimit || attempt === MAX_RETRIES) throw err;
+        const delayMs = Math.pow(2, attempt) * 1000; // 1s, 2s, 4s
+        console.warn(`[${label}] rate-limited — retry ${attempt + 1}/${MAX_RETRIES} in ${delayMs}ms`);
+        await new Promise(r => setTimeout(r, delayMs));
+      }
     }
+    throw new Error("unreachable");
+  } finally {
+    releaseSlot();
   }
-  throw new Error("unreachable");
 }
 
 const openai = new OpenAI({

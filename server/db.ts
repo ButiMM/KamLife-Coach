@@ -12,9 +12,9 @@ if (!process.env.DATABASE_URL) {
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 15,                    // hard cap — Railway postgres allows 100, keeping headroom for scheduler/admin
+  max: 50,                    // Railway postgres allows 100; 50 for app, leaving headroom for scheduler/admin/migrations
   idleTimeoutMillis: 30_000,  // close idle connections after 30s
-  connectionTimeoutMillis: 5_000, // fail fast if no connection available within 5s
+  connectionTimeoutMillis: 3_000, // fail fast — better a quick error than a 5s queue pile-up under load
 });
 
 export const db = drizzle(pool, { schema });
