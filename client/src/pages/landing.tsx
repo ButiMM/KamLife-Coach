@@ -212,6 +212,15 @@ export default function LandingPage() {
         {/* Dark overlay so text stays readable over any video */}
         <div className="absolute inset-0 bg-black/40" />
 
+        {/* Brand figure watermark — the orange runner glows through mix-blend-mode on dark bg */}
+        <img
+          src="https://res.cloudinary.com/dkxpypiak/image/upload/w_900,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+          className="absolute right-[-8%] bottom-[-5%] w-[520px] sm:w-[700px] opacity-[0.12] select-none pointer-events-none"
+          style={{ mixBlendMode: "screen" }}
+          aria-hidden="true"
+          alt=""
+        />
+
         {/* Bottom fade to blend into next section */}
         <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
 
@@ -295,9 +304,35 @@ export default function LandingPage() {
         </motion.div>
       </main>
 
+      {/* Trust strip — immediately below hero */}
+      <div className="border-y border-border/40 bg-background py-5 px-4">
+        <div className="max-w-4xl mx-auto flex flex-wrap justify-center items-center gap-x-10 gap-y-3 text-sm text-muted-foreground">
+          {[
+            { icon: "🇿🇦", text: "Built for South Africa" },
+            { icon: "🔒", text: "POPIA compliant" },
+            { icon: "✅", text: "No long-term contract" },
+            { icon: "📱", text: "Works on any phone — no app needed" },
+            { icon: "💬", text: "Cancel anytime by WhatsApp" },
+          ].map((item) => (
+            <div key={item.text} className="flex items-center gap-1.5 font-medium">
+              <span>{item.icon}</span>
+              <span>{item.text}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+
       {/* Who is this for */}
-      <section className="py-20 px-4 bg-[#1E3A6E]">
-        <div className="max-w-5xl mx-auto">
+      <section className="py-20 px-4 bg-[#1E3A6E] relative overflow-hidden">
+        {/* Brand figure watermark */}
+        <img
+          src="https://res.cloudinary.com/dkxpypiak/image/upload/w_700,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+          className="absolute left-[-8%] top-1/2 -translate-y-1/2 w-[380px] sm:w-[480px] opacity-[0.08] select-none pointer-events-none"
+          style={{ mixBlendMode: "screen" }}
+          aria-hidden="true"
+          alt=""
+        />
+        <div className="max-w-5xl mx-auto relative">
           <div className="text-center mb-12">
             <h2 className="text-3xl font-bold font-display mb-3 text-white">Who is Coach K for?</h2>
             <p className="text-white/70">If you've tried before and it didn't stick — this is built for you.</p>
@@ -643,8 +678,16 @@ export default function LandingPage() {
       </section>
 
       {/* Final CTA */}
-      <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center">
-        <div className="max-w-2xl mx-auto">
+      <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center relative overflow-hidden">
+        {/* Brand figure watermark — right side */}
+        <img
+          src="https://res.cloudinary.com/dkxpypiak/image/upload/w_700,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+          className="absolute right-[-5%] top-1/2 -translate-y-1/2 w-[340px] sm:w-[440px] opacity-[0.08] select-none pointer-events-none"
+          style={{ mixBlendMode: "screen" }}
+          aria-hidden="true"
+          alt=""
+        />
+        <div className="max-w-2xl mx-auto relative">
           <h2 className="text-4xl font-bold font-display mb-4">Your programme is waiting.</h2>
           <p className="text-white/75 text-lg mb-8">
             3 questions on WhatsApp. Programme built in 2 minutes. Day 1 delivered immediately.
