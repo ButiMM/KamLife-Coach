@@ -77,8 +77,8 @@ const PERSONAS = [
 const FEATURES = [
   {
     icon: Apple,
-    title: "SA food logging — any meal",
-    desc: "Type what you ate or snap a photo. Pap, pilchards, kota, braai, Nando's — Coach K knows it all. No calorie app needed.",
+    title: "Eat what you already eat — just smarter",
+    desc: "No clean eating. No expensive salads. Log your pap, your kota, your braai — Coach K shows you exactly how it fits your goal and what to adjust.",
   },
   {
     icon: Dumbbell,
@@ -92,8 +92,8 @@ const FEATURES = [
   },
   {
     icon: ShoppingCart,
-    title: "Grocery list rebuild",
-    desc: "Send your shopping list. Coach K rewrites it optimised for your goal and budget — with SA store prices and quantities included.",
+    title: "Your exact grocery list — done for you",
+    desc: "Tell Coach K your budget. Get back a specific Shoprite or Boxer list — exact items, exact quantities, exact rand amounts. No guessing. No wasted money.",
   },
   {
     icon: Camera,
@@ -107,13 +107,13 @@ const FEATURES = [
   },
   {
     icon: Shield,
-    title: "Braai, kota, and takeout coaching",
-    desc: "Nando's, KFC, Steers, Chicken Licken — real guides for every SA eating scenario. You never have to feel stuck.",
+    title: "Braai, KFC, kota — you're covered",
+    desc: "Going to a braai? Coach K tells you what to eat and how much. Nando's? Steers? Chicken Licken? There's a guide for all of it. Real life, not a diet magazine.",
   },
   {
     icon: Moon,
-    title: "Daily accountability",
-    desc: "Morning check-in with yesterday's summary. Evening nudge when habits slip. Water reminders. Sleep reminders. All automatic.",
+    title: "Coach K notices when you go quiet",
+    desc: "Miss a check-in? Coach K follows up. Go two days without logging? You'll hear about it — not to judge, but to pull you back. That's the accountability most people are missing.",
   },
   {
     icon: Trophy,
@@ -238,8 +238,8 @@ export default function LandingPage() {
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Lose fat. Build muscle. Get healthier. Programmes for every body, every budget, every lifestyle —
-            built specifically for South Africa. No app to download. No gym required.
+            Coach K tells you exactly what to eat, how to train, and keeps you accountable every single day —
+            built for South African food, budgets, and real life. No app. No gym needed.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
@@ -555,18 +555,17 @@ export default function LandingPage() {
             <p className="text-muted-foreground text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime on WhatsApp.</p>
             <ul className="space-y-3 mb-10">
               {[
+                "Exact grocery list — Shoprite, Boxer & Pick n Pay, your budget",
+                "Braai, kota, KFC, Steers — real SA eating, fully coached",
+                "Daily accountability — Coach K notices when you go quiet",
                 "Personalised 2–5 day programme — gym, home, or dumbbells",
                 "All goal types: fat loss · muscle gain · recomp · health",
-                "SA meal plans at Shoprite, Boxer & Pick n Pay prices",
-                "Daily WhatsApp coaching — morning + evening",
-                "Photo food logging — snap and send",
-                "Automatic step sync from your health app",
-                "Grocery list rebuild for your goal and budget",
-                "Braai, kota, fast food, and takeout coaching",
-                "Weekly Sunday progress reports",
+                "Photo food logging — snap your plate, get feedback in 10 seconds",
+                "Automatic step sync from Google Fit, Samsung Health, Apple Health",
+                "Weekly Sunday progress report — steps, weight, food, verdict",
                 "Injury modifications and medical condition support",
                 "Supplement advice — honest, SA-priced",
-                "7-day free trial — Day 1 sent immediately",
+                "7-day free trial — programme sent on Day 1",
               ].map((item) => (
                 <li key={item} className="flex items-start gap-2 text-sm">
                   <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
