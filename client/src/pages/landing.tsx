@@ -1,8 +1,9 @@
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star,
   ChevronRight, Phone, Target, Heart, Flame, Dumbbell, Apple, Footprints,
-  Moon, Camera, ShoppingCart, Trophy
+  Moon, Camera, ShoppingCart, Trophy, Plus, Minus
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "wouter";
@@ -143,6 +144,7 @@ const TESTIMONIALS = [
 ];
 
 export default function LandingPage() {
+  const [openFaq, setOpenFaq] = useState<number | null>(null);
   const { data: stats } = useQuery({
     queryKey: ["/api/public/stats"],
     queryFn: async () => {
@@ -160,9 +162,9 @@ export default function LandingPage() {
       <nav className="max-w-7xl mx-auto px-4 sm:px-6 h-18 flex items-center justify-between py-4 sticky top-0 bg-background/90 backdrop-blur-md z-50 border-b border-border/50">
         <div className="flex items-center">
           <img
-            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_56,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_96,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
             alt="KamLife Lifestyle Coach"
-            className="h-12 w-auto object-contain"
+            className="h-16 w-auto object-contain"
           />
         </div>
         <div className="flex items-center gap-3">
@@ -393,7 +395,7 @@ export default function LandingPage() {
       </section>
 
       {/* Testimonials */}
-      <section className="py-24 px-4 bg-muted/30">
+      <section className="py-24 px-4 bg-orange-50/50 dark:bg-orange-900/10">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold font-display mb-4">Real clients. Real results.</h2>
@@ -479,7 +481,7 @@ export default function LandingPage() {
       <section className="py-24 px-4 bg-muted/30">
         <div className="max-w-2xl mx-auto">
           <h2 className="text-4xl font-bold font-display text-center mb-12">Common questions</h2>
-          <div className="space-y-6">
+          <div className="space-y-3">
             {[
               {
                 q: "Do I need a gym membership?",
@@ -505,10 +507,26 @@ export default function LandingPage() {
                 q: "How do I cancel?",
                 a: "Reply CANCEL to Coach K at any time. No phone calls. No forms. No hassle. Your programme and progress are saved for 90 days — come back whenever you're ready.",
               },
-            ].map((faq) => (
-              <div key={faq.q} className="p-6 rounded-2xl bg-card border border-border/50">
-                <h3 className="font-bold mb-2">{faq.q}</h3>
-                <p className="text-muted-foreground text-sm leading-relaxed">{faq.a}</p>
+            ].map((faq, i) => (
+              <div
+                key={faq.q}
+                className="rounded-2xl bg-card border border-border/50 overflow-hidden"
+              >
+                <button
+                  className="w-full flex items-center justify-between gap-4 p-6 text-left hover:bg-muted/30 transition-colors"
+                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                >
+                  <h3 className="font-bold">{faq.q}</h3>
+                  {openFaq === i
+                    ? <Minus className="w-4 h-4 text-primary shrink-0" />
+                    : <Plus className="w-4 h-4 text-muted-foreground shrink-0" />
+                  }
+                </button>
+                {openFaq === i && (
+                  <div className="px-6 pb-6 border-t border-border/50 pt-4">
+                    <p className="text-muted-foreground text-sm leading-relaxed">{faq.a}</p>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -538,9 +556,9 @@ export default function LandingPage() {
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
           <div className="flex items-center">
             <img
-              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_40,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
+              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_60,c_fit,f_auto/WhatsApp_Image_2026-01-05_at_16.56.25_yeeq9h"
               alt="KamLife Lifestyle Coach"
-              className="h-8 w-auto object-contain"
+              className="h-10 w-auto object-contain"
             />
           </div>
           <p>Built for South Africa 🇿🇦 · POPIA compliant · R199/month</p>
