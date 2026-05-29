@@ -557,7 +557,19 @@ SA PORTION STANDARDS (use these — not US defaults):
 - Pilchards (whole tin, 215g drained): ~215 kcal, 26g protein
 - Bread slice (SA standard): 70g white = ~170 kcal, 65g brown = ~155 kcal
 - Egg (large): 65g = ~85 kcal, 7g protein
-- Use Nando's, Steers, KFC SA actual menu calories when those brands are mentioned
+- Use Nando's, Steers, KFC, Wimpy, Spur, Mugg & Bean SA actual menu calories when those brands are mentioned
+
+SA FAST-FOOD BREAKFAST (use the real menu item, never a generic "breakfast muffin" guess):
+- McDonald's Big Breakfast (eggs, hash brown, pork sausage, English muffin): ~760 kcal, 26g protein
+- McDonald's Egg McMuffin: ~290 kcal, 17g protein. Bacon & Egg McMuffin: ~310 kcal, 18g protein
+- McDonald's Hash Brown: ~140 kcal, 1g protein. Hotcakes (3, syrup + butter): ~580 kcal, 9g protein
+- A plain "McDonald's breakfast" with no item named = treat as the Big Breakfast
+- Wimpy / Spur / Mugg & Bean full breakfast: ~1100-1470 kcal — log as one breakfast plate, not separate items
+
+DRINKS — ZERO/SUGAR-FREE IS NOT FULL SUGAR:
+- Regular energy drink (Red Bull 250ml) = ~113 kcal. Coke/cola 330ml = ~140 kcal.
+- If the message says "zero", "zero sugar", "sugar free", "sugarfree", "no sugar", "diet", or "light" — that drink is ~0-5 kcal, 0g protein. NEVER log the full-sugar value, and NEVER mention "sugar" in the note for a sugar-free drink.
+- A "sugar free" milk coffee (mocha/latte/cappuccino) still has calories from the milk — only fizzy drinks/energy drinks go to ~0.
 
 Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
         },

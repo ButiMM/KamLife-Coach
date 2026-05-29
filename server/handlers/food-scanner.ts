@@ -146,6 +146,44 @@ const FUZZY_BLACKLIST = new Set([
   "missed", "missing", "lately", "recently", "done", "gone",
 ]);
 
+// Sugary sodas / energy drinks that have a true zero-calorie version. Matched against
+// a food entry's name + aliases, scoped to drink categories only, so real meals are never
+// touched. Mocha/latte etc. are NOT here — a "sugar free" milk coffee still has calories.
+const SUGARY_DRINK_RE = /\b(coke|cola|coca[\s-]?cola|pepsi|sprite|fanta|stoney|sparletta|sparberry|cream(?:e)? soda|powerade|energade|lucozade|monster|red\s?bull|redbull|score energy|dragon energy|play energy|switch energy|reboot|energy drink|cool[\s-]?drink|cooldrink|fizzy|soft drink|soda)\b/i;
+
+// Detect an explicit sugar-free intent in the raw message.
+function hasSugarFreeIntent(lower: string): boolean {
+  if (/\b(zero[\s-]?sugar|sugar[\s-]?free|sugarfree|no[\s-]?sugar|no[\s-]?cal|zero[\s-]?cal|diet)\b/i.test(lower)) return true;
+  // "<drink> zero" or "zero <drink>" — e.g. "red bull zero", "zero coke"
+  const drinkWords = "coke|cola|pepsi|sprite|fanta|stoney|sparletta|powerade|energade|lucozade|monster|red\\s?bull|redbull|energy|cool\\s?drink|cooldrink|soda";
+  if (new RegExp(`\\b(?:${drinkWords})\\b[\\w\\s]{0,12}\\bzero\\b`, "i").test(lower)) return true;
+  if (new RegExp(`\\bzero\\b[\\w\\s]{0,12}\\b(?:${drinkWords})\\b`, "i").test(lower)) return true;
+  return false;
+}
+
+// When the client logs a zero/sugar-free/diet drink, redirect any matched sugary soda or
+// energy drink to the canonical zero-calorie entry. Stops "sugar free energy drink" being
+// logged as a 113 kcal Red Bull — and stops the coach lecturing about "sugar" on a 0-cal drink.
+function redirectSugarFreeDrinks(foods: SAFood[], lower: string): SAFood[] {
+  if (!hasSugarFreeIntent(lower)) return foods;
+  const zeroEntry = SA_FOODS_SEED.find(f => f.name === "Diet Coke / Coke Zero");
+  if (!zeroEntry) return foods;
+  let changed = false;
+  const out: SAFood[] = [];
+  for (const f of foods) {
+    const isSugaryDrink = (f.typicalPortionCalories || 0) > 5
+      && (f.category === "drink" || f.category === "junk" || f.category === "beverage")
+      && SUGARY_DRINK_RE.test([f.name, ...f.aliases].join(" "));
+    if (isSugaryDrink) {
+      changed = true;
+      if (!out.some(o => o.name === zeroEntry.name)) out.push(zeroEntry);
+    } else {
+      out.push(f);
+    }
+  }
+  return changed ? out : foods;
+}
+
 export function scanForSAFoods(msg: string): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
@@ -188,7 +226,7 @@ export function scanForSAFoods(msg: string): SAFood[] {
   }
 
   // PASS 2: Fuzzy matching (only if exact found nothing)
-  if (matched.length > 0) return matched;
+  if (matched.length > 0) return redirectSugarFreeDrinks(matched, lower);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];
@@ -268,7 +306,7 @@ export function scanForSAFoods(msg: string): SAFood[] {
     cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
   }
 
-  return cleaned;
+  return redirectSugarFreeDrinks(cleaned, lower);
 }
 
 export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {

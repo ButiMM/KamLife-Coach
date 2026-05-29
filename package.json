@@ -11,7 +11,8 @@
     "test:golden": "tsx script/golden-regression.ts",
     "test:safety": "tsx script/safety-audit.ts",
     "test:unit": "tsx script/unit-tests.ts",
-    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts",
+    "test:scanner": "tsx script/food-scanner-tests.ts",
+    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts",
     "db:push": "drizzle-kit push"
   },
   "dependencies": {
