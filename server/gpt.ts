@@ -846,7 +846,14 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const clientContext = `${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   let systemContent = `${COACH_K_SYSTEM}${tail}`;
-  const MAX_SYSTEM_CHARS = 16_000;
+  // Cap lands the cut AFTER the goal-aware food logic (CLAUDE.md: never drop it — it ends
+  // ~char 18.4k) and BEFORE the bulky programme/food-table reference (~char 33.8k) that the
+  // specialist agents already own. 27k (not 24k) leaves headroom so the goal-aware section
+  // survives even for memory-rich paying clients whose dynamic tail runs ~8k. So the hot path
+  // always carries voice + scenario framework + situation handling + goal-aware coaching, and
+  // the reference data stays out of the per-message token bill. Static prefix is identical
+  // across calls, so it caches at ~50%.
+  const MAX_SYSTEM_CHARS = 27_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
     console.warn(`[GPT] System prompt ${systemContent.length} chars — trimming static brain to fit ${MAX_SYSTEM_CHARS} (client context preserved)`);
     const room = Math.max(0, MAX_SYSTEM_CHARS - tail.length);
