@@ -244,6 +244,11 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
             if (now - v > 30_000) mediaDedup.delete(k);
           }
         }
+        if (phoneMediaDedup.size > 500) {
+          for (const [k, v] of phoneMediaDedup) {
+            if (now - v > 5_000) phoneMediaDedup.delete(k);
+          }
+        }
       }
 
       // ── ASYNC VOICE: ACK immediately, process in background ──
