@@ -837,12 +837,20 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
 
-  let systemContent = `${COACH_K_SYSTEM}\n\n${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
-  const MAX_SYSTEM_CHARS = 10_000;
+  // The client's own data (name, goal, today's food, lifts, memory) + the instruction are
+  // small, cheap, and the entire reason a reply feels personal — they must NEVER be
+  // truncated. COACH_K_SYSTEM is the large, cacheable static prefix. If we exceed budget,
+  // trim ONLY the static brain's tail (deep reference material the specialist agents already
+  // cover), never the client context or the instruction. Cap is deliberately modest to
+  // control token cost — the static prefix is identical across calls so it gets cached.
+  const clientContext = `${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
+  const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
+  let systemContent = `${COACH_K_SYSTEM}${tail}`;
+  const MAX_SYSTEM_CHARS = 16_000;
   if (systemContent.length > MAX_SYSTEM_CHARS) {
-    console.warn(`[GPT] System prompt ${systemContent.length} chars — capping at ${MAX_SYSTEM_CHARS}`);
-    const tail = `\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
-    systemContent = systemContent.slice(0, MAX_SYSTEM_CHARS - tail.length) + tail;
+    console.warn(`[GPT] System prompt ${systemContent.length} chars — trimming static brain to fit ${MAX_SYSTEM_CHARS} (client context preserved)`);
+    const room = Math.max(0, MAX_SYSTEM_CHARS - tail.length);
+    systemContent = COACH_K_SYSTEM.slice(0, room) + tail;
   }
 
   let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];

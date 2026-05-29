@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { queryFoodDatabase } from "./foods";
+import { HANDLING_CONFUSION } from "./coach-prompt";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -41,6 +42,8 @@ export async function nutritionAgent(user: any, message: string, memoryContext: 
   } catch { }
 
   const systemPrompt = `${NUTRITION_SYSTEM}
+
+${HANDLING_CONFUSION}
 
 CLIENT PROFILE:
 Name: ${name}
@@ -97,6 +100,8 @@ export async function programmingAgent(user: any, message: string, memoryContext
 
   const systemPrompt = `${PROGRAMMING_SYSTEM}
 
+${HANDLING_CONFUSION}
+
 CLIENT PROFILE:
 Name: ${name}
 Training mode: ${mode}
@@ -152,6 +157,8 @@ export async function mindsetAgent(user: any, message: string, memoryContext: st
   const workouts = user.totalWorkoutsCompleted || 0;
 
   const systemPrompt = `${MINDSET_SYSTEM}
+
+${HANDLING_CONFUSION}
 
 CLIENT PROFILE:
 Name: ${name}
