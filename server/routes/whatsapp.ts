@@ -23,7 +23,7 @@ async function sendParts(
     const delays = [0, 2000, 5000, 10000];
     for (let d = 0; d < delays.length; d++) {
       if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
-      try { await twilioC.messages.create(params as Parameters<typeof twilioC.messages.create>[0]); break; }
+      try { await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]); break; }
       catch (e: any) { if (d === delays.length - 1) console.error(`[TEXT_ASYNC] part ${i + 1} failed: ${e.message}`); }
     }
   }

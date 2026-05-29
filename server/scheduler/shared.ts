@@ -253,7 +253,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   for (let i = 0; i < delays.length; i++) {
     if (delays[i] > 0) await new Promise(r => setTimeout(r, delays[i]));
     try {
-      await twilioClient.messages.create(params as Parameters<typeof twilioClient.messages.create>[0]);
+      await twilioClient.messages.create(params as unknown as Parameters<typeof twilioClient.messages.create>[0]);
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);

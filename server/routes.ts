@@ -181,7 +181,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)
   const coachPhone = (process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE || "").replace(/\D/g, "");
   const userPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
-  const isCoach = coachPhone && userPhone === coachPhone;
+  const isCoach = !!(coachPhone && userPhone === coachPhone);
   if (isCoach && (user.subscriptionStatus === "inactive" || user.subscriptionStatus === "trial")) {
     await db.update(users).set({ subscriptionStatus: "active" }).where(eq(users.phoneNumber, phone));
     user.subscriptionStatus = "active";

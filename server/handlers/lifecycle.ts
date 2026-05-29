@@ -873,7 +873,7 @@ export async function handleLifecycle(ctx: {
       if (newGoal === "maintenance") {
         newCals = (user.calorieTarget || 2000) + 200;
       } else {
-        const t = calculateTargets(wt, newGoal === "maintenance" ? "fat_loss" : newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
+        const t = calculateTargets(wt, newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
         newCals = t.calorieTarget;
         newProt = t.proteinTarget;
       }
@@ -1051,7 +1051,7 @@ export async function handleLifecycle(ctx: {
   const detectedLang = detectLanguage(m);
   const clientFirstName = user.name ? user.name.split(" ")[0] : null;
   // Retrieve stored language preference (may be more reliable than per-message detection)
-  const storedLang = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1] as import("./constants").SALanguage | undefined;
+  const storedLang = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1] as import("../constants").SALanguage | undefined;
   const activeLang = detectedLang !== "en" ? detectedLang : (storedLang || "en");
   let langPrefix = "";
   if (clientFirstName) {
