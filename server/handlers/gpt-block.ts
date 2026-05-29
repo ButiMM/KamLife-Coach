@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users, chatHistory } from "../../shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
 import { recomputeTodayFoodTotals } from "./food-scanner";
