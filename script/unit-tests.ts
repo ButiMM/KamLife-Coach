@@ -364,6 +364,40 @@ test("streak: late-night SAST log (11pm) counts as correct date", () => {
 });
 
 // ============================================================
+// Retrospective diet detection — regex must match/block correctly
+// ============================================================
+
+// Mirror the exact regex from food-context.ts so tests stay in sync
+const RETRO_DIET_RE = /\b(within\s+the\s+week|this\s+week\s+i.?(?:ve|have|had|been)|during\s+the\s+week|throughout\s+the\s+week|last\s+few\s+days|a\s+few\s+days\s+ago|over\s+the\s+(?:past|last)\s+(?:few\s+days|week)|most\s+days?\s+(?:i\s+)?eat|every\s+day\s+i\s+(?:eat|have|had)|i\s+(?:usually|normally|generally|typically)\s+(?:eat|have|had|have\s+been\s+eating)|my\s+usual\s+(?:diet|meals?|foods?|breakfast|lunch|dinner)|i\s+tend\s+to\s+(?:eat|have)|my\s+normal\s+(?:diet|meals?|foods?)|for\s+the\s+past\s+(?:few\s+days|week))\b/i;
+const TODAY_SIGNAL_RE = /\b(today|just\s+had|just\s+ate|right\s+now)\b/i;
+const isRetroDiet = (msg: string) => RETRO_DIET_RE.test(msg.toLowerCase()) && !TODAY_SIGNAL_RE.test(msg.toLowerCase());
+
+test("'within the week' is detected as retro", () => {
+  assert.ok(isRetroDiet("I has oats eggs and bread for breakfast within the week"), "within the week should be retro");
+});
+test("'I usually eat chicken' is detected as retro", () => {
+  assert.ok(isRetroDiet("I usually eat chicken rice and veg"), "usually eat = retro");
+});
+test("'I normally have oats' is detected as retro", () => {
+  assert.ok(isRetroDiet("I normally have oats and eggs for breakfast"), "normally have = retro");
+});
+test("'during the week' is detected as retro", () => {
+  assert.ok(isRetroDiet("During the week I eat pap and mince"), "during the week = retro");
+});
+test("'last few days' is detected as retro", () => {
+  assert.ok(isRetroDiet("Last few days I have been eating chicken and sweet potato"), "last few days = retro");
+});
+test("'today I had eggs' is NOT retro (today override)", () => {
+  assert.ok(!isRetroDiet("Today I had eggs and oats for breakfast"), "explicit 'today' should NOT be retro");
+});
+test("plain 'I had chicken for dinner' is NOT retro", () => {
+  assert.ok(!isRetroDiet("I had chicken for dinner"), "plain today log must not be retro");
+});
+test("'usually but today I had' respects today-signal override", () => {
+  assert.ok(!isRetroDiet("I usually eat oats but today I had eggs"), "today override must suppress retro flag");
+});
+
+// ============================================================
 // Subscription gate: inactive users should be blocked from media
 // ============================================================
 

@@ -480,6 +480,62 @@ export async function handleFoodContext(ctx: {
   const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 15;
   const foodLogOverride = hasLogTrigger && hasActualFood;
 
+  // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
+  // These are diet audits describing routine or past eating — NOT today's food log.
+  // Must fire BEFORE the scanner path so nothing gets logged to today's calories.
+  const RETRO_DIET_RE = /\b(within\s+the\s+week|this\s+week\s+i.?(?:ve|have|had|been)|during\s+the\s+week|throughout\s+the\s+week|last\s+few\s+days|a\s+few\s+days\s+ago|over\s+the\s+(?:past|last)\s+(?:few\s+days|week)|most\s+days?\s+(?:i\s+)?eat|every\s+day\s+i\s+(?:eat|have|had)|i\s+(?:usually|normally|generally|typically)\s+(?:eat|have|had|have\s+been\s+eating)|my\s+usual\s+(?:diet|meals?|foods?|breakfast|lunch|dinner)|i\s+tend\s+to\s+(?:eat|have)|my\s+normal\s+(?:diet|meals?|foods?)|for\s+the\s+past\s+(?:few\s+days|week))\b/i;
+  const todaySignalPresent = /\b(today|just\s+had|just\s+ate|right\s+now)\b/i.test(m);
+  const isRetroDietAudit = RETRO_DIET_RE.test(m) && !todaySignalPresent && hasActualFood;
+
+  if (isRetroDietAudit) {
+    const goal = user.goalType || "fat_loss";
+    const name = user.name?.split(" ")[0] || "";
+    const categories = foodsInMsg.map(f => f.category);
+    const hasProtein = categories.some(c => c === "protein");
+    const hasCarb = categories.some(c => c === "carb");
+    const hasJunk = categories.some(c => c === "junk");
+    let dietFeedback: string;
+    if (goal === "muscle_gain") {
+      if (hasProtein && hasCarb) {
+        dietFeedback = `Protein and carbs in the mix — good base for building. Keep that going consistently.`;
+      } else if (hasProtein) {
+        dietFeedback = `Solid protein choices. For muscle gain, make sure you are pairing them with enough carbs (rice, oats, sweet potato) to fuel training.`;
+      } else if (hasCarb) {
+        dietFeedback = `Good carb sources. For muscle, protein is the priority — add chicken, eggs, or mince to every meal.`;
+      } else {
+        dietFeedback = `Decent food choices. For muscle gain, anchor every meal with 30g+ protein.`;
+      }
+    } else {
+      if (hasProtein && hasCarb && !hasJunk) {
+        dietFeedback = `Solid structure — protein and carbs, no junk. That is a fat loss diet done right. Consistency over the week is what counts.`;
+      } else if (hasJunk) {
+        dietFeedback = `Good foods in there with some extras. For fat loss, the weekly pattern matters more than any single meal — keep your core meals clean.`;
+      } else if (hasProtein) {
+        dietFeedback = `Good protein focus. Add some veg (spinach, cabbage, butternut) to increase volume without adding calories — keeps you fuller longer.`;
+      } else {
+        dietFeedback = `Reasonable choices. For fat loss, make sure protein anchors every meal — it controls hunger and preserves muscle.`;
+      }
+    }
+    const retroReply = `${name ? name + ", t" : "T"}hanks for the overview — good to know what your week looks like.\n\n${dietFeedback}\n\n_This hasn't been logged as today's calories._ To log today, just tell me what you have eaten: *"I had oats and eggs for breakfast"* and I will add it.`;
+    await logChat(user.id, message, retroReply, "DIET_AUDIT");
+    return retroReply;
+  }
+
+  // DIET AUDIT CONTINUATION — "And it was chicken...", "Also had X" immediately after a diet audit
+  if (!isRetroDietAudit && hasActualFood && !hasLogTrigger && !todaySignalPresent && /^and\b/i.test(m.trim())) {
+    try {
+      const lastChat = await db.select({ intent: chatHistory.intent })
+        .from(chatHistory).where(eq(chatHistory.userId, user.id))
+        .orderBy(desc(chatHistory.createdAt)).limit(1);
+      if (lastChat[0]?.intent === "DIET_AUDIT") {
+        const foodList = foodsInMsg.map(f => f.name).join(", ");
+        const contReply = `Noted — ${foodList} added to your diet picture.\n\n_Still not logged as today's calories._ To log today: *"I had [food] for dinner"* and I will add it.`;
+        await logChat(user.id, message, contReply, "DIET_AUDIT");
+        return contReply;
+      }
+    } catch { /* non-fatal */ }
+  }
+
   if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && hasActualFood && (hasLogTrigger || directFoodScan)) {
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
