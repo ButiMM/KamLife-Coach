@@ -133,9 +133,11 @@ function splitMessage(text: string, maxLen = 1500): string[] {
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {
   const { handleMessage, checkRateLimit } = deps;
 
-  // Dedup map for WhatsApp album spam: one reply per phone per 10s window for media-only messages.
-  // WhatsApp albums arrive as N separate webhooks — we reply to the first, drop the rest silently.
+  // URL-level dedup: same URL resent within 30s = accidental duplicate, drop it.
   const mediaDedup = new Map<string, number>();
+  // Phone-level dedup for media-only messages: WhatsApp albums fire N separate webhooks (different
+  // URLs, same sender, <500ms apart). Process only the first; drop the rest silently within 5s.
+  const phoneMediaDedup = new Map<string, number>();
 
   // MessageSid dedup: Twilio retries the webhook if we don't respond within 15s.
   // Since we ACK immediately with empty TwiML, retries should be rare — but if they
@@ -221,11 +223,16 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       }
 
-      // Dedup by media URL — same URL resent within 30s = accidental duplicate, drop it.
-      // Keying on URL (not phone) means album photos with DIFFERENT URLs all pass through,
-      // even though they arrive from the same phone within milliseconds of each other.
+      // Dedup for media-only messages (no text caption).
       if (mediaUrl && !message) {
         const now = Date.now();
+        // Phone-level: drop subsequent album photos from the same sender within 5s
+        const lastPhoneSent = phoneMediaDedup.get(rawPhone);
+        if (lastPhoneSent && now - lastPhoneSent < 5_000) {
+          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        }
+        phoneMediaDedup.set(rawPhone, now);
+        // URL-level: same exact URL resent within 30s = accidental retry
         const lastSent = mediaDedup.get(mediaUrl);
         if (lastSent && now - lastSent < 30_000) {
           return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);

@@ -36,8 +36,11 @@ export function detectEscalation(message: string): EscalationDecision {
   // signals don't get mis-flagged as a muscle strain
   if (/\b(chest pain|can't breathe|cannot breathe|fainted|collapsed)\b/i.test(m))
     return { should: true, reason: "medical", priority: "high" };
-  // Injury — urgent
-  if (/\b(injur|hurt|pain|sore|torn|sprain|fracture|broken|hernia|slipped disc)/i.test(m))
+  // Acute/structural injury terms → urgent 1h SLA
+  if (/\b(injur|torn|sprain|fracture|broken|hernia|slipped disc|serious pain|sharp pain|severe pain|radiating pain)/i.test(m))
+    return { should: true, reason: "injury", priority: "urgent" };
+  // High-risk joint/area + pain signal → urgent (excludes DOMS-only triggers like "legs are sore")
+  if (/\b(back|spine|neck|shoulder|rotator|knee|ankle|wrist|elbow|hip|groin|disc|hamstring)\b/i.test(m) && /\b(hurt|pain|sore|aching)\b/i.test(m))
     return { should: true, reason: "injury", priority: "urgent" };
   // Billing / subscription
   if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))

@@ -100,7 +100,7 @@ export function registerPaymentRoutes(app: Express) {
 
       // Idempotency guard — if we have already processed this pf_payment_id, skip entirely.
       // PayFast retries ITNs multiple times; without this, a retry causes duplicate rewards/messages.
-      const eventKey = pfPaymentId || `${phone}-${amountGross}-${Date.now()}`;
+      const eventKey = pfPaymentId || data.m_payment_id || `${phone}-${amountGross}-no-id`;
       try {
         await db.insert(paymentEvents).values({
           provider: "payfast",

@@ -7,7 +7,7 @@ import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
-import { recomputeTodayFoodTotals, parseFoodLogTotalsFromMessageOut, scanForSAFoods } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, parseFoodLogTotalsFromMessageOut, scanForSAFoods } from "./food-scanner";
 
 function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
@@ -31,6 +31,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       .limit(1);
     if (lastMealLog.length > 0) {
       await db.delete(mealLogs).where(eq(mealLogs.id, lastMealLog[0].id));
+      invalidateFoodTotalsCache(user.id);
       const recomputed = await recomputeTodayFoodTotals(user.id);
       await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
       const foodName = noJustMatch[1].trim();
@@ -40,6 +41,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
 
   // ---- RESET ALL OF TODAY'S FOOD ----
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
+    invalidateFoodTotalsCache(user.id);
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     const todayStart = sastDayStart();
     await Promise.all([
@@ -65,6 +67,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     ) || mealLogRows[0];
     if (!target) return `No meal logged yet today to remove.`;
     await db.delete(mealLogs).where(eq(mealLogs.id, target.id));
+    invalidateFoodTotalsCache(user.id);
     const recomputed = await recomputeTodayFoodTotals(user.id);
     await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     return `Removed your ${label} from the log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\nRemaining: ~${Math.max(0, (user.calorieTarget || 1800) - recomputed.calories)} kcal | ~${Math.max(0, (user.proteinTarget || 120) - recomputed.protein)}g protein still to go.`;
@@ -94,6 +97,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       await db.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
     }
 
+    invalidateFoodTotalsCache(user.id);
     const recomputed = await recomputeTodayFoodTotals(user.id);
     await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     return `Removed your last meal log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.`;
@@ -125,6 +129,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
 
         if (targetMealLog) {
           await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
+          invalidateFoodTotalsCache(user.id);
           const recomputed = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
           const calTarget = user.calorieTarget || 1800;
@@ -157,6 +162,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
             await db.update(chatHistory).set({ messageIn: updatedMsg }).where(eq(chatHistory.id, targetLog.id));
           }
 
+          invalidateFoodTotalsCache(user.id);
           const recomputedFb = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({ todayCalories: recomputedFb.calories, todayProteinG: recomputedFb.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
           const calTargetFb = user.calorieTarget || 1800;

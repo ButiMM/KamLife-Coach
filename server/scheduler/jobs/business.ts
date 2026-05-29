@@ -2,9 +2,9 @@ import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
-  sendWhatsApp, sendCriticalAlert, canSendProactive, recordProactiveSend,
+  sendWhatsApp, sendCriticalAlert, claimDailySlot, isProactivePaused,
   getActiveClients, isPaused, loadState, saveState,
-  deliveryStats, todaySAST, FROM_NUMBER, PRICING,
+  deliveryStats, todaySAST, FROM_NUMBER, PRICING, inArray,
 } from "../shared";
 
 export async function runMonthEndBudget(): Promise<void> {
@@ -23,7 +23,7 @@ export async function runMonthEndBudget(): Promise<void> {
       } else {
         budgetMsg = `${name}, month end coming. You have more budget flexibility than most clients — still prioritise protein. Pre-cook chicken, buy oats in bulk, and prep your meals Sunday. Consistency over the month end is what separates people who get results.`;
       }
-      if (canSendProactive(client.id)) { await sendWhatsApp(client.phoneNumber, budgetMsg); recordProactiveSend(client.id); }
+      if (await claimDailySlot(client.id, "month_end_budget")) { await sendWhatsApp(client.phoneNumber, budgetMsg); }
     } catch (err) { console.error(`[SCHEDULER] Month-end budget error — ${client.phoneNumber}:`, err); }
   }
 }
@@ -46,7 +46,7 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
         await sendCriticalAlert(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
       }
       if (msUntilRenewal < 0 && client.subscriptionStatus === "active") {
-        await db.update(users).set({ subscriptionStatus: "inactive" }).where(eq(users.phoneNumber, client.phoneNumber));
+        await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date() }).where(eq(users.phoneNumber, client.phoneNumber));
         await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
         console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber}`);
       }
@@ -135,13 +135,14 @@ export async function runPaydayShoppingNudge(): Promise<void> {
       } else {
         msg = `${name}, start of the pay cycle — best time to set up your kitchen for the week.\n\nBuy ${goal === "muscle_gain" ? "chicken breast, eggs, and Greek yoghurt in bulk" : "lean protein in bulk — chicken breast, tuna, eggs"}. Freeze what you won't use this week.\n\nReply *shopping list* for your personalised list.`;
       }
-      if (canSendProactive(client.id)) { await sendWhatsApp(client.phoneNumber, msg); recordProactiveSend(client.id); }
+      if (await claimDailySlot(client.id, "payday_nudge")) { await sendWhatsApp(client.phoneNumber, msg); }
     } catch (err) { console.error(`[SCHEDULER] Payday nudge error — ${client.phoneNumber}:`, err); }
   }
 }
 
 export async function runStepLeaderboard(): Promise<void> {
   console.log("[SCHEDULER] JOB: Weekly step leaderboard broadcast");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runStepLeaderboard blocked"); return; }
   try {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
     const allStepLogs = await db.select({ userId: stepLogs.userId, steps: stepLogs.steps }).from(stepLogs).where(gte(stepLogs.loggedAt, sevenDaysAgo));
@@ -154,7 +155,7 @@ export async function runStepLeaderboard(): Promise<void> {
     const participantIds = Object.keys(userSteps);
     if (participantIds.length < 3) return;
     const participants = await db.select({ id: users.id, name: users.name, phoneNumber: users.phoneNumber, subscriptionStatus: users.subscriptionStatus })
-      .from(users).where(sql`${users.id} = ANY(${participantIds})`);
+      .from(users).where(inArray(users.id, participantIds));
     const infoMap: Record<string, { name: string; phone: string; active: boolean }> = {};
     for (const p of participants) infoMap[p.id] = { name: p.name || "Anonymous", phone: p.phoneNumber, active: p.subscriptionStatus === "active" };
     const ranked = participantIds.map(uid => ({
@@ -242,6 +243,7 @@ export async function runWeeklyKpiReport(): Promise<void> {
 
 export async function runSupplementReminder(): Promise<void> {
   console.log("[SCHEDULER] JOB: Supplement reminder");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runSupplementReminder blocked"); return; }
   try {
     const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
     const { sastDayStart } = await import("../shared");
@@ -275,6 +277,7 @@ export async function runSupplementReminder(): Promise<void> {
 
 export async function runAutoCalAdjust(): Promise<void> {
   console.log("[SCHEDULER] JOB: Auto calorie adjustment");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runAutoCalAdjust blocked"); return; }
   try {
     const activeClients = await db.select({ id: users.id, phoneNumber: users.phoneNumber, name: users.name, goalType: users.goalType, calorieTarget: users.calorieTarget, proteinTarget: users.proteinTarget, currentWeight: users.currentWeight, subscriptionStatus: users.subscriptionStatus }).from(users).where(eq(users.subscriptionStatus, "active"));
     let adjusted = 0;
@@ -285,6 +288,7 @@ export async function runAutoCalAdjust(): Promise<void> {
         if (weights.length < 3) continue;
         const first = parseFloat(String(weights[0].weight));
         const last = parseFloat(String(weights[weights.length - 1].weight));
+        if (isNaN(first) || isNaN(last)) continue;
         const change = last - first;
         const currentCal = client.calorieTarget || 1800;
         const currentProt = client.proteinTarget || 120;
@@ -311,6 +315,7 @@ export async function runAutoCalAdjust(): Promise<void> {
 
 export async function runMonthlyNps(): Promise<void> {
   console.log("[SCHEDULER] JOB: Monthly NPS survey");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runMonthlyNps blocked"); return; }
   const today = todaySAST();
   try {
     const activeClients = await db.select({ id: users.id, phoneNumber: users.phoneNumber, name: users.name, subscriptionStatus: users.subscriptionStatus, totalWorkoutsCompleted: users.totalWorkoutsCompleted, programmeStartDate: users.programmeStartDate }).from(users).where(eq(users.subscriptionStatus, "active"));

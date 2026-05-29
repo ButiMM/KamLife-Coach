@@ -31,7 +31,7 @@ import { handleFoodContext } from "./handlers/food-context";
 import { handleProgressCheck } from "./handlers/progress";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
-import { logChat, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
+import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
 import { handleMiscCommands } from "./handlers/misc-commands";
@@ -113,6 +113,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   if (safetyResult !== null) return safetyResult;
 
   const user = await getOrCreateUser(phone);
+
+  // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
+  if (message && message.length > 2) checkEscalation(user.id, message).catch(() => {});
 
   // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
   // Fire early as a background Promise. Text messages only (not photo/voice).

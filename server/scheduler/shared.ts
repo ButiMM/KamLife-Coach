@@ -23,7 +23,7 @@ export { getKamlifeProgramme } from "../programme";
 export { getShoppingList, formatShoppingList } from "../shopping-lists";
 export { PRICING } from "../../shared/pricing";
 export { selectVariantMessage, recordDelivery } from "../ab";
-export { asc, lte, count } from "drizzle-orm";
+export { asc, lte, count, inArray } from "drizzle-orm";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
