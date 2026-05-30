@@ -113,13 +113,17 @@ export async function runMorningCheckin(): Promise<void> {
       const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
       const stepsLogged = (yesterdayStepRows as { steps: number | null }[]).reduce((s, r) => s + (r.steps || 0), 0);
 
+      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
+      const isTodayTrainingDay = schedule.includes(todayDOW);
+
       const DOW_OPENERS: Record<number, string> = {
         1: `New week. Clean slate.`,
         2: `Day 2. Consistency beats intensity.`,
         3: `Halfway through the week.`,
         4: `Body is adapting. Do not stop.`,
         5: `Friday. The weekend does not mean the plan stops.`,
-        6: `Saturday. One session before tonight.`,
+        // Saturday: only mention training if today is actually a training day
+        6: isTodayTrainingDay ? `Saturday. One session before tonight.` : `Saturday. Rest day — food and steps.`,
       };
       const dowOpener = DOW_OPENERS[todayDOW] ? ` ${DOW_OPENERS[todayDOW]}` : "";
 
@@ -243,8 +247,6 @@ export async function runMorningCheckin(): Promise<void> {
         }
       } catch { /* non-critical */ }
 
-      const schedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
-      const isTodayTrainingDay = schedule.includes(todayDOW);
       const stepsTarget = client.stepsTarget || 10000;
 
       // Split into two messages: summary | today's action

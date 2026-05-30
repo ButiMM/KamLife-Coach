@@ -277,7 +277,10 @@ export async function handleFoodContext(ctx: {
     /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
   const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
-  const hasLogTrigger = /\b(ate|had|have|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|add|added|put in|putting in)\b/.test(m);
+  // "have" alone is too broad — matches possession ("I have eggs at home"), negation ("don't have"),
+  // and questions ("do you have"). Keep only explicit past/active eating forms.
+  // "add" alone matches too many non-food contexts ("add me", "add to cart").
+  const hasLogTrigger = /\b(ate|had|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
@@ -477,7 +480,13 @@ export async function handleFoodContext(ctx: {
   const hasActualFood = foodsInMsg.length > 0;
   const isEmotionalOnly = isEmotionalMsg && !hasLogTrigger;
   const isShortFoodMsg = !isQuestion && hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 30;
-  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood && m.split(/\s+/).length <= 15;
+  // directFoodScan: fires on bare food-word messages ("rice and chicken", "pap and wors").
+  // Requires 2+ food items OR an explicit quantity word — prevents single food words
+  // ("eggs", "milk") or shopping/planning fragments from being auto-logged.
+  const hasQuantityWord = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i.test(m);
+  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood
+    && m.split(/\s+/).length <= 12
+    && (foodsInMsg.length >= 2 || hasQuantityWord);
   const foodLogOverride = hasLogTrigger && hasActualFood;
 
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
