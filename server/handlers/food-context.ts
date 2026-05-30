@@ -280,7 +280,12 @@ export async function handleFoodContext(ctx: {
   // "have" alone is too broad — matches possession ("I have eggs at home"), negation ("don't have"),
   // and questions ("do you have"). Keep only explicit past/active eating forms.
   // "add" alone matches too many non-food contexts ("add me", "add to cart").
-  const hasLogTrigger = /\b(ate|had|having|eating|i'll have|i will have|gonna have|going to have|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
+  // Future tense ("i'll have", "going to have", "gonna have") removed — those are planning, not eating.
+  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
+
+  // Future / planning / shopping intent — describes intended eating or shopping, NOT food consumed today.
+  // Blocks directFoodScan and the main food scanner from firing on these messages.
+  const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i.test(m);
 
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
@@ -484,7 +489,7 @@ export async function handleFoodContext(ctx: {
   // Requires 2+ food items OR an explicit quantity word — prevents single food words
   // ("eggs", "milk") or shopping/planning fragments from being auto-logged.
   const hasQuantityWord = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i.test(m);
-  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && hasActualFood
+  const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && !isFuturePlanning && hasActualFood
     && m.split(/\s+/).length <= 12
     && (foodsInMsg.length >= 2 || hasQuantityWord);
   const foodLogOverride = hasLogTrigger && hasActualFood;
@@ -567,7 +572,7 @@ export async function handleFoodContext(ctx: {
     return shoppingReply;
   }
 
-  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && hasActualFood && (hasLogTrigger || directFoodScan)) {
+  if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)) {
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
 

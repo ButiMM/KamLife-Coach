@@ -509,6 +509,203 @@ test("inactive user string detection", () => {
 });
 
 // ============================================================
+// Food log gate — systemic corpus (mirrors food-context.ts logic)
+// Covers all known false-positive patterns and real meal logs.
+// ============================================================
+
+// Mirror exact regex from food-context.ts — keep in sync when changing either
+const HAS_LOG_TRIGGER = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/i;
+
+const IS_FUTURE_PLANNING = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i;
+
+const IS_QUESTION = (m: string) =>
+  m.includes("?") ||
+  /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|where)/.test(m) ||
+  /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
+
+const QUANTITY_WORD = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i;
+
+// directFoodScan fires when: no question, no frustration, no log trigger, no future planning,
+// has food (assumed true below), ≤12 words, AND (2+ foods simulated by token count OR quantity word).
+// We test the non-food-scanner conditions here.
+const wouldDirectScan = (m: string, foodCount: number) => {
+  const lo = m.toLowerCase();
+  if (IS_QUESTION(lo)) return false;
+  if (HAS_LOG_TRIGGER.test(lo)) return false;
+  if (IS_FUTURE_PLANNING.test(lo)) return false;
+  if (m.split(/\s+/).length > 12) return false;
+  return foodCount >= 2 || QUANTITY_WORD.test(lo);
+};
+
+// Full gate: would the food scanner fire? (mirrors food-context.ts logic exactly)
+// foodCount: how many SA foods were found (0 = no food detected, controls hasActualFood)
+const wouldLog = (m: string, foodCount: number) => {
+  const lo = m.toLowerCase();
+  const hasLogTrig = HAS_LOG_TRIGGER.test(lo);
+  const hasFood = foodCount > 0;
+  const foodLogOverride = hasLogTrig && hasFood;
+  const isFuturePlan = IS_FUTURE_PLANNING.test(lo);
+  const isQ = IS_QUESTION(lo);
+  const directScan = hasFood && wouldDirectScan(m, foodCount);
+  return (!isQ || foodLogOverride) && !isFuturePlan && hasFood && (hasLogTrig || directScan);
+};
+
+// --- hasLogTrigger: must match real meal logs ---
+test("hasLogTrigger: 'I ate chicken and rice' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("i ate chicken and rice"), "ate should match");
+});
+test("hasLogTrigger: 'I had oats for breakfast' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("i had oats for breakfast"), "had should match");
+});
+test("hasLogTrigger: 'just ate 2 eggs' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("just ate 2 eggs"), "just ate should match");
+});
+test("hasLogTrigger: 'lunch was pap and mince' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("lunch was pap and mince"), "lunch was should match");
+});
+test("hasLogTrigger: 'for dinner I had chicken' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("for dinner i had chicken"), "for dinner should match");
+});
+test("hasLogTrigger: 'post workout shake and banana' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("post workout shake and banana"), "post workout should match");
+});
+test("hasLogTrigger: 'having my oats now' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("having my oats now"), "having should match");
+});
+test("hasLogTrigger: 'added 2 eggs to my log' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("added 2 eggs to my log"), "added should match");
+});
+test("hasLogTrigger: 'pre workout oats and peanut butter' matches", () => {
+  assert.ok(HAS_LOG_TRIGGER.test("pre workout oats and peanut butter"), "pre workout should match");
+});
+
+// --- hasLogTrigger: must NOT match future tense (removed in this revision) ---
+test("hasLogTrigger: 'I'll have chicken later' does NOT match", () => {
+  assert.ok(!HAS_LOG_TRIGGER.test("i'll have chicken later"), "future i'll have must be removed from trigger");
+});
+test("hasLogTrigger: 'I will have rice for dinner' — dinner still matches but isFuturePlanning blocks gate", () => {
+  // hasLogTrigger matches 'dinner', but IS_FUTURE_PLANNING catches 'i will have' → gate still blocks
+  assert.ok(IS_FUTURE_PLANNING.test("i will have rice for dinner"), "i will have must be caught by future planning guard");
+  assert.ok(!wouldLog("I will have rice for dinner", 1), "full gate must block future planning even when log trigger fires");
+});
+test("hasLogTrigger: 'gonna have chicken tonight' does NOT match", () => {
+  assert.ok(!HAS_LOG_TRIGGER.test("gonna have chicken tonight"), "gonna have must be removed");
+});
+test("hasLogTrigger: 'going to have rice and chicken' does NOT match", () => {
+  assert.ok(!HAS_LOG_TRIGGER.test("going to have rice and chicken"), "going to have must be removed");
+});
+
+// --- isFuturePlanning: must match planning/shopping intent ---
+test("isFuturePlanning: 'I need to buy eggs and chicken' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("i need to buy eggs and chicken"), "need to buy should be planning");
+});
+test("isFuturePlanning: 'I'll have chicken and rice for dinner' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("i'll have chicken and rice for dinner"), "i'll have should be planning");
+});
+test("isFuturePlanning: 'going to have dinner tonight' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("going to have dinner tonight"), "going to have should be planning");
+});
+test("isFuturePlanning: 'want to eat rice tonight' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("want to eat rice tonight"), "want to eat should be planning");
+});
+test("isFuturePlanning: 'planning to have fish for dinner' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("planning to have fish for dinner"), "planning to have should be planning");
+});
+test("isFuturePlanning: 'gonna have breakfast soon' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("gonna have breakfast soon"), "gonna have should be planning");
+});
+test("isFuturePlanning: 'need to get some oats from the shop' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("need to get some oats from the shop"), "need to get should be planning");
+});
+test("isFuturePlanning: 'thinking of having chicken for dinner' matches", () => {
+  assert.ok(IS_FUTURE_PLANNING.test("thinking of having chicken for dinner"), "thinking of having should be planning");
+});
+
+// --- isFuturePlanning: must NOT block real past-eating logs ---
+test("isFuturePlanning: 'I had chicken and rice for lunch' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("i had chicken and rice for lunch"), "real log must not be planning");
+});
+test("isFuturePlanning: 'just ate oats and eggs' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("just ate oats and eggs"), "just ate must not be planning");
+});
+test("isFuturePlanning: 'for breakfast I ate pap and eggs' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("for breakfast i ate pap and eggs"), "for breakfast ate must not be planning");
+});
+test("isFuturePlanning: 'lunch was rice and mince' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("lunch was rice and mince"), "lunch was must not be planning");
+});
+test("isFuturePlanning: 'pap and wors' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("pap and wors"), "bare food must not be planning");
+});
+test("isFuturePlanning: 'post workout shake and banana' does NOT match", () => {
+  assert.ok(!IS_FUTURE_PLANNING.test("post workout shake and banana"), "post workout must not be planning");
+});
+
+// --- Full gate: should LOG (true positives) ---
+test("gate LOGS: 'I had chicken and rice for lunch' (past tense + food)", () => {
+  assert.ok(wouldLog("I had chicken and rice for lunch", 2), "past meal should log");
+});
+test("gate LOGS: 'pap and wors' (2 foods, directFoodScan)", () => {
+  assert.ok(wouldLog("pap and wors", 2), "bare 2-food message should log");
+});
+test("gate LOGS: 'rice and chicken' (2 foods, directFoodScan)", () => {
+  assert.ok(wouldLog("rice and chicken", 2), "bare 2-food message should log");
+});
+test("gate LOGS: '2 eggs and toast' (quantity + food, directFoodScan)", () => {
+  assert.ok(wouldLog("2 eggs and toast", 2), "quantity + food should log");
+});
+test("gate LOGS: 'for dinner I ate chicken breast' (for dinner + ate)", () => {
+  assert.ok(wouldLog("for dinner I ate chicken breast", 1), "for dinner + ate should log");
+});
+test("gate LOGS: 'breakfast was oats and milk' (breakfast was)", () => {
+  assert.ok(wouldLog("breakfast was oats and milk", 2), "breakfast was should log");
+});
+test("gate LOGS: 'just ate a bowl of mielie pap with stew' (just ate)", () => {
+  assert.ok(wouldLog("just ate a bowl of mielie pap with stew", 2), "just ate should log");
+});
+test("gate LOGS: 'lunch was rice, tuna and eggs' (meal label + foods)", () => {
+  assert.ok(wouldLog("lunch was rice, tuna and eggs", 3), "lunch was with foods should log");
+});
+test("gate LOGS: 'post workout: protein shake and banana' (post workout)", () => {
+  assert.ok(wouldLog("post workout: protein shake and banana", 2), "post workout should log");
+});
+test("gate LOGS: 'oats and eggs' (2 foods, directFoodScan)", () => {
+  assert.ok(wouldLog("oats and eggs", 2), "oats and eggs should log");
+});
+
+// --- Full gate: must NOT LOG (false positives — the known failure patterns) ---
+test("gate BLOCKS: 'I need to buy eggs and chicken' (shopping intent)", () => {
+  assert.ok(!wouldLog("I need to buy eggs and chicken", 2), "shopping intent must not log");
+});
+test("gate BLOCKS: 'I'll have chicken and rice for dinner' (future tense)", () => {
+  assert.ok(!wouldLog("I'll have chicken and rice for dinner", 2), "future tense must not log");
+});
+test("gate BLOCKS: 'going to have rice tonight' (future tense)", () => {
+  assert.ok(!wouldLog("going to have rice tonight", 1), "going to have must not log");
+});
+test("gate BLOCKS: 'want to eat rice and chicken for lunch' (planning)", () => {
+  assert.ok(!wouldLog("want to eat rice and chicken for lunch", 2), "want to eat must not log");
+});
+test("gate BLOCKS: 'planning to have chicken tomorrow' (planning)", () => {
+  assert.ok(!wouldLog("planning to have chicken tomorrow", 1), "planning to have must not log");
+});
+test("gate BLOCKS: 'should I eat eggs or oats?' (question)", () => {
+  assert.ok(!wouldLog("should I eat eggs or oats?", 2), "question must not log");
+});
+test("gate BLOCKS: 'is chicken good for weight loss?' (question)", () => {
+  assert.ok(!wouldLog("is chicken good for weight loss?", 1), "question must not log");
+});
+test("gate BLOCKS: 'what should I have for breakfast?' (question)", () => {
+  assert.ok(!wouldLog("what should I have for breakfast?", 0), "question must not log");
+});
+test("gate BLOCKS: 'I need to get oats and eggs from checkers' (shopping)", () => {
+  assert.ok(!wouldLog("I need to get oats and eggs from checkers", 2), "shopping errand must not log");
+});
+test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", () => {
+  assert.ok(!wouldLog("thinking of having chicken and rice tonight", 2), "thinking of having must not log");
+});
+
+// ============================================================
 // Results
 // ============================================================
 
