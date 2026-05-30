@@ -1261,6 +1261,16 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return bereavReply;
   }
 
+  // ---- STEP TRACKING APP RECOMMENDATION ----
+  // "Which app?" "What app to track steps?" — comes up every onboarding conversation.
+  // Give a clear, device-aware answer so the client can act immediately.
+  const isStepAppQ = /\b(which\s+app|what\s+app|step\s+(?:app|counter|tracker)|app\s+(?:for\s+)?steps?|steps?\s+app|track\s+(?:my\s+)?steps|how\s+(?:do\s+i\s+)?(?:count|track)\s+(?:my\s+)?steps|best\s+app\s+for\s+steps|google\s+fit|samsung\s+health|pedometer)\b/i.test(m);
+  if (isStepAppQ) {
+    const stepAppReply = `For counting steps, here is what I recommend based on your phone:\n\n*Android (Samsung):* Samsung Health — already on your phone. Open it, tap *Activity*, then *Steps*. It tracks automatically in the background.\n\n*Android (other):* Google Fit — free on Google Play. Takes 2 minutes to set up. If you already have it, open it and look for the steps circle on the home screen.\n\n*iPhone:* Apple Health — already installed. It counts steps automatically. Open it, tap *Browse → Activity → Steps*.\n\n*No smartphone / basic phone:* A cheap pedometer from Pick n Pay or Checkers works — clip it to your waistband, reset it in the morning.\n\nOnce it is set up, just send me your step count at the end of each day — type *"walked 8,000 steps"* or similar and I log it for you.\n\n_Target: ${(user.stepsTarget || 8500).toLocaleString()} steps/day._`;
+    await logChat(user.id, message, stepAppReply, "STEP_APP_GUIDE");
+    return stepAppReply;
+  }
+
   // ---- CRIME / SAFETY WALKING OBJECTION ----
   // "Can't walk outside — crime", "not safe to walk in my area", "too dangerous outside"
   // This is a real SA barrier. Acknowledge it, give indoor alternatives immediately.

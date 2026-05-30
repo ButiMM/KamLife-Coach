@@ -209,6 +209,32 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         return conversionResult.reply;
       }
 
+      // ---- FOOD/EATING GUIDANCE GLIMPSE — show Day 1 as proof of value ----
+      // Hard paywall replies to "what should I eat?" convert nobody — they haven't
+      // seen the product yet. Show one personalised day (goal + budget + medical aware),
+      // then gate Days 2–3 and the shopping list behind R199.
+      const isFoodGuidanceQ = /\b(what should i eat|how should i eat|how do i eat|what do i eat|what to eat|meal plan|eating plan|diet plan|give me a meal plan|how do you suggest i eat|what can i eat|how to eat|tell me what to eat|what must i eat|what should i be eating|food plan|i don.?t know what to eat|no idea what to eat|don.?t know how to eat|eating guide|what foods should i|what food should i|nutrition plan)\b/i.test(m);
+      if (isFoodGuidanceQ) {
+        const { generateMealPlan } = await import("./meal-plan");
+        const glimpsePlan = generateMealPlan({
+          calorieTarget: user.calorieTarget || 1800,
+          proteinTarget: user.proteinTarget || 120,
+          weeklyFoodBudget: user.weeklyFoodBudget || "100_300",
+          goalType: user.goalType || "fat_loss",
+          medicalConditions: user.medicalConditions || "",
+          otherMedicalNotes: user.otherMedicalNotes || "",
+          recentFoods: [],
+          firstName: user.name?.split(" ")[0] || "",
+        });
+        // Split: part[0] = header, part[1] = Day 1, part[2] = Day 2, part[3] = Day 3
+        const planParts = glimpsePlan.split("\n\n---\n\n");
+        const planHeader = planParts[0] || "";
+        const day1 = planParts[1] || "";
+        const upsell = `That is Day 1.\n\nDays 2 and 3 rotate the meals so you are not eating the same thing every day. Your weekly shopping list with ZAR prices is in there too.\n\n*Full weekly plan + shopping list + daily coaching — R199/month:*\n${payLink}\n\n_R6.63/day. Not satisfied after week 1? Message us and we will make it right._`;
+        const glimpseReply = `${planHeader}\n\n${day1}\n\n---\n\n${upsell}`;
+        await logChat(user.id, message, glimpseReply, "MEAL_PLAN_GLIMPSE");
+        return glimpseReply;
+      }
       const workouts = user.totalWorkoutsCompleted || 0;
       const isLapsed = !!user.cancelledAt;
       let gateReply: string;
