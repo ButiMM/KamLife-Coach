@@ -114,6 +114,39 @@ export function canSendProactive(clientId: string): boolean {
   return !dailySentThisProcess.has(dailyKey(clientId));
 }
 
+// ── ENGAGEMENT BACK-OFF FOR ROUTINE NUDGES ───────────────────────────────────
+// Routine nudges (hydration, evening "did you log?" reminders) ease off as a
+// client goes quiet. This protects against WhatsApp mutes and cuts message cost
+// at scale — we stop paying to message people who have checked out.
+//
+// IMPORTANT: win-back / retention jobs deliberately target silent users and must
+// NOT use this — they call canSendProactive directly. This is for routine,
+// "nice-to-have" daily nudges only.
+//
+// Cadence (pure decision in routineNudgeAllowed so it stays unit-testable):
+//   daysSilent 0–1 (engaged)    → every run
+//   daysSilent 2   (drifting)   → every other day
+//   daysSilent 3+  (gone quiet) → stop; retention/win-back owns this client
+export function routineNudgeAllowed(daysSilent: number, dayOfYear: number): boolean {
+  if (daysSilent <= 1) return true;
+  if (daysSilent === 2) return dayOfYear % 2 === 0;
+  return false;
+}
+
+export function dayOfYearSAST(): number {
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  const yearStart = Date.UTC(sast.getUTCFullYear(), 0, 1);
+  return Math.floor((sast.getTime() - yearStart) / 86_400_000);
+}
+
+export function canSendRoutineNudge(client: { id: string; lastActiveAt?: Date | string | null }): boolean {
+  if (!canSendProactive(client.id)) return false;
+  const daysSilent = client.lastActiveAt
+    ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+    : 0;
+  return routineNudgeAllowed(daysSilent, dayOfYearSAST());
+}
+
 export function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
   console.log(`[SCHEDULER:SEND] campaign=${jobKey} user=...${clientId.slice(-6)}`);
   dailySentThisProcess.add(dailyKey(clientId));

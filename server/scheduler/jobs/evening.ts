@@ -1,7 +1,7 @@
 import {
   db, users, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, desc, sql,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  sendWhatsApp, canSendProactive, canSendRoutineNudge, recordProactiveSend,
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, isSickOrInjuredToday,
 } from "../shared";
@@ -15,6 +15,11 @@ export async function runEveningAccountability(): Promise<void> {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
+    // Routine evening accountability — eases off as a client goes quiet so we don't
+    // stack onto the morning comeback flow (which owns 3+ day silent users) and so we
+    // stop paying to message people who have checked out. Engaged users (daysSilent ≤ 1)
+    // are unaffected. Also enforces the 1/day cap and the global pause.
+    if (!canSendRoutineNudge(client)) continue;
     try {
       const name = (client.name || "there").split(" ")[0];
       const phone = client.phoneNumber;

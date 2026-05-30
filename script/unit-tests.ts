@@ -706,6 +706,38 @@ test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", ()
 });
 
 // ============================================================
+// Engagement back-off for routine nudges — pure decision function
+// ============================================================
+
+import { routineNudgeAllowed } from "../server/scheduler/shared";
+
+test("back-off: engaged user (0 days silent) gets routine nudge", () => {
+  assert.ok(routineNudgeAllowed(0, 100), "0 days silent should always allow");
+  assert.ok(routineNudgeAllowed(0, 101), "0 days silent should allow on odd day too");
+});
+test("back-off: 1 day silent still gets routine nudge every day", () => {
+  assert.ok(routineNudgeAllowed(1, 100), "1 day silent should allow");
+  assert.ok(routineNudgeAllowed(1, 101), "1 day silent should allow on any day");
+});
+test("back-off: 2 days silent gets nudge every OTHER day (even day)", () => {
+  assert.ok(routineNudgeAllowed(2, 100), "2 days silent on even day = allowed");
+  assert.ok(!routineNudgeAllowed(2, 101), "2 days silent on odd day = skipped");
+});
+test("back-off: 3 days silent gets NO routine nudge (retention owns them)", () => {
+  assert.ok(!routineNudgeAllowed(3, 100), "3 days silent should be blocked");
+  assert.ok(!routineNudgeAllowed(3, 101), "3 days silent blocked on any day");
+});
+test("back-off: 7 days silent gets NO routine nudge", () => {
+  assert.ok(!routineNudgeAllowed(7, 100), "deeply silent users get no routine nudge");
+});
+test("back-off: every-other-day halves volume for drifting users", () => {
+  // Over 10 consecutive days at daysSilent=2, only ~half should fire
+  let fired = 0;
+  for (let day = 0; day < 10; day++) if (routineNudgeAllowed(2, day)) fired++;
+  assert.equal(fired, 5, `2-day-silent should fire 5/10 days, got ${fired}`);
+});
+
+// ============================================================
 // Results
 // ============================================================
 

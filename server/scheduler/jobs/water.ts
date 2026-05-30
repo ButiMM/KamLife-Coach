@@ -1,7 +1,7 @@
 import {
-  db, users, chatHistory,
-  eq, gte, and, lt,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  db, chatHistory,
+  eq, gte, and,
+  sendWhatsApp, canSendRoutineNudge, recordProactiveSend,
   getActiveClients, isPaused, dayStart,
 } from "../shared";
 import { logChat } from "../../handlers/chat-log";
@@ -23,10 +23,9 @@ export async function runWaterReminder(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
 
-    const daysSilent = client.lastActiveAt
-      ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
-      : 0;
-    if (daysSilent > 5) continue;
+    // Routine hydration nudge — eases off as the client goes quiet (anti-mute + cost).
+    // canSendRoutineNudge also enforces the 1/day cap and the global pause.
+    if (!canSendRoutineNudge(client)) continue;
 
     try {
       // Only nudge if they haven't logged water today already
@@ -41,7 +40,7 @@ export async function runWaterReminder(): Promise<void> {
 
       if (waterToday) continue; // Already logged — skip
 
-      if (canSendProactive(client.id)) {
+      {
         const name = client.name?.split(" ")[0] || "there";
         const nudge = WATER_NUDGES[idx](name);
         await sendWhatsApp(client.phoneNumber, nudge);
