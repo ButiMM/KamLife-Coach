@@ -1265,7 +1265,16 @@ function getWeekContext(phase: number, week: number): { rationale: string; sets:
   };
   const P5 = { rationale: "Deload week. Drop every weight by 40%. Keep every movement, every set. Your muscles are repairing and your nervous system is recovering — this week makes your next phase 10% stronger. Do not skip it.", sets: "3", reps: "12", rest: "60 sec" };
 
-  if (phase === 1 && P1[week]) return P1[week];
+  if (phase === 1 && P1[week]) {
+    const ctx = P1[week];
+    // Beginner ease-in: first 2 Foundation weeks at 2 working sets, then build to 3.
+    // Protects never-trained / heavier / older bodies from week-one overload and DOMS
+    // that makes people quit. The third set comes in once the movement pattern is owned.
+    if (isBeginner && week <= 2) {
+      return { ...ctx, sets: "2", rationale: `${ctx.rationale} Starting at 2 sets while your body adapts — we add the third set in week 3. No ego, just consistency.` };
+    }
+    return ctx;
+  }
   if (phase === 2 && P2[week]) return P2[week];
   if (phase === 3 && P3[week]) return P3[week];
   if (phase === 4 && P4[week]) return P4[week];
@@ -1303,9 +1312,9 @@ function formatGymDay(
   injuries = "none",
   experience = ""
 ): string {
-  const wCtx = getWeekContext(phase, week);
-  const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
   const isBeginner = experience === "beginner" || experience === "";
+  const wCtx = getWeekContext(phase, week, isBeginner);
+  const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
   const equipNote = isDumbbell
     ? `_No machine? Each exercise has a modification listed._\n\n`
     : isBeginner

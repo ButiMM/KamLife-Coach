@@ -6,7 +6,7 @@
 
 import assert from "node:assert/strict";
 import { calculateTargets, calculateStepsTarget } from "../server/targets";
-import { getDayType, getPhaseMultiplier, getPhaseNames } from "../server/programme";
+import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 
 let passed = 0;
@@ -165,6 +165,36 @@ test("phase 1 is Foundation", () => {
 
 test("phase 4 is Peak", () => {
   assert.equal(getPhaseNames()[4], "Peak");
+});
+
+// ============================================================
+// getWeekContext — beginner ease-in (Foundation weeks 1-2 at 2 sets)
+// ============================================================
+
+test("week context: non-beginner Foundation week 1 = 3 sets", () => {
+  assert.equal(getWeekContext(1, 1, false).sets, "3", "experienced user gets full 3 sets in week 1");
+});
+test("week context: beginner Foundation week 1 eased to 2 sets", () => {
+  assert.equal(getWeekContext(1, 1, true).sets, "2", "beginner should start at 2 sets");
+});
+test("week context: beginner Foundation week 2 still 2 sets", () => {
+  assert.equal(getWeekContext(1, 2, true).sets, "2", "beginner week 2 stays at 2 sets");
+});
+test("week context: beginner builds to 3 sets by week 3", () => {
+  assert.equal(getWeekContext(1, 3, true).sets, "3", "beginner adds third set in week 3");
+});
+test("week context: beginner reps unchanged (only sets eased)", () => {
+  assert.equal(getWeekContext(1, 1, true).reps, getWeekContext(1, 1, false).reps, "reps stay the same; only set count eases");
+});
+test("week context: beginner easing does NOT touch Phase 2+", () => {
+  // Build phase week 1 — beginner flag must not reduce sets outside Foundation
+  assert.equal(getWeekContext(2, 1, true).sets, getWeekContext(2, 1, false).sets, "phase 2 unaffected by beginner flag");
+});
+test("week context: beginner week 1 rationale mentions building up", () => {
+  assert.match(getWeekContext(1, 1, true).rationale, /week 3|2 sets|adapt/i, "beginner should be told the third set is coming");
+});
+test("week context: defaults to non-beginner when flag omitted", () => {
+  assert.equal(getWeekContext(1, 1).sets, "3", "omitted flag = full programme (explicit easing only)");
 });
 
 // ============================================================
