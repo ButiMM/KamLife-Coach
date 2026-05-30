@@ -536,6 +536,28 @@ export async function handleFoodContext(ctx: {
     } catch { /* non-fatal */ }
   }
 
+  // ---- SHOPPING LIST / PANTRY INVENTORY DETECTION ----
+  // A dash-formatted list of pantry staples (or a long list with no meal context) is NOT a meal.
+  // 3+ dash-listed items + shopping/pantry language → block.
+  // 7+ dash-listed items alone → block (nobody eats 7+ bulleted items as one sitting).
+  // NOTE: must use original `message` for line splitting — `m` collapses all whitespace to spaces.
+  const dashLineCount = message.split("\n").filter(l => /^\s*-\s*\S/.test(l)).length;
+  const SHOPPING_CONTEXT_RE = /\b(isle\s*by\s*isle|go\s*(?:isle|aisle)|aisle|what\s+i\s+have\s+(?:at\s+home|here)|have\s+at\s+home|at\s+home\s+i\s+(?:have|keep|stock)|what\s+i\s+(?:normally\s+)?(?:buy|stock|keep)|what.*(?:think|choose|chose)\s+(?:is\s+)?missing|shopping\s+list|groceries?|pantry|in\s+(?:my\s+)?fridge|what.?s\s+in\s+(?:my|the)\s+(?:fridge|pantry|house|cupboard)|i\s+stock|need\s+to\s+buy|running\s+low|picked\s+up\s+from|went\s+to\s+(?:the\s+)?(?:shop|store|checkers|shoprite|pick\s*n\s*pay|woolworths|spar))\b/i;
+  const isShoppingListMsg = !hasLogTrigger && ((dashLineCount >= 3 && SHOPPING_CONTEXT_RE.test(m)) || dashLineCount >= 7);
+
+  if (isShoppingListMsg) {
+    const name = user.name?.split(" ")[0] || "";
+    const items = message.split("\n")
+      .filter(l => /^\s*-\s*\S/.test(l))
+      .map(l => l.replace(/^\s*-\s*/, "").trim())
+      .filter(Boolean);
+    const preview = items.slice(0, 3).join(", ");
+    const moreNote = items.length > 3 ? ` and ${items.length - 3} more` : "";
+    const shoppingReply = `${name ? name + ", t" : "T"}hat looks like your pantry list — ${preview}${moreNote}. Good staples to have.\n\n_I haven't logged these as a meal._ Those are ingredients, not food eaten today.\n\nTo log what you actually ate, tell me:\n*"I had oats and milk for breakfast"* or *"lunch was rice, tuna and eggs"*\n\nWhat did you eat today?`;
+    await logChat(user.id, message, shoppingReply, "SHOPPING_LIST_CLARIFY");
+    return shoppingReply;
+  }
+
   if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && hasActualFood && (hasLogTrigger || directFoodScan)) {
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];

@@ -398,6 +398,106 @@ test("'usually but today I had' respects today-signal override", () => {
 });
 
 // ============================================================
+// Shopping list / pantry inventory detection — must NOT be logged as a meal
+// ============================================================
+
+// Mirror exact logic from food-context.ts
+const SHOPPING_CONTEXT_RE_TEST = /\b(isle\s*by\s*isle|go\s*(?:isle|aisle)|aisle|what\s+i\s+have\s+(?:at\s+home|here)|have\s+at\s+home|at\s+home\s+i\s+(?:have|keep|stock)|what\s+i\s+(?:normally\s+)?(?:buy|stock|keep)|what.*(?:think|choose|chose)\s+(?:is\s+)?missing|shopping\s+list|groceries?|pantry|in\s+(?:my\s+)?fridge|what.?s\s+in\s+(?:my|the)\s+(?:fridge|pantry|house|cupboard)|i\s+stock|need\s+to\s+buy|running\s+low|picked\s+up\s+from|went\s+to\s+(?:the\s+)?(?:shop|store|checkers|shoprite|pick\s*n\s*pay|woolworths|spar))\b/i;
+const dashCount = (msg: string) => msg.split("\n").filter(l => /^\s*-\s*\S/.test(l)).length;
+const isShoppingList = (msg: string, hasLogTrig: boolean) => {
+  const dc = dashCount(msg);
+  const mLow = msg.toLowerCase();
+  return !hasLogTrig && ((dc >= 3 && SHOPPING_CONTEXT_RE_TEST.test(mLow)) || dc >= 7);
+};
+
+test("'isle by isle' + dash list is detected as shopping list", () => {
+  const msg = "I just go isle by isle and choose what I think is missing\n-Wheetbix\n-eggs\n-full cream milk\n-peanut butter\n-brown rice\n-maize meal\n-pasta";
+  assert.ok(isShoppingList(msg, false), "isle by isle + 7 items should be shopping list");
+});
+test("7+ dash items alone (no context) is detected as shopping list", () => {
+  const msg = "-rice\n-chicken\n-eggs\n-pasta\n-oats\n-banana\n-cheese\n-peanut butter";
+  assert.ok(isShoppingList(msg, false), "8 dash items alone should be shopping list");
+});
+test("'shopping list' + 3 dash items is detected", () => {
+  const msg = "Here is my shopping list\n-oats\n-eggs\n-chicken";
+  assert.ok(isShoppingList(msg, false), "explicit shopping list text should be detected");
+});
+test("3 dash items with log trigger (meal listing) is NOT shopping list", () => {
+  const msg = "For lunch I had:\n-rice\n-chicken\n-salad";
+  assert.ok(!isShoppingList(msg, true), "dash list WITH log trigger should not be intercepted");
+});
+test("2 dash items without context is NOT shopping list", () => {
+  const msg = "I had for dinner\n-pap\n-wors";
+  assert.ok(!isShoppingList(msg, true), "only 2 items should not trigger shopping list guard");
+});
+
+// ============================================================
+// Conversion objection handler — pure function, no DB needed
+// ============================================================
+
+import { handleConversionObjection } from "../server/handlers/conversion";
+const fakeUser = { goalType: "fat_loss", proteinTarget: 130, calorieTarget: 1800 };
+const convCtx = (m: string) => ({ user: fakeUser, m: m.toLowerCase(), payLink: "https://example.com/pay", name: "Sipho" });
+
+test("'can't afford' triggers CONVERSION_MONEY", () => {
+  const r = handleConversionObjection(convCtx("I can't afford it right now"));
+  assert.ok(r !== null && r.intent === "CONVERSION_MONEY", `expected CONVERSION_MONEY, got ${r?.intent}`);
+});
+test("'too expensive' triggers CONVERSION_MONEY", () => {
+  const r = handleConversionObjection(convCtx("That's too expensive for me"));
+  assert.ok(r !== null && r.intent === "CONVERSION_MONEY", `expected CONVERSION_MONEY, got ${r?.intent}`);
+});
+test("'let me think about it' triggers CONVERSION_STALL", () => {
+  const r = handleConversionObjection(convCtx("Let me think about it"));
+  assert.ok(r !== null && r.intent === "CONVERSION_STALL", `expected CONVERSION_STALL, got ${r?.intent}`);
+});
+test("'maybe later' triggers CONVERSION_STALL", () => {
+  const r = handleConversionObjection(convCtx("Maybe later, I'm not ready"));
+  assert.ok(r !== null && r.intent === "CONVERSION_STALL", `expected CONVERSION_STALL, got ${r?.intent}`);
+});
+test("'how much is it' triggers CONVERSION_PRICE", () => {
+  const r = handleConversionObjection(convCtx("How much is it per month?"));
+  assert.ok(r !== null && r.intent === "CONVERSION_PRICE", `expected CONVERSION_PRICE, got ${r?.intent}`);
+});
+test("'what does it cost' triggers CONVERSION_PRICE", () => {
+  const r = handleConversionObjection(convCtx("What does it cost?"));
+  assert.ok(r !== null && r.intent === "CONVERSION_PRICE", `expected CONVERSION_PRICE, got ${r?.intent}`);
+});
+test("plain goal message returns null (no objection)", () => {
+  const r = handleConversionObjection(convCtx("I want to lose weight"));
+  assert.ok(r === null, "non-objection message should return null");
+});
+test("money objection reply contains R6.63", () => {
+  const r = handleConversionObjection(convCtx("No money right now"));
+  assert.ok(r !== null && r.reply.includes("R6.63"), "money reply should frame the daily cost");
+});
+
+// ============================================================
+// Crime / unsafe walking objection regex
+// ============================================================
+
+const CRIME_RE_TEST = /\b(can.?t\s+walk\s+(?:outside|outside here|outside in my area|in my area|near me|around here|on the street)|not\s+safe\s+to\s+walk|unsafe\s+to\s+walk|scared\s+to\s+walk|afraid\s+to\s+walk|dangerous\s+(?:to walk|outside|around here|in my area|near me)|crime\s+(?:in my area|is bad|is high|outside|near me|around here)|too\s+much\s+crime|high\s+crime|crime\s+rate|it.?s\s+not\s+safe\s+(?:outside|to walk|here)|can.?t\s+go\s+outside|don.?t\s+feel\s+safe\s+(?:walking|outside)|neighbourhood\s+(?:is\s+)?(?:dangerous|unsafe|not safe))\b/i;
+
+test("'not safe to walk' matches crime objection", () => {
+  assert.ok(CRIME_RE_TEST.test("it's not safe to walk in my area"), "not safe to walk should match");
+});
+test("'too much crime' matches crime objection", () => {
+  assert.ok(CRIME_RE_TEST.test("there is too much crime outside"), "too much crime should match");
+});
+test("'scared to walk outside' matches", () => {
+  assert.ok(CRIME_RE_TEST.test("I'm scared to walk outside"), "scared to walk should match");
+});
+test("'can't walk outside' matches", () => {
+  assert.ok(CRIME_RE_TEST.test("I can't walk outside here"), "can't walk outside should match");
+});
+test("'high crime rate' matches", () => {
+  assert.ok(CRIME_RE_TEST.test("the crime rate in my area is very high"), "high crime rate should match");
+});
+test("plain 'I walked 5km' does NOT match crime objection", () => {
+  assert.ok(!CRIME_RE_TEST.test("I walked 5km this morning"), "walked 5km should not trigger crime handler");
+});
+
+// ============================================================
 // Subscription gate: inactive users should be blocked from media
 // ============================================================
 

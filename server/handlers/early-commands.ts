@@ -1261,6 +1261,18 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return bereavReply;
   }
 
+  // ---- CRIME / SAFETY WALKING OBJECTION ----
+  // "Can't walk outside — crime", "not safe to walk in my area", "too dangerous outside"
+  // This is a real SA barrier. Acknowledge it, give indoor alternatives immediately.
+  const isCrimeWalkingObjection = /\b(can.?t\s+walk\s+(?:outside|outside here|outside in my area|in my area|near me|around here|on the street)|not\s+safe\s+to\s+walk|unsafe\s+to\s+walk|scared\s+to\s+walk|afraid\s+to\s+walk|dangerous\s+(?:to walk|outside|around here|in my area|near me)|crime\s+(?:in my area|is bad|is high|outside|near me|around here)|too\s+much\s+crime|high\s+crime|crime\s+rate|it.?s\s+not\s+safe\s+(?:outside|to walk|here)|can.?t\s+go\s+outside|don.?t\s+feel\s+safe\s+(?:walking|outside)|neighbourhood\s+(?:is\s+)?(?:dangerous|unsafe|not safe))\b/i.test(m);
+  if (isCrimeWalkingObjection) {
+    const goal = user.goalType || "fat_loss";
+    const target = user.stepsTarget || 8500;
+    const crimeReply = `${capName}, that is a real issue — no argument. Walking in an unsafe area is not worth the risk.\n\nHere is what works instead:\n\n*Indoors:*\n• Walk on the spot while watching TV or on the phone — 30 min = ~2,500 steps\n• March up and down your passage — it counts\n• Stair climbs if you have stairs — 10 min = ~1,200 steps\n• Jump rope — 20 min = ${goal === "fat_loss" ? "~200 kcal burned" : "great conditioning"}\n\n*Safer outdoor options:*\n• Mall walking early morning before it fills up — free, well-lit, secure\n• Church grounds or school yard if access is possible\n• Taxi to a safer area for a morning walk if viable\n\nThe number is what matters — *${target.toLocaleString()} steps* — not where you walk. Indoor steps count exactly the same.\n\nSend me your step count at the end of the day, wherever you got them.`;
+    await logChat(user.id, message, crimeReply, "CRIME_WALKING");
+    return crimeReply;
+  }
+
   // ---- MONTH-END / FINANCIAL STRESS ----
   const isMonthEnd = /\b(month.?end|end of month|no.?money|broke|short on cash|can.?t afford|salary.?not|waiting for.?(salary|pay|payday)|payday.*friday|payday.*next|no.?budget|empty|flat.?broke|nothing (left|to eat)|no.?food|can.?t buy|no.?groceries|no.?airtime|airtime.?finished)\b/i.test(m);
   if (isMonthEnd) {

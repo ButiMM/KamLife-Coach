@@ -198,6 +198,17 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       const name = user.name?.split(" ")[0] || "there";
+
+      // ---- CONVERSION OBJECTION HANDLERS — run before generic gate reply ----
+      // Price questions, money objections, and hesitation/stall get tailored responses
+      // that reframe cost and keep the door open instead of just re-showing a link.
+      const { handleConversionObjection } = await import("./handlers/conversion");
+      const conversionResult = handleConversionObjection({ user, m, payLink, name });
+      if (conversionResult) {
+        await logChat(user.id, message, conversionResult.reply, conversionResult.intent);
+        return conversionResult.reply;
+      }
+
       const workouts = user.totalWorkoutsCompleted || 0;
       const isLapsed = !!user.cancelledAt;
       let gateReply: string;
