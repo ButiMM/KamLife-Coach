@@ -2,7 +2,7 @@ import { db } from "./db";
 import { users, weightLogs, chatHistory, workoutLogs, stepLogs } from "../shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
-import { calculateTargets } from "./targets";
+import { calculateTargets, calculateStepsTarget } from "./targets";
 import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -438,7 +438,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm, u.trainingExperience || "beginner"
   );
 
-  const stepsTarget = age >= 70 ? 6000 : isElderly ? 8000 : 10000;
+  const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, u.trainingExperience || "beginner");
 
   let referralCode: string | undefined;
   {
@@ -485,7 +485,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
       ? `\n\n_Your programme is joint-friendly with lower-impact alternatives. We focus on mobility, strength maintenance, and keeping you active and independent. Always listen to your body._`
       : "";
 
-  const stepsLabel = stepsTarget === 6000 ? "6,000" : stepsTarget === 8000 ? "8,000" : "8,000-12,000";
+  const stepsLabel = stepsTarget.toLocaleString();
 
   const updatedUser = { ...u, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: u.age || 30, primaryFocusArea: u.primaryFocusArea };
   const firstWorkout = getKamlifeProgramme(updatedUser, true);
@@ -1121,7 +1121,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       u.gender || "male", u.age || 30, u.heightCm || 170, exp
     );
 
-    const stepsTarget = exp === "beginner" ? 8500 : 10000;
+    const stepsTarget = calculateStepsTarget(weight, u.age || 30, u.heightCm || 170, exp);
     const startPhase = exp === "beginner" ? 1 : 2;
 
     await db.update(users).set({

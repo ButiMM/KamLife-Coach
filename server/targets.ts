@@ -102,3 +102,38 @@ export function calculateTargets(
 
   return { calorieTarget, proteinTarget };
 }
+
+// ============================================================
+// STEP TARGET — eased-in STARTING goal, not a flat number for everyone.
+// A deconditioned, heavier, older, or never-trained body needs a lower
+// starting goal to avoid joint overload and week-one burnout. The programme
+// then applies a further week-1/2 ramp on top of this (70% → 85% → 100%),
+// so people build up gradually instead of being thrown straight into 10k.
+// Pure function — no DB, unit-tested in script/unit-tests.ts.
+// ============================================================
+export function calculateStepsTarget(
+  weightKg: number,
+  age: number,
+  heightCm: number,
+  trainingExperience: string = "beginner",
+): number {
+  let stepsTarget = 10000;
+
+  // BMI-based easing — heavier bodies start lower (knees, ankles, sustainability).
+  const bmi = heightCm > 0 ? weightKg / Math.pow(heightCm / 100, 2) : 0;
+  if (bmi >= 40) stepsTarget = 6000;        // severe obesity
+  else if (bmi >= 35) stepsTarget = 7000;   // obesity class II
+  else if (bmi >= 30) stepsTarget = 8000;   // obesity class I
+
+  // Age-based easing (independent of BMI) — take the gentler of the two.
+  if (age >= 70) stepsTarget = Math.min(stepsTarget, 6000);
+  else if (age >= 60) stepsTarget = Math.min(stepsTarget, 8000);
+
+  // Never-trained beginners start a notch lower regardless, then ramp up.
+  if (trainingExperience === "beginner") stepsTarget = Math.min(stepsTarget, 8500);
+
+  // Floor — keep the goal meaningful even for the most deconditioned start.
+  if (stepsTarget < 5000) stepsTarget = 5000;
+
+  return stepsTarget;
+}

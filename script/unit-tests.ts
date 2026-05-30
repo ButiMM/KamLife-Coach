@@ -5,7 +5,7 @@
  */
 
 import assert from "node:assert/strict";
-import { calculateTargets } from "../server/targets";
+import { calculateTargets, calculateStepsTarget } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 
@@ -709,45 +709,37 @@ test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", ()
 // Step target easing — BMI / age / experience aware starting goal
 // ============================================================
 
-test("steps: normal-BMI young non-beginner gets full 10k", () => {
-  // 80kg / 180cm → BMI 24.7, age 30, no experience arg
-  const { stepsTarget } = calculateTargets(80, "fat_loss", "office", 3, "male", 30, 180);
-  assert.equal(stepsTarget, 10000, `expected 10000, got ${stepsTarget}`);
+test("steps: normal-BMI non-beginner gets full 10k", () => {
+  // 80kg / 180cm → BMI 24.7, age 30, intermediate
+  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate"), 10000);
 });
 test("steps: obese (BMI>=30) starts eased at 8000", () => {
   // 100kg / 175cm → BMI 32.7
-  const { stepsTarget } = calculateTargets(100, "fat_loss", "office", 3, "male", 35, 175);
-  assert.equal(stepsTarget, 8000, `obese should start at 8000, got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(100, 35, 175, "intermediate"), 8000);
 });
 test("steps: obesity class II (BMI>=35) starts at 7000", () => {
   // 115kg / 175cm → BMI 37.6
-  const { stepsTarget } = calculateTargets(115, "fat_loss", "office", 3, "male", 35, 175);
-  assert.equal(stepsTarget, 7000, `BMI>=35 should start at 7000, got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(115, 35, 175, "intermediate"), 7000);
 });
 test("steps: severe obesity (BMI>=40) starts at 6000", () => {
   // 130kg / 175cm → BMI 42.4
-  const { stepsTarget } = calculateTargets(130, "fat_loss", "office", 3, "male", 35, 175);
-  assert.equal(stepsTarget, 6000, `BMI>=40 should start at 6000, got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(130, 35, 175, "intermediate"), 6000);
 });
 test("steps: never-trained beginner (normal BMI) eased to 8500", () => {
   // 70kg / 175cm → BMI 22.9, beginner
-  const { stepsTarget } = calculateTargets(70, "fat_loss", "office", 3, "male", 30, 175, "beginner");
-  assert.equal(stepsTarget, 8500, `beginner should start at 8500, got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(70, 30, 175, "beginner"), 8500);
 });
 test("steps: takes the GENTLER of age and BMI easing", () => {
   // elderly (age 72 → 6000) AND obese (BMI 32 → 8000): the lower 6000 wins
-  const { stepsTarget } = calculateTargets(95, "general", "retired", 2, "male", 72, 172);
-  assert.equal(stepsTarget, 6000, `elderly+obese should take gentler 6000, got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(95, 72, 172, "intermediate"), 6000);
 });
 test("steps: obese beginner still eased by BMI, not just experience", () => {
   // 115kg / 175cm beginner → BMI 37.6 (7000) is gentler than beginner (8500)
-  const { stepsTarget } = calculateTargets(115, "fat_loss", "office", 3, "male", 30, 175, "beginner");
-  assert.equal(stepsTarget, 7000, `obese beginner should take 7000 (BMI), got ${stepsTarget}`);
+  assert.equal(calculateStepsTarget(115, 30, 175, "beginner"), 7000);
 });
 test("steps: never drops below the 5000 floor", () => {
   // extreme: 160kg / 165cm → BMI 58.8, age 75 — both push low, floor holds at 5000+
-  const { stepsTarget } = calculateTargets(160, "general", "retired", 1, "female", 75, 165);
-  assert.ok(stepsTarget >= 5000, `floor violated: ${stepsTarget}`);
+  assert.ok(calculateStepsTarget(160, 75, 165, "beginner") >= 5000);
 });
 
 // ============================================================
