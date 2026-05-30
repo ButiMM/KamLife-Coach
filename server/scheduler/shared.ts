@@ -10,6 +10,7 @@ import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentPr
 import { eq, gte, and, lt, desc, or, sql } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations };
@@ -123,21 +124,9 @@ export function canSendProactive(clientId: string): boolean {
 // NOT use this — they call canSendProactive directly. This is for routine,
 // "nice-to-have" daily nudges only.
 //
-// Cadence (pure decision in routineNudgeAllowed so it stays unit-testable):
-//   daysSilent 0–1 (engaged)    → every run
-//   daysSilent 2   (drifting)   → every other day
-//   daysSilent 3+  (gone quiet) → stop; retention/win-back owns this client
-export function routineNudgeAllowed(daysSilent: number, dayOfYear: number): boolean {
-  if (daysSilent <= 1) return true;
-  if (daysSilent === 2) return dayOfYear % 2 === 0;
-  return false;
-}
-
-export function dayOfYearSAST(): number {
-  const sast = new Date(Date.now() + 2 * 3_600_000);
-  const yearStart = Date.UTC(sast.getUTCFullYear(), 0, 1);
-  return Math.floor((sast.getTime() - yearStart) / 86_400_000);
-}
+// The pure cadence decision lives in ./nudge-policy (no DB import) so it stays
+// unit-testable without a database. Re-exported here for existing callers.
+export { routineNudgeAllowed, dayOfYearSAST };
 
 export function canSendRoutineNudge(client: { id: string; lastActiveAt?: Date | string | null }): boolean {
   if (!canSendProactive(client.id)) return false;

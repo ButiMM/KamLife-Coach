@@ -709,7 +709,7 @@ test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", ()
 // Engagement back-off for routine nudges — pure decision function
 // ============================================================
 
-import { routineNudgeAllowed } from "../server/scheduler/shared";
+import { routineNudgeAllowed } from "../server/scheduler/nudge-policy";
 
 test("back-off: engaged user (0 days silent) gets routine nudge", () => {
   assert.ok(routineNudgeAllowed(0, 100), "0 days silent should always allow");
