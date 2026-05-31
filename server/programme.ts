@@ -1238,7 +1238,7 @@ const GOAL_FINISH_GYM: Record<string, string> = {
   recomposition: "_After: protein within 60 min, moderate carbs. Sweet potato or pap + chicken. Fuel the rebuild._",
 };
 
-function getWeekContext(phase: number, week: number): { rationale: string; sets: string; reps: string; rest: string } {
+export function getWeekContext(phase: number, week: number, isBeginner = false): { rationale: string; sets: string; reps: string; rest: string } {
   // Returns week-specific coaching rationale and progressive sets/reps.
   // Each phase has a distinct goal; within each phase, intensity climbs weekly.
   const P1: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {

@@ -478,8 +478,14 @@ export async function handleFoodContext(ctx: {
     }
   }
 
+  // ---- GUILT / SHAME SIGNAL — client is embarrassed about what they ate ----
+  // 🙈 (see-no-evil) is the most common "I know, I know" emoji in SA WhatsApp food logs.
+  // Detect and respond without adding more judgment — log it, move on, next meal.
+  const hasGuiltSignal = /[\u{1F648}\u{1F649}\u{1F64A}]/u.test(message)
+    || /\b(i know i know|guilty|oops|i shouldn.?t|i know it.?s bad|bad i know|not good i know|cheat meal|i cheated|fell off|messed up|slipped|my bad|naughty|bad choice|i gave in|couldn.?t resist|treat myself|i know this is bad|terrible choice)\b/i.test(m);
+
   // ---- SA FOOD DATABASE MATCHING + GPT FOOD FALLBACK ----
-  const isSoftStruggleEarly = /\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
+  const isSoftStruggleEarly =/\b(i.?m (really |so |just )?(struggling|falling behind|losing motivation|lost motivation|feeling behind|feeling lost|not sure what i.?m doing|demotivated|unmotivated))\b/.test(m) || /\b(feel like (giving up|i.?m failing|i.?m not making progress|nothing is working|i.?m not getting it right|i.?m behind))\b/.test(m) || /\b(i don.?t (know what.?s happening|know what i.?m doing|know if this is working))\b/.test(m) || /\b(hard (to stay|to keep|to maintain) (motivated|going|consistent))\b/.test(m) || /\b(haven.?t (trained|worked out|been to gym|gone to gym)|didn.?t (train|work out)|no (training|workout|gym) (for |in )?\d+\s*(days?|weeks?))\b/.test(m) || /\bfeeling (down|low|unmotivated|demotivated|flat|defeated|hopeless about (this|my progress|the gym))\b/i.test(m) || /\b(unmotivated|demotivated|lost (my |all )?(motivation|drive)|no motivation|zero motivation)\b/i.test(m);
   const isEmotionalMsg = isSoftStruggleEarly;
   const foodsInMsg = scanForSAFoods(m);
   const hasActualFood = foodsInMsg.length > 0;
@@ -576,7 +582,8 @@ export async function handleFoodContext(ctx: {
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
 
-    const FOR_MEAL_RE = /\bfor\s+(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
+    // Allow "for a snack", "for my dinner", "for the lunch" etc. — articles are non-capturing.
+    const FOR_MEAL_RE = /\bfor\s+(?:a\s+|my\s+|the\s+)?(breakfast|lunch|dinner|supper|snack|brunch|morning|afternoon|evening)\b/gi;
     const forMealMatches = [...m.matchAll(FOR_MEAL_RE)];
 
     if (forMealMatches.length >= 2) {
@@ -930,8 +937,9 @@ export async function handleFoodContext(ctx: {
         .map(f => COMBO_UPSELL[f.name])
         .find(note => note);
       const upsellNote = comboUpsell ? `\n\n${comboUpsell}` : "";
+      const guiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${stepAppend}`;
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
@@ -1006,8 +1014,9 @@ export async function handleFoodContext(ctx: {
         });
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
+        const fbGuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}`;
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}`;
       }
     }
   }
@@ -1086,8 +1095,9 @@ export async function handleFoodContext(ctx: {
       });
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
+      const fb2GuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}`;
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}`;
     }
     // GPT returned null — can't identify the food. Ask for clarification instead of silently dropping.
     console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
