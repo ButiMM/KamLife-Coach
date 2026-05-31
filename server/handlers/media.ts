@@ -23,7 +23,7 @@ import {
 import { askCoachK } from "../gpt";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
@@ -663,8 +663,16 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
 
       const visionReply = visionResponse.choices[0]?.message?.content?.trim();
+      // If the photo is unreadable or misclassified but the caption names real food,
+      // fall back to logging from the caption. The text pipeline applies its own gates
+      // (questions, future-tense, planning) so re-routing here is safe — no double log.
+      const captionHasFood = !!(message && message.trim().length > 1 && scanForSAFoods(message).length > 0);
       if (!visionReply || visionReply.length < 10) {
-        return "Eish, I cannot make out the food clearly. Take the photo in better light and send again.";
+        if (captionHasFood) {
+          console.log(`[FOOD_VISION] unreadable photo — logging from caption user=${user.id.slice(-6)}`);
+          return handleMessage(phone, message);
+        }
+        return "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
       if (/^NOT_FOOD\b/i.test(visionReply)) {
         console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
@@ -672,6 +680,11 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         const isIngredient = /\b(spray|oil|sauce|spice|seasoning|sugar|salt|flour|stock|baking|butter|margarine|cook.?n|cook and bake|spray.?n.?cook)\b/i.test(message || "");
         if (isIngredient) {
           return `Got it — that's a cooking ingredient, not a meal to log. If you're adding it to a dish, just tell me what you made: "chicken with non-stick spray" and I'll include it. What did you eat?`;
+        }
+        // Photo isn't food, but the caption names real food — log from the caption.
+        if (captionHasFood) {
+          console.log(`[FOOD_VISION] not_food photo but caption has food — logging from caption user=${user.id.slice(-6)}`);
+          return handleMessage(phone, message);
         }
         return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }

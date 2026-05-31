@@ -687,24 +687,21 @@ export async function handleFoodContext(ctx: {
 
     type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number };
     const allAdjustedFoods: AdjFood[] = [];
-    const mealLines: string[] = [];
     const isMultiMeal = mealSegments.length >= 2;
+    // Per-segment buckets — so a multi-meal log attributes each food (including
+    // GPT-supplemented items) to the correct meal in the breakdown, not just the total.
+    const segmentBuckets: { label: string; text: string; foods: AdjFood[] }[] = [];
 
     for (const seg of mealSegments) {
       const segFoods = scanForSAFoods(seg.text);
-      if (segFoods.length === 0) continue;
-      const adjusted = adjustFoodsForSegment(segFoods, seg.text);
+      const adjusted = segFoods.length > 0 ? adjustFoodsForSegment(segFoods, seg.text) : [];
+      segmentBuckets.push({ label: seg.label, text: seg.text, foods: adjusted });
       allAdjustedFoods.push(...adjusted);
-      if (isMultiMeal && seg.label) {
-        const segCals = adjusted.reduce((s, f) => s + f.adjustedCalories, 0);
-        const segProt = adjusted.reduce((s, f) => s + f.adjustedProtein, 0);
-        const lines = adjusted.map(f => `  • ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein`).join("\n");
-        mealLines.push(`*${seg.label}:* ~${segCals} kcal | ${segProt}g protein\n${lines}`);
-      }
     }
 
     // ---- PARTIAL MATCH SUPPLEMENT — catch food items SA scanner missed ----
-    // Only fires when the message has substantive unmatched content (e.g. "mushroom sauce" with "pap")
+    // Only fires when the message has substantive unmatched content (e.g. "mushroom sauce" with "pap").
+    // Each supplemented item is attributed back to the segment whose text mentions it.
     if (allAdjustedFoods.length > 0 && hasUnmatchedFoodContent(m, allAdjustedFoods)) {
       try {
         const suppItems = await gptFoodSupplement(message, user, allAdjustedFoods.map(f => f.name));
@@ -718,7 +715,7 @@ export async function handleFoodContext(ctx: {
             });
           });
           for (const sf of filtered) {
-            allAdjustedFoods.push({
+            const adj: AdjFood = {
               name: sf.name,
               aliases: [],
               caloriesPer100g: 0,
@@ -736,11 +733,30 @@ export async function handleFoodContext(ctx: {
               adjustedProtein: sf.protein_g,
               adjustedDescription: sf.portion_desc,
               quantity: 1,
-            });
+            };
+            allAdjustedFoods.push(adj);
+            // Attribute to the segment whose text mentions this item; else the last segment.
+            const sfWords = sf.name.toLowerCase().split(/\s+/).filter((w: string) => w.length > 3);
+            const target = segmentBuckets.find(b => sfWords.some(w => b.text.toLowerCase().includes(w)))
+              || segmentBuckets[segmentBuckets.length - 1];
+            if (target) target.foods.push(adj);
           }
         }
       } catch (e) {
         console.warn("[PARTIAL-MATCH SUPP] error:", e);
+      }
+    }
+
+    // Build the multi-meal breakdown AFTER supplement attribution, so each meal line
+    // includes its GPT-supplemented items (not just the running total).
+    const mealLines: string[] = [];
+    if (isMultiMeal) {
+      for (const b of segmentBuckets) {
+        if (!b.label || b.foods.length === 0) continue;
+        const segCals = b.foods.reduce((s, f) => s + f.adjustedCalories, 0);
+        const segProt = b.foods.reduce((s, f) => s + f.adjustedProtein, 0);
+        const lines = b.foods.map(f => `  • ${f.name}: ~${f.adjustedCalories} kcal, ${f.adjustedProtein}g protein`).join("\n");
+        mealLines.push(`*${b.label}:* ~${segCals} kcal | ${segProt}g protein\n${lines}`);
       }
     }
 

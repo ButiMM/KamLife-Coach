@@ -13,7 +13,8 @@
     "test:unit": "tsx script/unit-tests.ts",
     "test:scanner": "tsx script/food-scanner-tests.ts",
     "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "backfill:steps": "tsx script/backfill-step-targets.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
