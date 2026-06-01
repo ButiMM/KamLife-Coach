@@ -316,6 +316,32 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "leg raise plank":                  "plank-leg-raise",
   "shoulder tap":                     "plank-shoulder-tap",
   "shoulder taps":                    "plank-shoulder-tap",
+
+  // ── Common plurals / alternate spellings not covered above ───────
+  "walking lunges":                   "reverse-lunge",
+  "forward lunge":                    "reverse-lunge",
+  "forward lunges":                   "reverse-lunge",
+  "jump squat":                       "squat",
+  "jump squats":                      "squat",
+  "jumping squat":                    "squat",
+  "box squat":                        "squat",
+  "squat jump":                       "squat",
+  "single leg hip thrust":            "hip-thrust",
+  "single-leg hip thrust":            "hip-thrust",
+  "glute bridge hold":                "glute-bridge",
+  "hip bridge":                       "glute-bridge",
+  "hip bridges":                      "glute-bridge",
+  "mountain climber":                 "plank",
+  "mountain climbers":                "plank",
+  "burpee":                           "push-up",
+  "burpees":                          "push-up",
+  "leg raises":                       "dead-bug",
+  "ab leg raise":                     "dead-bug",
+  "step ups":                         "step-up",
+  "lateral lunges":                   "reverse-lunge",
+  "lateral lunge":                    "reverse-lunge",
+  "curtsy lunge":                     "reverse-lunge",
+  "curtsy lunges":                    "reverse-lunge",
 };
 
 /**
@@ -378,6 +404,20 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
     .trim();
   if (noTrail !== name) {
     slug = EXERCISE_SLUGS[noTrail];
+    if (slug) return urlForSlug(slug);
+  }
+
+  // 6. Replace hyphens with spaces — programme names use "Single-Leg" but slugs use "single leg"
+  const noHyphens = name.replace(/-/g, " ").trim();
+  if (noHyphens !== name) {
+    slug = EXERCISE_SLUGS[noHyphens];
+    if (slug) return urlForSlug(slug);
+  }
+
+  // 7. Strip trailing 's' to match singular slug entries ("walking lunges" → "walking lunge")
+  if (name.endsWith("s") && name.length > 4) {
+    const singular = name.slice(0, -1);
+    slug = EXERCISE_SLUGS[singular];
     if (slug) return urlForSlug(slug);
   }
 
