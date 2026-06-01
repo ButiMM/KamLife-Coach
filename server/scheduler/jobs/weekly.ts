@@ -1,9 +1,9 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
-  eq, gte, and, lt, asc, desc, sql, count,
+  eq, gte, and, lt, asc,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive,
   getActiveClients, isPaused, loadState, saveState,
-  todaySAST, thisWeekUTC, hasRunToday,
+  todaySAST, thisWeekUTC,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { runWeeklyRecaps } from "../../weekly-recap";
@@ -136,6 +136,8 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const trainEmoji = trainPct >= 100 ? "✅" : trainPct >= 66 ? "💪" : "⚠️";
       const streak = client.workoutStreak || 0;
       const streakLine = streak > 0 ? `🔥 ${streak}-session streak` : "";
+      const totalSessions = client.totalWorkoutsCompleted || 0;
+      const milestoneLine = totalSessions > 0 && totalSessions % 10 === 0 ? `🏆 ${totalSessions} total sessions — milestone` : "";
       const junkCount = foodLogs.filter(l => JUNK.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
       const noProteinDays = foodDays - proteinDays;
       let warning = "";
@@ -167,6 +169,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
         `*Weekly Score: ${totalScore}/100 — ${scoreLabel}*`, ``,
       ].filter(l => l !== null);
 
+      if (milestoneLine) lines.push(milestoneLine, ``);
       if (warning) lines.push(warning, ``);
       lines.push(`*This week:* ${focus}`);
       if (totalScore >= 85) lines.push(``, `${name}, this is what results look like. Same energy next week.`);
@@ -329,51 +332,4 @@ export async function runNsvCheckin(): Promise<void> {
       saveState(stateKey, todaySAST());
     } catch (err) { console.error(`[SCHEDULER] NSV check-in error — ${client.phoneNumber}:`, err); }
   }
-}
-
-export async function runWeeklyWinsCelebration(): Promise<void> {
-  console.log("[SCHEDULER] Running weekly wins celebration...");
-  const today = todaySAST();
-  if (hasRunToday("weekly_wins", today)) return;
-  saveState("weekly_wins", today);
-
-  const allClients = await db.select().from(users).where(and(
-    eq(users.onboardingState, "COMPLETE"),
-    eq(users.subscriptionStatus, "active"),
-  ));
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
-  let sent = 0;
-
-  for (const client of allClients) {
-    try {
-      const [workoutsRow] = await db.select({ c: count() }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
-      const [stepDaysRow] = await db.select({ c: count() }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));
-      const weights = await db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(2);
-
-      const wk = workoutsRow.c || 0;
-      const st = stepDaysRow.c || 0;
-      if (wk === 0 && st === 0) continue;
-
-      const name = client.name?.split(" ")[0] || "Champ";
-      const total = client.totalWorkoutsCompleted || 0;
-      const streak = client.workoutStreak || 0;
-      const wins: string[] = [];
-      if (wk > 0) wins.push(`💪 ${wk} workout${wk > 1 ? "s" : ""} completed`);
-      if (st > 0) wins.push(`🚶 ${st} day${st > 1 ? "s" : ""} of steps logged`);
-      if (streak >= 3) wins.push(`🔥 ${streak}-session streak`);
-      if (total > 0 && total % 10 === 0) wins.push(`🏆 ${total} total sessions milestone`);
-      if (weights.length >= 2) {
-        const diff = Number(weights[0].weight) - Number(weights[1].weight);
-        if (diff < -0.3) wins.push(`⚖️ Down ${Math.abs(diff).toFixed(1)}kg this week`);
-      }
-      if (wins.length === 0) continue;
-
-      const msg = `*${name}, your week in review:*\n\n${wins.join("\n")}\n\n${total >= 10 ? `You have done more than most people do in a year. ${total} sessions total.` : "Every session counts. Keep stacking."}\n\nSame energy next week. Monday starts now. 💪`;
-      await sendWhatsApp(client.phoneNumber, msg);
-      sent++;
-      await new Promise(r => setTimeout(r, 200));
-      if (sent >= 200) break;
-    } catch { /* skip */ }
-  }
-  console.log(`[SCHEDULER] Weekly wins sent: ${sent}`);
 }

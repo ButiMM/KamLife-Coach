@@ -25,7 +25,7 @@ import {
 } from "./scheduler/jobs/retention";
 import {
   runFridayWeekendStrategy, runSundayWeeklyReport, runSundayEveningCheckin,
-  runWeekendFoodAudit, runComplianceLevelUpdate, runNsvCheckin, runWeeklyWinsCelebration,
+  runWeekendFoodAudit, runComplianceLevelUpdate, runNsvCheckin,
 } from "./scheduler/jobs/weekly";
 import {
   runPhaseAdvancement, runGoalCheck, runWeeklyMondayCheckin,
@@ -277,7 +277,6 @@ export async function initScheduler(): Promise<void> {
     } catch (e) { console.error("[SCHEDULER] runAutoCalAdjust failed:", e); }
   }, { timezone: "UTC" });
   cron.schedule("0 15 * * 0",    () => safe("runStepLeaderboard",    runStepLeaderboard));    // 5pm SAST
-  cron.schedule("0 16 * * 0",    () => safe("runWeeklyWinsCelebration", runWeeklyWinsCelebration)); // 6pm SAST
   cron.schedule("0 17 * * 0",    () => safe("runSundayEveningCheckin",  runSundayEveningCheckin), { timezone: "UTC" }); // 7pm SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────
