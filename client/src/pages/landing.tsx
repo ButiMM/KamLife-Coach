@@ -203,8 +203,17 @@ export default function LandingPage() {
             preload="metadata"
           />
         ) : (
-          /* Fallback gradient when no video is uploaded yet */
-          <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-800 to-emerald-950" />
+          /* Fallback when no video — layered gradients + subtle mesh so the hero
+             doesn't look like a blank placeholder */
+          <>
+            <div className="absolute inset-0 bg-gradient-to-br from-[#0B1D35] via-[#1E3A6E] to-[#0B2A1A]" />
+            {/* radial highlight top-left — gives depth */}
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 60% at 20% 30%, rgba(251,146,60,0.12) 0%, transparent 70%)" }} />
+            {/* radial highlight bottom-right */}
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 50% at 80% 80%, rgba(37,211,102,0.08) 0%, transparent 65%)" }} />
+            {/* subtle dot-grid texture */}
+            <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "32px 32px" }} />
+          </>
         )}
 
         {/* Dark overlay so text stays readable over any video */}
@@ -670,7 +679,10 @@ export default function LandingPage() {
             />
           </div>
           <p>Built for South Africa · POPIA compliant · R199/month</p>
-          <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
+          <div className="flex flex-col items-center sm:items-end gap-1">
+            <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
+            <a href="/login" className="text-xs text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors">Coach login</a>
+          </div>
         </div>
       </footer>
     </div>

@@ -325,7 +325,15 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
       // Register the inflight counter BEFORE firing async processing so all photos in
       // an album burst are counted before any handler resolves and flushes the buffer.
-      if (mediaUrl && mediaType?.startsWith("image/")) bumpImageInflight(rawPhone);
+      // On the FIRST image of a burst, send an immediate ACK so the user doesn't see
+      // 20-30 seconds of silence while vision processes.
+      if (mediaUrl && mediaType?.startsWith("image/")) {
+        const isFirstInBurst = !photoReplyBuffer.has(rawPhone);
+        bumpImageInflight(rawPhone);
+        if (isFirstInBurst) {
+          sendParts(rawPhone, ["📸 Got your photo — analysing your meal, one sec…"], null).catch(() => {});
+        }
+      }
       processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage).catch(() => {});
     } catch (err: any) {
       console.error("[WHATSAPP] Webhook error:", err.message);
