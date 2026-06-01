@@ -482,7 +482,25 @@ export async function handleMediaMessage(ctx: {
               })();
             }
 
-            return stepReply + (perfectDay || "");
+            // Adaptive target suggestion — only when client has been consistently hitting
+            // their target. Requires streak >= 5 so casual users never see this.
+            let adaptiveNote = "";
+            if (streak >= 5 && extractedSteps >= target && target < 20000) {
+              try {
+                const weekAgo = new Date(Date.now() - 7 * 86_400_000);
+                const recentHits = await db.select({ steps: stepLogs.steps })
+                  .from(stepLogs)
+                  .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, weekAgo)))
+                  .limit(7);
+                const hitsThisWeek = recentHits.filter(l => (l.steps ?? 0) >= target).length;
+                if (hitsThisWeek >= 5) {
+                  const newTarget = target + 1000;
+                  adaptiveNote = `\n\n_You've hit ${target.toLocaleString()} steps ${hitsThisWeek}/7 days this week. Reply *"steps goal ${newTarget}"* to raise your target to ${newTarget.toLocaleString()}._`;
+                }
+              } catch { /* non-fatal */ }
+            }
+
+            return stepReply + (perfectDay || "") + adaptiveNote;
           }
         } catch (e) {
           console.warn("[step-vision]", e);

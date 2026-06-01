@@ -1261,6 +1261,24 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return bereavReply;
   }
 
+  // ---- UPDATE STEP TARGET — "steps goal 11000", "steps target 12000", "set steps to 10000" ----
+  const stepTargetMatch = m.match(/\bstep(?:s)?\s+(?:target|goal)\s+(?:to\s+)?(\d[\d,]*)\b/i)
+    || m.match(/\b(?:set|change|update|bump|raise|lower|increase|decrease)\s+(?:my\s+)?step(?:s)?(?:\s+(?:target|goal))?\s+to\s+(\d[\d,]*)\b/i);
+  if (stepTargetMatch) {
+    const rawNum = stepTargetMatch[1].replace(/,/g, "");
+    const newTarget = parseInt(rawNum, 10);
+    if (newTarget >= 2000 && newTarget <= 30000) {
+      await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.phoneNumber, phone));
+      const oldTarget = user.stepsTarget || 8500;
+      const direction = newTarget > oldTarget ? "raised" : newTarget < oldTarget ? "lowered" : "kept";
+      const stepUpdateReply = `Step target ${direction} to *${newTarget.toLocaleString()} steps/day*. ✅ Every screenshot you log will now track against this.`;
+      await logChat(user.id, message, stepUpdateReply, "STEP_TARGET_UPDATE");
+      return stepUpdateReply;
+    } else if (newTarget > 0) {
+      return `That step count doesn't look right (valid range: 2,000–30,000). What should your daily step goal be?`;
+    }
+  }
+
   // ---- STEP TRACKING APP RECOMMENDATION ----
   // "Which app?" "What app to track steps?" — comes up every onboarding conversation.
   // Give a clear, device-aware answer so the client can act immediately.

@@ -40,6 +40,7 @@ async function processTextAsync(
   allImageUrls: string[],
   handleMessage: RouteDeps["handleMessage"],
 ): Promise<void> {
+  const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
   try {
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
 
@@ -54,10 +55,20 @@ async function processTextAsync(
     const mediaMarkerMatch = cleanedReply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
     const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
     const cleanReply = replyMediaUrl ? cleanedReply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : cleanedReply;
+
+    // Image messages without a GIF/media attachment go through the coalescing buffer
+    // so that album bursts (N photos sent together) result in ONE combined reply.
+    // Replies that include a media URL (equipment GIFs, etc.) are sent immediately.
+    if (isImageMessage && !replyMediaUrl) {
+      await resolveImageInflight(phone, cleanReply);
+      return;
+    }
+
     await sendParts(phone, splitMessage(cleanReply), replyMediaUrl);
   } catch (err: any) {
     console.error("[TEXT_ASYNC] failed:", err?.message || err);
-    // Deliver error via outbound so user isn't left in silence
+    // For image messages: resolve inflight so the buffer doesn't hang, then send the error.
+    if (isImageMessage) await resolveImageInflight(phone, null).catch(() => {});
     await sendParts(phone, ["Eish, something went wrong on my side. Give me a second and try again."], null).catch(() => {});
   }
 }
@@ -128,6 +139,64 @@ function splitMessage(text: string, maxLen = 1500): string[] {
   }
   if (current.trim()) chunks.push(current.trim());
   return chunks.filter(Boolean);
+}
+
+// ── Per-phone album photo coalescing ──────────────────────────────────────────
+// When a client picks several photos from their gallery and sends them together,
+// WhatsApp fires N separate webhooks milliseconds apart — each with a distinct
+// MessageSid and URL. Without coalescing, each generates its own bot reply, so
+// 10 food photos = 10 separate WhatsApp messages, which is noisy and confusing.
+//
+// Design: before each image processTextAsync is fired, we bump an inflight counter
+// for that phone. When a handler resolves, we push the reply into a buffer and
+// decrement the counter. When the counter reaches 0 (all handlers for this burst
+// are done), a 400ms timer fires to flush all replies as one combined message.
+// The 400ms window lets any final DB writes (recomputeTodayFoodTotals) settle.
+const photoReplyBuffer = new Map<string, {
+  parts: string[];
+  failedCount: number;
+  inflight: number;
+  timer: ReturnType<typeof setTimeout> | null;
+}>();
+
+function bumpImageInflight(phone: string): void {
+  const e = photoReplyBuffer.get(phone);
+  if (e) {
+    if (e.timer) { clearTimeout(e.timer); e.timer = null; }
+    e.inflight++;
+  } else {
+    photoReplyBuffer.set(phone, { parts: [], failedCount: 0, inflight: 1, timer: null });
+  }
+}
+
+async function resolveImageInflight(phone: string, reply: string | null): Promise<void> {
+  const e = photoReplyBuffer.get(phone);
+  if (!e) { if (reply) await sendParts(phone, splitMessage(reply), null); return; }
+  if (reply) e.parts.push(reply); else e.failedCount++;
+  e.inflight = Math.max(0, e.inflight - 1);
+  if (e.inflight === 0) {
+    e.timer = setTimeout(() => { flushPhotoBuffer(phone).catch(() => {}); }, 400);
+  }
+}
+
+async function flushPhotoBuffer(phone: string): Promise<void> {
+  const entry = photoReplyBuffer.get(phone);
+  if (!entry) return;
+  photoReplyBuffer.delete(phone);
+  const { parts, failedCount } = entry;
+  if (parts.length === 0) return; // all failed — errors already sent individually
+  if (parts.length === 1 && failedCount === 0) {
+    await sendParts(phone, splitMessage(parts[0]), null);
+    return;
+  }
+  // Multiple parts: strip "Today so far" footer from all but the last (the last has
+  // the most accurate totals since all meals have been inserted by then).
+  const todayPattern = /\n\n_Today so far:[\s\S]*$/;
+  const bodies = parts.map((p, i) => (i === parts.length - 1 ? p : p.replace(todayPattern, "").trim()));
+  const batchNote = `\n\n_${parts.length} photo${parts.length > 1 ? "s" : ""} — all logged._`;
+  const failNote = failedCount > 0 ? `\n_(${failedCount} unclear — resend in better light if needed)_` : "";
+  const combined = bodies.join("\n\n") + batchNote + failNote;
+  await sendParts(phone, splitMessage(combined), null);
 }
 
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {
@@ -254,6 +323,9 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       // Twilio's 15s hard timeout is a real risk for GPT calls (5-15s each).
       // Respond instantly with empty TwiML, deliver the real reply via outbound API.
       res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+      // Register the inflight counter BEFORE firing async processing so all photos in
+      // an album burst are counted before any handler resolves and flushes the buffer.
+      if (mediaUrl && mediaType?.startsWith("image/")) bumpImageInflight(rawPhone);
       processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage).catch(() => {});
     } catch (err: any) {
       console.error("[WHATSAPP] Webhook error:", err.message);
