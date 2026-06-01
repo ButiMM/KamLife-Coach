@@ -679,10 +679,7 @@ export default function LandingPage() {
             />
           </div>
           <p>Built for South Africa · POPIA compliant · R199/month</p>
-          <div className="flex flex-col items-center sm:items-end gap-1">
-            <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
-            <a href="/login" className="text-xs text-muted-foreground/30 hover:text-muted-foreground/60 transition-colors">Coach login</a>
-          </div>
+          <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
         </div>
       </footer>
     </div>
