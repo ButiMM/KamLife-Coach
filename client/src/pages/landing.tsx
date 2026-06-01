@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import {
   MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star,
   ChevronRight, Phone, Target, Heart, Flame, Dumbbell, Apple, Footprints,
-  Moon, Camera, ShoppingCart, Trophy, Plus, Minus
+  Moon, Camera, ShoppingCart, Trophy, Plus, Minus, Mic
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "wouter";
@@ -424,18 +424,27 @@ export default function LandingPage() {
                         </div>
                       </div>
 
-                      {/* User reply */}
+                      {/* User sends voice note */}
                       <div className="flex justify-end">
-                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] px-2.5 py-2 max-w-[68%] shadow-sm">
-                          <p>Ready! Had eggs &amp; pap 💪</p>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:03 ✓✓</p>
+                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] px-2.5 py-2 max-w-[72%] shadow-sm">
+                          <div className="flex items-center gap-1.5 text-gray-600">
+                            <div className="flex gap-[2px] items-end h-3">
+                              {[2,4,7,5,6,3,7,4,2,5,3,5,4].map((h,i) => (
+                                <div key={i} className="w-[2px] bg-gray-400/70 rounded-full" style={{ height: `${h * 2}px` }} />
+                              ))}
+                            </div>
+                            <span className="text-[9px] text-gray-500">0:08</span>
+                          </div>
+                          <p className="text-[8.5px] text-gray-400 text-right mt-0.5">08:03 ✓✓</p>
                         </div>
                       </div>
 
                       {/* Coach K reply */}
                       <div className="flex">
-                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[78%] shadow-sm">
-                          <p>💪 <strong>Perfect pre-workout.</strong> Drink 500ml water before training. Let's go.</p>
+                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[84%] shadow-sm">
+                          <p className="text-gray-500 italic text-[9px]">I heard: "had eggs and pap for breakfast"</p>
+                          <p className="mt-0.5"><strong>Food logged ✅</strong></p>
+                          <p className="text-gray-700">~420 kcal · 28g protein</p>
                           <p className="text-[8.5px] text-gray-400 text-right mt-1">08:04 ✓✓</p>
                         </div>
                       </div>
@@ -481,6 +490,125 @@ export default function LandingPage() {
                       </div>
                     </div>
 
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      {/* ── HOW TO LOG — the biggest barrier, solved ── */}
+      <section className="py-24 px-4 bg-[#0B1D35]">
+        <div className="max-w-5xl mx-auto">
+          <div className="text-center mb-14">
+            <p className="text-orange-400 text-sm font-bold uppercase tracking-widest mb-3">No more excuses about logging</p>
+            <h2 className="text-4xl font-bold font-display text-white mb-4">Send it any way you have it.</h2>
+            <p className="text-white/55 text-lg max-w-xl mx-auto">Voice note, photo, or text — Coach K handles the rest in seconds. No app. No forms. Just WhatsApp.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+
+            {/* Voice note */}
+            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center shrink-0">
+                  <Mic className="w-5 h-5 text-orange-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base leading-tight">Voice note</h3>
+                  <p className="text-white/40 text-xs">Just talk — no typing</p>
+                </div>
+              </div>
+              <p className="text-white/55 text-sm mb-5 leading-relaxed">Send a 10-second voice note. Coach K transcribes your words and logs the meal instantly.</p>
+              {/* Mini chat */}
+              <div className="mt-auto space-y-2 text-[10.5px]">
+                <div className="flex justify-end">
+                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] px-2.5 py-2 max-w-[85%] shadow-sm">
+                    <div className="flex items-center gap-2 text-gray-600">
+                      <div className="flex gap-[2px] items-end h-3">
+                        {[2,4,6,4,5,3,6,4,2,5,3,4].map((h,i) => (
+                          <div key={i} className="w-[2px] bg-gray-400/60 rounded-full" style={{ height: `${h * 2}px` }} />
+                        ))}
+                      </div>
+                      <span className="text-gray-500">0:12</span>
+                    </div>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:09 ✓✓</p>
+                  </div>
+                </div>
+                <div className="flex">
+                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
+                    <p className="text-gray-500 italic text-[9.5px]">I heard: "roasted potatoes, mixed veggies and chicken"</p>
+                    <p className="font-semibold text-gray-800">Food logged ✅</p>
+                    <p className="text-gray-700">Meal total: ~957 kcal · 90g protein</p>
+                    <p className="text-gray-600">Today: 2,257 / 2,446 kcal 🎯</p>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:10 ✓✓</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Photo */}
+            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
+                  <Camera className="w-5 h-5 text-emerald-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base leading-tight">Photo</h3>
+                  <p className="text-white/40 text-xs">Snap and send</p>
+                </div>
+              </div>
+              <p className="text-white/55 text-sm mb-5 leading-relaxed">Photograph your plate — even 10 photos at once. Coach K identifies each food and replies in seconds.</p>
+              {/* Mini chat */}
+              <div className="mt-auto space-y-2 text-[10.5px]">
+                <div className="flex justify-end">
+                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] p-1.5 max-w-[65%] shadow-sm">
+                    <div className="bg-gray-300/60 rounded-[8px] h-14 flex items-center justify-center">
+                      <Camera className="w-4 h-4 text-gray-500" />
+                    </div>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5 pr-0.5">13:01 ✓✓</p>
+                  </div>
+                </div>
+                <div className="flex">
+                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
+                    <p className="font-semibold text-gray-800">Food logged ✅</p>
+                    <p className="text-gray-700">Pap · chakalaka · 2 chicken pieces</p>
+                    <p className="text-gray-700">~680 kcal · 41g protein</p>
+                    <p className="text-gray-600">Today: 1,490 / 2,200 kcal 🎯</p>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">13:02 ✓✓</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Text */}
+            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center shrink-0">
+                  <MessageCircle className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-white text-base leading-tight">Text</h3>
+                  <p className="text-white/40 text-xs">Type anything natural</p>
+                </div>
+              </div>
+              <p className="text-white/55 text-sm mb-5 leading-relaxed">Type it how you'd say it. "Had a kota for lunch" or "KFC 2-piece". Coach K understands SA food and slang.</p>
+              {/* Mini chat */}
+              <div className="mt-auto space-y-2 text-[10.5px]">
+                <div className="flex justify-end">
+                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] px-2.5 py-2 max-w-[85%] shadow-sm">
+                    <p className="text-gray-800">had 2 boerewors rolls at braai</p>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:32 ✓✓</p>
+                  </div>
+                </div>
+                <div className="flex">
+                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
+                    <p className="font-semibold text-gray-800">Food logged ✅</p>
+                    <p className="text-gray-700">~560 kcal · 22g protein</p>
+                    <p className="text-gray-600">Today: 1,890 / 2,200 kcal · on track 🔥</p>
+                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:32 ✓✓</p>
                   </div>
                 </div>
               </div>
