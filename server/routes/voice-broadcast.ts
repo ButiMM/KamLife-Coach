@@ -195,7 +195,7 @@ export function registerVoiceBroadcastRoutes(app: Express) {
       await pool.query(`DELETE FROM voice_recap_logs WHERE week_start = $1`, [weekStart]);
       console.log(`[VOICE_RECAP] Force re-run: cleared all recap logs for week ${weekStart}`);
       const { runWeeklyRecaps } = await import("../weekly-recap");
-      runWeeklyRecaps().then(r => {
+      runWeeklyRecaps({ force: true }).then(r => {
         console.log(`[VOICE_RECAP] Force re-run complete:`, r);
       }).catch(e => {
         console.error(`[VOICE_RECAP] Force re-run error:`, e.message);

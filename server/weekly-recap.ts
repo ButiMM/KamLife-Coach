@@ -263,10 +263,13 @@ async function storeRecapAudio(
   }
 }
 
-export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number; skipped: number }> {
-  if (isProactivePaused()) {
-    console.log("[RECAP] PROACTIVE_PAUSED=true — skipping weekly voice recaps");
+export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sent: number; failed: number; skipped: number }> {
+  if (!opts?.force && isProactivePaused()) {
+    console.log("[RECAP] PROACTIVE_PAUSED=true — skipping weekly voice recaps (use force-rerun to override)");
     return { sent: 0, failed: 0, skipped: 0 };
+  }
+  if (opts?.force && isProactivePaused()) {
+    console.log("[RECAP] PROACTIVE_PAUSED=true but force=true — proceeding with manual rerun");
   }
   const elevenLabsReady = isElevenLabsConfigured();
   if (!elevenLabsReady) {
