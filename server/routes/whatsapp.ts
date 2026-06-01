@@ -133,11 +133,8 @@ function splitMessage(text: string, maxLen = 1500): string[] {
 export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "checkRateLimit">) {
   const { handleMessage, checkRateLimit } = deps;
 
-  // URL-level dedup: same URL resent within 30s = accidental duplicate, drop it.
+  // URL-level dedup: same exact URL resent within 30s = accidental retry of one image, drop it.
   const mediaDedup = new Map<string, number>();
-  // Phone-level dedup for media-only messages: WhatsApp albums fire N separate webhooks (different
-  // URLs, same sender, <500ms apart). Process only the first; drop the rest silently within 5s.
-  const phoneMediaDedup = new Map<string, number>();
 
   // MessageSid dedup: Twilio retries the webhook if we don't respond within 15s.
   // Since we ACK immediately with empty TwiML, retries should be rare — but if they
@@ -224,15 +221,14 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       }
 
       // Dedup for media-only messages (no text caption).
+      // We do NOT drop "album" photos by sender. When a client picks several meal photos
+      // from their gallery and sends them together, WhatsApp delivers them as N separate
+      // webhooks — distinct URLs + MessageSids, same sender, milliseconds apart. Each one is
+      // a DISTINCT meal and must be logged. The previous phone-level drop ate every photo
+      // after the first (one meal logged, the rest silently lost). Genuine duplicates are
+      // still caught by the MessageSid dedup above and the same-URL dedup right here.
       if (mediaUrl && !message) {
         const now = Date.now();
-        // Phone-level: drop subsequent album photos from the same sender within 5s
-        const lastPhoneSent = phoneMediaDedup.get(rawPhone);
-        if (lastPhoneSent && now - lastPhoneSent < 5_000) {
-          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-        }
-        phoneMediaDedup.set(rawPhone, now);
-        // URL-level: same exact URL resent within 30s = accidental retry
         const lastSent = mediaDedup.get(mediaUrl);
         if (lastSent && now - lastSent < 30_000) {
           return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
@@ -242,11 +238,6 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         if (mediaDedup.size > 500) {
           for (const [k, v] of mediaDedup) {
             if (now - v > 30_000) mediaDedup.delete(k);
-          }
-        }
-        if (phoneMediaDedup.size > 500) {
-          for (const [k, v] of phoneMediaDedup) {
-            if (now - v > 5_000) phoneMediaDedup.delete(k);
           }
         }
       }

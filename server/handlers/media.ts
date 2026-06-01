@@ -851,21 +851,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoLoggedAt = parseMealDate(message || "");
       const photoIsRetro = isRetroactiveMeal(message || "");
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
-        // Dedup: if the same kcal amount was already logged from a photo in the last 3 minutes, skip
-        const threeMinAgo = new Date(Date.now() - 3 * 60 * 1000);
-        const recentMealDup = await db.select({ id: mealLogs.id, kcalInt: mealLogs.kcalInt })
-          .from(mealLogs)
-          .where(and(
-            eq(mealLogs.userId, user.id),
-            eq(mealLogs.source, "photo"),
-            gte(mealLogs.loggedAt, threeMinAgo),
-          ))
-          .orderBy(desc(mealLogs.loggedAt))
-          .limit(1);
-        if (recentMealDup.length > 0 && recentMealDup[0].kcalInt === totalPhotoKcal) {
-          console.log(`[MEDIA][${mediaTrace}] photo_meal_dedup skipped kcal=${totalPhotoKcal}`);
-          return `Already logged that meal (~${totalPhotoKcal} kcal). Send your next photo when you eat again.`;
-        }
+        // NO nutrition-based dedup here. Two genuinely different meals routinely land on
+        // the same calorie estimate (a breakfast bun and a tuna salad are both ~350 kcal),
+        // and clients send several meal photos back-to-back — so matching on kcal silently
+        // dropped real meals. True duplicate DELIVERIES (Twilio webhook retries, rapid
+        // same-sender bursts, and album webhooks) are already dropped upstream in
+        // routes/whatsapp.ts by URL / MessageSid / phone dedup. Any photo that reaches here
+        // is a distinct meal and must be logged.
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: message || "[Photo]",
