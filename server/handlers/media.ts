@@ -667,12 +667,18 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       // fall back to logging from the caption. The text pipeline applies its own gates
       // (questions, future-tense, planning) so re-routing here is safe — no double log.
       const captionHasFood = !!(message && message.trim().length > 1 && scanForSAFoods(message).length > 0);
+      // If the caption is just a meal label ("lunch") with no recognised food, we can't
+      // log from it — but we can ask a targeted question instead of a dead-end "can't read it".
+      const mealLabelMatch = message ? message.match(/\b(breakfast|lunch|dinner|supper|snack|brunch)\b/i) : null;
+      const mealAsk = mealLabelMatch
+        ? `I can't make out the photo clearly — what did you have for ${mealLabelMatch[1].toLowerCase()}? Just type it (e.g. "chicken, rice, veg") and I'll log it.`
+        : "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       if (!visionReply || visionReply.length < 10) {
         if (captionHasFood) {
           console.log(`[FOOD_VISION] unreadable photo — logging from caption user=${user.id.slice(-6)}`);
           return handleMessage(phone, message);
         }
-        return "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+        return mealAsk;
       }
       if (/^NOT_FOOD\b/i.test(visionReply)) {
         console.log(`[FOOD_VISION] not_food image rejected user=${user.id.slice(-6)}`);
@@ -686,7 +692,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
           console.log(`[FOOD_VISION] not_food photo but caption has food — logging from caption user=${user.id.slice(-6)}`);
           return handleMessage(phone, message);
         }
-        return "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+        return mealLabelMatch ? mealAsk : "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
       if (/^GROCERY_LIST:/i.test(visionReply)) {
         const itemsRaw = visionReply.replace(/^GROCERY_LIST:\s*/i, "").trim();

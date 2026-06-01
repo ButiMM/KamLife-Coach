@@ -325,8 +325,17 @@ export async function sendThrottled(
   return { sent, failed };
 }
 
-export async function getActiveClients() {
-  const now = new Date();
+// Proactive fan-out source for the scheduler jobs. Used ONLY by scheduler jobs
+// (never by routes or reactive replies), which makes it the single chokepoint
+// for the PROACTIVE_PAUSED killswitch: when paused this returns [], so every
+// coaching job that loops over it — present and future — no-ops automatically.
+// Billing/critical jobs that MUST keep running while coaching is paused (e.g.
+// subscription renewal/expiry alerts) pass { ignorePause: true }.
+export async function getActiveClients(opts?: { ignorePause?: boolean }) {
+  if (!opts?.ignorePause && isProactivePaused()) {
+    console.log("[SCHEDULER:PAUSED] getActiveClients → [] (PROACTIVE_PAUSED=true)");
+    return [];
+  }
   return db.select().from(users).where(
     and(
       eq(users.onboardingState, "COMPLETE"),

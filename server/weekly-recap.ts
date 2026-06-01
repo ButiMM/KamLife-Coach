@@ -15,6 +15,7 @@
 import OpenAI from "openai";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
+import { isProactivePaused } from "./scheduler/shared";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 
 const openai = new OpenAI({
@@ -263,6 +264,10 @@ async function storeRecapAudio(
 }
 
 export async function runWeeklyRecaps(): Promise<{ sent: number; failed: number; skipped: number }> {
+  if (isProactivePaused()) {
+    console.log("[RECAP] PROACTIVE_PAUSED=true — skipping weekly voice recaps");
+    return { sent: 0, failed: 0, skipped: 0 };
+  }
   const elevenLabsReady = isElevenLabsConfigured();
   if (!elevenLabsReady) {
     console.warn("[RECAP] ElevenLabs not configured — sending text-only recaps (set ELEVENLABS_API_KEY + ELEVENLABS_VOICE_ID for voice)");

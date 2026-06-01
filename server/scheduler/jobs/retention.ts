@@ -4,7 +4,7 @@ import {
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, dayStart, loadState, saveState,
   TRAINING_SCHEDULES, wasSickOrInjured, isSickOrInjuredToday,
-  todaySAST, claimProactive,
+  todaySAST, claimProactive, isProactivePaused,
   escalations,
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
@@ -121,6 +121,7 @@ export async function runDeepSilenceEscalation(): Promise<void> {
 
 export async function runComebackMessages(): Promise<void> {
   console.log("[SCHEDULER] Running comeback messages...");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runComebackMessages blocked"); return; }
   const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
 
@@ -303,6 +304,7 @@ export async function runStreakAtRisk(): Promise<void> {
 
 export async function runPausedClientLite(): Promise<void> {
   console.log("[SCHEDULER] JOB: Paused client lite check-in");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runPausedClientLite blocked"); return; }
   const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
 
   // Compute ISO week start (Monday) in SAST — used as weekly dedup key

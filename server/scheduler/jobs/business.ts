@@ -30,7 +30,7 @@ export async function runMonthEndBudget(): Promise<void> {
 
 export async function runSubscriptionExpiryCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
-  const clients = await getActiveClients();
+  const clients = await getActiveClients({ ignorePause: true }); // billing must run even when coaching is paused
   const now = Date.now();
   const threeDaysMs = 3 * 86_400_000;
   for (const client of clients) {

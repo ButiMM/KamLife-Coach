@@ -3,11 +3,12 @@ import {
   eq, gte, lt, and, desc, asc, count, sql,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, loadState, saveState,
-  todaySAST,
+  todaySAST, isProactivePaused,
 } from "../shared";
 
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runWeightReminder blocked"); return; }
   const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
   const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
   const activeClients = await db.select().from(users)
@@ -139,6 +140,7 @@ export async function runTrainingDataLog(): Promise<void> {
 }
 
 export async function runDietBreakCheck(): Promise<void> {
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runDietBreakCheck blocked"); return; }
   try {
     const expired = await db.select().from(users).where(
       and(
