@@ -61,7 +61,7 @@ const GOALS = [
     border: "border-secondary/20 dark:border-secondary/40",
     title: "Body recomp",
     who: "Wants to lose fat AND gain muscle · Plateau · Frustrated with the scale",
-    what: "Protein-high, calorie-controlled, training-heavy. The hardest goal done right. Requires consistency — Coach K makes that easy.",
+    what: "Protein-high, calorie-controlled, training-heavy. Coach K makes it the easiest hard goal you've ever had — one week at a time.",
   },
 ];
 
@@ -113,7 +113,7 @@ const FEATURES = [
   {
     icon: Moon,
     title: "Coach K notices when you go quiet",
-    desc: "Miss a check-in? Coach K follows up. Go two days without logging? You'll hear about it — not to judge, but to pull you back. That's the accountability most people are missing.",
+    desc: "Go quiet for a few days? Coach K checks in — no lecture, no guilt. Just a nudge to come back. No streak to restart. No catching up. Just: what's next?",
   },
   {
     icon: Trophy,
@@ -245,8 +245,8 @@ export default function LandingPage() {
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Coach K tells you exactly what to eat, how to train, and keeps you accountable every single day —
-            built for South African food, budgets, and real life. No app. No gym needed.
+            No gym. No perfect diet. No all-or-nothing. Coach K meets you exactly where you are —
+            built for South African food, real budgets, and real life. No app needed.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
@@ -319,6 +319,52 @@ export default function LandingPage() {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── THE PERMISSION SECTION — no gym, no perfection, just go ── */}
+      <section className="py-20 px-4 bg-gradient-to-br from-[#0B1D35] via-[#0f2644] to-[#0B1D35] text-white">
+        <div className="max-w-4xl mx-auto text-center">
+          <p className="text-orange-400 text-xs font-bold uppercase tracking-widest mb-4">Why people actually stick to this</p>
+          <h2 className="text-4xl sm:text-5xl font-bold font-display mb-5 leading-tight">
+            No gym. No perfect diet.<br />
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-300">Just go.</span>
+          </h2>
+          <p className="text-white/55 text-lg max-w-xl mx-auto mb-14 leading-relaxed">
+            The fitness industry makes this feel complicated because complicated sells supplements. Coach K does the opposite — the simpler it is, the longer you last.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-left">
+            {[
+              {
+                emoji: "🏠",
+                heading: "No gym. Ever.",
+                body: "Home, dumbbells, park, living room floor — all count. Coach K builds your programme around what you actually have, not what a gym wants you to spend.",
+              },
+              {
+                emoji: "🍟",
+                heading: "No perfect eating.",
+                body: "Log your KFC. Log the braai. Log the chips. Knowing what you ate beats guessing every time. Coach K never shames — just coaches the next meal.",
+              },
+              {
+                emoji: "↩️",
+                heading: "Miss a day? Just come back.",
+                body: "No streaks to restart. No catching up. No guilt trip. Coach K picks up exactly where you left off — even if it's been three weeks.",
+              },
+            ].map((item) => (
+              <div key={item.heading} className="bg-white/[0.06] rounded-2xl p-6 border border-white/10 hover:border-orange-400/40 hover:bg-white/[0.09] transition-all">
+                <div className="text-3xl mb-3">{item.emoji}</div>
+                <h3 className="font-bold text-lg text-white mb-2">{item.heading}</h3>
+                <p className="text-white/55 text-sm leading-relaxed">{item.body}</p>
+              </div>
+            ))}
+          </div>
+          <div className="mt-12">
+            <a href={WA_LINK} target="_blank" rel="noopener noreferrer"
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-bold text-base shadow-xl shadow-green-500/20 transition-all hover:scale-[1.02]">
+              <WhatsAppIcon className="w-5 h-5" />
+              Start wherever you are — 7 days free
+            </a>
           </div>
         </div>
       </section>
@@ -780,10 +826,10 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display mb-4">Your programme is waiting.</h2>
+          <h2 className="text-4xl font-bold font-display mb-4">Start messy. Start imperfect. Just start.</h2>
           <p className="text-white/75 text-lg mb-8">
-            3 questions on WhatsApp. Programme built in 2 minutes. Day 1 delivered immediately.
-            Whatever your goal, whatever your budget — Coach K is built for you.
+            3 questions on WhatsApp. Programme in 2 minutes. No gym required. No perfect diet required.
+            Whatever you have — Coach K builds around it.
           </p>
           <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-2xl shadow-green-500/30" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
