@@ -42,6 +42,7 @@ import {
   runMonthEndBudget, runSubscriptionExpiryCheck, runPaymentFailureRecovery,
   runSignupNudge, runPaydayShoppingNudge, runStepLeaderboard,
   runWeeklyKpiReport, runSupplementReminder, runAutoCalAdjust, runMonthlyNps,
+  runStepTargetAdaptation,
 } from "./scheduler/jobs/business";
 import {
   runWeightReminder, runMondayProgress, runMondayGroceries, runDietBreakCheck,
@@ -276,6 +277,7 @@ export async function initScheduler(): Promise<void> {
       await runAutoCalAdjust();
     } catch (e) { console.error("[SCHEDULER] runAutoCalAdjust failed:", e); }
   }, { timezone: "UTC" });
+  cron.schedule("0 9 * * 0",     () => safe("runStepTargetAdaptation", runStepTargetAdaptation), { timezone: "UTC" }); // 11am SAST
   cron.schedule("0 15 * * 0",    () => safe("runStepLeaderboard",    runStepLeaderboard));    // 5pm SAST
   cron.schedule("0 17 * * 0",    () => safe("runSundayEveningCheckin",  runSundayEveningCheckin), { timezone: "UTC" }); // 7pm SAST
 

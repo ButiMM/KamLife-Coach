@@ -278,39 +278,144 @@ export async function runSupplementReminder(): Promise<void> {
 export async function runAutoCalAdjust(): Promise<void> {
   console.log("[SCHEDULER] JOB: Auto calorie adjustment");
   if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runAutoCalAdjust blocked"); return; }
+
+  // One adjustment per client per 3-week window
+  const windowKey = Math.floor(Date.now() / (21 * 86_400_000));
+
   try {
-    const activeClients = await db.select({ id: users.id, phoneNumber: users.phoneNumber, name: users.name, goalType: users.goalType, calorieTarget: users.calorieTarget, proteinTarget: users.proteinTarget, currentWeight: users.currentWeight, subscriptionStatus: users.subscriptionStatus }).from(users).where(eq(users.subscriptionStatus, "active"));
+    const activeClients = await getActiveClients();
     let adjusted = 0;
+
     for (const client of activeClients) {
+      if (isPaused(client)) continue;
       try {
+        const dedupKey = `cal_adj_${client.id}_${windowKey}`;
+        if (loadState()[dedupKey]) continue;
+
+        // Don't adjust until 3 weeks into programme
+        if (client.programmeStartDate) {
+          const daysSinceStart = Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000);
+          if (daysSinceStart < 21) continue;
+        }
+
         const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
-        const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, threeWeeksAgo))).orderBy(asc(weightLogs.loggedAt));
+        const weights = await db
+          .select({ weight: weightLogs.weight })
+          .from(weightLogs)
+          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, threeWeeksAgo)))
+          .orderBy(asc(weightLogs.loggedAt));
         if (weights.length < 3) continue;
+
         const first = parseFloat(String(weights[0].weight));
-        const last = parseFloat(String(weights[weights.length - 1].weight));
+        const last  = parseFloat(String(weights[weights.length - 1].weight));
         if (isNaN(first) || isNaN(last)) continue;
-        const change = last - first;
-        const currentCal = client.calorieTarget || 1800;
-        const currentProt = client.proteinTarget || 120;
-        const name = client.name?.split(" ")[0] || "there";
-        const goal = client.goalType || "fat_loss";
-        if (goal === "fat_loss" && change >= -0.3 && currentCal > 1400) {
-          const newCal = Math.max(1400, currentCal - 100);
-          await db.update(users).set({ calorieTarget: newCal }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, your weight has held steady for 3 weeks. I have adjusted your daily target from ${currentCal} to *${newCal} kcal* to keep progress moving.\n\nProtein stays at ${currentProt}g — that does not change. The deficit is small and sustainable. Keep training and logging.`);
-          adjusted++;
+
+        const change     = last - first;
+        const currentCal  = client.calorieTarget  || 1800;
+        const currentProt = client.proteinTarget   || 120;
+        const name        = (client.name || "").split(" ")[0] || "there";
+        const goal        = client.goalType || "fat_loss";
+        const isFemale    = client.gender === "female";
+        const calFloor    = isFemale ? 1300 : 1500;
+
+        let newCal:  number | null = null;
+        let newProt: number | null = null;
+        let msg:     string | null = null;
+
+        if (goal === "fat_loss") {
+          if (change >= -0.3 && currentCal > calFloor) {
+            newCal  = Math.max(calFloor, currentCal - 100);
+            newProt = Math.min(currentProt + 10, 220);
+            msg = `${name}, your weight has held steady for 3 weeks — your body has adapted to the current deficit. Two small adjustments:\n\n📉 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (higher protein protects muscle while we cut)\n\nSmall change, big impact over time. Keep training, keep logging.`;
+          }
+        } else if (goal === "muscle_gain") {
+          if (change <= 0.3 && currentCal < 3500) {
+            newCal = Math.min(3500, currentCal + 150);
+            msg = `${name}, your weight has not moved in 3 weeks — for muscle gain, that means you need more fuel. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g. Your body needs the surplus to grow.`;
+          }
+        } else if (goal === "recomposition") {
+          if (change > 1.0 && currentCal > calFloor) {
+            // Gaining too fast — accumulating fat
+            newCal = Math.max(calFloor, currentCal - 100);
+            msg = `${name}, your weight has gone up ${change.toFixed(1)}kg in 3 weeks. For body recomp we want steady, not gaining. Pulling calories back slightly: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Keep the training consistent — that is where the muscle comes from.`;
+          } else if (change < -1.5) {
+            // Losing too fast — risking muscle loss
+            newCal = Math.min(3500, currentCal + 100);
+            msg = `${name}, you are losing faster than expected for recomp — ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is too fast and we risk losing muscle with the fat. Adding calories back: *${currentCal} → ${newCal} kcal/day*.\n\nProtein stays at ${currentProt}g. Recomp is a slow game — the goal is body composition, not just the scale.`;
+          }
+          // ±0.5kg: perfect recomp — no adjustment needed
         }
-        if (goal === "muscle_gain" && change <= 0.3 && currentCal < 3500) {
-          const newCal = Math.min(3500, currentCal + 150);
-          await db.update(users).set({ calorieTarget: newCal }).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, `${name}, your weight has not moved in 3 weeks. For muscle gain, you need more fuel. I have bumped your target from ${currentCal} to *${newCal} kcal*.\n\nProtein stays at ${currentProt}g. Focus on adding carbs around training — rice, oats, sweet potato. Your body needs the surplus to grow.`);
+
+        if (newCal !== null) {
+          const patch: Partial<typeof client> = { calorieTarget: newCal };
+          if (newProt !== null) (patch as any).proteinTarget = newProt;
+          await db.update(users).set(patch as any).where(eq(users.id, client.id));
+          await sendWhatsApp(client.phoneNumber, msg!);
+          saveState(dedupKey, todaySAST());
           adjusted++;
+          if (adjusted >= 20) break;
         }
-        if (adjusted >= 20) break;
       } catch { /* skip individual client errors */ }
     }
     console.log(`[SCHEDULER] Auto calorie adjustments made: ${adjusted}`);
   } catch (err) { console.error("[SCHEDULER] Auto calorie adjustment error:", err); }
+}
+
+export async function runStepTargetAdaptation(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Step target adaptation");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runStepTargetAdaptation blocked"); return; }
+
+  // One step adjustment per client per 2-week window
+  const windowKey = Math.floor(Date.now() / (14 * 86_400_000));
+
+  try {
+    const clients = await getActiveClients();
+    let bumped = 0, reduced = 0;
+
+    for (const client of clients) {
+      if (isPaused(client)) continue;
+      try {
+        const dedupKey = `step_adj_${client.id}_${windowKey}`;
+        if (loadState()[dedupKey]) continue;
+
+        const stepsTarget    = client.stepsTarget || 8500;
+        const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+        const sevenDaysAgo    = new Date(Date.now() - 7  * 86_400_000);
+
+        const [recentSteps, recentActivity] = await Promise.all([
+          db.select({ steps: stepLogs.steps })
+            .from(stepLogs)
+            .where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fourteenDaysAgo))),
+          db.select({ id: chatHistory.id })
+            .from(chatHistory)
+            .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, sevenDaysAgo)))
+            .limit(1),
+        ]);
+
+        if (recentActivity.length === 0) continue; // inactive — skip
+        if (recentSteps.length < 7) continue;       // not enough step data
+
+        const daysHit = recentSteps.filter(l => (l.steps || 0) >= stepsTarget).length;
+        const hitRate = daysHit / recentSteps.length;
+        const name    = (client.name || "").split(" ")[0] || "there";
+
+        if (hitRate >= 0.8 && stepsTarget < 12000) {
+          const newTarget = Math.min(12000, stepsTarget + 1000);
+          await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
+          await sendWhatsApp(client.phoneNumber, `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`);
+          saveState(dedupKey, todaySAST());
+          bumped++;
+        } else if (hitRate <= 0.3 && stepsTarget > 5000) {
+          const newTarget = Math.max(5000, stepsTarget - 1000);
+          await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
+          await sendWhatsApp(client.phoneNumber, `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`);
+          saveState(dedupKey, todaySAST());
+          reduced++;
+        }
+      } catch { /* skip individual */ }
+    }
+    console.log(`[SCHEDULER] Step target adaptation — bumped: ${bumped}, reduced: ${reduced}`);
+  } catch (err) { console.error("[SCHEDULER] Step target adaptation error:", err); }
 }
 
 export async function runMonthlyNps(): Promise<void> {
