@@ -203,7 +203,7 @@ export async function handleEarlyCommands(ctx: {
     return `What did you eat? Just tell me — I'll get you the kcal and protein instantly.\n\n_Examples:_\n• "2 eggs and pap for breakfast"\n• "Chicken thigh, rice and spinach for lunch"\n• "Pap and mince for dinner"\n\nInclude the food, rough amount, and which meal.`;
   }
 
-  if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
+  if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
       const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);
@@ -1240,6 +1240,15 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const badDayReply = `${capName}, one bad day doesn't undo weeks of work. It's one meal — not one month.\n\nHere's what actually matters now:\n\n*Tonight:* drink water, get to sleep at a decent time. Don't try to "make up" for it by skipping tomorrow's meals — that makes it worse.\n\n*Tomorrow:* back to normal. First meal — protein. Eggs, chicken, tuna. Don't punish yourself with restriction, just get back on track.\n\n*The truth:* fat loss happens over weeks and months. One rough day is noise in the data. What you do the next 3 days is what actually matters.`;
     await logChat(user.id, message, badDayReply, "BAD_EATING_DAY");
     return badDayReply;
+  }
+
+  // ---- LOGGING CONFESSION — "I haven't been logging" (general, not about skipping meals) ----
+  // Catches people apologising for not logging. Research: respond with curiosity not consequence.
+  const isLoggingConfession = /\b(haven.?t been logging|haven.?t logged|not been logging|been bad (at|with) logging|been slack(ing)? (on|with) (logging|tracking)|forgot to (log|track)|haven.?t been tracking|I know I haven.?t|I know, I haven.?t|missed (my )?log(s|ging)?|no logs (lately|recently|this week)|haven.?t logged (anything|meals?|food)|been slipping (on|with) (logging|tracking))\b/i.test(m);
+  if (isLoggingConfession) {
+    const confessionReply = `${capName}, no guilt here. Logging is information — not a test you pass or fail.\n\nTell me one thing: what are you eating right now, or what did you have at your last meal? Just that. We pick up from here.`;
+    await logChat(user.id, message, confessionReply, "LOGGING_CONFESSION");
+    return confessionReply;
   }
 
   // ---- SKIPPING MEALS / FORGOT TO EAT ----

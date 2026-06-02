@@ -88,12 +88,12 @@ export async function runSundayWeeklyReport(): Promise<void> {
       ]);
 
       if (chats.length === 0) {
-        await sendWhatsApp(client.phoneNumber, `${name}, no logs this week means no data to coach from. This week log at least one meal per day — that is the only focus. Nothing else.`);
+        await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week. The restart is simple — send me what you're eating right now. One meal. That's the whole task.`);
         continue;
       }
       const daysWithLogs = new Set(chats.map(c => new Date(c.createdAt!).toDateString())).size;
       if (daysWithLogs < 3) {
-        await sendWhatsApp(client.phoneNumber, `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged this week. That is not enough for me to coach you properly. Aim for at least 5 this week — just log one meal a day minimum.`);
+        await sendWhatsApp(client.phoneNumber, `${name}, ${daysWithLogs} day${daysWithLogs !== 1 ? "s" : ""} logged. You're in it — keep going. Target this week: 5 days, just one meal a day is enough.`);
         continue;
       }
 

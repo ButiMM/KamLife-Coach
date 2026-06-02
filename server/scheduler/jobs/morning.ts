@@ -83,7 +83,7 @@ export async function runMorningCheckin(): Promise<void> {
             await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
             await sendWhatsApp(phone, `Morning ${name}. Yesterday was a miss — but your *${wStreak}-session streak is protected* by your monthly shield.\n\nShield used. No more protection this month.\n\nLog today's session to keep the momentum going.`);
           } else {
-            await sendWhatsApp(phone, `Morning ${name}. Nothing logged yesterday — I have nothing to coach from. Log your breakfast in the next hour. That is all.`);
+            await sendWhatsApp(phone, `Morning ${name}. Send me your breakfast right now — one line is all I need. We start from here.`);
           }
           recordProactiveSend(client.id);
         }
@@ -195,8 +195,7 @@ export async function runMorningCheckin(): Promise<void> {
       }
 
       if (foodLogs.length === 0) {
-        parts.push(`No food logged yesterday.`);
-        parts.push(`You cannot out-train a diet you are not tracking.`);
+        parts.push(`No food logged yesterday — today starts now. Breakfast first.`);
       } else if (totalProtLogged >= proteinTarget * 0.9) {
         parts.push(`${totalProtLogged}g protein logged yesterday — target hit.`);
       } else if (totalProtLogged > 0) {
