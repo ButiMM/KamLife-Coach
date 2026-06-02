@@ -242,15 +242,14 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
-            Your personal SA fitness coach,{" "}
+            Change your body.{" "}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-200">
-              right in WhatsApp
+              SA coaching in WhatsApp.
             </span>
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            No gym. No perfect diet. No all-or-nothing. Coach K meets you exactly where you are —
-            built for South African food, real budgets, and real life. No app needed.
+            Lose fat. Build muscle. Body recomp. Whatever the goal — Coach K builds around your food, your budget, and your life. No gym. No app. No perfect diet required.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
