@@ -24,12 +24,24 @@ const HERO_VIDEO_URL = import.meta.env.VITE_HERO_VIDEO_URL || "";
 
 const GOALS = [
   {
+    icon: Target,
+    color: "text-orange-500",
+    headerGradient: "from-orange-100 to-amber-50 dark:from-orange-900/40 dark:to-amber-900/20",
+    iconBg: "bg-white dark:bg-black/30",
+    border: "border-orange-300 dark:border-orange-700",
+    title: "Body recomp",
+    badge: "Most popular",
+    who: "Lose fat AND build muscle · Plateau · Trained but not seeing results",
+    what: "Lose fat and build muscle at the same time. This is what most people actually want when they say they want to 'get fit'. Coach K handles the precision — protein targets, training load, weekly adjustments. You just show up.",
+  },
+  {
     icon: Flame,
     color: "text-orange-500",
     headerGradient: "from-orange-100 to-amber-50 dark:from-orange-900/40 dark:to-orange-800/20",
     iconBg: "bg-white dark:bg-black/30",
     border: "border-orange-200 dark:border-orange-800",
     title: "Lose fat",
+    badge: null,
     who: "Overweight · Post-baby · Slow metabolism · Diabetic",
     what: "Coach K builds your deficit, keeps you full on SA food, and adjusts every week based on your results. No starvation. No guessing.",
   },
@@ -40,6 +52,7 @@ const GOALS = [
     iconBg: "bg-white dark:bg-black/30",
     border: "border-secondary/20 dark:border-secondary/40",
     title: "Build muscle",
+    badge: null,
     who: "Skinny · Underweight · Wants to bulk · Men and women",
     what: "Progressive overload programme. High-protein SA meal plans. Weekly strength check-ins. Built for home, dumbbells, or a full gym.",
   },
@@ -50,27 +63,18 @@ const GOALS = [
     iconBg: "bg-white dark:bg-black/30",
     border: "border-orange-200 dark:border-orange-800",
     title: "Get healthy",
+    badge: null,
     who: "Hypertension · PCOS · ARVs · Over 40 · Sedentary lifestyle",
     what: "Coach K knows your condition. Adjusts for medication, doctor clearance, and lifestyle. No dangerous advice. Practical and safe.",
-  },
-  {
-    icon: Target,
-    color: "text-secondary",
-    headerGradient: "from-slate-100 to-indigo-50 dark:from-secondary/40 dark:to-secondary/20",
-    iconBg: "bg-white dark:bg-black/30",
-    border: "border-secondary/20 dark:border-secondary/40",
-    title: "Body recomp",
-    who: "Wants to lose fat AND gain muscle · Plateau · Frustrated with the scale",
-    what: "Protein-high, calorie-controlled, training-heavy. Coach K makes it the easiest hard goal you've ever had — one week at a time.",
   },
 ];
 
 const PERSONAS = [
+  { emoji: "🔄", label: "Body recomp, 26", desc: "Saw it online. Wants to lose fat AND build muscle. Tired of picking one or the other." },
   { emoji: "👩‍👧", label: "Busy mom, 34", desc: "No time for gym. Eats what the family eats. Needs something that fits real life." },
   { emoji: "🧑‍💼", label: "Office worker, 28", desc: "Sits all day. Eats takeaways. Wants to lose the belly without giving up Nando's." },
-  { emoji: "💪", label: "Gym guy, 22", desc: "Trains but doesn't track food. Hasn't seen results in 6 months. Wants a programme that works." },
+  { emoji: "💪", label: "Gym guy, 22", desc: "Trains hard but eats wrong. Six months in and stuck. Wants to actually see results." },
   { emoji: "👵", label: "Over 50, health-first", desc: "Doctor said lose weight. On medication. Needs safe, realistic guidance." },
-  { emoji: "🏘️", label: "Township, budget-conscious", desc: "Shoprite and Boxer budget. Pap, pilchards, eggs. Needs a plan that's actually affordable." },
   { emoji: "🎓", label: "Student, broke", desc: "R50 a week for food. Wants to stay fit without a gym membership or expensive supplements." },
 ];
 
@@ -374,11 +378,16 @@ export default function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-4xl font-bold font-display mb-4">What's your goal?</h2>
-            <p className="text-muted-foreground text-lg">Coach K adapts to you — not the other way around.</p>
+            <p className="text-muted-foreground text-lg">Body recomp, fat loss, muscle gain, or health — Coach K adapts to you, not the other way around.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {GOALS.map((g) => (
-              <div key={g.title} className={`rounded-3xl border ${g.border} overflow-hidden hover:shadow-lg transition-all`}>
+              <div key={g.title} className={`rounded-3xl border ${g.border} overflow-hidden hover:shadow-lg transition-all relative`}>
+                {g.badge && (
+                  <div className="absolute top-4 right-4 z-10 px-3 py-1 rounded-full bg-orange-500 text-white text-xs font-bold shadow-lg">
+                    {g.badge}
+                  </div>
+                )}
                 <div className={`bg-gradient-to-br ${g.headerGradient} px-7 py-8 flex items-center justify-center`}>
                   <div className={`w-16 h-16 rounded-2xl ${g.iconBg} shadow-sm flex items-center justify-center`}>
                     <g.icon className={`w-8 h-8 ${g.color}`} />
@@ -773,6 +782,10 @@ export default function LandingPage() {
           <h2 className="text-4xl font-bold font-display text-center mb-12">Common questions</h2>
           <div className="space-y-3">
             {[
+              {
+                q: "What is body recomp and why do most people choose it?",
+                a: "Body recomposition means losing fat and building muscle at the same time. It's the goal most people actually want — you want to look different, not just weigh less. Coach K manages this with high-protein eating, progressive training, and weekly adjustments. It's slower than a crash diet but the results last because you're changing your body composition, not just your weight.",
+              },
               {
                 q: "Do I need a gym membership?",
                 a: "No. Coach K builds home workouts with zero equipment, dumbbell programmes, or full gym programmes. You choose at signup and can change anytime.",
