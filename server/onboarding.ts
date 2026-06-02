@@ -552,7 +552,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const isReady = /^(yes|yebo|ja|sure|ok|okay|let.?s go|ready|start|sign|register|get me started|i.?m ready|go ahead|do it|yes coach|yes please)[\s!.]*$/i.test(msg.trim());
     if (isReady) {
       await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-      return `Before I set up your programme, I need your consent to store and process your personal fitness data under POPIA.\n\nYour info is used only for your coaching — never sold. Reply *delete my data* anytime.\n\nReply *yes* to continue.`;
+      return `Before I build your programme, I need your consent to store and process your personal information under POPIA (South Africa's data protection law).\n\n*What I store:* your name, phone number, fitness goal, food logs, workouts, and steps. If you share health info (weight, medical conditions), that is stored as special personal information and used only to make your coaching safer.\n\n*Your rights:* reply *delete my data* at any time to permanently erase everything. Full policy: kamlifecoach.co.za/privacy\n\n*Never sold. Never shared for marketing.*\n\nReply *yes* to give consent and continue.`;
     }
     // Another question / more context — answer briefly and re-invite
     const continuationCtx = `You are Coach K — a direct, warm South African fitness coach on WhatsApp. A potential new client is asking questions before signing up. Reply in 1-2 sentences only. Be specific and helpful. End EVERY response on a new line with exactly: "Reply *yes* when you're ready to build your programme."

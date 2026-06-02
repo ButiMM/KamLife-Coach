@@ -864,8 +864,11 @@ export default function LandingPage() {
               style={{ mixBlendMode: "multiply" }}
             />
           </div>
-          <p>Built for South Africa · POPIA compliant · R199/month</p>
-          <p className="text-xs text-muted-foreground/40">© 2026 KamLife</p>
+          <div className="flex flex-wrap justify-center sm:justify-end items-center gap-x-4 gap-y-1 text-sm">
+            <span>Built for South Africa</span>
+            <a href="/privacy" className="underline underline-offset-2 hover:text-foreground transition-colors">Privacy Policy (POPIA)</a>
+            <span className="text-muted-foreground/40">© 2026 KamLife</span>
+          </div>
         </div>
       </footer>
     </div>
