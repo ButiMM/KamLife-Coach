@@ -64,8 +64,8 @@ const GOALS = [
     border: "border-orange-200 dark:border-orange-800",
     title: "Get healthy",
     badge: null,
-    who: "Hypertension · PCOS · ARVs · Over 40 · Sedentary lifestyle",
-    what: "Coach K knows your condition. Adjusts for medication, doctor clearance, and lifestyle. No dangerous advice. Practical and safe.",
+    who: "Diabetes · Hypertension · PCOS · Over 40 · Sedentary lifestyle",
+    what: "Coach K adjusts for your condition — safe calorie ranges, foods that work with your medication, and a pace that won't break you. Practical. Not clinical.",
   },
 ];
 
@@ -249,7 +249,7 @@ export default function LandingPage() {
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Lose fat. Build muscle. Body recomp. Whatever the goal — Coach K builds around your food, your budget, and your life. No gym. No app. No perfect diet required.
+            Lose fat. Build muscle. Body recomp. Whatever the goal — Coach K builds around your food, your budget, and your life. Gym or home. No app. No perfect diet required.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
@@ -331,7 +331,7 @@ export default function LandingPage() {
         <div className="max-w-4xl mx-auto text-center">
           <p className="text-orange-400 text-xs font-bold uppercase tracking-widest mb-4">Why people actually stick to this</p>
           <h2 className="text-4xl sm:text-5xl font-bold font-display mb-5 leading-tight">
-            No gym. No perfect diet.<br />
+            Gym or no gym. Perfect diet or real life.<br />
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-300">Just go.</span>
           </h2>
           <p className="text-white/55 text-lg max-w-xl mx-auto mb-14 leading-relaxed">
@@ -340,9 +340,9 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-left">
             {[
               {
-                emoji: "🏠",
-                heading: "No gym. Ever.",
-                body: "Home, dumbbells, park, living room floor — all count. Coach K builds your programme around what you actually have, not what a gym wants you to spend.",
+                emoji: "🏋️",
+                heading: "Gym or home — both work.",
+                body: "Full gym, home dumbbells, or no equipment at all. Coach K builds your programme around what you have and where you train. Switch anytime.",
               },
               {
                 emoji: "🍟",
