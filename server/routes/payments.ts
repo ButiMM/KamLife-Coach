@@ -12,13 +12,11 @@ export function registerPaymentRoutes(app: Express) {
     res.sendStatus(200);
     try {
       const { MessageSid, MessageStatus, To, ErrorCode, ErrorMessage } = req.body;
+      // Normalise to the same canonical format stored in users.phoneNumber
+      const raw = (To || "");
+      const phone = raw.startsWith("whatsapp:") ? raw : `whatsapp:${raw}`;
       if (MessageStatus === "failed" || MessageStatus === "undelivered") {
-        const phone = (To || "").replace(/^whatsapp:/, "");
-        console.error(`[DELIVERY FAIL] ${phone} | SID: ${MessageSid} | Status: ${MessageStatus} | Error: ${ErrorCode} — ${ErrorMessage || "no detail"}`);
-        db.update(users)
-          .set({ lastActiveAt: users.lastActiveAt })
-          .where(eq(users.phoneNumber, phone))
-          .catch(() => {});
+        console.error(`[DELIVERY FAIL] ${phone.slice(-8)} | SID: ${MessageSid} | Status: ${MessageStatus} | Error: ${ErrorCode} — ${ErrorMessage || "no detail"}`);
         db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1)
           .then(rows => {
             if (rows[0]) {
@@ -31,8 +29,7 @@ export function registerPaymentRoutes(app: Express) {
             }
           }).catch(() => {});
       } else if (MessageStatus === "delivered") {
-        const phone = (To || "").replace(/^whatsapp:/, "");
-        console.log(`[DELIVERY OK] ${phone} | SID: ${MessageSid}`);
+        console.log(`[DELIVERY OK] ${phone.slice(-8)} | SID: ${MessageSid}`);
       }
     } catch (e) {
       console.error("[DELIVERY STATUS] Parse error:", e);

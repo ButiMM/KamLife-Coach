@@ -257,6 +257,9 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       if (!userId || !message?.trim()) {
         return res.status(400).json({ message: "userId and message are required" });
       }
+      if (message.trim().length > 1600) {
+        return res.status(400).json({ message: "Message too long — WhatsApp limit is 1600 characters" });
+      }
 
       const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
       if (!user) return res.status(404).json({ message: "User not found" });

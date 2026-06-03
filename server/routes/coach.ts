@@ -6,6 +6,15 @@ import { eq, desc, asc, and, gte, lt, sql, count } from "drizzle-orm";
 import { PRICING, calculateMRR, calculateARPU, calculateLTV, calculateTrialConversion } from "../../shared/pricing";
 import { deliveryStats } from "../scheduler";
 
+function escapeHtml(s: unknown): string {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
 export function registerCoachRoutes(app: Express): void {
 // ============================================================
 // COACH ADMIN DASHBOARD — GET /coach (auth via x-dashboard-key header only)
@@ -100,11 +109,10 @@ app.get("/coach", async (req: any, res: any) => {
       const rowBg = days >= 14 ? "#3b0a0a" : days >= 5 ? "#2a1a0a" : "#1a2a1a";
       const badgeColor = days >= 14 ? "#ef4444" : days >= 5 ? "#f97316" : "#f59e0b";
       const riskLabel = days >= 14 ? "SEVERE" : days >= 5 ? "HIGH" : "WARNING";
-      const injuries = u.injuries || u.medicalConditions || "";
-      const ph = u.phoneNumber.replace(/'/g, "\\'");
+      const ph = escapeHtml(u.phoneNumber);
       return `
         <tr style="background:${rowBg}; border-bottom: 1px solid #2d3748;">
-          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${u.name || "—"}</td>
+          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${escapeHtml(u.name) || "—"}</td>
           <td style="padding:10px 12px; color:#9ca3af; font-family:monospace;">${maskPhone(u.phoneNumber)}</td>
           <td style="padding:10px 12px;">
             <span style="background:${badgeColor}; color:#000; border-radius:4px; padding:2px 8px; font-size:12px; font-weight:700;">${riskLabel}</span>
@@ -112,7 +120,7 @@ app.get("/coach", async (req: any, res: any) => {
           </td>
           <td style="padding:10px 12px; color:#22c55e; font-weight:600; text-align:center;">${u.programmeWeek ?? "—"}</td>
           <td style="padding:10px 12px; color:#d1d5db; text-align:center;">${u.totalWorkoutsCompleted ?? 0}</td>
-          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${u.goalType || "—"}</td>
+          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${escapeHtml(u.goalType) || "—"}</td>
           <td style="padding:8px 6px; white-space:nowrap;">
             <button onclick="intervene('${ph}','checkin',this)" style="background:#3b82f6; color:#fff; border:none; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; margin:1px;">Check-in</button>
             <button onclick="intervene('${ph}','workout',this)" style="background:#22c55e; color:#000; border:none; border-radius:4px; padding:4px 8px; font-size:11px; cursor:pointer; margin:1px;">Workout</button>
@@ -123,20 +131,20 @@ app.get("/coach", async (req: any, res: any) => {
 
     const weekThreeRows = weekThreeUsers.map((u: any) => `
         <tr style="background:#0f1f2f; border-bottom: 1px solid #2d3748;">
-          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${u.name || "—"}</td>
+          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${escapeHtml(u.name) || "—"}</td>
           <td style="padding:10px 12px; color:#9ca3af; font-family:monospace;">${maskPhone(u.phoneNumber)}</td>
           <td style="padding:10px 12px; color:#d1d5db;">${fmtDate(u.lastActiveAt)}</td>
           <td style="padding:10px 12px; color:#d1d5db; text-align:center;">${u.totalWorkoutsCompleted ?? 0}</td>
-          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${u.goalType || "—"}</td>
+          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${escapeHtml(u.goalType) || "—"}</td>
         </tr>`).join("");
 
     const newThisWeekRows = newThisWeekUsers.map((u: any) => `
         <tr style="background:#0a1a0f; border-bottom: 1px solid #2d3748;">
-          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${u.name || "—"}</td>
+          <td style="padding:10px 12px; color:#f9fafb; font-weight:500;">${escapeHtml(u.name) || "—"}</td>
           <td style="padding:10px 12px; color:#9ca3af; font-family:monospace;">${maskPhone(u.phoneNumber)}</td>
           <td style="padding:10px 12px; color:#22c55e;">${fmtDate(u.createdAt)}</td>
-          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${u.goalType || "—"}</td>
-          <td style="padding:10px 12px; color:#d1d5db; font-size:13px;">${(u as any).budgetTier || "—"}</td>
+          <td style="padding:10px 12px; color:#a78bfa; font-size:13px;">${escapeHtml(u.goalType) || "—"}</td>
+          <td style="padding:10px 12px; color:#d1d5db; font-size:13px;">${escapeHtml((u as any).budgetTier) || "—"}</td>
         </tr>`).join("");
 
     const goalBreakdownHtml = Object.entries(goalCounts).map(([g, c]) =>

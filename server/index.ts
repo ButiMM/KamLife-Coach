@@ -461,23 +461,11 @@ export function log(message: string, source = "express") {
 app.use((req, res, next) => {
   const start = Date.now();
   const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
 
   res.on("finish", () => {
     const duration = Date.now() - start;
     if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
+      log(`${req.method} ${path} ${res.statusCode} in ${duration}ms`);
     }
   });
 
@@ -546,7 +534,8 @@ async function activateCoachAccount(): Promise<void> {
     { key: "AI_INTEGRATIONS_OPENAI_API_KEY", warn: true, hint: "GPT coaching responses will fail" },
     { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard admin access blocked until this is set" },
     { key: "PAYFAST_MERCHANT_ID", warn: true, hint: "Payment links will not work" },
-    { key: "PAYFAST_MERCHANT_KEY", warn: true, hint: "PayFast ITN signature validation disabled" },
+    { key: "PAYFAST_MERCHANT_KEY", warn: true, hint: "PayFast payment link generation will fail" },
+    { key: "PAYFAST_PASSPHRASE", warn: true, hint: "PayFast ITN signature validation will reject every payment notification — users who pay will not be activated" },
     { key: "APP_URL", warn: true, hint: "Payment links and PayFast callbacks will use fallback domain — set to your Railway URL" },
   ];
 

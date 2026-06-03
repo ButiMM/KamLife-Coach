@@ -12,8 +12,12 @@ import { sastDayStart } from "../utils";
 // HMAC token tied to phone number + server secret — no DB storage needed.
 // Anyone who knows only a phone number cannot fake a step sync.
 function makeStepToken(phone: string): string {
-  const secret = process.env.WEBHOOK_SECRET || process.env.TWILIO_AUTH_TOKEN || "kamlife-dev-secret";
-  return crypto.createHmac("sha256", secret).update(phone).digest("hex").slice(0, 16);
+  const secret = process.env.WEBHOOK_SECRET || process.env.TWILIO_AUTH_TOKEN;
+  if (!secret) {
+    console.error("[STEPS] WEBHOOK_SECRET is not set — step-sync tokens cannot be generated safely. Set WEBHOOK_SECRET in Railway.");
+    throw new Error("WEBHOOK_SECRET not configured");
+  }
+  return crypto.createHmac("sha256", secret).update(phone).digest("hex").slice(0, 32);
 }
 
 export function buildStepsWebhookUrl(appUrl: string, phone: string): string {
