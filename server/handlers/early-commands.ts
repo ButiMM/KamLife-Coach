@@ -1251,6 +1251,22 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return confessionReply;
   }
 
+  // ---- NIBBLING / GRAZING — "I was just nibbling on things" ----
+  // Client ate, but grazed rather than had proper meals. Don't shame — just get the data.
+  // Research: any eating occasion logged is better than none.
+  const isNibbling = (
+    /\bnibb(le[ds]?|ling)\b/i.test(m)
+    || (/\bgraz(e[ds]?|ing)\b/i.test(m) && !/\b(knee|elbow|skin|wound|road|floor)\b/i.test(m))
+    || /\bpicking at (my )?food\b/i.test(m)
+    || /\b(bits? and pieces|bits? here and there|eating here and there)\b/i.test(m)
+    || /\b(no proper meal today|didn.?t have a proper meal|ate nothing proper)\b/i.test(m)
+  );
+  if (isNibbling) {
+    const nibblingReply = `${capName}, nibbling still counts — tell me what you had and I'll log it properly.\n\nWhat were you picking at? Even rough amounts — "a few crackers, some peanut butter, bits of chicken". Anything you give me is data I can coach from.`;
+    await logChat(user.id, message, nibblingReply, "NIBBLING_CONFESSION");
+    return nibblingReply;
+  }
+
   // ---- CHRONIC UNDER-EATING — "I only eat once a day", "I struggle to eat", "no appetite most days" ----
   // Distinct from the acute "forgot to eat today" below. This is the recurring SA pattern:
   // work-from-home, low movement, low appetite, one meal a day. Research: 2 eating occasions/day
@@ -1273,6 +1289,50 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const deferReply = `${capName}, I appreciate you being upfront instead of going quiet — that tells me you're serious.\n\nMental readiness is real. If your head isn't in it, the body won't follow. I get it.\n\nBut here's what we're going to do — this time is not wasted:\n\n*Just two things. No program, no pressure:*\n🚶 Walk when you can — send me your steps\n📸 Photo what you eat — I won't judge, I just want to see where you're starting\n\nThat's it. No strict rules. By the time you feel ready, you'll already be in the habit and I'll already know your patterns — so we hit the ground running instead of starting from scratch.\n\nEvery walk you take now counts more than you think. 💪`;
     await logChat(user.id, message, deferReply, "DEFER_START");
     return deferReply;
+  }
+
+  // ---- RESULTS TIMELINE — "how long until I see results?" ----
+  // The #1 dropout question. User's proven answer: 3 months visual. Set honest expectations.
+  const isResultsTimelineQ = (
+    /\b(how long (until|before|till|to see|will it|does it) (take\b|be\b)?)/i.test(m) && /\b(results?|changes?|difference|lose|build|visible|see|notice|transform)\b/i.test(m)
+  ) || (
+    /\bwhen will (i|you|we) (see|notice|lose|start)\b/i.test(m) && /\b(results?|changes?|difference|weight|muscle|visible)\b/i.test(m)
+  ) || (
+    /\bhow many (weeks?|months?) (until|to see|before)\b/i.test(m) && /\b(results?|changes?|difference|visible)\b/i.test(m)
+  ) || /\b(when will i (see|notice|lose|feel)\s.{0,20}(results?|changes?|difference|weight)|how long (to|before) (see|notice) (results?|changes?|a difference)|how long (to|before) lose weight)\b/i.test(m);
+  if (isResultsTimelineQ) {
+    const goal = user.goalType || "fat_loss";
+    let timelineReply: string;
+    if (goal === "muscle_gain") {
+      timelineReply = `${capName}, honest answer:\n\n*Week 1–2:* You'll feel stronger. Workouts will feel easier.\n*Week 4–6:* Scale starts moving. Clothes start fitting differently.\n*Month 3:* You'll see it — and so will other people.\n\nMuscle builds from the inside out — strength going up IS the result before you see it visually. Trust the lifts, not the mirror right now.\n\nSend me a photo today. In 3 months I'll show you the exact difference.`;
+    } else if (goal === "recomposition") {
+      timelineReply = `${capName}, recomp is the most powerful transformation — but the slowest to show on scale.\n\n*Week 2–4:* Energy improves. Clothes fit differently. Waist tightens.\n*Month 3:* You'll see it — definition where fat was, different shape.\n*Month 6:* Other people start asking what you're doing.\n\nDon't trust the scale for recomp — it barely moves while your body changes shape. Monthly photos are the only measure that matters.`;
+    } else {
+      timelineReply = `${capName}, honest answer:\n\n*Week 1–2:* Scale drops 1–2kg — mostly water and glycogen. Energy improves.\n*Week 3–4:* Real fat loss starts. Clothes start feeling different.\n*Month 3:* You'll see it clearly — and so will other people.\n\nMost people want results in 3 weeks. The physiology takes 12. But those months pass whether you're doing this or not.\n\nSend me a photo now — clothed, mirror selfie is fine. In 3 months I'll show you the exact difference.`;
+    }
+    await logChat(user.id, message, timelineReply, "RESULTS_TIMELINE");
+    return timelineReply;
+  }
+
+  // ---- SHIFT WORKER — "I work 4 days dayshift 4 days nightshift 4 days off" ----
+  // Mining, nursing, security, casino — rotating schedules. Build around the schedule.
+  const isShiftWorker =
+    /\b(shift.?work(er|ing)?|rotating (shift|roster|schedule)|4\s*days?\s*(on|off|day.?shift|night.?shift)|work(ing)?\s+(day.?shift|night.?shift|on shift)|night.?shift\s+work|day.?shift\s+work|shift\s+(schedule|pattern|rotation|system|rota)|i\s+work\s+(days?\s+and\s+nights?|nights?\s+and\s+days?)|irregular\s+(shift|hours?)|12[\s\-]?hour\s+shift|24[\s\-]?hour\s+shift|working\s+(dayshift|nightshift|day\s+shift|night\s+shift)|going\s+(on|into)\s+shift|before\s+(my|the)\s+shift|come\s+off\s+shift|rotating\s+roster|i\s+work\s+(night|day)\s+shift)\b/i.test(m);
+  if (isShiftWorker) {
+    const goal = user.goalType || "fat_loss";
+    const shiftReply = `${capName}, KamLife is built to work around schedules like yours — miners, nurses, security, casino workers. You're not the first, and this is solvable.\n\n*On DAYSHIFT:* Train after your shift or first thing in the morning. Energy is normal.\n\n*On NIGHTSHIFT:* Train in the morning *before* you sleep — your body is still running after a night shift, use that window. Don't train right before going in.\n\n*On DAYS OFF:* These are your best training days. Full sessions.\n\n*Food on shift:* Pack your own. Canteen food is mostly refined carbs. Pre-pack chicken + rice, eggs + bread, biltong + fruit.\n\n*The one rule:* ${goal === "fat_loss" ? "Hit your protein target every 24 hours — timing matters less than consistency." : "Eat before and after every session. Muscle builds in the recovery window, not in the gym."}\n\nTell me your current rotation — dayshift, nightshift, or days off — and I'll tell you exactly what to do today.`;
+    await logChat(user.id, message, shiftReply, "SHIFT_WORKER");
+    return shiftReply;
+  }
+
+  // ---- INACTIVE GYM MEMBER — "only went 4 days in 3 months", "barely use my membership" ----
+  // Sunk cost guilt. Don't reinforce it — offer the real choice honestly.
+  const isInactiveGym =
+    /\b(gym\s+(but|member|membership)\s+(i|but|only|haven.?t|barely|rarely|hardly)|only\s+(go|went|been)\s+(to\s+)?(the\s+)?gym\s+(once|twice|\d+\s+times?|\d+\s+days?|rarely|barely)|haven.?t\s+(been|gone)\s+(to\s+)?(the\s+)?gym\s+(in|for|since)\s+(weeks?|months?|ages?|a\s+long\s+time)|(rarely|hardly|barely|never)\s+(go|use|been\s+to)\s+(the\s+)?gym|gym\s+membership\s+(sitting|wasting|going\s+to\s+waste|i\s+don.?t\s+use)|paying\s+for\s+(a\s+)?gym\s+(but|and)\s+(don.?t|haven.?t|barely|rarely)|not\s+using\s+(the|my)\s+gym|wasted?\s+(on\s+)?gym\s+membership)\b/i.test(m);
+  if (isInactiveGym) {
+    const inactiveGymReply = `${capName}, the membership is sunk cost — it's paid whether you go or not. Let's not make training decisions based on guilt about it.\n\nHonest question: what's actually stopping you from going?\n\n*If it's distance or time:* home training gets the same results. You don't need a gym.\n*If it's motivation:* home training is easier to start — no commute, no threshold to cross.\n*If it's schedule:* 30 minutes at home, 3 days a week, is enough.\n\n*Three options:*\n1. Switch fully to home training — I'll rebuild your programme right now\n2. Keep the gym for 1 day a week + home training for the rest\n3. Set one gym day as non-negotiable and build from there\n\nWhich one makes sense for where you are right now?`;
+    await logChat(user.id, message, inactiveGymReply, "INACTIVE_GYM");
+    return inactiveGymReply;
   }
 
   // ---- SKIPPING MEALS / FORGOT TO EAT ----
@@ -1320,6 +1380,29 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const stepAppReply = `For counting steps, here is what I recommend based on your phone:\n\n*Android (Samsung):* Samsung Health — already on your phone. Open it, tap *Activity*, then *Steps*. It tracks automatically in the background.\n\n*Android (other):* Google Fit — free on Google Play. Takes 2 minutes to set up. If you already have it, open it and look for the steps circle on the home screen.\n\n*iPhone:* Apple Health — already installed. It counts steps automatically. Open it, tap *Browse → Activity → Steps*.\n\n*No smartphone / basic phone:* A cheap pedometer from Pick n Pay or Checkers works — clip it to your waistband, reset it in the morning.\n\nOnce it is set up, just send me your step count at the end of each day — type *"walked 8,000 steps"* or similar and I log it for you.\n\n_Target: ${(user.stepsTarget || 8500).toLocaleString()} steps/day._`;
     await logChat(user.id, message, stepAppReply, "STEP_APP_GUIDE");
     return stepAppReply;
+  }
+
+  // ---- PHONE IN CAR / INFLATED STEPS — driving or machine vibration inflates step count ----
+  // Accelerometer can't distinguish walking from road/machine vibration.
+  // Common: truck drivers, miners, taxi drivers, machine operators.
+  const isInflatedSteps =
+    /\b(phone\s+(in|on|with\s+me\s+in)\s+(the\s+)?(car|truck|bakkie|vehicle)|driving\s+(around\s+)?with\s+(my\s+)?phone|car\s+(vibration|vibrates?)|machine\s+(vibration|vibrates?|shaking)|vibration\s+(is\s+too\s+much|count(s|ing)\s+as\s+steps?|giving\s+me\s+steps?)|steps?\s+(from|because\s+of|due\s+to)\s+(vibration|driving|car|truck)|inflated\s+steps?|steps?\s+not\s+(accurate|real|right|from\s+walking)|operating\s+(big|heavy|those|mining|the)\s+machine|step\s+count\s+(is\s+)?(from\s+)?(vibration|car|driving|machine))\b/i.test(m);
+  if (isInflatedSteps) {
+    const inflatedReply = `${capName}, car and machine vibration inflating step counts is a real issue — the phone accelerometer can't tell the difference between walking and road bumps.\n\n*Quick fix:* Phone in your *pocket* (not on the seat or console) filters out most vehicle vibration.\n\nOr just tell me your actual walking: "walked 2,000 steps at lunch" and I'll log only that.\n\n*For your situation:*\nYour real movement target will be smaller — and that's fine. What matters is intentional walking:\n• 10-min walk on a break: ~1,000 steps\n• Walking to/from your vehicle or canteen\n• 20-min walk at home in the evening\n\nShould I set your step target to reflect what you can actually walk — not what the car registers for you?`;
+    await logChat(user.id, message, inflatedReply, "INFLATED_STEPS");
+    return inflatedReply;
+  }
+
+  // ---- BELLY FAT / MKHABA — "I want to lose my belly", "mkhaba", "stomach fat" ----
+  // The #1 specific fat loss target. SA word "mkhaba" = belly/stomach fat (Zulu/Sotho).
+  // Acknowledge specifically — people feel heard when you know their word.
+  const isBellyFatQ =
+    /\b(mkhaba|belly\s*(fat|flab)?|belly\s+is|my\s+belly|lose\s+(my\s+)?belly|flat\s+(stomach|tummy|belly)|stomach\s+fat|tummy\s+(fat|flab)|love\s+handles?|spare\s+tyre|spare\s+tire|fat\s+(belly|stomach|tummy)|pot\s+belly|get\s+rid\s+of\s+(my\s+)?(belly|stomach|mkhaba)|stomach\s+is\s+(big|huge|fat)|big\s+(belly|stomach|tummy))\b/i.test(m);
+  if (isBellyFatQ) {
+    const goal = user.goalType || "fat_loss";
+    const bellyReply = `${capName}, the mkhaba — the most common target, and the most frustrating one. Here's the honest version:\n\n*You cannot spot-reduce belly fat.* No amount of sit-ups or crunches removes fat from a specific area — that's not how the body burns fat. Fat leaves from everywhere when you're in a calorie deficit, and the belly is usually the *last* area to go because that's where your body stores it last.\n\n*What actually shrinks it:*\n✅ Calorie deficit — eating less than you burn\n✅ High protein — preserves muscle while fat is lost\n✅ Steps — walking is the single most effective belly fat activity\n✅ Sleep — poor sleep raises cortisol, which stores fat specifically in the belly\n\n*What doesn't:*\n❌ Sit-ups (build abs under the fat, don't remove the fat)\n❌ Green tea, detoxes, waist trainers\n\n${goal === "fat_loss" || goal === "recomposition" ? "The good news: you're already on the right programme for this. Hit your calorie target, walk your steps, and the mkhaba goes — it just takes the full 3 months to become visible." : "For your muscle gain goal, eating a small surplus means the mkhaba won't grow — and once you build muscle, your metabolism burns more fat at rest. Recomp mode handles this well."}\n\nKeep logging. The belly is the last place it shows up and the last place it leaves — but it does leave.`;
+    await logChat(user.id, message, bellyReply, "BELLY_FAT");
+    return bellyReply;
   }
 
   // ---- CRIME / SAFETY WALKING OBJECTION ----

@@ -70,12 +70,36 @@ const GOALS = [
 ];
 
 const PERSONAS = [
-  { emoji: "🔄", label: "Body recomp, 26", desc: "Saw it online. Wants to lose fat AND build muscle. Tired of picking one or the other." },
-  { emoji: "👩‍👧", label: "Busy mom, 34", desc: "No time for gym. Eats what the family eats. Needs something that fits real life." },
-  { emoji: "🧑‍💼", label: "Office worker, 28", desc: "Sits all day. Eats takeaways. Wants to lose the belly without giving up Nando's." },
-  { emoji: "💪", label: "Gym guy, 22", desc: "Trains hard but eats wrong. Six months in and stuck. Wants to actually see results." },
-  { emoji: "👵", label: "Over 50, health-first", desc: "Doctor said lose weight. On medication. Needs safe, realistic guidance." },
-  { emoji: "🎓", label: "Student, broke", desc: "R50 a week for food. Wants to stay fit without a gym membership or expensive supplements." },
+  {
+    emoji: "🔥", bg: "bg-orange-500/25",
+    label: "The mkhaba mission", age: "30, Pretoria",
+    desc: "Belly fat that won't move no matter what. Tried everything. 'I barely eat' — but the mkhaba stays. Needs to understand what's actually causing it.",
+  },
+  {
+    emoji: "🔄", bg: "bg-sky-500/25",
+    label: "Body recomp goals", age: "26, Joburg",
+    desc: "Saw body recomp online. Wants to lose fat AND build muscle at the same time. Tired of being told to pick one or the other.",
+  },
+  {
+    emoji: "👩‍👧", bg: "bg-pink-500/25",
+    label: "Busy mom", age: "34, Cape Town",
+    desc: "No time for gym. Eats what the family eats. Needs something that fits real life — not a 6am gym session and a meal plan nobody else will eat.",
+  },
+  {
+    emoji: "🧑‍💼", bg: "bg-slate-500/25",
+    label: "Office worker", age: "28, Sandton",
+    desc: "Sits all day. Eats takeaways. Wants to lose the belly without giving up Nando's or spending hours cooking.",
+  },
+  {
+    emoji: "💪", bg: "bg-green-500/25",
+    label: "Gym member who barely goes", age: "22, Durban",
+    desc: "Trains hard when they go — but been 4 times in 3 months. Paying for membership, getting no results. Needs accountability and a plan.",
+  },
+  {
+    emoji: "🎓", bg: "bg-purple-500/25",
+    label: "Student, broke", age: "20, Soweto",
+    desc: "R50 a week for food. Wants to stay fit without a gym membership or expensive supplements. Needs it to work on a student budget.",
+  },
 ];
 
 const FEATURES = [
@@ -249,7 +273,7 @@ export default function LandingPage() {
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Lose fat. Build muscle. Body recomp. Whatever the goal — Coach K builds around your food, your budget, and your life. Gym or home. No app. No perfect diet required.
+            Lose the mkhaba. Body recomp. Build muscle. Coach K builds around your food, your budget, and your life. No gym needed. No perfect diet required.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
@@ -315,9 +339,13 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {PERSONAS.map((p) => (
               <div key={p.label} className="flex gap-4 p-5 rounded-2xl bg-white/10 border border-white/20 hover:border-orange-400/60 hover:bg-white/15 transition-all">
-                <div className="text-3xl shrink-0">{p.emoji}</div>
-                <div>
-                  <div className="font-semibold text-sm mb-1 text-white">{p.label}</div>
+                {/* Avatar circle — replace emoji with <img src={p.photoUrl}> when real photos are ready */}
+                <div className={`w-16 h-16 shrink-0 rounded-2xl ${p.bg} flex items-center justify-center text-3xl border border-white/10`}>
+                  {p.emoji}
+                </div>
+                <div className="min-w-0">
+                  <div className="font-semibold text-sm text-white leading-tight">{p.label}</div>
+                  <div className="text-orange-400/80 text-xs font-medium mb-1.5">{p.age}</div>
                   <p className="text-white/70 text-sm leading-relaxed">{p.desc}</p>
                 </div>
               </div>
