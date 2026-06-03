@@ -1251,6 +1251,30 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return confessionReply;
   }
 
+  // ---- CHRONIC UNDER-EATING — "I only eat once a day", "I struggle to eat", "no appetite most days" ----
+  // Distinct from the acute "forgot to eat today" below. This is the recurring SA pattern:
+  // work-from-home, low movement, low appetite, one meal a day. Research: 2 eating occasions/day
+  // is the threshold. Movement drives appetite. Never shame — make adding ONE thing feel easy.
+  const isChronicUndereating = /\b(only eat once|eat once a day|once or twice a day|one meal a day|two meals a day|don.?t eat much|hardly eat|barely eat|struggle to eat|struggling to eat|hard to eat|can.?t eat much|small appetite|no appetite|not (really |very )?hungry (most|these|during|when)|never (really )?hungry|low appetite|lose my appetite|don.?t feel like eating)\b/i.test(m);
+  if (isChronicUndereating) {
+    const goal = user.goalType || "fat_loss";
+    const undereatReply = goal === "muscle_gain"
+      ? `${capName}, this is the thing holding your results back — and it's fixable.\n\nEating once or twice a day means your body never gets enough fuel to build. It breaks down muscle for energy instead. You can train perfectly and still go nowhere if the food isn't there.\n\n*The easy fix — don't force big meals:*\nAdd ONE protein snack between meals. No cooking:\n• Yoghurt + a banana\n• Peanut butter on 2 slices bread\n• A tin of pilchards or tuna\n• A shake with milk\n\nOne extra eating moment a day. Your appetite grows once your body learns food is coming regularly.`
+      : `${capName}, I hear this a lot — and I'll be straight: eating once or twice a day is *slowing your fat loss, not speeding it up.*\n\nWhen you barely eat, your body thinks food is scarce — it slows your metabolism and holds onto fat harder. You also lose muscle, the exact thing that keeps you burning. "Skinny-fat" comes from under-eating, not over-eating.\n\nAnd if you're not moving much (working from home), your appetite stays low — that's normal. A short walk actually wakes it up.\n\n*The easy fix — don't force a big meal:*\nAdd ONE small protein thing a day. Yoghurt, a tin of pilchards, peanut butter on bread, boiled eggs. No cooking.\n\nTwo eating moments beats one. That's the only food target this week.`;
+    await logChat(user.id, message, undereatReply, "CHRONIC_UNDEREATING");
+    return undereatReply;
+  }
+
+  // ---- DEFER START / NOT MENTALLY READY — keep the habit forming, no pressure ----
+  // Active client wants to push their start to next month. Don't let them go dark —
+  // offer minimum viable engagement (walk + photo food) so the habit forms in the gap.
+  const isDeferringStart = /\b(can.?t start (this month|now|yet|right now)|don.?t think i can start|not sure i can start|not (mentally )?ready (to start|yet|for this|to begin)|not mentally ready|mentally not ready|start (next month|later|properly (next|in)|in (january|february|march|april|may|june|july|august|september|october|november|december))|begin next month|postpone (my|the|this)|push (my|the) start|wait (until|till|for) next month)\b/i.test(m);
+  if (isDeferringStart) {
+    const deferReply = `${capName}, I appreciate you being upfront instead of going quiet — that tells me you're serious.\n\nMental readiness is real. If your head isn't in it, the body won't follow. I get it.\n\nBut here's what we're going to do — this time is not wasted:\n\n*Just two things. No program, no pressure:*\n🚶 Walk when you can — send me your steps\n📸 Photo what you eat — I won't judge, I just want to see where you're starting\n\nThat's it. No strict rules. By the time you feel ready, you'll already be in the habit and I'll already know your patterns — so we hit the ground running instead of starting from scratch.\n\nEvery walk you take now counts more than you think. 💪`;
+    await logChat(user.id, message, deferReply, "DEFER_START");
+    return deferReply;
+  }
+
   // ---- SKIPPING MEALS / FORGOT TO EAT ----
   const isSkippingMeals = /\b(haven.?t eaten|forgot to eat|haven.?t had anything|skipped (breakfast|lunch|dinner|meals?|eating)|too busy to eat|no time to eat|nothing today|haven.?t had food|not eaten (yet|today|all day)|missed (breakfast|lunch|dinner|meals?)|didn.?t eat|didn.?t have (breakfast|lunch|dinner)|no food today)\b/i.test(m);
   if (isSkippingMeals) {
