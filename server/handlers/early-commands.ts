@@ -59,8 +59,10 @@ export async function handleEarlyCommands(ctx: {
     } else {
       portionReply = `${nm}most important question — and I'm going to surprise you: *I don't want you counting calories or weighing food.* It gets obsessive, and people quit within two weeks. We use your hand instead — it's always with you and it's sized to your body.\n\n*Build every plate like this:*\n🖐 *Protein* (chicken, eggs, fish, mince) — *1–2 palms*. Keeps you full and protects muscle while you lose fat.\n✊ *Veg* (cabbage, spinach, broccoli) — *2 fists*. As much as you want — basically free.\n🤲 *Carbs* (pap, rice, sweet potato) — *1 cupped hand*.\n👍 *Fats* (oil, peanut butter, avo) — 1 thumb.\n\nThat's the whole system. No app, no scale.\n\nYour number exists — *${cal} kcal · ${prot}g protein* — and I've got it for you. But the hand gets you there without the stress, and it's the thing you'll actually still be doing in 6 months. 👌`;
     }
+    // Hand-method visual reinforces the text — fires as an image after the coaching message.
+    const handGuideUrl = "https://res.cloudinary.com/dkxpypiak/image/upload/v1780499905/WhatsApp_Image_2026-06-03_at_16.16.16_i4ryyq.jpg";
     await logChat(user.id, message, portionReply, "PORTION_CONTROL");
-    return portionReply;
+    return `${portionReply}\n[MEDIA:${handGuideUrl}]`;
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
