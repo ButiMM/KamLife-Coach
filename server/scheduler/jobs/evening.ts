@@ -33,7 +33,7 @@ export async function runEveningAccountability(): Promise<void> {
           if (isNewClient) {
             await sendWhatsApp(phone, `${name}, your programme is loaded and ready. Reply *1* to see today's workout — it takes 20 minutes. The first session is always the hardest. Get it done tonight.`);
           } else {
-            await sendWhatsApp(phone, `${name}, haven't heard from you today. Did you move?`);
+            await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress. One quick thing before bed: tell me what you ate. Even just your last meal. That's all I need to keep you moving.`);
           }
           recordProactiveSend(client.id);
         }

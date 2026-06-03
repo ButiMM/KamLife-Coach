@@ -1508,14 +1508,14 @@ export async function handleMiscCommands(ctx: {
       const demoGifUrl = getExerciseGifUrl(demoName);
       const displayName = demoName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
       if (demoGifUrl) {
-        const demoReply = `*${displayName} — Form Demo*\n\nWatch the movement. Control every rep.\n\nIf something feels sharp — stop. Reply *injury* for modifications.\n[MEDIA:${demoGifUrl}]`;
+        const demoReply = `*${displayName} — Form Demo*\n\nWatch the movement. Slow on the way down, drive on the way up — control every rep.\n\nDoing it today? Hit *done* after your session and tell me how it felt. If anything feels sharp, stop and reply *injury*.\n[MEDIA:${demoGifUrl}]`;
         await logChat(user.id, message, `${displayName} — Form Demo (image sent)`, "EXERCISE_DEMO");
         return demoReply;
       }
       // Known exercise phrase but no image yet — still catch it, don't let GPT respond
       const KNOWN_EXERCISE_WORDS = /\b(squat|lunge|press|row|curl|raise|thrust|bridge|deadlift|rdl|plank|push.?up|pull.?up|pulldown|dip|extension|kickback|crunch|fly|flye|step.?up|hinge|deadbug|dead bug|hip|glute|calf|leg)\b/i;
       if (KNOWN_EXERCISE_WORDS.test(demoName)) {
-        const textReply = `*${displayName}*\n\nImage not available yet — but here's the key form:\n\nFull range of motion on every rep. Control the down phase — don't let gravity do the work. If it hurts sharp, stop immediately and reply *injury*.\n\nFor a full demo, search *"${displayName} form"* on YouTube.`;
+        const textReply = `*${displayName}*\n\nImage not available yet — but here's the key form:\n\nFull range of motion on every rep. Control the down phase — don't let gravity do the work. If it hurts sharp, stop immediately and reply *injury*.\n\nTrying it today? Send *done* after and tell me how it felt. For a full demo, search *"${displayName} form"* on YouTube.`;
         await logChat(user.id, message, `${displayName} — Form (text only, no image)`, "EXERCISE_DEMO");
         return textReply;
       }
