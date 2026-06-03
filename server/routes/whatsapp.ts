@@ -11,21 +11,32 @@ const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
 async function sendParts(
   phone: string,
   parts: string[],
-  replyMediaUrl: string | null,
+  replyMedia: string | string[] | null,
 ): Promise<void> {
   const fromNum = TWILIO_FROM();
   if (!fromNum) { console.error("[TEXT_ASYNC] TWILIO_WHATSAPP_NUMBER not set"); return; }
   const twilioC = twilio(process.env.TWILIO_ACCOUNT_SID!, process.env.TWILIO_AUTH_TOKEN!);
-  for (let i = 0; i < parts.length; i++) {
-    if (!parts[i].trim()) continue;
-    const params: Record<string, unknown> = { from: fromNum, to: phone, body: parts[i].trim() };
-    if (i === 0 && replyMediaUrl) params.mediaUrl = [replyMediaUrl];
+  const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
+  const sendOne = async (params: Record<string, unknown>, label: string) => {
     const delays = [0, 2000, 5000, 10000];
     for (let d = 0; d < delays.length; d++) {
       if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
-      try { await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]); break; }
-      catch (e: any) { if (d === delays.length - 1) console.error(`[TEXT_ASYNC] part ${i + 1} failed: ${e.message}`); }
+      try { await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]); return; }
+      catch (e: any) { if (d === delays.length - 1) console.error(`[TEXT_ASYNC] ${label} failed: ${e.message}`); }
     }
+  };
+  const textParts = parts.filter(p => p.trim());
+  // One image rides as the caption of the first text part (workout GIFs, equipment images —
+  // unchanged behaviour). Two or more images: keep the text clean and send each as its own
+  // message, since WhatsApp caps media captions at ~1024 chars and separate cards read better.
+  const captionFirst = mediaUrls.length === 1 && textParts.length > 0;
+  for (let i = 0; i < textParts.length; i++) {
+    const params: Record<string, unknown> = { from: fromNum, to: phone, body: textParts[i].trim() };
+    if (i === 0 && captionFirst) params.mediaUrl = [mediaUrls[0]];
+    await sendOne(params, `part ${i + 1}`);
+  }
+  for (let k = captionFirst ? 1 : 0; k < mediaUrls.length; k++) {
+    await sendOne({ from: fromNum, to: phone, mediaUrl: [mediaUrls[k]] }, `media ${k + 1}`);
   }
 }
 
@@ -52,19 +63,20 @@ async function processTextAsync(
       return `\n\n${labels.map((b: string, i: number) => `*${i + 1}.* ${b}`).join("\n")}`;
     });
 
-    const mediaMarkerMatch = cleanedReply.match(/\[MEDIA:(https?:\/\/[^\]]+)\]/);
-    const replyMediaUrl = mediaMarkerMatch ? mediaMarkerMatch[1] : null;
-    const cleanReply = replyMediaUrl ? cleanedReply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/, "").trim() : cleanedReply;
+    // Extract ALL [MEDIA:url] markers — a reply can carry more than one image (e.g. both
+    // portion guides). WhatsApp sends one media item per message, so sendParts fans them out.
+    const replyMediaUrls = [...cleanedReply.matchAll(/\[MEDIA:(https?:\/\/[^\]]+)\]/g)].map(mm => mm[1]);
+    const cleanReply = replyMediaUrls.length ? cleanedReply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/g, "").trim() : cleanedReply;
 
     // Image messages without a GIF/media attachment go through the coalescing buffer
     // so that album bursts (N photos sent together) result in ONE combined reply.
     // Replies that include a media URL (equipment GIFs, etc.) are sent immediately.
-    if (isImageMessage && !replyMediaUrl) {
+    if (isImageMessage && !replyMediaUrls.length) {
       await resolveImageInflight(phone, cleanReply);
       return;
     }
 
-    await sendParts(phone, splitMessage(cleanReply), replyMediaUrl);
+    await sendParts(phone, splitMessage(cleanReply), replyMediaUrls);
   } catch (err: any) {
     console.error("[TEXT_ASYNC] failed:", err?.message || err);
     // For image messages: resolve inflight so the buffer doesn't hang, then send the error.

@@ -59,10 +59,15 @@ export async function handleEarlyCommands(ctx: {
     } else {
       portionReply = `${nm}most important question — and I'm going to surprise you: *I don't want you counting calories or weighing food.* It gets obsessive, and people quit within two weeks. We use your hand instead — it's always with you and it's sized to your body.\n\n*Build every plate like this:*\n🖐 *Protein* (chicken, eggs, fish, mince) — *1–2 palms*. Keeps you full and protects muscle while you lose fat.\n✊ *Veg* (cabbage, spinach, broccoli) — *2 fists*. As much as you want — basically free.\n🤲 *Carbs* (pap, rice, sweet potato) — *1 cupped hand*.\n👍 *Fats* (oil, peanut butter, avo) — 1 thumb.\n\nThat's the whole system. No app, no scale.\n\nYour number exists — *${cal} kcal · ${prot}g protein* — and I've got it for you. But the hand gets you there without the stress, and it's the thing you'll actually still be doing in 6 months. 👌`;
     }
-    // Hand-method visual reinforces the text — fires as an image after the coaching message.
+    // Shared closer for every goal: explain the two guides + make clear portions flex with
+    // hunger, training load and how the program is tracking — a starting point, not strict law.
+    portionReply += `\n\n📌 *Two guides coming below — save them:*\n1️⃣ *What counts as what* — is it a protein, a veg, a carb or a fat\n2️⃣ *Build your plate* — how much of each goes on\n\nThese are a starting point, not strict rules. Hungry day or training hard? Eat a bit more. Quiet day? Pull it back. Your body, your program and how you're feeling all matter — so just keep logging your meals like normal and I'll help you fine-tune as we go. 👌`;
+    // Hand card rides first, plate poster second. WhatsApp sends one image per message, so the
+    // send path (sendParts) fans these out as two separate cards after the text.
     const handGuideUrl = "https://res.cloudinary.com/dkxpypiak/image/upload/v1780499905/WhatsApp_Image_2026-06-03_at_16.16.16_i4ryyq.jpg";
+    const plateGuideUrl = "https://res.cloudinary.com/dkxpypiak/image/upload/v1780499901/WhatsApp_Image_2026-06-03_at_16.16.33_xxvjbe.jpg";
     await logChat(user.id, message, portionReply, "PORTION_CONTROL");
-    return `${portionReply}\n[MEDIA:${handGuideUrl}]`;
+    return `${portionReply}\n[MEDIA:${handGuideUrl}]\n[MEDIA:${plateGuideUrl}]`;
   }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
