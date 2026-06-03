@@ -47,16 +47,15 @@ Compress to under 5MB, host it (Cloudinary or S3), then set `VITE_HERO_VIDEO_URL
 Set `MEDIA_BASE_URL` in Railway, then upload files to `MEDIA_BASE_URL/ex/<slug>.gif`.
 Slugs needed: `squat`, `hip-thrust`, `leg-press`, `leg-curl`, `leg-extension`, `calf-raise`, `rdl`, `bulgarian-split-squat`, `chest-press`, `chest-fly`, `lat-pulldown`, `seated-row`, `face-pull`, `lateral-raise`, `shoulder-press`, `bicep-curl`, `tricep-pushdown`, `cable-kickback`, `push-up`, `plank`, `dead-bug`
 
-### Create + upload portion-guide images
-The bot's PORTION_CONTROL handler teaches the hand method in text — but clients need the visual (this is how Precision Nutrition, Noom, and MyPlate all do it). Make 3 reusable infographics (NOT per-client):
-1. **The hand guide** — palm = protein, fist = veg, cupped hand = carbs, thumb = fats, with SA foods (chicken, pap, spinach, peanut butter)
-2. **Lunch/dinner plate** — ½ veg, ¼ protein, ¼ carb, SA food shown
-3. **Breakfast plate** — the structure you already used before (eggs/oats/fruit)
+### Upload portion-guide images — ✅ MADE, JUST NEED UPLOADING
+Two infographics are done (text is clean, SA foods, KamLife-branded). They are **reusable — the same two for every client, NOT per-client.**
+1. **"WHAT COUNTS AS WHAT"** (hand card — palm / fist / cupped hand / thumb) → save as `hand-guide.png`
+2. **"STOP COUNTING CALORIES / BUILD BETTER PLATES"** (plate method + hand method) → save as `plate-guide.png`
 
-How: use ChatGPT/DALL·E for the *food photography* only, then add text labels in **Canva** (AI image gen spells text wrong — don't let it write "protein"). Then:
-- Send these 3 to your current manual clients now (reuse for everyone)
-- Upload to `MEDIA_BASE_URL/portions/hand-guide.png`, `plate-lunch.png`, `plate-breakfast.png`
-- Tell Claude once uploaded — wiring them into the bot reply is a 3-line, goal-aware change
+What to do:
+- **Now (no code needed):** Send both to your current manual clients on WhatsApp. Reuse for everyone. When a client asks "how much should I eat?", reply with the hand card + one line of context.
+- **For the bot:** Upload both to `MEDIA_BASE_URL/portions/hand-guide.png` and `MEDIA_BASE_URL/portions/plate-guide.png`
+- **Then tell Claude** — wiring the hand card into the bot's PORTION_CONTROL reply is a 1-line, goal-aware change. (The bot's text response is already goal-aware, so muscle_gain clients get the right "more carbs" framing in words even though the poster leans fat-loss.)
 
 ### Run npm run diagnose:voice in Railway shell
 If ElevenLabs voice recaps are still not delivering to WhatsApp, run this in the Railway shell to diagnose the issue.
