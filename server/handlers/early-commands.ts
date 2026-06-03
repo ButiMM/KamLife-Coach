@@ -29,6 +29,40 @@ export async function handleEarlyCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
+
+  // ---- PORTION CONTROL / HOW TO MEASURE — hand-portion method, goal-aware ----
+  // The #1 post-onboarding question. We deliberately DON'T teach calorie counting or
+  // food scales — research and retention both favour the hand method: always available,
+  // sized to the body, sustainable. Anxious trackers especially need the pressure taken off.
+  // Runs BEFORE the calorie-target INSTANT ANSWER block so "how do I count calories" gets
+  // the METHOD, not just their target number. Target-number phrasings ("calories left",
+  // "my calorie target") contain no measure/count/portion words and fall through correctly.
+  const isPortionControlQ =
+    /\b(portion control|portion size|portion sizes|portioning|how big.*portion|portions? (right|correct|properly|wrong))\b/i.test(m)
+    || /\bhow (do|can|should|would) i (measure|count|track|weigh|portion|estimate|work out|know how much|gauge)\b/i.test(m)
+    || /\bhow much (should i|do i|must i|to) (eat|serve|dish|put on|have|portion)\b/i.test(m)
+    || /\bhow many calories.*\b(count|counting|measure|track|tracking|know|do i count)\b/i.test(m)
+    || /\b(do|should) i (need to |have to )?(weigh|measure|count|be counting|be weighing|be measuring|track)\b.{0,20}\b(food|portions?|calories|macros|meals?|everything)\b/i.test(m)
+    || /\b(how do i|how to)\s+(count|track|measure|weigh)\s+(my\s+)?(calories|macros|food|portions?|meals?)\b/i.test(m)
+    || /\b(measuring|counting|weighing)\s+(my\s+)?(food|portions?|calories|meals?)\b/i.test(m)
+    || m === "portion control" || m === "portions" || m === "portion size";
+  if (isPortionControlQ) {
+    const goal = user.goalType || "fat_loss";
+    const cal = user.calorieTarget || 1800;
+    const prot = user.proteinTarget || 120;
+    const nm = firstName ? `${firstName}, ` : "";
+    let portionReply: string;
+    if (goal === "muscle_gain") {
+      portionReply = `${nm}great question — and here's the surprise: *I don't want you counting calories or weighing food.* That gets obsessive and people quit. We use your hand instead — it's always with you and it's sized to your body.\n\n*Per meal, to build muscle:*\n🖐 *Protein* (chicken, mince, eggs, fish) — *2 full palms*. Non-negotiable.\n🤲 *Carbs* (pap, rice, sweet potato, oats) — *2 cupped hands*. This fuels the growth.\n✊ *Veg* — 1 fist.\n👍 *Fats* (oil, peanut butter, avo) — 1–2 thumbs.\n\n*The mistake to avoid:* eating too LITTLE. To build, you fill the plate. If the scale isn't moving up over 2 weeks, add another cupped hand of carbs.\n\nYour target is *${cal} kcal · ${prot}g protein* — but build every plate like that and you hit it automatically. No app, no scale. Trust the hand. 💪`;
+    } else if (goal === "recomposition") {
+      portionReply = `${nm}most important question you've asked — and I'm going to surprise you: *I don't want you counting calories or weighing food.* You'll burn out in two weeks doing that. We use your hand instead. It's always with you and it's sized to your body.\n\n*Build every plate like this:*\n🖐 *Protein* (chicken, mince, eggs, fish) — *2 palms*. This is your priority — it builds muscle AND keeps you full.\n✊ *Veg* — 1–2 fists. As much as you want.\n🤲 *Carbs* (pap, rice, sweet potato) — 1 cupped hand normally, *2 on training days*.\n👍 *Fats* (oil, peanut butter, avo) — 1–2 thumbs.\n\nThat's it. No counting, no scale. Build every plate like that and you're automatically in range.\n\nYour number exists — *${cal} kcal · ${prot}g protein* — and I've got it. But trust the hand. It's the thing you'll still be doing a year from now. 💪`;
+    } else {
+      portionReply = `${nm}most important question — and I'm going to surprise you: *I don't want you counting calories or weighing food.* It gets obsessive, and people quit within two weeks. We use your hand instead — it's always with you and it's sized to your body.\n\n*Build every plate like this:*\n🖐 *Protein* (chicken, eggs, fish, mince) — *1–2 palms*. Keeps you full and protects muscle while you lose fat.\n✊ *Veg* (cabbage, spinach, broccoli) — *2 fists*. As much as you want — basically free.\n🤲 *Carbs* (pap, rice, sweet potato) — *1 cupped hand*.\n👍 *Fats* (oil, peanut butter, avo) — 1 thumb.\n\nThat's the whole system. No app, no scale.\n\nYour number exists — *${cal} kcal · ${prot}g protein* — and I've got it for you. But the hand gets you there without the stress, and it's the thing you'll actually still be doing in 6 months. 👌`;
+    }
+    await logChat(user.id, message, portionReply, "PORTION_CONTROL");
+    return portionReply;
+  }
+
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
