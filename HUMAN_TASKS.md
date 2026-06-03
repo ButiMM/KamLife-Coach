@@ -47,6 +47,17 @@ Compress to under 5MB, host it (Cloudinary or S3), then set `VITE_HERO_VIDEO_URL
 Set `MEDIA_BASE_URL` in Railway, then upload files to `MEDIA_BASE_URL/ex/<slug>.gif`.
 Slugs needed: `squat`, `hip-thrust`, `leg-press`, `leg-curl`, `leg-extension`, `calf-raise`, `rdl`, `bulgarian-split-squat`, `chest-press`, `chest-fly`, `lat-pulldown`, `seated-row`, `face-pull`, `lateral-raise`, `shoulder-press`, `bicep-curl`, `tricep-pushdown`, `cable-kickback`, `push-up`, `plank`, `dead-bug`
 
+### Create + upload portion-guide images
+The bot's PORTION_CONTROL handler teaches the hand method in text — but clients need the visual (this is how Precision Nutrition, Noom, and MyPlate all do it). Make 3 reusable infographics (NOT per-client):
+1. **The hand guide** — palm = protein, fist = veg, cupped hand = carbs, thumb = fats, with SA foods (chicken, pap, spinach, peanut butter)
+2. **Lunch/dinner plate** — ½ veg, ¼ protein, ¼ carb, SA food shown
+3. **Breakfast plate** — the structure you already used before (eggs/oats/fruit)
+
+How: use ChatGPT/DALL·E for the *food photography* only, then add text labels in **Canva** (AI image gen spells text wrong — don't let it write "protein"). Then:
+- Send these 3 to your current manual clients now (reuse for everyone)
+- Upload to `MEDIA_BASE_URL/portions/hand-guide.png`, `plate-lunch.png`, `plate-breakfast.png`
+- Tell Claude once uploaded — wiring them into the bot reply is a 3-line, goal-aware change
+
 ### Run npm run diagnose:voice in Railway shell
 If ElevenLabs voice recaps are still not delivering to WhatsApp, run this in the Railway shell to diagnose the issue.
 
