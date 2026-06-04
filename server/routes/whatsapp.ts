@@ -343,7 +343,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         const isFirstInBurst = !photoReplyBuffer.has(rawPhone);
         bumpImageInflight(rawPhone);
         if (isFirstInBurst) {
-          sendParts(rawPhone, ["📸 Got your photo — analysing your meal, one sec…"], null).catch(() => {});
+          sendParts(rawPhone, ["📸 Got your photo, one sec…"], null).catch(() => {});
         }
       }
       processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage).catch(() => {});

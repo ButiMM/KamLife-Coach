@@ -811,11 +811,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
             const extraCtype = extraResp.headers.get("content-type") || "image/jpeg";
             const extraVision = await withTimeout("food_vision_extra", 22000, () => openai.chat.completions.create({
               model: foodVisionDecision.model,
-              max_tokens: Math.min(foodVisionDecision.maxTokens, 250),
+              max_tokens: Math.min(foodVisionDecision.maxTokens, 150),
               messages: [
-                { role: "system", content: `You are Coach K, a South African fitness coach. Client: ${clientName}. Estimate calories and protein in this food photo. End with: "TOTAL: X kcal | Yg protein". If not food, reply: NOT_FOOD` },
+                { role: "system", content: `List food items visible in this photo, one per line: "Item name: ~X kcal | Yg protein". SA foods welcome (pap, vetkoek, pilchards, etc). End with "TOTAL: X kcal | Yg protein". No advice or coaching sentences. If not food, reply: NOT_FOOD` },
                 { role: "user", content: [
-                  { type: "text", text: "Estimate calories and protein in this food photo." },
+                  { type: "text", text: "What food items are here? Numbers only." },
                   { type: "image_url", image_url: { url: `data:${extraCtype};base64,${extraB64}`, detail: "auto" } },
                 ]},
               ],
@@ -906,8 +906,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }).where(eq(users.id, user.id)).catch(e => console.warn("[photo todayCalories sync]", e));
       } catch (e) { console.warn("[non-fatal]", e); }
 
-      const extraSection = extraReplies.length > 0 ? `\n\n${extraReplies.join("\n")}` : "";
-      const multiPhotoNote = extraReplies.length > 0 ? `\n_${extraReplies.length + 1} photos logged — total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+      // Format extra-photo replies compactly. Step responses are already well-formatted
+      // paragraphs; food lines are compact "Item: ~X kcal | Yg protein" from the new prompt.
+      const extraSection = extraReplies.length > 0
+        ? "\n" + extraReplies.map(r => r.startsWith("📸") || /\d+,?\d* steps/i.test(r) ? `\n${r}` : `• ${r}`).join("\n")
+        : "";
+      const totalPhotos = extraReplies.filter(r => !/\d+,?\d* steps/i.test(r)).length + 1;
+      const multiPhotoNote = extraReplies.length > 0 ? `\n_${totalPhotos} photos — all logged. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
@@ -1042,13 +1047,15 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       }
 
       const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
-      if (wordCount < 3) {
+      // Only flag as too-short for single words that could be ambient noise.
+      // 2+ words from Whisper is almost always intentional — process it directly.
+      if (wordCount < 2) {
         const failCount = bumpVoiceFailure(user.id);
         if (failCount >= 3) {
           clearVoiceFailure(user.id);
-          return `I keep only picking up a few words — "${transcribedText}". Please type your message — I'll reply properly.`;
+          return `I keep only picking up a single word — "${transcribedText}". Please type your message — I'll reply properly.`;
         }
-        return `I only caught a few words — "${transcribedText}". Send again or type your message.`;
+        return `I only caught one word — "${transcribedText}". Send again or type your message.`;
       }
       clearVoiceFailure(user.id);
 
