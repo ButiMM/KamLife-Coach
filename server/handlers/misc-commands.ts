@@ -515,10 +515,18 @@ export async function handleMiscCommands(ctx: {
       let weightLine = "";
       if (firstWeight.length > 0 && lastWeight.length > 0 && firstWeight[0].id !== lastWeight[0].id) {
         const diff = parseFloat(String(lastWeight[0].weight)) - parseFloat(String(firstWeight[0].weight));
-        weightLine = diff < 0
-          ? `\n⬇️ Weight: down ${Math.abs(diff).toFixed(1)}kg since you started`
-          : diff > 0 ? `\n⬆️ Weight: up ${diff.toFixed(1)}kg since you started`
-          : `\n⚖️ Weight: unchanged since you started`;
+        const journeyDays = firstWeight[0].loggedAt && lastWeight[0].loggedAt
+          ? (new Date(lastWeight[0].loggedAt).getTime() - new Date(firstWeight[0].loggedAt).getTime()) / 86_400_000
+          : daysOn || 999;
+        const isSuspicious = Math.abs(diff) > 10 || (Math.abs(diff) > 5 && journeyDays < 14);
+        if (isSuspicious) {
+          weightLine = `\n⚠️ Weight data: ${parseFloat(String(firstWeight[0].weight)).toFixed(1)}kg → ${parseFloat(String(lastWeight[0].weight)).toFixed(1)}kg — looks like a data issue. Send "weight Xkg" with your real current weight to fix it.`;
+        } else {
+          weightLine = diff < 0
+            ? `\n⬇️ Weight: down ${Math.abs(diff).toFixed(1)}kg since you started`
+            : diff > 0 ? `\n⬆️ Weight: up ${diff.toFixed(1)}kg since you started`
+            : `\n⚖️ Weight: unchanged since you started`;
+        }
       } else if (user.currentWeight) {
         weightLine = `\n⚖️ Current weight: ${user.currentWeight}kg`;
       }
@@ -551,7 +559,7 @@ export async function handleMiscCommands(ctx: {
           .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, sevenDaysAgo))),
         db.select({ steps: stepLogs.steps }).from(stepLogs)
           .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
-        db.select({ weight: weightLogs.weight }).from(weightLogs)
+        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs)
           .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2),
       ]);
 
@@ -598,9 +606,21 @@ export async function handleMiscCommands(ctx: {
       }
 
       if (weightRows.length >= 2) {
-        const diff = parseFloat(String(weightRows[0].weight)) - parseFloat(String(weightRows[1].weight));
+        const wNew = parseFloat(String(weightRows[0].weight));
+        const wOld = parseFloat(String(weightRows[1].weight));
+        const diff = wNew - wOld;
         if (!isNaN(diff) && Math.abs(diff) >= 0.3) {
-          out.push(diff < 0 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg since last weigh-in` : `⬆️ Up ${diff.toFixed(1)}kg since last weigh-in`);
+          const msApart = weightRows[0].loggedAt && weightRows[1].loggedAt
+            ? new Date(weightRows[0].loggedAt).getTime() - new Date(weightRows[1].loggedAt).getTime()
+            : 0;
+          const daysBetween = msApart > 0 ? msApart / 86_400_000 : 999;
+          // Biologically impossible: >10kg in any gap, or >5kg within 14 days = data entry error
+          const isSuspicious = Math.abs(diff) > 10 || (Math.abs(diff) > 5 && daysBetween < 14);
+          if (isSuspicious) {
+            out.push(`⚠️ Weight: ${wOld.toFixed(1)}kg → ${wNew.toFixed(1)}kg — that's a big jump. If your starting weight was logged incorrectly, send "weight ${wNew.toFixed(1)}kg" to reset from your current number.`);
+          } else {
+            out.push(diff < 0 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg since last weigh-in` : `⬆️ Up ${diff.toFixed(1)}kg since last weigh-in`);
+          }
         }
       }
 
