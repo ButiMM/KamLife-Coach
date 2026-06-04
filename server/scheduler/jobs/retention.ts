@@ -4,7 +4,7 @@ import {
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, dayStart, loadState, saveState,
   TRAINING_SCHEDULES, wasSickOrInjured, isSickOrInjuredToday,
-  todaySAST, claimProactive, isProactivePaused,
+  todaySAST, claimProactive, claimDailySlot, isProactivePaused,
   escalations,
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
@@ -12,18 +12,17 @@ import { selectVariantMessage, recordDelivery } from "../../ab";
 export async function runWeek3Intervention(): Promise<void> {
   console.log("[SCHEDULER] JOB: Week 3 intervention");
   const clients = await getActiveClients();
-  const state = loadState();
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
       if (client.programmeWeek !== 3) continue;
-      const sentKey = `week3_sent_${client.id}`;
-      if (state[sentKey] === "sent") continue;
+      // Once ever per client — DB claim survives the container recycle that wiped the state file.
+      if (!(await claimProactive(client.id, "week3_intervention", "once"))) continue;
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const planned = client.trainingDaysPerWeek || 3;
-      if (canSendProactive(client.id)) {
+      {
         const daysSinceActive = client.lastActiveAt
           ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
           : 999;
@@ -32,8 +31,6 @@ export async function runWeek3Intervention(): Promise<void> {
           ? `${name}, I have not heard from you in ${daysSinceActive} days. You are in Week 3 — the week most people quit.\n\n${workouts} sessions completed. That work is real and it does not disappear.\n\nI am not asking for a perfect week. I am asking for ONE session today. Reply *1* and I will send your workout. 20 minutes. That is all.`
           : `${name}, you have ${workouts} sessions banked. Week 3 is where 70% of people disappear — not because it got too hard, but because the mirror has not changed yet. The adaptation is happening in your muscles and metabolism. It is not visible yet but it is real. Show up ${planned} more times this week. That is all.`;
         await sendWhatsApp(client.phoneNumber, week3Msg);
-        recordProactiveSend(client.id);
-        saveState(sentKey, "sent");
       }
     } catch (err) {
       console.error(`[SCHEDULER] Week 3 intervention error — ${client.phoneNumber}:`, err);
@@ -145,6 +142,8 @@ export async function runComebackMessages(): Promise<void> {
     const name = client.name?.split(" ")[0] || "Champ";
     const wk = client.totalWorkoutsCompleted || 0;
     const msg = comebacks[sent % comebacks.length](name, wk);
+    // Once per day per client — DB-backed so a recycle on a comeback day can't re-send.
+    if (!(await claimProactive(client.id, "comeback", todaySAST()))) continue;
     await sendWhatsApp(client.phoneNumber, msg);
     sent++;
     await new Promise(r => setTimeout(r, 200));
@@ -262,8 +261,8 @@ export async function runStreakAtRisk(): Promise<void> {
         const todayWorkout = await db.select({ id: workoutLogs.id })
           .from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, todayStart))).limit(1);
         if (todayWorkout.length === 0 && !await isSickOrInjuredToday(client.id)) {
+          if (!(await claimDailySlot(client.id, "streak_at_risk"))) continue;
           await sendWhatsApp(client.phoneNumber, `🔥 ${name}, your *${wStreak}-session workout streak* ends at midnight.\n\nLog your session tonight — even a 15-minute walk counts. Reply *done* when finished.`);
-          recordProactiveSend(client.id);
           streakAlertsSent++;
           continue;
         }
@@ -276,8 +275,8 @@ export async function runStreakAtRisk(): Promise<void> {
           .from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, new Date(Date.now() - 90 * 86400_000)))).orderBy(desc(stepLogs.loggedAt));
         const stepStreak = computeStreakFromLogs(recentSteps);
         if (stepStreak >= 2) {
+          if (!(await claimDailySlot(client.id, "streak_at_risk"))) continue;
           await sendWhatsApp(client.phoneNumber, `🚶 ${name}, your *${stepStreak}-day step streak* ends at midnight.\n\nLog your steps now — even if it's only 3,000. Reply with a number or send a screenshot.`);
-          recordProactiveSend(client.id);
           streakAlertsSent++;
           continue;
         }
@@ -290,8 +289,8 @@ export async function runStreakAtRisk(): Promise<void> {
           .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, new Date(Date.now() - 14 * 86400_000)))).orderBy(desc(mealLogs.loggedAt));
         const foodStreak = computeStreakFromLogs(recentMeals);
         if (foodStreak >= 3) {
+          if (!(await claimDailySlot(client.id, "streak_at_risk"))) continue;
           await sendWhatsApp(client.phoneNumber, `📋 ${name}, your *${foodStreak}-day food logging streak* ends at midnight.\n\nTell me one thing you ate today — even "pap and chicken" is enough to keep it alive.`);
-          recordProactiveSend(client.id);
           streakAlertsSent++;
         }
       }
@@ -336,11 +335,10 @@ export async function runPausedClientLite(): Promise<void> {
   let sent = 0;
   for (const client of lapsedClients) {
     try {
-      const stateKey = `paused_lite_${client.id}`;
-      if (loadState()[stateKey] === thisWeek) continue;
+      // DB claim (weekly window) replaces the state-file flag a container recycle would wipe.
+      if (!(await claimProactive(client.id, "paused_lite", thisWeek))) continue;
       const name = client.name?.split(" ")[0] || "";
       await sendWhatsApp(client.phoneNumber, MSGS[msgIdx](name));
-      saveState(stateKey, thisWeek);
       sent++;
       await new Promise(r => setTimeout(r, 300));
       if (sent >= 50) break;

@@ -2,9 +2,9 @@ import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
-  sendWhatsApp, sendCriticalAlert, claimDailySlot, isProactivePaused,
+  sendWhatsApp, sendCriticalAlert, claimDailySlot, claimProactive, isProactivePaused,
   getActiveClients, isPaused, loadState, saveState,
-  deliveryStats, todaySAST, FROM_NUMBER, PRICING, inArray,
+  deliveryStats, todaySAST, thisWeekUTC, FROM_NUMBER, PRICING, inArray,
 } from "../shared";
 
 export async function runMonthEndBudget(): Promise<void> {
@@ -175,6 +175,8 @@ export async function runStepLeaderboard(): Promise<void> {
       const personal = myRank <= 5
         ? `\nYou are *#${myRank}*! ${myRank === 1 ? "You led the pack this week. 👑" : "Keep pushing for #1 next week."}`
         : `\nYou are *#${myRank}* of ${ranked.length}. ${r.avg.toLocaleString()} avg steps. Log more to climb next week.`;
+      // DB claim (weekly window) so a recycle can't re-broadcast the leaderboard.
+      if (!(await claimProactive(r.uid, "step_leaderboard", thisWeekUTC()))) continue;
       try { await sendWhatsApp(r.phone, `${boardBase}${personal}\n\nNew week starts now. Reply *leaderboard* anytime to check rankings.`); sent++; } catch {}
       if (sent % 10 === 0) await new Promise(r => setTimeout(r, 2000));
     }
@@ -267,6 +269,8 @@ export async function runSupplementReminder(): Promise<void> {
       else if (/magnesium/.test(suppText)) suppName = "magnesium";
       const name = client.name?.split(" ")[0] || "there";
       const msg = suppName ? `Morning ${name} — ${suppName} taken yet? Consistency is what makes it work.` : `Morning ${name} — supplements taken? One less thing to think about later.`;
+      // Daily-slot claim (routine nudge) — DB-backed, restart-safe, respects the daily cap.
+      if (!(await claimDailySlot(uid, "supplement_reminder"))) continue;
       await sendWhatsApp(client.phoneNumber, msg);
       sent++;
       if (sent >= 50) break;
@@ -289,9 +293,6 @@ export async function runAutoCalAdjust(): Promise<void> {
     for (const client of activeClients) {
       if (isPaused(client)) continue;
       try {
-        const dedupKey = `cal_adj_${client.id}_${windowKey}`;
-        if (loadState()[dedupKey]) continue;
-
         // Don't adjust until 3 weeks into programme
         if (client.programmeStartDate) {
           const daysSinceStart = Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000);
@@ -347,11 +348,12 @@ export async function runAutoCalAdjust(): Promise<void> {
         }
 
         if (newCal !== null) {
+          // Claim before mutating targets + sending — DB-backed per 3-week window, restart-safe.
+          if (!(await claimProactive(client.id, "cal_adjust", `w${windowKey}`))) continue;
           const patch: Partial<typeof client> = { calorieTarget: newCal };
           if (newProt !== null) (patch as any).proteinTarget = newProt;
           await db.update(users).set(patch as any).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, msg!);
-          saveState(dedupKey, todaySAST());
           adjusted++;
           if (adjusted >= 20) break;
         }
@@ -375,9 +377,6 @@ export async function runStepTargetAdaptation(): Promise<void> {
     for (const client of clients) {
       if (isPaused(client)) continue;
       try {
-        const dedupKey = `step_adj_${client.id}_${windowKey}`;
-        if (loadState()[dedupKey]) continue;
-
         const stepsTarget    = client.stepsTarget || 8500;
         const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
         const sevenDaysAgo    = new Date(Date.now() - 7  * 86_400_000);
@@ -400,16 +399,16 @@ export async function runStepTargetAdaptation(): Promise<void> {
         const name    = (client.name || "").split(" ")[0] || "there";
 
         if (hitRate >= 0.8 && stepsTarget < 12000) {
+          if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.min(12000, stepsTarget + 1000);
           await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, `${name}, you have been nailing your step target 🔥 Time to raise the bar.\n\nNew target: *${newTarget.toLocaleString()} steps/day*\n\nSame routine — just aim a little further. Your body is ready for it.`);
-          saveState(dedupKey, todaySAST());
           bumped++;
         } else if (hitRate <= 0.3 && stepsTarget > 5000) {
+          if (!(await claimProactive(client.id, "step_target_adapt", `w${windowKey}`))) continue;
           const newTarget = Math.max(5000, stepsTarget - 1000);
           await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, `${name}, I have adjusted your step target to *${newTarget.toLocaleString()} steps/day*.\n\nThis is not lowering standards — it is setting a target you can actually hit consistently. Hitting ${newTarget.toLocaleString()} every day beats struggling at ${stepsTarget.toLocaleString()} and stopping.\n\nWe raise it again when this feels easy.`);
-          saveState(dedupKey, todaySAST());
           reduced++;
         }
       } catch { /* skip individual */ }
@@ -427,8 +426,8 @@ export async function runMonthlyNps(): Promise<void> {
     let sent = 0;
     for (const client of activeClients) {
       if ((client.totalWorkoutsCompleted || 0) < 3) continue;
-      const alreadySentToday = await db.select({ id: sentProactive.id }).from(sentProactive).where(and(eq(sentProactive.userId, client.id), eq(sentProactive.dedupeWindow, today))).limit(1);
-      if (alreadySentToday.length > 0) continue;
+      // Atomic daily-slot claim replaces the non-atomic "already sent today" check.
+      if (!(await claimDailySlot(client.id, "monthly_nps"))) continue;
       const name = client.name?.split(" ")[0] || "there";
       await sendWhatsApp(client.phoneNumber, `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`);
       sent++;

@@ -1,7 +1,7 @@
 import {
   db, users, chatHistory, stepLogs, weightLogs,
   eq, gte, and, asc, desc,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, programmeDaysSince, sastDayStart,
 } from "../shared";
 
@@ -36,8 +36,8 @@ export async function runStepSyncCatchup(): Promise<void> {
 
       const msg = `${name}, quick one — three ways to log your steps:\n\n*1. Just type the number* — send me a number any time. Like: *8500*\n*2. Send a screenshot* — photo of your steps app and I'll read the number\n*3. Auto-sync* — reply *connect steps* for a one-time setup that sends your steps to me automatically every night\n\nPick what works for you.`;
 
+      if (!(await claimDailySlot(client.id, "step_sync_guide"))) continue;
       await sendWhatsApp(client.phoneNumber, msg);
-      recordProactiveSend(client.id, "step_sync_guide");
 
       // Flag so we don't resend
       const updatedNotes = ((client.profileNotes || "") + " step_sync_sent").trim();
@@ -56,19 +56,18 @@ export async function runEarlyOnboarding(): Promise<void> {
     if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
+      if (![1, 2, 3, 5, 7].includes(days)) continue;
       const name = client.name || "there";
-      if (!canSendProactive(client.id)) continue;
+      // One atomic daily-slot claim per onboarding day — DB-backed, restart-safe.
+      if (!(await claimDailySlot(client.id, "early_onboarding"))) continue;
 
       if (days === 1) {
         await sendWhatsApp(client.phoneNumber, `${name}, Day 1. Your programme is live and ready.\n\nReply:\n• "today" for your workout\n• "2" to log food\n• "3" to log your steps\n\nOne small action today is better than a perfect week planned and not started.`);
-        recordProactiveSend(client.id);
       } else if (days === 2) {
         await sendWhatsApp(client.phoneNumber, `Day 2, ${name}. How did Day 1 go? Reply DONE if you completed the session, or just tell me what happened. No judgment — just forward.`);
-        recordProactiveSend(client.id);
       } else if (days === 3) {
         const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Log your steps — pick what works for you:*\n\n*1. Just type the number* (easiest)\nSend me a number any time. Like: *8500*. I'll log it.\n\n*2. Send a screenshot*\nOpen Samsung Health, Apple Health, or Google Fit. Screenshot your step count. Send me the photo and I'll read it.\n\n*3. Auto-sync* (set up once, never log again)\nReply *connect steps* and I'll send you the one-time setup guide.`;
         await sendWhatsApp(client.phoneNumber, day3Msg);
-        recordProactiveSend(client.id);
       } else if (days === 5) {
         const fiveDaysAgoOnb = new Date(Date.now() - 5 * 86_400_000);
         const recentSteps = await db.select({ steps: stepLogs.steps }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fiveDaysAgoOnb)));
@@ -76,12 +75,10 @@ export async function runEarlyOnboarding(): Promise<void> {
         const recentFoodLogs = await db.select({ id: chatHistory.id }).from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, fiveDaysAgoOnb)));
         const workoutsDone = client.totalWorkoutsCompleted || 0;
         await sendWhatsApp(client.phoneNumber, `Day 5, ${name}. Here is what you have built in less than a week:\n\n✅ ${workoutsDone} workout${workoutsDone !== 1 ? "s" : ""} completed\n👟 ${totalStepsLogged.toLocaleString()} steps logged\n🍽 ${recentFoodLogs.length} meal${recentFoodLogs.length !== 1 ? "s" : ""} tracked\n\nThis is data. Data becomes results. Most people never get this far. You did.\n\nKeep logging — reply *1* for today's workout.`);
-        recordProactiveSend(client.id);
       } else if (days === 7) {
         const workoutsDone = client.totalWorkoutsCompleted || 0;
         const goal = client.goalType === "muscle_gain" ? "building muscle" : client.goalType === "recomposition" ? "body recomp" : "fat loss";
         await sendWhatsApp(client.phoneNumber, `One week done, ${name}. Seven days of showing up.\n\n${workoutsDone >= 3 ? `${workoutsDone} sessions this week — you are on track.` : workoutsDone > 0 ? `${workoutsDone} session${workoutsDone !== 1 ? "s" : ""} done — aim for ${client.trainingDaysPerWeek || 3} next week.` : "No sessions logged yet — this week, do one. Just one."}\n\n*What happens in Week 2:*\nYour body starts adapting. Energy improves. Soreness decreases. The habit begins to form. Most ${goal} results show at Week 4-6 — you are building the foundation right now.\n\nReply *menu* to see all your options. Keep going.`);
-        recordProactiveSend(client.id);
       }
     } catch (err) { console.error(`[SCHEDULER] Early onboarding error — ${client.phoneNumber}:`, err); }
   }
@@ -95,7 +92,7 @@ export async function runMonthlyMeasurements(): Promise<void> {
 
   for (const client of clients) {
     if (isPaused(client)) continue;
-    if (!canSendProactive(client.id)) continue;
+    if (!(await claimDailySlot(client.id, "monthly_measurements"))) continue;
     try {
       const name = (client.name || "there").split(" ")[0];
       const [latestWeight] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1);
@@ -112,7 +109,6 @@ export async function runMonthlyMeasurements(): Promise<void> {
         ? `${name}, it's the 1st — measurement day.\n\nWeigh in this morning (before food, after bathroom) and send me the number. Also grab a tape measure and send:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm${contextLine}`
         : `${name}, it's the 1st — measurement day.\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nAlso grab a tape measure:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\n\nThe tape doesn't lie when the scale does.`;
       await sendWhatsApp(client.phoneNumber, msg);
-      recordProactiveSend(client.id);
     } catch (err) { console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err); }
   }
 }
@@ -122,7 +118,7 @@ export async function runReferralNudge(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
       if (![7, 30, 60, 90].includes(days)) continue;
@@ -135,6 +131,7 @@ export async function runReferralNudge(): Promise<void> {
         60: `${name}, 60 days in. Two months of real work. People around you have noticed. When they ask what you are doing, tell them — and share code *${code}*. Every referral earns you R20 off. No limit.`,
         90: `${name}, 90 days. A quarter year of consistency. That is rare and worth talking about. Your code is *${code}* — share it with someone who has been talking about getting fit. They get a cheaper start. You get rewarded.`,
       };
+      if (!(await claimDailySlot(client.id, "referral_nudge"))) continue;
       await sendWhatsApp(client.phoneNumber, msgs[days]);
     } catch (err) { console.error(`[SCHEDULER] Referral nudge error — ${client.phoneNumber}:`, err); }
   }
@@ -145,12 +142,14 @@ export async function runGoalReassessment(): Promise<void> {
   const clients = await getActiveClients();
 
   for (const client of clients) {
-    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
+      if (![30, 60, 90].includes(days)) continue;
       const name = client.name || "there";
       const goal = client.goalType || "fat_loss";
       const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition", general: "general fitness" };
+      if (!(await claimDailySlot(client.id, "goal_reassessment"))) continue;
       if (days === 30) {
         await sendWhatsApp(client.phoneNumber, `${name}, 30 days in. Time to check in properly.\n\nWeigh yourself this morning and send me the number. Also — is your goal still ${goalLabel[goal] || goal}? Or has something shifted? One reply: your weight in kg, and yes or no if the goal is the same.`);
       } else if (days === 60) {

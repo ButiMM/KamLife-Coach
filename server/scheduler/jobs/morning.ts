@@ -1,7 +1,7 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, lt, desc, sql,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, wasSickOrInjured,
   todaySAST,
@@ -26,10 +26,9 @@ export async function runMorningCheckin(): Promise<void> {
         const pauseEnd = new Date(pauseMatch[1]);
         const tomorrow = new Date(Date.now() + 86_400_000);
         const isTomorrowEnd = pauseEnd.toISOString().slice(0, 10) === tomorrow.toISOString().slice(0, 10);
-        if (isTomorrowEnd && canSendProactive(client.id)) {
+        if (isTomorrowEnd && await claimDailySlot(client.id, "morning")) {
           const name = client.name?.split(" ")[0] || "there";
           await sendWhatsApp(client.phoneNumber, `${name}, your coaching pause ends tomorrow. Morning check-ins and workout reminders resume from tomorrow. Your programme is exactly where you left it — nothing resets.`);
-          recordProactiveSend(client.id);
         }
       }
       continue;
@@ -42,7 +41,7 @@ export async function runMorningCheckin(): Promise<void> {
     if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {
-      if (canSendProactive(client.id)) {
+      if (await claimDailySlot(client.id, "morning")) {
         const name = client.name || "there";
         const reEngageBody = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:`;
         const reEngageButtons = [
@@ -55,7 +54,6 @@ export async function runMorningCheckin(): Promise<void> {
         await sendWhatsAppButtons(client.phoneNumber, reEngageBody, reEngageButtons);
         if (assignmentId !== null) await recordDelivery(assignmentId);
         await db.update(users).set({ awaitingInputType: "comeback" }).where(eq(users.id, client.id));
-        recordProactiveSend(client.id, "comeback_rescue");
       }
       continue;
     }
@@ -67,11 +65,10 @@ export async function runMorningCheckin(): Promise<void> {
       const yesterdayLogs = await getYesterdayLogs(client.id);
 
       if (yesterdayLogs.length === 0) {
-        if (canSendProactive(client.id)) {
+        if (await claimDailySlot(client.id, "morning")) {
           const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
           if (sickYesterday) {
             await sendWhatsApp(phone, `Morning ${name}. Hope you're feeling better. When you're ready to get back on it, just say Hi.`);
-            recordProactiveSend(client.id);
             continue;
           }
           const wStreak = client.workoutStreak || 0;
@@ -85,7 +82,6 @@ export async function runMorningCheckin(): Promise<void> {
           } else {
             await sendWhatsApp(phone, `Morning ${name}. Send me your breakfast right now — one line is all I need. We start from here.`);
           }
-          recordProactiveSend(client.id);
         }
         continue;
       }
@@ -189,8 +185,7 @@ export async function runMorningCheckin(): Promise<void> {
 
       if (sickYesterday) {
         parts.push(`Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.`);
-        await sendWhatsApp(phone, parts.join(" "));
-        recordProactiveSend(client.id);
+        if (await claimDailySlot(client.id, "morning")) { await sendWhatsApp(phone, parts.join(" ")); }
         continue;
       }
 
@@ -269,10 +264,9 @@ export async function runMorningCheckin(): Promise<void> {
       todaySection.push(`🍳 What's for breakfast?`);
       if (repeatSuggestion) todaySection.push(repeatSuggestion);
 
-      if (canSendProactive(client.id)) {
+      if (await claimDailySlot(client.id, "morning")) {
         const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n");
         await sendWhatsApp(phone, fullMessage);
-        recordProactiveSend(client.id);
       }
     } catch (err) {
       console.error(`[SCHEDULER] Morning check-in error — ${client.phoneNumber}:`, err);

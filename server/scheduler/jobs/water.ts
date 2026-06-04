@@ -1,7 +1,7 @@
 import {
   db, chatHistory,
   eq, gte, and,
-  sendWhatsApp, canSendRoutineNudge, recordProactiveSend,
+  sendWhatsApp, canSendRoutineNudge, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart,
 } from "../shared";
 import { logChat } from "../../handlers/chat-log";
@@ -40,12 +40,13 @@ export async function runWaterReminder(): Promise<void> {
 
       if (waterToday) continue; // Already logged — skip
 
-      {
+      // Atomic daily-slot claim before send — DB-backed, restart-safe. The back-off
+      // prefilter above (canSendRoutineNudge) still eases off for quiet clients.
+      if (await claimDailySlot(client.id, "water_reminder")) {
         const name = client.name?.split(" ")[0] || "there";
         const nudge = WATER_NUDGES[idx](name);
         await sendWhatsApp(client.phoneNumber, nudge);
         await logChat(client.id, "[auto]", nudge, "WATER_REMINDER");
-        recordProactiveSend(client.id, "water_reminder");
       }
     } catch (err) {
       console.error(`[SCHEDULER] Water reminder error — ${client.phoneNumber}:`, err);

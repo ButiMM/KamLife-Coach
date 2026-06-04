@@ -1,7 +1,7 @@
 import {
   db, users, stepLogs, workoutLogs, mealLogs,
   eq, gte, and, desc, sql,
-  sendWhatsApp, canSendProactive, canSendRoutineNudge, recordProactiveSend,
+  sendWhatsApp, canSendProactive, canSendRoutineNudge, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart, getTodayLogs,
   TRAINING_SCHEDULES, isSickOrInjuredToday,
 } from "../shared";
@@ -26,7 +26,7 @@ export async function runEveningAccountability(): Promise<void> {
       const todayLogs = await getTodayLogs(client.id);
 
       if (todayLogs.length === 0) {
-        if (canSendProactive(client.id)) {
+        if (await claimDailySlot(client.id, "evening")) {
           const isNewClient = !client.totalWorkoutsCompleted && client.createdAt &&
             (Date.now() - new Date(client.createdAt).getTime()) > 6 * 3_600_000 &&
             (Date.now() - new Date(client.createdAt).getTime()) < 48 * 3_600_000;
@@ -35,7 +35,6 @@ export async function runEveningAccountability(): Promise<void> {
           } else {
             await sendWhatsApp(phone, `${name}, haven't heard from you today — no stress. One quick thing before bed: tell me what you ate. Even just your last meal. That's all I need to keep you moving.`);
           }
-          recordProactiveSend(client.id);
         }
         continue;
       }
@@ -83,7 +82,7 @@ export async function runEveningAccountability(): Promise<void> {
       const noDinnerYet = !recentMeal;
       const hasBeenActive = todayCal > 0 || workedOut || stepCount > 1000;
 
-      if (noDinnerYet && hasBeenActive && !sick && canSendProactive(client.id)) {
+      if (noDinnerYet && hasBeenActive && !sick && await claimDailySlot(client.id, "evening")) {
         const protGap = protTarget - todayProt;
         let dinnerSuggestion: string;
         if (goal === "muscle_gain") {
@@ -94,7 +93,6 @@ export async function runEveningAccountability(): Promise<void> {
           dinnerSuggestion = `${name}, dinner time soon. Keep it light: scrambled eggs + spinach, ${opts.split(",")[0].trim()} on 1 slice toast, or grilled chicken + veg. What do you have at home?`;
         }
         await sendWhatsApp(phone, dinnerSuggestion);
-        recordProactiveSend(client.id);
         continue;
       }
 
@@ -116,13 +114,12 @@ export async function runEveningAccountability(): Promise<void> {
         } else if (isTrainingDay) {
           const foodLine = todayCal > 0 ? ` Food's in.` : ``;
           const sessionMsg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
-          if (canSendProactive(client.id)) {
+          if (await claimDailySlot(client.id, "evening")) {
             await sendWhatsAppButtons(phone, sessionMsg, [
               "Doing it tonight",
               "Swap to tomorrow",
               "Rest day today",
             ]);
-            recordProactiveSend(client.id);
           }
           continue;
         } else if (stepsDone) {
@@ -136,8 +133,7 @@ export async function runEveningAccountability(): Promise<void> {
         }
       }
 
-      await sendWhatsApp(phone, msg);
-      recordProactiveSend(client.id);
+      if (await claimDailySlot(client.id, "evening")) { await sendWhatsApp(phone, msg); }
     } catch (err) {
       console.error(`[SCHEDULER] Evening accountability error — ${client.phoneNumber}:`, err);
     }

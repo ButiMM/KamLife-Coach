@@ -3,7 +3,7 @@ import {
   eq, gte, and, lt, asc, desc,
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, loadState, saveState,
-  todaySAST, thisWeekUTC,
+  todaySAST, thisWeekUTC, claimProactive, claimDailySlot,
 } from "../shared";
 
 export async function runPhaseAdvancement(): Promise<void> {
@@ -23,6 +23,8 @@ export async function runPhaseAdvancement(): Promise<void> {
       const currentPhase = client.programmePhase || 1;
       if (currentPhase >= 5) continue;
       const newPhase = currentPhase + 1;
+      // Claim before mutating + sending so a container recycle can't re-advance/re-send.
+      if (!(await claimProactive(client.id, "phase_advance", `phase${newPhase}`))) continue;
       const phaseNames: Record<number, string> = { 1: "Foundation", 2: "Build", 3: "Push", 4: "Peak", 5: "Deload" };
       await db.update(users).set({ programmePhase: newPhase, programmeWeek: 1, programmeDayInWeek: 1, phaseReadyToAdvance: false }).where(eq(users.id, client.id));
       const name = client.name || "there";
@@ -42,6 +44,8 @@ export async function runGoalCheck(): Promise<void> {
       const lastCheck = client.lastGoalCheckWeek || 0;
       const checkWeeks = [4, 8, 12, 16, 20, 24];
       if (!checkWeeks.includes(currentWeek) || lastCheck >= currentWeek) continue;
+      // DB claim per checkpoint week — survives restart; covers both send paths below.
+      if (!(await claimProactive(client.id, "goal_check", `week${currentWeek}`))) continue;
       const name = client.name || "there";
       const total = client.totalWorkoutsCompleted || 0;
       const goal = client.goalType || "fat_loss";
@@ -65,15 +69,12 @@ export async function runGoalCheck(): Promise<void> {
 export async function runWeeklyMondayCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Weekly Monday check-in");
   const clients = await getActiveClients();
-  const thisWeek = thisWeekUTC();
   const fiveDaysAgo = new Date(Date.now() - 5 * 86_400_000);
 
   for (const client of clients) {
     if (isPaused(client)) continue;
     if (client.lastActiveAt && new Date(client.lastActiveAt) < fiveDaysAgo) continue;
     try {
-      const stateKey = `weekly_checkin_${client.id}`;
-      if (loadState()[stateKey] === thisWeek) continue;
       const name = client.name || "there";
       const week = client.programmeWeek || 1;
       const sessions = client.totalWorkoutsCompleted || 0;
@@ -92,7 +93,8 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       } else {
         msg = `${name}, Week ${week} — ${sessions} sessions. You are in the top 5% of people who stick with a programme this long. What is your goal for this week? One specific thing.`;
       }
-      if (canSendProactive(client.id)) { await sendWhatsApp(client.phoneNumber, msg); saveState(stateKey, thisWeek); recordProactiveSend(client.id); }
+      // Daily-slot claim before send (preserves daily-cap reach; DB-backed, restart-safe).
+      if (await claimDailySlot(client.id, "weekly_checkin")) { await sendWhatsApp(client.phoneNumber, msg); }
     } catch (err) { console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err); }
   }
 }
@@ -106,6 +108,8 @@ export async function runInjuryFollowup(): Promise<void> {
       if (!client.injuries || client.injuries === "" || client.injuries === "none") continue;
       const name = client.name || "there";
       const injuryNote = client.injuries.slice(0, 60);
+      // Once per week per client — DB-backed so a restart can't re-ask the same day.
+      if (!(await claimProactive(client.id, "injury_followup", thisWeekUTC()))) continue;
       await sendWhatsApp(client.phoneNumber, `${name}, quick check — how is the ${injuryNote} doing? If it has improved, reply "injury better" and I will update your programme. If it is still affecting you, tell me what you can and cannot do and I will adjust.`);
     } catch (err) { console.error(`[SCHEDULER] Injury follow-up error — ${client.phoneNumber}:`, err); }
   }
@@ -129,8 +133,10 @@ export async function runPlateauDetection(): Promise<void> {
       const oldest = parseFloat(String(recentWeights[0].weight));
       const newest = parseFloat(String(recentWeights[recentWeights.length - 1].weight));
       if (Math.abs(newest - oldest) > 0.5) continue;
+      // DB claim (weekly window) replaces the old state-file flag, which a container
+      // recycle would wipe — causing a repeat plateau message on restart.
+      if (!(await claimProactive(client.id, "plateau", thisWeekUTC()))) continue;
       await sendWhatsApp(client.phoneNumber, `${name}, your weight has been stable for 3 weeks. This is a plateau and it is normal — your body adapts. Here is the fix: this week, cut your carb portions by one third. Keep protein the same. Add a 20-minute walk on top of your normal routine. Weigh in again in 7 days. Plateaus break when you change one variable at a time.`);
-      saveState(`plateau_sent_${client.id}`, todaySAST());
     } catch (err) { console.error(`[SCHEDULER] Plateau detection error — ${client.phoneNumber}:`, err); }
   }
 }

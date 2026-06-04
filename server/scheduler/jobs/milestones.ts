@@ -1,7 +1,7 @@
 import {
   db, weightLogs,
   eq, asc,
-  sendWhatsApp, canSendProactive, recordProactiveSend,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive,
   getActiveClients, isPaused, programmeDaysSince, loadState, saveState,
 } from "../shared";
 import { generateVoiceNote } from "../../tts";
@@ -34,7 +34,6 @@ export const WORKOUT_MILESTONES: Record<number, (name: string) => string> = {
 export async function runMilestoneCelebrations(): Promise<void> {
   console.log("[SCHEDULER] JOB: Milestone celebrations");
   const clients = await getActiveClients();
-  const state = loadState();
 
   for (const client of clients) {
     if (isPaused(client)) continue;
@@ -43,18 +42,21 @@ export async function runMilestoneCelebrations(): Promise<void> {
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = programmeDaysSince(client.programmeStartDate);
 
+      // Day milestone — DB claim so a container recycle on the milestone day can't re-send.
       if ([7, 14, 30, 60, 90, 180, 365].includes(days)) {
-        const firstWeight = await db.select({ weight: weightLogs.weight })
-          .from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
-        const firstWeightKg = firstWeight[0]?.weight ? String(firstWeight[0].weight) : null;
-        const msg = buildDayMilestoneMessage(name, days, workouts, firstWeightKg);
-        if (msg) await sendWhatsApp(client.phoneNumber, msg);
+        if (await claimProactive(client.id, "day_milestone", `d${days}`)) {
+          const firstWeight = await db.select({ weight: weightLogs.weight })
+            .from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
+          const firstWeightKg = firstWeight[0]?.weight ? String(firstWeight[0].weight) : null;
+          const msg = buildDayMilestoneMessage(name, days, workouts, firstWeightKg);
+          if (msg) await sendWhatsApp(client.phoneNumber, msg);
+        }
       }
 
       const workoutMilestoneText = WORKOUT_MILESTONES[workouts];
       if (workoutMilestoneText) {
-        const milestoneKey = `workout_milestone_${workouts}_${client.id}`;
-        if (state[milestoneKey] === "sent") continue;
+        // DB claim per milestone count — replaces the state-file flag a recycle would wipe.
+        if (!(await claimProactive(client.id, "workout_milestone", `w${workouts}`))) continue;
         const text = workoutMilestoneText(name);
         let voiceUrl: string | null = null;
         if ([25, 50, 100].includes(workouts)) {
@@ -67,7 +69,6 @@ export async function runMilestoneCelebrations(): Promise<void> {
           }
         }
         await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);
-        saveState(milestoneKey, "sent");
       }
     } catch (err) {
       console.error(`[SCHEDULER] Milestone error — ${client.phoneNumber}:`, err);

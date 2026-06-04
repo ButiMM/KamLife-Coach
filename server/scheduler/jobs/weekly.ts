@@ -1,7 +1,7 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
   eq, gte, and, lt, asc,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive, claimDailySlot,
   getActiveClients, isPaused, loadState, saveState,
   todaySAST, thisWeekUTC,
 } from "../shared";
@@ -79,6 +79,9 @@ export async function runSundayWeeklyReport(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
+      // One claim per client per week — covers the report, the shopping-list card, AND
+      // the programme-week advance below, so a container recycle can't double any of them.
+      if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC()))) continue;
       const name = client.name || "there";
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, weekAgo))),
@@ -235,7 +238,7 @@ export async function runSundayEveningCheckin(): Promise<void> {
       } else {
         question = `${name}, week done. ${completedSessions} sessions, ${weekFoodLogs.length} meals logged. One sentence — what do you want to be different next week?`;
       }
-      if (canSendProactive(client.id)) { await sendWhatsApp(client.phoneNumber, question); recordProactiveSend(client.id); }
+      if (await claimDailySlot(client.id, "sunday_evening")) { await sendWhatsApp(client.phoneNumber, question); }
     } catch (err) { console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err); }
   }
 }
@@ -270,9 +273,12 @@ export async function runWeekendFoodAudit(): Promise<void> {
       const weekendProteinRate = weekendLogs.length > 0 ? weekendProtein / weekendLogs.length : 0;
       const name = client.name || "there";
 
+      // Claim only when there is actually a pattern to flag — DB-backed weekly dedup.
       if (weekendJunkRate > weekdayJunkRate + 0.3) {
+        if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
         await sendWhatsApp(client.phoneNumber, `${name} — pattern spotted. Your weekday eating is solid. But ${weekendJunk > 0 ? `${weekendJunk} weekend meal${weekendJunk !== 1 ? "s" : ""}` : "your weekends"} this week had foods that are undoing the weekday work. One rule for weekends: protein first at every meal, then eat what you want after. That single rule changes everything.`);
       } else if (weekendProteinRate < weekdayProteinRate - 0.3) {
+        if (!(await claimProactive(client.id, "weekend_food_audit", thisWeekUTC()))) continue;
         await sendWhatsApp(client.phoneNumber, `${name} — you are hitting protein well during the week. But weekends your protein drops. When you are out, at a braai, or grabbing food on the go — always anchor the meal with protein first.`);
       }
     } catch (err) { console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err); }
@@ -318,8 +324,6 @@ export async function runNsvCheckin(): Promise<void> {
       const recentActivity = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, sevenDaysAgo))).limit(1);
       if (recentActivity.length === 0) continue;
-      const stateKey = `nsv_sent_${client.id}_${thisWeekUTC()}`;
-      if (loadState()[stateKey]) continue;
       const name = client.name || "there";
       const week = client.programmeWeek || 1;
       const nsvPrompts = [
@@ -328,8 +332,9 @@ export async function runNsvCheckin(): Promise<void> {
         `${name}, Week ${week}.\n\nForget the numbers for a second. Did you make any food choice this week that you wouldn't have made 3 months ago? Less junk automatically? Didn't finish the whole takeaway? Chose water over a cool drink?\n\nSmall shifts like that are what compound into big change. Tell me one.`,
         `${name} — Saturday check-in.\n\nNon-scale question: what habit stuck this week that didn't exist before you started?\n\nCould be logging meals, hitting your steps, not skipping breakfast, sleeping earlier. Behaviour change is harder than weight loss — and it lasts longer.\n\nTell me one habit that's starting to feel automatic.`,
       ];
+      // DB claim (weekly window) replaces the state-file flag that a recycle would wipe.
+      if (!(await claimProactive(client.id, "nsv_checkin", thisWeekUTC()))) continue;
       await sendWhatsApp(client.phoneNumber, nsvPrompts[(week - 1) % nsvPrompts.length]);
-      saveState(stateKey, todaySAST());
     } catch (err) { console.error(`[SCHEDULER] NSV check-in error — ${client.phoneNumber}:`, err); }
   }
 }

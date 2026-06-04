@@ -1,5 +1,5 @@
 import {
-  sendWhatsApp, getActiveClients, isPaused, canSendProactive,
+  sendWhatsApp, getActiveClients, isPaused, claimDailySlot,
 } from "../shared";
 
 export function getSACulturalEvent(month: number, day: number): ((name: string) => string) | null {
@@ -27,8 +27,9 @@ export async function runCulturalCalendar(): Promise<void> {
   console.log(`[SCHEDULER] JOB: Cultural event — ${month}/${day}`);
   const clients = await getActiveClients();
   for (const client of clients) {
-    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (isPaused(client)) continue;
     try {
+      if (!(await claimDailySlot(client.id, "cultural_event"))) continue;
       await sendWhatsApp(client.phoneNumber, eventFn(client.name || "there"));
     } catch (err) { console.error(`[SCHEDULER] Cultural event error — ${client.phoneNumber}:`, err); }
   }
@@ -42,8 +43,9 @@ export async function runWomensMonth(): Promise<void> {
     ["she", "her", "woman", "female"].some(w => (client.profileNotes || "").toLowerCase().includes(w));
 
   for (const client of clients) {
-    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (isPaused(client)) continue;
     try {
+      if (!(await claimDailySlot(client.id, "womens_month"))) continue;
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       if (femaleIndicators(client)) {
@@ -59,8 +61,9 @@ export async function runNewYearReset(): Promise<void> {
   console.log("[SCHEDULER] JOB: New Year reset");
   const clients = await getActiveClients();
   for (const client of clients) {
-    if (isPaused(client) || !canSendProactive(client.id)) continue;
+    if (isPaused(client)) continue;
     try {
+      if (!(await claimDailySlot(client.id, "new_year_reset"))) continue;
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = Math.floor((Date.now() - new Date(client.programmeStartDate || Date.now()).getTime()) / 86_400_000);

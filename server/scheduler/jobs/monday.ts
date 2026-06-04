@@ -1,9 +1,9 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
   eq, gte, lt, and, desc, asc, count, sql,
-  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
+  sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot, claimProactive,
   getActiveClients, isPaused, loadState, saveState,
-  todaySAST, isProactivePaused,
+  todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
 
 export async function runWeightReminder(): Promise<void> {
@@ -23,6 +23,8 @@ export async function runWeightReminder(): Promise<void> {
       ? `Last week: ${parseFloat(lastWeightRow.weight).toFixed(1)}kg — what's today's number?`
       : `Send me the number (e.g. 75.3kg)`;
     const msg = `${name}, weigh-in day. ⚖️\n\nStep on the scale first thing — after toilet, before food, same conditions every time.\n\n${lastWeightHint}\n\nThe scale is data, not judgment. Track it so we can coach from facts, not feelings.`;
+    // Once per week per client — DB-backed so a container recycle can't re-send.
+    if (!(await claimProactive(client.id, "weight_reminder", thisWeekUTC()))) continue;
     await sendWhatsApp(client.phoneNumber, msg);
     sent++;
     await new Promise(r => setTimeout(r, 200));
@@ -78,8 +80,9 @@ export async function runMondayProgress(): Promise<void> {
         }
       }
 
+      // Claim the daily slot atomically before sending (DB-backed, restart-safe).
+      if (!(await claimDailySlot(client.id, "monday_progress"))) continue;
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
-      recordProactiveSend(client.id);
       sent++;
       await new Promise(r => setTimeout(r, 200));
       if (sent >= 150) break;
@@ -151,6 +154,8 @@ export async function runDietBreakCheck(): Promise<void> {
       )
     );
     for (const client of expired) {
+      // Claim before restoring + sending so a recycle can't double-fire the notice.
+      if (!(await claimProactive(client.id, "diet_break_end", todaySAST()))) continue;
       const restored = client.dietBreakCalTarget!;
       await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null }).where(eq(users.id, client.id));
       const name = (client.name || "").split(" ")[0] || "there";
