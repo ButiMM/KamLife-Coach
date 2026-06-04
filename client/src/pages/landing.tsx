@@ -150,34 +150,26 @@ const FEATURES = [
   },
 ];
 
-const TESTIMONIALS = [
+const CAPABILITIES = [
   {
-    name: "Thandiwe M.",
-    location: "Soweto",
-    goal: "Fat loss",
-    quote: "I've tried diets my whole life. This is the first time someone actually speaks to me in my language about pap and pilchards instead of salads I can't afford.",
-    result: "Dropped 8kg in 10 weeks",
+    icon: "🍽️",
+    heading: "Pap, pilchards, vetkoek — it all counts.",
+    body: "Send a photo or a voice note. Coach K breaks down any South African meal, logs the calories and protein, and tells you exactly what's missing.",
   },
   {
-    name: "Sipho K.",
-    location: "Cape Town",
-    goal: "Muscle gain",
-    quote: "I was training for 2 years with nothing to show. Coach K fixed my eating and gave me a real programme. My chest and shoulders are finally growing.",
-    result: "+5kg lean mass in 3 months",
+    icon: "📉",
+    heading: "Losing too fast? Coach K flags it.",
+    body: "Dropping more than 1kg a week? The bot catches it and tells you why that's a problem — muscle loss, metabolism slowdown, crash-diet territory. Goal-aware, every time.",
   },
   {
-    name: "Ayanda N.",
-    location: "Durban",
-    goal: "Health & PCOS",
-    quote: "I have PCOS and was told to lose weight but nobody ever told me HOW. Coach K adjusted everything for my condition. I'm off two medications now.",
-    result: "Lost 12kg over 4 months",
+    icon: "🔄",
+    heading: "Life changes. The programme adapts.",
+    body: "Night shift this week? Moved gyms? Travelling? Just tell Coach K. The plan adjusts — no restart, no starting over.",
   },
   {
-    name: "Ruan v.d.W.",
-    location: "Pretoria",
-    goal: "Recomp",
-    quote: "The braai coaching alone is worth R199. I go to every family braai and stay on track. The weekly report keeps me honest.",
-    result: "Lost 6kg, gained visible muscle",
+    icon: "💪",
+    heading: "Missed a workout? No guilt. Just next steps.",
+    body: "Coach K checks in, figures out what happened, and gives you the minimum viable session to keep the streak alive. Consistency beats perfection.",
   },
 ];
 
@@ -725,28 +717,15 @@ export default function LandingPage() {
       <section className="py-24 px-4 bg-orange-50/50 dark:bg-orange-900/10">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Real clients. Real results.</h2>
-            <p className="text-muted-foreground text-lg">Across every goal, every budget, every part of South Africa.</p>
+            <h2 className="text-4xl font-bold font-display mb-4">Built for real South African life.</h2>
+            <p className="text-muted-foreground text-lg">No salads you can't afford. No gym you never go to. Just WhatsApp.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {TESTIMONIALS.map((t) => (
-              <div key={t.name} className="p-7 rounded-3xl bg-card border border-border/60 hover:shadow-lg transition-all flex flex-col gap-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="font-bold">{t.name}</div>
-                    <div className="text-xs text-muted-foreground">{t.location} · {t.goal}</div>
-                  </div>
-                  <div className="flex gap-0.5">
-                    {[...Array(5)].map((_, i) => (
-                      <Star key={i} className="w-4 h-4 fill-amber-400 text-amber-400" />
-                    ))}
-                  </div>
-                </div>
-                <p className="text-muted-foreground text-sm leading-relaxed italic">"{t.quote}"</p>
-                <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-orange-50 dark:bg-orange-900/20 text-orange-700 dark:text-orange-400 text-xs font-semibold w-fit border border-orange-200 dark:border-orange-800">
-                  <CheckCircle className="w-3.5 h-3.5" />
-                  {t.result}
-                </div>
+            {CAPABILITIES.map((c) => (
+              <div key={c.heading} className="p-7 rounded-3xl bg-card border border-border/60 hover:shadow-lg transition-all flex flex-col gap-3">
+                <div className="text-3xl">{c.icon}</div>
+                <div className="font-bold text-base">{c.heading}</div>
+                <p className="text-muted-foreground text-sm leading-relaxed">{c.body}</p>
               </div>
             ))}
           </div>

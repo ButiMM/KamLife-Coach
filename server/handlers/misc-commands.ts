@@ -160,8 +160,12 @@ export async function handleMiscCommands(ctx: {
     return injuryReply;
   }
 
-  // ---- FIX 3: HANDLER 5 — Period and cycle tracking ----
-  if (m.includes("my period") || m.includes("time of the month") || m.includes(" pms") || m.includes("that time") || m.includes("menstrual") || m.includes("on my period") || m.includes("period started") || m.includes("period week")) {
+  // ---- Period / cycle awareness ----
+  if (
+    /\b(my period|on my period|period started|period week|period cramps?|period pains?|menstrual|menstruation|time of (the )?month|that time of month|pms|pmdd|luteal phase|follicular phase|ovulation|ovulating|my cycle|my hormones|hormones (are|going|messing)|cycle week|cycle day)\b/i.test(m)
+    || /\b(bloating|cramps?|spotting)\b/i.test(m) && /\b(period|cycle|hormones?|monthly)\b/i.test(m)
+    || m === "my period" || m === "period" || m === "pms"
+  ) {
     const cycleContext = `Client mentioned their menstrual cycle or period. Ask which phase they are in using EXACTLY these options: "Just started (Day 1–5)", "Middle of cycle (Day 6–14)", "PMS week (Day 15–21)", or "Period week (Day 22–28)". Then based on their reply: Phase 1 (period) — lighter training is fine, walking counts, iron-rich foods essential (red meat, spinach, pilchards), no guilt for lower energy. Phase 2 (follicular) — best training week, peak strength, push harder, carbs support performance. Phase 3 (PMS) — reduce intensity slightly, higher protein reduces cravings, magnesium from dark leafy greens helps mood. Phase 4 (period) — same as Phase 1. Normalise all of it. Weight fluctuates 1–3kg from water retention before period — not fat. Do not panic. Coach the next meal or session, not the feelings. SA voice. Max 3 sentences unless giving phase-specific advice.`;
     const cycleReply = await withTimeout("gpt_cycle", 20000, () => askCoachK(message, user, cycleContext));
     await logChat(user.id, message, cycleReply, "CYCLE");
