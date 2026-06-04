@@ -28,6 +28,12 @@ const BASE = (process.env.MEDIA_BASE_URL || "").replace(/\/$/, "");
 // Only use custom CDN if BASE is set and not the placeholder
 const CUSTOM_CDN = BASE && !BASE.includes("placeholder") ? BASE : "";
 
+// Slugs for which an animated GIF has actually been uploaded to CUSTOM_CDN/ex/<slug>.gif.
+// EMPTY by default = every exercise serves the free-exercise-db still image (works now,
+// zero setup). When you upload a real GIF, add its slug here so it takes over. This keeps
+// images working whether or not MEDIA_BASE_URL is set.
+const UPLOADED_GIF_SLUGS = new Set<string>([]);
+
 // ── Free-exercise-db fallback images (public domain, no upload needed) ────────
 // Source: github.com/yuhonas/free-exercise-db — CC0 / public domain
 // If a URL 404s the image silently won't send — no crash, no error.
@@ -361,7 +367,12 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
   const name = exerciseName.toLowerCase().trim();
 
   function urlForSlug(slug: string): string | null {
-    if (CUSTOM_CDN) return `${CUSTOM_CDN}/ex/${slug}.gif`;
+    // Only serve a CDN .gif for slugs we KNOW have been uploaded. Otherwise fall
+    // back to the guaranteed-working free-exercise-db still image. This prevents the
+    // footgun where setting MEDIA_BASE_URL (e.g. for portion images) silently points
+    // every exercise at a .gif that 404s. Add slugs to UPLOADED_GIF_SLUGS as you
+    // upload them — until then, the still image always shows.
+    if (CUSTOM_CDN && UPLOADED_GIF_SLUGS.has(slug)) return `${CUSTOM_CDN}/ex/${slug}.gif`;
     return EXERCISE_MEDIA[slug] || null;
   }
 

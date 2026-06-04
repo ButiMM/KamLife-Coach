@@ -1518,15 +1518,26 @@ export async function handleMiscCommands(ctx: {
     return reply;
   }
 
-  // ---- EXERCISE DEMO — "show me squat", "how to bench press", "squat gif" ----
+  // ---- EXERCISE DEMO — "show me squat", "how to do a bicep curl", "squat form" ----
+  // Extraction is two-stage: capture the phrase after a lead-in, THEN strip filler
+  // words ("how to do", "a/an/the", trailing "please/exercise/form") so the leftover
+  // is a clean exercise name the slug lookup can resolve. Previously "show me how to
+  // do a dumbbell bicep curl" captured the literal filler and failed to match.
   {
-    const demoName = (
-      m.match(/^show\s+(?:me\s+)?(?:a\s+)?(.+?)(?:\s+gif)?$/i)?.[1] ||
-      m.match(/^how\s+to\s+(?:do\s+(?:a\s+)?)?(.+?)(?:\s+gif)?$/i)?.[1] ||
-      m.match(/^how\s+do\s+(?:i|you)\s+(?:do\s+(?:a\s+)?)?(.+?)(?:\s+gif)?$/i)?.[1] ||
-      m.match(/^demo(?:nstrate)?\s+(?:a\s+)?(.+?)(?:\s+gif)?$/i)?.[1] ||
-      m.match(/^(.+?)\s+gif$/i)?.[1]
+    let demoName = (
+      m.match(/^(?:can\s+you\s+|could\s+you\s+|please\s+)?show\s+(?:me\s+)?(.+?)$/i)?.[1] ||
+      m.match(/^how\s+(?:to|do\s+(?:i|you))\s+(.+?)$/i)?.[1] ||
+      m.match(/^demo(?:nstrate)?\s+(.+?)$/i)?.[1] ||
+      m.match(/^what\s+(?:does|do)\s+(?:a\s+|an\s+|the\s+)?(.+?)\s+look\s+like\b.*$/i)?.[1] ||
+      m.match(/^(.+?)\s+(?:gif|form|technique|demo)$/i)?.[1]
     )?.trim().toLowerCase();
+    if (demoName) {
+      demoName = demoName
+        .replace(/^(?:how\s+to\s+(?:do\s+)?|do\s+(?:a\s+)?|a\s+|an\s+|the\s+)/i, "")
+        .replace(/\s+(?:gif|form|technique|demo|please|exercise|movement|properly|correctly|for\s+me)$/i, "")
+        .replace(/^(?:a\s+|an\s+|the\s+)/i, "")
+        .trim();
+    }
     if (demoName && demoName.length > 2 && demoName.length < 40) {
       const demoGifUrl = getExerciseGifUrl(demoName);
       const displayName = demoName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
