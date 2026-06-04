@@ -187,8 +187,7 @@ Aim to cover 2–3 sections per day over 4–5 days.
 |---|---|---|
 | H1 | Rotate ElevenLabs API key — it was exposed in codebase | 🔴 DO IMMEDIATELY |
 | H2 | Check PAYFAST_PASSPHRASE is set in Railway | 🔴 Critical — paid clients won't activate without it |
-| H3 | Set PROACTIVE_PAUSED=false in Railway when ready for live proactive messages | 🟡 |
-| H4 | Upload 21 exercise GIFs to CDN at `MEDIA_BASE_URL/ex/<slug>.gif` | 🟡 |
+| H3 | Set PROACTIVE_PAUSED=false in Railway when ready to send morning check-ins and evening nudges to clients | 🟡 |
 | H5 | Set VITE_HERO_VIDEO_URL for landing page hero video | 🟢 |
 | H6 | Register Information Officer at inforegulator.org.za (POPIA legal requirement) | 🟡 |
 | H7 | Create privacy@kamlifecoach.co.za email | 🟡 |

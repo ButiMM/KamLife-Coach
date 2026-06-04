@@ -152,24 +152,24 @@ const FEATURES = [
 
 const CAPABILITIES = [
   {
-    icon: "🍽️",
-    heading: "Pap, pilchards, vetkoek — it all counts.",
-    body: "Send a photo or a voice note. Coach K breaks down any South African meal, logs the calories and protein, and tells you exactly what's missing.",
+    icon: "🍖",
+    heading: "Pap, kota, KFC — logged in 10 seconds.",
+    body: "Photo or voice note. Coach K identifies every South African food by name, calculates the calories and protein instantly, and shows you exactly how it fits your daily target. No food diary. No app. Just WhatsApp.",
   },
   {
     icon: "📉",
-    heading: "Losing too fast? Coach K flags it.",
-    body: "Dropping more than 1kg a week? The bot catches it and tells you why that's a problem — muscle loss, metabolism slowdown, crash-diet territory. Goal-aware, every time.",
+    heading: "Dropping 1.5kg a week? That's a problem.",
+    body: "Most apps celebrate every kilo lost. Coach K flags when you're losing too fast — because rapid loss means muscle, not fat. It explains the risk, adjusts your targets, and protects your metabolism.",
   },
   {
     icon: "🔄",
-    heading: "Life changes. The programme adapts.",
-    body: "Night shift this week? Moved gyms? Travelling? Just tell Coach K. The plan adjusts — no restart, no starting over.",
+    heading: "Night shift. Load shedding. Broke at month-end.",
+    body: "Coach K is built for real South African conditions — not a California gym lifestyle. Can't cook during load shedding? Gym closed? Broke until payday? It adapts the plan instantly, every time.",
   },
   {
-    icon: "💪",
-    heading: "Missed a workout? No guilt. Just next steps.",
-    body: "Coach K checks in, figures out what happened, and gives you the minimum viable session to keep the streak alive. Consistency beats perfection.",
+    icon: "👁️",
+    heading: "Gone quiet for 3 days? Coach K follows up.",
+    body: "People don't quit because they want to — they drift and never come back. Coach K notices the silence and sends a check-in. No lecture. No guilt. Just: what's in the way, and how do we fix it?",
   },
 ];
 
@@ -258,14 +258,14 @@ export default function LandingPage() {
           </div>
 
           <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
-            Change your body.{" "}
+            A personal trainer costs R3,000.{" "}
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-200">
-              SA coaching in WhatsApp.
+              Coach K costs R199.
             </span>
           </h1>
 
           <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Lose the mkhaba. Body recomp. Build muscle. Coach K builds around your food, your budget, and your life. No gym needed. No perfect diet required.
+            Real coaching in your WhatsApp. Knows pap, pilchards, and KFC by name. Builds your programme on Day 1 and adjusts it every single week based on what you actually eat, train, and weigh.
           </p>
 
           <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
@@ -292,11 +292,20 @@ export default function LandingPage() {
           </div>
 
           <div className="flex flex-wrap justify-center gap-1.5 text-xs text-white/60">
-            <span>⭐⭐⭐⭐⭐ Trusted by clients in</span>
-            <span className="text-white/80 font-medium">Soweto · Cape Town · Durban · Pretoria</span>
+            {stats?.activeClients && stats.activeClients > 3 ? (
+              <>
+                <span className="text-white/80 font-medium">{stats.activeClients} active clients</span>
+                <span>·</span>
+                <span>{stats.workoutsLogged?.toLocaleString()} workouts logged</span>
+                <span>·</span>
+                <span>Soweto · Cape Town · Durban · Pretoria</span>
+              </>
+            ) : (
+              <span>Programme built on Day 1 · Adjusts weekly · No app needed · Cancel by WhatsApp</span>
+            )}
           </div>
           <p className="text-sm text-white/40">
-            7 days free · R199/month · Cancel anytime by WhatsApp · Programme sent on Day 1
+            7 days free · R199/month · Cancel anytime by WhatsApp
           </p>
         </motion.div>
 
@@ -325,8 +334,8 @@ export default function LandingPage() {
       <section className="py-20 px-4 bg-[#1E3A6E]">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold font-display mb-3 text-white">Who is Coach K for?</h2>
-            <p className="text-white/70">If you've tried before and it didn't stick — this is built for you.</p>
+            <h2 className="text-3xl font-bold font-display mb-3 text-white">If you've tried before and quit — read this.</h2>
+            <p className="text-white/70">Most programmes fail because they don't fit your actual life. Coach K starts where you are, not where it wants you to be.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {PERSONAS.map((p) => (
@@ -435,8 +444,8 @@ export default function LandingPage() {
       <section id="how-it-works" className="py-24 px-4 bg-muted/30">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">How it works</h2>
-            <p className="text-muted-foreground text-lg">Three steps. No new apps. Under 3 minutes.</p>
+            <h2 className="text-4xl font-bold font-display mb-4">Up and running in 3 minutes.</h2>
+            <p className="text-muted-foreground text-lg">No app to download. No form to fill in. Just WhatsApp.</p>
           </div>
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
 
@@ -577,9 +586,9 @@ export default function LandingPage() {
       <section className="py-24 px-4 bg-[#0B1D35]">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-14">
-            <p className="text-orange-400 text-sm font-bold uppercase tracking-widest mb-3">No more excuses about logging</p>
-            <h2 className="text-4xl font-bold font-display text-white mb-4">Send it any way you have it.</h2>
-            <p className="text-white/55 text-lg max-w-xl mx-auto">Voice note, photo, or text — Coach K handles the rest in seconds. No app. No forms. Just WhatsApp.</p>
+            <p className="text-orange-400 text-sm font-bold uppercase tracking-widest mb-3">Log food the way you actually communicate</p>
+            <h2 className="text-4xl font-bold font-display text-white mb-4">Voice note. Photo. Or just type it.</h2>
+            <p className="text-white/55 text-lg max-w-xl mx-auto">Coach K handles all three. Talk, snap, or text — calories and protein back in 10 seconds. No manual logging. No calorie counting.</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
@@ -696,8 +705,8 @@ export default function LandingPage() {
       <section className="py-24 px-4">
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Everything included. Nothing extra to buy.</h2>
-            <p className="text-muted-foreground text-lg">Built specifically for South African lifestyles, food, and budgets.</p>
+            <h2 className="text-4xl font-bold font-display mb-4">Everything a personal trainer does. For R199 a month.</h2>
+            <p className="text-muted-foreground text-lg">No upsells. No supplements to buy. No gym required. Everything below is included in one flat rate.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
             {FEATURES.map((f) => (
@@ -717,8 +726,8 @@ export default function LandingPage() {
       <section className="py-24 px-4 bg-orange-50/50 dark:bg-orange-900/10">
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Built for real South African life.</h2>
-            <p className="text-muted-foreground text-lg">No salads you can't afford. No gym you never go to. Just WhatsApp.</p>
+            <h2 className="text-4xl font-bold font-display mb-4">Not a generic fitness app. A South African coach.</h2>
+            <p className="text-muted-foreground text-lg">It knows load shedding, month-end, KFC, and the mkhaba. No other fitness product was built for this.</p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
             {CAPABILITIES.map((c) => (
@@ -845,10 +854,10 @@ export default function LandingPage() {
       {/* Final CTA */}
       <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display mb-4">Start messy. Start imperfect. Just start.</h2>
+          <h2 className="text-4xl font-bold font-display mb-4">R199/month. A personal trainer charges that for 40 minutes.</h2>
           <p className="text-white/75 text-lg mb-8">
-            3 questions on WhatsApp. Programme in 2 minutes. No gym required. No perfect diet required.
-            Whatever you have — Coach K builds around it.
+            3 questions on WhatsApp. Programme on Day 1. Coaching every day after that.
+            Whatever you eat, wherever you train, however busy your life is — Coach K works around it.
           </p>
           <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-2xl shadow-green-500/30" asChild>
             <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
