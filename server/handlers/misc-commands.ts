@@ -4,6 +4,7 @@
  */
 
 import { db } from "../db";
+import { assessWeightRate } from "./weight";
 import {
   users, weightLogs, workoutLogs, stepLogs, chatHistory,
   mealLogs, exerciseLogs, bodyMeasurements, clothingCheckins,
@@ -552,7 +553,7 @@ export async function handleMiscCommands(ctx: {
       const trainingDaysPerWeek = user.trainingDaysPerWeek || 3;
       const firstName = user.name?.split(" ")[0] || "";
 
-      const [mealRows, weekWorkouts, stepRows, weightRows] = await Promise.all([
+      const [mealRows, weekWorkouts, stepRows, weightRows, firstWeightRow] = await Promise.all([
         db.select({ loggedAt: mealLogs.loggedAt, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
           .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sevenDaysAgo))),
         db.select({ id: workoutLogs.id }).from(workoutLogs)
@@ -561,6 +562,8 @@ export async function handleMiscCommands(ctx: {
           .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo))),
         db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs)
           .where(eq(weightLogs.userId, user.id)).orderBy(desc(weightLogs.loggedAt)).limit(2),
+        db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs)
+          .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1),
       ]);
 
       // Aggregate mealLogs by SAST day
@@ -605,22 +608,18 @@ export async function handleMiscCommands(ctx: {
         out.push(`${sIcon} Steps: avg ${avgSteps.toLocaleString()} — ${stepsAboveTarget}/${stepRows.length} days at target`);
       }
 
-      if (weightRows.length >= 2) {
-        const wNew = parseFloat(String(weightRows[0].weight));
-        const wOld = parseFloat(String(weightRows[1].weight));
-        const diff = wNew - wOld;
-        if (!isNaN(diff) && Math.abs(diff) >= 0.3) {
-          const msApart = weightRows[0].loggedAt && weightRows[1].loggedAt
-            ? new Date(weightRows[0].loggedAt).getTime() - new Date(weightRows[1].loggedAt).getTime()
-            : 0;
-          const daysBetween = msApart > 0 ? msApart / 86_400_000 : 999;
-          // Biologically impossible: >10kg in any gap, or >5kg within 14 days = data entry error
-          const isSuspicious = Math.abs(diff) > 10 || (Math.abs(diff) > 5 && daysBetween < 14);
-          if (isSuspicious) {
-            out.push(`⚠️ Weight: ${wOld.toFixed(1)}kg → ${wNew.toFixed(1)}kg — that's a big jump. If your starting weight was logged incorrectly, send "weight ${wNew.toFixed(1)}kg" to reset from your current number.`);
-          } else {
-            out.push(diff < 0 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg since last weigh-in` : `⬆️ Up ${diff.toFixed(1)}kg since last weigh-in`);
-          }
+      if (weightRows.length >= 1) {
+        const wCurrent = parseFloat(String(weightRows[0].weight));
+        const startRow = firstWeightRow[0];
+        if (startRow && weightRows.length >= 2) {
+          const wStart = parseFloat(String(startRow.weight));
+          const totalChange = wCurrent - wStart;
+          const weeksSinceStart = Math.max(1, (new Date(weightRows[0].loggedAt!).getTime() - new Date(startRow.loggedAt!).getTime()) / (7 * 86_400_000));
+          const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", user.proteinTarget || 130, user.calorieTarget || 1800, firstName);
+          if (rateNote) out.push(rateNote);
+          else out.push(`⚖️ Current weight: ${wCurrent.toFixed(1)}kg`);
+        } else {
+          out.push(`⚖️ Current weight: ${wCurrent.toFixed(1)}kg`);
         }
       }
 

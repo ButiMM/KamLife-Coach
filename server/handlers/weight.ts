@@ -3,6 +3,62 @@ import { users, weightLogs } from "../../shared/schema";
 import { eq, and, gte, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
+
+/**
+ * Assess whether a weight-change rate is safe, concerning or dangerous for the given goal.
+ * Returns null when there's not enough data or the change is negligible.
+ *
+ * Safe bands (evidence-based):
+ *  fat_loss:    0–0.5 kg/wk excellent, 0.5–1 ok, 1–1.5 warn, >1.5 alert, >2.5 danger
+ *  recomposition: 0–0.4 kg/wk fine, 0.4–0.75 warn, >0.75 alert
+ *  muscle_gain: should be gaining or flat; any consistent loss is a problem
+ */
+export function assessWeightRate(
+  totalChangeKg: number,
+  weeksSinceStart: number,
+  goal: string,
+  proteinTarget: number,
+  calorieTarget: number,
+  name: string,
+): string | null {
+  if (weeksSinceStart < 1 || Math.abs(totalChangeKg) < 0.5) return null;
+  const pace = Math.abs(totalChangeKg) / weeksSinceStart;
+  const nm = name ? `${name}, ` : "";
+
+  if (totalChangeKg < 0 && (goal === "fat_loss" || goal === "recomposition")) {
+    const maxSafe = goal === "fat_loss" ? 1.0 : 0.75;
+    const maxWarn = goal === "fat_loss" ? 1.5 : 0.75;
+    if (pace <= (goal === "fat_loss" ? 0.5 : 0.4)) {
+      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ✅ right on target, sustainable.`;
+    } else if (pace <= maxSafe) {
+      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ✅ good, at the high end of safe. Keep protein at ${proteinTarget}g daily.`;
+    } else if (pace <= maxWarn) {
+      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ⚠️ *faster than ideal.* At this pace you're likely losing muscle alongside fat. Hit ${proteinTarget}g protein every single day — that's what protects your muscle while you lose fat.`;
+    } else if (pace <= 2.5) {
+      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — 🚨 *this is too fast.* Losing this quickly causes muscle loss, metabolic slowdown and rebound weight gain. Add 200 kcal/day and hit ${proteinTarget}g protein. Your target is ${calorieTarget} kcal — are you reaching it?`;
+    } else {
+      return `🚨 *${nm}this weight loss rate is dangerous.* ${pace.toFixed(2)}kg per week — that's crash-diet territory. At this pace your body is burning muscle, not just fat, and your metabolism will slow down hard. Please tell me what you've been eating — something is seriously wrong with your intake.`;
+    }
+  }
+
+  if (totalChangeKg < 0 && goal === "muscle_gain") {
+    return pace > 0.3
+      ? `🚨 *${nm}you're losing weight on a muscle-building programme.* Down ${Math.abs(totalChangeKg).toFixed(1)}kg — you cannot build muscle in this deficit. You need to eat MORE: push to ${calorieTarget} kcal and ${proteinTarget}g protein every day. What's your typical day of eating look like?`
+      : `⚠️ Down *${Math.abs(totalChangeKg).toFixed(1)}kg* on a muscle gain programme. You need a calorie surplus — are you hitting ${calorieTarget} kcal daily?`;
+  }
+
+  if (totalChangeKg > 0 && goal === "muscle_gain") {
+    if (pace >= 0.1 && pace <= 0.5) return `📈 Total gained: *${totalChangeKg.toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ✅ solid lean gain rate.`;
+    if (pace > 0.5) return `📈 Total gained: *${totalChangeKg.toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — gaining fast, watch body fat levels.`;
+    return `📈 Total gained: *${totalChangeKg.toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — very slow. Push calories up slightly.`;
+  }
+
+  if (totalChangeKg > 0 && goal === "fat_loss") {
+    return `📈 Up *${totalChangeKg.toFixed(1)}kg* since starting. Weight is moving the wrong way for fat loss — tighten carb portions and hit ${proteinTarget}g protein every day.`;
+  }
+
+  return `${totalChangeKg < 0 ? "📉" : "📈"} Total change: *${totalChangeKg > 0 ? "+" : ""}${totalChangeKg.toFixed(1)}kg*.`;
+}
 import { sastDayStart } from "../utils";
 import { generateVoiceNote } from "../tts";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -81,22 +137,10 @@ export async function handleWeightLog(
     if (firstLog) {
       const startKg = parseFloat(String(firstLog.weight));
       const totalChange = newKg - startKg;
-      const weeksSinceStart = Math.max(1, Math.round((Date.now() - new Date(firstLog.loggedAt!).getTime()) / (7 * 86_400_000)));
-      const pacePerWeek = Math.abs(totalChange / weeksSinceStart).toFixed(2);
-      const goal = user.goalType || "fat_loss";
-      if (Math.abs(totalChange) >= 0.5) {
-        if (totalChange < 0 && goal === "fat_loss") {
-          journeyNote = `\n\n📉 Total lost: *${Math.abs(totalChange).toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.3 && parseFloat(pacePerWeek) <= 0.8 ? "right on target" : parseFloat(pacePerWeek) < 0.3 ? "slower than optimal — check protein and deficit" : "slightly fast — make sure you're eating enough protein"}.`;
-        } else if (totalChange > 0 && goal === "muscle_gain") {
-          journeyNote = `\n\n📈 Total gained: *${totalChange.toFixed(1)}kg* since week 1. Pace: ${pacePerWeek}kg/week — ${parseFloat(pacePerWeek) >= 0.1 && parseFloat(pacePerWeek) <= 0.5 ? "solid lean gain rate" : parseFloat(pacePerWeek) > 0.5 ? "gaining fast — watch body fat" : "very slow — push calories slightly"}.`;
-        } else if (totalChange > 0 && goal === "fat_loss") {
-          journeyNote = `\n\n📈 Up *${totalChange.toFixed(1)}kg* from starting weight of ${startKg}kg. Weight is moving the wrong way for fat loss — tighten up on carb portions and hit the protein target every day. The calories and protein targets above are your numbers.`;
-        } else if (totalChange < 0 && goal === "muscle_gain") {
-          journeyNote = `\n\n📉 Down *${Math.abs(totalChange).toFixed(1)}kg* from starting weight of ${startKg}kg. For muscle gain you need to be eating more — bump calories by 200/day and make sure you're hitting protein every meal.`;
-        } else {
-          journeyNote = `\n\n${totalChange < 0 ? "📉" : "📈"} Total change: *${totalChange > 0 ? "+" : ""}${totalChange.toFixed(1)}kg* from starting weight of ${startKg}kg.`;
-        }
-      }
+      const weeksSinceStart = Math.max(1, (Date.now() - new Date(firstLog.loggedAt!).getTime()) / (7 * 86_400_000));
+      const firstName = (user.name || "").split(" ")[0] || "";
+      const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", newProtein, newCals, firstName);
+      if (rateNote) journeyNote = `\n\n${rateNote}`;
     }
   } catch { /* non-fatal */ }
 
