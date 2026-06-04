@@ -989,16 +989,29 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
       const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
 
-      let transcription;
+      let transcription: { text?: string } = { text: "" };
+      // Confidence signal from attempt 1 (verbose_json). Whisper "hallucinates"
+      // English-sounding words when handed a language it can't handle (most SA
+      // languages beyond EN/AF/ZU). avg_logprob and compression_ratio are the
+      // standard signals for catching that garble — see the guard further down.
+      let voiceQuality: { avgLogprob: number; comp: number } | null = null;
       console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
       try {
-        transcription = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
+        const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
           file: createReadStream(tmpAudioPath),
           model: "whisper-1",
           prompt: whisperPrompt,
+          response_format: "verbose_json",
           ...(whisperLang ? { language: whisperLang } : {}),
         }));
-        console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
+        transcription = { text: v?.text || "" };
+        const segs: any[] = Array.isArray(v?.segments) ? v.segments : [];
+        if (segs.length) {
+          const avgLogprob = segs.reduce((s, x) => s + (x.avg_logprob ?? 0), 0) / segs.length;
+          const comp = Math.max(...segs.map((x) => x.compression_ratio ?? 0));
+          voiceQuality = { avgLogprob, comp };
+        }
+        console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0} avgLogprob=${voiceQuality?.avgLogprob?.toFixed(2) ?? "n/a"} comp=${voiceQuality?.comp?.toFixed(2) ?? "n/a"}`);
       } catch (transErr: any) {
         console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
         try {
@@ -1067,6 +1080,22 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           return `I only caught one word — "${transcribedText}". Send again or type your message.`;
         }
         clearVoiceFailure(user.id);
+      }
+
+      // Low-confidence (garble) guard — when Whisper invents English-sounding words
+      // from a language it can't handle, a very negative avg_logprob or a high
+      // compression ratio gives it away. Don't coach on nonsense — ask the client to
+      // type instead (GPT reads typed SA languages well). Soft fail (recoverable);
+      // thresholds are conservative to avoid rejecting genuine accented English, and
+      // the metrics are logged above so they can be tuned against real notes.
+      if (voiceQuality && wordCount >= 2 && (voiceQuality.avgLogprob < -1.0 || voiceQuality.comp > 2.5)) {
+        console.log(`[VOICE] low_confidence_garble avgLogprob=${voiceQuality.avgLogprob.toFixed(2)} comp=${voiceQuality.comp.toFixed(2)} text="${transcribedText.slice(0, 80)}"`);
+        const garbleCount = bumpVoiceFailure(user.id);
+        if (garbleCount >= 2) {
+          clearVoiceFailure(user.id);
+          return "I'm struggling to make out your voice notes clearly — that's a limit on voice, not you. I understand *typed* messages in any South African language, so please type what you need and I'll help you properly. 🙏";
+        }
+        return "I caught some of that, but not clearly enough to be sure I understood you right. Could you type it instead? I read English, Zulu, Xhosa, Sotho, Tswana, Tsonga and Afrikaans text well. 🙏";
       }
       clearVoiceFailure(user.id);
 
