@@ -54,17 +54,26 @@ const cases: Case[] = [
   { name: "medical: dizzy", input: "felt dizzy during my workout", expect: { reason: "medical", priority: "high" } },
   { name: "medical: fainted", input: "I fainted this morning", expect: { reason: "medical", priority: "high" } },
   { name: "medical: collapsed", input: "my partner collapsed at work", expect: { reason: "medical", priority: "high" } },
-  { name: "medical: diabetes", input: "I was diagnosed with diabetes", expect: { reason: "medical", priority: "high" } },
-  { name: "medical: diabete typo", input: "my diabete medication makes me tired", expect: { reason: "medical", priority: "high" } },
-  { name: "medical: blood pressure", input: "blood pressure is high", expect: { reason: "medical", priority: "high" } },
+  { name: "medical: heart attack", input: "I think I'm having a heart attack", expect: { reason: "medical", priority: "high" } },
+  { name: "medical: hypo (diabetic emergency)", input: "I think I'm having a hypo", expect: { reason: "medical", priority: "high" } },
+  { name: "medical: blood sugar crashed", input: "my blood sugar crashed at the gym", expect: { reason: "medical", priority: "high" } },
   { name: "medical: heart condition", input: "I have a heart condition", expect: { reason: "medical", priority: "high" } },
   { name: "medical: pregnant", input: "hey Coach K, I'm pregnant 🥳", expect: { reason: "medical", priority: "high" } },
   { name: "medical: pregnancy", input: "can I work out during pregnancy?", expect: { reason: "medical", priority: "high" } },
-  { name: "medical: asthma", input: "my asthma kicks in when I run", expect: { reason: "medical", priority: "high" } },
   { name: "medical: epilepsy", input: "dealing with epileptic episodes", expect: { reason: "medical", priority: "high" } },
   { name: "medical: surgery", input: "I had surgery last week", expect: { reason: "medical", priority: "high" } },
   { name: "medical: hospital", input: "just got out of the hospital", expect: { reason: "medical", priority: "high" } },
-  { name: "medical: medication", input: "my new medication makes me drowsy", expect: { reason: "medical", priority: "high" } },
+  { name: "medical: stop medication", input: "should I stop my insulin?", expect: { reason: "medical", priority: "high" } },
+
+  // ── CHRONIC CONDITIONS = COACH, DON'T ESCALATE ───────────────────────
+  // The product is built to coach these. Escalating them floods the inbox and
+  // interrupts good coaching. (See detectEscalation guiding rule.)
+  { name: "coached: diabetes diagnosis", input: "I was diagnosed with diabetes", expect: null },
+  { name: "coached: belly will cause diabetes", input: "my doctor says my belly is big and it will cause me diabetes", expect: null },
+  { name: "coached: diabetic losing weight", input: "I'm diabetic and want to lose weight", expect: null },
+  { name: "coached: high blood pressure", input: "I have high blood pressure", expect: null },
+  { name: "coached: med side-effect", input: "my new medication makes me drowsy", expect: null },
+  { name: "coached: asthma when running", input: "my asthma kicks in when I run", expect: null },
 
   // ── BILLING (high) ───────────────────────────────────────────────────
   { name: "billing: refund", input: "I want a refund", expect: { reason: "billing", priority: "high" } },
@@ -104,7 +113,8 @@ const cases: Case[] = [
   { name: "benign: program", input: "love the program so far", expect: null },
   // Tricky benigns — words that LOOK dangerous but aren't
   { name: "benign: heart emoji", input: "love the progress ❤️", expect: null },
-  { name: "benign: doctor positive", input: "my doctor said the diet is working great", expect: { reason: "medical", priority: "high" } }, // still escalates — medical context
+  { name: "benign: doctor positive", input: "my doctor said the diet is working great", expect: null }, // mentioning a doctor is not an emergency — coach it
+  { name: "benign: doctor advised weight loss", input: "my doctor told me I need to lose weight", expect: null },
 ];
 
 let passed = 0;

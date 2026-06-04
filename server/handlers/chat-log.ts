@@ -29,6 +29,14 @@ export async function checkEscalation(userId: string, messageIn: string): Promis
         const [client] = await db.select({ name: users.name, phoneNumber: users.phoneNumber }).from(users).where(eq(users.id, userId)).limit(1);
         const clientName = client?.name || "Client";
         const clientPhone = client?.phoneNumber || "unknown";
+        // Never alert when the coach-alert number IS the client (test setup or
+        // misconfig). Otherwise the internal "HIGH ESCALATION — open the dashboard"
+        // message lands in the client's own chat, leaking tooling and a phone number.
+        const normPhone = (p: string) => p.replace(/^whatsapp:/, "").replace(/\D/g, "");
+        if (normPhone(clientPhone) === normPhone(process.env.COACH_ALERT_PHONE)) {
+          console.log("[ESCALATION] Skipping coach alert — alert phone == client phone (recorded in inbox only)");
+          return;
+        }
         const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
         const fromNum = process.env.TWILIO_WHATSAPP_NUMBER.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
         const emoji = esc.priority === "urgent" ? "🚨" : "⚠️";

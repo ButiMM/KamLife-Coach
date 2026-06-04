@@ -21,20 +21,29 @@ export function escalationSLA(priority: string): Date {
 
 export function detectEscalation(message: string): EscalationDecision {
   const m = message.toLowerCase();
-  // Ordering matters: crisis → acute-medical emergencies → injury → billing →
-  // chronic-medical → frustration → human-requested. Acute-medical sits above
-  // injury so "chest pain" is flagged medical, not a muscle injury.
+  // Ordering matters (first match wins).
   //
-  // Regexes intentionally omit the trailing \b so participles and plurals match
-  // ("sprained", "diabetes", "pregnancy", "epileptic"). Leading \b still prevents
-  // mid-word false positives.
+  // GUIDING RULE for MEDICAL: escalate only when the bot should NOT be the one
+  // answering — genuine emergencies, and situations that need medical clearance or
+  // professional judgement (pregnancy, recent surgery, heart/seizure conditions,
+  // medication changes, a diabetic hypo). Do NOT escalate the everyday chronic
+  // conditions this product is BUILT to coach — diabetes, high blood pressure, PCOS,
+  // being overweight. The target client is exactly the person whose doctor warned
+  // them about diabetes; that is a coaching conversation, not a human handoff.
+  // Escalating it floods the coach inbox and interrupts good coaching.
+  //
+  // Regexes intentionally omit the trailing \b so participles/plurals match
+  // ("sprained", "pregnancy", "epileptic"). Leading \b still prevents mid-word hits.
 
   // Crisis/self-harm — urgent
   if (/\b(want to die|kill myself|end it all|cannot go on|can't go on|suicidal|self.?harm|cutting myself|hurting myself|not worth living|end my life|no reason to live|give up on life)\b/i.test(m))
     return { should: true, reason: "crisis", priority: "urgent" };
-  // Acute medical emergencies — checked before "injury" so pain-adjacent cardiac/respiratory
-  // signals don't get mis-flagged as a muscle strain
-  if (/\b(chest pain|can't breathe|cannot breathe|fainted|collapsed)\b/i.test(m))
+  // Acute medical emergencies — checked before "injury" so cardiac/respiratory
+  // signals aren't mis-flagged as a muscle strain
+  if (/\b(chest pain|chest tight|tight chest|can'?t breathe?|cannot breathe?|fainted|fainting|passed out|black(ed)? out|collapsed|seizure|convulsion|heart attack|having a stroke|had a stroke|coughing up blood)\b/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  // Diabetic / metabolic emergency — distinct from simply HAVING diabetes (which we coach)
+  if (/\b(hypo|hypoglyc|blood sugar (is )?(very |really )?(low|high|crashed)|sugar crash|sugar (is )?too (low|high))\b/i.test(m))
     return { should: true, reason: "medical", priority: "high" };
   // Acute/structural injury terms → urgent 1h SLA
   if (/\b(injur|torn|sprain|fracture|broken|hernia|slipped disc|serious pain|sharp pain|severe pain|radiating pain)/i.test(m))
@@ -45,8 +54,22 @@ export function detectEscalation(message: string): EscalationDecision {
   // Billing / subscription
   if (/\b(refund|cancel.*subscription|stop.*billing|charge|payment.*issue|money back|unsubscribe)\b/i.test(m))
     return { should: true, reason: "billing", priority: "high" };
-  // Chronic medical — conditions, medications, professional care
-  if (/\b(doctor|hospital|surgery|medication|diabet|blood pressure|heart condition|pregnant|pregnan|asthma|epilep|dizzy)/i.test(m))
+  // Pregnancy / postpartum — exercise & nutrition need individualised, careful handling
+  if (/\b(pregnant|pregnan|expecting a baby|trimester|breast.?feeding|post.?partum|just had a baby|gave birth|miscarriage)/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  // Recent surgery / hospitalisation — needs clearance before training
+  if (/\b(surgery|operation|post.?op|hospitalised|hospitalized|in hospital|out of (the )?hospital|admitted to hospital|stitches)/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  // Heart / cardiac / seizure conditions — clearance before exertion
+  if (/\b(heart condition|heart disease|heart problem|cardiac|angina|pacemaker|epilep)/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  // Medication CHANGES or adverse reactions — bot must never advise on meds
+  if (/\b(stop|skip|chang|increas|decreas|double|halv)\w*\b.{0,24}\b(medication|meds|insulin|tablets?|pills?|treatment|chronic meds|arvs?|antiretroviral)\b/i.test(m)
+      || /\b(can i|should i|is it (ok|safe|fine))\b.{0,30}\b(medication|meds|insulin|tablets?|pills?)\b/i.test(m)
+      || /\b(allergic reaction|bad reaction|side.?effects?)\b.{0,24}\b(medication|meds|tablets?|pills?|insulin)\b/i.test(m))
+    return { should: true, reason: "medical", priority: "high" };
+  // Acute neurological symptoms during/after activity
+  if (/\b(dizzy|dizziness|light.?headed|blurred vision|numbness|going numb)\b/i.test(m))
     return { should: true, reason: "medical", priority: "high" };
   // Frustration / complaint
   if (/\b(angry|furious|disgusted|worst|scam|rip.?off|waste of money|terrible|useless|report you)\b/i.test(m))
