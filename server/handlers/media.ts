@@ -1047,15 +1047,26 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       }
 
       const wordCount = transcribedText.split(/\s+/).filter(Boolean).length;
-      // Only flag as too-short for single words that could be ambient noise.
-      // 2+ words from Whisper is almost always intentional — process it directly.
       if (wordCount < 2) {
-        const failCount = bumpVoiceFailure(user.id);
-        if (failCount >= 3) {
-          clearVoiceFailure(user.id);
-          return `I keep only picking up a single word — "${transcribedText}". Please type your message — I'll reply properly.`;
+        // Known single-word commands pass through directly — asking to resend wastes a round trip.
+        const cleanWord = transcribedText.toLowerCase().replace(/[.!?,\s]+$/, "");
+        const KNOWN_COMMANDS = new Set([
+          "workout", "done", "hi", "hello", "hey", "steps", "water", "progress",
+          "sleep", "weight", "supplements", "supps", "vitamins", "menu", "help",
+          "log", "stats", "badges", "referral", "shopping", "groceries", "portions",
+          "reset", "pause", "resume", "yes", "no", "ok", "okay", "food", "macros",
+          "calories", "protein", "cardio", "gym", "home", "mkhaba", "continue",
+          "cancel", "unsubscribe", "monthly", "weekly", "today", "tomorrow",
+        ]);
+        if (!KNOWN_COMMANDS.has(cleanWord)) {
+          const failCount = bumpVoiceFailure(user.id);
+          if (failCount >= 3) {
+            clearVoiceFailure(user.id);
+            return `I keep only picking up a single word — "${transcribedText}". Please type your message — I'll reply properly.`;
+          }
+          return `I only caught one word — "${transcribedText}". Send again or type your message.`;
         }
-        return `I only caught one word — "${transcribedText}". Send again or type your message.`;
+        clearVoiceFailure(user.id);
       }
       clearVoiceFailure(user.id);
 

@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { users, workoutLogs, chatHistory, mealLogs } from "../../shared/schema";
+import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
@@ -1432,6 +1432,49 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const inflatedReply = `${capName}, car and machine vibration inflating step counts is a real issue — the phone accelerometer can't tell the difference between walking and road bumps.\n\n*Quick fix:* Phone in your *pocket* (not on the seat or console) filters out most vehicle vibration.\n\nOr just tell me your actual walking: "walked 2,000 steps at lunch" and I'll log only that.\n\n*For your situation:*\nYour real movement target will be smaller — and that's fine. What matters is intentional walking:\n• 10-min walk on a break: ~1,000 steps\n• Walking to/from your vehicle or canteen\n• 20-min walk at home in the evening\n\nShould I set your step target to reflect what you can actually walk — not what the car registers for you?`;
     await logChat(user.id, message, inflatedReply, "INFLATED_STEPS");
     return inflatedReply;
+  }
+
+  // ---- WALKING CALORIE BURN — "how many calories did I burn walking/steps?" ----
+  // Previously the bot ignored this cross-reference question and just showed food totals.
+  // Key coaching point: their calorie target already accounts for activity — don't eat back steps.
+  const isWalkingCalQ =
+    /\b(how\s+(many\s+)?calories?\s+(did\s+i\s+|have\s+i\s+)?burn(ed|t)?\s+(from\s+)?(walking|steps?|my\s+walk(ing)?|my\s+steps?|the\s+walk(ing)?))\b/i.test(m)
+    || /\b(how\s+much\s+(did\s+i\s+|have\s+i\s+)?burn(ed|t)?\s+(from\s+)?(walking|steps?))\b/i.test(m)
+    || /\b(walk(ing)?\s+calories?|step\s+calories?|calories?\s+(from|burned\s+from)\s+(walking|steps?))\b/i.test(m)
+    || /\b(how\s+(does|do)\s+(the\s+)?(walking|steps?)\s+(affect|impact|count|factor\s+into|fit\s+into)\s+(my\s+)?(total\s+calories?|calorie\s+total|calories?\s+(for\s+)?today|daily\s+(intake|calories?|budget)|calorie\s+(target|budget)))\b/i.test(m)
+    || /\b(burned|burnt)\s+(walking|from\s+(walking|steps?))\b/i.test(m);
+
+  if (isWalkingCalQ) {
+    const todayStart = sastDayStart();
+    let todaySteps = 0;
+    try {
+      const stepRow = await db.select({ steps: stepLogs.steps })
+        .from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStart)))
+        .orderBy(desc(stepLogs.loggedAt))
+        .limit(1);
+      todaySteps = stepRow[0]?.steps || 0;
+    } catch { /* non-fatal */ }
+
+    const bodyWeightKg = user.currentWeight ? parseFloat(String(user.currentWeight)) : 75;
+    const weightFactor = Number.isFinite(bodyWeightKg) && bodyWeightKg >= 30 && bodyWeightKg <= 250
+      ? bodyWeightKg / 75 : 1;
+    const estimatedKcal = Math.round(todaySteps * weightFactor * 0.04);
+    const stepsTarget = user.stepsTarget || 8500;
+    const calTarget = user.calorieTarget || 1800;
+    const nm = firstName ? `${firstName}, ` : "";
+
+    let walkCalReply: string;
+    if (todaySteps === 0) {
+      const perK = Math.round(weightFactor * 40);
+      const targetBurn = Math.round(stepsTarget * weightFactor * 0.04);
+      walkCalReply = `${nm}no steps logged yet today — send me your step count ("walked 6,000 steps") and I'll work it out exactly.\n\nFor you specifically, every 1,000 steps ≈ *~${perK} kcal*.\nHitting your ${stepsTarget.toLocaleString()} steps target burns roughly *~${targetBurn} kcal*.\n\n*One thing to know:* your *${calTarget} kcal daily target already includes your activity level.* Walk your steps, hit your calorie target — you're on track. You don't need to eat extra because you walked.`;
+    } else {
+      walkCalReply = `${nm}*Today's step burn:*\n${todaySteps.toLocaleString()} steps ≈ *~${estimatedKcal} kcal*\n\n*Important — how this fits your plan:*\nYour *${calTarget} kcal target already accounts for your activity level.* You don't "eat back" those walking calories on top of your target — the target was set to include them.\n\n*The rule:*\n✅ Hit your calorie target → you're eating the right amount\n✅ Hit your step target (${stepsTarget.toLocaleString()}) → your metabolism stays active, fat loss is faster\n❌ Adding step calories on top of your food target = eating at maintenance, not a deficit\n\nWalking accelerates fat loss. It doesn't mean you can eat more.`;
+    }
+
+    await logChat(user.id, message, walkCalReply, "WALKING_CALORIE_BURN");
+    return walkCalReply;
   }
 
   // ---- BELLY FAT / MKHABA — "I want to lose my belly", "mkhaba", "stomach fat" ----
