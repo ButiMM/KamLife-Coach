@@ -571,6 +571,12 @@ DRINKS — ZERO/SUGAR-FREE IS NOT FULL SUGAR:
 - If the message says "zero", "zero sugar", "sugar free", "sugarfree", "no sugar", "diet", or "light" — that drink is ~0-5 kcal, 0g protein. NEVER log the full-sugar value, and NEVER mention "sugar" in the note for a sugar-free drink.
 - A "sugar free" milk coffee (mocha/latte/cappuccino) still has calories from the milk — only fizzy drinks/energy drinks go to ~0.
 
+NEVER ASSUME DEFAULT INGREDIENTS — log ONLY what the user explicitly mentioned:
+- "toast" = just toast (no butter). "bread" = just bread (no spread). "eggs" = just eggs (no oil).
+- If the user lists items separately, log each exactly as stated — add NOTHING extra.
+- Do NOT add butter, oil, margarine, cream, sugar, sauce, or any cooking medium unless the user said so.
+- "toast and eggs" → toast + eggs. NOT toast + butter + eggs.
+
 Be precise — never round to nearest 100. Always use SA food names (pap not polenta, pilchards not sardines).`,
         },
         {
@@ -698,7 +704,8 @@ Your task: Identify ONLY the food items in the user's message that are completel
 - Sauces, gravies, dressings, and condiments ONLY if >20 kcal per typical portion
 - Omit: spices (salt, pepper, cumin, etc.), garnishes, water, condiments <20 kcal
 - If all foods are already identified, set is_food=true with an empty foods array
-- Use SA food names and portions (pap not polenta, pilchards not sardines)`,
+- Use SA food names and portions (pap not polenta, pilchards not sardines)
+- NEVER add assumed defaults: if "toast" is already identified, do NOT add butter — the user did not say butter. Only add items that were genuinely mentioned but not yet identified.`,
         },
         { role: "user", content: message.slice(0, 500) },
       ],

@@ -16,6 +16,58 @@ function sastToday(): string {
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 
+  // ---- INGREDIENT NEGATION — "toast has no butter", "there's no oil", "without mayo" ----
+  // Catches negative corrections of assumed/hallucinated ingredients BEFORE the food scanner
+  // can re-log them as new food entries. Must run before the hasMgmtKeyword quick-exit.
+  const DENIED_INGREDIENT_RE = /\b(butter|margarine|oil|mayo(?:nnaise)?|sugar|cream|sauce|gravy|dressing|spread)\b/i;
+  const NEGATION_CUES_RE = /\b(has?\s+no\b|have\s+no\b|there.?s\s+no\b|there\s+is\s+no\b|without\b|didn.?t\s+(?:add|put|use|have|spread)\b|no\s+\w+\s+(?:on|in)\b)/i;
+
+  if (DENIED_INGREDIENT_RE.test(m) && NEGATION_CUES_RE.test(m)) {
+    const denied = (DENIED_INGREDIENT_RE.exec(m) || [])[0]?.trim().toLowerCase();
+    if (denied) {
+      try {
+        const todayStart = sastDayStart();
+        const todayMealLogs = await db.select({
+          id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items,
+          kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt,
+        })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+          .orderBy(desc(mealLogs.loggedAt))
+          .limit(10);
+
+        const targetLog = todayMealLogs.find(l => {
+          const raw = (l.rawMessage || "").toLowerCase();
+          if (raw.includes(denied)) return true;
+          const logItems = l.items as Array<{ name?: string }> | null;
+          return Array.isArray(logItems) && logItems.some(i =>
+            (i.name || "").toLowerCase().includes(denied)
+          );
+        });
+
+        if (targetLog) {
+          await db.delete(mealLogs).where(eq(mealLogs.id, targetLog.id));
+          invalidateFoodTotalsCache(user.id);
+          const recomputed = await recomputeTodayFoodTotals(user.id);
+          await db.update(users)
+            .set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() })
+            .where(eq(users.id, user.id));
+          const calTarget = user.calorieTarget || 1800;
+          const protTarget = user.proteinTarget || 120;
+          const remaining = calTarget - recomputed.calories;
+          const protRem = protTarget - recomputed.protein;
+          const remainingLine = remaining >= 0
+            ? `Remaining: ~${remaining} kcal | ~${Math.max(0, protRem)}g protein still to go.`
+            : `Over target by ~${Math.abs(remaining)} kcal.`;
+          return `Removed the entry with ${denied} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\n${remainingLine}\n\nSend me what you actually had and I'll re-log it without the ${denied}.`;
+        }
+        // Not found in any log today — fall through without handling
+      } catch (err) {
+        console.error("[FOOD_NEGATION]", err);
+      }
+    }
+  }
+
   // Quick-exit: if message has no management keywords at all, skip the whole handler
   const hasMgmtKeyword = /\b(remove|delete|undo|clear|reset|wipe|scratch|take out|take off|didn.?t (have|eat)|did not (have|eat)|get rid of|cancel.*meal|wrong meal|mistake.*log|log.*mistake|not.*eat|never ate|no\s+just)\b/i.test(m);
   if (!hasMgmtKeyword) return null;
