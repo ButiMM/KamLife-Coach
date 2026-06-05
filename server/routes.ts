@@ -190,7 +190,9 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
   // Safety messages (chest pain, crisis, emergency) always bypass.
   // Onboarding is handled before this point and bypasses via onboardingState check.
-  if (user.subscriptionStatus === 'inactive' && !isCoach) {
+  const trialExpired = user.subscriptionStatus === "trial" &&
+    user.betaBypassUntil && new Date(user.betaBypassUntil) < new Date();
+  if ((user.subscriptionStatus === 'inactive' || trialExpired) && !isCoach) {
     const isSafety = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|can.?t breathe|shortness of breath|can.?t catch my breath|heart racing|heart pounding|dizziness|feeling faint|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
     if (!isSafety) {
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";

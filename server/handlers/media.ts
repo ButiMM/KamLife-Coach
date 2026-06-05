@@ -407,7 +407,7 @@ export async function handleMediaMessage(ctx: {
                   await db.insert(mealLogs).values({
                     userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
                     loggedAt: new Date(), rawMessage: "[Collage food]", mealLabel: "Collage meal",
-                  }).catch(() => {});
+                  }).catch((e) => console.error("[COLLAGE_FOOD] mealLogs insert failed:", e));
                   await logChat(user.id, "[Photo - collage meal]", txt, "FOOD_LOG");
                   invalidateFoodTotalsCache(user.id);
                   const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
@@ -463,7 +463,7 @@ export async function handleMediaMessage(ctx: {
                     await db.insert(mealLogs).values({
                       userId: user.id, source: "photo", kcalInt: kcal, proteinInt: prot,
                       loggedAt: new Date(), rawMessage: "[Album photo]", mealLabel: "Album meal",
-                    }).catch(() => {});
+                    }).catch((e) => console.error("[ALBUM_FOOD] mealLogs insert failed:", e));
                     await logChat(user.id, "[Photo - album meal]", text, "FOOD_LOG");
                   }
                   if (albumKcal > 0) {

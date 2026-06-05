@@ -150,7 +150,7 @@ export async function handleEarlyCommands(ctx: {
   if (/\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
     tempEquipmentMode.delete(phone);
     awaitingEquipmentAnswer.delete(phone);
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
     const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Reply *menu* or *workout* for today's session.`;
     await logChat(user.id, message, backMsg, "BACK_TO_GYM");
     return backMsg;
@@ -168,27 +168,28 @@ export async function handleEarlyCommands(ctx: {
     if (weightMatch) {
       const kg = parseFloat(weightMatch[1]);
       if (Number.isFinite(kg) && kg >= 30 && kg <= 250) {
-        await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+        user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
         const { handleWeightLog } = await import("./weight");
         return handleWeightLog(phone, user, kg);
       }
     }
     // Not a valid weight — clear the prompt state and let the message flow normally
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
   }
 
   // If awaiting equipment answer — check in-memory map AND db field (survives restart)
   const isAwaitingEquipment = awaitingEquipmentAnswer.get(phone) || user.awaitingInputType === "equipment";
   if (isAwaitingEquipment) {
     awaitingEquipmentAnswer.delete(phone);
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
     let tempMode = user.trainingMode || "gym";
     if (/\b(full gym|gym|machines|cables|full equipment|1)\b/i.test(m)) tempMode = "gym";
     else if (/\b(dumbbell|dumbbells|db|2)\b/i.test(m)) tempMode = "gym_dumbbell";
     else if (/\b(nothing|no equipment|bodyweight|hotel room|3)\b/i.test(m)) tempMode = "home";
     tempEquipmentMode.set(phone, tempMode);
     // Persist to DB so the mode survives a server restart
-    await db.update(users).set({ awaitingInputType: `holiday_equipment:${tempMode}` }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    user.awaitingInputType = `holiday_equipment:${tempMode}`;
+    await db.update(users).set({ awaitingInputType: `holiday_equipment:${tempMode}` }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] set holiday_equipment failed:", e));
     const tempUser = { ...user, trainingMode: tempMode };
     const workout = buildDayWorkout(tempUser);
     const gifUrl = getPrimaryWorkoutGifUrl(workout);
@@ -202,7 +203,8 @@ export async function handleEarlyCommands(ctx: {
   const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train|send me|my workout|today)\b/i.test(m);
   if (isHolidayMention) {
     awaitingEquipmentAnswer.set(phone, true);
-    await db.update(users).set({ awaitingInputType: "equipment" }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    user.awaitingInputType = "equipment";
+    await db.update(users).set({ awaitingInputType: "equipment" }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] set equipment failed:", e));
     const equipQ = `${firstName ? firstName + ", w" : "W"}hat do you have access to where you are? Reply:\n\n*1 — gym* — full machines and cables\n*2 — dumbbells* — dumbbells only\n*3 — nothing* — no equipment, bodyweight only`;
     await logChat(user.id, message, equipQ, "EQUIPMENT_QUESTION");
     return equipQ;
@@ -255,7 +257,7 @@ export async function handleEarlyCommands(ctx: {
       : user;
     // Clear the persisted holiday mode from DB now that we've consumed it
     if (tempEquipmentMode.has(phone)) {
-      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch(() => {});
+      user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
     }
     tempEquipmentMode.delete(phone);
 

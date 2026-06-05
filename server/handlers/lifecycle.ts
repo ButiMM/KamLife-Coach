@@ -538,7 +538,7 @@ export async function handleLifecycle(ctx: {
   }
   if (parsedMeasures.length >= 2) {
     await Promise.all(parsedMeasures.map(pm =>
-      db.insert(bodyMeasurements).values({ userId: user.id, measurementType: pm.type, value: pm.value.toString() }).catch(() => {})
+      db.insert(bodyMeasurements).values({ userId: user.id, measurementType: pm.type, value: pm.value.toString() }).catch((e) => console.error("[MEASUREMENTS] insert failed:", e))
     ));
     const lines = parsedMeasures.map(pm => `• ${pm.type.charAt(0).toUpperCase() + pm.type.slice(1)}: ${pm.value}cm`);
     const multiReply = `*Measurements logged:*\n${lines.join("\n")}\n\nTracked. Check them monthly — the tape tells the truth when the scale doesn't.`;

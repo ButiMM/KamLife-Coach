@@ -37,7 +37,7 @@ const _streakShownToday = new Map<string, string>();
 
 function _todaySastKey(): string {
   const d = new Date(Date.now() + 2 * 3_600_000);
-  return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
 }
 
 export function hasShownStreakToday(userId: string): boolean {
@@ -60,12 +60,12 @@ export async function computeFoodLogStreak(userId: string): Promise<number> {
     for (const l of logs) {
       if (!l.createdAt) continue;
       const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
-      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`);
     }
     let streak = 0;
     const checkDate = new Date(Date.now() + 2 * 3_600_000);
     while (true) {
-      const key = `${checkDate.getUTCFullYear()}-${checkDate.getUTCMonth()}-${checkDate.getUTCDate()}`;
+      const key = `${checkDate.getUTCFullYear()}-${checkDate.getUTCMonth() + 1}-${checkDate.getUTCDate()}`;
       if (!days.has(key)) break;
       streak++;
       checkDate.setUTCDate(checkDate.getUTCDate() - 1);
@@ -669,7 +669,7 @@ export function buildFoodLogReply(p: {
 
   const sastNow = new Date(Date.now() + 2 * 3_600_000);
   const sastHour = sastNow.getUTCHours();
-  const todayKey = `${sastNow.getUTCFullYear()}-${sastNow.getUTCMonth()}-${sastNow.getUTCDate()}`;
+  const todayKey = `${sastNow.getUTCFullYear()}-${sastNow.getUTCMonth() + 1}-${sastNow.getUTCDate()}`;
   const warnKey = `${user.id}:${todayKey}`;
   const alreadyWarned = _lowCalWarnedToday.get(warnKey) === todayKey;
   const lowCalThreshold = calorieTarget * 0.45;
