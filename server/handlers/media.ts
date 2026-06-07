@@ -911,8 +911,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const extraSection = extraReplies.length > 0
         ? "\n" + extraReplies.map(r => r.startsWith("📸") || /\d+,?\d* steps/i.test(r) ? `\n${r}` : `• ${r}`).join("\n")
         : "";
-      const totalPhotos = extraReplies.filter(r => !/\d+,?\d* steps/i.test(r)).length + 1;
-      const multiPhotoNote = extraReplies.length > 0 ? `\n_${totalPhotos} photos — all logged. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+      const totalSentPhotos = 1 + Math.min(extraImageUrls.length, 3);
+      const totalLoggedFoodPhotos = extraReplies.filter(r => !/\d+,?\d* steps/i.test(r)).length + 1;
+      const logNote = totalLoggedFoodPhotos >= totalSentPhotos ? "all logged" : `${totalLoggedFoodPhotos} of ${totalSentPhotos} logged`;
+      const multiPhotoNote = extraReplies.length > 0 ? `\n_${totalSentPhotos} photo${totalSentPhotos !== 1 ? "s" : ""} — ${logNote}. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);

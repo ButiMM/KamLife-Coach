@@ -232,7 +232,12 @@ export async function runMorningCheckin(): Promise<void> {
           .from(chatHistory)
           .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, weekAgo)))
           .orderBy(desc(chatHistory.createdAt)).limit(14);
-        const breakfastLog = recentFoods.find(l => l.messageIn && /\b(breakfast|morning|oats|eggs?|cereal|toast|bread)\b/i.test(l.messageIn));
+        const MEAL_CORRECTION_RE = /\b(has?\s+no\b|have\s+no\b|there.?s\s+no\b|without\b|didn.?t\s+(?:add|put|use|have|spread)\b|no\s+\w+\s+(?:on|in)\b|not\s+have\b)\b/i;
+        const breakfastLog = recentFoods.find(l =>
+          !!l.messageIn &&
+          /\b(breakfast|morning|oats|eggs?|cereal|toast|bread)\b/i.test(l.messageIn) &&
+          !MEAL_CORRECTION_RE.test(l.messageIn)
+        );
         if (breakfastLog?.messageIn) {
           const meal = breakfastLog.messageIn.replace(/\b(for breakfast|breakfast was|this morning|had|ate|eating|having|i |my )\b/gi, "").trim();
           if (meal.length > 3 && meal.length < 60) {
