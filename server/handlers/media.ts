@@ -927,10 +927,22 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const logNote = totalLoggedFoodPhotos >= totalSentPhotos ? "all logged" : `${totalLoggedFoodPhotos} of ${totalSentPhotos} logged`;
       const multiPhotoNote = extraReplies.length > 0 ? `\n_${totalSentPhotos} photo${totalSentPhotos !== 1 ? "s" : ""} — ${logNote}. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
+
+      // Honest coaching nudge for high-cal meals on fat-loss / recomp goals.
+      // Fires only when a single meal eats >38% of the daily calorie budget.
+      // Muscle-gain clients need the calories — no nudge for them.
+      let photoCoachNudge = "";
+      if (totalPhotoKcal > 0 && (goal === "fat_loss" || goal === "recomposition")) {
+        const calTarget = user.calorieTarget || 1800;
+        if (totalPhotoKcal > Math.round(calTarget * 0.38)) {
+          photoCoachNudge = `\n\nHeavy meal — logged. Balance it: go lighter on your next meal and push the steps today.`;
+        }
+      }
+
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      return `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      return `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
