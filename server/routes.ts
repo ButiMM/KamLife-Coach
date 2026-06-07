@@ -362,32 +362,13 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   );
   if (_isGroceryList) {
     const clientName = user.name?.split(" ")[0] || "there";
-    const goal = user.goalType || "fat_loss";
-    const goalLabel = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
-    const listItems = _cleanedItems.join(", ");
     let listReply: string;
     try {
-      const calTarget = user.calorieTarget || 1800;
-      const protTarget = user.proteinTarget || 120;
-      const raw = await askCoachK(
-        `My pantry/grocery list:\n${listItems}`,
-        user,
-        `The client sent their full grocery/pantry list. Their goal is ${goalLabel}. Daily targets: ${calTarget} kcal, ${protTarget}g protein.
-
-Do a real coaching review of this list — not 3 sentences, a proper breakdown. Use this structure (no bullet points, flowing paragraphs, Kam's direct SA voice):
-
-1. *Eat freely from these:* Name the lean proteins and vegetables on their list. Tell them WHY — these are the foundation of their meals.
-
-2. *Portion these carefully:* Name the carbs and calorie-dense items on their list that are good but easy to overeat. Give them a portion rule for each (e.g. "fist-size", "one cup cooked", "two slices max").
-
-3. *Watch out for these:* Name the processed meats, sugary drinks, high-calorie sauces and snacks on their list. Be direct — tell them exactly why each one slows their ${goalLabel} progress. Not preachy, just facts.
-
-4. One closing line: tell them to send you what they eat each day (photo or words) and you'll track the numbers.
-
-Write like a coach who has actually looked at their shopping, not a chatbot generating a report. No exclamation marks. No "great list". No numbered bullet points. Use *bold* only for the section headers above.`
-      );
-      listReply = raw.trim();
-    } catch {
+      const { refineGroceryList } = await import("./grocery-refine");
+      listReply = await refineGroceryList(_cleanedItems, user);
+      if (!listReply) throw new Error("empty refine result");
+    } catch (e) {
+      console.warn("[GROCERY_REFINE]", e);
       listReply = `Got your list, ${clientName}. When you start eating, just send me what you have each day — a photo or a few words and I'll track the numbers.`;
     }
     await logChat(user.id, "[Shopping List]", listReply, "SHOPPING_LIST");
