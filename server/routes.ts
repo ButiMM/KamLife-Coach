@@ -345,6 +345,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
 
 
+  // ---- SHOPPING / GROCERY LIST GUARD — must run BEFORE early commands ----
+  // A forwarded grocery/pantry list uses WhatsApp's "[ ]" checkbox format.
+  // Without this guard the alcohol handler in early-commands fires on
+  // "apple cider vinegar" + "soft drinks" from the list items, logging a fake drink.
+  const checkboxLines = message.split("\n").filter(l => /^\[\s*\]/.test(l.trim()));
+  if (checkboxLines.length >= 5) {
+    const clientName = user.name?.split(" ")[0] || "there";
+    const reply = `Got your shopping list, ${clientName}. Once you've stocked up, just send me what you eat each day — a photo or a few words is enough. I do the rest.`;
+    await logChat(user.id, "[Shopping List]", reply, "SHOPPING_LIST");
+    return reply;
+  }
+
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
   const earlyResult = await handleEarlyCommands({ phone, message, m, user });
   if (earlyResult !== null) return earlyResult;
@@ -430,17 +442,6 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // ---- WATER LOGGING HANDLER ----
   const waterResult = await handleWater({ phone, message, m, user });
   if (waterResult !== null) return waterResult;
-
-  // ---- SHOPPING / GROCERY LIST GUARD ----
-  // When a client forwards a grocery/pantry list (checkbox format), do NOT scan it as
-  // food they've eaten. Detect 5+ lines starting with "[ ]" (WhatsApp checkbox format).
-  const checkboxLines = message.split("\n").filter(l => /^\[\s*\]/.test(l.trim()));
-  if (checkboxLines.length >= 5) {
-    const clientName = user.name?.split(" ")[0] || "there";
-    const reply = `Got your shopping list, ${clientName}. Once you've stocked up, just send me what you eat each day — a photo or a few words is enough. I do the rest.`;
-    await logChat(user.id, "[Shopping List]", reply, "SHOPPING_LIST");
-    return reply;
-  }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
   const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage });

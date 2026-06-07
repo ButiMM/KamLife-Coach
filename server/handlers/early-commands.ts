@@ -685,8 +685,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   }
 
   // ---- ALCOHOL AWARENESS — "had 3 beers", "wine tonight", "drinks at the braai" ----
-  const alcoholMatch = /\b(\d+)?\s*(beers?|wines?|glasses?\s*(?:of\s*)?wine|brandies?|brandy|whiskey|whisky|vodka|gin|rum|ciders?|savanna|hunters|castle|black label|heineken|windhoek|amstel|stellenbosch|nederburg|four cousins|robertson|4th street|smirnoff|jameson|jack daniel|gordons|captain morgan)\b/i.test(m);
-  const hasAlcoholVerb = /\b(had|drank|drinking|having|drinks?|tonight|last night|yesterday|at the braai|at the party|weekend)\b/i.test(m);
+  // Strip "cider vinegar" / "apple cider vinegar" first — it's a condiment, not a drink
+  const mNoVinegar = m.replace(/\bapple\s+cider\s+vinegar\b/gi, "").replace(/\bcider\s+vinegar\b/gi, "");
+  const alcoholMatch = /\b(\d+)?\s*(beers?|wines?|glasses?\s*(?:of\s*)?wine|brandies?|brandy|whiskey|whisky|vodka|gin|rum|ciders?|savanna|hunters|castle|black label|heineken|windhoek|amstel|stellenbosch|nederburg|four cousins|robertson|4th street|smirnoff|jameson|jack daniel|gordons|captain morgan)\b/i.test(mNoVinegar);
+  const hasAlcoholVerb = /\b(had|drank|drinking|having|drinks?|tonight|last night|yesterday|at the braai|at the party|weekend)\b/i.test(mNoVinegar);
   const isDirectAlcoholQty = /^(\d+\s*)?(beers?|wines?|glasses?\s*(of\s*)?(wine|beer|brandy|whisky|whiskey|vodka|gin|rum|cider)|shots?|doubles?)\b/i.test(m.trim());
   const isAlcoholLog = alcoholMatch && (hasAlcoholVerb || isDirectAlcoholQty);
   if (isAlcoholLog) {
