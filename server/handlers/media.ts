@@ -187,10 +187,13 @@ export async function handleMediaMessage(ctx: {
       let isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
         || (user.awaitingInputType === "steps");
 
-      // ---- UNCAPTIONED IMAGE PRE-CLASSIFIER ----
+      // ---- IMAGE PRE-CLASSIFIER ----
+      // Runs for: (a) no caption, or (b) caption with no obvious food keywords —
+      // so body photos captioned "Alot of work to be done" still get correctly classified.
+      const hasObviousFoodCaption = /\b(ate|had|eat|eating|lunch|dinner|breakfast|meal|food|snack|protein|calories)\b/i.test(message || "");
       let isCollage = false;
       let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
-      if (noCaption && !isStepScreenshot) {
+      if ((noCaption || !hasObviousFoodCaption) && !isStepScreenshot) {
         try {
           const classifyResp = await withTimeout("image_classify", 8000, () => openai.chat.completions.create({
             model: "gpt-4o-mini",
@@ -795,6 +798,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       let totalPhotoProt = extractProt(visionReply);
       // Strip internal TOTAL: line — used for extraction only, not shown to user
       const visionDisplay = visionReply.replace(/\nTOTAL:[^\n]*/i, "").trim();
+
+      // Safety net: food vision returned NOT_FOOD (pre-classifier missed it or wasn't run).
+      // Give a helpful response rather than showing "NOT_FOOD" to the user.
+      if (/^NOT_FOOD\b/i.test(visionDisplay)) {
+        const notFoodReply = `I can see that's not a food photo. If you're logging a meal, send a photo of the food or just type what you ate — e.g. *chicken and rice*. For steps, send a screenshot of your step count.`;
+        await logChat(user.id, "[Photo]", notFoodReply, "UNRECOGNISED_PHOTO");
+        return notFoodReply;
+      }
 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──
       const extraImageUrls = (allMediaUrls || []).filter(u => u !== mediaUrl);
