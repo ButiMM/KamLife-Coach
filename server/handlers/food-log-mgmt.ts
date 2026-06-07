@@ -7,7 +7,7 @@ import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart } from "../utils";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, parseFoodLogTotalsFromMessageOut, scanForSAFoods } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 
 function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
@@ -46,7 +46,20 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         });
 
         if (targetLog) {
-          await db.delete(mealLogs).where(eq(mealLogs.id, targetLog.id));
+          const logItems = (targetLog.items as Array<{ name?: string; kcal?: number; protein?: number }> | null) || [];
+          const deniedItem = logItems.find(i => (i.name || "").toLowerCase().includes(denied));
+
+          if (deniedItem && logItems.length > 1) {
+            // Subtract just the denied ingredient — keep the rest of the meal
+            const newItems = logItems.filter(i => i !== deniedItem);
+            const newKcal = Math.max(0, targetLog.kcalInt - (deniedItem.kcal || 0));
+            const newProt = Math.max(0, targetLog.proteinInt - (deniedItem.protein || 0));
+            await db.update(mealLogs).set({ kcalInt: newKcal, proteinInt: newProt, items: newItems }).where(eq(mealLogs.id, targetLog.id));
+          } else {
+            // Denied item is the whole meal (or items not stored) — delete the log entry
+            await db.delete(mealLogs).where(eq(mealLogs.id, targetLog.id));
+          }
+
           invalidateFoodTotalsCache(user.id);
           const recomputed = await recomputeTodayFoodTotals(user.id);
           await db.update(users)
@@ -59,7 +72,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           const remainingLine = remaining >= 0
             ? `Remaining: ~${remaining} kcal | ~${Math.max(0, protRem)}g protein still to go.`
             : `Over target by ~${Math.abs(remaining)} kcal.`;
-          return `Removed the entry with ${denied} from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\n${remainingLine}\n\nSend me what you actually had and I'll re-log it without the ${denied}.`;
+          return `Got it — ${denied} removed from your log. ✅\n\nUpdated total today: ~${recomputed.calories} kcal | ~${recomputed.protein}g protein.\n\n${remainingLine}`;
         }
         // Not found in any log today — fall through without handling
       } catch (err) {
@@ -238,14 +251,16 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       /^my\s+meals?$/i.test(m.trim())) {
     const todayStart = sastDayStart();
     const logs = await db.select({
-      messageIn: chatHistory.messageIn,
-      messageOut: chatHistory.messageOut,
-      createdAt: chatHistory.createdAt,
-    }).from(chatHistory).where(and(
-      eq(chatHistory.userId, user.id),
-      eq(chatHistory.intent, "FOOD_LOG"),
-      gte(chatHistory.createdAt, todayStart),
-    )).orderBy(asc(chatHistory.createdAt)).limit(20);
+      kcalInt: mealLogs.kcalInt,
+      proteinInt: mealLogs.proteinInt,
+      mealLabel: mealLogs.mealLabel,
+      rawMessage: mealLogs.rawMessage,
+      loggedAt: mealLogs.loggedAt,
+      source: mealLogs.source,
+    }).from(mealLogs).where(and(
+      eq(mealLogs.userId, user.id),
+      gte(mealLogs.loggedAt, todayStart),
+    )).orderBy(asc(mealLogs.loggedAt)).limit(20);
 
     if (logs.length === 0) return `No food logged yet today. Send your meal and I will track it.`;
 
@@ -253,19 +268,21 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     let totalCals = 0;
     let totalProtein = 0;
     for (const l of logs) {
-      const parsed = parseFoodLogTotalsFromMessageOut(l.messageOut || "");
-      if (parsed) {
-        totalCals += parsed.calories;
-        totalProtein += parsed.protein;
-      } else {
-        const matched = scanForSAFoods(l.messageIn || "");
-        totalCals += matched.reduce((s, f) => s + (f.typicalPortionCalories || 0), 0);
-        totalProtein += matched.reduce((s, f) => s + (f.typicalPortionProtein || 0), 0);
-      }
-      const time = l.createdAt ? new Date(l.createdAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit" }) : "--:--";
-      lines.push(`${time} — ${(l.messageIn || "[photo]").slice(0, 80)}`);
+      totalCals += l.kcalInt || 0;
+      totalProtein += l.proteinInt || 0;
+      const time = l.loggedAt ? new Date(l.loggedAt).toLocaleTimeString("en-ZA", { hour: "2-digit", minute: "2-digit", timeZone: "Africa/Johannesburg" }) : "--:--";
+      const label = l.mealLabel ? `[${l.mealLabel}] ` : l.source === "photo" ? "[photo] " : "";
+      const desc = l.source === "photo" ? "Food photo" : (l.rawMessage || "Meal").slice(0, 70);
+      lines.push(`${time} — ${label}${desc} (${l.kcalInt} kcal | ${l.proteinInt}g prot)`);
     }
-    return `*Today's meal log (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total so far:* ~${totalCals} kcal | ~${totalProtein}g protein`;
+    const calorieTarget = user.calorieTarget || 1800;
+    const proteinTarget = user.proteinTarget || 120;
+    const calRemaining = calorieTarget - totalCals;
+    const protRemaining = proteinTarget - totalProtein;
+    const remainingLine = calRemaining >= 0
+      ? `Remaining: ~${calRemaining} kcal | ~${Math.max(0, protRemaining)}g protein`
+      : `Over target by ~${Math.abs(calRemaining)} kcal`;
+    return `*Today's meals (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total:* ~${totalCals} kcal | ~${totalProtein}g protein\n${remainingLine}`;
   }
 
   return null;

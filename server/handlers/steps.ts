@@ -75,7 +75,7 @@ function _stepEquivalent(burnKcal: number): string {
   return "";
 }
 
-export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0): string {
+export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number): string {
   const idx = Math.floor(Date.now() / 86400000) % 5;
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
@@ -99,6 +99,14 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
 
   // Add equivalent note
   if (equivalent) response += ` ${equivalent}`;
+
+  // 7-day average context (only show when we have enough data and it's meaningful)
+  if (weeklyAvg && weeklyAvg > 0) {
+    const vsTarget = weeklyAvg >= target
+      ? `above target — keep it up.`
+      : `${(target - weeklyAvg).toLocaleString()} below your ${target.toLocaleString()} target.`;
+    response += `\n\n_7-day average: ${weeklyAvg.toLocaleString()} steps — ${vsTarget}_`;
+  }
 
   // Step streak celebration
   if (streak >= 7) {

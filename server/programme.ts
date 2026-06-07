@@ -1300,6 +1300,50 @@ function getExerciseSets(ex: Exercise, wSets: string, wReps: string, phase: numb
   return `${wSets} × ${wReps} reps`;
 }
 
+const EXERCISE_YOUTUBE: Record<string, string> = {
+  "smith squat": "https://www.youtube.com/results?search_query=smith+machine+squat+tutorial+form",
+  "leg press": "https://www.youtube.com/results?search_query=leg+press+machine+tutorial+form",
+  "goblet squat": "https://www.youtube.com/results?search_query=goblet+squat+dumbbell+tutorial+form",
+  "leg extension": "https://www.youtube.com/results?search_query=leg+extension+machine+tutorial+form",
+  "leg curl": "https://www.youtube.com/results?search_query=leg+curl+machine+tutorial+form",
+  "calf raise": "https://www.youtube.com/results?search_query=calf+raise+tutorial+form",
+  "chest press": "https://www.youtube.com/results?search_query=chest+press+machine+tutorial+form",
+  "dumbbell press": "https://www.youtube.com/results?search_query=dumbbell+bench+press+tutorial+form",
+  "lat pulldown": "https://www.youtube.com/results?search_query=lat+pulldown+tutorial+form",
+  "pull-up": "https://www.youtube.com/results?search_query=assisted+pull+up+tutorial+form",
+  "seated row": "https://www.youtube.com/results?search_query=seated+cable+row+tutorial+form",
+  "dumbbell row": "https://www.youtube.com/results?search_query=dumbbell+single+arm+row+tutorial",
+  "lateral raise": "https://www.youtube.com/results?search_query=dumbbell+lateral+raise+tutorial+form",
+  "cable lateral raise": "https://www.youtube.com/results?search_query=cable+lateral+raise+tutorial+form",
+  "bulgarian split squat": "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
+  "hip thrust": "https://www.youtube.com/results?search_query=barbell+hip+thrust+tutorial+form",
+  "glute bridge": "https://www.youtube.com/results?search_query=glute+bridge+exercise+tutorial+form",
+  "face pull": "https://www.youtube.com/results?search_query=face+pull+cable+tutorial+form",
+  "chest fly": "https://www.youtube.com/results?search_query=dumbbell+chest+fly+tutorial+form",
+  "bicep curl": "https://www.youtube.com/results?search_query=bicep+curl+dumbbell+tutorial+form",
+  "tricep pushdown": "https://www.youtube.com/results?search_query=tricep+cable+pushdown+tutorial+form",
+  "tricep extension": "https://www.youtube.com/results?search_query=tricep+overhead+extension+tutorial+form",
+  "cable kickback": "https://www.youtube.com/results?search_query=cable+kickback+tricep+tutorial+form",
+  "shoulder press": "https://www.youtube.com/results?search_query=dumbbell+shoulder+press+tutorial+form",
+  "romanian deadlift": "https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial",
+  "rdl": "https://www.youtube.com/results?search_query=romanian+deadlift+form+tutorial",
+  "push up": "https://www.youtube.com/watch?v=IODxDxX7oi4",
+  "push-up": "https://www.youtube.com/watch?v=IODxDxX7oi4",
+  "bodyweight squat": "https://www.youtube.com/results?search_query=bodyweight+squat+tutorial+form",
+  "walking lunge": "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
+  "reverse lunge": "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
+  "plank": "https://www.youtube.com/results?search_query=plank+exercise+tutorial+form",
+  "dead bug": "https://www.youtube.com/results?search_query=dead+bug+exercise+tutorial+form",
+};
+
+function getYoutubeLinkForExercise(name: string): string | undefined {
+  const key = name.toLowerCase();
+  for (const [k, url] of Object.entries(EXERCISE_YOUTUBE)) {
+    if (key.includes(k)) return url;
+  }
+  return undefined;
+}
+
 function formatGymDay(
   exercises: Exercise[],
   label: string,
@@ -1342,6 +1386,10 @@ function formatGymDay(
     }
     if (ex.modification && (isDumbbell || isBeginner)) {
       out += `_(Alt: ${ex.modification})_\n`;
+    }
+    const ytLink = ex.youtube || getYoutubeLinkForExercise(ex.name);
+    if (ytLink) {
+      out += `📺 ${ytLink}\n`;
     }
     out += `\n`;
   }

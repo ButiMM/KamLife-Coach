@@ -14,7 +14,7 @@ import { sendWhatsAppButtons } from "../../twilio-interactive";
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
   const todayDOW = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
-  if (todayDOW === 0) { console.log("[SCHEDULER] Morning check-in — skipping Sunday"); return; }
+  void todayDOW; // Sunday check removed — clients need morning coaching 7 days a week
 
   const clients = await getActiveClients();
 
@@ -217,7 +217,7 @@ export async function runMorningCheckin(): Promise<void> {
       }
 
       if (stepsLogged > 0) {
-        const stepsTarget = client.stepsTarget || 8500;
+        const stepsTarget = client.stepsTarget || 10000;
         parts.push(stepsLogged >= stepsTarget
           ? `Steps: ${stepsLogged.toLocaleString()} — target hit.`
           : `Steps: ${stepsLogged.toLocaleString()} of ${stepsTarget.toLocaleString()} target.`

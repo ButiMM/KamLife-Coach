@@ -442,8 +442,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       invalidatePatternCache(user.id);
-      const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
-      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak);
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+      const [perfectDay, streak, recentStepLogs] = await Promise.all([
+        checkPerfectDay(user.id, user.proteinTarget || 130),
+        getStepStreak(user.id),
+        db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
+          .limit(7),
+      ]);
+      const weeklyAvg = recentStepLogs.length >= 3
+        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
+        : undefined;
+      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg);
       stepReplyPart = stepReply + (perfectDay || "");
 
       // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too

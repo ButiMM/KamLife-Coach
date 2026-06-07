@@ -866,12 +866,14 @@ export async function handleFoodContext(ctx: {
         // Insert BEFORE computing running totals — eliminates race window where two concurrent
         // food logs both read 0 prior calories before either has written to DB
         const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+        const rawSlice = message.slice(0, 1000);
         const recentDup = await db.select({ id: mealLogs.id })
           .from(mealLogs)
           .where(and(
             eq(mealLogs.userId, user.id),
             gte(mealLogs.loggedAt, dedupWindow),
             eq(mealLogs.kcalInt, totalCals),
+            eq(mealLogs.rawMessage, rawSlice),
           ))
           .limit(1);
         if (recentDup.length === 0) {
