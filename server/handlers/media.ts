@@ -531,6 +531,29 @@ export async function handleMediaMessage(ctx: {
         await db.insert(progressPhotos).values({ userId: user.id, photoNumber, photoBase64: base64, contentType });
         await logChat(user.id, `[Progress Photo ${photoNumber}]`, "[Photo received]", "PROGRESS_PHOTO");
 
+        // Save any additional album photos as progress photos (client sends front/side/back together)
+        const albumExtrasProgress = (allMediaUrls || []).filter(u => u !== mediaUrl).slice(0, 3);
+        let albumSavedCount = 0;
+        if (albumExtrasProgress.length > 0) {
+          const imgAuthHeaderProg = "Basic " + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID || ""}:${process.env.TWILIO_AUTH_TOKEN || ""}`).toString("base64");
+          for (const extraUrl of albumExtrasProgress) {
+            try {
+              const r = await fetch(extraUrl, { headers: { Authorization: imgAuthHeaderProg } });
+              if (!r.ok) continue;
+              const buf = await r.arrayBuffer();
+              if (buf.byteLength > 10 * 1024 * 1024) continue;
+              const extraB64 = Buffer.from(buf).toString("base64");
+              const extraCtype = r.headers.get("content-type") || "image/jpeg";
+              const nextNum = (await db.select({ id: progressPhotos.id }).from(progressPhotos).where(eq(progressPhotos.userId, user.id))).length + 1;
+              await db.insert(progressPhotos).values({ userId: user.id, photoNumber: nextNum, photoBase64: extraB64, contentType: extraCtype });
+              await logChat(user.id, `[Progress Photo ${nextNum}]`, "[Album photo received]", "PROGRESS_PHOTO");
+              albumSavedCount++;
+            } catch (e) { console.warn("[progress album extra]", e); }
+          }
+        }
+        const totalProgressSaved = 1 + albumSavedCount;
+        const progressCountLabel = totalProgressSaved > 1 ? `${totalProgressSaved} photos saved` : "Photo saved";
+
         // ── PROGRESS PHOTO COMPARISON (follow-up via WhatsApp) ──────────────────
         // Trigger if: user has at least 1 earlier photo AND the earliest is 14+ days old.
         const earliestPhoto = existingPhotos.length > 0 ? existingPhotos[0] : null;
@@ -540,7 +563,7 @@ export async function handleMediaMessage(ctx: {
 
         if (comparisonEligible) {
           // Return an immediate acknowledgment, then fire comparison async.
-          const ackMsg = `Photo ${photoNumber} saved, ${clientName}. Give me a moment to compare it to your baseline — I will send the breakdown right away.`;
+          const ackMsg = `${progressCountLabel}, ${clientName}. Give me a moment to compare it to your baseline — I will send the breakdown right away.`;
           // Fire async — do not await so the webhook reply is fast.
           (async () => {
             try {
@@ -589,7 +612,7 @@ export async function handleMediaMessage(ctx: {
 
           return ackMsg;
         } else {
-          return `Saved, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
+          return `${progressCountLabel}, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
         }
       }
 
