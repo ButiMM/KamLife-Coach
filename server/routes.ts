@@ -346,15 +346,25 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
 
 
   // ---- SHOPPING / GROCERY LIST GUARD — must run BEFORE early commands ----
-  // A forwarded grocery/pantry list uses WhatsApp's "[ ]" checkbox format.
-  // Without this guard the alcohol handler in early-commands fires on
-  // "apple cider vinegar" + "soft drinks" from the list items, logging a fake drink.
-  const checkboxLines = message.split("\n").filter(l => /^\[\s*\]/.test(l.trim()));
-  if (checkboxLines.length >= 5) {
+  // Detect grocery/pantry lists regardless of format: checkboxes [ ]/[x], bullets, dashes,
+  // numbered lines, or plain one-item-per-line. The signal is: many short lines + no
+  // eating verbs. Without this, the alcohol handler misreads "cider" in "apple cider vinegar"
+  // and "drinks" in "soft drinks" as an alcohol log.
+  const _msgLines = message.split("\n").map(l => l.trim()).filter(Boolean);
+  const _cleanedItems = _msgLines
+    .map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim())
+    .filter(l => l.length > 1 && l.length < 80);
+  const _hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(m);
+  const _isListFormat = _msgLines.filter(l => /^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])/.test(l)).length >= 4;
+  const _isGroceryList = !_hasEatingContext && _cleanedItems.length >= 8 && (
+    _isListFormat ||
+    (_cleanedItems.every(l => l.split(/\s+/).length <= 6) && _msgLines.length >= 10)
+  );
+  if (_isGroceryList) {
     const clientName = user.name?.split(" ")[0] || "there";
     const goal = user.goalType || "fat_loss";
     const goalLabel = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
-    const listItems = checkboxLines.map(l => l.replace(/^\[\s*\]/, "").trim()).filter(Boolean).join(", ");
+    const listItems = _cleanedItems.join(", ");
     let listReply: string;
     try {
       const raw = await askCoachK(
