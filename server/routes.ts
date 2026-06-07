@@ -367,10 +367,24 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     const listItems = _cleanedItems.join(", ");
     let listReply: string;
     try {
+      const calTarget = user.calorieTarget || 1800;
+      const protTarget = user.proteinTarget || 120;
       const raw = await askCoachK(
         `My pantry/grocery list:\n${listItems}`,
         user,
-        `The client just sent their grocery/pantry list. In 3–4 sentences:\n1. Name 2–3 SPECIFIC items from their list that are strong for their ${goalLabel} goal.\n2. Name 1 specific item to watch or limit — be honest, not preachy.\n3. Final line: tell them to send what they eat each day (photo or words) so you can track it.\nNo generic praise. Be direct and specific.`
+        `The client sent their full grocery/pantry list. Their goal is ${goalLabel}. Daily targets: ${calTarget} kcal, ${protTarget}g protein.
+
+Do a real coaching review of this list — not 3 sentences, a proper breakdown. Use this structure (no bullet points, flowing paragraphs, Kam's direct SA voice):
+
+1. *Eat freely from these:* Name the lean proteins and vegetables on their list. Tell them WHY — these are the foundation of their meals.
+
+2. *Portion these carefully:* Name the carbs and calorie-dense items on their list that are good but easy to overeat. Give them a portion rule for each (e.g. "fist-size", "one cup cooked", "two slices max").
+
+3. *Watch out for these:* Name the processed meats, sugary drinks, high-calorie sauces and snacks on their list. Be direct — tell them exactly why each one slows their ${goalLabel} progress. Not preachy, just facts.
+
+4. One closing line: tell them to send you what they eat each day (photo or words) and you'll track the numbers.
+
+Write like a coach who has actually looked at their shopping, not a chatbot generating a report. No exclamation marks. No "great list". No numbered bullet points. Use *bold* only for the section headers above.`
       );
       listReply = raw.trim();
     } catch {
