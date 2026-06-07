@@ -49,11 +49,14 @@ export function requireAdminKey(req: any, res: any, next: any) {
   const cookies = parseCookies(req);
   if (cookies.admin_session && verifySessionToken(cookies.admin_session, secret)) return next();
 
-  // 2. Header fallback — server-rendered /coach page uses x-dashboard-key directly
+  // 2. Header fallback — server-rendered /coach page uses x-dashboard-key directly.
+  // Hash both values to equal length before timingSafeEqual — prevents key-length oracle via timing.
   const provided = (req.headers["x-dashboard-key"] as string) || "";
-  if (provided.length > 0 && provided.length === secret.length) {
+  if (provided.length > 0) {
     try {
-      if (crypto.timingSafeEqual(Buffer.from(provided), Buffer.from(secret))) return next();
+      const ph = crypto.createHash("sha256").update(provided).digest();
+      const sh = crypto.createHash("sha256").update(secret).digest();
+      if (crypto.timingSafeEqual(ph, sh)) return next();
     } catch {}
   }
 

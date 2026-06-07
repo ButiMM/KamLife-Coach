@@ -9,6 +9,17 @@ export function registerPaymentRoutes(app: Express) {
 
   // ── Twilio delivery status webhook ──
   app.post("/webhook/status", (req: any, res: any) => {
+    // Validate Twilio signature — prevents forged delivery status poisoning our logs.
+    const authToken = process.env.TWILIO_AUTH_TOKEN || "";
+    if (authToken) {
+      const sig = (req.headers["x-twilio-signature"] as string) || "";
+      const proto = (req.headers["x-forwarded-proto"] as string) || req.protocol;
+      const fullUrl = `${proto}://${req.get("host")}${req.originalUrl}`;
+      if (!twilio.validateRequest(authToken, sig, fullUrl, req.body)) {
+        console.warn(`[SECURITY] Delivery status — invalid Twilio signature from ${req.ip}`);
+        return res.status(403).end();
+      }
+    }
     res.sendStatus(200);
     try {
       const { MessageSid, MessageStatus, To, ErrorCode, ErrorMessage } = req.body;
@@ -81,9 +92,10 @@ export function registerPaymentRoutes(app: Express) {
         return;
       }
 
-      // Amount sanity check
-      if (paymentStatus === "COMPLETE" && (amountGross < 1 || amountGross > 500)) {
-        console.error(`[PAYFAST:${itnId}] REJECTED — amount R${amountGross} outside acceptable range (1–500)`);
+      // Amount validation — must match the subscription price within R5 tolerance.
+      // Accepting any amount between R1–500 would allow someone to pay R1 and get a subscription.
+      if (paymentStatus === "COMPLETE" && Math.abs(amountGross - PRICING.monthlyPriceZAR) > 5) {
+        console.error(`[PAYFAST:${itnId}] REJECTED — amount R${amountGross} doesn't match expected R${PRICING.monthlyPriceZAR} (tolerance ±R5)`);
         return;
       }
 
