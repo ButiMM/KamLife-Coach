@@ -352,9 +352,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   const checkboxLines = message.split("\n").filter(l => /^\[\s*\]/.test(l.trim()));
   if (checkboxLines.length >= 5) {
     const clientName = user.name?.split(" ")[0] || "there";
-    const reply = `Got your shopping list, ${clientName}. Once you've stocked up, just send me what you eat each day — a photo or a few words is enough. I do the rest.`;
-    await logChat(user.id, "[Shopping List]", reply, "SHOPPING_LIST");
-    return reply;
+    const goal = user.goalType || "fat_loss";
+    const goalLabel = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
+    const listItems = checkboxLines.map(l => l.replace(/^\[\s*\]/, "").trim()).filter(Boolean).join(", ");
+    let listReply: string;
+    try {
+      const raw = await askCoachK(
+        `My pantry/grocery list:\n${listItems}`,
+        user,
+        `The client just sent their grocery/pantry list. In 3–4 sentences:\n1. Name 2–3 SPECIFIC items from their list that are strong for their ${goalLabel} goal.\n2. Name 1 specific item to watch or limit — be honest, not preachy.\n3. Final line: tell them to send what they eat each day (photo or words) so you can track it.\nNo generic praise. Be direct and specific.`
+      );
+      listReply = raw.trim();
+    } catch {
+      listReply = `Got your list, ${clientName}. When you start eating, just send me what you have each day — a photo or a few words and I'll track the numbers.`;
+    }
+    await logChat(user.id, "[Shopping List]", listReply, "SHOPPING_LIST");
+    return listReply;
   }
 
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
