@@ -197,7 +197,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     if (!isSafety) {
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const cleanPhone = phone.replace(/^whatsapp:/, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       const name = user.name?.split(" ")[0] || "there";
 

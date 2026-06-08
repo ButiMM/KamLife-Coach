@@ -70,7 +70,7 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       const name = client.name || "there";
       const daysSinceFail = Math.floor((Date.now() - new Date(client.cancelledAt!).getTime()) / 86_400_000);
       const workouts = client.totalWorkoutsCompleted || 0;
-      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       if (daysSinceFail === 1) {
         await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`);
@@ -91,7 +91,7 @@ export async function runSignupNudge(): Promise<void> {
   for (const client of inactiveClients) {
     try {
       const name = client.name || "there";
-      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       const onboardingComplete = client.onboardingState === "COMPLETE" && !!client.goalType;
       const isNewSignup = onboardingComplete && !client.totalWorkoutsCompleted && !client.lastWorkoutDate;
@@ -136,7 +136,7 @@ export async function runSignupNudge(): Promise<void> {
       const daysSinceExpiry = Math.floor((Date.now() - expiredAt.getTime()) / 86_400_000);
       if (daysSinceExpiry !== 1 && daysSinceExpiry !== 3 && daysSinceExpiry !== 7) continue;
       const name = client.name || "there";
-      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
       const workouts = client.totalWorkoutsCompleted || 0;
       const hasProgress = workouts > 0;

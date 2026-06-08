@@ -513,7 +513,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const name = u.name || "there";
   const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
   const merchantId = process.env.PAYFAST_MERCHANT_ID;
-  const cleanPhoneOnb = u.phoneNumber.replace(/^whatsapp:/, "").replace(/\D/g, "");
+  const cleanPhoneOnb = u.phoneNumber.replace(/^whatsapp:/, "");
   const payLinkOnb = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneOnb)}` : appUrl;
 
   const goalCalExplainer: Record<string, string> = {
@@ -1158,7 +1158,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     const appUrlLeg = process.env.APP_URL || "https://kamlifecoach.co.za";
     const merchantIdLeg = process.env.PAYFAST_MERCHANT_ID;
-    const cleanPhoneLeg = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+    const cleanPhoneLeg = phone.replace(/^whatsapp:/, "");
     const payLinkLeg = merchantIdLeg ? `${appUrlLeg}/api/payfast/link?phone=${encodeURIComponent(cleanPhoneLeg)}` : appUrlLeg;
     const legCalExplainer = goal === "muscle_gain"
       ? `*What ${calorieTarget} kcal means:* This is a surplus above maintenance — fuel to build muscle. Don't undershoot it. 1 egg = ~6g protein. 100g chicken = ~31g. Hit ${proteinTarget}g protein daily and the programme works.`

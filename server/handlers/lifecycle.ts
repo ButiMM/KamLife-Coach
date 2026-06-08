@@ -795,7 +795,7 @@ export async function handleLifecycle(ctx: {
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const clientName = user.name ? `, ${user.name}` : "";
     if (merchantId && appUrl) {
-      const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const cleanPhone = phone.replace(/^whatsapp:/, "");
       const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
       const payReply = `Sharp${clientName}. Here is your payment link: ${payLink}\n\nR199/month — cancel anytime. Your profile and progress are saved and will be waiting when you activate.`;
       await logChat(user.id, message, payReply, "PAYMENT_REQUEST");
