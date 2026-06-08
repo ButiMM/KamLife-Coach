@@ -1,4 +1,5 @@
-import express, { type Express, type Request, type Response } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import crypto from "crypto";
 import { chatStorage } from "../chat/storage";
 import { openai, speechToText, ensureCompatibleFormat } from "./client";
 
@@ -6,6 +7,21 @@ import { openai, speechToText, ensureCompatibleFormat } from "./client";
 const audioBodyParser = express.json({ limit: "50mb" });
 
 export function registerAudioRoutes(app: Express): void {
+  // Auth guard for all audio/voice routes. These call OpenAI (STT + gpt-audio) and
+  // accept 50MB bodies, so an open endpoint is a cost/DoS vector. Require the coach
+  // dashboard key via x-coach-key; if no key is configured the routes are closed (503), never open.
+  const requireAudioAuth = (req: Request, res: Response, next: NextFunction) => {
+    const dashKey = process.env.COACH_DASHBOARD_KEY;
+    if (!dashKey) return res.status(503).json({ error: "Audio service not configured" });
+    const raw = req.headers["x-coach-key"];
+    const key = (Array.isArray(raw) ? raw[0] : raw) || "";
+    let authorized = false;
+    try { authorized = key.length === dashKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey)); } catch { authorized = false; }
+    if (!authorized) return res.status(403).json({ error: "Forbidden" });
+    next();
+  };
+  app.use(["/api/conversations", "/api/voice-conversations"], requireAudioAuth);
+
   const parseRouteId = (value: string | string[] | undefined): number => {
     const id = Array.isArray(value) ? value[0] : value;
     return Number.parseInt(id ?? "", 10);
