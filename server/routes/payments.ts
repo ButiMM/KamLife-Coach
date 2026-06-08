@@ -1,9 +1,17 @@
 import type { Express } from "express";
+import crypto from "crypto";
 import { db } from "../db";
 import { users, chatHistory, paymentEvents, adminEvents } from "../../shared/schema";
 import { eq, and } from "drizzle-orm";
 import twilio from "twilio";
 import { PRICING } from "../../shared/pricing";
+
+function checkAdminKey(provided: string | string[] | undefined): boolean {
+  const dashKey = process.env.COACH_DASHBOARD_KEY;
+  if (!dashKey) return false;
+  const key = (Array.isArray(provided) ? provided[0] : provided) || "";
+  try { return key.length === dashKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey)); } catch { return false; }
+}
 
 export function registerPaymentRoutes(app: Express) {
 
@@ -235,10 +243,7 @@ export function registerPaymentRoutes(app: Express) {
   // Use when PayFast ITN fires but webhook fails (network blip, etc.) and user paid but DB didn't update.
   // Protected by COACH_DASHBOARD_KEY so only the coach can call it.
   app.post("/api/admin/force-activate", async (req: any, res: any) => {
-    const authKey = req.headers["x-coach-key"];
-    if (authKey !== process.env.COACH_DASHBOARD_KEY) {
-      return res.status(403).json({ error: "Forbidden" });
-    }
+    if (!checkAdminKey(req.headers["x-coach-key"])) return res.status(403).json({ error: "Forbidden" });
     try {
       const { phone, reason } = req.body as { phone?: string; reason?: string };
       if (!phone) return res.status(400).json({ error: "phone required" });
@@ -267,8 +272,7 @@ export function registerPaymentRoutes(app: Express) {
 
   // ── Admin: test Twilio button (Content API) ──
   app.get("/api/admin/test-buttons", async (req: any, res: any) => {
-    const authKey = req.headers["x-coach-key"];
-    if (authKey !== process.env.COACH_DASHBOARD_KEY) return res.status(403).json({ error: "Forbidden" });
+    if (!checkAdminKey(req.headers["x-coach-key"])) return res.status(403).json({ error: "Forbidden" });
     const to = req.query.to as string;
     if (!to) return res.status(400).json({ error: "?to=whatsapp:+27..." });
     try {
@@ -341,8 +345,7 @@ export function registerPaymentRoutes(app: Express) {
   // Lists active subscribers who have no payment_events record — likely manually activated.
   // Also lists admin_events history so every force-activate is visible.
   app.get("/api/admin/reconcile", async (req: any, res: any) => {
-    const authKey = req.headers["x-coach-key"];
-    if (authKey !== process.env.COACH_DASHBOARD_KEY) return res.status(403).json({ error: "Forbidden" });
+    if (!checkAdminKey(req.headers["x-coach-key"])) return res.status(403).json({ error: "Forbidden" });
     try {
       const { pool } = await import("../db");
       // Active users with no matching payment event
