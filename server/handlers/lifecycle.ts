@@ -25,6 +25,7 @@ import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
+import { sendCriticalAlert } from "../scheduler/shared";
 import { sastToday, sastDayStart, proteinOptions } from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
@@ -740,8 +741,16 @@ export async function handleLifecycle(ctx: {
         subscriptionStatus: "inactive",
         cancelledAt: new Date(),
       }).where(eq(users.phoneNumber, phone));
+      // PayFast recurring billing keeps charging until the subscription is cancelled on
+      // PayFast's side — marking the user inactive locally does not stop the charge.
+      // Alert the founder to action the PayFast cancellation so the user is not billed again.
+      const coachAlertPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+      if (coachAlertPhone) {
+        const alertTo = `whatsapp:+${coachAlertPhone.replace(/\D/g, "")}`;
+        await sendCriticalAlert(alertTo, `[BILLING] ${name} (${phone}) cancelled their subscription. Cancel their PayFast recurring billing${user.paymentReference ? ` (ref: ${user.paymentReference})` : ""} now so they are not charged again.`).catch((e) => console.error("[CANCEL] Founder alert failed:", e));
+      }
       const appUrl2 = process.env.APP_URL || "https://kamlifecoach.co.za";
-      const confirmedCancelReply = `Done, ${name}. Subscription cancelled — no more charges.\n\nYour profile and ${user.totalWorkoutsCompleted || 0} sessions are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
+      const confirmedCancelReply = `Done, ${name}. Your coaching is stopped and your recurring billing is being cancelled — you will not be charged again. If you ever see another charge, reply *refund* and we will sort it immediately.\n\nYour profile and ${user.totalWorkoutsCompleted || 0} sessions are saved for 90 days. Come back anytime.\n\nIf you change your mind, reply *rejoin* or visit ${appUrl2}.`;
       await logChat(user.id, message, confirmedCancelReply, "CANCEL_CONFIRMED");
       return confirmedCancelReply;
     } else {
