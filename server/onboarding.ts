@@ -730,10 +730,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       await db.update(users).set({
         goalType: goal,
         proteinTarget: Math.round(w * 2),
-        onboardingState: "ASK_EQUIPMENT",
+        onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
       const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
-      return `Goal locked in: *${goalLabel}*.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+      return `Goal locked in: *${goalLabel}*.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
     }
 
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
@@ -752,9 +752,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         heightCm: null,
         bmi: null,
         proteinTarget: Math.round(fallbackWeight * 2),
-        onboardingState: "ASK_EQUIPMENT",
+        onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
-      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
     }
 
     const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
@@ -795,10 +795,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       heightCm: heightCmVal,
       bmi: bmiVal,
       proteinTarget: Math.round(weight * 2),
-      onboardingState: "ASK_EQUIPMENT",
+      onboardingState: "ASK_MEDICAL",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nGym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
   }
 
   // ---- ASK_EQUIPMENT — route by training location ----
