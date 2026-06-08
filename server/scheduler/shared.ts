@@ -339,7 +339,13 @@ export async function getActiveClients(opts?: { ignorePause?: boolean }) {
   return db.select().from(users).where(
     and(
       eq(users.onboardingState, "COMPLETE"),
-      eq(users.subscriptionStatus, "active")
+      or(
+        eq(users.subscriptionStatus, "active"),
+        and(
+          eq(users.subscriptionStatus, "trial"),
+          gte(users.betaBypassUntil, new Date())
+        )
+      )
     )
   );
 }
