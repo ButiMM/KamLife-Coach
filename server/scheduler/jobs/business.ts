@@ -45,10 +45,13 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
         const daysLeft = Math.ceil(msUntilRenewal / 86_400_000);
         await sendCriticalAlert(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
       }
-      if (msUntilRenewal < 0 && client.subscriptionStatus === "active") {
+      // 3-day grace period: PayFast recurring ITNs can land hours late and monthly
+      // billing isn't exactly 30 days — only expire once renewal is >3 days overdue.
+      if (msUntilRenewal < -threeDaysMs && client.subscriptionStatus === "active") {
+        const daysOverdue = Math.floor(-msUntilRenewal / 86_400_000);
         await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date() }).where(eq(users.phoneNumber, client.phoneNumber));
         await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
-        console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber}`);
+        console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber} — renewal ${daysOverdue} day(s) overdue, no PayFast ITN received`);
       }
     } catch (err) { console.error(`[SCHEDULER] Subscription expiry error — ${client.phoneNumber}:`, err); }
   }
