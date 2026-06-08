@@ -449,7 +449,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: matchedMeal.carbsInt,
           fatInt: matchedMeal.fatInt,
           items: matchedMeal.items,
-        }).catch(() => {});
+        }).catch((e) => { console.error("[quick_relog mealLogs insert]", e); throw e; });
         invalidatePatternCache(user.id);
         invalidateFoodTotalsCache(user.id);
         const calorieTarget = user.calorieTarget || 2000;
@@ -474,7 +474,7 @@ export async function handleFoodContext(ctx: {
       return `♻️ Same meal logged: "${toRepeat.slice(0, 80)}"\n\n${repeatReply}`;
     } catch (err) {
       console.error("[REPEAT MEAL]", err);
-      return `Could not find a recent meal to repeat. Tell me what you had.`;
+      return `Something went wrong logging that meal. Please type what you ate (e.g. "pap and chicken") and I will log it directly.`;
     }
   }
 
