@@ -862,6 +862,7 @@ export async function handleFoodContext(ctx: {
 
       const scannerLoggedAt = parseMealDate(message);
       const scannerIsRetro = isRetroactiveMeal(message);
+      let mealLogInsertOk = true;
       try {
         // Insert BEFORE computing running totals — eliminates race window where two concurrent
         // food logs both read 0 prior calories before either has written to DB
@@ -908,7 +909,13 @@ export async function handleFoodContext(ctx: {
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
         }
-      } catch (e) { console.error("[MEAL_LOG] mealLogs insert failed — user:", user.id?.slice(-6), "kcal:", e); }
+      } catch (e) { mealLogInsertOk = false; console.error("[MEAL_LOG] mealLogs insert failed — user:", user.id?.slice(-6), "kcal:", e); }
+
+      if (!mealLogInsertOk) {
+        const failReply = `Eish — I worked out that meal (~${totalCals} kcal | ${Math.round(totalProtein)}g protein) but couldn't save it just now. Send it again in a moment and I'll log it.`;
+        await logChat(user.id, message, failReply, "FOOD_LOG_FAILED");
+        return failReply;
+      }
 
       // Recompute AFTER insert — fresh totals include just-inserted meal and any concurrent meals
       let runningCals = prevCals + totalCals;
