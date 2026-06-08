@@ -149,8 +149,10 @@ export function registerPaymentRoutes(app: Express) {
           }).where(eq(users.phoneNumber, normalisedPhone));
 
           if (wasInactive && targetUser.referredBy) {
+            // referredBy stores the inviter's user id (UUID), set in the "join CODE" flow —
+            // match on users.id, not users.referralCode, or the referrer is never found.
             const [referrer] = await tx.select().from(users)
-              .where(eq(users.referralCode, targetUser.referredBy))
+              .where(eq(users.id, targetUser.referredBy))
               .limit(1);
             if (referrer && referrer.subscriptionStatus === "active") {
               const newExpiry = new Date(
