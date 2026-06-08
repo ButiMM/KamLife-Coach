@@ -988,6 +988,10 @@ export async function handleMiscCommands(ctx: {
       if (avgDaily >= waterTarget * 0.9) grade = "🟢";
       else if (avgDaily >= waterTarget * 0.6) grade = "🟡";
 
+      const wrTodaySAST = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+      const wrYestSAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
+      const displayedWaterStreak = (user.waterLastResetDate === wrTodaySAST || user.waterLastResetDate === wrYestSAST) ? (user.waterStreak || 0) : 0;
+
       const historyLines = days.slice(0, 7).map(([date, litres]) => {
         const d = new Date(date).toLocaleDateString("en-ZA", { weekday: "short", day: "numeric", month: "short" });
         const emoji = litres >= waterTarget ? "✅" : litres >= waterTarget * 0.5 ? "⚠️" : "🔴";
@@ -998,7 +1002,7 @@ export async function handleMiscCommands(ctx: {
         `Target: *${waterTarget}L/day* (based on ${wKg}kg)\n` +
         `Average: *${avgDaily.toFixed(1)}L/day* ${grade}\n` +
         `Target hit: ${targetHitDays}/${days.length} days\n` +
-        `Streak: ${user.waterStreak || 0} days\n\n` +
+        `Streak: ${displayedWaterStreak} days\n\n` +
         `_Last 7 days:_\n${historyLines}\n\n` +
         (avgDaily < waterTarget * 0.6 ? `You are significantly under-hydrated. Dehydration slows fat loss, kills energy, and makes training harder. Set a phone alarm every 2 hours to drink.` :
          avgDaily < waterTarget * 0.9 ? `Close but not consistent. Carry a bottle everywhere. If you can see it, you will drink it.` :
@@ -1016,7 +1020,9 @@ export async function handleMiscCommands(ctx: {
   if (m === "badges" || m === "achievements" || m === "my badges" || m === "my achievements" || m === "trophies" || /\b(badge|achievement|trophy|unlock|reward)\b/i.test(m)) {
     const totalWorkouts = user.totalWorkoutsCompleted || 0;
     const streak = user.workoutStreak || 0;
-    const waterStreak = user.waterStreak || 0;
+    const wsBadgeTodaySAST = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+    const wsBadgeYestSAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
+    const waterStreak = (user.waterLastResetDate === wsBadgeTodaySAST || user.waterLastResetDate === wsBadgeYestSAST) ? (user.waterStreak || 0) : 0;
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
     const name = user.name?.split(" ")[0] || "Champ";
 
