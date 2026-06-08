@@ -997,6 +997,7 @@ export async function handleFoodContext(ctx: {
               eq(mealLogs.userId, user.id),
               gte(mealLogs.loggedAt, gptDedupWindow),
               eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
+              eq(mealLogs.rawMessage, message.slice(0, 1000)),
             ))
             .limit(1);
           if (gptRecentDup.length === 0) {
@@ -1080,6 +1081,7 @@ export async function handleFoodContext(ctx: {
             eq(mealLogs.userId, user.id),
             gte(mealLogs.loggedAt, fb2DedupWindow),
             eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
+            eq(mealLogs.rawMessage, message.slice(0, 1000)),
           ))
           .limit(1);
         if (fb2RecentDup.length === 0) {
