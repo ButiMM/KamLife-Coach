@@ -1034,7 +1034,10 @@ export async function handleFoodContext(ctx: {
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
         const fbGuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}`;
+        const protClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fbIsSnack && !fbIsDessert)
+          ? `\n\nWhat protein did you have with this? Chicken, eggs, tuna, beans — send it and I'll add it to your total.`
+          : "";
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}`;
       }
     }
   }
@@ -1115,7 +1118,10 @@ export async function handleFoodContext(ctx: {
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
       const fb2GuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}`;
+      const fb2ProtClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fb2IsSnack && !fb2IsDessert)
+        ? `\n\nWhat protein did you have with this? Chicken, eggs, tuna, beans — send it and I'll add it to your total.`
+        : "";
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}`;
     }
     // GPT returned null — can't identify the food. Ask for clarification instead of silently dropping.
     console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
