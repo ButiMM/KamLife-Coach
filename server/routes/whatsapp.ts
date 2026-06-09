@@ -97,11 +97,12 @@ async function processVoiceAsync(
 ): Promise<void> {
   try {
     const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
-    const parts = reply.split(/\n\n---\n\n/).filter(Boolean);
+    const parts = splitMessage(reply);
     await sendParts(phone, parts, null);
     console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-6)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
+    await sendParts(phone, ["I got your voice note but had a moment — please send it again or type your message."], null).catch(() => {});
   }
 }
 
@@ -326,7 +327,8 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       // ── ASYNC VOICE: ACK immediately, process in background ──
       // Twilio hard-kills after 15s. Whisper takes 20-38s. We can never finish in time synchronously.
       if (audioMedia && mediaUrl) {
-        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>🎤 Coach K is listening... I'll reply in a moment.</Message></Response>`);
+        res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        sendParts(rawPhone, ["🎤 Coach K is listening... I'll reply in a moment."], null).catch(() => {});
         processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage).catch(() => {});
         return;
       }
