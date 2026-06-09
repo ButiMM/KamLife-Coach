@@ -70,6 +70,10 @@ export async function runEveningAccountability(): Promise<void> {
       const protHit = todayProt >= Math.round(protTarget * 0.9);
       const stepCount = todayStep?.steps ?? 0;
       const goal = client.goalType || "fat_loss";
+      const calTarget = client.calorieTarget || 0;
+      // Mirrors the calorieCeilingHit logic in food-scanner — don't push more food/protein
+      // when the user is already meaningfully over their daily calorie budget.
+      const calorieCeilingHit = calTarget > 0 && (todayCal - calTarget) >= 100;
 
       // Proactive dinner suggestion: user has been active today but no dinner logged yet.
       // Identify "dinner" as a meal logged in the last 4 hours — if absent and it's evening, suggest.
@@ -82,7 +86,7 @@ export async function runEveningAccountability(): Promise<void> {
       const noDinnerYet = !recentMeal;
       const hasBeenActive = todayCal > 0 || workedOut || stepCount > 1000;
 
-      if (noDinnerYet && hasBeenActive && !sick && await claimDailySlot(client.id, "evening")) {
+      if (noDinnerYet && hasBeenActive && !sick && !calorieCeilingHit && await claimDailySlot(client.id, "evening")) {
         const protGap = protTarget - todayProt;
         let dinnerSuggestion: string;
         if (goal === "muscle_gain") {
@@ -110,7 +114,7 @@ export async function runEveningAccountability(): Promise<void> {
         } else if (workedOut && stepsDone) {
           msg = `${name}, session done and ${stepCount.toLocaleString()} steps. Log tonight's food so I can track your protein.`;
         } else if (workedOut) {
-          msg = `${name}, session done. ${todayCal > 0 ? `${todayProt}g protein logged — get to ${protTarget}g tonight.` : `No food logged. Log tonight's meal.`}`;
+          msg = `${name}, session done. ${todayCal > 0 ? (calorieCeilingHit ? `${todayProt}g protein logged — calories done for today.` : `${todayProt}g protein logged — get to ${protTarget}g tonight.`) : `No food logged. Log tonight's meal.`}`;
         } else if (isTrainingDay) {
           const foodLine = todayCal > 0 ? ` Food's in.` : ``;
           const sessionMsg = `${name}, training day and the session is still not done.${foodLine} You've got tonight — what's the plan?`;
@@ -123,7 +127,7 @@ export async function runEveningAccountability(): Promise<void> {
           }
           continue;
         } else if (stepsDone) {
-          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
+          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : calorieCeilingHit ? "calories done for today." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
         } else if (todayCal > 0 || stepCount > 0) {
           const done = stepCount > 0 ? `${stepCount.toLocaleString()} steps` : `food logged`;
           const gap = stepCount < stepsTarget ? `${(stepsTarget - stepCount).toLocaleString()} steps short` : `protein at ${todayProt}g — get to ${protTarget}g`;

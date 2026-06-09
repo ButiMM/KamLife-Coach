@@ -15,6 +15,7 @@ export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
   const todayDOW = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
   void todayDOW; // Sunday check removed — clients need morning coaching 7 days a week
+  const yesterdayDOW = (todayDOW - 1 + 7) % 7;
 
   const clients = await getActiveClients();
 
@@ -74,7 +75,9 @@ export async function runMorningCheckin(): Promise<void> {
           const wStreak = client.workoutStreak || 0;
           const currentMonth = todaySAST().slice(0, 7);
           const shieldUsedMonth = (client.profileNotes || "").match(/streak_shield:(\d{4}-\d{2})/)?.[1];
-          const shieldAvailable = wStreak >= 3 && shieldUsedMonth !== currentMonth;
+          const clientSchedule = TRAINING_SCHEDULES[client.trainingDaysPerWeek || 4] || TRAINING_SCHEDULES[4];
+          const wasYesterdayTrainingDay = clientSchedule.includes(yesterdayDOW);
+          const shieldAvailable = wasYesterdayTrainingDay && wStreak >= 3 && shieldUsedMonth !== currentMonth;
           if (shieldAvailable) {
             const updatedNotes = (client.profileNotes || "").replace(/streak_shield:\d{4}-\d{2}/, "").trim() + ` streak_shield:${currentMonth}`;
             await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
