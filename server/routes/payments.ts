@@ -107,7 +107,12 @@ export function registerPaymentRoutes(app: Express) {
         return;
       }
 
-      const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+      // Rebuild from digits so the lookup matches regardless of how PayFast encodes
+      // custom_str1 on the ITN. Form-encoded POST bodies decode "+" to a space, so a
+      // value sent as "+27..." can arrive as "27..." or " 27..." — all must resolve to
+      // the canonical "whatsapp:+<digits>" Twilio stores.
+      const phoneDigits = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const normalisedPhone = `whatsapp:+${phoneDigits}`;
       const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
       if (!targetUser) {
         console.error(`[PAYFAST:${itnId}] REJECTED — no user found for phone: ${safePhone}`);
@@ -247,7 +252,9 @@ export function registerPaymentRoutes(app: Express) {
     try {
       const { phone, reason } = req.body as { phone?: string; reason?: string };
       if (!phone) return res.status(400).json({ error: "phone required" });
-      const normalisedPhone = phone.startsWith("whatsapp:") ? phone : `whatsapp:${phone}`;
+      // Normalise from digits — admin may paste with/without "+" or "whatsapp:" prefix.
+      const phoneDigits = phone.replace(/^whatsapp:/, "").replace(/\D/g, "");
+      const normalisedPhone = `whatsapp:+${phoneDigits}`;
       const [targetUser] = await db.select().from(users).where(eq(users.phoneNumber, normalisedPhone)).limit(1);
       if (!targetUser) return res.status(404).json({ error: "User not found" });
       const renewsAt = new Date(Date.now() + 30 * 86_400_000);
