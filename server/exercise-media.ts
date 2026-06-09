@@ -436,6 +436,31 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
 }
 
 /**
+ * Returns a form cue appropriate for the exercise type.
+ * Strength exercises get tempo coaching; cardio/isometric exercises get movement coaching.
+ */
+export function getExerciseDemoFormCue(exerciseName: string): string {
+  const n = exerciseName.toLowerCase();
+  if (/mountain.?climber|burpee|jumping.?jack|high.?knee|jump.?squat|box.?jump|sprint|skater/.test(n))
+    return "Core locked, hips level throughout. Drive alternating knees to your chest — controlled speed, not just fast. Stop if your hips pike up.";
+  if (/\bplank\b|dead.?bug|hollow.?hold|ab.?wheel/.test(n))
+    return "Press lower back toward neutral. Core braced hard — brace like you're about to get hit. Breathe steadily. Do not hold your breath.";
+  if (/push.?up|press.?up/.test(n))
+    return "Hands just outside shoulder width. Lower your chest to the floor — full range. Drive through palms. Core tight, no sagging hips.";
+  if (/pull.?up|chin.?up/.test(n))
+    return "Start from a dead hang. Drive elbows down to your back pockets — that's what moves you up. Chin over bar at top, full extension at bottom.";
+  if (/lunge|split.?squat|step.?up/.test(n))
+    return "Front knee tracks over toes — never caving in. Lower your back knee toward the floor. Drive through the front heel to stand.";
+  if (/hip.?thrust|glute.?bridge/.test(n))
+    return "Drive hips up explosively. Squeeze glutes hard at the top for 1 full second. Lower slowly.";
+  if (/calf.?raise/.test(n))
+    return "Heel as low as possible at the bottom. Rise all the way up onto toes. Pause at the top. No bouncing.";
+  if (/rdl|romanian|deadlift|hinge/.test(n))
+    return "Push hips back — not down. Flat back the entire way. Feel the hamstring stretch at the bottom. Drive hips forward to stand.";
+  return "Control the tempo — 2 seconds down, drive up with intent. Full range of motion on every rep.";
+}
+
+/**
  * Scans a workout text block for the first bolded exercise name (*Exercise Name*)
  * and returns its image URL, or null.
  */

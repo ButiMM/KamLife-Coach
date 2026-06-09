@@ -11,7 +11,7 @@ import {
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
 import { SUPPLEMENT_GUIDE } from "../constants";
-import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "../exercise-media";
+import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExerciseDemoFormCue } from "../exercise-media";
 import {
   buildDayWorkout, buildDayWorkoutForType, buildFullProgramme,
   getKamlifeProgramme, getDayType,
@@ -1559,7 +1559,8 @@ export async function handleMiscCommands(ctx: {
       const demoGifUrl = getExerciseGifUrl(demoName);
       const displayName = demoName.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
       if (demoGifUrl) {
-        const demoReply = `*${displayName} — Form Demo*\n\nWatch the movement. Slow on the way down, drive on the way up — control every rep.\n\nDoing it today? Hit *done* after your session and tell me how it felt. If anything feels sharp, stop and reply *injury*.\n[MEDIA:${demoGifUrl}]`;
+        const formCue = getExerciseDemoFormCue(demoName);
+        const demoReply = `*${displayName} — Form Demo*\n\n${formCue}\n\nDoing it today? Hit *done* after your session and tell me how it felt. If anything feels sharp, stop and reply *injury*.\n[MEDIA:${demoGifUrl}]`;
         await logChat(user.id, message, `${displayName} — Form Demo (image sent)`, "EXERCISE_DEMO");
         return demoReply;
       }
