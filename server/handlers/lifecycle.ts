@@ -1142,13 +1142,19 @@ export async function handleLifecycle(ctx: {
     const hasWeight = recentWt.length > 0;
     const todayStr = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }).split("/").reverse().join("-");
     const todayProtein = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
+    const todayCalsForAdvice = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
     const protTarget = user.proteinTarget || 120;
     type Gap = { action: string };
     const gaps: Gap[] = [];
     if (sessions < sessionsTarget) gaps.push({ action: `Complete your ${sessionsTarget} training sessions this week — you have done ${sessions}. Even a 30-minute session counts.` });
     if (avgSteps > 0 && avgSteps < stepsTarget * 0.85) gaps.push({ action: `Get your steps up to ${stepsTarget.toLocaleString()}/day — you are averaging ${avgSteps.toLocaleString()}. Park further, walk at lunch, take the stairs.` });
     if (!hasWeight) gaps.push({ action: `Log your weight. Step on the scale tomorrow morning (after bathroom, before eating) and send me the number. I need data to coach you.` });
-    if (todayProtein > 0 && todayProtein < protTarget * 0.65) gaps.push({ action: `Hit your ${protTarget}g protein target — you are only at ${todayProtein}g today. Eggs, chicken, pilchards, or a protein shake before bed.` });
+    if (todayProtein > 0 && todayProtein < protTarget * 0.65) {
+      const calCeiling = (user.calorieTarget || 0) > 0 && (todayCalsForAdvice - (user.calorieTarget || 0)) >= 100;
+      gaps.push({ action: calCeiling
+        ? `Protein was ${protTarget - todayProtein}g short today — carry it into tomorrow's first meal. Aim for ${protTarget}g tomorrow.`
+        : `Hit your ${protTarget}g protein target — you are only at ${todayProtein}g today. Eggs, chicken, pilchards, or a protein shake before bed.` });
+    }
     let adviceReply: string;
     if (gaps.length === 0) {
       adviceReply = `${fn ? fn + ", you" : "You"} are doing the work — sessions, steps, and data are all consistent.\n\n*Next gear:* Pick one exercise this week and add weight or reps to what you did last time. That is progressive overload. That is where results compound.\n\nKeep it simple. Same programme, slightly harder. Update me after your next session.`;
