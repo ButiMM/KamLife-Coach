@@ -179,7 +179,8 @@ export async function handleMiscCommands(ctx: {
     const todayProt = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
-    const calLeft = Math.max(0, calTarget - todayCals);
+    const calLeftRaw = calTarget - todayCals;
+    const calLeft = Math.max(0, calLeftRaw);
     const protLeft = Math.max(0, protTarget - todayProt);
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name?.split(" ")[0] || "";
@@ -191,6 +192,16 @@ export async function handleMiscCommands(ctx: {
     const highCalBudget = calLeft > 800;
 
     let suggestion = `*🍽️ Next Meal Suggestion${name ? ` — ${name}` : ""}*\n\n`;
+
+    // Calorie target already hit — suggesting more food contradicts the day's assessment
+    if (todayCals > 0 && calLeftRaw <= 0) {
+      const protNote = protLeft > 20
+        ? `${protLeft}g protein short — carry it to tomorrow.`
+        : "Protein on track. ✅";
+      suggestion += `Calorie target reached. ${protNote}\n\nNo more food needed today — water only.`;
+      await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
+      return suggestion;
+    }
 
     if (todayCals === 0) {
       suggestion += `No food logged yet today.\n\n`;
