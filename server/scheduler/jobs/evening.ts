@@ -130,7 +130,11 @@ export async function runEveningAccountability(): Promise<void> {
           msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : calorieCeilingHit ? "calories done for today." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
         } else if (todayCal > 0 || stepCount > 0) {
           const done = stepCount > 0 ? `${stepCount.toLocaleString()} steps` : `food logged`;
-          const gap = stepCount < stepsTarget ? `${(stepsTarget - stepCount).toLocaleString()} steps short` : `protein at ${todayProt}g — get to ${protTarget}g`;
+          const gap = stepCount < stepsTarget
+            ? `${(stepsTarget - stepCount).toLocaleString()} steps short`
+            : calorieCeilingHit
+              ? `calories done for today — carry protein into tomorrow's first meal`
+              : `protein at ${todayProt}g — get to ${protTarget}g`;
           msg = `${name}, ${done} today. ${gap}. One more thing before bed.`;
         } else {
           msg = `${name}, nothing logged today. Log one meal tonight — that is the only job.`;
