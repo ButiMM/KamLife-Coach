@@ -232,8 +232,12 @@ function fallbackScript(firstName: string, data: ClientWeekData): string {
   const goal = data.goalType || "fat_loss";
   if (w >= target) {
     const stepLine = data.avgStepsThisWeek >= stepsTarget
-      ? `${s} steps a day on top of that means your daily deficit is real.`
-      : `Steps at ${s} — that needs to come up to ${stepsTarget.toLocaleString()} to support the deficit.`;
+      ? goal === "muscle_gain"
+        ? `${s} steps a day alongside training — active recovery without killing the surplus.`
+        : `${s} steps a day on top of that means your daily deficit is real.`
+      : goal === "muscle_gain"
+        ? `Steps at ${s} — aim for ${stepsTarget.toLocaleString()} to support recovery without overcooking the burn.`
+        : `Steps at ${s} — that needs to come up to ${stepsTarget.toLocaleString()} to support the deficit.`;
     return `Hey ${firstName}, it's Coach K. ${w} out of ${target} sessions this week — you earned that. ${stepLine} This week: log your weight every morning. I need that data to tell if the ${goal === "muscle_gain" ? "muscle" : "fat"} is actually moving.`;
   }
   const missed = target - w;
