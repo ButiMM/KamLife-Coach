@@ -764,7 +764,7 @@ export async function handleLifecycle(ctx: {
   if (m === "cancel" || m === "cancel subscription" || m === "unsubscribe" || m === "stop coaching" || m === "stop subscription") {
     const alreadyInactive = user.subscriptionStatus === "inactive";
     if (alreadyInactive) {
-      const payLink2 = process.env.APP_URL ? `${process.env.APP_URL}/api/payfast/link?phone=${encodeURIComponent(phone.replace(/^whatsapp:/, "").replace(/\D/g, ""))}` : process.env.APP_URL || "https://kamlifecoach.co.za";
+      const payLink2 = process.env.APP_URL ? `${process.env.APP_URL}/api/payfast/link?phone=${encodeURIComponent(phone.replace(/^whatsapp:/, ""))}` : process.env.APP_URL || "https://kamlifecoach.co.za";
       const cancelledAlreadyReply = `Your subscription is already inactive. Your profile and ${user.totalWorkoutsCompleted || 0} sessions are saved.\n\nReady to restart? ${payLink2}`;
       await logChat(user.id, message, cancelledAlreadyReply, "CANCEL");
       return cancelledAlreadyReply;
