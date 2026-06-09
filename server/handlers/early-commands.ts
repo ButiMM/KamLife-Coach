@@ -91,7 +91,10 @@ export async function handleEarlyCommands(ctx: {
       const remaining = cal - todayCals;
       const protRemaining = prot - todayProt;
       if (todayCals > 0) {
-        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅`}\n\nHit protein first — everything else follows.`;
+        const calDone = remaining <= 0;
+        const protShortNote = calDone && protRemaining > 0 ? ` ${protRemaining}g protein short — carry to tomorrow.` : "";
+        const actionLine = calDone ? "" : `\n\nHit protein first — everything else follows.`;
+        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}`;
       }
       return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
     } catch (err) {
