@@ -16,7 +16,7 @@ function isJunk(msg: string): boolean {
   return JUNK_WORDS.some(w => msg.includes(w));
 }
 
-export async function checkFoodPatterns(userId: string): Promise<string | null> {
+export async function checkFoodPatterns(userId: string, calorieCeilingHit = false): Promise<string | null> {
   try {
     const todayStart = sastDayStart();
     const recent = await db.select().from(chatHistory)
@@ -60,6 +60,9 @@ export async function checkFoodPatterns(userId: string): Promise<string | null> 
     if (recentMealLogs.length >= 3) {
       const noProteinStreak = recentMealLogs.filter(r => (r.proteinInt || 0) === 0).length;
       if (noProteinStreak >= 3) {
+        if (calorieCeilingHit) {
+          return `⚠️ *Protein pattern:* Three meals in a row without protein. Carry protein into tomorrow's first meal — eggs or chicken at breakfast covers the gap.`;
+        }
         return `⚠️ *Protein missing:* Three meals in a row with no protein logged. Your muscle target and fat loss both depend on hitting your protein. Eggs, tinned tuna, chicken, or beans — pick one for the next meal.`;
       }
     }

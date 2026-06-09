@@ -526,7 +526,10 @@ SA voice. Direct. Coach forward, not backward.`;
   const gptFoodMatch = scanForSAFoods(m);
   const isFoodLog = !isLogCommand && !isQuestion && !isFrustration && hasLogTrigger && gptFoodMatch.length > 0;
   if (isFoodLog) {
-    const pattern = await checkFoodPatterns(user.id);
+    const _todayStrP = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }).split("/").reverse().join("-");
+    const _todayCalsP = user.todayCaloriesDate === _todayStrP ? (user.todayCalories || 0) : 0;
+    const _calCeilingForPattern = (user.calorieTarget || 0) > 0 && (_todayCalsP - (user.calorieTarget || 0)) >= 100;
+    const pattern = await checkFoodPatterns(user.id, _calCeilingForPattern);
     const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
