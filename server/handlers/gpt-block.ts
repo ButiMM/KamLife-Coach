@@ -75,10 +75,13 @@ export async function handleGptBlock(ctx: {
         ? `step target hit (${todaySteps.toLocaleString()} steps)`
         : `${(stepTarget - todaySteps).toLocaleString()} steps short (${todaySteps.toLocaleString()} done so far)`;
 
+    const progContext = user.programmePhase
+      ? `\n- Programme: Phase ${user.programmePhase}, Week ${user.programmeWeek || 1}, Day ${user.programmeDayInWeek || 1}`
+      : "";
     todayStatusBlock = `\n\nCLIENT STATUS RIGHT NOW (${sastHour}:00 SAST):
 - Calories: ${calEaten} kcal eaten / ${calTarget} target → ${calStatus}
 - Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
-- Steps today: ${stepStatus}
+- Steps today: ${stepStatus}${progContext}
 USE THIS DATA. If they are over on calories — call it out with the number. If short on protein — give one specific high-protein food. Do not ignore this data.`;
   } catch (e) { /* non-fatal — context is best-effort */ }
 
