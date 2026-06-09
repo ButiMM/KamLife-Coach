@@ -453,6 +453,10 @@ export function buildFoodLogReply(p: {
     : 0;
 
   const effectiveRemaining = calRemaining + extraStepsBurned;
+  // The calorie day is effectively closed — meaningfully over target even after step
+  // burn. Used to stop protein nags that tell someone to "eat more today" in the same
+  // message that tells them "no more food today — water only".
+  const calorieCeilingHit = calRemaining <= 0 && effectiveRemaining <= -100;
   const stepsNote = extraStepsBurned > 0 && calRemaining < 0
     ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
     : "";
@@ -561,15 +565,20 @@ export function buildFoodLogReply(p: {
         "Solid protein.", "Good protein hit.", "Protein sorted.", "Strong meal.",
         "Protein locked in.", "That's the protein box ticked.",
       ]);
-      const protCloser = proteinRemaining > 0
+      const protCloser = proteinRemaining <= 0
+        ? pick(["Protein target hit for today. ✅", "Daily protein done. ✅", "Protein goal complete. ✅"])
+        : calorieCeilingHit
         ? pick([
+            `Still ${Math.round(proteinRemaining)}g short on protein — but you're over on calories, so carry it to tomorrow.`,
+            `${Math.round(proteinRemaining)}g short on protein, but the calorie day is done. Leave it for tomorrow.`,
+          ])
+        : pick([
             `${Math.round(proteinRemaining)}g protein still needed today.`,
             `${Math.round(proteinRemaining)}g left to hit your target.`,
             `${Math.round(proteinRemaining)}g more to go today.`,
-          ])
-        : pick(["Protein target hit for today. ✅", "Daily protein done. ✅", "Protein goal complete. ✅"]);
+          ]);
       coachNote = `\n\n${protOpener} ${protCloser}`;
-    } else if (hasGoodProteins && totalMealProtein >= 10) {
+    } else if (hasGoodProteins && totalMealProtein >= 10 && !calorieCeilingHit) {
       coachNote = `\n\n${pick([
         `${Math.round(totalMealProtein)}g protein this meal — close. Push for 20g+ next meal.`,
         `${Math.round(totalMealProtein)}g protein — good start. 20g+ per meal is the target.`,
@@ -577,7 +586,7 @@ export function buildFoodLogReply(p: {
         `${Math.round(totalMealProtein)}g in. Almost there — push for 20g+ at the next one.`,
       ])}`;
     } else if (!hasGoodProteins && hasCarbs && !isFruitSnack
-        && !earlyInDay
+        && !earlyInDay && !calorieCeilingHit
         && proteinRemaining > proteinTarget * 0.35) {
       // Only nag about protein if: it's past the first meal of the day AND they're
       // genuinely behind (>35% of daily target still outstanding). Stops constant
@@ -589,6 +598,7 @@ export function buildFoodLogReply(p: {
         "Protein gap — sort it next meal. Eggs, chicken, or tinned fish.",
       ])}`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText
+        && !calorieCeilingHit
         && proteinRemaining > proteinTarget * 0.35) {
       coachNote = `\n\n${pick([
         "Next meal needs protein. Pick one: eggs, chicken, or tuna.",
