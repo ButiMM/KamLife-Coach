@@ -467,7 +467,11 @@ export async function handleFoodContext(ctx: {
         const mealWasToday = matchedMeal.loggedAt ? matchedMeal.loggedAt >= sastDayStart() : false;
         const copyLabel = mealWasToday ? "Copied from earlier today" : "Copied from yesterday";
         await logChat(user.id, message, `Quick relog: ${labels.join(", ")} (+${totalCals} kcal · +${totalProt}g protein)`, "FOOD_LOG");
-        return `♻️ ${copyLabel}:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit."} ${protGap > 0 ? `${protGap}g protein left.` : "Protein target hit ✅"}`;
+        const calorieDone = remaining <= 0;
+        const protNote = protGap > 0
+          ? (calorieDone ? `${protGap}g protein short — carry to tomorrow.` : `${protGap}g protein left.`)
+          : "Protein target hit ✅";
+        return `♻️ ${copyLabel}:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit. ✅"} ${protNote}`;
       }
 
       const repeatReply = await handleMessage(phone, toRepeat);
