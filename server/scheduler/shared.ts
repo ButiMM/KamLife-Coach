@@ -170,6 +170,28 @@ export async function claimProactive(userId: string, messageKey: string, dedupeW
   }
 }
 
+// claimCritical — DB-backed dedupe for billing/critical alerts. Identical to
+// claimProactive but deliberately ignores PROACTIVE_PAUSED: subscription and
+// payment messages must keep flowing while coaching is paused. Guards against
+// double-sends when a job re-runs the same day (file-based hasRunToday state
+// does not survive Railway redeploys).
+export async function claimCritical(userId: string, messageKey: string, dedupeWindow: string): Promise<boolean> {
+  const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
+  if (weeklyKeyedSent.has(inMemKey)) return false;
+  try {
+    const inserted = await db.insert(sentProactive)
+      .values({ userId, messageKey, dedupeWindow })
+      .onConflictDoNothing()
+      .returning({ id: sentProactive.id });
+    weeklyKeyedSent.set(inMemKey, true);
+    return inserted.length > 0;
+  } catch (e) {
+    console.warn(`[claimCritical] DB error for ${messageKey}/${userId}:`, e);
+    weeklyKeyedSent.set(inMemKey, true);
+    return true;
+  }
+}
+
 // Startup hydration — repopulate in-memory set from today's DB records
 (async () => {
   try {

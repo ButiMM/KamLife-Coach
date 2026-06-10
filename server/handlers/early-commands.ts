@@ -554,10 +554,28 @@ export async function handleEarlyCommands(ctx: {
 
       // For cross-meal, prefer today's meals as the source
       const todayMeals = poolMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
+
+      // Cross-meal with no "yesterday" reference means TODAY's meal — never silently
+      // substitute an older one. Copying a 3-day-old lunch as "today's lunch" makes the
+      // coach contradict what the client just told it.
+      let todayCrossMatch: (typeof allMeals)[number] | null = null;
+      if (crossMealM && daysBack === 0 && sourceHint) {
+        const todaySub = todayMeals.filter(l => (l.kcalInt || 0) >= 100);
+        todayCrossMatch =
+          todaySub.find(l => l.rawMessage && new RegExp(`\\b${sourceHint}\\b`, "i").test(l.rawMessage))
+          || todaySub.find(l => (l.mealLabel || "").toLowerCase() === sourceHint)
+          || (todaySub.length === 1 ? todaySub[0] : null);
+        if (!todayCrossMatch) {
+          const honestMiss = `I don't have today's ${sourceHint} logged, so I can't copy it. Tell me what it was — "rice, tin fish and veg" — and I'll log it as your ${targetLabel || "meal"} now.`;
+          await logChat(user.id, message, honestMiss, "SAME_AS_TODAY_MISS");
+          return honestMiss;
+        }
+      }
+
       const searchPool = (crossMealM && todayMeals.filter(l => (l.kcalInt || 0) >= 150).length > 0)
         ? todayMeals : poolMeals;
 
-      const match = findBestMeal(searchPool, sourceHint);
+      const match = todayCrossMatch || findBestMeal(searchPool, sourceHint);
 
       if (!match) {
         const timeRef = daysBack >= 2 ? `in the last ${daysBack} days` : daysBack === 1 ? "yesterday" : "recently";

@@ -2,7 +2,7 @@ import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations,
   abExperiments, abAssignments,
   eq, gte, and, lt, desc, asc, sql, count,
-  sendWhatsApp, sendCriticalAlert, claimDailySlot, claimProactive, isProactivePaused,
+  sendWhatsApp, sendCriticalAlert, claimDailySlot, claimProactive, claimCritical, isProactivePaused,
   getActiveClients, isPaused, loadState, saveState,
   deliveryStats, todaySAST, thisWeekUTC, FROM_NUMBER, PRICING, inArray,
 } from "../shared";
@@ -43,14 +43,18 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
       const name = client.name || "there";
       if (msUntilRenewal > 0 && msUntilRenewal <= threeDaysMs) {
         const daysLeft = Math.ceil(msUntilRenewal / 86_400_000);
-        await sendCriticalAlert(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
+        if (await claimCritical(client.id, "renewal_reminder", todaySAST())) {
+          await sendCriticalAlert(client.phoneNumber, `${name}, your KamLife Coach subscription renews in ${daysLeft} day${daysLeft !== 1 ? "s" : ""}. If your payment details have changed, update them at kamlifecoach.co.za before then. Nothing changes if everything is fine — coaching continues automatically.`);
+        }
       }
       // 3-day grace period: PayFast recurring ITNs can land hours late and monthly
       // billing isn't exactly 30 days — only expire once renewal is >3 days overdue.
       if (msUntilRenewal < -threeDaysMs && client.subscriptionStatus === "active") {
         const daysOverdue = Math.floor(-msUntilRenewal / 86_400_000);
         await db.update(users).set({ subscriptionStatus: "inactive", cancelledAt: new Date() }).where(eq(users.phoneNumber, client.phoneNumber));
-        await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
+        if (await claimCritical(client.id, "sub_expired", todaySAST())) {
+          await sendCriticalAlert(client.phoneNumber, `${name}, your subscription has expired. Your profile and progress history are saved. To continue with Coach K, renew at kamlifecoach.co.za or reply *pay* for a payment link.`);
+        }
         console.log(`[SCHEDULER] Subscription expired — ${client.phoneNumber} — renewal ${daysOverdue} day(s) overdue, no PayFast ITN received`);
       }
     } catch (err) { console.error(`[SCHEDULER] Subscription expiry error — ${client.phoneNumber}:`, err); }
@@ -72,6 +76,8 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       const workouts = client.totalWorkoutsCompleted || 0;
       const cleanPhone = client.phoneNumber.replace(/^whatsapp:/, "");
       const payLink = merchantId ? `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}` : appUrl;
+      if (daysSinceFail !== 1 && daysSinceFail !== 3 && daysSinceFail !== 7) continue;
+      if (!(await claimCritical(client.id, "payment_recovery", todaySAST()))) continue;
       if (daysSinceFail === 1) {
         await sendCriticalAlert(client.phoneNumber, `${name}, your payment didn't go through yesterday. Could be a bank issue — happens all the time.\n\nYour programme and ${workouts} sessions of progress are saved. Update your payment here and coaching continues immediately:\n${payLink}`);
       } else if (daysSinceFail === 3) {
@@ -101,13 +107,19 @@ export async function runSignupNudge(): Promise<void> {
         const daysSince = Math.floor((Date.now() - created.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
         if (daysSince === 1 && client.subscriptionStatus === "inactive") {
-          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nR6.63/day.`);
+          if (await claimCritical(client.id, "signup_nudge", todaySAST())) {
+            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is built and ready.\n\n${workouts === 0 ? "Day 1 is waiting." : `${workouts} session${workouts > 1 ? "s" : ""} logged.`} Activate now and coaching starts immediately.\n\n*R199/month — cancel anytime:*\n${payLink}\n\nR6.63/day.`);
+          }
         } else if (daysSince === 3 && client.subscriptionStatus === "inactive") {
-          await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R199/month — R6.63/day:\n${payLink}`);
+          if (await claimCritical(client.id, "signup_nudge", todaySAST())) {
+            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R199/month — R6.63/day:\n${payLink}`);
+          }
         }
       } else if (!isNewSignup && cancelled) {
         const daysSinceCancelled = Math.floor((Date.now() - cancelled.getTime()) / 86_400_000);
         const workouts = client.totalWorkoutsCompleted || 0;
+        if (daysSinceCancelled !== 3 && daysSinceCancelled !== 7 && daysSinceCancelled !== 30) continue;
+        if (!(await claimCritical(client.id, "winback", todaySAST()))) continue;
         if (daysSinceCancelled === 3) {
           await sendCriticalAlert(client.phoneNumber, `${name} — you've done ${workouts} sessions with Coach K. That doesn't disappear.\n\nYour programme, weight history, and streaks are all saved. Pick up exactly where you left off.\n\n*Reactivate for R199/month:*\n${payLink}`);
         } else if (daysSinceCancelled === 7) {
@@ -152,7 +164,9 @@ export async function runSignupNudge(): Promise<void> {
       } else {
         msg = `${name}, last nudge — your trial ended a week ago.\n\n${hasProgress ? `${workouts} sessions and all your data are saved.` : "Your programme is still ready."}\n\nWhen you are ready — R199/month:\n${payLink}\n\nIf you have decided not to continue, reply STOP.`;
       }
-      await sendCriticalAlert(client.phoneNumber, msg);
+      if (await claimCritical(client.id, "trial_expiry_nudge", todaySAST())) {
+        await sendCriticalAlert(client.phoneNumber, msg);
+      }
     } catch (err) { console.error(`[SCHEDULER] Trial expiry nudge error — ${client.phoneNumber}:`, err); }
   }
 }

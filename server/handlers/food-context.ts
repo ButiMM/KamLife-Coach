@@ -287,6 +287,36 @@ export async function handleFoodContext(ctx: {
   // Blocks directFoodScan and the main food scanner from firing on these messages.
   const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i.test(m);
 
+  // ---- "ATE IT" — confirm a previously planned meal and log it ----
+  // Closes the loop on FOOD_PLANNED: "gonna have X for lunch" → [eats] → "ate it" → logged.
+  if (/^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?)[.!\s]*$/i.test(m)) {
+    try {
+      const twelveHoursAgo = new Date(Date.now() - 12 * 3_600_000);
+      const planned = await db.select({ messageIn: chatHistory.messageIn })
+        .from(chatHistory)
+        .where(and(
+          eq(chatHistory.userId, user.id),
+          eq(chatHistory.intent, "FOOD_PLANNED"),
+          gte(chatHistory.createdAt, twelveHoursAgo),
+        ))
+        .orderBy(desc(chatHistory.createdAt))
+        .limit(1);
+      if (planned.length > 0 && planned[0].messageIn) {
+        // Rewrite the planned message into past tense and re-run it through this handler —
+        // it now takes the normal scanner logging path.
+        const eaten = planned[0].messageIn.replace(
+          /\b(i.?m\s+)?(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|planning\s+to\s+(?:eat|have|cook)|thinking\s+of\s+(?:eating|having|cooking)|want\s+to\s+(?:eat|have|try|order)|will\s+be\s+(?:eating|having))\b/gi,
+          "i had",
+        );
+        return await handleFoodContext({ ...ctx, message: eaten, m: eaten.toLowerCase().replace(/\s+/g, " ").trim() });
+      }
+      const noPlan = `Nothing pending to log. Tell me what you ate — "I had rice and chicken" — and I'll log it now.`;
+      await logChat(user.id, message, noPlan, "FOOD_PLANNED_MISS");
+      return noPlan;
+    } catch (e) { console.warn("[FOOD_PLANNED] ate-it lookup failed:", e); }
+  }
+
+
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
   if (hasSocialEventKeyword && !isQuestion && !isFrustration) {
@@ -504,6 +534,12 @@ export async function handleFoodContext(ctx: {
     && (foodsInMsg.length >= 2 || hasQuantityWord);
   const foodLogOverride = hasLogTrigger && hasActualFood;
 
+  // Diagnostic: any message containing recognised foods logs its gate state — when a
+  // meal silently fails to log in production, this line names the reason instantly.
+  if (hasActualFood) {
+    console.log(`[FOOD_GATE] user=...${String(user.id || "").slice(-6)} foods=[${foodsInMsg.map(f => f.name).join("|")}] q=${isQuestion} frus=${isFrustration} emo=${isEmotionalOnly} future=${isFuturePlanning} trig=${hasLogTrigger} direct=${directFoodScan} words=${m.split(/\s+/).length}`);
+  }
+
   // ---- RETROSPECTIVE DIET HISTORY — "within the week", "usually eat", "normally I have" ----
   // These are diet audits describing routine or past eating — NOT today's food log.
   // Must fire BEFORE the scanner path so nothing gets logged to today's calories.
@@ -582,7 +618,26 @@ export async function handleFoodContext(ctx: {
     return shoppingReply;
   }
 
+  // ---- PLANNED MEAL — food described in future EATING tense ("gonna have X for lunch").
+  // Be honest that it is NOT logged, and give a one-word path to log it once eaten.
+  // Without this, GPT chats about the meal and the client believes it was logged —
+  // then "dinner same as lunch" copies a stale meal and the coach contradicts itself.
+  // Eating-future only: shopping intents ("need to buy") fall through to other handlers.
+  const isFutureEating = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|planning\s+to\s+(?:eat|have|cook)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i.test(m);
+  if (isFutureEating && !isQuestion && !isFrustration && hasActualFood) {
+    const junkPlanned = foodsInMsg.filter(f => f.category === "junk");
+    const plannedNames = foodsInMsg.map(f => f.name).join(", ");
+    const plannedLabel = extractMealLabel(message);
+    const swapNote = junkPlanned.length > 0
+      ? `\n\nOne flag: ${junkPlanned.map(f => f.name).join(" and ")} — ${junkPlanned[0].notes ? junkPlanned[0].notes.split(".")[0] + "." : "empty calories."} Swap for water and the meal is solid.`
+      : `\n\nGood plan — solid choices in there.`;
+    const plannedReply = `Sounds like ${plannedLabel || "a meal"} in the making — ${plannedNames}.${swapNote}\n\n_Not logged yet._ When you've eaten, reply *ate it* and I'll log it.`;
+    await logChat(user.id, message, plannedReply, "FOOD_PLANNED");
+    return plannedReply;
+  }
+
   if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)) {
+    console.log(`[FOOD_SCAN] gate fired — user=...${String(user.id || "").slice(-6)} foods=${foodsInMsg.length} trigger=${hasLogTrigger} direct=${directFoodScan}`);
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
     const mealSegments: { label: string; text: string }[] = [];
 
@@ -912,6 +967,7 @@ export async function handleFoodContext(ctx: {
           });
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
+          console.log(`[MEAL_LOG] saved — user=...${String(user.id || "").slice(-6)} kcal=${totalCals} prot=${Math.round(totalProtein)} label=${firstSegLabel || "none"}`);
         }
       } catch (e) { mealLogInsertOk = false; console.error("[MEAL_LOG] mealLogs insert failed — user:", user.id?.slice(-6), "kcal:", e); }
 

@@ -1834,20 +1834,22 @@ export function buildFullProgramme(user: any): string {
     return `*Phase ${phase}: ${phaseName} — Week ${week} | Full Body Home Programme*\nTrain on non-consecutive days. Each session hits squat, push, hinge, pull, and core.\n\n${day1}`;
   }
 
-  // Female programme: send Day A first
+  // Female programme: send Day A first — full-gym users only; dumbbell users route
+  // through buildDay1Workout so they get dumbbell exercises, not machine work
   const isFemaleGluteFocusFull = user.primaryFocusArea === "glutes_legs";
-  if (isFemaleGluteFocusFull) {
+  if (isFemaleGluteFocusFull && mode === "gym") {
     return `*Your 3-Day Programme — Shoulders, Back, Arms, Glutes, Hamstrings, Calves*\nTrain Monday, Wednesday, Friday or Tuesday, Thursday, Saturday. Never two days in a row.\n\n${FEMALE_DAY_A}`;
   }
 
-  // 4-day upper/lower: send Upper (Day 1) first — Lower follows after DONE
+  // 4-day upper/lower: send Upper (Day 1) first — Lower follows after DONE.
+  // Full-gym only: INTERMEDIATE_GYM_UPPER uses machines/cables a dumbbell user doesn't have.
   const trainingDays = user.trainingDaysPerWeek || 3;
   const exp = user.trainingExperience || "beginner";
-  if (trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
+  if (mode === "gym" && trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
     return `*4-Day Upper/Lower Split — Week ${week}*\nMonday + Thursday: Upper Body. Tuesday + Friday: Lower Body. Rest Wednesday, Saturday, Sunday.\n\n${INTERMEDIATE_GYM_UPPER}`;
   }
 
-  // Gym: deliver Day 1 only — Days 2 and 3 follow after DONE is logged
+  // Gym + dumbbell: deliver Day 1 only — following days unlock after DONE is logged
   return buildDay1Workout(user);
 }
 
