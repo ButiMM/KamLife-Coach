@@ -1,5 +1,5 @@
 import { db } from "./db";
-import { users, weightLogs, chatHistory, workoutLogs, stepLogs } from "../shared/schema";
+import { users, weightLogs, chatHistory, stepLogs } from "../shared/schema";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets, calculateStepsTarget } from "./targets";
@@ -13,65 +13,46 @@ import { getTodayWorkoutState } from "./workout-state";
 // MENU TEXT — context-aware
 // ============================================================
 
-export async function getMenuText(user: any): Promise<string> {
+export async function getMenuText(user: any, opts?: { showCommands?: boolean }): Promise<string> {
   const name = getDisplayName(user);
-  const phase = user.programmePhase || 1;
-  const phaseNames = getPhaseNames();
-  const phaseName = phaseNames[phase] || "Foundation";
-  const day = user.programmeDayInWeek || 1;
-  const dayType = getDayType(day);
-  const dayLabel = { push: "Push 💪", pull: "Pull 🏋️", legs: "Legs 🦵", core: "Core 🔥", rest: "Rest 🛌" }[dayType] || "Today's session";
+  const hey = name ? `Hey ${name} 👋` : `Hey 👋`;
   const mode = user.trainingMode || "home";
   const stepsTarget = user.stepsTarget || 8000;
 
   const todayStart = sastDayStart();
 
-  let workoutDone = false;
   let todayStepCount: number | null = null;
   let workoutState: Awaited<ReturnType<typeof getTodayWorkoutState>>;
 
   try {
-    const [todayWorkout, todaySteps, ws] = await Promise.all([
-      db.select().from(workoutLogs)
-        .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
-        .limit(1),
+    const [todaySteps, ws] = await Promise.all([
       db.select().from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStart)))
         .limit(1),
       getTodayWorkoutState(user),
     ]);
-    workoutDone = todayWorkout.length > 0;
     todayStepCount = todaySteps.length > 0 ? todaySteps[0].steps : null;
     workoutState = ws;
   } catch {
     workoutState = await getTodayWorkoutState(user);
   }
 
-  const workoutStatus = mode !== "walk_only"
-    ? (workoutDone ? `Workout ✅` : workoutState!.type === "REST" ? `Rest day 🛌` : `Today: ${dayLabel}`)
-    : null;
-  const stepStatus = todayStepCount !== null
-    ? `Steps: ${todayStepCount.toLocaleString()}/${stepsTarget.toLocaleString()}${todayStepCount >= stepsTarget ? " ✅" : ""}`
-    : null;
-
-  const statusParts = [workoutStatus, stepStatus].filter(Boolean).join(" · ");
-
-  // Trial countdown
+  // Trial countdown — business-critical, stays on every greeting
   let trialLine = "";
   if (user.subscriptionStatus === "trial" && user.betaBypassUntil) {
     const daysLeft = Math.max(0, Math.ceil((new Date(user.betaBypassUntil).getTime() - Date.now()) / 86_400_000));
-    if (daysLeft <= 3) {
-      trialLine = `\n⏰ *${daysLeft} day${daysLeft !== 1 ? "s" : ""} left on free trial* — reply *pay* to keep coaching`;
-    } else {
-      trialLine = `\n_Free trial: ${daysLeft} days remaining_`;
-    }
+    trialLine = daysLeft <= 3
+      ? `\n\n⏰ *${daysLeft} day${daysLeft !== 1 ? "s" : ""} left on free trial* — reply *pay* to keep coaching`
+      : `\n\n_Free trial: ${daysLeft} days remaining_`;
   }
 
-  const headerLine = name
-    ? `*KamLife Coach* — ${name}\nPhase ${phase}: ${phaseName}${statusParts ? ` | ${statusParts}` : ""}${trialLine}`
-    : `*KamLife Coach* 💪${trialLine}`;
+  // Full command list only when explicitly asked (menu/help) or the user is lost.
+  // A greeting gets a coach, not a sitemap.
+  const commandsBlock = opts?.showCommands
+    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.\n💪 _workout_ · _done_ · _tomorrow's session_\n📊 _my progress_ · _weight 82_ · _steps 6000_\n🛒 _shopping list_ · _meal prep_ · _supplements_\n⚙️ _my water_ · _badges_ · _referral_ · _connect steps_ · _pause_`
+    : "";
 
-  const footer = `\n\n_Also: shopping list · meal prep · supplements · my water · badges · referral · *connect steps*_`;
+  const tail = `${commandsBlock}${trialLine}`;
 
   const daysSilent = user.lastActiveAt
     ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
@@ -79,31 +60,37 @@ export async function getMenuText(user: any): Promise<string> {
 
   // Already done today
   if (workoutState.type === "ALREADY_DONE") {
-    const stepGap = todayStepCount !== null && todayStepCount < stepsTarget
-      ? `Session done ✅. ${(stepsTarget - todayStepCount).toLocaleString()} steps to go.`
-      : `Session done ✅. Good work today.`;
-    return `${headerLine}\n\n${stepGap}${footer}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+    const body = todayStepCount !== null && todayStepCount < stepsTarget
+      ? `Session done ✅ — ${(stepsTarget - todayStepCount).toLocaleString()} steps to go and today's full.`
+      : `Session done ✅ — good work today.`;
+    return `${hey} ${body}${tail}[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
   // Rest day
   if (workoutState.type === "REST") {
-    return `${headerLine}\n\n*${workoutState.todayName} — rest day.* Next training: ${workoutState.nextTrainingName}.${footer}[BUTTONS:Log food|My progress|Tomorrow's session]`;
+    return `${hey} ${workoutState.todayName} — rest day. Next session: ${workoutState.nextTrainingName}.\n\nRecovery is where the work pays off. Protein in, water up, walk if you can.${tail}[BUTTONS:Log food|My progress|Tomorrow's session]`;
   }
 
-  // Missed sessions — flag it in the menu nudge
+  // Missed sessions — flag it in the greeting
   if (workoutState.type === "MISSED") {
     const missed = workoutState.missedSessions.join(" + ");
-    return `${headerLine}\n\nMissed ${missed}. ${workoutState.todayName} is still a training day — do it now.${footer}[BUTTONS:Today's workout|Log food|My progress]`;
+    return `${hey} You missed ${missed}. ${workoutState.todayName} is still a training day — let's get it done.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
   }
 
   // Returning after silence
   if (daysSilent >= 3) {
     const daysText = daysSilent <= 7 ? `${daysSilent} days` : "a while";
-    return `${headerLine}\n\n${daysText} away — no lecture. Pick up where you left off.${footer}[BUTTONS:Today's workout|Log food|My progress]`;
+    return `${hey} Been ${daysText} — no lecture. We pick up where you left off.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
   }
 
   // Normal training day
-  return `${headerLine}\n\nTraining day. Your session is ready.${footer}[BUTTONS:Today's workout|Log food|My progress]`;
+  const stepsSoFar = todayStepCount !== null
+    ? ` You're at ${todayStepCount.toLocaleString()} steps — ${todayStepCount >= stepsTarget ? "target hit ✅" : `${(stepsTarget - todayStepCount).toLocaleString()} to go`}.`
+    : "";
+  const trainBody = mode === "walk_only"
+    ? `Today's job: ${stepsTarget.toLocaleString()} steps.${stepsSoFar}`
+    : `Training day — your session's ready.${stepsSoFar}`;
+  return `${hey} ${trainBody}${tail}[BUTTONS:Today's workout|Log food|My progress]`;
 }
 
 // ============================================================

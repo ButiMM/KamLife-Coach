@@ -467,9 +467,13 @@ export async function handleEarlyCommands(ctx: {
   }
 
   // ---- GREETINGS / MENU (direct — no GPT) ----
+  // A greeting gets a warm coach check-in; menu/help gets the full command list.
   const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
-  if (greetings.some(g => m === g || m === g + " 👋") || m === "menu" || m === "help") {
+  if (greetings.some(g => m === g || m === g + " 👋")) {
     return await getMenuText(user);
+  }
+  if (m === "menu" || m === "help") {
+    return await getMenuText(user, { showCommands: true });
   }
 
   // ---- SHOPPING LIST command ----
@@ -1630,7 +1634,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     || /^(\?{2,}|!{2,}|\?!+)$/.test(m)
     || /\b(i.?m (lost|confused|not sure)|don.?t (understand|get it)|what do i do( now)?|not sure what to (do|say|send)|how does this work)\b/i.test(m);
   if (isConfused) {
-    const menuReply = await getMenuText(user);
+    const menuReply = await getMenuText(user, { showCommands: true });
     await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
     return menuReply;
   }

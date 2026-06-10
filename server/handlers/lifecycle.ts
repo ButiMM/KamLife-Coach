@@ -625,7 +625,7 @@ export async function handleLifecycle(ctx: {
 
     if (currentState === "COMPLETE" && !wantsFullReset) {
       // COMPLETE users saying bare "restart" — probably want menu, not a wipe
-      return await getMenuText(user);
+      return await getMenuText(user, { showCommands: true });
     }
 
     // Has data and wants a full reset — require confirmation
