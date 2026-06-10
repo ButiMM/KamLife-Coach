@@ -7,7 +7,7 @@
 
 import { db } from "../db";
 import { users, workoutLogs, exerciseLogs, stepLogs } from "../../shared/schema";
-import { eq, and, gte, desc } from "drizzle-orm";
+import { eq, and, gte, lt, desc } from "drizzle-orm";
 import {
   buildDayWorkout, buildDay2Workout, buildDay3Workout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
@@ -17,7 +17,7 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
-import { sastDayStart } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel } from "../utils";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
@@ -265,6 +265,59 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     return `${cardioReply}${stepsNote}${streakNote}\n\nLog your food: tell me what you ate today.[BUTTONS:Log food|My progress|Tomorrow's session]`;
+  }
+
+  // ---- RETROACTIVE WORKOUT — "trained yesterday", "did legs yesterday", "done on Sunday" ----
+  const hasRetroDayRef = /\b(yesterday|last night|2 days ago|two days ago|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|last\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m);
+  const hasCompletionWord = /\b(done|finished|complete[d]?|trained|did\s+(my\s+)?(workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+done|session\s+done|training\s+done|gym\s+done|gym\s+yesterday|trained\s+yesterday)\b/i.test(m);
+  const hasMissWord = /\b(missed?|couldn.?t|skipped?|didn.?t|won.?t|rest\s+day|sick|injur|cancel)\b/i.test(m);
+
+  const isRetroDone = !m.includes("?") && hasRetroDayRef && hasCompletionWord && !hasMissWord;
+
+  if (isRetroDone) {
+    const retroDate = parseMealDate(m);
+    const retroStart = new Date(retroDate);
+    retroStart.setUTCHours(0, 0, 0, 0);
+    const retroEnd = new Date(retroStart.getTime() + 86_400_000);
+    const dateLabel = mealDateLabel(retroDate);
+
+    const existing = await db.select({ id: workoutLogs.id }).from(workoutLogs)
+      .where(and(
+        eq(workoutLogs.userId, user.id),
+        gte(workoutLogs.loggedAt, retroStart),
+        lt(workoutLogs.loggedAt, retroEnd),
+      ))
+      .limit(1);
+
+    if (existing.length > 0) {
+      return `${firstName ? firstName + ", already" : "Already"} got ${dateLabel}'s workout logged.`;
+    }
+
+    await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: retroDate });
+
+    const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+    const trainingDays = user.trainingDaysPerWeek || 3;
+    const todaySlot = getTodaySlot(user);
+    const nextDay = (todaySlot % trainingDays) + 1;
+    const weekAdvance = todaySlot === trainingDays;
+    const newWeek = weekAdvance ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
+
+    // Advance lastWorkoutDate only if the retroactive session is more recent — keeps
+    // streak tracking correct when someone logs yesterday before doing today's session.
+    const currentLastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate).getTime() : 0;
+    const updateLastWorkout = retroDate.getTime() > currentLastWorkout;
+
+    await db.update(users).set({
+      totalWorkoutsCompleted: newTotal,
+      programmeDayInWeek: nextDay,
+      programmeWeek: newWeek,
+      lastActiveAt: new Date(),
+      ...(updateLastWorkout ? { lastWorkoutDate: retroDate } : {}),
+    }).where(eq(users.phoneNumber, phone));
+
+    await logChat(user.id, message, `[RETRO WORKOUT: ${dateLabel}]`, "WORKOUT_LOG");
+    const n = firstName || "";
+    return `${n ? n + " — " : ""}got it, logged to ${dateLabel}. ${newTotal} session${newTotal !== 1 ? "s" : ""} in total.\n\nNow log your food or send today's workout when you're ready.[BUTTONS:Log food|My progress|Today's workout]`;
   }
 
   // ---- WORKOUT DONE — log completion ----

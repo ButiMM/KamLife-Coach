@@ -38,7 +38,7 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -430,15 +430,21 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;
-      const todayStartSteps = sastDayStart();
-      const existingStep = await db.select({ id: stepLogs.id })
+      const stepIsRetro = isRetroactiveMeal(message);
+      const stepLoggedAt = stepIsRetro ? parseMealDate(message) : new Date();
+      const stepDayStart = new Date(stepLoggedAt);
+      stepDayStart.setUTCHours(0, 0, 0, 0);
+      const stepDayEnd = new Date(stepDayStart.getTime() + 86_400_000);
+      const existingStep = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
         .from(stepLogs)
-        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, todayStartSteps)))
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, stepDayStart), lt(stepLogs.loggedAt, stepDayEnd)))
         .limit(1);
       if (existingStep.length > 0) {
-        await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existingStep[0].id));
+        if (steps > (existingStep[0].steps ?? 0)) {
+          await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existingStep[0].id));
+        }
       } else {
-        await db.insert(stepLogs).values({ userId: user.id, steps });
+        await db.insert(stepLogs).values({ userId: user.id, steps, loggedAt: stepLoggedAt });
       }
       await db.update(users).set({ lastActiveAt: new Date() }).where(eq(users.phoneNumber, phone));
       invalidatePatternCache(user.id);
@@ -454,7 +460,8 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
         ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
         : undefined;
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user);
-      stepReplyPart = stepReply + (perfectDay || "");
+      const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
+      stepReplyPart = stepReply + stepRetroNote + (perfectDay || "");
 
       // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too
       const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
