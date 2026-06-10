@@ -623,7 +623,11 @@ export async function handleEarlyCommands(ctx: {
   // ---- CLIENT SENDS THEIR OWN SHOPPING LIST — "adjust my list", "here's what I buy", "fix my groceries", or raw comma-separated items ----
   // Also catches plain lists like "chicken, eggs, rice, bread, spinach, oats" (≥4 items, mostly food words)
   const FOOD_WORDS = /\b(chicken|beef|mince|fish|eggs|milk|bread|rice|pap|oats|potato|sweet potato|spinach|cabbage|carrots|tomato|onion|garlic|beans|lentils|tuna|pilchards|yoghurt|cheese|butter|oil|flour|sugar|salt|broccoli|banana|apple|orange|pear|grapes|avocado|corn|maize|samp|weetbix|jungle oats|provita|peanut butter|pasta|spaghetti|macaroni|noodles|soup|stock|tofu|tempeh|whey|protein|biltong|vienna|polony|liver|kidney|tripe|sausage|breyani|vetkoek|roti|corn flour|mealie|mealies)\b/gi;
-  const isRawFoodList = m.includes(",") && (m.match(FOOD_WORDS) || []).length >= 3 && !m.includes("?") && m.split(/\s+/).length <= 25;
+  // A meal statement is never a grocery list. Voice transcripts are comma-heavy
+  // ("Breakfast, four fish fingers, four eggs...") and were being hijacked here,
+  // silently skipping the food logger. Meal words / eating verbs route to food logging.
+  const isMealStatement = /\b(breakfast|lunch|dinner|supper|snack|brunch|i\s+had|i\s+ate|just\s+had|just\s+ate|\bhad\b|\bate\b|having|eating|i.?ll\s+have|gonna\s+have|going\s+to\s+have)\b/i.test(m);
+  const isRawFoodList = !isMealStatement && m.includes(",") && (m.match(FOOD_WORDS) || []).length >= 3 && !m.includes("?") && m.split(/\s+/).length <= 25;
   const isClientList = (
     (/\b(adjust|fix|check|improve|optimize|look at|review|here.?s|heres|this is what i|what i normally|my.*grocery|my.*shopping|i usually buy|i always buy|every week i buy|i buy)\b/i.test(m)
     && /\b(list|buy|shop|grocery|groceries|shopping|trolley|basket)\b/i.test(m)
