@@ -1,6 +1,7 @@
 import { db } from "../db";
 import { stepLogs } from "../../shared/schema";
 import { eq, desc } from "drizzle-orm";
+import { educationNote } from "../education";
 
 export async function getStepStreak(userId: string): Promise<number> {
   try {
@@ -75,11 +76,13 @@ function _stepEquivalent(burnKcal: number): string {
   return "";
 }
 
-export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number): string {
+export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any): string {
   const idx = Math.floor(Date.now() / 86400000) % 5;
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
-  const equivalent = steps >= target ? _stepEquivalent(burnEst) : "";
+  // Any meaningful walk gets the food-equivalent credit — even below target,
+  // the burn was real, and that's the lesson worth landing.
+  const equivalent = steps >= 4000 ? _stepEquivalent(burnEst) : "";
 
   let base: string;
   if (steps >= target) {
@@ -113,6 +116,10 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
     response += `\n\n🔥 *${streak}-day step streak.* ${streak >= 14 ? "Two weeks of movement. This is a habit now." : "A full week of steps. Don't break it."}`;
   } else if (streak >= 3 && steps >= target) {
     response += `\n\n🔥 ${streak} days in a row hitting target. Keep the streak alive.`;
+  }
+
+  if (user) {
+    response += educationNote(user, { event: "steps", burnKcal: burnEst });
   }
 
   return response;

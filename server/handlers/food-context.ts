@@ -20,6 +20,7 @@ import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from 
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
 import { invalidatePatternCache } from "../cache";
+import { educationNote, remainingInMeals } from "../education";
 
 function extractMealLabel(msg: string): string | null {
   const lo = msg.toLowerCase();
@@ -268,7 +269,9 @@ export async function handleFoodContext(ctx: {
     const protTarget = user.proteinTarget || 120;
     const remaining = calTarget - summaryTotals.calories;
     const protRemaining = protTarget - summaryTotals.protein;
-    return `Today so far:${name} *${summaryTotals.calories} kcal | ${summaryTotals.protein}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go.` : `Calorie target reached. ✅`}`;
+    const inMeals = remaining > 0 ? remainingInMeals(remaining) : "";
+    const eduNote = educationNote(user, { event: "totals", calorieTarget: calTarget, proteinTarget: protTarget, overBy: remaining < 0 ? -remaining : 0 });
+    return `Today so far:${name} *${summaryTotals.calories} kcal | ${summaryTotals.protein}g protein*\nTarget: ${calTarget} kcal | ${protTarget}g protein\n${remaining > 0 ? `${remaining} kcal and ${protRemaining}g protein still to go${inMeals ? ` — ${inMeals}` : ""}.` : `Calorie target reached. ✅`}${eduNote}`;
   }
 
   // ---- Shared message-type flags used by food handlers below ----

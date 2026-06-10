@@ -453,7 +453,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       const weeklyAvg = recentStepLogs.length >= 3
         ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
         : undefined;
-      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg);
+      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user);
       stepReplyPart = stepReply + (perfectDay || "");
 
       // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too

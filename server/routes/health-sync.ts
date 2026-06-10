@@ -266,7 +266,7 @@ export function registerHealthSyncRoutes(app: Express): void {
       const target = user.stepsTarget || 8500;
       const weight = parseFloat(String(user.currentWeight || "0")) || 75;
       const streak = await getStepStreak(user.id);
-      const response = getStepResponse(steps, target, weight, streak);
+      const response = getStepResponse(steps, target, weight, streak, undefined, user);
       const autoMsg = `_[Auto-synced from your health app]_\n\n${response}`;
 
       await sendWhatsApp(user.phoneNumber, autoMsg);

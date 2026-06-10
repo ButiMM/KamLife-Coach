@@ -1,5 +1,6 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { enforceCoachGuardrails } from "../coach-guardrails";
+import { educationNote } from "../education";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
@@ -653,8 +654,18 @@ export function buildFoodLogReply(p: {
     }
   }
 
+  // Plain-language explainer for clients who don't know what a calorie is —
+  // taught once each, early in the programme, then silent. When it fires it
+  // takes the slot the random reinforcement note would have used.
+  const eduNote = educationNote(user, {
+    event: "meal",
+    calorieTarget,
+    proteinTarget,
+    overBy: effectiveRemaining < 0 ? Math.abs(effectiveRemaining) : 0,
+  });
+
   let variableReinforcement = "";
-  if (Math.random() < 0.18) {
+  if (!eduNote && Math.random() < 0.18) {
     const fn = (user.name || "").split(" ")[0] || "Sharp";
     const daysSinceStart = user.programmeStartDate
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
@@ -697,5 +708,5 @@ export function buildFoodLogReply(p: {
     _lowCalWarnedToday.set(warnKey, todayKey);
   }
 
-  return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${variableReinforcement}${calorieFloorNote}`;
+  return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
 }

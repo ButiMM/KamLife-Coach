@@ -375,7 +375,7 @@ export async function handleMediaMessage(ctx: {
             }
             await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
             const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
-            const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak);
+            const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, undefined, user);
             await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
             console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
 
@@ -891,7 +891,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
                   }
                   const stepTarget = user.stepsTarget || 10000;
                   const stepStreak = await getStepStreak(user.id);
-                  extraReplies.push(getStepResponse(extraSteps, stepTarget, parseFloat(user.currentWeight as string || "75") || 75, stepStreak));
+                  extraReplies.push(getStepResponse(extraSteps, stepTarget, parseFloat(user.currentWeight as string || "75") || 75, stepStreak, undefined, user));
                   await logChat(user.id, `[Step Screenshot: ${extraSteps}]`, `Steps logged: ${extraSteps}`, "STEP_LOG");
                 }
               }

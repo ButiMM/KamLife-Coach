@@ -13,6 +13,7 @@ import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
+import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
 
@@ -94,7 +95,9 @@ export async function handleEarlyCommands(ctx: {
         const calDone = remaining <= 0;
         const protShortNote = calDone && protRemaining > 0 ? ` ${protRemaining}g protein short — carry to tomorrow.` : "";
         const actionLine = calDone ? "" : `\n\nHit protein first — everything else follows.`;
-        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}`;
+        const inMeals = remaining > 0 ? remainingInMeals(remaining) : "";
+        const eduNote = educationNote(user, { event: "totals", calorieTarget: cal, proteinTarget: prot, overBy: remaining < 0 ? -remaining : 0 });
+        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
       }
       return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
     } catch (err) {
