@@ -77,7 +77,9 @@ function _stepEquivalent(burnKcal: number): string {
 }
 
 export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any): string {
-  const idx = Math.floor(Date.now() / 86400000) % 5;
+  // Random pick, not day-keyed — the same canned line twice in one conversation
+  // reads as a bot. Variety matters more than cross-user determinism.
+  const idx = Math.floor(Math.random() * 5);
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
   // Any meaningful walk gets the food-equivalent credit — even below target,
@@ -103,11 +105,16 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
   // Add equivalent note
   if (equivalent) response += ` ${equivalent}`;
 
-  // 7-day average context (only show when we have enough data and it's meaningful)
+  // 7-day average context (only show when we have enough data and it's meaningful).
+  // Within ~3% of target is ON target for coaching purposes — someone averaging
+  // 10,778 against 11,000 is winning, not "222 below". Never guilt-trip consistency.
   if (weeklyAvg && weeklyAvg > 0) {
+    const nearTargetBand = Math.max(300, Math.round(target * 0.03));
     const vsTarget = weeklyAvg >= target
       ? `above target — keep it up.`
-      : `${(target - weeklyAvg).toLocaleString()} below your ${target.toLocaleString()} target.`;
+      : (target - weeklyAvg) <= nearTargetBand
+        ? `that's your ${target.toLocaleString()} target hit, day in day out. This consistency is what changes bodies.`
+        : `${(target - weeklyAvg).toLocaleString()} below your ${target.toLocaleString()} target.`;
     response += `\n\n_7-day average: ${weeklyAvg.toLocaleString()} steps — ${vsTarget}_`;
   }
 

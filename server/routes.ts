@@ -417,7 +417,12 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
     ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)\b/i)
     : null;
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
-  if (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch) {
+  // A question about steps is never a step log — "Doesn't going over 10,000 steps
+  // affect my goals?" must reach GPT (which has step context), not the logger.
+  const stepIsQuestion = m.includes("?")
+    || /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
+    || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(m);
+  if (!stepIsQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
       const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);

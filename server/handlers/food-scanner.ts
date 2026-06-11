@@ -610,7 +610,18 @@ export function buildFoodLogReply(p: {
     }
   }
 
-  const junkNote = junkNoteText ? `\n\n${junkNoteText}` : "";
+  // A junk-item note must not contradict the meal it rides on. "Low protein for the
+  // calories" next to "Strong meal, 51g protein" reads as the bot arguing with itself —
+  // strip protein-shaming sentences when the meal's protein is actually strong.
+  let junkNoteClean = junkNoteText || "";
+  if (junkNoteClean && totalMealProtein >= 20) {
+    junkNoteClean = junkNoteClean
+      .split(/(?<=\.)\s+/)
+      .filter(s => !/low protein|no protein|lacks protein/i.test(s))
+      .join(" ")
+      .trim();
+  }
+  const junkNote = junkNoteClean ? `\n\n${junkNoteClean}` : "";
 
   let proteinTip = "";
   const budgetTier = user.weeklyFoodBudget || "100_300";

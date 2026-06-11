@@ -952,6 +952,10 @@ export async function handleLifecycle(ctx: {
   const hasNegativeGym = /\b(no|don.?t|won.?t|can.?t|not|without|never|quit|left)\b.{0,15}\bgym\b/i.test(m);
   const isProfileUpdate =
     /\b(change my goal|my goal is now|switch to|switch my goal|new goal|update my goal)\b/i.test(m) ||
+    // Natural goal-change phrasings — "I want to go into a building phase", "I want to
+    // start bulking", "change the muscle composition", "time to cut" — these must hit
+    // the real goal-change flow (recalculated targets), never GPT improvisation.
+    /\b(building phase|bulking phase|gaining phase|cutting phase|go(?:ing)?\s+into\s+a\s+(?:build|bulk|gain|cut)|start\s+(?:bulking|cutting|building)|want\s+to\s+(?:bulk|build\s+muscle|gain\s+muscle|put\s+on\s+muscle|cut|lean\s+out)|change\s+(?:the\s+|my\s+)?muscle\s+composition|muscle\s+composition.*(?:change|build|phase)|time\s+to\s+(?:bulk|cut|build))\b/i.test(m) ||
     /\b(change.*budget|budget.*changed|my budget is now|budget is now|new budget)\b/i.test(m) ||
     (!hasNegativeGym && /\b(joined.*gym|got.*gym|have.*gym|going to.*gym|now.*gym|gym.*membership)\b/i.test(m)) ||
     /\b(change.*training days|training.*(\d)\s*days|now training.*(\d)|(\d)\s*days.*week.*train)\b/i.test(m) ||
@@ -964,7 +968,7 @@ export async function handleLifecycle(ctx: {
 
     // Goal change — ask why first before applying
     let pendingGoal: string | null = null;
-    if (/fat loss|lose weight|lose fat|cut/i.test(m)) pendingGoal = "fat_loss";
+    if (/fat loss|lose weight|lose fat|cut|lean out/i.test(m)) pendingGoal = "fat_loss";
     else if (/muscle|bulk|build|gain/i.test(m)) pendingGoal = "muscle_gain";
     else if (/recomposition|recomp|both/i.test(m)) pendingGoal = "recomposition";
 
