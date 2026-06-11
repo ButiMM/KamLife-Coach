@@ -471,8 +471,26 @@ export async function handleEarlyCommands(ctx: {
 
   // ---- GREETINGS / MENU (direct — no GPT) ----
   // A greeting gets a warm coach check-in; menu/help gets the full command list.
-  const greetings = ["hello", "hi", "hey", "howzit", "hola", "sawubona", "dumela", "heita", "eita", "yo", "sup"];
-  if (greetings.some(g => m === g || m === g + " 👋")) {
+  // Covers SA languages: isiZulu, isiXhosa, Sesotho/Setswana/Sepedi, Afrikaans, Xitsonga.
+  const greetings = [
+    "hello", "hi", "hey", "howzit", "hola", "yo", "sup", "hello there", "hi there",
+    "sawubona", "sanibonani", "unjani", "kunjani",          // isiZulu
+    "molo", "molweni",                                       // isiXhosa
+    "dumela", "dumelang", "lumela", "thobela",               // Sotho/Tswana/Pedi
+    "avuxeni",                                               // Xitsonga
+    "hallo", "goeie more", "goeie môre", "hoe gaan dit",     // Afrikaans
+    "heita", "eita", "aweh", "awe",                          // street
+    "morning", "good morning", "good afternoon", "good evening", "good day", "gm",
+  ];
+  // Strip emojis/punctuation and an optional "coach (k)" suffix so "hi coach k 👋" still matches.
+  const mGreet = m
+    .replace(/[👋🙏🙌💪🔥❤️😊🤝]/gu, "")
+    .trim()
+    .replace(/[!.,?]+$/g, "")
+    .trim()
+    .replace(/\s+(coach k|coach|there|guys|team)$/i, "")
+    .trim();
+  if (greetings.includes(mGreet)) {
     return await getMenuText(user);
   }
   if (m === "menu" || m === "help") {

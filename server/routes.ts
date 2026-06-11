@@ -407,10 +407,22 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
   const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i);
   const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
+  // Spoken numbers — voice notes produce "ten thousand steps", "did twelve thousand steps"
+  const WORD_THOUSANDS: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+    seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
+  };
+  const wordThousandMatch = !stepNumMatch && !deviceStepMatch
+    ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)\b/i)
+    : null;
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
-  if (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch) {
+  if (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch) {
     let steps = 0;
-    if (deviceStepMatch) {
+    if (wordThousandMatch) {
+      const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
+      steps = base * 1000 + (wordThousandMatch[2] ? 500 : 0);
+    } else if (deviceStepMatch) {
       const num = parseFloat(deviceStepMatch[1].replace(/,/g, ""));
       steps = deviceStepMatch[2] ? Math.round(num * 1000) : Math.round(num);
     } else if (stepNumMatch) {

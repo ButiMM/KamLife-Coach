@@ -338,9 +338,18 @@ CRITICAL RULES — these are non-negotiable:
 
   // Pure reactions — only words that are unambiguously positive regardless of context.
   // Words like "wow", "eish", "omg" are ambiguous (can be sarcasm/frustration) — they fall through to context-aware handling.
-  const PURE_REACTIONS = new Set(["nice", "awesome", "great", "perfect", "noted", "got it", "will do", "lekker", "cool", "dankie", "aight"]);
+  // Gratitude is never ambiguous — all SA languages included, no GPT call needed.
+  const PURE_REACTIONS = new Set([
+    "nice", "awesome", "great", "perfect", "noted", "got it", "will do", "lekker", "cool", "aight",
+    "thanks", "thank you", "thanks coach", "thank you coach", "thanks a lot", "thank u", "ty",
+    "dankie", "baie dankie",                       // Afrikaans
+    "ngiyabonga", "siyabonga", "ngiyabonga coach", // isiZulu
+    "enkosi",                                      // isiXhosa
+    "ke a leboha", "ke a leboga", "kea leboha",    // Sesotho/Setswana
+    "ndza khensa",                                 // Xitsonga
+  ]);
   if (PURE_REACTIONS.has(m)) {
-    const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up."];
+    const acks = ["Sharp.", "Noted.", "Lekker.", "Good.", "Keep it up.", "Yebo. 👊", "Sho."];
     const ack = acks[Math.floor(Math.random() * acks.length)];
     await logChat(user.id, message, ack, "REACTION_ACK");
     return ack;
@@ -348,7 +357,7 @@ CRITICAL RULES — these are non-negotiable:
 
   // Ambiguous reactions — "wow", "eish", "omg", "sharp" — route through context to read the room
   const AMBIGUOUS_REACTIONS = ["wow", "eish", "omg", "oh my god", "yoh", "hayibo", "haibo", "shem", "really", "seriously", "sharp", "lol", "wtf", "right"];
-  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine", "thanks", "thank you"];
+  const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine"];
   if (SHORT_REPLIES.includes(m) || AMBIGUOUS_REACTIONS.includes(m)) {
     try {
       const lastExchange = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
