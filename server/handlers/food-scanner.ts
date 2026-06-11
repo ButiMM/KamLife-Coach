@@ -177,15 +177,23 @@ function redirectSugarFreeDrinks(foods: SAFood[], lower: string): SAFood[] {
       && SUGARY_DRINK_RE.test([f.name, ...f.aliases].join(" "));
     if (isSugaryDrink) {
       changed = true;
-      if (!out.some(o => o.name === zeroEntry.name)) out.push(zeroEntry);
+      // Keep the client's actual drink name — "Monster Zero" must never be logged
+      // as "Diet Coke". Same zero macros, their drink's identity.
+      const zeroName = `${f.name.replace(/\s+drink$/i, "")} Zero (sugar-free)`;
+      if (!out.some(o => o.name === zeroName)) out.push({ ...zeroEntry, name: zeroName });
     } else {
       out.push(f);
     }
   }
-  return changed ? out : foods;
+  if (!changed) return foods;
+  // When a specific drink was renamed ("Monster Energy Zero"), drop the generic
+  // "Diet Coke / Coke Zero" entry that also matched via a bare "zero sugar" alias —
+  // otherwise the reply names the wrong drink (caught by routing-audit).
+  const hasSpecificZero = out.some(o => o.name.endsWith("Zero (sugar-free)"));
+  return hasSpecificZero ? out.filter(o => o.name !== zeroEntry.name) : out;
 }
 
-export function scanForSAFoods(msg: string): SAFood[] {
+export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
 
@@ -223,11 +231,24 @@ export function scanForSAFoods(msg: string): SAFood[] {
       other.alias.length > entry.alias.length &&
       other.alias.includes(entry.alias)
     );
-    if (!dominated) matched.push(entry.food);
+    if (!dominated) {
+      // The generic zero-drink entry aliases every brand's zero variant
+      // ("monster zero", "powerade zero", "stoney zero"...). Logging those as
+      // "Diet Coke / Coke Zero" renames the client's drink — keep their brand.
+      if (entry.food.name === "Diet Coke / Coke Zero" && !/\b(coke|pepsi|tab|cola)\b/i.test(entry.alias)) {
+        const brandName = entry.alias.replace(/\b\w/g, c => c.toUpperCase());
+        matched.push({ ...entry.food, name: brandName });
+      } else {
+        matched.push(entry.food);
+      }
+    }
   }
 
   // PASS 2: Fuzzy matching (only if exact found nothing)
-  if (matched.length > 0) return redirectSugarFreeDrinks(matched, lower);
+  // exactOnly: callers gating AUTO-logging (no eating verb present) must not act on
+  // fuzzy guesses — fuzzy matched "building phase" to mopani worms and logged a fake
+  // meal over a goal-change request (caught by routing-audit).
+  if (matched.length > 0 || opts?.exactOnly) return redirectSugarFreeDrinks(matched, lower);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];

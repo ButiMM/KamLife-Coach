@@ -297,7 +297,7 @@ export async function handleFoodContext(ctx: {
   // but stays anchored on (ate|had|eaten|finished)+(it|that) so real food logs
   // ("I just had it with rice") fall through to the scanner instead.
   const ateItConfirm =
-    /^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?)[.!\s]*$/i.test(m) ||
+    /^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?|log it|log that|log this|log the meal|yes log it)[.!\s]*$/i.test(m) ||
     (m.split(/\s+/).length <= 7 &&
       /^(?:omg|ok|okay|yebo|sharp|eish|yoh|lol|haha|so)?[\s,!]*(?:i|i.?ve)?\s*(?:just\s+)?(?:ate|had|finished|eaten)\s+(?:it|that)(?:\s+now)?[.!\s]*$/i.test(m));
   if (ateItConfirm) {
@@ -540,9 +540,13 @@ export async function handleFoodContext(ctx: {
   // Requires 2+ food items OR an explicit quantity word — prevents single food words
   // ("eggs", "milk") or shopping/planning fragments from being auto-logged.
   const hasQuantityWord = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i.test(m);
+  // Auto-logging without an eating verb demands EXACT food matches — a fuzzy guess
+  // is never enough evidence to write to the food log on its own.
+  const exactFoodCount = scanForSAFoods(m, { exactOnly: true }).length;
   const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && !isFuturePlanning && hasActualFood
     && m.split(/\s+/).length <= 12
-    && (foodsInMsg.length >= 2 || hasQuantityWord);
+    && exactFoodCount >= 1
+    && (exactFoodCount >= 2 || hasQuantityWord);
   const foodLogOverride = hasLogTrigger && hasActualFood;
 
   // Diagnostic: any message containing recognised foods logs its gate state — when a

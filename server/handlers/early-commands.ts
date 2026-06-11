@@ -218,11 +218,17 @@ export async function handleEarlyCommands(ctx: {
 
   // ---- PERMANENT EQUIPMENT UPDATE ----
   // When user tells us they've changed their setup (joined a gym, bought dumbbells, etc.)
-  const isEquipmentUpdate =
+  // Negation guard: "I have NO gym access", "don't have weights", "can't get to the gym"
+  // is the OPPOSITE of an equipment upgrade — without this, "no gym access this week"
+  // flipped the client's programme to full gym (caught by routing-audit).
+  const negatedEquipment =
+    /\b(no|don'?t|do not|won'?t|can'?t|cannot|without|lost|left|quit|cancelled?|stopped)\b[\w\s]{0,18}\b(gym|equipment|dumbbells?|weights|bands?|access)\b/i.test(m) ||
+    /\bno\s+(gym\s+)?access\b/i.test(m);
+  const isEquipmentUpdate = !negatedEquipment && (
     /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
     /\b(joined|signed up|now (go to|at|train at)|started at|going to)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre)\b/i.test(m) ||
     /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
-    /\bupdate my (equipment|training mode|setup)\b/i.test(m);
+    /\bupdate my (equipment|training mode|setup)\b/i.test(m));
 
   if (isEquipmentUpdate) {
     const lower = m.toLowerCase();

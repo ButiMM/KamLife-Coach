@@ -104,7 +104,7 @@ const getStepResponse = _getStepResponse;
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
+export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
   let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 

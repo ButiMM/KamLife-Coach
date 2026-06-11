@@ -105,7 +105,11 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   }
 
   // ---- RESET ALL OF TODAY'S FOOD ----
-  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|undo.*last.*meal|delete.*last.*meal|remove.*last.*meal|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m)) {
+  // "remove/delete/undo LAST meal" must NOT match here — that is a single-entry
+  // removal handled by isRemoveLast below. Having it in this branch wiped the
+  // client's entire day when they asked to remove one meal (caught by routing-audit).
+  if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|wipe.*food|wipe.*log|clear.*today|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m) &&
+      !/\b(last|previous)\s+(meal|entry|one|log)\b/i.test(m)) {
     invalidateFoodTotalsCache(user.id);
     await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
     const todayStart = sastDayStart();
