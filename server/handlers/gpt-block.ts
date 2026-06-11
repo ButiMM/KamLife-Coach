@@ -375,6 +375,8 @@ CRITICAL — READ THE TONE FIRST:
 - If your previous message was clearly wrong, confused, or unhelpful AND the client says "wow", "eish", "omg", "really", "seriously", "lol" — they are expressing disbelief or frustration, NOT celebration. Acknowledge the bad response briefly and correct it.
 - If your previous message was good coaching and the client's reaction is positive — acknowledge and move forward.
 - Never respond to sarcasm with cheerfulness. If the context is negative, match it with directness and a correction.
+- NEVER claim there was a technical issue ("it seems there was an issue") — nothing went wrong unless the client says so.
+- NEVER pivot to a different topic. If your previous message was about the workout, do NOT ask about meals. Stay on the subject of your previous message.
 Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
       const shortReply = sanitizeCoachReply(await withTimeout("gpt_short", 20000, () => askCoachK(message, user, shortReplyContext, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
       await logChat(user.id, message, shortReply, "SHORT_REPLY");

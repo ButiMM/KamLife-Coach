@@ -1065,7 +1065,10 @@ const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
   // Programme requests — asking TO SEE the plan, never a completion report.
   // Must be caught BEFORE the GPT classifier, which treats "today's workout" as ambiguous
   // and guesses WORKOUT_LOG, causing the completion handler to fire and log a fake session.
-  [/^(today.?s\s+(?:workout|session|training|programme?)|my\s+(?:workout|session|programme?)(?:\s+(?:today|for\s+today))?|give\s+me\s+(?:my\s+)?(?:workout|session|programme?)|show\s+(?:me\s+)?(?:my\s+)?(?:workout|session|programme?)|what.?s\s+(?:my\s+)?(?:today.?s\s+)?(?:workout|session|programme?))[\s?!.]*$/i, "OTHER"],
+  // Tolerates up to 3 leading filler words — voice transcripts arrive as
+  // "Meet today's workout." (Whisper mishearing "what's"). Completion verbs,
+  // schedule words, and change requests are excluded by the lookahead.
+  [/^(?!.*\b(?:done|did|finished|complete[d]?|smashed|crushed|logged|next|tomorrow|yesterday|change|switch|swap|cancel|skip|new|different|another)\b)(?:[\w'’]+\s+){0,3}(?:today.?s?|my|the)?\s*(?:workout|session|training|programme?)(?:\s+(?:for\s+)?(?:today|now|please|pls))?[\s?!.]*$/i, "OTHER"],
 ];
 
 const VALID_INTENTS = new Set<ClassifiedIntent>([

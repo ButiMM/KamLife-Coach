@@ -865,10 +865,24 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: TODAY'S WORKOUT ----
-  if (["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
+  // Exact phrases PLUS a tolerant matcher. Voice transcripts arrive with artifacts
+  // ("Meet today's workout." — Whisper mishearing "what's"), real typing arrives with
+  // punctuation ("Today's workout?"), and follow-ups arrive as deixis ("Show it to me").
+  // Every one of these must deliver the plan deterministically — when they miss, GPT
+  // improvises an unformatted workout paragraph with no warm-up and no logging path.
+  const wReqStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
+  const WORKOUT_REQ_EXACT = ["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
     "show me", "show", "send it", "send workout", "show session", "today's session", "todays session",
-    "1", "day 1", "day 2", "day 3", "day 4", "day 5", "day 6"].includes(m)) {
-    const dayMatch = m.match(/^day\s*([1-6])$/);
+    "show it", "show it to me", "show me it", "send it to me", "send me it", "let me see", "let me see it",
+    "1", "day 1", "day 2", "day 3", "day 4", "day 5", "day 6"];
+  const wReqNoun = /\b(workout|session|programme?|program|training)\b/i.test(wReqStripped);
+  // Completions, schedule moves, and complaints are NOT plan requests — other handlers own those.
+  const wReqExcluded = /\b(done|did|finished|complete[d]?|smashed|crushed|killed|logged|next|tomorrow|yesterday|change|switch|swap|cancel|stop|pause|skip|move|reschedule|hate|boring|harder|easier|rest)\b/i.test(wReqStripped);
+  const wReqShape = /\b(today.?s?|my|the|me|what.?s|what|give|show|send|see|meet|get|need|want|whats)\b/i.test(wReqStripped);
+  const isWorkoutRequest = WORKOUT_REQ_EXACT.includes(wReqStripped)
+    || (wReqNoun && !wReqExcluded && wReqShape && wReqStripped.split(/\s+/).length <= 6);
+  if (isWorkoutRequest) {
+    const dayMatch = wReqStripped.match(/^day\s*([1-6])$/);
     if (dayMatch) {
       const requestedDay = parseInt(dayMatch[1]);
       const dayUser = { ...user, programmeDayInWeek: requestedDay };
