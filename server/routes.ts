@@ -405,7 +405,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   ) : null;
   const deviceStepMatch = (_devMatch && !/\b(?:heart\s*rate|bpm|pulse|calories?\s*burned|sleep\s*score|blood|oxygen)\b/i.test(m)) ? _devMatch : null;
   const hasKmWalk = m.match(/(?:walked|loop|walk)\s+([\d.]+)\s*km/i);
-  const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*(?:min(?:ute)?s?|hrs?|hours?)/i);
+  const hasDurationWalk = !stepNumMatch && !deviceStepMatch && !hasKmWalk && m.match(/(?:walked|walk|walking)\s+(?:for\s+)?(\d+)\s*((min(?:ute)?s?|hrs?|hours?))/i);
   const stepIsKShorthand = !!m.match(/\b[\d,]+(?:\.\d+)?\s*k\s*(?:steps?|staps?)\b/i);
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
   if (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch) {
@@ -415,7 +415,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       steps = deviceStepMatch[2] ? Math.round(num * 1000) : Math.round(num);
     } else if (stepNumMatch) {
       const raw = stepNumMatch[1].replace(/,/g, "");
-      steps = stepIsKShorthand ? Math.round(parseFloat(raw) * 1000) : parseInt(raw);
+      steps = stepIsKShorthand ? Math.round(parseFloat(raw) * 1000) : Math.round(parseFloat(raw));
     } else if (hasKmWalk) {
       const km = Math.min(parseFloat(hasKmWalk[1]), 50); // cap at 50km (marathon+)
       steps = Math.round(km * 1300);

@@ -633,7 +633,7 @@ export function buildFoodLogReply(p: {
         ];
     proteinTip = `\n\n${suggestions[Math.floor(Math.random() * suggestions.length)]} ${Math.round(protRemaining)}g protein still needed today.`;
   } else if (protRemaining <= 0) {
-    const evnHour = new Date().getUTCHours() + 2;
+    const evnHour = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
     const isEvening = evnHour >= 17;
     const caloriesOnTarget = runningCals <= calorieTarget * 1.1;
     if (isEvening && caloriesOnTarget) {

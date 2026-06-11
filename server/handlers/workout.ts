@@ -269,7 +269,12 @@ export async function handleWorkoutCommands(ctx: {
 
   // ---- RETROACTIVE WORKOUT — "trained yesterday", "did legs yesterday", "done on Sunday" ----
   const hasRetroDayRef = /\b(yesterday|last night|2 days ago|two days ago|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|last\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday))\b/i.test(m);
-  const hasCompletionWord = /\b(done|finished|complete[d]?|trained|did\s+(my\s+)?(workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+done|session\s+done|training\s+done|gym\s+done|gym\s+yesterday|trained\s+yesterday)\b/i.test(m);
+  // "done/finished/completed" alone is too generic — must appear beside a workout word.
+  // "trained", "did my workout/session/legs/etc." are workout-specific by themselves.
+  const hasCompletionWord =
+    /\b(trained|did\s+(?:my\s+)?(?:workout|session|training|gym|legs?|upper(?:\s+body)?|lower(?:\s+body)?|chest|back|push|pull|cardio|arms?|shoulders?|squats?)|workout\s+(?:done|complete[d]?|finished)|session\s+(?:done|complete[d]?|finished)|training\s+(?:done|complete[d]?|finished)|gym\s+(?:done|complete[d]?|finished))\b/i.test(m)
+    || /\b(?:done|finished|complete[d]?)\b.{0,40}\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b/i.test(m)
+    || /\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b.{0,40}\b(?:done|finished|complete[d]?)\b/i.test(m);
   const hasMissWord = /\b(missed?|couldn.?t|skipped?|didn.?t|won.?t|rest\s+day|sick|injur|cancel)\b/i.test(m);
 
   const isRetroDone = !m.includes("?") && hasRetroDayRef && hasCompletionWord && !hasMissWord;
