@@ -397,9 +397,19 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
     return safetyReply;
   }
 
+  // Client critiquing the bot's RESPONSE QUALITY — not personal emotional distress.
+  // "vague", "robotic", "that was wrong", "no this is a disaster" = coaching feedback.
+  // These must NOT route to the mindset agent (which treats everything as personal struggle).
+  const isMetaCriticism =
+    /\b(vague|robotic|generic)\b/i.test(m) ||
+    /\b(this|that|your|the)\s+(response|answer|reply|message|coaching)\s+(is|was|doesn.?t|makes no)\b/i.test(m) ||
+    /\b(this is a disaster|that.?s a disaster|no this is|you (ignored|didn.?t (listen|read|understand|get it)))\b/i.test(m) ||
+    /\b(not what i (asked|said|meant)|didn.?t answer|ignored (my|the) question)\b/i.test(m);
+
   const isFrustrated =
     /\b(wow just wow|seriously\?|what the|this is ridiculous|what is this|are you serious|come on|wtf|what the hell|this is useless|pathetic|this doesn.?t make sense|that.?s wrong|you.?re wrong|bad response|wrong answer|that.?s not what i|you didn.?t even|you ignored|you didn.?t listen|not what i asked|not worth|waste of money|waste of time|cancel|refund|unsubscribe|this is bad|this is shit|this sucks|useless|rubbish|garbage|disappointed|i.?m done|giving up on this|doesn.?t work|broken|stupid)\b/i.test(m) ||
-    (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo|omg|oh my god|yoh)\s*[!?.]*$/i.test(m));
+    (m.length < 30 && /^\s*(wow|seriously|really|eish|ag man|ag nee|shem|hayibo|haibo|omg|oh my god|yoh)\s*[!?.]*$/i.test(m)) ||
+    isMetaCriticism;
 
   if (isFrustrated) {
     try {
@@ -411,7 +421,18 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
       const lastOut = lastBotMsg[0]?.messageOut || "";
       const lastIntent = lastBotMsg[0]?.intent || "";
       const profileGuard = `PROFILE FACTS: Goal=${user.goalType || "fat_loss"}, Budget=${user.weeklyFoodBudget || "100_300"}, Injuries=${user.injuries || "none"}, Medical=${user.medicalConditions || "none"}. You MUST use these facts and never ignore them.`;
-      const frustContext = `You are Coach K. Client said: "${message}". Your previous message was: "${lastOut.slice(0, 200)}".
+      const frustContext = isMetaCriticism
+        ? `You are Coach K. Client said: "${message}". Your previous message was: "${lastOut.slice(0, 200)}".
+
+The client is critiquing the QUALITY of your coaching response — they called it vague, robotic, generic, or wrong. This is NOT personal emotional distress. Do NOT respond with empathy, emotional support, or life coaching. ${profileGuard}
+
+TWO SENTENCES ONLY:
+1. Acknowledge in one direct sentence what the last response missed (was it too brief? too generic? ignored what they said?)
+2. Give one specific, data-driven coaching action using their actual numbers (weight, target, goal, programme)
+
+BANNED — never say any of these: "I sense your disappointment", "navigate your fitness journey", "overwhelmed", "challenges your way", "I'm sorry", "I apologise", "you've got this", "let's ensure", "keep you engaged and motivated", "feel free", "reach out", "be kind to yourself", "I understand", "It sounds like"
+SA voice. Direct. Correct the miss. Coach forward.`
+        : `You are Coach K. Client said: "${message}". Your previous message was: "${lastOut.slice(0, 200)}".
 
 They are unhappy with your response. ${profileGuard}
 
@@ -460,7 +481,7 @@ SA voice. Direct. Coach forward, not backward.`;
   // 1. RANT with high confidence → mindset agent (empathetic, doesn't lecture on nutrition)
   // 2. Otherwise use keyword-based routing as before
   let agentType = routeToAgent(message);
-  if (classifiedIntent === "RANT" && intentConfidence >= 0.75) {
+  if (classifiedIntent === "RANT" && intentConfidence >= 0.75 && !isMetaCriticism) {
     agentType = "mindset";
     console.log(`[INTENT] RANT override → mindset agent (${Math.round(intentConfidence * 100)}% confidence)`);
   }
