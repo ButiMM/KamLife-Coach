@@ -347,6 +347,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   // Conservative: high confidence only, never accepts invented numbers, and the
   // original message always proceeds untouched on timeout/error. Killswitch: NORMALIZER=off.
   let normalizedQuestion = false;
+  const originalMBeforeNorm = m; // save before any normalization rewrite — used for supplementary extraction
   if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
     try {
       const pre = await Promise.race([
@@ -369,6 +370,28 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
             console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
             message = canon;
             m = canonLower.replace(/\s+/g, " ").trim();
+          }
+        }
+      }
+      // Supplementary extraction: when a GOAL_CHANGE is normalized, the canonical
+      // captures the goal but drops other context from the original voice note.
+      // Extract gym membership and body weight from the original and apply immediately
+      // so the handler response references the correct training mode and targets.
+      if (pre.intent === "GOAL_CHANGE" && pre.confidence >= 0.75) {
+        const gymInOriginal = /\b(joined.*gym|back.*gym|back at.*gym|at.*gym|now.*gym|got.*gym|started.*gym|i.?ve.*joined|gym.*member)\b/i.test(originalMBeforeNorm);
+        if (gymInOriginal && user.trainingMode !== "gym") {
+          await db.update(users).set({ trainingMode: "gym" }).where(eq(users.phoneNumber, phone));
+          user.trainingMode = "gym";
+          console.log("[NORMALIZER] supplementary: training mode → gym from GOAL_CHANGE original");
+        }
+        const wtMatch = originalMBeforeNorm.match(/\bmy\s+(?:current\s+)?weight\s+(?:is\s+)?(\d{2,3}(?:\.\d+)?)\b/i)
+          || originalMBeforeNorm.match(/\bi\s+(?:currently\s+)?weigh\s+(\d{2,3}(?:\.\d+)?)\s*kg/i);
+        if (wtMatch) {
+          const wt = parseFloat(wtMatch[1]);
+          if (wt >= 30 && wt <= 300) {
+            await db.update(users).set({ currentWeight: wt.toString() }).where(eq(users.phoneNumber, phone));
+            user.currentWeight = wt.toString();
+            console.log(`[NORMALIZER] supplementary: weight → ${wt}kg from GOAL_CHANGE original`);
           }
         }
       }

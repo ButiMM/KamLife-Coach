@@ -1062,6 +1062,10 @@ const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
   [/^(\d{4,6})\s*(steps?|step|km|k|miles?)?\s*$/i, "STEPS"],
   [/^(\d{2,3}(?:\.\d+)?)\s*kg\s*$/i, "WEIGHT"],
   [/^(done|finished|completed|session done|workout done|trained today|went to gym|gym done|just finished|just trained)[\s!.]*$/i, "WORKOUT_LOG"],
+  // Programme requests — asking TO SEE the plan, never a completion report.
+  // Must be caught BEFORE the GPT classifier, which treats "today's workout" as ambiguous
+  // and guesses WORKOUT_LOG, causing the completion handler to fire and log a fake session.
+  [/^(today.?s\s+(?:workout|session|training|programme?)|my\s+(?:workout|session|programme?)(?:\s+(?:today|for\s+today))?|give\s+me\s+(?:my\s+)?(?:workout|session|programme?)|show\s+(?:me\s+)?(?:my\s+)?(?:workout|session|programme?)|what.?s\s+(?:my\s+)?(?:today.?s\s+)?(?:workout|session|programme?))[\s?!.]*$/i, "OTHER"],
 ];
 
 const VALID_INTENTS = new Set<ClassifiedIntent>([
@@ -1095,7 +1099,9 @@ FOOD_LOG     - reporting food/drinks ALREADY eaten → canonical: "i had <items>
 FOOD_PLANNED - food they are GOING TO eat (future tense) → canonical: "i'm gonna have <items> for <meal>"
 MEAL_COPY    - repeat a previous meal ("same as lunch") → canonical: "<meal> same as <meal/yesterday>"
 STEPS        - steps/distance walked, a statement not a question → canonical: "<number> steps [yesterday]"
-WORKOUT_LOG  - completed exercise/session → canonical: "workout done [yesterday]"
+WORKOUT_LOG  - ALREADY COMPLETED exercise/session → canonical: "workout done [yesterday]"
+               MUST have explicit completion: "done", "finished", "trained", "just came from gym", "session complete"
+               "Today's workout" alone = programme request = OTHER, not WORKOUT_LOG
 WEIGHT       - body weight check-in → canonical: "<number>kg"
 GOAL_CHANGE  - wants different goal: building/bulking phase, cut, lean out, muscle composition → canonical: "change my goal to <muscle gain|fat loss|recomposition>"
 TOTALS_QUERY - asking today's calories/protein/remaining → canonical: "today's calories"
@@ -1103,20 +1109,24 @@ QUESTION     - asking about fitness/nutrition/health (even if it contains number
 RANT         - venting frustration/emotion → canonical: ""
 GREETING     - purely social opener → canonical: ""
 MENU_REQUEST - wants menu/options/help → canonical: ""
-OTHER        - everything else → canonical: ""
+OTHER        - everything else, including requests to SEE a plan → canonical: ""
 
 RULES:
 - A question that MENTIONS steps/food/weight is QUESTION, never a log. "Doesn't going over 10,000 steps affect my goals?" → QUESTION.
 - NEVER invent items, numbers, or meals not present in the message. Canonical only rephrases what is there.
 - Keep food items exactly as said (tin fish stays tin fish). Translate number-words to digits ("ten thousand" → 10000).
 - "building phase" / "change muscle composition" / "bulk" → GOAL_CHANGE muscle gain. "cut" / "lean out" → fat loss.
+- "Today's workout" / "my workout" / "give me my workout" = requesting the plan = OTHER. No canonical needed.
 
 Examples:
 "Also, I want to go into a building phase. I want to change the muscle composition." → {"intent":"GOAL_CHANGE","confidence":0.95,"canonical":"change my goal to muscle gain"}
 "Doesn't going over 10,000 steps affect my body composition and my goals?" → {"intent":"QUESTION","confidence":0.95,"canonical":""}
 "Breakfast, four fish fingers, four slices of bread, four eggs, and a black coffee." → {"intent":"FOOD_LOG","confidence":0.95,"canonical":"i had 4 fish fingers, 4 slices of bread, 4 eggs and a black coffee for breakfast"}
 "Right, for lunch it's going to be tin fish, rice, and mixed veggies." → {"intent":"FOOD_PLANNED","confidence":0.9,"canonical":"i'm gonna have tin fish, rice and mixed veg for lunch"}
-"Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}`,
+"Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}
+"Today's workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
+"Give me my workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
+"I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}`,
         },
         { role: "user", content: m.slice(0, 300) },
       ],

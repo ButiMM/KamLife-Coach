@@ -496,7 +496,16 @@ export async function handleWorkoutCommands(ctx: {
     const newTargets = calculateTargets(currentWt, goalType, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
     await db.update(users).set({ goalType, calorieTarget: newTargets.calorieTarget, proteinTarget: newTargets.proteinTarget }).where(eq(users.phoneNumber, phone));
     const label = goalLabels[goalType] || goalType;
-    return `Goal updated to *${label}*.\n\nTargets adjusted: ${newTargets.calorieTarget} kcal/day | ${newTargets.proteinTarget}g protein.\n\n${goalType === "muscle_gain" ? "Eat in a slight surplus. Hit protein every meal. Push weights up every session." : goalType === "fat_loss" ? "Stay in your calorie range. Hit protein first — it preserves muscle while cutting." : "Hold calories at maintenance. Weight training stays the same."}`;
+    const capFirst = (user.name || "").split(" ")[0];
+    const nameStr = capFirst ? `Sharp ${capFirst}` : "Sharp";
+    const mode = user.trainingMode || "home";
+    const sessionWord = mode === "gym" ? "gym session" : "home session";
+    const goalDetail = goalType === "muscle_gain"
+      ? `Eat above ${newTargets.calorieTarget} kcal on training days. Hit ${newTargets.proteinTarget}g protein every day — that is what builds muscle. Add reps or weight every session.\n\nReply *workout* for your first ${sessionWord}.`
+      : goalType === "fat_loss"
+      ? `Stay within ${newTargets.calorieTarget} kcal. Hit ${newTargets.proteinTarget}g protein first at every meal — that preserves muscle while you cut.\n\nReply *workout* for today's session.`
+      : `Hold calories at ${newTargets.calorieTarget} kcal. Hit ${newTargets.proteinTarget}g protein. Consistency over the next 8 weeks is what locks the results in.\n\nReply *workout* for today's session.`;
+    return `${nameStr}. Goal updated to *${label}*.\n\nNew targets: *${newTargets.calorieTarget} kcal/day | ${newTargets.proteinTarget}g protein.*\n\n${goalDetail}`;
   }
 
   return null;
