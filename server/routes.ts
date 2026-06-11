@@ -357,7 +357,18 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
       ]);
       normalizedQuestion = pre.intent === "QUESTION" && pre.confidence >= 0.8;
       const ACTION_INTENTS = new Set<ClassifiedIntent>(["FOOD_LOG", "FOOD_PLANNED", "MEAL_COPY", "STEPS", "WORKOUT_LOG", "WEIGHT", "GOAL_CHANGE", "TOTALS_QUERY"]);
-      const canon = ((pre as IntentClassification).canonical || "").trim();
+      let canon = ((pre as IntentClassification).canonical || "").trim();
+      // Tense brake: FOOD_PLANNED is only valid when the CLIENT used future words.
+      // A bare food list ("Lunch / Tin fish / Rice / Mixed veggies") is an eaten meal —
+      // the most common logging format. If the classifier guessed future tense the
+      // client never wrote, convert the canonical to past so the meal logs immediately
+      // instead of being held hostage behind an "ate it" confirmation.
+      if (pre.intent === "FOOD_PLANNED" && canon) {
+        const FUTURE_RE = /\b(i.?ll\s+have|i\s+will|gonna|going\s+to|planning|will\s+be|later|tonight|this\s+evening|about\s+to|busy\s+(?:cooking|making)|in\s+the\s+oven|on\s+the\s+stove)\b/i;
+        if (!FUTURE_RE.test(originalMBeforeNorm)) {
+          canon = canon.replace(/\b(i.?m\s+)?(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|will\s+be\s+(?:eating|having))\b/gi, "i had");
+        }
+      }
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
         const canonLower = canon.toLowerCase();
         if (canonLower !== m) {

@@ -292,7 +292,15 @@ export async function handleFoodContext(ctx: {
 
   // ---- "ATE IT" — confirm a previously planned meal and log it ----
   // Closes the loop on FOOD_PLANNED: "gonna have X for lunch" → [eats] → "ate it" → logged.
-  if (/^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?)[.!\s]*$/i.test(m)) {
+  // Humans never type the magic phrase exactly — "Omg I just had it", "ok ate it now",
+  // "finished it" must all land. Tolerates interjection prefixes and just/now padding,
+  // but stays anchored on (ate|had|eaten|finished)+(it|that) so real food logs
+  // ("I just had it with rice") fall through to the scanner instead.
+  const ateItConfirm =
+    /^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?)[.!\s]*$/i.test(m) ||
+    (m.split(/\s+/).length <= 7 &&
+      /^(?:omg|ok|okay|yebo|sharp|eish|yoh|lol|haha|so)?[\s,!]*(?:i|i.?ve)?\s*(?:just\s+)?(?:ate|had|finished|eaten)\s+(?:it|that)(?:\s+now)?[.!\s]*$/i.test(m));
+  if (ateItConfirm) {
     try {
       const twelveHoursAgo = new Date(Date.now() - 12 * 3_600_000);
       const planned = await db.select({ messageIn: chatHistory.messageIn })

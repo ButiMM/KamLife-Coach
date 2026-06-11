@@ -1117,12 +1117,14 @@ RULES:
 - Keep food items exactly as said (tin fish stays tin fish). Translate number-words to digits ("ten thousand" → 10000).
 - "building phase" / "change muscle composition" / "bulk" → GOAL_CHANGE muscle gain. "cut" / "lean out" → fat loss.
 - "Today's workout" / "my workout" / "give me my workout" = requesting the plan = OTHER. No canonical needed.
+- FOOD_PLANNED requires EXPLICIT future words from the client ("going to", "gonna", "later", "tonight", "will have"). A bare food list — meal name then items, no verbs — is ALWAYS FOOD_LOG (already eaten). When in doubt between FOOD_LOG and FOOD_PLANNED, choose FOOD_LOG.
 
 Examples:
 "Also, I want to go into a building phase. I want to change the muscle composition." → {"intent":"GOAL_CHANGE","confidence":0.95,"canonical":"change my goal to muscle gain"}
 "Doesn't going over 10,000 steps affect my body composition and my goals?" → {"intent":"QUESTION","confidence":0.95,"canonical":""}
 "Breakfast, four fish fingers, four slices of bread, four eggs, and a black coffee." → {"intent":"FOOD_LOG","confidence":0.95,"canonical":"i had 4 fish fingers, 4 slices of bread, 4 eggs and a black coffee for breakfast"}
-"Right, for lunch it's going to be tin fish, rice, and mixed veggies." → {"intent":"FOOD_PLANNED","confidence":0.9,"canonical":"i'm gonna have tin fish, rice and mixed veg for lunch"}
+"Luch\nTin fish\nRice\nMixed veggies" → {"intent":"FOOD_LOG","confidence":0.95,"canonical":"i had tin fish, rice and mixed veggies for lunch"}
+"Tonight I'm going to make chicken and pap for dinner" → {"intent":"FOOD_PLANNED","confidence":0.9,"canonical":"i'm gonna have chicken and pap for dinner"}
 "Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}
 "Today's workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "Give me my workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
