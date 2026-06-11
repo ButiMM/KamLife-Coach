@@ -26,9 +26,19 @@ Slugs: `squat`, `hip-thrust`, `leg-press`, `leg-curl`, `leg-extension`, `calf-ra
 `tricep-pushdown`, `cable-kickback`, `push-up`, `plank`, `dead-bug`
 
 ## Handler pipeline order
-Safety → Onboarding → POPIA → Subscription → Frustration → FoodLogMgmt →
+Safety → Onboarding → POPIA → Subscription → Frustration → **Normalizer** → FoodLogMgmt →
 EarlyCommands → Media → Workout → Steps → Water → FoodContext → Progress →
 Misc → Lifecycle → GPT
+
+### Normalizer (front-door brain)
+`classifyIntent` (gpt-4o-mini, fired in background at message entry) classifies AND
+rewrites messy phrasing into the canonical forms the deterministic handlers expect —
+"I want to go into a building phase" → "change my goal to muscle gain". Applied in
+routes.ts before FoodLogMgmt. High-confidence action intents only; numbers in the
+canonical must exist in the original (hallucination brake); on timeout/error the
+original message proceeds unchanged. Killswitch: `NORMALIZER=off` in Railway.
+QUESTION classification also guards the step logger from eating questions.
+Voice transcripts get normalized too — media recursion re-enters handleMessage as text.
 
 ## Never touch without full understanding
 - `server/coach-prompt.ts` — any change to food philosophy or coaching voice must preserve goal-aware logic (fat_loss gets portion context, muscle_gain gets encouragement)

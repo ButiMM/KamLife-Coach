@@ -12,7 +12,7 @@ import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
-import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent } from "./gpt";
+import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -106,7 +106,7 @@ const getStepResponse = _getStepResponse;
 
 async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
   try {
-  const m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
+  let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
   // ---- SAFETY + DATA GUARDS (crisis, medical, terminal, delete, reset) ----
   const safetyResult = await runSafetyGuards(phone, message, m);
@@ -339,6 +339,42 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   }
 
 
+  // ---- FRONT-DOOR NORMALIZER — the classifier's verdict applied BEFORE routing ----
+  // The brain decides what the message IS; the deterministic handlers stay the hands.
+  // Messy human phrasing ("I want to go into a building phase", "Breakfast, four fish
+  // fingers...") is rewritten into the canonical form the handlers were built for —
+  // so infinite phrasing variety maps onto the finite patterns that log correctly.
+  // Conservative: high confidence only, never accepts invented numbers, and the
+  // original message always proceeds untouched on timeout/error. Killswitch: NORMALIZER=off.
+  let normalizedQuestion = false;
+  if (process.env.NORMALIZER !== "off" && !mediaUrl && user.onboardingState === "COMPLETE" && !user.awaitingInputType) {
+    try {
+      const pre = await Promise.race([
+        intentPromise,
+        new Promise<{ intent: ClassifiedIntent; confidence: number; canonical?: string }>(res =>
+          setTimeout(() => res({ intent: "OTHER" as ClassifiedIntent, confidence: 0 }), 3500)),
+      ]);
+      normalizedQuestion = pre.intent === "QUESTION" && pre.confidence >= 0.8;
+      const ACTION_INTENTS = new Set<ClassifiedIntent>(["FOOD_LOG", "FOOD_PLANNED", "MEAL_COPY", "STEPS", "WORKOUT_LOG", "WEIGHT", "GOAL_CHANGE", "TOTALS_QUERY"]);
+      const canon = ((pre as IntentClassification).canonical || "").trim();
+      if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
+        const canonLower = canon.toLowerCase();
+        if (canonLower !== m) {
+          // Hallucination brake: every number in the canonical must exist in the original,
+          // unless the original spelled numbers as words ("ten thousand").
+          const digitGroups = canonLower.match(/\d+/g) || [];
+          const originalHasNumberWords = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|thousand|half)\b/i.test(m);
+          const inventsNumbers = digitGroups.some(d => !m.includes(d) && !originalHasNumberWords);
+          if (!inventsNumbers) {
+            console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
+            message = canon;
+            m = canonLower.replace(/\s+/g, " ").trim();
+          }
+        }
+      }
+    } catch { /* non-fatal — original message proceeds */ }
+  }
+
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
   const foodLogMgmtResult = await handleFoodLogMgmt(user, m);
   if (foodLogMgmtResult !== null) return foodLogMgmtResult;
@@ -422,7 +458,7 @@ async function handleMessage(phone: string, message: string, mediaUrl?: string, 
   const stepIsQuestion = m.includes("?")
     || /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
     || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(m);
-  if (!stepIsQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
+  if (!stepIsQuestion && !normalizedQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
       const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);

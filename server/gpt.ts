@@ -1044,11 +1044,16 @@ export async function generateMilestoneVoiceScript(
 
 export type ClassifiedIntent =
   | "FOOD_LOG" | "WORKOUT_LOG" | "STEPS" | "WEIGHT"
-  | "QUESTION" | "RANT" | "GREETING" | "MENU_REQUEST" | "OTHER";
+  | "QUESTION" | "RANT" | "GREETING" | "MENU_REQUEST" | "OTHER"
+  | "GOAL_CHANGE" | "FOOD_PLANNED" | "MEAL_COPY" | "TOTALS_QUERY";
 
 export interface IntentClassification {
   intent: ClassifiedIntent;
   confidence: number;
+  /** Canonical rephrasing of the message in the exact form the deterministic
+   *  handlers were built for — e.g. "i want to go into a building phase" →
+   *  "change my goal to muscle gain". Empty when no rewrite is needed. */
+  canonical?: string;
 }
 
 const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
@@ -1062,6 +1067,7 @@ const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
 const VALID_INTENTS = new Set<ClassifiedIntent>([
   "FOOD_LOG", "WORKOUT_LOG", "STEPS", "WEIGHT",
   "QUESTION", "RANT", "GREETING", "MENU_REQUEST", "OTHER",
+  "GOAL_CHANGE", "FOOD_PLANNED", "MEAL_COPY", "TOTALS_QUERY",
 ]);
 
 export async function classifyIntent(message: string, userId?: string): Promise<IntentClassification> {
@@ -1077,32 +1083,61 @@ export async function classifyIntent(message: string, userId?: string): Promise<
   try {
     const response = await withOpenAIRetry(() => openai.chat.completions.create({
       model: "gpt-4o-mini",
-      max_tokens: 20,
+      max_tokens: 110,
       temperature: 0,
       messages: [
         {
           role: "system",
-          content: `Classify this WhatsApp message from a South African fitness app user. Respond ONLY with JSON: {"intent":"X","confidence":0.0}\n\nX must be exactly one of:\nFOOD_LOG   - reporting food/drinks eaten (e.g. "I had pap and eggs", "just ate chicken")\nWORKOUT_LOG- reporting completed exercise/session (e.g. "done", "trained today")\nSTEPS      - logging steps walked (e.g. "8500 steps", "walked 6km today")\nWEIGHT     - logging body weight (e.g. "I'm 85kg now", "weighed 78 this morning")\nQUESTION   - asking about fitness, nutrition, or health\nRANT       - venting frustration or emotion (not asking for information)\nGREETING   - purely social opener (hi/hello/morning only)\nMENU_REQUEST - wants menu, options, or help list\nOTHER      - everything else`,
+          content: `You are the message-understanding brain of a South African WhatsApp fitness coach. Clients write in English, Afrikaans, isiZulu, isiXhosa, Sotho, slang, and voice-note transcripts. Classify the message AND, for action intents, rephrase it into the canonical form the system understands. Respond ONLY with JSON: {"intent":"X","confidence":0.0,"canonical":""}
+
+X must be exactly one of:
+FOOD_LOG     - reporting food/drinks ALREADY eaten → canonical: "i had <items> for <meal> [yesterday]"
+FOOD_PLANNED - food they are GOING TO eat (future tense) → canonical: "i'm gonna have <items> for <meal>"
+MEAL_COPY    - repeat a previous meal ("same as lunch") → canonical: "<meal> same as <meal/yesterday>"
+STEPS        - steps/distance walked, a statement not a question → canonical: "<number> steps [yesterday]"
+WORKOUT_LOG  - completed exercise/session → canonical: "workout done [yesterday]"
+WEIGHT       - body weight check-in → canonical: "<number>kg"
+GOAL_CHANGE  - wants different goal: building/bulking phase, cut, lean out, muscle composition → canonical: "change my goal to <muscle gain|fat loss|recomposition>"
+TOTALS_QUERY - asking today's calories/protein/remaining → canonical: "today's calories"
+QUESTION     - asking about fitness/nutrition/health (even if it contains numbers!) → canonical: ""
+RANT         - venting frustration/emotion → canonical: ""
+GREETING     - purely social opener → canonical: ""
+MENU_REQUEST - wants menu/options/help → canonical: ""
+OTHER        - everything else → canonical: ""
+
+RULES:
+- A question that MENTIONS steps/food/weight is QUESTION, never a log. "Doesn't going over 10,000 steps affect my goals?" → QUESTION.
+- NEVER invent items, numbers, or meals not present in the message. Canonical only rephrases what is there.
+- Keep food items exactly as said (tin fish stays tin fish). Translate number-words to digits ("ten thousand" → 10000).
+- "building phase" / "change muscle composition" / "bulk" → GOAL_CHANGE muscle gain. "cut" / "lean out" → fat loss.
+
+Examples:
+"Also, I want to go into a building phase. I want to change the muscle composition." → {"intent":"GOAL_CHANGE","confidence":0.95,"canonical":"change my goal to muscle gain"}
+"Doesn't going over 10,000 steps affect my body composition and my goals?" → {"intent":"QUESTION","confidence":0.95,"canonical":""}
+"Breakfast, four fish fingers, four slices of bread, four eggs, and a black coffee." → {"intent":"FOOD_LOG","confidence":0.95,"canonical":"i had 4 fish fingers, 4 slices of bread, 4 eggs and a black coffee for breakfast"}
+"Right, for lunch it's going to be tin fish, rice, and mixed veggies." → {"intent":"FOOD_PLANNED","confidence":0.9,"canonical":"i'm gonna have tin fish, rice and mixed veg for lunch"}
+"Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}`,
         },
         { role: "user", content: m.slice(0, 300) },
       ],
     }), "classifyIntent");
 
-    const raw = (response.choices[0]?.message?.content || "{}").trim();
-    const parsed = JSON.parse(raw) as { intent?: string; confidence?: number };
+    const raw = (response.choices[0]?.message?.content || "{}").trim().replace(/^```json?\s*|\s*```$/g, "");
+    const parsed = JSON.parse(raw) as { intent?: string; confidence?: number; canonical?: string };
     const intent: ClassifiedIntent = VALID_INTENTS.has(parsed.intent as ClassifiedIntent)
       ? (parsed.intent as ClassifiedIntent)
       : "OTHER";
     const confidence = typeof parsed.confidence === "number"
       ? Math.min(1, Math.max(0, parsed.confidence))
       : 0.5;
+    const canonical = typeof parsed.canonical === "string" ? parsed.canonical.trim().slice(0, 400) : "";
 
     if (response.usage && userId) {
       const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
-      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%) tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
+      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%)${canonical ? ` canon="${canonical.slice(0, 60)}"` : ""} tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
     }
 
-    return { intent, confidence };
+    return { intent, confidence, canonical };
   } catch (err) {
     console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
     return { intent: "OTHER", confidence: 0 };
