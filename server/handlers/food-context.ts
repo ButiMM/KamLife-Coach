@@ -78,6 +78,17 @@ function hasUnmatchedFoodContent(message: string, matchedFoods: Array<{ name: st
   return tokens.length > 0;
 }
 
+// Scale EVERY number in a portion description by the quantity — count AND grams.
+// "2 slices (60g)" ×2 must become "4 slices (120g)", never "4 slices (60g)";
+// a label whose grams contradict its count destroys trust in all the numbers.
+function scalePortionDescription(desc: string, quantity: number): string {
+  if (quantity === 1) return desc;
+  return desc.replace(/\d+(?:\.\d+)?/g, (n) => {
+    const scaled = parseFloat(n) * quantity;
+    return Number.isInteger(scaled) ? String(scaled) : String(Math.round(scaled * 10) / 10);
+  });
+}
+
 function getStreakNote(userId: string, streak: number, name: string): string {
   if (hasShownStreakToday(userId)) return "";
   const note = getFoodStreakCelebration(streak, name);
@@ -829,7 +840,7 @@ export async function handleFoodContext(ctx: {
           ...f,
           adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
           adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
-          adjustedDescription: quantity !== 1 ? f.typicalPortionDescription.replace(/^\d+/, String(Math.round(parseInt(f.typicalPortionDescription.match(/^\d+/)?.[0] || "1") * quantity))) : f.typicalPortionDescription,
+          adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
           quantity,
         };
       });

@@ -139,6 +139,8 @@ const CASES: Case[] = [
   // ── FOOD LOG ────────────────────────────────────────────────────────────
   { name: "food: classic 'I had X' logs with numbers", msg: "I had 2 eggs and pap for breakfast",
     expect: [/kcal/i, /protein/i] },
+  { name: "food: portion label grams scale with quantity — 4 slices is 120g, not 60g (known bug, prior session)", msg: "I had 4 slices of brown bread for breakfast",
+    expect: [/4 slices/i, /120\s*g/i, /kcal/i], reject: [/\(60g\)/i] },
   { name: "food: bare list with meal header logs (prod bug 2026-06-11)", msg: "Lunch\nTin fish\nRice\nMixed veggies",
     expect: [/kcal/i, /protein/i], reject: [/not logged yet/i, /in the making/i] },
   { name: "food: bare list with TYPO meal header logs (prod bug 2026-06-11)", msg: "Luch\nTin fish\nRice\nMixed veggies",
