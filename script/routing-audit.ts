@@ -165,6 +165,12 @@ const CASES: Case[] = [
   // ── RETROACTIVE LOGGING ─────────────────────────────────────────────────
   { name: "retro: yesterday's meal logs with date", msg: "Yesterday I had 2 eggs and pap for dinner",
     expect: [/kcal/i, /yesterday/i] },
+  { name: "retro: multi-day catch-up logs each day to the correct date (prod gap 2026-06-11)", msg: "Had chicken and rice Wednesday, oats Thursday morning, pap and pilchards Friday dinner",
+    expect: [/logged \d+ days|✅/i, /kcal/i],
+    reject: [/not logged yet|in the making|planned/i] },
+  { name: "retro: multi-day catch-up handles prefix food (food before day name)", msg: "Rice and beef Wednesday and oats with eggs Thursday",
+    expect: [/logged \d+ days|kcal/i],
+    reject: [/not logged yet|planned/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",

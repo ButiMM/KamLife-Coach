@@ -651,6 +651,82 @@ export async function handleFoodContext(ctx: {
     return plannedReply;
   }
 
+  // ---- MULTI-DAY CATCH-UP LOGGING ----
+  // Fires when client logs food for 2+ different days in one message:
+  //   "Had chicken Wednesday, oats Thursday morning, pap Friday dinner"
+  // Without this, parseMealDate picks the first day found and all foods land
+  // on the same wrong date. Each day now gets its own DB entry at the correct
+  // historical loggedAt.
+  const MDAY_NAME_RE = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|yesterday|today)\b/gi;
+  const mDayMatches: Array<{ name: string; idx: number }> = [];
+  {
+    let mdm: RegExpExecArray | null;
+    const reMD = new RegExp(MDAY_NAME_RE.source, "gi");
+    while ((mdm = reMD.exec(m)) !== null) {
+      const key = mdm[0].toLowerCase();
+      if (!mDayMatches.find(d => d.name === key))
+        mDayMatches.push({ name: key, idx: mdm.index });
+    }
+  }
+
+  if (mDayMatches.length >= 2 && !isQuestion && !isFrustration && !isFuturePlanning && hasActualFood) {
+    mDayMatches.sort((a, b) => a.idx - b.idx);
+
+    const daySegs: Array<{ day: string; text: string }> = [];
+    for (let i = 0; i < mDayMatches.length; i++) {
+      const { name, idx } = mDayMatches[i];
+      const afterStart = idx + name.length;
+      const afterEnd = i + 1 < mDayMatches.length ? mDayMatches[i + 1].idx : m.length;
+      let segText = m.slice(afterStart, afterEnd).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+      // Food before the first day name belongs to that day ("Had chicken Wednesday" → chicken → Wednesday)
+      if (i === 0 && idx > 0) {
+        const prefix = m.slice(0, idx).replace(/^[\s,;.]+|[\s,;.]+$/g, "").trim();
+        if (prefix) segText = prefix + (segText ? " " + segText : "");
+      }
+      daySegs.push({ day: name, text: segText });
+    }
+
+    // Collect planned inserts first — only write if 2+ days have food hits
+    const multiPlan: Array<{ label: string; foods: SAFood[]; kcal: number; prot: number; date: Date; raw: string }> = [];
+    for (const seg of daySegs) {
+      const segFoods = scanForSAFoods(seg.text);
+      if (segFoods.length === 0) continue;
+      const segDate = parseMealDate(seg.day + " " + seg.text);
+      let segKcal = 0, segProt = 0;
+      for (const f of segFoods) { segKcal += f.typicalPortionCalories || 0; segProt += f.typicalPortionProtein || 0; }
+      multiPlan.push({ label: mealDateLabel(segDate), foods: segFoods, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text });
+    }
+
+    if (multiPlan.length >= 2) {
+      await Promise.all(multiPlan.map(p =>
+        db.insert(mealLogs).values({
+          userId: user.id,
+          rawMessage: p.raw,
+          source: "text",
+          kcalInt: p.kcal,
+          proteinInt: p.prot,
+          carbsInt: 0,
+          fatInt: 0,
+          loggedAt: p.date,
+        }).catch(e => console.warn("[multiday-log insert]", e))
+      ));
+      const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");
+      await logChat(user.id, message, logSummary, "FOOD_LOG");
+      invalidatePatternCache(user.id);
+      invalidateFoodTotalsCache(user.id);
+      const recomp = await recomputeTodayFoodTotals(user.id);
+      await db.update(users).set({ todayCalories: recomp.calories, todayProteinG: recomp.protein, todayCaloriesDate: sastToday() })
+        .where(eq(users.id, user.id)).catch(() => {});
+      const lines = multiPlan.map(p => {
+        const cap = p.label.charAt(0).toUpperCase() + p.label.slice(1);
+        return `*${cap}:* ${p.foods.map(f => f.name).join(", ")} — ${p.kcal} kcal | ${p.prot}g protein`;
+      });
+      const todayNote = recomp.calories > 0 ? `\n\n_Today's running total: ${recomp.calories} kcal | ${recomp.protein}g protein._` : "";
+      return `Logged ${multiPlan.length} days. ✅\n\n${lines.join("\n")}${todayNote}`;
+    }
+    // Fewer than 2 days had recognised food — fall through to single-day scanner
+  }
+
   if ((!isQuestion || foodLogOverride) && !isFrustration && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)) {
     console.log(`[FOOD_SCAN] gate fired — user=...${String(user.id || "").slice(-6)} foods=${foodsInMsg.length} trigger=${hasLogTrigger} direct=${directFoodScan}`);
     const MEAL_KEYWORDS = ["breakfast", "lunch", "dinner", "supper", "snack", "brunch", "morning", "afternoon", "evening"];
