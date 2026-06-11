@@ -148,12 +148,12 @@ export async function runMorningCheckin(): Promise<void> {
         for (const l of recentFoodLogDays) {
           if (!l.createdAt) continue;
           const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
-          foodDays.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+          foodDays.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
         }
         const foodCheck = new Date(Date.now() + 2 * 3_600_000);
         foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
         while (true) {
-          const key = `${foodCheck.getUTCFullYear()}-${foodCheck.getUTCMonth()}-${foodCheck.getUTCDate()}`;
+          const key = `${foodCheck.getUTCFullYear()}-${String(foodCheck.getUTCMonth() + 1).padStart(2, "0")}-${String(foodCheck.getUTCDate()).padStart(2, "0")}`;
           if (!foodDays.has(key)) break;
           foodLogStreakCount++;
           foodCheck.setUTCDate(foodCheck.getUTCDate() - 1);
@@ -165,12 +165,12 @@ export async function runMorningCheckin(): Promise<void> {
         for (const l of recentStepLogs as { loggedAt: Date | null }[]) {
           if (!l.loggedAt) continue;
           const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000);
-          stepDays.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+          stepDays.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
         }
         const stepCheck = new Date(Date.now() + 2 * 3_600_000);
         stepCheck.setUTCDate(stepCheck.getUTCDate() - 1);
         while (true) {
-          const key = `${stepCheck.getUTCFullYear()}-${stepCheck.getUTCMonth()}-${stepCheck.getUTCDate()}`;
+          const key = `${stepCheck.getUTCFullYear()}-${String(stepCheck.getUTCMonth() + 1).padStart(2, "0")}-${String(stepCheck.getUTCDate()).padStart(2, "0")}`;
           if (!stepDays.has(key)) break;
           stepStreakCount++;
           stepCheck.setUTCDate(stepCheck.getUTCDate() - 1);

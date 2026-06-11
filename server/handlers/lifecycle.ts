@@ -311,8 +311,8 @@ export async function handleLifecycle(ctx: {
       await logChat(user.id, message, clothingReply, "CLOTHING_CHECKIN");
       return clothingReply;
     }
-    // Didn't recognise the answer — clear state and let GPT handle
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+    // Didn't recognise the answer — prompt again, keep state so next message is still caught
+    return `I didn't catch that. Answer in one message, like: "Looser, High, Flatter, Great"\n\n1. *Jeans* — Looser / Same / Tighter\n2. *Energy* — High / Medium / Low\n3. *Stomach* — Flatter / Same / Bloated\n4. *Overall* — Great / Good / Okay / Bad`;
   }
 
   // ---- INJURY BETTER — close the follow-up loop ----
@@ -337,7 +337,11 @@ export async function handleLifecycle(ctx: {
 
   if (sleepMatch) {
     const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
-    const hours = hoursStr ? parseFloat(hoursStr[1]) : null;
+    const rawHours = hoursStr ? parseFloat(hoursStr[1]) : null;
+    if (rawHours !== null && (rawHours < 0.5 || rawHours > 16)) {
+      return `That doesn't look right — sleep hours should be between 1 and 16. Did you mean ${rawHours > 16 ? "minutes" : "hours"}? Try again: "I slept 7 hours".`;
+    }
+    const hours = rawHours;
     const isBadSleep = /bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap/i.test(m);
 
     const sleepReply = getSleepResponse(hours, isBadSleep);

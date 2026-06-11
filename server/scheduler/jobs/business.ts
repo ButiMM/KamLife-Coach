@@ -16,7 +16,7 @@ export async function runMonthEndBudget(): Promise<void> {
       const name = client.name || "there";
       const budget = client.weeklyFoodBudget || "100_300";
       let budgetMsg: string;
-      if (budget === "under_50" || budget === "50_100") {
+      if (budget === "under_50" || budget === "50_100" || budget === "under_100") {
         budgetMsg = `${name}, month end is coming. Your R57 emergency plan — eggs R25, pilchards R12, sugar beans R20. This covers your protein for 4 days. Shop this weekend before the money is gone.`;
       } else if (budget === "100_300") {
         budgetMsg = `${name}, month end approaching. Your R100 week plan — eggs 12 pack R45, pilchards 3 tins R36, cabbage R8, onions R8, pap 2kg R15. Enough for the full week. Shop at Shoprite or Boxer this weekend.`;

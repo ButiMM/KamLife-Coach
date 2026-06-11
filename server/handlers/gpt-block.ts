@@ -49,7 +49,7 @@ export async function handleGptBlock(ctx: {
   // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
   let todayStatusBlock = "";
   try {
-    const [todayTotals] = await Promise.all([recomputeTodayFoodTotals(user.id)]);
+    const todayTotals = await recomputeTodayFoodTotals(user.id);
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
     const stepTarget = user.stepsTarget || 8500;

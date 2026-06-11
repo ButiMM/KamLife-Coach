@@ -375,9 +375,13 @@ function applyGoalModifications(list: ShoppingList, goalType: string): ShoppingL
 
 const ALL_LISTS: Record<string, ShoppingList[]> = {
   under_100: [TIER_1_WEEK_A, TIER_1_WEEK_B],
+  under_50:  [TIER_1_WEEK_A, TIER_1_WEEK_B],   // DB stores this from onboarding
+  "50_100":  [TIER_1_WEEK_A, TIER_1_WEEK_B],   // DB stores this from onboarding
   "100_300": [TIER_2_WEEK_A, TIER_2_WEEK_B],
   "300_600": [TIER_3_WEEK_A, TIER_3_WEEK_B],
-  over_600: [TIER_4_WEEK_A, TIER_4_WEEK_B],
+  "300_500": [TIER_3_WEEK_A, TIER_3_WEEK_B],   // DB stores this from onboarding
+  over_600:  [TIER_4_WEEK_A, TIER_4_WEEK_B],
+  "500_plus":[TIER_4_WEEK_A, TIER_4_WEEK_B],   // DB stores this from onboarding
 };
 
 export function getShoppingList(budgetTier: string, weekNumber: number, goalType?: string): ShoppingList {
