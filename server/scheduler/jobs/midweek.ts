@@ -14,9 +14,9 @@
  */
 
 import {
-  db, users, workoutLogs, mealLogs,
+  db, users, workoutLogs, mealLogs, chatHistory,
   eq, gte, and, sql,
-  sendWhatsApp, claimDailySlot,
+  sendWhatsApp, claimDailySlot, canSendProactive,
   getActiveClients, isPaused, dayStart,
   TRAINING_SCHEDULES,
 } from "../shared";
@@ -92,6 +92,37 @@ export async function runMidweekSessionCheck(): Promise<void> {
       console.error(`[MIDWEEK] Session check error — ${client.phoneNumber}:`, err);
     }
   }
+}
+
+// ── Wednesday evening: weekly sleep question ─────────────────────────────────
+// Sleep deprivation raises ghrelin (hunger hormone) by ~28% and kills training
+// recovery. One question per week builds sleep awareness.
+
+export async function runWednesdaySleepQuestion(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Wednesday sleep question");
+  const clients = await getActiveClients();
+  const threeDaysAgo = new Date(Date.now() - 3 * 86_400_000);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const daysSilent = client.lastActiveAt
+        ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+        : 999;
+      if (daysSilent > 7) continue;
+      if (!canSendProactive(client.id)) continue;
+      if (!await claimDailySlot(client.id, "sleep_question")) continue;
+
+      const name = (client.name || "there").split(" ")[0];
+      await sendWhatsApp(
+        client.phoneNumber,
+        `${name}, quick mid-week check — how many hours did you sleep last night?\n\nSleep is when your body actually builds the muscle and burns the fat. Less than 7 hours and hunger hormones spike, recovery stalls, and your training output drops. Just reply with a number — no judgement.`,
+      );
+      sent++;
+    } catch (err) { console.error(`[MIDWEEK] Sleep question error — ${client.phoneNumber}:`, err); }
+  }
+  console.log(`[MIDWEEK] Sleep questions sent: ${sent}`);
 }
 
 // ── Thursday: protein pattern intervention ────────────────────────────────────

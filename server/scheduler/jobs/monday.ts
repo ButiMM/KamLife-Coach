@@ -53,7 +53,7 @@ export async function runMondayProgress(): Promise<void> {
       const foodLogs = fl.c || 0;
       const stepDays = sl.c || 0;
       const weights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(2);
-      const firstWeightLog = await db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
+      const firstWeightLog = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
 
       if (workouts === 0 && foodLogs === 0 && stepDays === 0) continue;
 
@@ -77,6 +77,28 @@ export async function runMondayProgress(): Promise<void> {
           lines.push(`⚖️ Up ${diff.toFixed(1)}kg — good for muscle gain. Track lifts to confirm strength is going up.`);
         } else if (diff > 0.5 && goal === "fat_loss") {
           lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week. Review your weekend eating and portion sizes.`);
+        }
+      }
+
+      // Goal arrival estimate — project when target weight will be hit at current pace
+      const targetKg = client.targetWeightKg ? Number(client.targetWeightKg) : null;
+      if (targetKg && firstWeightLog.length > 0 && weights.length >= 1) {
+        const currentKg = Number(weights[0].weight);
+        const startKg = Number(firstWeightLog[0].weight);
+        const startDate = firstWeightLog[0].loggedAt;
+        if (startDate && Math.abs(currentKg - startKg) >= 0.3) {
+          const weeksSinceStart = Math.max(2, (Date.now() - new Date(startDate).getTime()) / (7 * 86_400_000));
+          const pacePerWeek = (currentKg - startKg) / weeksSinceStart;
+          const remaining = targetKg - currentKg;
+          const movingCorrectly = (remaining < 0 && pacePerWeek < 0) || (remaining > 0 && pacePerWeek > 0);
+          if (movingCorrectly && Math.abs(pacePerWeek) >= 0.05) {
+            const weeksToGoal = Math.ceil(Math.abs(remaining) / Math.abs(pacePerWeek));
+            if (weeksToGoal >= 1 && weeksToGoal <= 52) {
+              const arrivalDate = new Date(Date.now() + weeksToGoal * 7 * 86_400_000);
+              const arrivalMonth = arrivalDate.toLocaleString("en-ZA", { month: "long", year: "numeric" });
+              lines.push(`🎯 At this pace: *${targetKg}kg in ~${weeksToGoal} week${weeksToGoal !== 1 ? "s" : ""}* — around *${arrivalMonth}*.`);
+            }
+          }
         }
       }
 

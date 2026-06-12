@@ -7,6 +7,7 @@ import {
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { runWeeklyRecaps } from "../../weekly-recap";
+import { generateMealPlan } from "../../meal-plan";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
   console.log("[SCHEDULER] JOB: Friday weekend strategy");
@@ -283,6 +284,49 @@ export async function runWeekendFoodAudit(): Promise<void> {
       }
     } catch (err) { console.error(`[SCHEDULER] Weekend food audit error — ${client.phoneNumber}:`, err); }
   }
+}
+
+export async function runSundayMealPlan(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Sunday proactive meal plan");
+  const clients = await getActiveClients();
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      const daysSilent = client.lastActiveAt
+        ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+        : 999;
+      if (daysSilent > 10) continue;
+      if (!canSendProactive(client.id)) continue;
+      if (!(await claimProactive(client.id, "sunday_meal_plan", thisWeekUTC()))) continue;
+
+      const name = (client.name || "there").split(" ")[0];
+      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn })
+        .from(chatHistory)
+        .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
+      const recentFoods = recentFoodLogs.map(l => (l.messageIn || "").toLowerCase()).filter(Boolean);
+
+      const plan = generateMealPlan({
+        calorieTarget: client.calorieTarget || 1800,
+        proteinTarget: client.proteinTarget || 120,
+        weeklyFoodBudget: client.weeklyFoodBudget || "100_300",
+        goalType: client.goalType || "fat_loss",
+        medicalConditions: client.medicalConditions || "",
+        otherMedicalNotes: client.otherMedicalNotes || "",
+        recentFoods,
+        firstName: name,
+      });
+
+      const goalLabel = client.goalType === "muscle_gain" ? "muscle gain" : client.goalType === "recomposition" ? "recomposition" : "fat loss";
+      const intro = `*${name} — your 3-day plan for the week ahead:*\n\nBuilt for your ${goalLabel} goal. Screenshot it, save it, use it. Prep protein on Sunday and your whole week is easier.\n\n---\n\n`;
+      await sendWhatsApp(client.phoneNumber, intro + plan);
+      recordProactiveSend(client.id);
+      sent++;
+    } catch (err) { console.error(`[SCHEDULER] Sunday meal plan error — ${client.phoneNumber}:`, err); }
+  }
+  console.log(`[SCHEDULER] Sunday meal plans sent: ${sent}`);
 }
 
 export async function runComplianceLevelUpdate(): Promise<void> {

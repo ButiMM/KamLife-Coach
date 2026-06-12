@@ -26,6 +26,7 @@ import {
 import {
   runFridayWeekendStrategy, runSundayWeeklyReport, runSundayEveningCheckin,
   runWeekendFoodAudit, runComplianceLevelUpdate, runNsvCheckin,
+  runSundayMealPlan,
 } from "./scheduler/jobs/weekly";
 import {
   runPhaseAdvancement, runGoalCheck, runWeeklyMondayCheckin,
@@ -49,8 +50,9 @@ import {
   runTrainingDataLog,
 } from "./scheduler/jobs/monday";
 import { runWaterReminder } from "./scheduler/jobs/water";
-import { runMidweekSessionCheck, runProteinStreakIntervention } from "./scheduler/jobs/midweek";
+import { runMidweekSessionCheck, runProteinStreakIntervention, runWednesdaySleepQuestion } from "./scheduler/jobs/midweek";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
+import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, deliveryStats };
@@ -260,6 +262,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 8 * * 3",     () => safe("runInjuryFollowup",      runInjuryFollowup),      { timezone: "UTC" }); // 10am SAST
   cron.schedule("30 9 * * 3",    () => safe("runPausedClientLite",    runPausedClientLite),    { timezone: "UTC" }); // 11:30am SAST
   cron.schedule("0 12 * * 3",    () => safe("runMidweekSessionCheck", runMidweekSessionCheck), { timezone: "UTC" }); // 2pm SAST — zero-session intervention
+  cron.schedule("0 18 * * 3",    () => safe("runWednesdaySleepQuestion", runWednesdaySleepQuestion), { timezone: "UTC" }); // 8pm SAST — weekly sleep question
 
   // ── Weekly — Thursday ─────────────────────────────────────────────────────
   cron.schedule("0 5 * * 4",     () => safe("runProteinStreakIntervention", runProteinStreakIntervention), { timezone: "UTC" }); // 7am SAST — protein pattern
@@ -271,6 +274,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 8 * * 6",     () => safe("runNsvCheckin",          runNsvCheckin),          { timezone: "UTC" }); // 10am SAST
 
   // ── Weekly — Sunday ───────────────────────────────────────────────────────
+  cron.schedule("0 13 * * 0",    () => safe("runSundayMealPlan",      runSundayMealPlan),      { timezone: "UTC" }); // 3pm SAST — proactive meal plan for the week ahead
   cron.schedule("0 20 * * 0",    () => safe("runCipUpdate",           runCipUpdate),           { timezone: "UTC" }); // 10pm SAST — rebuild all CIPs after the week closes
   cron.schedule("0 6 * * 0",     () => safe("runSundayWeeklyReport",  runSundayWeeklyReport),  { timezone: "UTC" }); // 8am SAST
   cron.schedule("0 7 * * 0",     () => safe("runPlateauDetection",    runPlateauDetection),    { timezone: "UTC" }); // 9am SAST
@@ -289,6 +293,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 17 * * 0",    () => safe("runSundayEveningCheckin",  runSundayEveningCheckin), { timezone: "UTC" }); // 7pm SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────
+  cron.schedule("0 17 1 * *",    () => safe("runMonthlyNarrative",    runMonthlyNarrative),    { timezone: "UTC" }); // 1st 7pm SAST — identity narrative
   cron.schedule("0 7 1 * *",     () => safe("runMonthlyMeasurements", runMonthlyMeasurements), { timezone: "UTC" }); // 1st 9am SAST
   cron.schedule("0 8 20 * *",    () => safe("runMonthEndBudget",      runMonthEndBudget),      { timezone: "UTC" }); // 20th 10am SAST
   cron.schedule("0 7 15,25 * *", () => safe("runPaydayShoppingNudge", runPaydayShoppingNudge), { timezone: "UTC" }); // 15th+25th

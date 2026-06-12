@@ -6,14 +6,14 @@
 import twilio from "twilio";
 import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart } from "../utils";
 import { db, pool } from "../db";
-import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations } from "../../shared/schema";
+import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles } from "../../shared/schema";
 import { eq, gte, and, lt, desc, or, sql } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 
 export { db, pool };
-export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations };
+export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
 export { abExperiments, abAssignments } from "../../shared/schema";
 export { eq, gte, and, lt, desc, or, sql, sastDayStart };
 
