@@ -95,6 +95,42 @@ export async function handleProgressCheck(ctx: {
         ]);
     const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
 
+    // ---- COACHING ANALYSIS — the ONE thing to fix next week ----
+    // A 7-day summary is useful. A 7-day summary that names the single biggest
+    // gap AND gives a concrete action is coaching. The data is already computed —
+    // this function interprets it so the client doesn't have to.
+    function coachingInsight(): string {
+      const trainingPct = plannedSessions > 0 ? completedSessions / plannedSessions : 1;
+      const proteinPct = avgDailyProt > 0 ? avgDailyProt / protTarget : 0;
+      const stepsPct = avgSteps > 0 ? avgSteps / stepsTarget : 0;
+      const fn = user.name?.split(" ")[0] || "";
+
+      // Priority: no training > no logging > protein gap > steps gap
+      if (completedSessions === 0 && plannedSessions > 0) {
+        return `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Reply *1* right now and do today's workout. 20 minutes changes the week.`;
+      }
+      if (weekFoodLogDays < 3) {
+        return `*Fix this week:* Log your food. ${weekFoodLogDays}/7 days isn't enough for me to see where the problem is. I cannot coach what I cannot see. Start tonight: just log dinner, even if it wasn't perfect.`;
+      }
+      if (avgDailyProt > 0 && proteinPct < 0.75) {
+        const gap = protTarget - avgDailyProt;
+        return `*Fix this week:* Protein — you averaged ${avgDailyProt}g but need ${protTarget}g. That ${gap}g daily gap is muscle you're not protecting. Add protein at every meal: 3 eggs (+18g), tin of tuna (+25g), 150g chicken (+35g). Pick one per meal and close the gap.`;
+      }
+      if (trainingPct < 0.5) {
+        const missed = plannedSessions - completedSessions;
+        return `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough training stimulus to drive results. Do the next session today. Not tomorrow. Today.`;
+      }
+      if (avgSteps > 0 && stepsPct < 0.7) {
+        const stepGap = stepsTarget - avgSteps;
+        return `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Fix: 20-minute walk after dinner every day. That alone adds ~2,000 steps and accelerates fat loss more than most people realise.`;
+      }
+      return fn
+        ? `${fn}, solid week across all areas. This week's focus: push training intensity — more weight on the bar or more reps than last time. Results come from progressive overload, not just showing up.`
+        : `Solid week across all areas. This week: push the intensity — more weight or more reps than last session.`;
+    }
+    const insight = coachingInsight();
+    const fullProgressReply = `${progressReply}\n\n${insight}`;
+
     let winsCard = "";
     if (onTrack) {
       const clientDisplayName = user.name || "KamLife";
@@ -118,7 +154,7 @@ export async function handleProgressCheck(ctx: {
       winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R199/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
     }
 
-    const fullReply = `${progressReply}${winsCard}`;
+    const fullReply = `${fullProgressReply}${winsCard}`;
     await logChat(user.id, message, fullReply, "PROGRESS_CHECK");
     return fullReply;
   } catch (e) {
