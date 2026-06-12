@@ -96,7 +96,8 @@ export async function runMorningCheckin(): Promise<void> {
       const yEnd = dayStart(0);
       const ninetyDaysAgoSteps = new Date(Date.now() - 90 * 86_400_000);
 
-      const [proteinRows, recentStepLogs, yesterdayStepRows] = await Promise.all([
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+      const [proteinRows, recentStepLogs, yesterdayStepRows, mealSlotRows] = await Promise.all([
         db.select({ totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int` })
           .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, yStart), lt(mealLogs.loggedAt, yEnd)))
           .catch((_e: Error) => [{ totalProt: 0 }]),
@@ -107,6 +108,15 @@ export async function runMorningCheckin(): Promise<void> {
         db.select({ steps: stepLogs.steps })
           .from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, yStart), lt(stepLogs.loggedAt, yEnd)))
           .catch((_e: Error) => [] as { steps: number | null }[]),
+        db.select({
+          mealLabel: mealLogs.mealLabel,
+          avgProt: sql<number>`AVG(${mealLogs.proteinInt})::int`,
+          logCount: sql<number>`COUNT(*)::int`,
+        })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, fourteenDaysAgo)))
+          .groupBy(mealLogs.mealLabel)
+          .catch(() => [] as { mealLabel: string | null; avgProt: number; logCount: number }[]),
       ]);
 
       const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
@@ -199,7 +209,24 @@ export async function runMorningCheckin(): Promise<void> {
       } else if (totalProtLogged > 0) {
         const gap = proteinTarget - totalProtLogged;
         parts.push(`${totalProtLogged}g protein logged yesterday — ${gap}g short of your ${proteinTarget}g target.`);
-        parts.push(proteinHint(client, gap));
+
+        // Identify the chronically weakest meal slot from 14-day data
+        const MAIN_SLOTS = ["breakfast", "lunch", "dinner"];
+        const SLOT_FIX: Record<string, string> = {
+          breakfast: `Tomorrow: lead breakfast with 3 eggs or 200g Greek yoghurt before anything else.`,
+          lunch: `Today: anchor lunch with chicken, tuna, or eggs — before adding rice or bread.`,
+          dinner: `Tonight: lead dinner with 200g chicken, fish, or eggs before anything else.`,
+        };
+        const qualifyingSlots = (mealSlotRows as { mealLabel: string | null; avgProt: number; logCount: number }[])
+          .filter(r => r.mealLabel && MAIN_SLOTS.includes(r.mealLabel) && r.logCount >= 3);
+        const worstSlot = qualifyingSlots.length >= 2
+          ? qualifyingSlots.reduce((min, r) => r.avgProt < min.avgProt ? r : min)
+          : null;
+        if (worstSlot?.mealLabel && SLOT_FIX[worstSlot.mealLabel]) {
+          parts.push(`Your ${worstSlot.mealLabel}s average only ${worstSlot.avgProt}g protein — that's the gap. ${SLOT_FIX[worstSlot.mealLabel]}`);
+        } else {
+          parts.push(proteinHint(client, gap));
+        }
       } else {
         parts.push(`Food was logged but protein not tracked.`);
       }
