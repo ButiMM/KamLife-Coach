@@ -49,6 +49,7 @@ import {
   runTrainingDataLog,
 } from "./scheduler/jobs/monday";
 import { runWaterReminder } from "./scheduler/jobs/water";
+import { runMidweekSessionCheck, runProteinStreakIntervention } from "./scheduler/jobs/midweek";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, deliveryStats };
@@ -257,6 +258,10 @@ export async function initScheduler(): Promise<void> {
   // ── Weekly — Wednesday ────────────────────────────────────────────────────
   cron.schedule("0 8 * * 3",     () => safe("runInjuryFollowup",      runInjuryFollowup),      { timezone: "UTC" }); // 10am SAST
   cron.schedule("30 9 * * 3",    () => safe("runPausedClientLite",    runPausedClientLite),    { timezone: "UTC" }); // 11:30am SAST
+  cron.schedule("0 12 * * 3",    () => safe("runMidweekSessionCheck", runMidweekSessionCheck), { timezone: "UTC" }); // 2pm SAST — zero-session intervention
+
+  // ── Weekly — Thursday ─────────────────────────────────────────────────────
+  cron.schedule("0 5 * * 4",     () => safe("runProteinStreakIntervention", runProteinStreakIntervention), { timezone: "UTC" }); // 7am SAST — protein pattern
 
   // ── Weekly — Friday ───────────────────────────────────────────────────────
   cron.schedule("0 14 * * 5",    () => safe("runFridayWeekendStrategy", runFridayWeekendStrategy), { timezone: "UTC" }); // 4pm SAST

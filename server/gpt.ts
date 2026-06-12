@@ -192,9 +192,10 @@ export async function buildPatternSummary(user: any): Promise<string> {
   const today = new Date();
   const sevenDaysAgo = sastDayStart(new Date(today.getTime() - 7 * 86_400_000));
   const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
+  const twentyEightDaysAgo = new Date(today.getTime() - 28 * 86_400_000);
 
   try {
-    const [recentChats, recentWeights, olderWeights, recentSteps] = await Promise.all([
+    const [recentChats, recentWeights, olderWeights, recentSteps, monthWorkouts, monthProtein] = await Promise.all([
       db.select().from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
         .orderBy(desc(chatHistory.createdAt))
@@ -215,6 +216,19 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
         .orderBy(desc(stepLogs.loggedAt))
         .limit(7),
+      // 28-day session count for trajectory scoring
+      db.select({ count: sql<number>`COUNT(*)::int` })
+        .from(workoutLogs)
+        .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo)))
+        .catch(() => [{ count: 0 }]),
+      // 28-day protein compliance — days at ≥80% of target
+      db.select({
+        day: sql<string>`DATE(${mealLogs.loggedAt})`,
+        total: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+      }).from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, twentyEightDaysAgo)))
+        .groupBy(sql`DATE(${mealLogs.loggedAt})`)
+        .catch(() => [] as { day: string; total: number }[]),
     ]);
 
     const daysWithLogs = new Set(
@@ -343,6 +357,49 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
     if (programmeWeek === 3) parts.push("Currently in week 3 of the programme — the danger zone.");
     if (today.getDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
+
+    // ── 28-day trajectory scoring ────────────────────────────────────────────
+    const plannedSessions28 = (user.trainingDaysPerWeek || 3) * 4;
+    const completedSessions28 = (monthWorkouts as { count: number }[])[0]?.count || 0;
+    const sessionCompliance28 = plannedSessions28 > 0 ? completedSessions28 / plannedSessions28 : 0;
+
+    const protDays = monthProtein as { day: string; total: number }[];
+    const protCompliantDays = protDays.filter(d => d.total >= proteinTarget * 0.8).length;
+    const protLoggedDays = protDays.filter(d => d.total > 0).length;
+    const protCompliance28 = protLoggedDays >= 7 ? protCompliantDays / protLoggedDays : null;
+
+    // Trajectory label: derives from session compliance over 4 weeks + current streak
+    const wStreak28 = user.workoutStreak || 0;
+    let trajectory: string;
+    if (sessionCompliance28 >= 0.8 && wStreak28 >= 4) {
+      trajectory = "ON_A_RUN";
+    } else if (sessionCompliance28 >= 0.65) {
+      trajectory = "ON_TRACK";
+    } else if (sessionCompliance28 >= 0.4 && wStreak28 >= 1) {
+      trajectory = "RECOVERING";
+    } else if (completedSessions28 === 0) {
+      trajectory = "DISENGAGED";
+    } else {
+      trajectory = "STRUGGLING";
+    }
+
+    const trajectoryNote = {
+      ON_A_RUN:    `TRAJECTORY: On a run — ${completedSessions28}/${plannedSessions28} sessions over 4 weeks (${Math.round(sessionCompliance28 * 100)}%). This client is succeeding. Push harder. Reference the streak. Raise the bar.`,
+      ON_TRACK:    `TRAJECTORY: On track — ${completedSessions28}/${plannedSessions28} sessions over 4 weeks. Consistent. Reinforce the habit. Identify the next gear.`,
+      RECOVERING:  `TRAJECTORY: Recovering — was behind, now back. ${completedSessions28}/${plannedSessions28} sessions. Acknowledge the comeback. Build momentum, don't pile on.`,
+      DISENGAGED:  `TRAJECTORY: Disengaged — 0 sessions in 28 days. Handle with care. Find out what's in the way. Set the smallest possible win. Don't push training — rebuild the relationship first.`,
+      STRUGGLING:  `TRAJECTORY: Struggling — ${completedSessions28}/${plannedSessions28} sessions over 4 weeks (${Math.round(sessionCompliance28 * 100)}%). Direct but not harsh. Name the gap. Give one small action. Don't accept excuses — but acknowledge the difficulty is real.`,
+    }[trajectory] || "";
+
+    if (trajectoryNote) parts.push(trajectoryNote);
+
+    if (protCompliance28 !== null) {
+      if (protCompliance28 >= 0.75) {
+        parts.push(`28-day protein compliance: ${Math.round(protCompliance28 * 100)}% of logged days at ≥80% target — strong habit.`);
+      } else if (protCompliance28 < 0.4) {
+        parts.push(`28-day protein compliance: only ${Math.round(protCompliance28 * 100)}% of logged days hit 80% protein target — chronic shortfall.`);
+      }
+    }
 
     const result = parts.join(" ");
     patternCache.set(cacheKey, result, PATTERN_CACHE_TTL_MS);

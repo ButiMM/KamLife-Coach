@@ -97,7 +97,8 @@ export async function runMorningCheckin(): Promise<void> {
       const ninetyDaysAgoSteps = new Date(Date.now() - 90 * 86_400_000);
 
       const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
-      const [proteinRows, recentStepLogs, yesterdayStepRows, mealSlotRows] = await Promise.all([
+      const twentyEightDaysAgo = new Date(Date.now() - 28 * 86_400_000);
+      const [proteinRows, recentStepLogs, yesterdayStepRows, mealSlotRows, monthWorkoutRows] = await Promise.all([
         db.select({ totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int` })
           .from(mealLogs).where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, yStart), lt(mealLogs.loggedAt, yEnd)))
           .catch((_e: Error) => [{ totalProt: 0 }]),
@@ -117,6 +118,10 @@ export async function runMorningCheckin(): Promise<void> {
           .where(and(eq(mealLogs.userId, client.id), gte(mealLogs.loggedAt, fourteenDaysAgo)))
           .groupBy(mealLogs.mealLabel)
           .catch(() => [] as { mealLabel: string | null; avgProt: number; logCount: number }[]),
+        db.select({ count: sql<number>`COUNT(*)::int` })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, twentyEightDaysAgo)))
+          .catch(() => [{ count: 0 }]),
       ]);
 
       const totalProtLogged = (proteinRows as { totalProt: number }[])[0]?.totalProt || 0;
@@ -187,14 +192,46 @@ export async function runMorningCheckin(): Promise<void> {
         }
       }
 
+      // ── Trajectory classification (28-day compliance) ──────────────────────
+      const completedSessions28 = (monthWorkoutRows as { count: number }[])[0]?.count || 0;
+      const plannedSessions28 = (client.trainingDaysPerWeek || 3) * 4;
+      const sessionCompliance28 = plannedSessions28 > 0 ? completedSessions28 / plannedSessions28 : 0;
+      type Trajectory = "ON_A_RUN" | "ON_TRACK" | "RECOVERING" | "STRUGGLING" | "DISENGAGED";
+      const trajectory: Trajectory =
+        sessionCompliance28 >= 0.8 && wStreak >= 4 ? "ON_A_RUN" :
+        sessionCompliance28 >= 0.65              ? "ON_TRACK" :
+        sessionCompliance28 >= 0.4 && wStreak >= 1 ? "RECOVERING" :
+        completedSessions28 === 0                ? "DISENGAGED" :
+                                                   "STRUGGLING";
+
+      // ── Loss-framed streak line ─────────────────────────────────────────────
+      // Positive framing for short streaks, loss framing for meaningful ones
       const streakParts: string[] = [];
-      if (wStreak >= 2) streakParts.push(`🔥 *${wStreak}-session streak*`);
-      if (stepStreakCount >= 2) streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      if (wStreak >= 10) {
+        streakParts.push(`🔥 *${wStreak}-session streak* — don't be the one who broke a ${wStreak}-session run`);
+      } else if (wStreak >= 5) {
+        streakParts.push(`🔥 *${wStreak}-session streak* — protect it`);
+      } else if (wStreak >= 2) {
+        streakParts.push(`🔥 *${wStreak}-session streak*`);
+      }
+      if (stepStreakCount >= 5) {
+        streakParts.push(`🚶 *${stepStreakCount}-day step streak* — keep it alive`);
+      } else if (stepStreakCount >= 2) {
+        streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
+      }
       if (foodLogStreakCount >= 3) streakParts.push(`🍽️ ${foodLogStreakCount}-day food streak`);
       const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
+      // ── Trajectory-aware DOW opener override ───────────────────────────────
+      const trajectoryPrefix: Partial<Record<Trajectory, string>> = {
+        ON_A_RUN:   `You're on the best run you've been on.`,
+        STRUGGLING: `Today is the reset.`,
+        DISENGAGED: `Today is the day we change this.`,
+      };
+      const trajPrefix = trajectoryPrefix[trajectory] ? ` ${trajectoryPrefix[trajectory]}` : "";
+
       const sickYesterday = await wasSickOrInjured(client.id, dayStart(-1));
-      const parts: string[] = [`Morning ${name}.${dowOpener}${identityLine}${streakLine}`];
+      const parts: string[] = [`Morning ${name}.${dowOpener}${trajPrefix}${identityLine}${streakLine}`];
 
       if (sickYesterday) {
         parts.push(`Hope you're feeling better. When you're ready, just say Hi and we pick up from where you left off.`);
@@ -298,6 +335,17 @@ export async function runMorningCheckin(): Promise<void> {
 
       todaySection.push(`🍳 What's for breakfast?`);
       if (repeatSuggestion) todaySection.push(repeatSuggestion);
+
+      // Trajectory-aware closing line — replaces generic "send me your meals" with context-driven push
+      const trajectoryClose: Record<Trajectory, string> = {
+        ON_A_RUN:   `\n\n_You're ${completedSessions28} sessions in over 4 weeks. Don't give this up — most people are nowhere near this._`,
+        ON_TRACK:   ``,
+        RECOVERING: `\n\n_Good to have you back. One day at a time — this week counts._`,
+        STRUGGLING: `\n\n_${completedSessions28} sessions in 4 weeks. The number needs to change. Start today._`,
+        DISENGAGED: `\n\n_No sessions in 28 days. Today is not about intensity — just reply Hi and we go from there._`,
+      };
+      const closingLine = trajectoryClose[trajectory] || "";
+      if (closingLine) todaySection.push(closingLine);
 
       if (await claimDailySlot(client.id, "morning")) {
         const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n");
