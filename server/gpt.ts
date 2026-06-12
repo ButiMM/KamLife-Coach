@@ -7,6 +7,7 @@ import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
+import { getClientNarrative } from "./intelligence/profile";
 
 // ============================================================
 // CONCURRENCY LIMITER — max 25 simultaneous OpenAI calls
@@ -835,7 +836,10 @@ export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
 
 export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string): Promise<string> {
   const context = buildContext(user);
-  const patternSummary = await buildPatternSummary(user);
+  const [patternSummary, cipNarrative] = await Promise.all([
+    buildPatternSummary(user),
+    getClientNarrative(user.id).catch(() => null),
+  ]);
   console.log(`[PATTERN] ${patternSummary}`);
   const saFlags = getSAContextFlags(user);
   const instruction = extraInstruction || "Respond as Coach K to this client message.";
@@ -919,7 +923,10 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   // trim ONLY the static brain's tail (deep reference material the specialist agents already
   // cover), never the client context or the instruction. Cap is deliberately modest to
   // control token cost — the static prefix is identical across calls so it gets cached.
-  const clientContext = `${context}\n\n${patternSummary}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
+  const cipBlock = cipNarrative
+    ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative}`
+    : "";
+  const clientContext = `${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   let systemContent = `${COACH_K_SYSTEM}${tail}`;
   // Cap lands the cut AFTER the goal-aware food logic (CLAUDE.md: never drop it — it ends

@@ -50,6 +50,7 @@ import {
 } from "./scheduler/jobs/monday";
 import { runWaterReminder } from "./scheduler/jobs/water";
 import { runMidweekSessionCheck, runProteinStreakIntervention } from "./scheduler/jobs/midweek";
+import { runCipUpdate } from "./scheduler/jobs/cip-update";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, deliveryStats };
@@ -270,6 +271,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 8 * * 6",     () => safe("runNsvCheckin",          runNsvCheckin),          { timezone: "UTC" }); // 10am SAST
 
   // ── Weekly — Sunday ───────────────────────────────────────────────────────
+  cron.schedule("0 20 * * 0",    () => safe("runCipUpdate",           runCipUpdate),           { timezone: "UTC" }); // 10pm SAST — rebuild all CIPs after the week closes
   cron.schedule("0 6 * * 0",     () => safe("runSundayWeeklyReport",  runSundayWeeklyReport),  { timezone: "UTC" }); // 8am SAST
   cron.schedule("0 7 * * 0",     () => safe("runPlateauDetection",    runPlateauDetection),    { timezone: "UTC" }); // 9am SAST
   cron.schedule("0 7 * * 0",     () => safe("runComplianceLevelUpdate", runComplianceLevelUpdate), { timezone: "UTC" }); // 9am SAST

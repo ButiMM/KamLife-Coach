@@ -476,6 +476,41 @@ export const clientActions = pgTable("client_actions", {
 
 export type ClientAction = typeof clientActions.$inferSelect;
 
+// ── Client Intelligence Profile ────────────────────────────────────────────
+// One row per user. Updated weekly by runCipUpdate(). Injected into every
+// GPT call so the coach always has the client's full history in context.
+export const clientIntelligenceProfiles = pgTable("client_intelligence_profiles", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+
+  // Journey anchors
+  startWeightKg: numeric("start_weight_kg", { precision: 5, scale: 1 }),
+  bestWeightKg: numeric("best_weight_kg", { precision: 5, scale: 1 }),
+  totalKgChanged: numeric("total_kg_changed", { precision: 5, scale: 1 }),
+
+  // All-time records (used for loss-framing)
+  longestWorkoutStreak: integer("longest_workout_streak").default(0).notNull(),
+  longestFoodStreak: integer("longest_food_streak").default(0).notNull(),
+  bestWeekAvgProteinG: integer("best_week_avg_protein_g").default(0).notNull(),
+  bestWeekSessions: integer("best_week_sessions").default(0).notNull(),
+
+  // Behavioral fingerprint
+  weakestDow: integer("weakest_dow"),         // 0=Sun … 6=Sat — day most likely to go silent
+  peakEngagementHour: integer("peak_engagement_hour"), // 0-23 SAST — when they actually respond
+
+  // Lifetime compliance
+  lifetimeSessionCompliance: numeric("lifetime_session_compliance", { precision: 4, scale: 3 }),
+  lifetimeFoodLogDays: integer("lifetime_food_log_days").default(0).notNull(),
+  plateauCount: integer("plateau_count").default(0).notNull(),
+
+  // Rich history blobs
+  monthlySnapshots: jsonb("monthly_snapshots"),  // [{month, sessions, planned, proteinDays, avgWeightKg}]
+  patternFlags: jsonb("pattern_flags"),           // ["silent_tuesdays", "chronic_protein_gap", ...]
+
+  // The narrative injected into every GPT call
+  coachNarrative: text("coach_narrative"),
+});
+
 export const clientActionsRelations = relations(clientActions, ({ one }) => ({
   user: one(users, { fields: [clientActions.userId], references: [users.id] }),
 }));

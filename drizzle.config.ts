@@ -30,5 +30,6 @@ export default defineConfig({
     "client_actions",
     "conversations",
     "messages",
+    "client_intelligence_profiles",
   ],
 });
