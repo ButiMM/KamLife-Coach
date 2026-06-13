@@ -17,7 +17,7 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
-import { sastDayStart, parseMealDate, mealDateLabel } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent } from "../utils";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
@@ -111,7 +111,11 @@ export async function handleWorkoutCommands(ctx: {
   // ---- CARDIO LOG — running, walking, cycling, yoga, HIIT, Zumba, parkrun, etc. ----
   // Fat-loss clients (the majority) do cardio-only sessions that isDone/EXERCISE_PATTERN never catches.
   // Catches these and logs a workout session + converts km distance to step count where applicable.
-  const isCardioLog = (
+  // Question/future guard: "Should I do 30 min yoga?" / "is 5km good?" / "going to run 5km
+  // tomorrow" must NOT auto-log a completed session — those reach GPT for coaching instead.
+  const cardioIsQuestion = m.includes("?")
+    || /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim());
+  const isCardioLog = !cardioIsQuestion && !isFutureIntent(m) && (
     // "went for a {activity}"
     /\b(?:went\s+for\s+(?:a\s+)?(?:run|jog|walk|swim|cycle|hike))\b/i.test(m)
     // "I ran / jogged / cycled / swam" (exercise-specific verbs — no context required)

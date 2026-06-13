@@ -340,7 +340,12 @@ export async function handleLifecycle(ctx: {
     || m.match(/\b(bad\s*sleep|poor\s*sleep|no\s*sleep|couldn'?t\s+sleep|can'?t\s+sleep|couldnt\s+sleep|insomnia|didn'?t\s+sleep(?:\s+well)?|barely\s+slept?|hardly\s+slept?|rough\s+night|terrible\s+sleep|bad\s+night|sleg\s+geslaap)\b/i);
 
   if (sleepMatch) {
-    const hoursStr = m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
+    // Prefer the ACTUAL figure after "only/just/managed/barely/maybe/got" over a number
+    // earlier in the sentence — "didn't sleep 8 hours, only got 5 hours" must log 5, not 8.
+    // The non-greedy sleepMatch otherwise grabs the first (negated) number.
+    const actualHoursMatch = m.match(/\b(?:only|just|managed|barely|maybe)\b[\s\w]{0,12}?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i)
+      || m.match(/\bgot\s+(?:about\s+|around\s+|roughly\s+)?(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
+    const hoursStr = actualHoursMatch || m.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|ure)\b/i);
     const rawHours = hoursStr ? parseFloat(hoursStr[1]) : null;
     if (rawHours !== null && (rawHours < 0.5 || rawHours > 16)) {
       return `That doesn't look right — sleep hours should be between 1 and 16. Did you mean ${rawHours > 16 ? "minutes" : "hours"}? Try again: "I slept 7 hours".`;

@@ -155,6 +155,16 @@ export function isRetroactiveMeal(message: string): boolean {
   return /\b(yesterday|last night|days? ago|on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|last\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|had this (saturday|sunday|monday|tuesday|wednesday|thursday|friday)|saturday|sunday)\b/.test(m);
 }
 
+// Future-intent / hypothetical detector — stops PLANNED actions ("I'll walk 10k
+// tomorrow", "going to run 5km", "want to do yoga") from being logged as if already
+// done. Used by the step and cardio loggers, which match the activity + number
+// regardless of tense. Note: i'll requires the apostrophe so "ill"/"I feel ill"
+// does not match; voice transcripts that drop it are covered by tomorrow/going to.
+export function isFutureIntent(message: string): boolean {
+  const m = message.toLowerCase();
+  return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
+}
+
 // Returns a human-readable label for the date, e.g. "Saturday" or "yesterday".
 export function mealDateLabel(date: Date): string {
   const nowSAST = new Date(Date.now() + 2 * 3_600_000);

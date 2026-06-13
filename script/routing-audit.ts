@@ -95,6 +95,10 @@ const CASES: Case[] = [
     reject: [/steps?\s+logged/i, /7-day average/i] },
   { name: "steps: duration walk converts", msg: "I walked for 30 minutes",
     expect: [/steps|walk/i], reject: [/didn'?t catch/i] },
+  { name: "steps: future 'I'll walk 10000 steps tomorrow' must NOT log (audit catch 2026-06-13)", msg: "I'll walk 10000 steps tomorrow",
+    reject: [/steps?\s+logged|7-day average|target hit|steps today/i] },
+  { name: "steps: 'going to do 8000 steps later' must NOT log (audit catch 2026-06-13)", msg: "I'm going to do 8000 steps later",
+    reject: [/steps?\s+logged|7-day average|target hit/i] },
 
   // ── WORKOUT ─────────────────────────────────────────────────────────────
   { name: "workout: \"today's workout\" delivers plan or rest-day, never logs (prod bug 2026-06-11)", msg: "Today's workout",
@@ -115,6 +119,14 @@ const CASES: Case[] = [
     expect: [/yesterday|logged|legs|session/i] },
   { name: "workout: food sentence with 'done' must not log workout (prod bug)", msg: "ate pizza yesterday, done with that",
     reject: [/session logged|workout logged|sessions in total/i] },
+  { name: "cardio: 'went for a 5km run' still logs (regression guard)", msg: "went for a 5km run this morning",
+    expect: [/run|cardio|session|logged|good work|active|💪|✅|steps/i], reject: [/didn'?t catch/i] },
+  { name: "cardio: question 'should I do 30 min yoga?' must NOT log (audit catch 2026-06-13)", msg: "Should I do 30 minutes of yoga today?",
+    reject: [/session logged|workout logged|sessions in total|good work staying active/i] },
+  { name: "cardio: 'is 5km a good distance to run?' must NOT log (audit catch 2026-06-13)", msg: "Is 5km a good distance to run?",
+    reject: [/session logged|workout logged|sessions in total/i] },
+  { name: "cardio: future 'going to run 5km tomorrow' must NOT log (audit catch 2026-06-13)", msg: "I'm going to run 5km tomorrow",
+    reject: [/session logged|workout logged|sessions in total/i] },
 
   // ── WEIGHT ──────────────────────────────────────────────────────────────
   { name: "weight: bare kg logs", msg: "83kg",
@@ -131,10 +143,16 @@ const CASES: Case[] = [
     expect: [/between 1 and 16|doesn'?t look right/i] },
   { name: "sleep: bad night phrasing", msg: "bad night, barely slept",
     expect: [/sleep|rest|tonight|recovery/i] },
+  { name: "sleep: 'didn't sleep 8 hours, only got 5 hours' logs 5 not 8 (audit catch 2026-06-13)", msg: "I didn't sleep 8 hours, only got 5 hours",
+    expect: [/\b5 hours\b/i], reject: [/\b8 hours\b/i] },
 
   // ── WATER ───────────────────────────────────────────────────────────────
   { name: "water: litres log", msg: "drank 2 litres of water today",
     expect: [/water|litre|2/i] },
+  { name: "water: question 'is 500ml enough water?' must NOT log (audit catch 2026-06-13)", msg: "is 500ml enough water?",
+    reject: [/logged|added|running total|target hit|so far today/i] },
+  { name: "water: negation 'haven't had my 2 litres of water yet' must NOT log (audit catch 2026-06-13)", msg: "I haven't had my 2 litres of water yet",
+    reject: [/litres? logged|2L added|running total|water target hit/i] },
 
   // ── FOOD LOG ────────────────────────────────────────────────────────────
   { name: "food: classic 'I had X' logs with numbers", msg: "I had 2 eggs and pap for breakfast",
@@ -245,6 +263,14 @@ const CASES: Case[] = [
     reject: [/overwhelmed/i, /fitness journey/i, /challenges your way/i, /i sense your/i] },
   { name: "meta: 'no this is a disaster' no therapy speak", msg: "No this is a disaster",
     reject: [/overwhelmed/i, /fitness journey/i, /challenges your way/i] },
+
+  // ── SAFETY — false-positive medical (must NOT fire ambulance) ────────────
+  { name: "safety: 'stroke of luck' must NOT trigger medical emergency (audit catch 2026-06-13)", msg: "what a stroke of luck, I hit a new PB today!",
+    reject: [/10177|ambulance|medical emergency/i] },
+  { name: "safety: 'breaststroke' must NOT trigger medical emergency (audit catch 2026-06-13)", msg: "did 20 lengths of breaststroke at the pool",
+    reject: [/10177|ambulance|medical emergency/i] },
+  { name: "safety: genuine 'I think I'm having a stroke' still fires emergency", msg: "I think I'm having a stroke",
+    expect: [/10177|ambulance|emergency/i] },
 ];
 
 async function main() {

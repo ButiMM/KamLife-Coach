@@ -21,7 +21,12 @@ export async function handleWater(ctx: {
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
   const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
   const isNonWaterDrink = /\b(wine|beer|whisky|brandy|rum|vodka|gin|shots?|alcohol|henny|hennessy|smirnoff|hunters|savanna|castle|black label|flying fish|brutal fruit|cider|juice|coffee|tea|milo|milk|cooldrink|cool drink|fanta|sprite|coke|pepsi|energy drink|redbull|monster|cream soda|softdrink|soda water|tonic)\b/i.test(m);
-  if (waterMatch && hasWaterKeyword && !isNonWaterDrink) {
+  // Question ("is 500ml enough water?", "how much is 2 litres?") must NOT log — reaches
+  // the water-question handler below or GPT. Negation/intent ("haven't had my 2L of water
+  // yet", "need to drink 2 litres") must NOT log water that was never consumed.
+  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
+  const waterNotConsumed = /\b(haven.?t|hasn.?t|didn.?t|did\s+not|forgot|need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
+  if (waterMatch && hasWaterKeyword && !isNonWaterDrink && !waterIsQuestion && !waterNotConsumed) {
     const amount = parseFloat(waterMatch[1]);
     const unit = waterMatch[2].toLowerCase();
     let litres = amount;
@@ -101,7 +106,7 @@ export async function handleWater(ctx: {
 
   // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
   // e.g. "I drank water", "drank some water", "had water"
-  if (!waterMatch && hasWaterKeyword && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
+  if (!waterMatch && hasWaterKeyword && !waterIsQuestion && !waterNotConsumed && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
     const wKg = parseFloat(user.currentWeight as string || "0") || 75;
     const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
     const todayW = Math.round((parseFloat(user.todayWater as string || "0")) * 10) / 10;

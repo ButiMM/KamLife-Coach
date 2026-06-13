@@ -115,6 +115,8 @@ const cases: Case[] = [
   { name: "benign: heart emoji", input: "love the progress ❤️", expect: null },
   { name: "benign: doctor positive", input: "my doctor said the diet is working great", expect: null }, // mentioning a doctor is not an emergency — coach it
   { name: "benign: doctor advised weight loss", input: "my doctor told me I need to lose weight", expect: null },
+  { name: "benign: stroke of luck", input: "what a stroke of luck, hit a new PB!", expect: null }, // "stroke" only escalates as "having/had a stroke"
+  { name: "benign: breaststroke", input: "did 20 lengths of breaststroke at the pool", expect: null },
 ];
 
 let passed = 0;

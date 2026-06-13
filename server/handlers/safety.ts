@@ -67,7 +67,15 @@ export async function runSafetyGuards(
   }
 
   // ---- ACUTE MEDICAL EMERGENCY ----
-  if (/\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|heart attack|stroke|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|shortness of breath|collapsed|heart racing badly|heart pounding)\b/i.test(m)) {
+  // "stroke" is checked separately from the other emergencies: alone it matched
+  // swimming strokes and "stroke of luck/genius", firing a false ambulance alert +
+  // coach crisis ping. The benign exclusion applies ONLY to the stroke keyword, so a
+  // message like "stroke of luck but now chest pain" still fires on chest pain. A real
+  // stroke is never phrased "stroke of luck", so this cannot suppress a genuine one.
+  const nonStrokeEmergency = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|heart attack|seizure|convulsion|i (fainted|collapsed)|difficulty breathing|can.?t breathe|cannot breathe|shortness of breath|collapsed|heart racing badly|heart pounding)\b/i.test(m);
+  const benignStroke = /\bstroke of (?:luck|genius)\b|\b(?:breast|back|free|butterfly|side|swim(?:ming)?|paddle|broad|key)\s*-?\s*strokes?\b|\bbreaststroke\b|\bbackstroke\b/i.test(m);
+  const strokeEmergency = /\bstrokes?\b/i.test(m) && !benignStroke;
+  if (nonStrokeEmergency || strokeEmergency) {
     const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait.\n\nYour coach has been notified. Health first — everything else can wait.`;
     try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
