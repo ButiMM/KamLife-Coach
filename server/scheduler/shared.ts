@@ -7,7 +7,7 @@ import twilio from "twilio";
 import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart } from "../utils";
 import { db, pool } from "../db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles } from "../../shared/schema";
-import { eq, gte, and, lt, desc, or, sql } from "drizzle-orm";
+import { eq, gte, and, lt, desc, or, sql, like } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
@@ -75,10 +75,59 @@ export function isProactivePaused(): boolean {
   return process.env.PROACTIVE_PAUSED === "true";
 }
 
-export const dailySentThisProcess = new Set<string>();
+// ── UNIFIED PROACTIVE BUDGET ──────────────────────────────────────────────────
+// One per-user daily ceiling that EVERY coaching job shares. Previously
+// claimDailySlot enforced a hard 1/day (the DAILY_CAP sentinel) while claimProactive
+// jobs (weekly report, NSV, silence, weekend audit, buddy, …) bypassed it entirely —
+// so an engaged user could be hit by 5+ messages on a busy Sunday. Over-messaging is
+// the #1 driver of WhatsApp blocks (which crater sender quality and risk a number
+// ban) and a top-3 driver of churn ("nagging"). We cap total daily proactive volume;
+// cron ordering means the morning anchor (6am) and weekly summaries (7–8am) claim
+// their slots first, and the low-value tail is what gets cut.
+//
+// Billing/critical alerts use claimCritical(), which deliberately ignores this
+// budget — money messages must always flow.
+//
+// Restart-safe: each consumed slot is an atomic DAILY_CAP_<n> row insert, so a
+// container recycle can't grant extra slots. The in-memory count is the fast path
+// and is hydrated from the DB on startup.
+export const DAILY_PROACTIVE_CAP = Math.max(1, Number(process.env.MAX_PROACTIVE_PER_DAY) || 3);
+export const dailyProactiveCount = new Map<string, number>(); // `${today}:${clientId}` → sends today
 
 export function dailyKey(clientId: string): string {
   return `${todaySAST()}:${clientId}`;
+}
+
+function dailyCountOf(clientId: string): number {
+  return dailyProactiveCount.get(dailyKey(clientId)) || 0;
+}
+function bumpDailyCount(clientId: string): void {
+  const k = dailyKey(clientId);
+  dailyProactiveCount.set(k, (dailyProactiveCount.get(k) || 0) + 1);
+}
+
+// Atomically consume one slot of the shared daily budget. Returns false once the
+// user has hit the cap today. Each slot is a distinct DAILY_CAP_<n> row, so the
+// test-and-set is atomic and survives restarts.
+async function consumeDailyBudget(clientId: string): Promise<boolean> {
+  if (dailyCountOf(clientId) >= DAILY_PROACTIVE_CAP) return false;
+  const today = todaySAST();
+  for (let slot = 1; slot <= DAILY_PROACTIVE_CAP; slot++) {
+    try {
+      const ins = await db.insert(sentProactive)
+        .values({ userId: clientId, messageKey: `DAILY_CAP_${slot}`, dedupeWindow: today })
+        .onConflictDoNothing()
+        .returning({ id: sentProactive.id });
+      if (ins.length) { bumpDailyCount(clientId); return true; }
+      // slot taken — try the next one
+    } catch (e) {
+      // DB unavailable — degrade to the in-memory budget so we still cap
+      if (dailyCountOf(clientId) >= DAILY_PROACTIVE_CAP) return false;
+      bumpDailyCount(clientId);
+      return true;
+    }
+  }
+  return false; // every slot taken today
 }
 
 export async function claimDailySlot(clientId: string, jobKey: string): Promise<boolean> {
@@ -87,32 +136,29 @@ export async function claimDailySlot(clientId: string, jobKey: string): Promise<
     return false;
   }
   const today = todaySAST();
-  if (dailySentThisProcess.has(dailyKey(clientId))) return false;
   try {
-    const capInserted = await db
-      .insert(sentProactive)
-      .values({ userId: clientId, messageKey: "DAILY_CAP", dedupeWindow: today })
+    // Per-job dedup (restart-safe): only the first call for (job, user, day) wins.
+    const jobIns = await db.insert(sentProactive)
+      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
       .onConflictDoNothing()
       .returning({ id: sentProactive.id });
-    if (!capInserted.length) return false;
-    await db
-      .insert(sentProactive)
-      .values({ userId: clientId, messageKey: jobKey, dedupeWindow: today })
-      .onConflictDoNothing();
-    dailySentThisProcess.add(dailyKey(clientId));
+    if (!jobIns.length) return false; // this job already fired for this user today
+    // Then the shared daily ceiling.
+    if (!(await consumeDailyBudget(clientId))) return false;
     console.log(`[SCHEDULER:SEND] campaign=${jobKey} user=...${clientId.slice(-6)}`);
     return true;
   } catch (err) {
     console.warn(`[claimDailySlot] DB error (${jobKey}/${clientId.slice(0, 8)}):`, err);
-    if (dailySentThisProcess.has(dailyKey(clientId))) return false;
-    dailySentThisProcess.add(dailyKey(clientId));
+    // DB down — best-effort in-memory budget only
+    if (dailyCountOf(clientId) >= DAILY_PROACTIVE_CAP) return false;
+    bumpDailyCount(clientId);
     return true;
   }
 }
 
 export function canSendProactive(clientId: string): boolean {
   if (isProactivePaused()) return false;
-  return !dailySentThisProcess.has(dailyKey(clientId));
+  return dailyCountOf(clientId) < DAILY_PROACTIVE_CAP;
 }
 
 // ── ENGAGEMENT BACK-OFF FOR ROUTINE NUDGES ───────────────────────────────────
@@ -136,9 +182,10 @@ export function canSendRoutineNudge(client: { id: string; lastActiveAt?: Date | 
   return routineNudgeAllowed(daysSilent, dayOfYearSAST());
 }
 
+// Telemetry only — the preceding claim (claimProactive/claimDailySlot) has already
+// consumed the daily budget, so this just records the send for visibility.
 export function recordProactiveSend(clientId: string, jobKey = "proactive"): void {
   console.log(`[SCHEDULER:SEND] campaign=${jobKey} user=...${clientId.slice(-6)}`);
-  dailySentThisProcess.add(dailyKey(clientId));
   db.insert(sentProactive)
     .values({ userId: clientId, messageKey: jobKey, dedupeWindow: todaySAST() })
     .onConflictDoNothing()
@@ -152,7 +199,16 @@ export function weeklyKeyedKey(clientId: string, messageKey: string, window: str
   return `${window}:${clientId}:${messageKey}`;
 }
 
-export async function claimProactive(userId: string, messageKey: string, dedupeWindow: string): Promise<boolean> {
+// Proactive claim with per-(key, window) dedup. Now ALSO respects the shared daily
+// budget so weekly/event jobs can no longer stack on top of the daily anchor — pass
+// { critical: true } for the rare flagship send that must never be capped (e.g. the
+// Sunday weekly report). Billing should use claimCritical(), not this.
+export async function claimProactive(
+  userId: string,
+  messageKey: string,
+  dedupeWindow: string,
+  opts?: { critical?: boolean },
+): Promise<boolean> {
   if (isProactivePaused()) return false;
   const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
   if (weeklyKeyedSent.has(inMemKey)) return false;
@@ -162,10 +218,15 @@ export async function claimProactive(userId: string, messageKey: string, dedupeW
       .onConflictDoNothing()
       .returning({ id: sentProactive.id });
     weeklyKeyedSent.set(inMemKey, true);
-    return inserted.length > 0;
+    if (inserted.length === 0) return false; // already claimed this key/window
+    if (opts?.critical) { bumpDailyCount(userId); return true; }
+    return await consumeDailyBudget(userId); // suppressed if over the daily cap
   } catch (e) {
     console.warn(`[claimProactive] DB error for ${messageKey}/${userId}:`, e);
     weeklyKeyedSent.set(inMemKey, true);
+    if (opts?.critical) { bumpDailyCount(userId); return true; }
+    if (dailyCountOf(userId) >= DAILY_PROACTIVE_CAP) return false;
+    bumpDailyCount(userId);
     return true;
   }
 }
@@ -192,16 +253,17 @@ export async function claimCritical(userId: string, messageKey: string, dedupeWi
   }
 }
 
-// Startup hydration — repopulate in-memory set from today's DB records
+// Startup hydration — rebuild the per-user daily count from today's consumed slots
+// (one DAILY_CAP_<n> row per message sent), so the budget survives a restart.
 (async () => {
   try {
     const today = todaySAST();
-    const sentToday = await db
+    const slotsToday = await db
       .select({ userId: sentProactive.userId })
       .from(sentProactive)
-      .where(eq(sentProactive.dedupeWindow, today));
-    for (const row of sentToday) dailySentThisProcess.add(dailyKey(row.userId));
-    console.log(`[SCHEDULER] Daily budget hydrated: ${sentToday.length} clients already sent today`);
+      .where(and(eq(sentProactive.dedupeWindow, today), like(sentProactive.messageKey, "DAILY_CAP_%")));
+    for (const row of slotsToday) bumpDailyCount(row.userId);
+    console.log(`[SCHEDULER] Daily budget hydrated: ${slotsToday.length} slots used today across ${dailyProactiveCount.size} clients`);
   } catch (e) {
     console.warn("[SCHEDULER] Budget hydration failed (non-fatal):", e);
   }

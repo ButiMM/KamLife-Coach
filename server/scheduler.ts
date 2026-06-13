@@ -9,7 +9,7 @@ import { pool } from "./db";
 import {
   deliveryStats, sendWhatsApp,
   loadState, saveState, todaySAST, hasRunToday,
-  weeklyKeyedSent, dailySentThisProcess, dailyKey,
+  weeklyKeyedSent, dailyProactiveCount,
   escalations, sentProactive,
   db, lt, eq, lte, and,
 } from "./scheduler/shared";
@@ -63,8 +63,8 @@ export { sendWhatsApp, deliveryStats };
 // ============================================================
 cron.schedule("0 22 * * *", async () => {
   const today = todaySAST();
-  for (const key of dailySentThisProcess.values()) {
-    if (!key.startsWith(today)) dailySentThisProcess.delete(key);
+  for (const key of dailyProactiveCount.keys()) {
+    if (!key.startsWith(today)) dailyProactiveCount.delete(key);
   }
   for (const key of weeklyKeyedSent.keys()) {
     if (!key.startsWith(today.slice(0, 7))) weeklyKeyedSent.delete(key);
@@ -73,7 +73,7 @@ cron.schedule("0 22 * * *", async () => {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as Parameters<typeof lt>[0], thirtyDaysAgo));
   } catch { /* non-fatal */ }
-  console.log("[SCHEDULER] dedupe purged — daily set size:", dailySentThisProcess.size);
+  console.log("[SCHEDULER] dedupe purged — daily budget entries:", dailyProactiveCount.size);
 
   // Daily SLA digest — all priorities past deadline
   try {

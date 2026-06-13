@@ -82,7 +82,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
     try {
       // One claim per client per week — covers the report, the shopping-list card, AND
       // the programme-week advance below, so a container recycle can't double any of them.
-      if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC()))) continue;
+      if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC(), { critical: true }))) continue;
       const name = client.name || "there";
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
         db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, weekAgo))),
