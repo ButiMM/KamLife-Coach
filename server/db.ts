@@ -44,12 +44,35 @@ if (!STUB && !process.env.DATABASE_URL) {
 }
 
 function makeRealPool() {
-  return new Pool({
+  // Railway postgres allows 100 connections; default 50 for the app leaves headroom
+  // for admin/migrations. Tunable as the base grows (DB_POOL_MAX).
+  const max = Math.max(5, Number(process.env.DB_POOL_MAX) || 50);
+  // Kill a pathological query before it pins a connection and cascades into pool
+  // exhaustion (set 0 to disable).
+  const stmtTimeout = process.env.PG_STATEMENT_TIMEOUT_MS !== undefined
+    ? Number(process.env.PG_STATEMENT_TIMEOUT_MS)
+    : 30_000;
+  const p = new Pool({
     connectionString: process.env.DATABASE_URL,
-    max: 50,                    // Railway postgres allows 100; 50 for app, leaving headroom for scheduler/admin/migrations
-    idleTimeoutMillis: 30_000,  // close idle connections after 30s
-    connectionTimeoutMillis: 3_000, // fail fast — better a quick error than a 5s queue pile-up under load
+    max,
+    idleTimeoutMillis: 30_000,       // close idle connections after 30s
+    connectionTimeoutMillis: 5_000,  // fail fast under load rather than queueing indefinitely
+    keepAlive: true,                 // TCP keepalive — stops the proxy silently dropping idle sockets
   });
+  // Apply statement_timeout per connection via SET (fail-safe: a failed SET never
+  // blocks the connection, unlike a startup `options` param that a pooler can reject).
+  if (stmtTimeout > 0) {
+    p.on("connect", (client) => {
+      client.query(`SET statement_timeout TO ${stmtTimeout}`).catch(() => {});
+    });
+  }
+  // CRITICAL: without this, an error on an idle client (DB restart, network blip)
+  // emits 'error' on the pool and crashes the whole Node process. At scale this
+  // happens routinely during DB maintenance — swallow it and let the pool recover.
+  p.on("error", (err) => {
+    console.error("[DB] Idle client error (pool will recover):", err.message);
+  });
+  return p;
 }
 function makeRealDb(p: ReturnType<typeof makeRealPool>) {
   return drizzle(p, { schema });
