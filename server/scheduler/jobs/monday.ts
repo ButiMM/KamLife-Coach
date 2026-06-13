@@ -27,8 +27,6 @@ export async function runWeightReminder(): Promise<void> {
     if (!(await claimProactive(client.id, "weight_reminder", thisWeekUTC()))) continue;
     await sendWhatsApp(client.phoneNumber, msg);
     sent++;
-    await new Promise(r => setTimeout(r, 200));
-    if (sent >= 150) break;
   }
   console.log(`[SCHEDULER] Weight reminders sent: ${sent}`);
 }
@@ -106,8 +104,6 @@ export async function runMondayProgress(): Promise<void> {
       if (!(await claimDailySlot(client.id, "monday_progress"))) continue;
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
       sent++;
-      await new Promise(r => setTimeout(r, 200));
-      if (sent >= 150) break;
     } catch { continue; }
   }
   console.log(`[SCHEDULER] Monday progress summaries sent: ${sent}`);
@@ -139,8 +135,6 @@ export async function runMondayGroceries(): Promise<void> {
       const msg = `*${name}'s Weekly Shopping List* 🛒\n_${goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Recomposition"} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
       await sendWhatsApp(client.phoneNumber, msg);
       sent++;
-      await new Promise(r => setTimeout(r, 250));
-      if (sent >= 150) break;
     } catch { continue; }
   }
   console.log(`[SCHEDULER] Monday grocery lists sent: ${sent}`);

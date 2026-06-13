@@ -146,8 +146,6 @@ export async function runComebackMessages(): Promise<void> {
     if (!(await claimProactive(client.id, "comeback", todaySAST()))) continue;
     await sendWhatsApp(client.phoneNumber, msg);
     sent++;
-    await new Promise(r => setTimeout(r, 200));
-    if (sent >= 100) break;
   }
   console.log(`[SCHEDULER] Comeback messages sent: ${sent}`);
 }
@@ -239,7 +237,9 @@ export async function runStreakAtRisk(): Promise<void> {
   }
 
   let streakAlertsSent = 0;
-  const STREAK_ALERT_CAP = 150;
+  // Runaway-protection ceiling only — must exceed the real active base so genuine
+  // users are never truncated. The per-user daily budget already bounds volume.
+  const STREAK_ALERT_CAP = Math.max(1000, Number(process.env.STREAK_ALERT_CAP) || 20000);
 
   for (const client of clients) {
     if (streakAlertsSent >= STREAK_ALERT_CAP) { console.warn(`[SCHEDULER] Streak-at-risk cap reached`); break; }
@@ -340,8 +340,6 @@ export async function runPausedClientLite(): Promise<void> {
       const name = client.name?.split(" ")[0] || "";
       await sendWhatsApp(client.phoneNumber, MSGS[msgIdx](name));
       sent++;
-      await new Promise(r => setTimeout(r, 300));
-      if (sent >= 50) break;
     } catch (err) {
       console.error(`[SCHEDULER] Paused lite error — ${client.phoneNumber}:`, err);
     }

@@ -328,10 +328,14 @@ function resetDeliveryStatsIfNeeded() {
   }
 }
 
-// Scheduler-side rate limiter: max 10 outbound sends/second to Twilio.
-// Webhook replies are not subject to this limit — only proactive scheduler sends.
+// Scheduler-side rate limiter: caps outbound sends/second to Twilio so a burst
+// window (e.g. the 6am morning fan-out across the whole base) can't spike the
+// channel. Env-tunable (SCHEDULER_SEND_RATE_PER_SEC) so throughput can be raised
+// as the userbase grows without a redeploy. Default 10/sec preserves prior behaviour.
+// Webhook replies are NOT subject to this — only proactive scheduler sends.
 let _lastSchedulerSendAt = 0;
-const SCHEDULER_MIN_GAP_MS = 100; // 10 per second
+const _sendRatePerSec = Math.max(1, Number(process.env.SCHEDULER_SEND_RATE_PER_SEC) || 10);
+const SCHEDULER_MIN_GAP_MS = Math.round(1000 / _sendRatePerSec);
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();

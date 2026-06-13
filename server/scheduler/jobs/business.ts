@@ -327,7 +327,6 @@ export async function runSupplementReminder(): Promise<void> {
       if (!(await claimDailySlot(uid, "supplement_reminder"))) continue;
       await sendWhatsApp(client.phoneNumber, msg);
       sent++;
-      if (sent >= 50) break;
     }
     console.log(`[SCHEDULER] Supplement reminders sent: ${sent}`);
   } catch (err) { console.error("[SCHEDULER] Supplement reminder error:", err); }
@@ -409,7 +408,6 @@ export async function runAutoCalAdjust(): Promise<void> {
           await db.update(users).set(patch as any).where(eq(users.id, client.id));
           await sendWhatsApp(client.phoneNumber, msg!);
           adjusted++;
-          if (adjusted >= 20) break;
         }
       } catch { /* skip individual client errors */ }
     }
@@ -485,8 +483,6 @@ export async function runMonthlyNps(): Promise<void> {
       const name = client.name?.split(" ")[0] || "there";
       await sendWhatsApp(client.phoneNumber, `${name}, one question:\n\nHow likely are you to recommend Coach K to a friend? Reply with a number from 1 to 10.\n\n1 = Not at all. 10 = Definitely.\n\nHonest answer only — I read every one.`);
       sent++;
-      await new Promise(r => setTimeout(r, 200));
-      if (sent >= 100) break;
     }
     console.log(`[SCHEDULER] NPS surveys sent: ${sent}`);
   } catch (err) { console.error("[SCHEDULER] NPS survey error:", err); }
