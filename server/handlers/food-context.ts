@@ -403,7 +403,10 @@ export async function handleFoodContext(ctx: {
   const isRetroLogRequest = !wantsRepeat
     && /\b(log|logging|record|add|enter|capture|track|update|forgot|missed|didn.?t)\b/i.test(m)
     && /\byesterday\b/i.test(m);
-  const isRepeatMeal = !isRetroLogRequest && /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food) again)\b/i.test(m);
+  // Negation guard: "I don't want the same as yesterday" / "not the same meal" must NOT relog.
+  const wantsNotRepeat = /\b(don.?t|not|no|never|won.?t|wouldn.?t|avoid|skip)\b.{0,20}\b(same|repeat|again)\b/i.test(m)
+    || /\b(same|repeat)\b.{0,20}\b(don.?t|not|no|never|won.?t|wouldn.?t)\b/i.test(m);
+  const isRepeatMeal = !isRetroLogRequest && !wantsNotRepeat && /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food) again)\b/i.test(m);
 
   // Bare retroactive-log request with no food named yet — guide them to send yesterday's
   // meals with a "yesterday" prefix so the meal parser dates them to yesterday, not today.

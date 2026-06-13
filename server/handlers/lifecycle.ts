@@ -316,7 +316,11 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- INJURY BETTER — close the follow-up loop ----
-  const injuryBetter = /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
+  // Guards: "no more pain meds/killers/relief" must NOT clear injuries (med management, not recovery).
+  // "pain is gone but back still hurts" must NOT clear injuries (partial, not full recovery).
+  const injuryBetter = !/\b(meds?|killers?|relief|pills?|tablets?|patches?)\b/i.test(m)
+    && !/\bstill\s+(?:hurts?|aching|sore|painful|bad)\b/i.test(m)
+    && /\b(injury better|injury healed|no more pain|pain is gone|knee is better|back is better|shoulder is better|hip is better|feeling better.*injury|injury.*feeling better|all good.*injury|injury.*all good)\b/i.test(m);
   if (injuryBetter && user.injuries && user.injuries !== "none") {
     const oldInjury = user.injuries;
     await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
@@ -1016,9 +1020,14 @@ export async function handleLifecycle(ctx: {
     }
 
     // Training days — catch "4 days a week", "gym 4 days", "train 4 days", etc.
-    const trainingDaysMatch = m.match(/\b([2-6])\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i)
+    // Guard: question phrasing ("Should I switch to 5 days?") must NOT auto-apply.
+    const isProfileDaysQuestion = /^(?:should|would|could|can\s+i|is\s+it|what\s+if|how\s+about|do\s+you\s+think|if\s+i)\b/i.test(m.trim())
+      || /[?？]\s*$/.test(m.trim());
+    const trainingDaysMatch = isProfileDaysQuestion ? null : (
+      m.match(/\b([2-6])\s*days?\s*(?:a\s*week|per\s*week|\/week)?/i)
       || m.match(/(?:gym|train|workout)\s+([2-6])\s*days?/i)
-      || m.match(/([2-6])\s*days?\s*(?:a\s*week|per\s*week|at\s*the\s*gym)/i);
+      || m.match(/([2-6])\s*days?\s*(?:a\s*week|per\s*week|at\s*the\s*gym)/i)
+    );
     if (trainingDaysMatch) {
       const days = parseInt(trainingDaysMatch[1]);
       if (days >= 2 && days <= 6) {

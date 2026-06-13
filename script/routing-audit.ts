@@ -163,6 +163,8 @@ const CASES: Case[] = [
     expect: [/remov|nothing|no meals/i], reject: [/cleared for today/i, /all entries wiped/i] },
   { name: "mgmt: clear food log", msg: "clear food log",
     expect: [/clear|nothing|empty|no meals/i] },
+  { name: "mgmt: 'clear my schedule today' must NOT wipe food log (audit catch 2026-06-13)", msg: "clear my schedule today",
+    reject: [/cleared for today|all entries wiped/i] },
   { name: "mgmt: 'log it' confirms pending meal path (prod bug 2026-06-11 13:49)", msg: "Log it",
     expect: [/nothing pending|tell me what you ate/i], reject: [/today so far/i] },
 
@@ -184,6 +186,10 @@ const CASES: Case[] = [
   { name: "retro: 'log yesterday's food' asks what they ate, must NOT relog today (prod bug 2026-06-13)", msg: "I want to log yesterday's food",
     expect: [/what did you eat yesterday|send it starting with/i],
     reject: [/copied from|♻️|remaining today/i] },
+  { name: "repeat: negation 'I don't want the same as yesterday' must NOT relog (audit catch 2026-06-13)", msg: "I don't want the same as yesterday",
+    reject: [/copied from|♻️|Meal total/i] },
+  { name: "repeat: 'not the same meal today' must NOT relog (audit catch 2026-06-13)", msg: "not the same meal today",
+    reject: [/copied from|♻️|Meal total/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",
@@ -202,6 +208,21 @@ const CASES: Case[] = [
     expect: [/gym/i] },
   { name: "gym: 'no gym access' gets home alternative, never gym upgrade (audit catch)", msg: "I have no gym access this week",
     expect: [/home|bodyweight/i], reject: [/updated to \*?full gym/i] },
+  { name: "days: question 'Should I switch to 5 days?' must NOT auto-apply (audit catch 2026-06-13)", msg: "Should I switch to 5 days?",
+    reject: [/updated to 5 days|5 days\/week/i] },
+  { name: "days: question 'Can I train 4 days a week?' must NOT auto-apply (audit catch 2026-06-13)", msg: "Can I train 4 days a week?",
+    reject: [/updated to 4 days|4 days\/week/i] },
+
+  // ── INJURY ──────────────────────────────────────────────────────────────
+  { name: "injury: 'no more pain meds' must NOT clear injuries (audit catch 2026-06-13)", msg: "no more pain meds since yesterday",
+    user: { injuries: "lower back strain" },
+    reject: [/marked as recovered|full programme is back/i] },
+  { name: "injury: 'still hurts' mid-sentence must NOT clear injuries (audit catch 2026-06-13)", msg: "the pain is gone in my knee but my back still hurts",
+    user: { injuries: "lower back strain" },
+    reject: [/marked as recovered|full programme is back/i] },
+  { name: "injury: genuine recovery confirmation clears injuries", msg: "injury healed, knee is better",
+    user: { injuries: "knee strain" },
+    expect: [/marked as recovered|full programme is back/i] },
 
   // ── MENU / GREETING / GRATITUDE ─────────────────────────────────────────
   { name: "menu: bare menu", msg: "menu",

@@ -360,8 +360,13 @@ export async function handleEarlyCommands(ctx: {
   // ---- NEW / CHANGE PROGRAMME REQUEST — always ask, never auto-deliver ----
   // ---- DIRECT DAYS SWITCH — "switch to 3 days" / "I want to do 4 days" ----
   // Updates training days immediately without the full questionnaire.
-  const directSwitchMatch = m.match(/\b(?:switch|change|move|update)\s+(?:me\s+)?to\s+([2-6])\s*days?\b/i)
-    || m.match(/\bwant\s+to\s+(?:do|train)\s+([2-6])\s*days?\s*(?:a\s*week|per\s*week)?\b/i);
+  // Guard: interrogative phrasing ("Should I switch to 5 days?") must NOT auto-apply — route to GPT.
+  const isTrainingDaysQuestion = /^(?:should|would|could|can\s+i|is\s+it|what\s+if|how\s+about|do\s+you\s+think|if\s+i)\b/i.test(m.trim())
+    || /[?？]\s*$/.test(m.trim());
+  const directSwitchMatch = isTrainingDaysQuestion ? null : (
+    m.match(/\b(?:switch|change|move|update)\s+(?:me\s+)?to\s+([2-6])\s*days?\b/i)
+    || m.match(/\bwant\s+to\s+(?:do|train)\s+([2-6])\s*days?\s*(?:a\s*week|per\s*week)?\b/i)
+  );
   if (directSwitchMatch) {
     const newDays = parseInt(directSwitchMatch[1]);
     const newTargets = user.currentWeight
