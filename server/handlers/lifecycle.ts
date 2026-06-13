@@ -858,11 +858,20 @@ export async function handleLifecycle(ctx: {
     const choice = m.trim();
     await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
     const capName = user.name?.split(" ")[0] || "there";
+    // Enrol a returning client in the structured 7-day comeback arc (jobs/comeback.ts
+    // advances them through day 2/4/7 beats). Flag mirrors streak_shield:/paused_until:.
+    const enrolComeback = async () => {
+      const base = (user.profileNotes || "").replace(/\s*comeback:\d{4}-\d{2}-\d{2}/, "").trim();
+      const notes = `${base ? base + " " : ""}comeback:${sastToday()}`.trim();
+      await db.update(users).set({ profileNotes: notes }).where(eq(users.phoneNumber, phone));
+    };
     let reply = "";
     if (choice === "1" || /\b(back|let.?s go|i.?m back|ready|let's start)\b/i.test(m)) {
       reply = `${capName} is back. No big deal — resets are part of the process.\n\nSend me what you ate today and we pick up right now. No restarts, no lectures.`;
+      await enrolComeback();
     } else if (choice === "2" || /\b(simpler|simple|overwhelm|too much)\b/i.test(m)) {
       reply = `Got it, ${capName}. We strip it down.\n\nFor the next 3 days, your only job is: *log 2 meals a day*. Nothing else. No workout pressure. No step count. Just food.\n\nSend your first meal whenever you're ready.`;
+      await enrolComeback();
     } else if (choice === "3" || /\b(busy|later|week|not now)\b/i.test(m)) {
       reply = `Understood, ${capName}. I will check in with you next week.\n\nYour programme is exactly where you left it — no restart needed. One message brings it back. I'll be here.`;
     } else {
