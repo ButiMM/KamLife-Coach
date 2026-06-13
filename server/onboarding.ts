@@ -432,8 +432,15 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     const namePrefix = (u.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
     for (let attempt = 0; attempt < 5; attempt++) {
       const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
-      const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
-      if (existing.length === 0) { referralCode = candidate; break; }
+      try {
+        const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
+        if (existing.length === 0) { referralCode = candidate; break; }
+      } catch (e) {
+        // A DB blip here must never abort onboarding completion — the referral code
+        // is a nice-to-have; just skip it and let the welcome go out.
+        console.warn("[ONBOARDING] referral code check failed, skipping:", e);
+        break;
+      }
     }
   }
 
@@ -476,7 +483,15 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const stepsLabel = stepsTarget.toLocaleString();
 
   const updatedUser = { ...u, trainingMode: mode, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, stepsTarget, age: u.age || 30, primaryFocusArea: u.primaryFocusArea };
-  const firstWorkout = getKamlifeProgramme(updatedUser, true);
+  // The user is already marked COMPLETE above — programme generation must never be
+  // allowed to throw here, or the welcome (their first impression) is lost entirely.
+  let firstWorkout: string;
+  try {
+    firstWorkout = getKamlifeProgramme(updatedUser, true);
+  } catch (e) {
+    console.error("[ONBOARDING] getKamlifeProgramme failed in completeOnboarding — using fallback:", e);
+    firstWorkout = `Your Day 1 workout is ready — reply *1* or *workout* and I'll send it straight through.`;
+  }
 
   const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
   const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
@@ -1131,7 +1146,14 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     const finalUser = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const f = finalUser[0];
-    const programme = getKamlifeProgramme(f);
+    // Already COMPLETE above — never let programme generation throw away the welcome.
+    let programme: string;
+    try {
+      programme = getKamlifeProgramme(f);
+    } catch (e) {
+      console.error("[ONBOARDING] getKamlifeProgramme failed in ASK_WORK_SCHEDULE — using fallback:", e);
+      programme = `Your Day 1 workout is ready — reply *1* or *workout* and I'll send it straight through.`;
+    }
     const goalLabel: Record<string, string> = {
       fat_loss: "Fat loss", muscle_gain: "Muscle gain", recomposition: "Body recomposition",
       general: "General fitness", health_condition: "Health management",
