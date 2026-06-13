@@ -23,6 +23,8 @@ export default defineConfig({
     "exercise_logs",
     "progress_photos",
     "escalations",
+    "admin_events",
+    "payment_events",
     "ab_experiments",
     "ab_assignments",
     "meal_logs",
@@ -30,6 +32,7 @@ export default defineConfig({
     "client_actions",
     "conversations",
     "messages",
+    "user_integrations",
     "client_intelligence_profiles",
   ],
 });
