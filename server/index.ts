@@ -327,6 +327,25 @@ async function runMigrations(): Promise<void> {
       processed_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )`,
     `CREATE UNIQUE INDEX IF NOT EXISTS payment_events_unique_idx ON payment_events(provider, provider_payment_id)`,
+    `CREATE TABLE IF NOT EXISTS client_intelligence_profiles (
+      user_id          UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      updated_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      start_weight_kg  NUMERIC(5,1),
+      best_weight_kg   NUMERIC(5,1),
+      total_kg_changed NUMERIC(5,1),
+      longest_workout_streak    INTEGER NOT NULL DEFAULT 0,
+      longest_food_streak       INTEGER NOT NULL DEFAULT 0,
+      best_week_avg_protein_g   INTEGER NOT NULL DEFAULT 0,
+      best_week_sessions        INTEGER NOT NULL DEFAULT 0,
+      weakest_dow              INTEGER,
+      peak_engagement_hour     INTEGER,
+      lifetime_session_compliance NUMERIC(4,3),
+      lifetime_food_log_days      INTEGER NOT NULL DEFAULT 0,
+      plateau_count               INTEGER NOT NULL DEFAULT 0,
+      monthly_snapshots  JSONB,
+      pattern_flags      JSONB,
+      coach_narrative    TEXT
+    )`,
   ];
 
   let created = 0;
