@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 process.env.DATABASE_URL = process.env.DATABASE_URL || "postgresql://test:test@localhost:5432/test";
 
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+const { findFabricatedComposites } = await import("../server/utils");
 
 let passed = 0;
 let failed = 0;
@@ -79,6 +80,37 @@ test("'macdonalds' misspelling + reversed word order still matches breakfast", (
 });
 test("'egg mcmuffin' matches the McMuffin (not a burger)", () => {
   assert.ok(names("egg mcmuffin").includes("McDonald's Egg McMuffin"));
+});
+
+// ── Anti-fabrication guard — GPT must not invent a composite from a listed meal ──
+// Guards the exact production failure where "rice / chicken livers / veggies" became
+// a phantom "rice and chicken", double-counting protein.
+const fab = (msg: string, ns: string[]) => findFabricatedComposites(msg, ns.map(n => ({ name: n })));
+
+test("invented 'rice and chicken' from a newline-listed meal is flagged", () => {
+  assert.deepEqual(
+    fab("Dinner\nRice\nChicken livers\nMixed veggies",
+      ["Chicken livers", "Mixed frozen vegetables", "Rice and chicken (home cooked)"]),
+    ["Rice and chicken (home cooked)"],
+  );
+});
+test("invented composite from a comma-listed meal is flagged", () => {
+  assert.deepEqual(fab("rice, chicken livers, veggies", ["Rice and chicken", "Chicken livers"]), ["Rice and chicken"]);
+});
+test("composite the client typed verbatim in a list is NOT flagged", () => {
+  assert.deepEqual(fab("Lunch\nrice and chicken\nsalad", ["Rice and chicken", "Salad"]), []);
+});
+test("composite in a flowing sentence (not a list) is never touched", () => {
+  assert.deepEqual(fab("I had a plate of rice with grilled chicken", ["Rice with chicken"]), []);
+});
+test("clean listed meal with separate items is not flagged", () => {
+  assert.deepEqual(fab("Breakfast\neggs\ntoast\nbanana", ["Eggs", "Toast", "Banana"]), []);
+});
+test("'mac n cheese' listed, model returns 'mac and cheese' — kept as faithful", () => {
+  assert.deepEqual(fab("supper\nmac n cheese\ncoke zero", ["Mac and cheese", "Coke Zero"]), []);
+});
+test("single hyphenated dish (no and/with joiner) is not flagged", () => {
+  assert.deepEqual(fab("lunch\nchicken stir-fry\ncoke", ["Chicken stir-fry", "Coke"]), []);
 });
 
 if (failed > 0) {

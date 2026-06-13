@@ -5,7 +5,7 @@ import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
 import { calculateTargets } from "./targets";
-import { getDisplayName, sastDayStart } from "./utils";
+import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 
@@ -523,6 +523,9 @@ export interface GptFoodFallbackResult {
   totalProtein: number;
   coachNote: string;
   fromCache: boolean;
+  // Composite items the anti-fabrication guard stripped before totalling — the
+  // caller surfaces these so the client can re-send what was left out.
+  dropped?: string[];
 }
 
 const foodFallbackCache = new Map<string, { result: GptFoodFallbackResult; expiresAt: number }>();
@@ -654,7 +657,7 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
       return null;
     }
 
-    const foods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
+    const allFoods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
       name: String(f.name || "food"),
       kcal: Math.max(0, Number(parseInt(String(f.kcal ?? 0))) || 0),
       protein_g: Math.max(0, Number(parseInt(String(f.protein_g ?? 0))) || 0),
@@ -664,7 +667,16 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
       category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
     }));
 
-    if (foods.length === 0) return null;
+    if (allFoods.length === 0) return null;
+
+    // ANTI-FABRICATION GUARD — the model sometimes merges a listed carb with an
+    // UNLISTED protein ("rice" → "rice and chicken"), inventing protein the client
+    // never reported. Drop those phantom composites BEFORE totalling so a wrong,
+    // inflated number is never logged or shown as "target hit". The caller surfaces
+    // `dropped` so the client can re-send what was left out.
+    const dropped = findFabricatedComposites(message, allFoods);
+    const foods = dropped.length > 0 ? allFoods.filter(f => !dropped.includes(f.name)) : allFoods;
+    if (foods.length === 0) return null; // whole "meal" was a single fabricated composite
 
     const totalKcal = foods.reduce((s, f) => s + f.kcal, 0);
     const totalProtein = foods.reduce((s, f) => s + f.protein_g, 0);
@@ -673,11 +685,17 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
       console.warn(`[gptFoodFallback] rejecting hallucinated meal — totalKcal=${totalKcal} totalProt=${totalProtein} items=${foods.map(f => `${f.name}:${f.kcal}`).join(",")}`);
       return null;
     }
+    if (dropped.length > 0) {
+      console.warn(`[gptFoodFallback] dropped fabricated composite(s): ${dropped.join(", ")} — kept: ${foods.map(f => f.name).join(", ")}`);
+    }
     const result: GptFoodFallbackResult = {
       foods,
       totalKcal,
       totalProtein,
-      coachNote: String(parsed.coach_note || ""),
+      // The model's one-liner was written for the full pre-strip meal — discard it
+      // when we dropped an item so it can't praise food we didn't log.
+      coachNote: dropped.length > 0 ? "" : String(parsed.coach_note || ""),
+      dropped,
       fromCache: false,
     };
 

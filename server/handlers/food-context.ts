@@ -1227,7 +1227,10 @@ export async function handleFoodContext(ctx: {
         const protClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fbIsSnack && !fbIsDessert)
           ? `\n\nWhat protein did you have with this? Chicken, eggs, tuna, beans — send it and I'll add it to your total.`
           : "";
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}`;
+        const fbDroppedNote = (gptFallbackResult.dropped && gptFallbackResult.dropped.length > 0)
+          ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
+          : "";
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}`;
       }
     }
   }
@@ -1312,7 +1315,10 @@ export async function handleFoodContext(ctx: {
       const fb2ProtClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fb2IsSnack && !fb2IsDessert)
         ? `\n\nWhat protein did you have with this? Chicken, eggs, tuna, beans — send it and I'll add it to your total.`
         : "";
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}`;
+      const fb2DroppedNote = (gptFallbackResult.dropped && gptFallbackResult.dropped.length > 0)
+        ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
+        : "";
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}`;
     }
     // GPT returned null — can't identify the food. Ask for clarification instead of silently dropping.
     console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);

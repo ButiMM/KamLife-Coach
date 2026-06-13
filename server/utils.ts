@@ -165,6 +165,60 @@ export function isFutureIntent(message: string): boolean {
   return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
 }
 
+// Deterministic backstop against the GPT food estimator FABRICATING a composite
+// item. Demonstrated production failure: a client listed "rice / chicken livers /
+// mixed veggies" as separate items and the model logged a phantom "rice and chicken
+// (home cooked)" — inventing a second protein and inflating the meal's calories and
+// protein, then declaring the protein target hit. A prompt rule against this already
+// exists and the model ignores it, so this does NOT trust the model — it returns the
+// names of any fabricated composites so the caller can drop them rather than log a
+// wrong number.
+//
+// Fires ONLY when BOTH hold (keeps false positives near zero):
+//   1. The client's message is an ENUMERATED LIST (foods one-per-line / comma /
+//      slash separated, mostly short segments) — never a flowing sentence, where a
+//      model legitimately joins "rice with grilled chicken".
+//   2. A returned item NAME joins two foods (and / with / & / +) AND that joined
+//      phrase is NOT what the client wrote — joiners are normalised, so a faithful
+//      "mac n cheese" → "mac and cheese" is kept; only invented merges are dropped.
+export function findFabricatedComposites(
+  userMessage: string,
+  foods: Array<{ name: string }>,
+): string[] {
+  if (!userMessage || !foods || foods.length === 0) return [];
+
+  const segs = userMessage
+    .split(/[\n\/;•·]|,(?!\d)/) // split on line/slash/semicolon/bullet/comma (not "1,000")
+    .map(s => s.trim())
+    .filter(Boolean)
+    .filter(s => !/^(breakfast|lunch|dinner|supper|snack|brunch)\s*:?\s*$/i.test(s));
+  if (segs.length < 2) return []; // not an enumerated list — leave flowing prose alone
+  const shortShare = segs.filter(s => s.split(/\s+/).length <= 4).length / segs.length;
+  if (shortShare < 0.6) return [];
+
+  // Canonicalise so every food-joiner becomes "and" in both strings — a client's
+  // "mac n cheese" / "eggs & bacon" then matches the model's "mac and cheese".
+  const canon = (s: string) => s.toLowerCase()
+    .replace(/[&+]/g, " and ")
+    .replace(/[^a-z0-9 ]/g, " ")
+    .replace(/\b(?:and|with|n)\b/g, "and")
+    .replace(/\s+/g, " ")
+    .trim();
+  const hay = canon(userMessage);
+
+  const fabricated: string[] = [];
+  for (const f of foods) {
+    const rawName = (f.name || "").replace(/\([^)]*\)/g, " "); // drop "(home cooked)" etc.
+    const hasJoiner = /\b(?:and|with|n)\b/i.test(rawName) || /[&+]/.test(rawName);
+    if (!hasJoiner) continue;
+    const core = canon(rawName);
+    if (core.split(" ").length < 3) continue; // need a real "X and Y" composite
+    if (hay.includes(core)) continue;          // client wrote it verbatim — trust it
+    fabricated.push(f.name);
+  }
+  return fabricated;
+}
+
 // Returns a human-readable label for the date, e.g. "Saturday" or "yesterday".
 export function mealDateLabel(date: Date): string {
   const nowSAST = new Date(Date.now() + 2 * 3_600_000);
