@@ -394,7 +394,24 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- QUICK RE-LOG — "same as yesterday", "same as lunch", "had the same for dinner" ----
-  const isRepeatMeal = /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food))\b/i.test(m);
+  // GUARD: "log/record yesterday's food" is a RETROACTIVE-LOGGING request — the user wants
+  // to tell me what they ate YESTERDAY, not copy a past meal into today. Without this, a
+  // voice note "I want to log yesterday's food" was being relogged as today's pasta.
+  // Repeat intent requires an explicit same/repeat/again; a logging verb + "yesterday"
+  // (without those) means retroactive capture, so it must fall through.
+  const wantsRepeat = /\b(same|repeat|again)\b/i.test(m);
+  const isRetroLogRequest = !wantsRepeat
+    && /\b(log|logging|record|add|enter|capture|track|update|forgot|missed|didn.?t)\b/i.test(m)
+    && /\byesterday\b/i.test(m);
+  const isRepeatMeal = !isRetroLogRequest && /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food) again)\b/i.test(m);
+
+  // Bare retroactive-log request with no food named yet — guide them to send yesterday's
+  // meals with a "yesterday" prefix so the meal parser dates them to yesterday, not today.
+  if (isRetroLogRequest && scanForSAFoods(message).length === 0) {
+    const nm = user.name ? `${user.name.split(" ")[0]}, ` : "";
+    return `${nm}sure — what did you eat yesterday? Send it starting with *yesterday*, e.g. *"yesterday I had 2 eggs and pap for breakfast, chicken and rice for lunch"* — and I'll log it to yesterday, not today.`;
+  }
+
   if (isRepeatMeal) {
     try {
       // Determine WHICH meal to copy FROM — look for the reference meal (after "as", not the target meal)

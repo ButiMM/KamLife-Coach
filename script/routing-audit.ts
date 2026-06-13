@@ -181,6 +181,9 @@ const CASES: Case[] = [
   { name: "retro: multi-day catch-up handles prefix food (food before day name)", msg: "Rice and beef Wednesday and oats with eggs Thursday",
     expect: [/logged \d+ days|kcal/i],
     reject: [/not logged yet|planned/i] },
+  { name: "retro: 'log yesterday's food' asks what they ate, must NOT relog today (prod bug 2026-06-13)", msg: "I want to log yesterday's food",
+    expect: [/what did you eat yesterday|send it starting with/i],
+    reject: [/copied from|♻️|remaining today/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",
