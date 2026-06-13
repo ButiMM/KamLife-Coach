@@ -1,9 +1,11 @@
 import type { Express } from "express";
 import path from "path";
-import { db } from "../db";
+import { db, pool } from "../db";
 import { users, workoutLogs } from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
+import { deliveryStats, jobRegistry, dailyProactiveCount, DAILY_PROACTIVE_CAP } from "../scheduler/shared";
+import { isTwilioCircuitOpen } from "../utils";
 
 export function registerHealthRoutes(app: Express) {
   // ── Simple health check — includes DB ping so Railway stops routing to dead instances ──
@@ -59,6 +61,52 @@ export function registerHealthRoutes(app: Express) {
 
     const allOnline = Object.values(checks).every(c => c.status === "online");
     res.json({ status: allOnline ? "healthy" : "degraded", checks, timestamp: new Date().toISOString() });
+  });
+
+  // ── Ops snapshot — one read-only view of whether the core loop is firing ──
+  // NOTE: delivery stats, the proactive budget, and the job registry are in-memory
+  // on the scheduler leader replica, so query the leader instance for accurate
+  // operational numbers. The DB-derived funnel/subscription counts are global.
+  app.get("/api/ops", requireAdminKey, async (_req, res) => {
+    try {
+      const total = deliveryStats.sent + deliveryStats.failed;
+      const failureRate = total > 0 ? deliveryStats.failed / total : 0;
+
+      const [funnelRows, subRows] = await Promise.all([
+        db.execute(sql`SELECT onboarding_state AS state, COUNT(*)::int AS n FROM users GROUP BY onboarding_state`),
+        db.execute(sql`SELECT subscription_status AS status, COUNT(*)::int AS n FROM users GROUP BY subscription_status`),
+      ]);
+
+      let clientsAtCap = 0, slotsUsedToday = 0;
+      for (const n of dailyProactiveCount.values()) { slotsUsedToday += n; if (n >= DAILY_PROACTIVE_CAP) clientsAtCap++; }
+
+      res.json({
+        timestamp: new Date().toISOString(),
+        delivery: {
+          sentToday: deliveryStats.sent,
+          failedToday: deliveryStats.failed,
+          failureRate: Number(failureRate.toFixed(3)),
+          since: deliveryStats.lastReset,
+        },
+        twilioCircuitOpen: isTwilioCircuitOpen(),
+        proactiveBudget: {
+          cap: DAILY_PROACTIVE_CAP,
+          clientsMessagedToday: dailyProactiveCount.size,
+          slotsUsedToday,
+          clientsAtCap,
+        },
+        dbPool: {
+          total: (pool as any).totalCount ?? null,
+          idle: (pool as any).idleCount ?? null,
+          waiting: (pool as any).waitingCount ?? null,
+        },
+        onboardingFunnel: Object.fromEntries((funnelRows.rows as any[]).map(r => [r.state || "unknown", Number(r.n)])),
+        subscriptions: Object.fromEntries((subRows.rows as any[]).map(r => [r.status || "unknown", Number(r.n)])),
+        jobs: Object.fromEntries(jobRegistry.entries()),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
   });
 
   // ── Voice note file serving ──

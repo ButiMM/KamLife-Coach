@@ -319,6 +319,32 @@ export async function sendCriticalAlert(to: string, body: string): Promise<void>
 
 export const deliveryStats = { sent: 0, failed: 0, lastReset: new Date().toISOString().slice(0, 10) };
 
+// ── JOB RUN REGISTRY ──────────────────────────────────────────────────────────
+// Last-run telemetry per scheduler job, surfaced by the /api/ops endpoint so the
+// core loop is observable at scale (console logs vanish on every Railway redeploy).
+// In-memory — resets on restart, which is fine for live operational visibility.
+export interface JobRunInfo {
+  lastRunAt: string | null;
+  lastDurationMs: number | null;
+  lastOk: boolean | null;
+  lastError: string | null;
+  runs: number;
+  failures: number;
+}
+export const jobRegistry = new Map<string, JobRunInfo>();
+
+export function recordJobRun(name: string, ok: boolean, durationMs: number, error?: string): void {
+  const prev = jobRegistry.get(name);
+  jobRegistry.set(name, {
+    lastRunAt: new Date().toISOString(),
+    lastDurationMs: durationMs,
+    lastOk: ok,
+    lastError: ok ? null : (error || "unknown").slice(0, 300),
+    runs: (prev?.runs || 0) + 1,
+    failures: (prev?.failures || 0) + (ok ? 0 : 1),
+  });
+}
+
 function resetDeliveryStatsIfNeeded() {
   const today = new Date().toISOString().slice(0, 10);
   if (deliveryStats.lastReset !== today) {

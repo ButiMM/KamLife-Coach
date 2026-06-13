@@ -9,7 +9,7 @@ import { pool } from "./db";
 import {
   deliveryStats, sendWhatsApp,
   loadState, saveState, todaySAST, hasRunToday,
-  weeklyKeyedSent, dailyProactiveCount,
+  weeklyKeyedSent, dailyProactiveCount, recordJobRun,
   escalations, sentProactive,
   db, lt, eq, lte, and,
 } from "./scheduler/shared";
@@ -128,6 +128,26 @@ cron.schedule("*/30 * * * *", async () => {
       }
     }
   } catch (e) { console.error("[SCHEDULER] Urgent SLA check failed:", e); }
+
+  // WhatsApp delivery-quality early warning. A spiking failure rate is the first
+  // sign the channel is degrading (sender-quality drop, mass opt-outs) — the path
+  // to a number ban. Alert the coach once/day so it can be acted on before a block.
+  try {
+    const total = deliveryStats.sent + deliveryStats.failed;
+    if (total >= 50 && deliveryStats.failed / total > 0.3) {
+      const today = todaySAST();
+      if (loadState()["delivery_quality_alert"] !== today) {
+        saveState("delivery_quality_alert", today);
+        const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+        if (coachPhone) {
+          const pct = Math.round((deliveryStats.failed / total) * 100);
+          await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`,
+            `⚠️ KamLife delivery alert: ${deliveryStats.failed}/${total} WhatsApp sends failed today (${pct}%).\n\nCheck Twilio status and your WhatsApp sender quality rating now — a high failure/block rate is the path to a number suspension.`
+          ).catch(() => {});
+        }
+      }
+    }
+  } catch (e) { console.error("[SCHEDULER] Delivery-quality check failed:", e); }
 }, { timezone: "UTC" });
 
 // ============================================================
@@ -155,12 +175,15 @@ export async function initScheduler(): Promise<void> {
 
   schedulerInitialised = true;
 
-  // Safe job runner — catches, logs, and alerts coach on repeated failures
+  // Safe job runner — catches, logs, records run telemetry, and alerts coach on repeated failures
   const jobFailureCounts: Record<string, number> = {};
   function safe(name: string, fn: () => Promise<void>): void {
+    const started = Date.now();
     fn().then(() => {
+      recordJobRun(name, true, Date.now() - started);
       jobFailureCounts[name] = 0; // reset on success
     }).catch(async (e) => {
+      recordJobRun(name, false, Date.now() - started, String(e));
       jobFailureCounts[name] = (jobFailureCounts[name] || 0) + 1;
       const failures = jobFailureCounts[name];
       console.error(`[SCHEDULER] ${name} failed (x${failures}):`, e);
