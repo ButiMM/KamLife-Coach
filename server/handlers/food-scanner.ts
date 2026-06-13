@@ -587,8 +587,11 @@ export function buildFoodLogReply(p: {
         "Solid protein.", "Good protein hit.", "Protein sorted.", "Strong meal.",
         "Protein locked in.", "That's the protein box ticked.",
       ]);
+      // When the daily protein target is already met, the single "target hit ✅"
+      // is owned by the proteinTip block below. Emit only the opener here so one
+      // reply never prints "Protein target hit" twice (which read as a glitch).
       const protCloser = proteinRemaining <= 0
-        ? pick(["Protein target hit for today. ✅", "Daily protein done. ✅", "Protein goal complete. ✅"])
+        ? ""
         : calorieCeilingHit
         ? pick([
             `Still ${Math.round(proteinRemaining)}g short on protein — but you're over on calories, so carry it to tomorrow.`,
@@ -599,8 +602,8 @@ export function buildFoodLogReply(p: {
             `${Math.round(proteinRemaining)}g left to hit your target.`,
             `${Math.round(proteinRemaining)}g more to go today.`,
           ]);
-      coachNote = `\n\n${protOpener} ${protCloser}`;
-    } else if (hasGoodProteins && totalMealProtein >= 10 && !calorieCeilingHit) {
+      coachNote = `\n\n${protOpener}${protCloser ? " " + protCloser : ""}`;
+    } else if (hasGoodProteins && totalMealProtein >= 10 && proteinRemaining > 0 && !calorieCeilingHit) {
       coachNote = `\n\n${pick([
         `${Math.round(totalMealProtein)}g protein this meal — close. Push for 20g+ next meal.`,
         `${Math.round(totalMealProtein)}g protein — good start. 20g+ per meal is the target.`,

@@ -524,7 +524,7 @@ export async function handleFoodContext(ctx: {
         }).catch((e) => { console.error("[quick_relog mealLogs insert]", e); throw e; });
         invalidatePatternCache(user.id);
         invalidateFoodTotalsCache(user.id);
-        const calorieTarget = user.calorieTarget || 2000;
+        const calorieTarget = user.calorieTarget || 1800;
         const proteinTarget = user.proteinTarget || 120;
         const relogged = await recomputeTodayFoodTotals(user.id);
         await db.update(users).set({
@@ -944,7 +944,7 @@ export async function handleFoodContext(ctx: {
     if (allAdjustedFoods.length > 0) {
       const totalCals = allAdjustedFoods.reduce((s, f) => s + f.adjustedCalories, 0);
       const totalProtein = allAdjustedFoods.reduce((s, f) => s + f.adjustedProtein, 0);
-      const calorieTarget = user.calorieTarget || 2000;
+      const calorieTarget = user.calorieTarget || 1800;
       const proteinTarget = user.proteinTarget || 120;
       const junkFoods = allAdjustedFoods.filter(f => f.category === "junk");
       const goodProteins = allAdjustedFoods.filter(f => f.category === "protein");
@@ -1153,7 +1153,7 @@ export async function handleFoodContext(ctx: {
     if (!isQuestion && hasLogTrigger && hasActualFood) {
       const gptFallbackResult = await gptFoodFallback(message, user);
       if (gptFallbackResult) {
-        const calorieTarget = user.calorieTarget || 2000;
+        const calorieTarget = user.calorieTarget || 1800;
         const proteinTarget = user.proteinTarget || 120;
         const foodLines = gptFallbackResult.foods.map(f =>
           `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
@@ -1241,7 +1241,7 @@ export async function handleFoodContext(ctx: {
   if (!isQuestion && !isEmotionalOnly && hasStrongFoodTrigger && !hasActualFood && !voiceFallbackTooLong) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
-      const calorieTarget = user.calorieTarget || 2000;
+      const calorieTarget = user.calorieTarget || 1800;
       const foodLines = gptFallbackResult.foods.map((f: any) =>
         `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
       ).join("\n");

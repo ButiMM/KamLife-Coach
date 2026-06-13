@@ -113,6 +113,49 @@ test("single hyphenated dish (no and/with joiner) is not flagged", () => {
   assert.deepEqual(fab("lunch\nchicken stir-fry\ncoke", ["Chicken stir-fry", "Coke"]), []);
 });
 
+// ── No double / contradictory "protein target hit" in one reply ──────────────
+// buildFoodLogReply assembles a coach note AND a protein tip; both could once
+// independently declare "Protein target hit ✅" in the same message (and the
+// 10–20g branch could say "push for 20g+" right next to a "target hit"). Run
+// each scenario many times because the wording is randomly picked.
+const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+// One regex per distinct protein-verdict sentence the reply can emit — each is
+// written to match its sentence exactly once, so the count is the number of
+// separate protein verdicts. A correct reply gives EXACTLY ONE. Two means the
+// old double-"target hit" bug; a "20g+" alongside a "hit" is the contradiction.
+const VERDICT_RE = /protein target hit|daily protein done|protein goal complete|protein sorted for the day|protein and calories both on target|full day nailed|protein done, calories locked|\d+g protein still needed|\d+g (?:more to go|left to hit)|\d+g short on protein|20g\+/gi;
+const protHitCount = (reply: string) => (reply.match(VERDICT_RE) || []).length;
+const logReply = (over: Record<string, any>) => buildFoodLogReply({
+  foodLines: "• Chicken breast: ~300 kcal, 35g protein (1 portion)",
+  mealLabel: "Meal total",
+  totalMealCals: 600,
+  totalMealProtein: 35,
+  runningCals: 1500,
+  runningProtein: 150,   // already past the 120g target
+  calorieTarget: 1800,
+  proteinTarget: 120,
+  prevCals: 900,
+  hasGoodProteins: true,
+  hasCarbs: false,
+  user: { name: "Test", goalType: "fat_loss", stepsTarget: 8500 }, // no id → no edu note
+  todaySteps: 0,
+  ...over,
+});
+
+test("a ≥20g meal that crosses the protein target declares 'target hit' exactly once", () => {
+  for (let i = 0; i < 80; i++) {
+    const r = logReply({});
+    assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
+  }
+});
+test("a 10–20g meal with target already hit never says 'push for 20g+' next to 'target hit'", () => {
+  for (let i = 0; i < 80; i++) {
+    const r = logReply({ totalMealProtein: 15 });
+    assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
+    assert.ok(!/20g\+/.test(r), `self-contradicting 'push for 20g+' present:\n${r}`);
+  }
+});
+
 if (failed > 0) {
   console.error(`\nfood-scanner-tests: ${passed} passed, ${failed} FAILED\n${failures.join("\n")}`);
   process.exit(1);
