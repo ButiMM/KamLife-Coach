@@ -129,7 +129,7 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
   }
 }
 
-export async function checkPerfectDay(userId: string, proteinTarget = 130): Promise<string | null> {
+export async function checkPerfectDay(userId: string, proteinTarget = 120): Promise<string | null> {
   try {
     const todayStart = sastDayStart();
 

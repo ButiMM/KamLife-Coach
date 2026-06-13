@@ -156,6 +156,41 @@ test("a 10–20g meal with target already hit never says 'push for 20g+' next to
   }
 });
 
+// ── Portion default-count divisor — gram-led descriptions are 1 serving ──────
+// Guards the "2 chicken livers" → ~3 kcal bug: a "150g portion" must NOT be read
+// as a count of 150, or stating a quantity divides the calories into nothing.
+const { portionDefaultCount } = await import("../server/handlers/food-scanner");
+
+test("a gram-led portion ('150g portion') counts as 1 serving, not 150", () => {
+  assert.equal(portionDefaultCount("150g portion"), 1);
+});
+test("ml/kg/oz-led portions also count as 1 serving", () => {
+  assert.equal(portionDefaultCount("500ml glass"), 1);
+  assert.equal(portionDefaultCount("1kg portion"), 1);
+});
+test("a count-led portion ('2 large eggs') keeps its count", () => {
+  assert.equal(portionDefaultCount("2 large eggs"), 2);
+  assert.equal(portionDefaultCount("3 slices (90g)"), 3);
+});
+test("count-then-weight ('1 quarter kota (350g)') uses the count, not the grams", () => {
+  assert.equal(portionDefaultCount("1 quarter kota (350g)"), 1);
+});
+test("fractional and text-led portions are handled", () => {
+  assert.equal(portionDefaultCount("1.5 cups (cooked)"), 1.5);
+  assert.equal(portionDefaultCount("Medium plate (~200g)"), 1);
+  assert.equal(portionDefaultCount(""), 1);
+});
+test("real foods.ts: '2 chicken livers' scales up, never collapses to ~0", async () => {
+  // The chicken-livers portion is gram-led ("150g portion"); two of them must be
+  // ~2x a portion, not 2/150 of one. Compute the same way the handler does.
+  const livers = scanForSAFoods("chicken livers")[0];
+  assert.ok(livers, "chicken livers should be in the SA DB");
+  const defaultQty = portionDefaultCount(livers.typicalPortionDescription);
+  const quantity = 2 / defaultQty; // user said "2"
+  const scaledKcal = Math.round((livers.typicalPortionCalories || 0) * quantity);
+  assert.ok(scaledKcal > 100, `expected a real calorie count for 2 livers, got ${scaledKcal}`);
+});
+
 if (failed > 0) {
   console.error(`\nfood-scanner-tests: ${passed} passed, ${failed} FAILED\n${failures.join("\n")}`);
   process.exit(1);

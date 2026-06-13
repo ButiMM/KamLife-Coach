@@ -135,8 +135,14 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const target = mealLogRows.find(l =>
       (l.mealLabel || "").toLowerCase().includes(label) ||
       (l.rawMessage || "").toLowerCase().includes(label)
-    ) || mealLogRows[0];
-    if (!target) return `No meal logged yet today to remove.`;
+    );
+    // Never fall back to deleting the most-recent meal — silently removing the
+    // wrong entry corrupts the day's totals while telling the client otherwise.
+    if (!target) {
+      return mealLogRows.length > 0
+        ? `I couldn't find a "${label}" entry in today's log, so I haven't deleted anything — I won't risk removing the wrong meal. Reply "remove last" to undo your most recent entry, or name the food (e.g. "remove the rice").`
+        : `No meal logged yet today to remove.`;
+    }
     await db.delete(mealLogs).where(eq(mealLogs.id, target.id));
     invalidateFoodTotalsCache(user.id);
     const recomputed = await recomputeTodayFoodTotals(user.id);

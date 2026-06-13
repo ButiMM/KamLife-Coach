@@ -11,6 +11,7 @@ import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
+  portionDefaultCount,
   computeFoodLogStreak, getFoodStreakCelebration,
   hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
@@ -847,8 +848,7 @@ export async function handleFoodContext(ctx: {
           const qtyBefore = qtyDirect || qtyWithFiller;
           if (qtyBefore) {
             const userQty = parseFloat(qtyBefore[1]);
-            const defaultQtyMatch = f.typicalPortionDescription.match(/^(\d+)/);
-            const defaultQty = defaultQtyMatch ? parseInt(defaultQtyMatch[1]) : 1;
+            const defaultQty = portionDefaultCount(f.typicalPortionDescription);
             if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
               quantity = userQty / defaultQty;
             }
@@ -1126,7 +1126,7 @@ export async function handleFoodContext(ctx: {
       await logChat(user.id, message, reply, "FOOD_LOG");
       const [saPattern, saDay, foodStreak] = await Promise.all([
         checkFoodPatterns(user.id),
-        checkPerfectDay(user.id, user.proteinTarget || 130),
+        checkPerfectDay(user.id, user.proteinTarget || 120),
         computeFoodLogStreak(user.id),
       ]);
       const streakCelebration = getStreakNote(user.id, foodStreak, user.name || "");
@@ -1221,7 +1221,7 @@ export async function handleFoodContext(ctx: {
           user,
         });
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-        const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
+        const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120), computeFoodLogStreak(user.id)]);
         const fbGuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
         console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
         const protClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fbIsSnack && !fbIsDessert)
@@ -1309,7 +1309,7 @@ export async function handleFoodContext(ctx: {
         user,
       });
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
-      const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130), computeFoodLogStreak(user.id)]);
+      const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120), computeFoodLogStreak(user.id)]);
       const fb2GuiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       console.log(`[GPT-FOOD-FALLBACK] ${user.id.slice(0, 8)} — ${gptFallbackResult.foods.map((f: any) => f.name).join(", ")} — ${gptFallbackResult.totalKcal} kcal${gptFallbackResult.fromCache ? " [cached]" : ""}`);
       const fb2ProtClarifyNote = (gptFallbackResult.totalProtein === 0 && gptFallbackResult.totalKcal >= 150 && !fb2IsSnack && !fb2IsDessert)

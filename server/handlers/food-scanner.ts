@@ -94,6 +94,21 @@ export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/**
+ * The serving COUNT implied by a portion description's leading number — used as
+ * the divisor when a client states their own count ("3 eggs" → 3/2 portions).
+ * Returns 1 when the leading number is a weight/volume, NOT a count: "150g
+ * portion" must be 1, otherwise "2 chicken livers" divides by 150 and logs ~3
+ * kcal instead of two real portions. Pure — unit-tested in food-scanner-tests.
+ */
+export function portionDefaultCount(desc: string): number {
+  if (!desc) return 1;
+  if (/^\d+(?:\.\d+)?\s*(?:g|kg|ml|l|oz)\b/i.test(desc)) return 1;
+  const m = desc.match(/^(\d+(?:\.\d+)?)/);
+  const n = m ? parseFloat(m[1]) : 1;
+  return n > 0 ? n : 1;
+}
+
 function levenshtein(a: string, b: string): number {
   const la = a.length, lb = b.length;
   if (la === 0) return lb;
@@ -501,7 +516,10 @@ export function buildFoodLogReply(p: {
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
   let dayAssessment = "";
-  if (prevCals > 0 && totalMealCals >= 100) {
+  // Only assess the day when we trust the running total. When runningTotalSane is
+  // false the line above already softens to "Remaining ~X" — firing an "over by
+  // 800, no more food" verdict off the same distrusted number contradicts it.
+  if (prevCals > 0 && totalMealCals >= 100 && runningTotalSane) {
     const hourNow = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
     const dayProgress = Math.min(hourNow / 20, 1);
     const expectedCals = calorieTarget * dayProgress;
