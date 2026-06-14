@@ -61,6 +61,46 @@ export async function textToSpeech(text: string): Promise<Buffer | null> {
 }
 
 /**
+ * Transcribe audio using ElevenLabs Scribe v1.
+ * Better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa, etc.).
+ * Returns the transcribed text, or null if not configured / fails.
+ */
+export async function scribeTranscribe(
+  audioBuffer: ArrayBuffer,
+  ext: string,
+  langHint?: string,
+): Promise<string | null> {
+  const apiKey = process.env.ELEVENLABS_API_KEY;
+  if (!apiKey) return null;
+
+  try {
+    const formData = new FormData();
+    const blob = new Blob([audioBuffer], { type: `audio/${ext}` });
+    formData.append("file", blob, `audio.${ext}`);
+    formData.append("model_id", "scribe_v1");
+    if (langHint) formData.append("language_code", langHint);
+
+    const response = await fetch(`${ELEVENLABS_BASE}/speech-to-text`, {
+      method: "POST",
+      headers: { "xi-api-key": apiKey },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      console.error(`[ELEVENLABS] Scribe error ${response.status}:`, err.slice(0, 200));
+      return null;
+    }
+
+    const data = await response.json() as { text?: string };
+    return data.text?.trim() || null;
+  } catch (e: any) {
+    console.error("[ELEVENLABS] Scribe failed:", e.message);
+    return null;
+  }
+}
+
+/**
  * Get remaining character quota for this billing period.
  */
 export async function getElevenLabsQuota(): Promise<{ used: number; limit: number } | null> {

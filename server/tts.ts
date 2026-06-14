@@ -1,6 +1,7 @@
 // ============================================================
 // COACH K TTS — voice note generation for milestone moments
-// Generates MP3 via OpenAI TTS, serves via Express at /voice/:id.mp3
+// Uses ElevenLabs cloned voice (Coach K) when configured,
+// falls back to OpenAI TTS (onyx). Serves via Express at /voice/:id.mp3
 // Requires APP_BASE_URL env var to be set (e.g. https://yourapp.railway.app)
 // ============================================================
 
@@ -9,6 +10,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
+import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured } from "./elevenlabs";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -21,6 +23,7 @@ mkdir(VOICE_DIR, { recursive: true }).catch(() => {});
 
 /**
  * Generate a voice note from text.
+ * Uses ElevenLabs cloned voice (Coach K) when configured; falls back to OpenAI TTS.
  * Returns the public HTTPS URL for the audio file, or null if APP_BASE_URL is not set.
  */
 export async function generateVoiceNote(text: string): Promise<string | null> {
@@ -36,9 +39,21 @@ export async function generateVoiceNote(text: string): Promise<string | null> {
     const id = randomUUID();
     const filePath = join(VOICE_DIR, `${id}.mp3`);
 
+    // Use ElevenLabs cloned Coach K voice when configured
+    if (isElevenLabsConfigured()) {
+      const elevenBuf = await elevenLabsTTS(text);
+      if (elevenBuf) {
+        await writeFile(filePath, elevenBuf);
+        const url = `${appUrl}/voice/${id}.mp3`;
+        console.log(`[TTS] Generated voice note (ElevenLabs Coach K): ${url}`);
+        return url;
+      }
+      console.warn("[TTS] ElevenLabs failed — falling back to OpenAI TTS");
+    }
+
     const mp3 = await openai.audio.speech.create({
       model: "tts-1",
-      voice: "onyx",          // Deep, warm, authoritative voice
+      voice: "onyx",
       input: text,
       response_format: "mp3",
     });
@@ -47,7 +62,7 @@ export async function generateVoiceNote(text: string): Promise<string | null> {
     await writeFile(filePath, buffer);
 
     const url = `${appUrl}/voice/${id}.mp3`;
-    console.log(`[TTS] Generated voice note: ${url}`);
+    console.log(`[TTS] Generated voice note (OpenAI): ${url}`);
     return url;
   } catch (err) {
     console.error("[TTS] Generation failed:", err);

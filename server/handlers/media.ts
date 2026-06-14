@@ -30,6 +30,7 @@ import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from ".
 import { sendWhatsApp } from "../scheduler/shared";
 import { getExerciseGifUrl } from "../exercise-media";
 import { buildDayWorkout } from "../programme";
+import { scribeTranscribe } from "../elevenlabs";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -374,7 +375,7 @@ export async function handleMediaMessage(ctx: {
               await db.insert(stepLogs).values({ userId: user.id, steps: extractedSteps });
             }
             await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
-            const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 130), getStepStreak(user.id)]);
+            const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 120), getStepStreak(user.id)]);
             const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, undefined, user);
             await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
             console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
@@ -923,12 +924,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         invalidateFoodTotalsCache(user.id);
       }
 
-      const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 130)]);
+      const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120)]);
       let photoDailyTotal = "";
       try {
         const totals = await recomputeTodayFoodTotals(user.id);
         const calTarget = user.calorieTarget || 1800;
-        const protTarget = user.proteinTarget || 130;
+        const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
           photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
@@ -1037,60 +1038,82 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
       const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
 
-      let transcription: { text?: string } = { text: "" };
-      // Confidence signal from attempt 1 (verbose_json). Whisper "hallucinates"
-      // English-sounding words when handed a language it can't handle (most SA
-      // languages beyond EN/AF/ZU). avg_logprob and compression_ratio are the
-      // standard signals for catching that garble — see the guard further down.
+      let transcribedText: string | undefined;
+      // Confidence signal only available from Whisper verbose_json path.
       let voiceQuality: { avgLogprob: number; comp: number } | null = null;
-      console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
-      try {
-        const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
-          file: createReadStream(tmpAudioPath),
-          model: "whisper-1",
-          prompt: whisperPrompt,
-          response_format: "verbose_json",
-          ...(whisperLang ? { language: whisperLang } : {}),
-        }));
-        transcription = { text: v?.text || "" };
-        const segs: any[] = Array.isArray(v?.segments) ? v.segments : [];
-        if (segs.length) {
-          const avgLogprob = segs.reduce((s, x) => s + (x.avg_logprob ?? 0), 0) / segs.length;
-          const comp = Math.max(...segs.map((x) => x.compression_ratio ?? 0));
-          voiceQuality = { avgLogprob, comp };
-        }
-        console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0} avgLogprob=${voiceQuality?.avgLogprob?.toFixed(2) ?? "n/a"} comp=${voiceQuality?.comp?.toFixed(2) ?? "n/a"}`);
-      } catch (transErr: any) {
-        console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
+
+      // ElevenLabs Scribe: better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa).
+      // Try it first when configured; fall through to Whisper on any failure.
+      if (process.env.ELEVENLABS_API_KEY) {
         try {
-          transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
-            file: createReadStream(tmpAudioPath),
-            model: "whisper-1",
-            prompt: whisperPrompt,
-          }));
-          console.log(`[VOICE] whisper_attempt_2_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
-        } catch (retryErr: any) {
-          console.warn(`[VOICE] whisper_attempt_2_failed error=${retryErr?.message || retryErr}`);
-          transcription = { text: "" };
+          const scribeText = await withTimeout("scribe_transcribe", 20000, () =>
+            scribeTranscribe(audioBuffer, audioExt, storedLangPref || undefined)
+          );
+          if (scribeText) {
+            transcribedText = scribeText;
+            console.log(`[VOICE] scribe_ok text="${scribeText.slice(0, 80)}" len=${scribeText.length}`);
+          }
+        } catch (scribeErr: any) {
+          console.warn(`[VOICE] scribe_failed: ${scribeErr?.message || scribeErr}`);
         }
       }
 
-      let transcribedText = transcription.text?.trim();
+      // Whisper fallback (3 attempts with quality signals)
       if (!transcribedText) {
-        console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
+        let transcription: { text?: string } = { text: "" };
+        // Confidence signal from attempt 1 (verbose_json). Whisper "hallucinates"
+        // English-sounding words when handed a language it can't handle (most SA
+        // languages beyond EN/AF/ZU). avg_logprob and compression_ratio are the
+        // standard signals for catching that garble — see the guard further down.
+        console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
-          const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
-            openai.audio.transcriptions.create({
+          const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
+            file: createReadStream(tmpAudioPath),
+            model: "whisper-1",
+            prompt: whisperPrompt,
+            response_format: "verbose_json",
+            ...(whisperLang ? { language: whisperLang } : {}),
+          }));
+          transcription = { text: v?.text || "" };
+          const segs: any[] = Array.isArray(v?.segments) ? v.segments : [];
+          if (segs.length) {
+            const avgLogprob = segs.reduce((s, x) => s + (x.avg_logprob ?? 0), 0) / segs.length;
+            const comp = Math.max(...segs.map((x) => x.compression_ratio ?? 0));
+            voiceQuality = { avgLogprob, comp };
+          }
+          console.log(`[VOICE] whisper_attempt_1_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0} avgLogprob=${voiceQuality?.avgLogprob?.toFixed(2) ?? "n/a"} comp=${voiceQuality?.comp?.toFixed(2) ?? "n/a"}`);
+        } catch (transErr: any) {
+          console.warn(`[VOICE] whisper_attempt_1_failed lang=${whisperLang || "auto"} error=${transErr?.message || transErr}`);
+          try {
+            transcription = await withTimeout("voice_transcribe_retry", 25000, () => openai.audio.transcriptions.create({
               file: createReadStream(tmpAudioPath),
               model: "whisper-1",
-              language: "en",
               prompt: whisperPrompt,
-            })
-          );
-          transcribedText = retryTranscription.text?.trim() || "";
-          console.log(`[VOICE] whisper_attempt_3_result text="${transcribedText.slice(0, 80)}" len=${transcribedText.length}`);
-        } catch (retryErr: any) {
-          console.warn(`[VOICE] whisper_attempt_3_failed error=${retryErr?.message || retryErr}`);
+            }));
+            console.log(`[VOICE] whisper_attempt_2_result text="${(transcription.text || "").slice(0, 80)}" len=${transcription.text?.length ?? 0}`);
+          } catch (retryErr: any) {
+            console.warn(`[VOICE] whisper_attempt_2_failed error=${retryErr?.message || retryErr}`);
+            transcription = { text: "" };
+          }
+        }
+
+        transcribedText = transcription.text?.trim();
+        if (!transcribedText) {
+          console.log(`[VOICE] whisper_attempt_3_en bytes=${audioBuffer.byteLength}`);
+          try {
+            const retryTranscription = await withTimeout("voice_transcribe_en_retry", 20000, () =>
+              openai.audio.transcriptions.create({
+                file: createReadStream(tmpAudioPath),
+                model: "whisper-1",
+                language: "en",
+                prompt: whisperPrompt,
+              })
+            );
+            transcribedText = retryTranscription.text?.trim() || "";
+            console.log(`[VOICE] whisper_attempt_3_result text="${transcribedText.slice(0, 80)}" len=${transcribedText.length}`);
+          } catch (retryErr: any) {
+            console.warn(`[VOICE] whisper_attempt_3_failed error=${retryErr?.message || retryErr}`);
+          }
         }
       }
 
