@@ -200,8 +200,6 @@ const EXERCISE_SLUGS: Record<string, string> = {
   "single-leg glute bridge":                              "glute-bridge",
   "single leg glute bridge":                              "glute-bridge",
   "reverse lunge":                                        "reverse-lunge",
-  "hip abduction machine":                                "hip-thrust",
-  "hip abduction machine (burnout)":                      "hip-thrust",
   "step up":                                              "step-up",
   "push-up":                                              "push-up",
   "push up":                                              "push-up",

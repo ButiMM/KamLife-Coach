@@ -77,8 +77,7 @@ function _stepEquivalent(burnKcal: number): string {
 }
 
 export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any): string {
-  // Random pick, not day-keyed — the same canned line twice in one conversation
-  // reads as a bot. Variety matters more than cross-user determinism.
+  if (!target || target <= 0) target = 10000;
   const idx = Math.floor(Math.random() * 5);
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";

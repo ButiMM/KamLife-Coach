@@ -1332,6 +1332,7 @@ const EXERCISE_YOUTUBE: Record<string, string> = {
   "bodyweight squat": "https://www.youtube.com/results?search_query=bodyweight+squat+tutorial+form",
   "walking lunge": "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
   "reverse lunge": "https://www.youtube.com/results?search_query=reverse+lunge+tutorial+form",
+  "hip abduction machine": "https://www.youtube.com/results?search_query=hip+abduction+machine+tutorial+form",
   "plank": "https://www.youtube.com/results?search_query=plank+exercise+tutorial+form",
   "dead bug": "https://www.youtube.com/results?search_query=dead+bug+exercise+tutorial+form",
 };

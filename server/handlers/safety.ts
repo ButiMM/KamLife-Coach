@@ -20,6 +20,9 @@ const CRISIS_PHRASES = [
   "want to die", "kill myself", "end it all", "cannot go on", "can't go on",
   "suicidal", "self harm", "self-harm", "cutting myself", "hurting myself",
   "not worth living", "end my life", "no reason to live", "give up on life",
+  "want to hurt myself", "harm myself", "take my life",
+  "no point in living", "better off dead", "hang myself",
+  "everyone would be better off without me",
 ];
 
 // ── Terminal command guard ────────────────────────────────────
@@ -77,8 +80,26 @@ export async function runSafetyGuards(
   const strokeEmergency = /\bstrokes?\b/i.test(m) && !benignStroke;
   if (nonStrokeEmergency || strokeEmergency) {
     const acuteUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait.\n\nYour coach has been notified. Health first — everything else can wait.`;
+    const acuteName = acuteUser[0]?.name || "friend";
+    const acuteReply = `This sounds like it could be a medical emergency. Stop what you're doing and call *10177* (SA ambulance) or go to your nearest emergency room immediately. Do not wait. Health first — everything else can wait.`;
     try { await logChat(acuteUser[0]?.id || "unknown", message, acuteReply, "ACUTE_MEDICAL"); } catch (e) { console.warn("[non-fatal]", e); }
+    const coachAlertPhone = process.env.COACH_ALERT_PHONE;
+    if (!coachAlertPhone) {
+      console.error(`[ACUTE_MEDICAL] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${acuteName} (${phone}). Message: "${message.slice(0, 150)}"`);
+    } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
+      try {
+        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+        await alertClient.messages.create({
+          from: fromNum,
+          to: `whatsapp:${coachAlertPhone}`,
+          body: `🚨 MEDICAL ALERT\nClient: ${acuteName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been directed to call 10177. Please check on this client.`,
+        });
+        console.log(`[ACUTE_MEDICAL] Coach alert sent to ${coachAlertPhone}`);
+      } catch (e) {
+        console.error(`[ACUTE_MEDICAL] ⚠️  COACH ALERT SEND FAILED — coach NOT notified! Client: ${acuteName} (${phone}). Error:`, e);
+      }
+    }
     return acuteReply;
   }
 
