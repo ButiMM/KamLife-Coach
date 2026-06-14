@@ -16,7 +16,7 @@ export interface SAFood {
   notes: string;
 }
 
-export const SA_FOODS_SEED: SAFood[] = [
+const RAW_FOODS_SEED: SAFood[] = [
   // ─── STAPLES / GRAINS ───
   { name: "Pap (stiff maize porridge)", aliases: ["pap", "mieliepap", "stiff pap", "hard pap"], caloriesPer100g: 360, proteinPer100g: 7, carbsPer100g: 78, fatPer100g: 1.5, typicalPortionDescription: "1 cup cooked", typicalPortionGrams: 200, typicalPortionCalories: 330, typicalPortionProtein: 7, category: "carb", budgetTier: 1, notes: "SA staple. Low protein — always pair with a protein source." },
   { name: "Soft pap (porridge)", aliases: ["soft pap", "porridge pap", "pap porridge", "mealie meal porridge"], caloriesPer100g: 65, proteinPer100g: 1.5, carbsPer100g: 14, fatPer100g: 0.3, typicalPortionDescription: "1 bowl cooked", typicalPortionGrams: 250, typicalPortionCalories: 160, typicalPortionProtein: 4, category: "carb", budgetTier: 1, notes: "High water content when cooked. Good breakfast option." },
@@ -1082,11 +1082,159 @@ export const SA_FOODS_SEED: SAFood[] = [
   { name: "Ginger snaps SA", aliases: ["ginger snaps", "ginger snap biscuits", "ginger biscuits sa", "bakers ginger snaps"], caloriesPer100g: 415, proteinPer100g: 5, carbsPer100g: 72, fatPer100g: 12, typicalPortionDescription: "2 biscuits (~18g)", typicalPortionGrams: 18, typicalPortionCalories: 75, typicalPortionProtein: 1, category: "junk", budgetTier: 1, notes: "Crispy ginger-flavoured biscuit. Lower fat than shortbread or Romany Creams. 75 kcal per 2 biscuits. Good with tea." },
 ];
 
+// ─────────────────────────────────────────────────────────────────────────────
+// SEED RESOLUTION — kills the "line order decides nutrition" bug.
+//
+// The seed grew in three waves; the same food was re-added with different values
+// and overlapping aliases. The scanner matched by array order, so an unrelated
+// entry could hijack a term — a Kota answered "bunny chow", a generic slice
+// answered "roman's pizza", pork chops answered "pork ribs". resolveFoodSeed()
+// makes alias ownership deterministic and principled instead of accidental:
+// the entry whose NAME matches a term owns it; an entry that merely lists the
+// term as an alias loses. This is pure routing — it never invents a calorie
+// value, it only decides which existing entry a word resolves to. Runs once at
+// module import.
+// ─────────────────────────────────────────────────────────────────────────────
 
+function normaliseFoodName(name: string): string {
+  // Apostrophes are deleted (not spaced) so "roman's" === "romans". Parens become
+  // spaces (not dropped) so "Curry (chicken)" keeps the word "chicken".
+  return name
+    .toLowerCase()
+    .replace(/['’]/g, "")
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * How strong a claim an entry has on a given alias. Higher wins; ties break to
+ * the lowest array index (stable, deterministic).
+ *   100 — the entry's name IS the term ("Bunny chow" owns "bunny chow")
+ *  60-80 — the name contains every word of the term; the more concise the name,
+ *          the higher (so a bare term prefers the simply-named, usually
+ *          standard-portion entry over a verbose combo)
+ *    20 — alias-only: the term appears nowhere in the name (weakest claim)
+ */
+function aliasOwnershipScore(food: SAFood, alias: string): number {
+  const n = normaliseFoodName(food.name);
+  const a = normaliseFoodName(alias);
+  if (!a) return 0;
+  if (n === a) return 100;
+  const nameWords = new Set(n.split(" "));
+  const aliasWords = new Set(a.split(" "));
+  const allPresent = [...aliasWords].every(w => nameWords.has(w));
+  if (allPresent) {
+    const extra = Math.max(0, nameWords.size - aliasWords.size);
+    return 60 + Math.max(0, 20 - extra * 5);
+  }
+  return 20;
+}
+
+function resolveFoodSeed(raw: SAFood[]): SAFood[] {
+  // PASS A — collapse case-insensitive duplicate NAMES (the seeding accident:
+  // "Bunny chow" ×3, "Peppermint Crisp tart"/"Peppermint crisp tart"). The
+  // scanner lowercases names when matching, so the lowest-idx row already won
+  // every name match — keeping it preserves current behaviour exactly while
+  // deleting the unreachable shadow rows. Unique aliases from a dropped row are
+  // merged into the survivor so no coverage is lost.
+  const keptByName = new Map<string, number>(); // lowercased name -> index in `raw`
+  const nameStaging: SAFood[] = [];
+  for (const f of raw) {
+    const key = f.name.toLowerCase();
+    const existingIdx = keptByName.get(key);
+    if (existingIdx === undefined) {
+      keptByName.set(key, nameStaging.length);
+      nameStaging.push({ ...f, aliases: [...f.aliases] });
+    } else {
+      const survivor = nameStaging[existingIdx];
+      const have = new Set(survivor.aliases.map(a => a.toLowerCase()));
+      for (const a of f.aliases) if (!have.has(a.toLowerCase())) survivor.aliases.push(a);
+    }
+  }
+  raw = nameStaging;
+
+  // 1. alias string -> indexes of every entry that declares it (name or alias)
+  const aliasToIdx = new Map<string, number[]>();
+  raw.forEach((f, i) => {
+    const all = new Set([f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())]);
+    for (const a of all) {
+      const list = aliasToIdx.get(a);
+      if (list) list.push(i); else aliasToIdx.set(a, [i]);
+    }
+  });
+
+  // 2. For each alias claimed by 2+ DIFFERENT foods, pick one owner; the rest
+  //    must drop that alias so it can never be the accidental winner again.
+  const stripFrom = new Map<number, Set<string>>();
+  for (const [alias, idxs] of aliasToIdx) {
+    if (new Set(idxs.map(i => raw[i].name)).size < 2) continue; // not a real collision
+    let bestIdx = idxs[0], bestScore = -1;
+    for (const i of idxs) {
+      const s = aliasOwnershipScore(raw[i], alias);
+      if (s > bestScore) { bestScore = s; bestIdx = i; } // idxs ascending → ties keep lowest
+    }
+    for (const i of idxs) {
+      if (i === bestIdx) continue;
+      const set = stripFrom.get(i);
+      if (set) set.add(alias); else stripFrom.set(i, new Set([alias]));
+    }
+  }
+
+  // 3. Rebuild without stripped aliases.
+  const rebuilt = raw.map((f, i) => {
+    const strip = stripFrom.get(i);
+    if (!strip) return f;
+    return { ...f, aliases: f.aliases.filter(a => !strip.has(a.toLowerCase())) };
+  });
+
+  // 4. Drop entries that lost their own name to a better owner AND have no
+  //    surviving aliases — they are unreachable duplicates (e.g. the 2nd and
+  //    3rd identical "Bunny chow" rows). Entries that still own any term survive.
+  return rebuilt.filter((f, i) => {
+    const strip = stripFrom.get(i);
+    const nameLost = strip?.has(f.name.toLowerCase());
+    return !(nameLost && f.aliases.length === 0);
+  });
+}
+
+export const SA_FOODS_SEED: SAFood[] = resolveFoodSeed(RAW_FOODS_SEED);
+
+/**
+ * Startup smoke alarm. Lists every alias still claimed by more than one food so
+ * value conflicts can never hide for six months again. After resolveFoodSeed()
+ * this should be empty; anything it prints is a genuine same-name value clash
+ * that needs a human calorie decision (e.g. "Gatsby" full vs standard portion).
+ */
+export function validateFoodSeed(seed: SAFood[] = SA_FOODS_SEED): { collisions: number; details: string[] } {
+  const aliasToNames = new Map<string, Set<string>>();
+  for (const f of seed) {
+    const all = new Set([f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())]);
+    for (const a of all) {
+      const set = aliasToNames.get(a);
+      if (set) set.add(f.name); else aliasToNames.set(a, new Set([f.name]));
+    }
+  }
+  const details: string[] = [];
+  for (const [alias, names] of aliasToNames) {
+    if (names.size > 1) details.push(`"${alias}" → ${[...names].join(" | ")}`);
+  }
+  return { collisions: details.length, details };
+}
 
 
 
 export async function initFoodsTable(): Promise<void> {
+  // Smoke alarm: surface any alias still claimed by two different foods. After
+  // resolveFoodSeed() this is 0; if a future edit reintroduces a collision it
+  // prints here on every boot so it can never silently misroute calories again.
+  const audit = validateFoodSeed();
+  if (audit.collisions > 0) {
+    console.warn(`[FOODS] ⚠️ ${audit.collisions} alias collision(s) — a term resolves to >1 food:`);
+    for (const d of audit.details.slice(0, 25)) console.warn(`  ${d}`);
+  } else {
+    console.log(`[FOODS] Seed clean — ${SA_FOODS_SEED.length} foods, 0 alias collisions`);
+  }
   try {
     await pool.query(`
       CREATE TABLE IF NOT EXISTS sa_foods (
