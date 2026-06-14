@@ -239,7 +239,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 5,18 * * *",  () => safe("runDeepSilenceEscalation", runDeepSilenceEscalation), { timezone: "UTC" });
 
   // ── Hourly ────────────────────────────────────────────────────────────────
-  cron.schedule("0 * * * *",     () => safe("runBuddyAccountability", runBuddyAccountability));
+  cron.schedule("0 * * * *",     () => safe("runBuddyAccountability", runBuddyAccountability),     { timezone: "UTC" });
 
   // ── Weekly — Monday ───────────────────────────────────────────────────────
   cron.schedule("30 4 * * 1",    async () => {                        // 6:30am SAST weight reminder
@@ -258,10 +258,10 @@ export async function initScheduler(): Promise<void> {
       await runMondayProgress();
     } catch (e) { console.error("[SCHEDULER] runMondayProgress failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 5 * * 1",     () => safe("runWeeklyKpiReport",     runWeeklyKpiReport));    // 7am SAST KPI report
-  cron.schedule("0 5 * * 1",     () => safe("runWomensMonth",         runWomensMonth));        // 7am SAST Women's Month (Aug only)
-  cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement));   // 7am SAST phase check
-  cron.schedule("0 4 * * 1",     () => safe("runTrainingDataLog",     runTrainingDataLog));    // 6am SAST training data log
+  cron.schedule("0 5 * * 1",     () => safe("runWeeklyKpiReport",     runWeeklyKpiReport),     { timezone: "UTC" }); // 7am SAST KPI report
+  cron.schedule("0 5 * * 1",     () => safe("runWomensMonth",         runWomensMonth),         { timezone: "UTC" }); // 7am SAST Women's Month (Aug only)
+  cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement),    { timezone: "UTC" }); // 7am SAST phase check
+  cron.schedule("0 4 * * 1",     () => safe("runTrainingDataLog",     runTrainingDataLog),     { timezone: "UTC" }); // 6am SAST training data log
   cron.schedule("0 6 * * 1",     async () => {                        // 8am SAST grocery list
     try {
       const today = todaySAST();
@@ -270,8 +270,8 @@ export async function initScheduler(): Promise<void> {
       await runMondayGroceries();
     } catch (e) { console.error("[SCHEDULER] runMondayGroceries failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 6 * * 1",     () => safe("runWeeklyMondayCheckin", runWeeklyMondayCheckin)); // 8am SAST
-  cron.schedule("0 7 * * 1",     () => safe("runGoalCheck",           runGoalCheck));           // 9am SAST
+  cron.schedule("0 6 * * 1",     () => safe("runWeeklyMondayCheckin", runWeeklyMondayCheckin), { timezone: "UTC" }); // 8am SAST
+  cron.schedule("0 7 * * 1",     () => safe("runGoalCheck",           runGoalCheck),           { timezone: "UTC" }); // 9am SAST
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────
   cron.schedule("0 8 * * 2,4",   async () => {                        // 10am SAST comeback
@@ -314,7 +314,7 @@ export async function initScheduler(): Promise<void> {
     } catch (e) { console.error("[SCHEDULER] runAutoCalAdjust failed:", e); }
   }, { timezone: "UTC" });
   cron.schedule("0 9 * * 0",     () => safe("runStepTargetAdaptation", runStepTargetAdaptation), { timezone: "UTC" }); // 11am SAST
-  cron.schedule("0 15 * * 0",    () => safe("runStepLeaderboard",    runStepLeaderboard));    // 5pm SAST
+  cron.schedule("0 15 * * 0",    () => safe("runStepLeaderboard",    runStepLeaderboard),     { timezone: "UTC" }); // 5pm SAST
   cron.schedule("0 17 * * 0",    () => safe("runSundayEveningCheckin",  runSundayEveningCheckin), { timezone: "UTC" }); // 7pm SAST
 
   // ── Monthly ───────────────────────────────────────────────────────────────

@@ -699,10 +699,10 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
 
     const allFoods: GptFoodItem[] = (parsed.foods || []).map((f: any) => ({
       name: String(f.name || "food"),
-      kcal: Math.max(0, Number(parseInt(String(f.kcal ?? 0))) || 0),
-      protein_g: Math.max(0, Number(parseInt(String(f.protein_g ?? 0))) || 0),
-      carbs_g: Math.max(0, Number(parseInt(String(f.carbs_g ?? 0))) || 0),
-      fat_g: Math.max(0, Number(parseInt(String(f.fat_g ?? 0))) || 0),
+      kcal: Math.max(0, Math.round(parseFloat(String(f.kcal ?? 0)) || 0)),
+      protein_g: Math.max(0, Math.round(parseFloat(String(f.protein_g ?? 0)) || 0)),
+      carbs_g: Math.max(0, Math.round(parseFloat(String(f.carbs_g ?? 0)) || 0)),
+      fat_g: Math.max(0, Math.round(parseFloat(String(f.fat_g ?? 0)) || 0)),
       portion_desc: String(f.portion_desc || ""),
       category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
     }));
@@ -843,10 +843,10 @@ Your task: Identify ONLY the food items in the user's message that are completel
 
     const foods: GptFoodItem[] = (parsed.foods as any[]).map(f => ({
       name: String(f.name || "food"),
-      kcal: Math.max(0, Number(parseInt(String(f.kcal ?? 0))) || 0),
-      protein_g: Math.max(0, Number(parseInt(String(f.protein_g ?? 0))) || 0),
-      carbs_g: Math.max(0, Number(parseInt(String(f.carbs_g ?? 0))) || 0),
-      fat_g: Math.max(0, Number(parseInt(String(f.fat_g ?? 0))) || 0),
+      kcal: Math.max(0, Math.round(parseFloat(String(f.kcal ?? 0)) || 0)),
+      protein_g: Math.max(0, Math.round(parseFloat(String(f.protein_g ?? 0)) || 0)),
+      carbs_g: Math.max(0, Math.round(parseFloat(String(f.carbs_g ?? 0)) || 0)),
+      fat_g: Math.max(0, Math.round(parseFloat(String(f.fat_g ?? 0)) || 0)),
       portion_desc: String(f.portion_desc || ""),
       category: (["protein","carb","fat","vegetable","junk","dairy","beverage","other"].includes(f.category) ? f.category : "other") as GptFoodItem["category"],
     })).filter(f => f.kcal > 15); // drop spice-level items
