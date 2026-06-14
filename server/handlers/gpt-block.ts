@@ -1,7 +1,7 @@
 import { db } from "../db";
 import { users, chatHistory } from "../../shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
-import { askCoachK, getSAContextFlags, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
+import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
 import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
@@ -44,7 +44,7 @@ export async function handleGptBlock(ctx: {
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   const clientName = user.name || "there";
   const trainingMode = user.trainingMode || "home";
-  const saContext = getSAContextFlags(user);
+  const saContext = [getNowContextSA(), getSAContextFlags(user)].filter(Boolean).join("\n\n");
 
   // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
   let todayStatusBlock = "";

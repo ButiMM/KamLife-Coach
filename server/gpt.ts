@@ -177,6 +177,45 @@ export function getSAContextFlags(user?: any): string {
 }
 
 // ============================================================
+// REAL-TIME AWARENESS — current SAST date, weekday, and time of day.
+// Railway runs in UTC; SAST is UTC+2 with no daylight saving, so we
+// shift the epoch by +2h and read the UTC fields as SAST wall-clock.
+// Injected into every GPT path so the coach actually knows WHEN "now"
+// is — morning vs midnight, weekday vs weekend, the real date — instead
+// of guessing or sounding timeless.
+// ============================================================
+export function getNowContextSA(): string {
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+  const dow = sast.getUTCDay();
+  const dayName = days[dow];
+  const monthName = months[sast.getUTCMonth()];
+  const date = sast.getUTCDate();
+  const year = sast.getUTCFullYear();
+  const hour = sast.getUTCHours();
+  const hh = String(hour).padStart(2, "0");
+  const mm = String(sast.getUTCMinutes()).padStart(2, "0");
+  const isWeekend = dow === 0 || dow === 6;
+
+  const period =
+    hour >= 5 && hour < 12 ? "morning" :
+    hour >= 12 && hour < 17 ? "afternoon" :
+    hour >= 17 && hour < 21 ? "evening" : "night";
+
+  const timeCue =
+    period === "night"
+      ? "It is late at night — do NOT tell them to go train now. If they have not eaten, suggest something light; otherwise focus on rest and setting up tomorrow."
+      : period === "morning"
+      ? "Morning — a natural time to set up the day: today's session, steps, and a protein-strong first meal."
+      : period === "evening"
+      ? "Evening — the day is closing. Check whether they trained, hit their protein, and moved today; coach the last meal accordingly."
+      : "";
+
+  return `RIGHT NOW (authoritative — never guess the date or time): It is ${dayName}, ${date} ${monthName} ${year}, ${hh}:${mm} (${period}) SAST — South Africa, UTC+2.${isWeekend ? " It is the weekend." : ""}${timeCue ? " " + timeCue : ""}`;
+}
+
+// ============================================================
 // PATTERN SUMMARY — 7-DAY BEHAVIOUR ANALYSIS SENT WITH EVERY GPT CALL
 // ============================================================
 
@@ -945,7 +984,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const cipBlock = cipNarrative
     ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative}`
     : "";
-  const clientContext = `${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
+  const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
   let systemContent = `${COACH_K_SYSTEM}${tail}`;
   // Cap lands the cut AFTER the goal-aware food logic (CLAUDE.md: never drop it — it ends

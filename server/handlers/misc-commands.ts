@@ -902,14 +902,27 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: NEXT WORKOUT ----
-  if (["next", "next workout", "tomorrow", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow", "what's tomorrow"].includes(m)) {
+  // Exact bare phrases PLUS a shape match, so prefixed and voice-transcribed
+  // phrasings ("show me tomorrow's workout", "what's tomorrow's session") route
+  // here deterministically. "tomorrow" is deliberately excluded from the today
+  // handler above, so without this these requests fall through to GPT — which
+  // fabricates a generic workout with no sets, weights, or logging path.
+  const nextStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
+  const NEXT_WORKOUT_EXACT = ["next", "next workout", "tomorrow", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow", "what's tomorrow"];
+  const isNextWorkoutByShape =
+    /\b(tomorrow|tomorrows|next)\b/i.test(nextStripped)
+    && /\b(workout|session|programme?|program|training)\b/i.test(nextStripped)
+    && !/\b(done|did|finished|complete[d]?|logged|change|switch|swap|cancel|skip|move|reschedule|rest|hate|boring|harder|easier)\b/i.test(nextStripped)
+    && nextStripped.split(/\s+/).length <= 7;
+  if (NEXT_WORKOUT_EXACT.includes(nextStripped) || isNextWorkoutByShape) {
     // programmeDayInWeek is already set to the NEXT session after each "done" log —
     // just use it directly instead of advancing by one more step.
     const nextDay = user.programmeDayInWeek || 1;
     const nextDayUser = { ...user, programmeDayInWeek: nextDay };
     const nextWorkout = buildDayWorkout(nextDayUser);
     const week = user.programmeWeek || 1;
-    return `*Week ${week} — Next Session (Day ${nextDay}):*\n\n${nextWorkout}`;
+    const gifNext = getPrimaryWorkoutGifUrl(nextWorkout);
+    return `*Week ${week} — Next Session (Day ${nextDay}):*\n\n${nextWorkout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifNext ? `\n[MEDIA:${gifNext}]` : ""}`;
   }
 
   // ---- NEW: STREAK ----
