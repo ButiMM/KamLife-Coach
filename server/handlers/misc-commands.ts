@@ -630,7 +630,7 @@ export async function handleMiscCommands(ctx: {
           const wStart = parseFloat(String(startRow.weight));
           const totalChange = wCurrent - wStart;
           const weeksSinceStart = Math.max(1, (new Date(weightRows[0].loggedAt!).getTime() - new Date(startRow.loggedAt!).getTime()) / (7 * 86_400_000));
-          const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", user.proteinTarget || 130, user.calorieTarget || 1800, firstName);
+          const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", user.proteinTarget || 120, user.calorieTarget || 1800, firstName);
           if (rateNote) out.push(rateNote);
           else out.push(`⚖️ Current weight: ${wCurrent.toFixed(1)}kg`);
         } else {
@@ -735,7 +735,7 @@ export async function handleMiscCommands(ctx: {
         protByDay[key] = (protByDay[key] || 0) + (meal.proteinInt || 0);
       }
       const bestProt = Object.values(protByDay).length > 0 ? Math.max(...Object.values(protByDay)) : 0;
-      const protTarget = user.proteinTarget || 130;
+      const protTarget = user.proteinTarget || 120;
 
       // Steps: average this week
       const stepsTarget = user.stepsTarget || 8500;

@@ -506,7 +506,7 @@ SA voice. Direct. Coach forward, not backward.`;
       const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
       gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext);
     } else if (agentType === "admin") {
-      const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 130}g | Steps target: ${user.stepsTarget || 8500}`;
+      const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
     } else {
       gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
@@ -567,7 +567,7 @@ SA voice. Direct. Coach forward, not backward.`;
     const _todayCalsP = user.todayCaloriesDate === _todayStrP ? (user.todayCalories || 0) : 0;
     const _calCeilingForPattern = (user.calorieTarget || 0) > 0 && (_todayCalsP - (user.calorieTarget || 0)) >= 100;
     const pattern = await checkFoodPatterns(user.id, _calCeilingForPattern);
-    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 130);
+    const perfectDay = await checkPerfectDay(user.id, user.proteinTarget || 120);
     // ---- Calorie running total — from EXISTING food logs only (not current GPT message) ----
     let dailyTotal = "";
     try {
@@ -585,7 +585,7 @@ SA voice. Direct. Coach forward, not backward.`;
         }
       }
       const calTarget = user.calorieTarget || 1800;
-      const protTarget = user.proteinTarget || 130;
+      const protTarget = user.proteinTarget || 120;
       if (totalCal > 0) {
         const remaining = calTarget - totalCal;
         dailyTotal = `\n\n_Today so far: ~${totalCal} kcal | ${totalProt}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : remaining < -100 ? ` Over by ${Math.abs(remaining)} kcal.` : " On target."}_`;

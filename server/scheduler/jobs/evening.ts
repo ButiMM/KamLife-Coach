@@ -42,8 +42,8 @@ export async function runEveningAccountability(): Promise<void> {
       if (!canSendProactive(client.id)) continue;
 
       const sick = await isSickOrInjuredToday(client.id);
-      const protTarget = client.proteinTarget || 130;
-      const stepsTarget = client.stepsTarget || 10000;
+      const protTarget = client.proteinTarget || 120;
+      const stepsTarget = client.stepsTarget || 8000;
       const trainingDays = client.trainingDaysPerWeek || 3;
       const dow = new Date().getUTCDay();
       const isTrainingDay = (TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3]).includes(dow);

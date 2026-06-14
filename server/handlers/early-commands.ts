@@ -639,7 +639,7 @@ export async function handleEarlyCommands(ctx: {
       const fromNote = crossMealM ? `copied from ${sourceHint}`
         : daysBack > 0 ? `from ${daysBack === 1 ? "yesterday" : `${daysBack} days ago`}`
         : mealWasToday ? "from earlier today" : "from yesterday";
-      const remaining = (user.calorieTarget || 2000) - recomputed.calories;
+      const remaining = (user.calorieTarget || 1800) - recomputed.calories;
       const protGap = (user.proteinTarget || 120) - recomputed.protein;
       const rawLabel = match.rawMessage ? `_${match.rawMessage.slice(0, 80)}_\n` : "";
 

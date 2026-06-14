@@ -548,7 +548,7 @@ export async function gptFoodFallback(
   try {
     const goal = user.goalType || "fat_loss";
     const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 130;
+    const protTarget = user.proteinTarget || 120;
 
     const resp = await withOpenAIRetry(() => openai.chat.completions.create({
       model: "gpt-4o-mini",

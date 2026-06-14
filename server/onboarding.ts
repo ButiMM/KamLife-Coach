@@ -729,9 +729,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const hasWeight = !!user.currentWeight;
     if (hasWeight) {
       const w = parseFloat(user.currentWeight!);
+      const { proteinTarget: goalProt } = calculateTargets(w, goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
       await db.update(users).set({
         goalType: goal,
-        proteinTarget: Math.round(w * 2),
+        proteinTarget: goalProt,
         onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
       const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
@@ -749,11 +750,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     if (isSkip) {
       const fallbackWeight = user.gender === "female" ? 65 : 75;
+      const { proteinTarget: skipProt } = calculateTargets(fallbackWeight, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, 170, user.trainingExperience || "beginner");
       await db.update(users).set({
         currentWeight: fallbackWeight.toString(),
         heightCm: null,
         bmi: null,
-        proteinTarget: Math.round(fallbackWeight * 2),
+        proteinTarget: skipProt,
         onboardingState: "ASK_MEDICAL",
       }).where(eq(users.phoneNumber, phone));
       return `No stress. I will start with baseline targets and adjust once you log weight.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
@@ -792,11 +794,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       bmiVal = bmi.toString();
     }
 
+    const { proteinTarget: weightProt } = calculateTargets(weight, user.goalType || "fat_loss", user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, heightCmVal || 170, user.trainingExperience || "beginner");
     await db.update(users).set({
       currentWeight: weight.toString(),
       heightCm: heightCmVal,
       bmi: bmiVal,
-      proteinTarget: Math.round(weight * 2),
+      proteinTarget: weightProt,
       onboardingState: "ASK_MEDICAL",
     }).where(eq(users.phoneNumber, phone));
 

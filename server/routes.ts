@@ -314,7 +314,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
     const streak = user.workoutStreak || 0;
     const totalW = user.totalWorkoutsCompleted || 0;
-    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".\n\nYour last message (${lastIntent}): "${lastOut}"\n\nThey are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.\n\nREAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 130}g.\n\nWRITE TWO SENTENCES ONLY:\n1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)\n2. Give one concrete coaching action using their actual numbers above\n\nBANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"\n\nCoach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
+    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".\n\nYour last message (${lastIntent}): "${lastOut}"\n\nThey are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.\n\nREAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 120}g.\n\nWRITE TWO SENTENCES ONLY:\n1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)\n2. Give one concrete coaching action using their actual numbers above\n\nBANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"\n\nCoach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
@@ -539,7 +539,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       invalidatePatternCache(user.id);
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
       const [perfectDay, streak, recentStepLogs] = await Promise.all([
-        checkPerfectDay(user.id, user.proteinTarget || 130),
+        checkPerfectDay(user.id, user.proteinTarget || 120),
         getStepStreak(user.id),
         db.select({ steps: stepLogs.steps }).from(stepLogs)
           .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))

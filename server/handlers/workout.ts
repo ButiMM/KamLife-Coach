@@ -409,7 +409,7 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     const [perfectDay, poCtxDone] = await Promise.all([
-      checkPerfectDay(user.id, user.proteinTarget || 130),
+      checkPerfectDay(user.id, user.proteinTarget || 120),
       getProgressiveOverloadContext(user.id),
     ]);
 

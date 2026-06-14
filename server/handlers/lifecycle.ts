@@ -899,10 +899,10 @@ export async function handleLifecycle(ctx: {
     const newGoal = choice === "1" ? "maintenance" : choice === "2" ? "muscle_gain" : choice === "3" ? "recomposition" : null;
     if (newGoal) {
       const wt = parseFloat(user.currentWeight || "75");
-      let newCals = user.calorieTarget || 2000;
+      let newCals = user.calorieTarget || 1800;
       let newProt = user.proteinTarget || 120;
       if (newGoal === "maintenance") {
-        newCals = (user.calorieTarget || 2000) + 200;
+        newCals = (user.calorieTarget || 1800) + 200;
       } else {
         const t = calculateTargets(wt, newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
         newCals = t.calorieTarget;
@@ -1272,7 +1272,7 @@ export async function handleLifecycle(ctx: {
       }
     }
     const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 130;
+    const protTarget = user.proteinTarget || 120;
     const calRemaining = calTarget - totalCal;
     const hour = new Date().getHours();
     const isLateEnough = hour >= 16; // After 4pm, low intake is a real problem
