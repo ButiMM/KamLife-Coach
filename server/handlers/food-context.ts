@@ -1059,13 +1059,28 @@ export async function handleFoodContext(ctx: {
           ))
           .limit(1);
         if (recentDup.length === 0) {
-        const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f) => {
+        // Carbs/fat per food: take the LOWER of two estimates.
+        //  • dry estimate  = per-100g × portion grams — overcounts cooked staples
+        //    (rice/pasta/lentils per-100g is dry weight, the portion is cooked: 3-4× too high)
+        //  • ratio estimate = portion calories × that macro's energy share — overcounts
+        //    alcohol (beer/wine calories are ethanol, not in 4P+4C+9F)
+        // The two error modes never hit the same food, so min() yields the right value
+        // for both. These totals feed the coach's "authoritative" daily macros (gpt.ts),
+        // so an inflated carb count was making the coach wrongly tell clients to cut staples.
+        const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
+        const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
           const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-          return s + (grams * (f.carbsPer100g || 0) / 100);
+          const dry = grams * (f.carbsPer100g || 0) / 100;
+          const e = macroEnergy(f);
+          const ratio = e > 0 ? (f.adjustedCalories || 0) * (4 * (f.carbsPer100g || 0) / e) / 4 : dry;
+          return s + Math.min(dry, ratio);
         }, 0));
-        const totalFat = Math.round(allAdjustedFoods.reduce((s, f) => {
+        const totalFat = Math.round(allAdjustedFoods.reduce((s, f: any) => {
           const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-          return s + (grams * (f.fatPer100g || 0) / 100);
+          const dry = grams * (f.fatPer100g || 0) / 100;
+          const e = macroEnergy(f);
+          const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
+          return s + Math.min(dry, ratio);
         }, 0));
         const items = allAdjustedFoods.map(f => ({
           name: f.name,
