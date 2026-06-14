@@ -404,7 +404,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
         await sendSMSFallback(to, body);
         return;
       }
-      const isTransient = !e?.status || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
+      const isTransient = !e?.status || e.status === 429 || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
       if (!isTransient || i === delays.length - 1) {
         recordTwilioFailure();
         deliveryStats.failed++;

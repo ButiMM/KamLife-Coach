@@ -117,7 +117,7 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function splitMessage(text: string, maxLen = 1500): string[] {
+function splitMessage(text: string, maxLen = 3800): string[] {
   if (/\n\n---\n\n/.test(text)) {
     const days = text.split(/\n\n---\n\n/);
     const result: string[] = [];
