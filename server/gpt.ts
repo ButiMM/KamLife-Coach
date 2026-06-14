@@ -8,6 +8,7 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
+import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
 // CONCURRENCY LIMITER — max 25 simultaneous OpenAI calls
@@ -1059,7 +1060,7 @@ export async function generateMilestoneVoiceScript(
     startKg?: number;
     sessions?: number;
   },
-): Promise<string> {
+): Promise<{ script: string; emotion: VoiceEmotion }> {
   const firstName = (user.name || "").split(" ")[0] || "there";
   const goal = user.goalType || "fat_loss";
   const daysOn = Math.floor((Date.now() - new Date(user.createdAt || Date.now()).getTime()) / 86_400_000);
@@ -1085,11 +1086,27 @@ export async function generateMilestoneVoiceScript(
     workout_sessions: `Completed ${data.sessions} total workout sessions with Coach K`,
   };
 
-  const toneHint = patternSummary.includes("silent") || patternSummary.includes("no training")
-    ? "They have had a rough or inconsistent week. Acknowledge the journey wasn't smooth — this milestone despite the struggle says something real about their character."
-    : patternSummary.includes("consistent") || patternSummary.includes("solid")
-    ? "They have been consistent and showing up. Build on the momentum — this is who they are now."
-    : "Be direct and celebratory — this is a real moment.";
+  // Pick the emotional register from the REAL pattern data, then let it drive both
+  // the words (prompt below) and the voice delivery (returned to the caller).
+  // buildPatternSummary already computed these signals — read them back out.
+  const silentMatch = patternSummary.match(/\((\d+)\s+days?\s+silent\)/i);
+  const daysSilent = silentMatch ? parseInt(silentMatch[1], 10) : 0;
+  const lastTrainMatch = patternSummary.match(/Last training was (\d+) days ago/i);
+  const daysSinceTraining = lastTrainMatch ? parseInt(lastTrainMatch[1], 10) : 0;
+  const lapsed = daysSilent >= 4 || daysSinceTraining >= 5
+    || /No training sessions logged this week/i.test(patternSummary);
+  const struggling = /too hard or wanting to quit|needs direct accountability|consistently under/i.test(patternSummary);
+  const thriving = /solid habit|at or above target|Food logging is consistent/i.test(patternSummary);
+
+  // Hitting a milestone after going quiet or struggling = a comeback: firm first,
+  // proud second — never a soft "how are you". Otherwise match their momentum.
+  const emotion: VoiceEmotion = (lapsed || struggling) ? "comeback" : thriving ? "celebratory" : "warm";
+
+  const toneHint = emotion === "comeback"
+    ? "They went quiet or had a rough stretch before hitting this. Do NOT open soft and do NOT ask how they are. In the first sentence, name the gap directly and firmly — they know they slipped. Then give real respect that they showed up and hit this number anyway. Firm first, proud second."
+    : emotion === "celebratory"
+    ? "They have been consistent and showing up. Match that energy — warm, genuinely pleased, real fire behind it. This is who they are now."
+    : "Direct, warm and real — a genuine moment, spoken like you mean it, not recited.";
 
   try {
     const response = await openai.chat.completions.create({
@@ -1099,25 +1116,25 @@ export async function generateMilestoneVoiceScript(
       messages: [
         {
           role: "system",
-          content: `You write short voice note scripts for a South African fitness coach named Coach K. These are spoken aloud to the client so they must sound natural when read out loud.\n\nRULES:\n- Exactly 2-3 sentences. Never more.\n- Start with the client's first name.\n- Reference the exact achievement numbers (do not round or approximate).\n- SA voice: warm, direct, real — not American hype. Use "lekker", "sharp", "eish" naturally if it fits.\n- Never say "I'm Coach K" or "this is Coach K". Never say "keep it up" or "great job".\n- End with ONE specific forward-looking sentence (what they do next, not generic inspiration).\n- No hashtags, emojis, or asterisks.`,
+          content: `You write short voice note scripts for a South African fitness coach named Coach K. These will be spoken aloud by a cloned voice so they MUST sound natural when heard, not when read. Write for the ear, not the eye.\n\nRULES:\n- Exactly 2-3 sentences. Never more.\n- Start with the client's first name — nothing before it, no greeting phrase.\n- Reference the exact achievement numbers. Never round or approximate.\n- SA voice: direct, real, specific — not American hype. Use "lekker", "sharp", "eish" naturally if it fits — not forced.\n- Never say "I'm Coach K" or "this is Coach K". Never "keep it up", "great job", "I'm so proud".\n- No questions — statements only. Questions break the coaching authority.\n- End with ONE specific forward-looking sentence — what they do NEXT, not a generic sentiment.\n- No hashtags, emojis, asterisks, or punctuation the voice would mispronounce.\n- Do not start sentences with "And" or "But" — it sounds read.\n- Vary sentence rhythm: short punch, longer thought, short closer.`,
         },
         {
           role: "user",
-          content: `Client: ${firstName}, goal: ${goal}, days on programme: ${daysOn}\nMilestone: ${milestoneDescription[milestoneType]}\nTheir week: ${patternSummary || "no recent data"}\nTone guidance: ${toneHint}\n\nWrite the voice note script now.`,
+          content: `Client: ${firstName}, goal: ${goal}, days on programme: ${daysOn}\nMilestone: ${milestoneDescription[milestoneType]}\nTheir recent pattern: ${patternSummary || "no recent data"}\nTone guidance: ${toneHint}\n\nWrite the voice note script now. No intro, no sign-off — just the script.`,
         },
       ],
     });
 
     const script = response.choices[0]?.message?.content?.trim();
     if (script && script.length > 20) {
-      console.log(`[VOICE_SCRIPT] Generated for ${firstName} (${milestoneType}): "${script.slice(0, 80)}..."`);
-      return script;
+      console.log(`[VOICE_SCRIPT] Generated for ${firstName} (${milestoneType}) emotion=${emotion}: "${script.slice(0, 80)}..."`);
+      return { script, emotion };
     }
   } catch (err) {
     console.warn("[VOICE_SCRIPT] GPT failed, using fallback:", err);
   }
 
-  return fallbacks[milestoneType];
+  return { script: fallbacks[milestoneType], emotion };
 }
 
 // ============================================================

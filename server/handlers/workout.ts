@@ -398,7 +398,7 @@ export async function handleWorkoutCommands(ctx: {
       if ([25, 50, 100].includes(newTotal)) {
         const updatedUser = { ...user, totalWorkoutsCompleted: newTotal };
         generateMilestoneVoiceScript(updatedUser, "workout_sessions", { sessions: newTotal })
-          .then(script => generateVoiceNote(script))
+          .then(({ script, emotion }) => generateVoiceNote(script, emotion))
           .then(url => { if (url) return sendWhatsApp(phone, "", url); })
           .catch(err => console.warn("[TTS] Workout milestone voice failed:", err));
       }

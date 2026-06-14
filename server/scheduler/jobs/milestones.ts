@@ -61,11 +61,11 @@ export async function runMilestoneCelebrations(): Promise<void> {
         let voiceUrl: string | null = null;
         if ([25, 50, 100].includes(workouts)) {
           try {
-            const script = await generateMilestoneVoiceScript(client, "workout_sessions", { sessions: workouts });
-            voiceUrl = await generateVoiceNote(script);
+            const { script, emotion } = await generateMilestoneVoiceScript(client, "workout_sessions", { sessions: workouts });
+            voiceUrl = await generateVoiceNote(script, emotion);
           } catch (voiceErr) {
             console.warn("[MILESTONE] Voice script failed, using text:", voiceErr);
-            voiceUrl = await generateVoiceNote(text).catch(() => null);
+            voiceUrl = await generateVoiceNote(text, "celebratory").catch(() => null);
           }
         }
         await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);

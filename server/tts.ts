@@ -10,7 +10,7 @@ import { writeFile, mkdir } from "fs/promises";
 import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
-import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured } from "./elevenlabs";
+import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured, type VoiceEmotion } from "./elevenlabs";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -24,9 +24,10 @@ mkdir(VOICE_DIR, { recursive: true }).catch(() => {});
 /**
  * Generate a voice note from text.
  * Uses ElevenLabs cloned voice (Coach K) when configured; falls back to OpenAI TTS.
+ * `emotion` selects the ElevenLabs delivery register (default "warm").
  * Returns the public HTTPS URL for the audio file, or null if APP_BASE_URL is not set.
  */
-export async function generateVoiceNote(text: string): Promise<string | null> {
+export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "warm"): Promise<string | null> {
   let appUrl = (process.env.APP_BASE_URL || process.env.APP_URL || "").replace(/\/$/, "");
   if (!appUrl) {
     console.warn("[TTS] APP_BASE_URL / APP_URL not set — voice notes disabled");
@@ -41,7 +42,7 @@ export async function generateVoiceNote(text: string): Promise<string | null> {
 
     // Use ElevenLabs cloned Coach K voice when configured
     if (isElevenLabsConfigured()) {
-      const elevenBuf = await elevenLabsTTS(text);
+      const elevenBuf = await elevenLabsTTS(text, emotion);
       if (elevenBuf) {
         await writeFile(filePath, elevenBuf);
         const url = `${appUrl}/voice/${id}.mp3`;
