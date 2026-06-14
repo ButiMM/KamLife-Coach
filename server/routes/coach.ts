@@ -17,16 +17,72 @@ function escapeHtml(s: unknown): string {
 
 export function registerCoachRoutes(app: Express): void {
 // ============================================================
-// COACH ADMIN DASHBOARD — GET /coach (auth via x-dashboard-key header only)
+// COACH ADMIN DASHBOARD — GET /coach (auth via session cookie or x-dashboard-key header)
 // ============================================================
 app.get("/coach", async (req: any, res: any) => {
-  const key = (req.headers["x-dashboard-key"] as string) || "";
   const dashKey = process.env.COACH_DASHBOARD_KEY;
   if (!dashKey) return res.status(503).send("<h1>Dashboard not configured — set COACH_DASHBOARD_KEY</h1>");
+
+  // Parse cookies
+  const cookieHeader = (req.headers.cookie as string) || "";
+  const cookieMap: Record<string, string> = {};
+  for (const part of cookieHeader.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq === -1) continue;
+    const k = part.slice(0, eq).trim();
+    const v = part.slice(eq + 1).trim();
+    if (k) try { cookieMap[k] = decodeURIComponent(v); } catch {}
+  }
+
+  // Verify a session token (mirrors auth.ts verifySessionToken)
+  const verifyToken = (token: string): boolean => {
+    const dot = token.lastIndexOf(".");
+    if (dot === -1) return false;
+    const payload = token.slice(0, dot);
+    const sig = token.slice(dot + 1);
+    try {
+      const expected = crypto.createHmac("sha256", dashKey).update(payload).digest("hex");
+      if (sig.length !== expected.length) return false;
+      if (!crypto.timingSafeEqual(Buffer.from(sig, "hex"), Buffer.from(expected, "hex"))) return false;
+    } catch { return false; }
+    const colonIdx = payload.indexOf(":");
+    if (colonIdx === -1) return false;
+    return Date.now() < parseInt(payload.slice(colonIdx + 1), 10);
+  };
+
   let authorized = false;
-  try { authorized = key.length === dashKey.length && crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey)); } catch { authorized = false; }
+  let hasCookie = false;
+
+  // 1. Cookie-based session (set on previous login or /coach visit)
+  if (cookieMap.admin_session) {
+    authorized = verifyToken(cookieMap.admin_session);
+    if (authorized) hasCookie = true;
+  }
+
+  // 2. Header fallback — timing-safe comparison
   if (!authorized) {
-    return res.status(401).send("<h1>Unauthorized</h1>");
+    const key = (req.headers["x-dashboard-key"] as string) || "";
+    try {
+      authorized = key.length === dashKey.length &&
+        crypto.timingSafeEqual(Buffer.from(key), Buffer.from(dashKey));
+    } catch {}
+  }
+
+  if (!authorized) return res.status(401).send("<h1>Unauthorized</h1>");
+
+  // Promote to session cookie so subsequent API calls authenticate via cookie,
+  // keeping the raw key out of the HTML response body.
+  if (!hasCookie) {
+    const exp = Date.now() + 24 * 60 * 60 * 1000;
+    const payload = `admin:${exp}`;
+    const sig = crypto.createHmac("sha256", dashKey).update(payload).digest("hex");
+    res.cookie("admin_session", `${payload}.${sig}`, {
+      httpOnly: true,
+      sameSite: "strict" as const,
+      secure: process.env.NODE_ENV === "production",
+      maxAge: 24 * 60 * 60 * 1000,
+      path: "/",
+    });
   }
   try {
     const now = Date.now();
@@ -560,7 +616,7 @@ app.get("/coach", async (req: any, res: any) => {
 </div>
 
 <script>
-  const DASH_KEY = "${key}";
+  const DASH_KEY = "";
   async function intervene(phone, type, btn) {
     btn.disabled = true;
     btn.textContent = "...";
