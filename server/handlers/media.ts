@@ -692,6 +692,7 @@ ESTIMATION: State specific calories and protein for ALL food and drink items vis
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
 FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food — check these specific cases first:
+- If it shows plain water only — a glass of water, a water bottle, a tap running, or a refillable bottle (no branded label, no calories to track) — respond with EXACTLY: WATER
 - If it shows a handwritten or typed grocery/shopping list, a receipt from a grocery store, or a list of items to BUY (not to eat right now) — respond with EXACTLY: GROCERY_LIST: [list the items you can read, comma-separated, in plain English]
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
@@ -718,6 +719,14 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
       const mealAsk = mealLabelMatch
         ? `I can't make out the photo clearly — what did you have for ${mealLabelMatch[1].toLowerCase()}? Just type it (e.g. "chicken, rice, veg") and I'll log it.`
         : "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+      // Sentinel checks must come before the length guard — "NOT_FOOD" is 8 chars and
+      // "WATER" is 5 chars, both below the < 10 threshold that catches garbled replies.
+      if (/^WATER\b/i.test(visionReply || "")) {
+        console.log(`[FOOD_VISION] water_bottle detected user=${user.id.slice(-6)}`);
+        const waterReply = `That's water 💧 — good. To log today's intake just type: *water 500ml* (or however much you've had). What have you eaten today?`;
+        await logChat(user.id, "[Water photo]", waterReply, "WATER_LOG");
+        return waterReply;
+      }
       if (!visionReply || visionReply.length < 10) {
         if (captionHasFood) {
           console.log(`[FOOD_VISION] unreadable photo — logging from caption user=${user.id.slice(-6)}`);
