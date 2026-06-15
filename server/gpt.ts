@@ -127,7 +127,17 @@ export function buildContext(user: any): string {
       ? "Pick n Pay/Checkers (budget R300–R600/week)"
       : "Woolworths/Checkers/Spar (budget R600+/week)";
 
-  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\nShopping store tier: ${storeTier}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
+  // Dietary restrictions from profileNotes (set during onboarding)
+  const gptProfileNotes = (user.profileNotes || "").toLowerCase();
+  const gptDietaryParts: string[] = [];
+  if (gptProfileNotes.includes("diet:halal")) gptDietaryParts.push("HALAL (no pork, no alcohol in food — must be halal-certified)");
+  if (gptProfileNotes.includes("diet:vegan")) gptDietaryParts.push("VEGAN (no meat, fish, eggs, or dairy — plant-based only: beans, lentils, tofu, soya mince, plant milk)");
+  else if (gptProfileNotes.includes("diet:vegetarian")) gptDietaryParts.push("VEGETARIAN (no meat or fish — eggs and dairy are fine)");
+  const dietaryContext = gptDietaryParts.length > 0
+    ? `\nDietary restrictions: ${gptDietaryParts.join(", ")}. NEVER suggest foods that violate these restrictions — not even as an example or alternative.`
+    : "";
+
+  return `CLIENT PROFILE:\nName: ${name}\nGender: ${gender}\nGoal: ${goal}\nAge: ${age}\nPhase: ${phase} — ${phaseName}\nCalorie target: ${calories}\nProtein target: ${protein}g\nStep target: ${steps}\nTraining mode: ${mode}\nEquipment: ${equipment}\nLife situation: ${situation}\nJob type: ${job}\nActivity level: ${activity}\nPrimary focus: ${focus}\nInjuries: ${injuries}\nMedical conditions: ${medicalConditions}\nExperience: ${experience}\nWater today: ${water}L\nDays on programme: ${daysOnProgramme} (week ${weeksOnProgramme})\nCompliance level: ${user.complianceLevel || 'RESET'}\nWorkout streak: ${user.workoutStreak || 0} consecutive sessions\nTotal sessions completed: ${user.totalWorkoutsCompleted || 0}\nProgramme week: ${user.programmeWeek || 1}\nSubscription status: ${user.subscriptionStatus || 'inactive'}\nShopping store tier: ${storeTier}${dietaryContext}\n\n${coachingTone}\n${ageGuidelines}${medicalDisclaimer}`;
 }
 
 // ============================================================

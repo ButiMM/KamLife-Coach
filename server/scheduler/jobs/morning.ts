@@ -151,7 +151,10 @@ export async function runMorningCheckin(): Promise<void> {
 
       const progDays = programmeDaysSince(client.programmeStartDate);
       let identityLine = "";
-      if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
+      // DOMS coaching for new clients — soreness on day 2-3 is the #1 early dropout trigger
+      if (progDays === 2 && (client.workoutStreak || 0) >= 1) identityLine = " Day 2. Muscles sore? That is the repair happening — it means the session worked. Keep going.";
+      else if (progDays === 3 && (client.workoutStreak || 0) >= 1) identityLine = " Day 3. Soreness passing? That is your body adapting. That feeling goes away — the strength stays.";
+      else if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
       else if (progDays === 14) identityLine = " Two weeks consistent. You're building something real.";
       else if (progDays === 21) identityLine = " Three weeks in. The habit is forming — your body knows the routine now.";
       else if (progDays === 30) identityLine = " A month. You are now the kind of person who trains for a month straight.";

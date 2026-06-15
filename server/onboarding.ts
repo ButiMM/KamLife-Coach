@@ -126,6 +126,15 @@ export function getOnboardingMealPlan(user: any): string {
   const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
   const noGluten = otherNotes.includes("gluten") || otherNotes.includes("coeliac") || otherNotes.includes("wheat") || otherNotes.includes("celiac");
 
+  // Dietary preference flags — stored in profileNotes as diet:halal / diet:vegetarian / diet:vegan
+  const profileNotesLower = (user.profileNotes || "").toLowerCase();
+  const isHalal = profileNotesLower.includes("diet:halal");
+  const isVegetarian = profileNotesLower.includes("diet:vegetarian") || profileNotesLower.includes("diet:vegan");
+  const isVegan = profileNotesLower.includes("diet:vegan");
+  // Effective restriction flags extend allergy flags with dietary preferences
+  const noFishEff = noFish || isVegetarian; // vegetarians/vegans don't eat fish or meat
+  const noDairyEff = noDairy || isVegan;    // vegans don't consume dairy
+
   // Calorie/protein adjustments
   const adjustedCal = isPhysicalJob ? cal + 300 : isHIV ? cal + 200 : cal;
   const adjustedProt = isHIV ? Math.round(prot * 1.2) : prot;
@@ -148,6 +157,9 @@ export function getOnboardingMealPlan(user: any): string {
   if (noFish) medFlags.push("Fish allergy — pilchards/tuna replaced with eggs/chicken");
   if (noDairy) medFlags.push("Dairy free");
   if (noGluten) medFlags.push("Gluten free");
+  if (isHalal) medFlags.push("Halal — no pork, alcohol-free. Buy halal-certified chicken and beef.");
+  if (isVegetarian && !isVegan) medFlags.push("Vegetarian — no meat or fish");
+  if (isVegan) medFlags.push("Vegan — plant-based only, no animal products");
 
   // Training day layout
   const allDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
@@ -163,8 +175,12 @@ export function getOnboardingMealPlan(user: any): string {
   const meal3Label = isNightShift ? "Post-shift meal" : "Dinner";
   const maxPrep = isStudent ? "8 min" : "20 min";
 
-  // ---- BREAKFAST proteins (egg-based, always appropriate for morning) ----
-  const bfProteins = goal === "muscle_gain"
+  // ---- BREAKFAST proteins (egg-based for omnivores, plant-based for vegans) ----
+  const bfProteins = isVegan
+    ? (noPeanuts
+        ? ["½ cup oats + soya milk + banana", "soya yoghurt 150g + fruit", "½ cup oats + soya milk", "soya yoghurt 150g + banana", "½ cup oats + soya milk", "soya yoghurt 150g", "½ cup oats + soya milk + banana"]
+        : ["½ cup oats + 1 tbsp PB + banana", "soya yoghurt 150g", "½ cup oats + 1 tbsp PB", "½ cup oats + banana + 1 tbsp PB", "½ cup oats + soya milk", "soya yoghurt 150g + fruit", "½ cup oats + 1 tbsp PB + banana"])
+    : goal === "muscle_gain"
     ? ["3 whole eggs", "3 whole eggs + banana", "3 whole eggs", "3 whole eggs + banana", "3 whole eggs", "3 whole eggs", "3 whole eggs + banana"]
     : ["2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs", "2 boiled eggs"];
 
@@ -199,6 +215,31 @@ export function getOnboardingMealPlan(user: any): string {
     dinnerProteins = noFish
       ? ["150g beef mince", "150g chicken breast", "150g chicken thigh", "150g beef mince", "3 eggs + cottage cheese", "150g chicken thigh", "150g beef mince"]
       : ["150g beef mince", "150g chicken breast", "200g salmon", "150g chicken thigh", "150g beef mince", "1 tin pilchards", "150g chicken thigh"];
+  }
+
+  // Dietary override — completely replace protein arrays for vegetarian/vegan clients
+  if (isVegan) {
+    if (budget === "under_100") {
+      lunchProteins = ["200g cooked sugar beans", "150g cooked lentils", "200g cooked sugar beans", noPeanuts ? "soya mince 50g dry" : "soya mince 50g + 1 tbsp PB", "200g sugar beans + lentils", "150g cooked lentils", "soya mince 50g dry"];
+      dinnerProteins = ["150g cooked lentils", "200g cooked sugar beans", "150g cooked lentils", "200g cooked sugar beans", "150g cooked lentils", "200g cooked sugar beans", "150g cooked lentils"];
+    } else {
+      lunchProteins = ["200g firm tofu", "150g cooked lentils", "soya mince 100g dry", "200g sugar beans + lentils", "200g firm tofu", "soya mince 100g dry", "150g cooked lentils"];
+      dinnerProteins = ["150g cooked lentils", "200g firm tofu", "soya mince 100g dry", "200g cooked sugar beans", "150g cooked lentils", "200g firm tofu", "soya mince 100g dry"];
+    }
+  } else if (isVegetarian) {
+    if (budget === "under_100") {
+      lunchProteins = ["4 boiled eggs", "200g cottage cheese", "4 boiled eggs", "sugar beans (200g cooked) + 1 egg", "4 boiled eggs", "200g cottage cheese", "4 boiled eggs"];
+      dinnerProteins = ["3 boiled eggs", "sugar beans (200g cooked)", "3 boiled eggs", "200g cottage cheese", "3 boiled eggs", "sugar beans (200g cooked)", "3 boiled eggs"];
+    } else if (budget === "100_300") {
+      lunchProteins = ["4 boiled eggs", "200g cottage cheese", "4 boiled eggs", "sugar beans (200g) + 2 eggs", "4 boiled eggs", "200g cottage cheese", "4 boiled eggs"];
+      dinnerProteins = ["3 boiled eggs", "200g cottage cheese", "3 boiled eggs", "sugar beans (200g)", "3 boiled eggs", "200g cottage cheese", "3 boiled eggs"];
+    } else if (budget === "300_600") {
+      lunchProteins = ["4 boiled eggs", "150g firm tofu", "150g cottage cheese", "3 eggs + sugar beans 100g", "150g firm tofu", "200g cottage cheese", "4 boiled eggs"];
+      dinnerProteins = ["150g cottage cheese", "3 boiled eggs", "150g firm tofu", "3 boiled eggs + sugar beans", "150g cottage cheese", "150g firm tofu", "3 boiled eggs"];
+    } else {
+      lunchProteins = ["4 boiled eggs", "200g firm tofu", "200g cottage cheese", "3 eggs + 150g Greek yoghurt", "200g firm tofu", "4 boiled eggs + cottage cheese", "200g firm tofu"];
+      dinnerProteins = ["200g firm tofu", "3 boiled eggs", "200g cottage cheese", "200g firm tofu", "3 boiled eggs + sugar beans", "200g cottage cheese", "200g firm tofu"];
+    }
   }
 
   // ---- BREAKFAST carbs (oats, bread, sweet potato — morning foods only) ----
@@ -252,8 +293,8 @@ export function getOnboardingMealPlan(user: any): string {
   const vegOptions = ["cabbage (boiled)", "spinach (wilted)", "cabbage + tomato", "spinach + onion",
     budget !== "under_100" ? "frozen mixed veg" : "cabbage", "spinach + tomato", "cabbage + onion"];
 
-  // Dairy/milk based on goal
-  const milkType = (goal === "muscle_gain" && !noDairy && budget !== "under_100") ? "full cream milk" : (!noDairy ? "low fat milk" : "water");
+  // Dairy/milk based on goal (vegans get soya milk instead)
+  const milkType = isVegan ? "soya milk" : (goal === "muscle_gain" && !noDairy && budget !== "under_100") ? "full cream milk" : (!noDairy ? "low fat milk" : "water");
   const pbServing = noPeanuts ? (budget !== "under_100" ? "1 extra egg" : "extra sugar beans") : (goal === "muscle_gain" ? "2 tbsp peanut butter" : "1 tbsp peanut butter");
 
   // Pre-workout options (training days)
@@ -271,6 +312,23 @@ export function getOnboardingMealPlan(user: any): string {
     noFish ? `150g chicken + ½ cup rice — 320 cal, 30g protein` : `1 tin pilchards + 2 brown bread slices — 300 cal, 25g protein`,
     `2 eggs + banana — 250 cal, 16g protein`,
   ];
+
+  // Override pre/post workout options for vegetarian and vegan clients
+  if (isVegan) {
+    preOptions[0] = noPeanuts ? `banana + ½ cup oats — 220 cal, 6g protein, 5 min` : `1 tbsp PB + banana — 220 cal, 8g protein, 2 min`;
+    preOptions[1] = `½ cup oats + soya milk + banana — 210 cal, 7g protein, 5 min`;
+    preOptions[2] = noPeanuts ? `banana + ½ cup oats — 200 cal, 6g protein, 5 min` : `1 tbsp PB + 1 banana — 220 cal, 8g protein, 2 min`;
+    preOptions[3] = `½ cup oats + soya milk — 160 cal, 6g protein, 5 min`;
+    postOptions[0] = `200g cooked lentils + ½ cup brown rice — 300 cal, 18g protein`;
+    postOptions[1] = `200g cooked sugar beans + 1 medium sweet potato — 290 cal, 16g protein`;
+    postOptions[2] = `soya mince 80g dry + ½ cup rice — 280 cal, 22g protein`;
+    postOptions[3] = `200g cooked lentils + banana — 270 cal, 17g protein`;
+  } else if (isVegetarian) {
+    // No fish, no meat — eggs and dairy are fine
+    preOptions[2] = `banana + 1 boiled egg — 180 cal, 10g protein, 2 min`;
+    postOptions[0] = `3 boiled eggs + 1 medium sweet potato — 340 cal, 24g protein`;
+    postOptions[2] = noDairy ? `4 boiled eggs + ½ cup brown rice — 320 cal, 28g protein` : `150g cottage cheese + ½ cup brown rice — 280 cal, 25g protein`;
+  }
 
   // Calorie split per meal
   const bfCal = Math.round(adjustedCal * 0.25);
@@ -294,13 +352,18 @@ export function getOnboardingMealPlan(user: any): string {
 
     // ---- BREAKFAST ----
     let bf: string;
-    if (isStudent) {
+    if (isVegan) {
+      // bfProt is already a plant-based string from the vegan bfProteins array
       bf = i % 2 === 0
-        ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 1 boiled egg — ${bfCal} cal, 14g protein, 8 min`
+        ? `${bfProt} + ${bfCarb} — ${bfCal} cal, 12g protein, 5 min`
+        : `${bfProt} — ${bfCal} cal, 10g protein, 3 min`;
+    } else if (isStudent) {
+      bf = i % 2 === 0
+        ? `½ cup oats + ${noDairyEff ? "water" : "low fat milk"} + 1 boiled egg — ${bfCal} cal, 14g protein, 8 min`
         : noGluten ? `2 boiled eggs + banana — ${bfCal} cal, 15g protein, 5 min` : `2 boiled eggs + 2 brown bread — ${bfCal} cal, 16g protein, 8 min`;
     } else if (isLowGI) {
       bf = i % 2 === 0
-        ? `${bfCarb} + ${noDairy ? "" : `${milkType} + `}2 boiled eggs — ${bfCal} cal, 18g protein, ${maxPrep}`
+        ? `${bfCarb} + ${noDairyEff ? "" : `${milkType} + `}2 boiled eggs — ${bfCal} cal, 18g protein, ${maxPrep}`
         : `${bfCarb} + 1 boiled egg — ${bfCal} cal, 16g protein, 20 min (batch cook Sunday)`;
     } else if (goal === "muscle_gain") {
       bf = i % 3 === 0
@@ -317,7 +380,7 @@ export function getOnboardingMealPlan(user: any): string {
     const seasonNote = isHypertension ? " (season: lemon + garlic, no Aromat)" : "";
     let lunch: string;
     if (isStudent) {
-      lunch = noFish
+      lunch = noFishEff
         ? `${lp} + ${lc} + ${v} — ${lunchCal} cal, 22g protein, 10 min`
         : i % 2 === 0 ? `1 tin pilchards + ${noGluten ? "1 sweet potato" : "2 brown bread"} — ${lunchCal} cal, 25g protein, 3 min` : `${lp} + ${lc} — ${lunchCal} cal, 20g protein, 10 min`;
     } else {
@@ -328,8 +391,8 @@ export function getOnboardingMealPlan(user: any): string {
     let dinner: string;
     if (isStudent) {
       dinner = i % 2 === 0
-        ? noFish ? `2 eggs + cabbage — ${dinnerCal} cal, 14g protein, 8 min` : `½ tin pilchards + cabbage — ${dinnerCal} cal, 18g protein, 5 min`
-        : `2 eggs + spinach — ${dinnerCal} cal, 14g protein, 8 min`;
+        ? noFishEff ? (isVegan ? `150g cooked lentils + cabbage — ${dinnerCal} cal, 12g protein, 8 min` : `2 eggs + cabbage — ${dinnerCal} cal, 14g protein, 8 min`) : `½ tin pilchards + cabbage — ${dinnerCal} cal, 18g protein, 5 min`
+        : isVegan ? `200g cooked sugar beans + spinach — ${dinnerCal} cal, 12g protein, 8 min` : `2 eggs + spinach — ${dinnerCal} cal, 14g protein, 8 min`;
     } else {
       dinner = `${dp} + ${dc} + ${v2}${seasonNote} — ${dinnerCal} cal, 25g protein, ${maxPrep}`;
     }
@@ -338,7 +401,7 @@ export function getOnboardingMealPlan(user: any): string {
     let snack = "";
     if (budget !== "under_100") {
       if (goal === "muscle_gain") snack = noPeanuts ? `baked beans ½ tin — 110 cal, 7g protein` : `${pbServing} + banana — 260 cal, 9g protein`;
-      else if (!noDairy && budget !== "100_300") snack = `low fat yoghurt 150g — 100 cal, 10g protein`;
+      else if (!noDairyEff && budget !== "100_300") snack = `low fat yoghurt 150g — 100 cal, 10g protein`;
       else snack = `baked beans ½ tin — 110 cal, 7g protein`;
     }
 
@@ -346,9 +409,9 @@ export function getOnboardingMealPlan(user: any): string {
     let dayPlan = `\n*${dayLabel}*\n`;
     if (isTraining) dayPlan += `Pre-workout (60–90 min before): ${pre}\n`;
     dayPlan += `${meal1Label}: ${bf}\n`;
-    if (isLowGI) dayPlan += `Snack 10am: 1 apple or banana + 1 boiled egg — 120 cal, 8g protein\n`;
+    if (isLowGI) dayPlan += `Snack 10am: 1 apple or banana + ${isVegan ? (noPeanuts ? "handful almonds" : "1 tbsp peanut butter") : "1 boiled egg"} — 120 cal, ${isVegan ? "4" : "8"}g protein\n`;
     dayPlan += `Lunch: ${lunch}\n`;
-    if (isLowGI) dayPlan += `Snack 3pm: ${noDairy ? "1 boiled egg" : "125g low fat yoghurt or 1 boiled egg"} — 80 cal, 8g protein\n`;
+    if (isLowGI) dayPlan += `Snack 3pm: ${isVegan ? (noPeanuts ? "200g cooked sugar beans" : "1 tbsp peanut butter + apple") : noDairyEff ? "1 boiled egg" : "125g low fat yoghurt or 1 boiled egg"} — 80 cal, ${isVegan ? "5" : "8"}g protein\n`;
     if (isTraining) dayPlan += `Post-workout (within 30 min): ${post}\n`;
     if (snack && !isLowGI) dayPlan += `Snack: ${snack}\n`;
     dayPlan += `${meal3Label}: ${dinner}\n`;
@@ -379,11 +442,30 @@ export function getOnboardingMealPlan(user: any): string {
     proTip = "Salmon goes on special at Shoprite most Fridays — buy two packs and freeze immediately. Frozen salmon has identical nutrition to fresh and costs R30 less.";
   }
 
+  // Override shopping list for vegetarian/vegan clients
+  if (isVegan || isVegetarian) {
+    if (budget === "under_100") {
+      shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\n${isVegan ? "Soya milk 1L — R20" : "Eggs 12 pack — R45"}\n${isVegan ? "" : "Cottage cheese 250g — R18\n"}Sugar beans 500g — R20\nLentils 500g — R15\n${isVegan ? "Soya mince 250g dry — R20\n" : ""}Cabbage 1 head — R8\n${isLowGI ? "Oats 500g — R15 (replaces pap)" : "Pap/maize meal 2kg — R15"}\nSpinach 1 bunch — R10\nOnions — R8\nSunflower oil 500ml — R10`;
+      shopTotal = isVegan ? 118 : 134;
+      proTip = isVegan ? "Soak sugar beans overnight and cook Sunday — 4 days of plant protein at under R5 per serving. Soya mince from Shoprite is R20 and gives you a full week of dinners." : "Cook a big pot of sugar beans on Sunday — it feeds you 4 days at under R7 per serving. Add 2 boiled eggs per bowl for complete protein.";
+    } else if (budget === "100_300") {
+      shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\n${isVegan ? "Soya milk 1L — R20\n" : "Eggs 12 pack — R45\n"}Sugar beans 500g — R20\nLentils 500g — R15\nSoya mince 250g dry — R20\nFirm tofu 400g — R35\n${isVegan ? "" : "Cottage cheese 250g — R18\n"}Oats 500g — R15\n${noGluten ? "" : "Brown bread 1 loaf — R14\n"}Sweet potato 1kg — R12\nCabbage — R8\nSpinach — R10\nOnions + tomatoes — R23\nGarlic — R8\nSunflower oil — R10`;
+      shopTotal = isVegan ? 180 : 233;
+      proTip = "Firm tofu from Shoprite absorbs any flavour — fry with garlic and soy sauce. It surprises people how good it is. 12g protein per 100g and cheaper than chicken breast per gram of protein.";
+    } else {
+      shopList = `*Your Weekly Shopping List — Shoprite or Boxer*\n${isVegan ? "Soya milk 1L — R20" : "Eggs 12 pack — R45"}\nFirm tofu 400g×2 — R70\nSoya mince 250g dry — R20\nLentils 500g — R15\nSugar beans 500g — R20\n${isVegan ? "" : `Cottage cheese 250g — R18\n${budget !== "100_300" ? "Low fat Greek yoghurt 500g — R35\n" : ""}`}Oats 1kg — R25\nBrown rice 1kg — R20\nSweet potato 1.5kg — R18\nBanana bunch — R15\n${noPeanuts ? "" : "Peanut butter 400g — R25\n"}Broccoli — R20\nSpinach — R10\nGarlic + lemon — R13`;
+      shopTotal = isVegan ? 261 : 344;
+      proTip = isVegan ? "Rotate tofu and soya mince through the week — different textures, same protein. Marinade tofu in soy sauce and garlic 30 minutes before cooking for best results." : "Cottage cheese mixed with eggs makes the quickest high-protein breakfast in SA — R18 for 250g at Shoprite. 45g protein from just these two ingredients.";
+    }
+  } else if (isHalal) {
+    shopList += `\n\n⚠️ _Halal: Buy chicken and beef from a halal-certified butcher or look for the halal label at Shoprite, Pick n Pay, or your local halal store._`;
+  }
+
   // Special situation notes
   const goalNote = goal === "fat_loss"
-    ? `\n\n⚠️ *Fat loss rules:* Sweet potato over white pap always. High-volume veg fills the plate first — protein second, carbs last. ${noDairy ? "" : "Low fat dairy only."} ${noPeanuts ? "" : "Max 1 tbsp peanut butter — not a staple."}`
+    ? `\n\n⚠️ *Fat loss rules:* Sweet potato over white pap always. High-volume veg fills the plate first — protein second, carbs last. ${noDairyEff ? "" : "Low fat dairy only."} ${noPeanuts ? "" : "Max 1 tbsp peanut butter — not a staple."}`
     : goal === "muscle_gain"
-    ? `\n\n💪 *Muscle gain rules:* Whole eggs every time — the yolk has the nutrients. ${noDairy ? "" : `${milkType} for extra calories.`} ${noPeanuts ? "" : "Peanut butter is your friend — calorie dense and protein rich."} Pre and post-workout meals are non-negotiable.`
+    ? `\n\n💪 *Muscle gain rules:* ${isVegan ? "Plant protein at every meal — beans, lentils, tofu, soya mince. Hit the numbers." : "Whole eggs every time — the yolk has the nutrients."} ${noDairyEff ? (isVegan ? "Soya milk adds easy calories." : "") : `${milkType} for extra calories.`} ${noPeanuts ? "" : "Peanut butter is your friend — calorie dense and protein rich."} Pre and post-workout meals are non-negotiable.`
     : goal === "recomposition"
     ? `\n\n🔄 *Recomp rules:* Carbs before and after training. Lower carbs on rest day evenings. Protein stays the same every day — no exceptions. Zero empty calories.`
     : "";
@@ -1053,7 +1135,26 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const lower = msg.toLowerCase().trim();
     const isClearNone = lower === "none" || lower === "no" || lower === "n/a" || lower === "nil" || lower === "nope" || lower === "nothing";
     const injuries = isClearNone ? "" : msg;
-    await db.update(users).set({ injuries, onboardingState: "ASK_EQUIPMENT" }).where(eq(users.phoneNumber, phone));
+    await db.update(users).set({ injuries, onboardingState: "ASK_DIETARY" }).where(eq(users.phoneNumber, phone));
+    return `Any dietary restrictions?\n\n1️⃣ None — I eat everything\n2️⃣ Halal — no pork or alcohol in food\n3️⃣ Vegetarian — no meat or fish\n4️⃣ Vegan — no animal products at all`;
+  }
+
+  if (state === "ASK_DIETARY") {
+    const lower = msg.toLowerCase().trim();
+    let dietFlag: string | null = null;
+    if (msg.includes("2") || /\b(halal|muslim|islam|haram)\b/i.test(lower)) {
+      dietFlag = "diet:halal";
+    } else if (msg.includes("4") || /\bvegan\b/i.test(lower)) {
+      dietFlag = "diet:vegan";
+    } else if (msg.includes("3") || /\b(vegetarian|veggie|no meat|meatless|meat.?free|plant.?based)\b/i.test(lower)) {
+      dietFlag = "diet:vegetarian";
+    }
+    const existingNotes = (user.profileNotes || "").replace(/\bdiet:\w+\b/g, "").trim();
+    const updatedNotes = dietFlag ? (existingNotes ? `${existingNotes} ${dietFlag}` : dietFlag) : existingNotes;
+    await db.update(users).set({
+      profileNotes: updatedNotes || null,
+      onboardingState: "ASK_EQUIPMENT",
+    }).where(eq(users.phoneNumber, phone));
     return `Gym or home training?[BUTTONS:Gym|Home training|No equipment]`;
   }
 
