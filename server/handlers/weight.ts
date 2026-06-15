@@ -77,16 +77,14 @@ export async function handleWeightLog(
     newKg, user.goalType || "fat_loss", user.lifeSituation || "office",
     user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner",
   );
-  const prevKg = parseFloat(user.currentWeight || "0");
   const prevCals = user.calorieTarget || newCals;
   const prevProtein = user.proteinTarget || newProtein;
-
-  await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
 
   const todayWeightStart = sastDayStart();
   // The true "last log" for the change comparison is the most recent weigh-in BEFORE today —
   // NOT user.currentWeight, which can still hold a stale onboarding number and produced the
   // nonsense "up 15.8kg from last log" when a client first weighed in on the system.
+  // Read this baseline BEFORE writing today's row (filtered to < today, so the write can't move it).
   const [lastPriorLog] = await db.select({ weight: weightLogs.weight })
     .from(weightLogs)
     .where(and(eq(weightLogs.userId, user.id), lt(weightLogs.loggedAt, todayWeightStart)))
@@ -94,40 +92,54 @@ export async function handleWeightLog(
     .limit(1);
   const lastLoggedKg = lastPriorLog ? parseFloat(String(lastPriorLog.weight)) : null;
 
-  const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
-    .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
-    .limit(1);
-  if (existingToday.length > 0) {
-    await db.update(weightLogs).set({ weight: newKg.toString() }).where(eq(weightLogs.id, existingToday[0].id));
-  } else {
-    await db.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
-  }
+  // Atomic: the user's targets and today's weigh-in must both land or neither. A half-commit
+  // (targets updated but no weight row, or a weight row with stale targets) corrupts every
+  // downstream comparison and the auto-calorie-adjust job. Wrap both writes in one transaction.
+  await db.transaction(async (tx) => {
+    await tx.update(users)
+      .set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein })
+      .where(eq(users.phoneNumber, phone));
+
+    const existingToday = await tx.select({ id: weightLogs.id }).from(weightLogs)
+      .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
+      .limit(1);
+    if (existingToday.length > 0) {
+      await tx.update(weightLogs).set({ weight: newKg.toString() }).where(eq(weightLogs.id, existingToday[0].id));
+    } else {
+      await tx.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
+    }
+  });
+
+  // True journey start = the FIRST weight ever logged (now includes today's row if it's the first).
+  // Used by BOTH the milestone and goal-reached voice scripts so neither ever quotes last week's
+  // weight as the starting point. prevKg (user.currentWeight before this log) is the PREVIOUS
+  // weigh-in, not the journey start — passing it as startKg was the goal-voice bug.
+  const [journeyFirstLog] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+    .from(weightLogs).where(eq(weightLogs.userId, user.id))
+    .orderBy(asc(weightLogs.loggedAt)).limit(1);
+  const journeyStartKg = journeyFirstLog ? parseFloat(String(journeyFirstLog.weight)) : newKg;
 
   let milestoneCelebration = "";
   try {
-    const firstLog = await db.select({ weight: weightLogs.weight }).from(weightLogs)
-      .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
-    if (firstLog.length > 0) {
-      const startKg = parseFloat(String(firstLog[0].weight));
-      const totalLoss = startKg - newKg;
-      const firstName = (user.name || "").split(" ")[0] || "there";
-      const MILESTONE_MESSAGES: Record<number, string> = {
-        2:  `\n\n🏆 *${firstName}, that's 2kg gone.* Two bags of sugar off your body — permanently. This is working.`,
-        5:  `\n\n🏆 *${firstName}, 5kg gone.* Five kilograms. That's a bag of potatoes you were carrying everywhere. It's not coming back. Screenshot this.`,
-        10: `\n\n🏆 *${firstName}, 10 kilograms.* Most people who start a programme never see 10kg. You did. Share this with someone — you've earned it.`,
-        15: `\n\n🏆 *${firstName}, 15kg lost.* That is a genuinely rare thing. Tell me — what's changed beyond the scale? Energy? Sleep? How clothes fit? I want to know.`,
-        20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
-      };
-      for (const milestone of [2, 5, 10, 15, 20]) {
-        if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
-          await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
-          milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
-          generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
-            .then(({ script, emotion }) => generateVoiceNote(script, emotion))
-            .then(url => { if (url) return sendWhatsApp(phone, "", url); })
-            .catch(err => console.warn("[TTS] Milestone voice failed:", err));
-          break;
-        }
+    const startKg = journeyStartKg;
+    const totalLoss = startKg - newKg;
+    const firstName = (user.name || "").split(" ")[0] || "there";
+    const MILESTONE_MESSAGES: Record<number, string> = {
+      2:  `\n\n🏆 *${firstName}, that's 2kg gone.* Two bags of sugar off your body — permanently. This is working.`,
+      5:  `\n\n🏆 *${firstName}, 5kg gone.* Five kilograms. That's a bag of potatoes you were carrying everywhere. It's not coming back. Screenshot this.`,
+      10: `\n\n🏆 *${firstName}, 10 kilograms.* Most people who start a programme never see 10kg. You did. Share this with someone — you've earned it.`,
+      15: `\n\n🏆 *${firstName}, 15kg lost.* That is a genuinely rare thing. Tell me — what's changed beyond the scale? Energy? Sleep? How clothes fit? I want to know.`,
+      20: `\n\n🏆 *${firstName}, 20 kilograms.* I have coached a lot of people. 20kg is real transformation. This is the version of you that does not go back.`,
+    };
+    for (const milestone of [2, 5, 10, 15, 20]) {
+      if (totalLoss >= milestone && totalLoss < milestone + 0.6) {
+        await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
+        milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
+        generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
+          .then(({ script, emotion }) => generateVoiceNote(script, emotion))
+          .then(url => { if (url) return sendWhatsApp(phone, "", url); })
+          .catch(err => console.warn("[TTS] Milestone voice failed:", err));
+        break;
       }
     }
   } catch (e) { console.warn("[non-fatal]", e); }
@@ -143,13 +155,10 @@ export async function handleWeightLog(
 
   let journeyNote = "";
   try {
-    const [firstLog] = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
-      .from(weightLogs).where(eq(weightLogs.userId, user.id))
-      .orderBy(asc(weightLogs.loggedAt)).limit(1);
-    if (firstLog) {
-      const startKg = parseFloat(String(firstLog.weight));
+    if (journeyFirstLog) {
+      const startKg = journeyStartKg;
       const totalChange = newKg - startKg;
-      const weeksSinceStart = Math.max(1, (Date.now() - new Date(firstLog.loggedAt!).getTime()) / (7 * 86_400_000));
+      const weeksSinceStart = Math.max(1, (Date.now() - new Date(journeyFirstLog.loggedAt!).getTime()) / (7 * 86_400_000));
       const firstName = (user.name || "").split(" ")[0] || "";
       const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", newProtein, newCals, firstName);
       if (rateNote) journeyNote = `\n\n${rateNote}`;
@@ -172,8 +181,10 @@ export async function handleWeightLog(
       const firstName = (user.name || "").split(" ")[0] || "there";
       await db.update(users).set({ awaitingInputType: "goal_transition" }).where(eq(users.phoneNumber, phone));
       const goalMilestone = goal === "fat_loss" ? "goal_reached_fat_loss" : "goal_reached_muscle";
-      const kgLostTotal = prevKg - newKg;
-      generateMilestoneVoiceScript(user, goalMilestone, { currentKg: newKg, startKg: prevKg || newKg, kgLost: Math.max(0, kgLostTotal) })
+      // startKg must be the journey start (first weigh-in), not prevKg (last week's weight),
+      // or the voice note tells the client they "started at" a weight from days ago.
+      const kgLostTotal = journeyStartKg - newKg;
+      generateMilestoneVoiceScript(user, goalMilestone, { currentKg: newKg, startKg: journeyStartKg, kgLost: Math.max(0, kgLostTotal) })
         .then(({ script, emotion }) => generateVoiceNote(script, emotion))
         .then(url => { if (url) return sendWhatsApp(phone, "", url); })
         .catch(err => console.warn("[TTS] Goal voice failed:", err));

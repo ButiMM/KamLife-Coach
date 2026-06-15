@@ -552,8 +552,21 @@ const IS_FUTURE_PLANNING = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s
 
 const IS_QUESTION = (m: string) =>
   m.includes("?") ||
-  /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|where)/.test(m) ||
-  /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
+  /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|does |do |where|can )/.test(m) ||
+  /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than|is that enough|enough protein|enough calories|is it enough|any good|any protein)\b/.test(m);
+
+// Mirror food-context.ts isFrustration: frustration words, UNLESS the message is
+// also a food log / correction (those should still log even when phrased angrily).
+const HAS_FRUSTRATION_WORDS = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i;
+const IS_FRUSTRATION = (m: string) =>
+  HAS_FRUSTRATION_WORDS.test(m) &&
+  !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
+
+// Mirror food-context.ts hasSubstantiveQuestion: a genuine nutritional question that
+// must be answered, not silently logged ("I had 2 eggs, is that enough protein?").
+const HAS_SUBSTANTIVE_QUESTION = (m: string) =>
+  /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
+  || /^(is |does |do |will |can |should |are |have |has )\b/i.test(m);
 
 const QUANTITY_WORD = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i;
 
@@ -563,6 +576,7 @@ const QUANTITY_WORD = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+
 const wouldDirectScan = (m: string, foodCount: number) => {
   const lo = m.toLowerCase();
   if (IS_QUESTION(lo)) return false;
+  if (IS_FRUSTRATION(lo)) return false;
   if (HAS_LOG_TRIGGER.test(lo)) return false;
   if (IS_FUTURE_PLANNING.test(lo)) return false;
   if (m.split(/\s+/).length > 12) return false;
@@ -571,15 +585,20 @@ const wouldDirectScan = (m: string, foodCount: number) => {
 
 // Full gate: would the food scanner fire? (mirrors food-context.ts logic exactly)
 // foodCount: how many SA foods were found (0 = no food detected, controls hasActualFood)
+// Mirrors the gate at food-context.ts: (!isQuestion || foodLogOverride) && !isFrustration
+//   && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)
+// isEmotionalOnly depends on the soft-struggle detector (not regex-reproducible here);
+// the corpus below contains no emotional-struggle messages, so it is treated as false.
 const wouldLog = (m: string, foodCount: number) => {
   const lo = m.toLowerCase();
   const hasLogTrig = HAS_LOG_TRIGGER.test(lo);
   const hasFood = foodCount > 0;
-  const foodLogOverride = hasLogTrig && hasFood;
+  const foodLogOverride = hasLogTrig && hasFood && !HAS_SUBSTANTIVE_QUESTION(lo);
   const isFuturePlan = IS_FUTURE_PLANNING.test(lo);
   const isQ = IS_QUESTION(lo);
+  const isFrus = IS_FRUSTRATION(lo);
   const directScan = hasFood && wouldDirectScan(m, foodCount);
-  return (!isQ || foodLogOverride) && !isFuturePlan && hasFood && (hasLogTrig || directScan);
+  return (!isQ || foodLogOverride) && !isFrus && !isFuturePlan && hasFood && (hasLogTrig || directScan);
 };
 
 // --- hasLogTrigger: must match real meal logs ---
@@ -735,6 +754,31 @@ test("gate BLOCKS: 'I need to get oats and eggs from checkers' (shopping)", () =
 });
 test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", () => {
   assert.ok(!wouldLog("thinking of having chicken and rice tonight", 2), "thinking of having must not log");
+});
+
+// --- Substantive nutritional questions must NOT silently log (foodLogOverride guard) ---
+// These contain a real eating verb ("I had") AND food, so the old helper logged them and
+// dropped the question. The real fix: foodLogOverride excludes substantive questions.
+test("gate BLOCKS: 'I had 2 eggs, is that enough protein?' (eaten food + question — must answer, not log)", () => {
+  assert.ok(!wouldLog("I had 2 eggs, is that enough protein?", 1), "nutritional question must not silently log the eggs");
+});
+test("gate BLOCKS: 'I had chicken and rice, is that enough?' (eaten food + 'is that enough')", () => {
+  assert.ok(!wouldLog("I had chicken and rice, is that enough?", 2), "'is that enough' question must not log");
+});
+test("gate BLOCKS: 'does chicken and rice have protein' (does-prefix nutrition question)", () => {
+  assert.ok(!wouldLog("does chicken and rice have protein", 2), "'does ... have protein' question must not log");
+});
+test("gate BLOCKS: 'how much protein in 2 eggs and toast' (how much question)", () => {
+  assert.ok(!wouldLog("how much protein in 2 eggs and toast", 2), "'how much' question must not log");
+});
+
+// --- Frustration must NOT log even with food words present (isFrustration guard) ---
+test("gate BLOCKS: 'this is nonsense, wrong again' (pure frustration, no eating verb)", () => {
+  assert.ok(!wouldLog("this is nonsense, wrong again with the rice", 1), "frustration without eating verb must not log");
+});
+// But frustration phrased as a correction of a logged meal SHOULD still log:
+test("gate LOGS: 'no that's wrong, I had chicken not beef' (correction with eating verb)", () => {
+  assert.ok(wouldLog("no that's wrong, I had chicken not beef", 2), "meal correction must still log despite frustration words");
 });
 
 // ============================================================

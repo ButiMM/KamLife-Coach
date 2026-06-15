@@ -4,6 +4,8 @@ Run these tests by messaging the bot from your own WhatsApp number.
 Mark each ✅ pass / ❌ fail / ⚠️ partial in the Notes column as you go.
 Aim to cover 2–3 sections per day over 4–5 days.
 
+_Last updated: 15 June 2026 — refreshed regression checks (R1, R7–R12) and resolved-issues list after the workout-delivery, food-question, restaurant, and weight-comparison fixes._
+
 ---
 
 ## Day 1 — Core voice & single-word commands
@@ -163,12 +165,18 @@ Aim to cover 2–3 sections per day over 4–5 days.
 
 | # | What to check | Expected | Notes |
 |---|---|---|---|
-| R1 | Send `workout` — does GIF still attach? | Yes — first image is caption on workout text | |
+| R1 | Send `workout` — does the FULL workout text arrive? | Yes — complete session as text (Twilio body capped at 1500 chars, long sessions split into multiple messages). NO static bench-press image — that was disabled until real animated GIFs are uploaded to the CDN. YouTube tutorial links preview as rich cards. | |
 | R2 | Send `portions` — do BOTH images arrive as separate messages? | Yes — hand guide first, plate poster second | |
 | R3 | Log a food photo — does single-image analysis still work? | Yes — photo with caption, not two separate messages | |
 | R4 | Send a voice note 6+ words — does it transcribe and respond normally? | Yes — not intercepted by single-word check | |
 | R5 | `calories` command returns today's total | Yes, with running total | |
 | R6 | `progress` shows weight change with pace note | Yes — pace note only appears if ≥2 weight logs | |
+| R7 | "I had 2 eggs, is that enough protein?" | Answers the protein question — does NOT silently log the eggs and stay quiet | |
+| R8 | "my cousin works at KFC" | Normal chat reply — does NOT return the KFC order guide (no eating intent) | |
+| R9 | "I ate at KFC for lunch" | KFC order guide DOES appear (explicit eating intent) | |
+| R10 | "last week I was 83kg" (retrospective) | Does NOT log 83kg as today's weight | |
+| R11 | Log weight when a prior weigh-in exists | Change shown vs the real last weigh-in, not a stale onboarding baseline ("up 15.8kg" bug) | |
+| R12 | Send `workout` twice within 5 min | Second reply is the cooldown note ("scroll up ↑"), not a duplicate full workout | |
 
 ---
 
@@ -177,7 +185,12 @@ Aim to cover 2–3 sections per day over 4–5 days.
 | # | Issue | Current behaviour | Priority |
 |---|---|---|---|
 | K1 | "Tomorrow's session" after dumbbell switch — intro says "gym programme" | Bot sends dumbbell exercises but heading says "gym" | Low |
-| K2 | Scheduler may fire proactive messages more than once if server restarts mid-run | Duplicate check not in place yet | Medium — fix before PROACTIVE_PAUSED=false |
+
+**Fixed since last revision** (kept here for history — test to confirm, no longer open bugs):
+- ~~K2 — Scheduler could fire proactive messages twice on restart~~ → FIXED: `claimDailySlot()` is a DB-atomic INSERT-ON-CONFLICT, restart-safe. Safe to set `PROACTIVE_PAUSED=false`.
+- ~~Workout request returned image-only with no text~~ → FIXED: Twilio body limit (1600) was exceeded by long workouts; `splitMessage` now caps at 1500 and re-splits oversized parts.
+- ~~Severe-frustration reply was tone-deaf ("What exercise will you start with?")~~ → FIXED: bot-complaint path now bans the chirpy redirects.
+- ~~Food questions logged as meals; restaurant false-positives; retrospective weight logged as today~~ → FIXED (see R7–R11).
 
 ---
 
