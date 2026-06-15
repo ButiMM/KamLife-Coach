@@ -288,8 +288,8 @@ export async function handleFoodContext(ctx: {
 
   // ---- Shared message-type flags used by food handlers below ----
   const isQuestion = m.includes("?") ||
-    /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|where)/.test(m) ||
-    /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than)\b/.test(m);
+    /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|does |do |where|can )/.test(m) ||
+    /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than|is that enough|enough protein|enough calories|is it enough|any good|any protein)\b/.test(m);
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
   const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
   // "have" alone is too broad — matches possession ("I have eggs at home"), negation ("don't have"),
@@ -373,7 +373,14 @@ export async function handleFoodContext(ctx: {
     m.includes("ocean basket") ? "ocean_basket" :
     null;
 
-  if (eatingOutPlace && !isQuestion && !isFrustration) {
+  // Require an explicit eating-intent signal before firing the guide — "my cousin works at KFC"
+  // must not trigger the KFC calorie guide. Only fire when the user is clearly going there,
+  // ordering from there, or just ate there.
+  const hasEatingIntent =
+    /\b(going to|went to|was at|ate at|ordered from|getting from|pick up from|buying from|takeaway from|eat(ing)? at|lunch at|dinner at|breakfast at|stop(ped)? at|from (nandos|kfc|steers|wimpy|debonairs|mcdonalds|mcdonald|chicken licken|ocean basket)|ate (some|their|the)|had (some|their|the))\b/i.test(m)
+    || (/\b(nandos|kfc|steers|wimpy|debonairs|mcdonalds|chicken licken|ocean basket)\b/i.test(m)
+        && /\b(today|for lunch|for dinner|for supper|for breakfast|just|tonight|this morning|yesterday|after work|on the way)\b/i.test(m));
+  if (eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration) {
     const goal = user.goalType || "fat_loss";
     const guides: Record<string, string> = {
       nandos: `*Nando's — Coach K Pick*\n\n✅ Best: Quarter chicken (skin off) + peri-peri chips + coleslaw = ~650 kcal, 35g protein\n✅ Good: Grilled chicken wrap (no sauce, extra coleslaw)\n⚠️ Watch: Double chicken = fine if that's your big meal\n❌ Avoid: Chips as main + roll + dessert = 1,200 kcal\n\nFlame-grilled is always better than fried. Skin off saves 80-100 kcal.`,
@@ -389,7 +396,7 @@ export async function handleFoodContext(ctx: {
     if (guide) {
       const goalNote = goal === "fat_loss" ? `\n\n_Your goal is fat loss — the right order here keeps you on track without missing out._` : `\n\n_Your goal is muscle — prioritise protein options and eat to fullness._`;
       const eatingReply = `${guide}${goalNote}`;
-      await logChat(user.id, message, eatingReply, "FOOD_LOG");
+      await logChat(user.id, message, eatingReply, "EATING_OUT_GUIDE");
       return eatingReply;
     }
   }
@@ -579,7 +586,14 @@ export async function handleFoodContext(ctx: {
     && m.split(/\s+/).length <= 12
     && exactFoodCount >= 1
     && (exactFoodCount >= 2 || hasQuantityWord);
-  const foodLogOverride = hasLogTrigger && hasActualFood;
+  // foodLogOverride: Only bypass the isQuestion guard when the message is a past-eating
+  // statement with a trivial trailing "?" (confirmation, e.g. "I had eggs?") — NOT when
+  // the message contains a substantive nutritional question ("is that enough protein?",
+  // "how many calories in that?"). Logging food in response to a genuine question
+  // would silently discard the question and never answer it.
+  const hasSubstantiveQuestion = /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
+    || /^(is |does |do |will |can |should |are |have |has )\b/i.test(m);
+  const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion;
 
   // Diagnostic: any message containing recognised foods logs its gate state — when a
   // meal silently fails to log in production, this line names the reason instantly.

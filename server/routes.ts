@@ -333,13 +333,53 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     const lastOut = (lastBotMsgs[0]?.messageOut || "").slice(0, 200);
     const streak = user.workoutStreak || 0;
     const totalW = user.totalWorkoutsCompleted || 0;
-    const severeCtx = `You are Coach K. Client ${firstName || "this client"} just said: "${message}".\n\nYour last message (${lastIntent}): "${lastOut}"\n\nThey are frustrated with the quality of coaching or a specific response — NOT sick, NOT in crisis. They want better coaching, not wellness support.\n\nREAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 120}g.\n\nWRITE TWO SENTENCES ONLY:\n1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)\n2. Give one concrete coaching action using their actual numbers above\n\nBANNED — never write any of these: "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"\n\nCoach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
+
+    // Detect when the complaint is about the BOT ITSELF being confusing/generic/useless
+    // vs. frustration with a specific coaching output (wrong calories, bad workout, etc.)
+    // When it's a bot-complaint, we must NOT pivot to workout instructions — that proves their point.
+    const BOT_COMPLAINT = /\b(this (coach|bot|thing|it|app) is|you are just|you.?re just|just a (bot|calculator|robot|machine)|nothing makes sense|you are (useless|garbage|terrible|pathetic|nonsense|generic|confusing)|this is (nonsense|garbage|useless|terrible|pathetic)|confused calculator|generic (bot|coach)?|makes no sense|doesn.?t make sense|not making sense|whole lot of nonsense|a lot of nonsense)\b/i.test(m)
+      || /\b(entire coach|whole (coach|bot)|this whole|this entire)\b/i.test(m);
+
+    const severeCtx = BOT_COMPLAINT
+      ? `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
+
+They are saying the ENTIRE COACH is confusing, generic, or not making sense — this is a complaint about the bot itself, not about one specific bad reply.
+
+Your last reply was (${lastIntent}): "${lastOut}"
+
+DO NOT suggest an exercise. DO NOT ask "What exercise will you start with?" DO NOT pivot to workout. That would prove their point that you are generic and confused.
+
+WRITE TWO SENTENCES ONLY:
+1. Acknowledge that your responses have been unclear or unhelpful — be direct and specific, not defensive
+2. Name exactly ONE thing they can type right now to get something useful (e.g. "Type *today's workout* to get your programme" or "Type *menu* to see your options" — pick the most relevant for their goal: ${user.goalType || "fat_loss"})
+
+BANNED — never write any of these: "What exercise will you start with?", "Let's get back on track", "Focus on today's workout", "I hear you", "You need support", "Let's focus on", "wellness", "recovery", "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
+
+Coach K tone: direct, accountable, SA voice. Two sentences. Nothing else.`
+      : `You are Coach K. Client ${firstName || "this client"} just said: "${message}".
+
+Your last message (${lastIntent}): "${lastOut}"
+
+They are frustrated with a specific coaching response — NOT sick, NOT in crisis. They want better coaching, not wellness support.
+
+REAL DATA: ${totalW} total sessions logged. ${streak > 0 ? `${streak}-session streak.` : ""} Goal: ${user.goalType || "fat_loss"}. Protein target: ${user.proteinTarget || 120}g.
+
+WRITE TWO SENTENCES ONLY:
+1. Name the specific thing that went wrong or that they're unhappy about (based on your last message and their reaction)
+2. Give one concrete next step using their actual numbers above (e.g. a specific food to log, their actual protein number, a specific lift target — NOT a vague "let's get back on track" and NEVER "What exercise will you start with?")
+
+BANNED — never write any of these: "What exercise will you start with?", "I hear you", "You need support", "Let's focus on", "Prioritize", "I understand your", "wellness", "recovery" (unless they said they were sick), "gentle walk", "be kind to yourself", "take care", "self-care", "feel free", "reach out"
+
+Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
+
     try {
       const severeReply = await withTimeout("gpt_severe", 20000, () => askCoachK(message, user, severeCtx));
       await logChat(user.id, message, severeReply, "SEVERE_FRUSTRATION");
       return severeReply;
     } catch (e) {
-      const fallback = `${firstName ? `${firstName}, ` : ""}that response wasn't good enough. Your protein target is ${user.proteinTarget || 120}g today — log your next meal and I will track it accurately.`;
+      const fallback = BOT_COMPLAINT
+        ? `${firstName ? `${firstName}, ` : ""}my responses clearly weren't making sense. Type *menu* to see exactly what I can do, or *today's workout* to get your programme.`
+        : `${firstName ? `${firstName}, ` : ""}that response wasn't good enough. Type *menu* to see your options or tell me specifically what you need.`;
       await logChat(user.id, message, fallback, "SEVERE_FRUSTRATION");
       return fallback;
     }
