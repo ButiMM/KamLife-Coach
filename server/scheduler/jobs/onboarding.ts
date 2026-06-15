@@ -56,7 +56,7 @@ export async function runEarlyOnboarding(): Promise<void> {
     if (isPaused(client)) continue;
     try {
       const days = programmeDaysSince(client.programmeStartDate);
-      if (![1, 2, 3, 5, 7].includes(days)) continue;
+      if (![1, 2, 3, 4, 5, 6, 7].includes(days)) continue;
       const name = client.name || "there";
       // One atomic daily-slot claim per onboarding day — DB-backed, restart-safe.
       if (!(await claimDailySlot(client.id, "early_onboarding"))) continue;
@@ -68,6 +68,15 @@ export async function runEarlyOnboarding(): Promise<void> {
       } else if (days === 3) {
         const day3Msg = `3 days in, ${name}. Most people have already quit by now. You are still here. That already puts you ahead.\n\n---\n\n*📱 Log your steps — pick what works for you:*\n\n*1. Just type the number* (easiest)\nSend me a number any time. Like: *8500*. I'll log it.\n\n*2. Send a screenshot*\nOpen Samsung Health, Apple Health, or Google Fit. Screenshot your step count. Send me the photo and I'll read it.\n\n*3. Auto-sync* (set up once, never log again)\nReply *connect steps* and I'll send you the one-time setup guide.`;
         await sendWhatsApp(client.phoneNumber, day3Msg);
+      } else if (days === 4) {
+        // Day 4 — make eating easy: a stocked kitchen removes the daily decision.
+        const budget = client.weeklyFoodBudget || "100_300";
+        const budgetLine = (budget === "under_100" || budget === "50_100" || budget === "under_50")
+          ? "Protein first — eggs, pilchards, sugar beans. Those three carry the week."
+          : client.goalType === "muscle_gain"
+            ? "Chicken, eggs and oats in bulk — you need the volume to build."
+            : "Lean protein first — chicken, tuna, eggs — then carbs around training.";
+        await sendWhatsApp(client.phoneNumber, `Day 4, ${name}. Let's make eating easy.\n\nReply *shopping list* and I'll build you a budget-friendly list for the week. ${budgetLine}\n\nWhen the kitchen is stocked right, eating well stops being a daily decision — that's how consistency gets easy.`);
       } else if (days === 5) {
         const fiveDaysAgoOnb = new Date(Date.now() - 5 * 86_400_000);
         const recentSteps = await db.select({ steps: stepLogs.steps }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, fiveDaysAgoOnb)));
@@ -75,6 +84,9 @@ export async function runEarlyOnboarding(): Promise<void> {
         const recentFoodLogs = await db.select({ id: chatHistory.id }).from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, fiveDaysAgoOnb)));
         const workoutsDone = client.totalWorkoutsCompleted || 0;
         await sendWhatsApp(client.phoneNumber, `Day 5, ${name}. Here is what you have built in less than a week:\n\n✅ ${workoutsDone} workout${workoutsDone !== 1 ? "s" : ""} completed\n👟 ${totalStepsLogged.toLocaleString()} steps logged\n🍽 ${recentFoodLogs.length} meal${recentFoodLogs.length !== 1 ? "s" : ""} tracked\n\nThis is data. Data becomes results. Most people never get this far. You did.\n\nKeep logging — reply *1* for today's workout.`);
+      } else if (days === 6) {
+        // Day 6 — real life includes takeaways: teach the eating-out guide before week's end.
+        await sendWhatsApp(client.phoneNumber, `Day 6, ${name}. Real life includes takeaways — let's handle them.\n\nNext time you're getting food out, just ask me: "what should I eat at KFC?" — or Nando's, Steers, Wimpy. I'll give you the smart order for your goal.\n\nEating out isn't the enemy. Not knowing what to order is. Reply *menu* anytime for everything I can help with.`);
       } else if (days === 7) {
         const workoutsDone = client.totalWorkoutsCompleted || 0;
         const goal = client.goalType === "muscle_gain" ? "building muscle" : client.goalType === "recomposition" ? "body recomp" : "fat loss";
