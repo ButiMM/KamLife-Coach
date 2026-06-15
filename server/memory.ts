@@ -1,5 +1,6 @@
 import { pool } from "./db";
 import OpenAI from "openai";
+import { assertAiOnline } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -77,6 +78,7 @@ async function pruneOldMemories(phone: string): Promise<void> {
 
 export async function storeMemory(phone: string, content: string, category: string): Promise<void> {
   try {
+    assertAiOnline("storeMemory");
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: content });
     const vec = resp.data[0].embedding;
     if (!Array.isArray(vec) || vec.length !== 1536) {
@@ -97,6 +99,7 @@ export async function storeMemory(phone: string, content: string, category: stri
 
 export async function retrieveMemories(phone: string, query: string): Promise<string[]> {
   try {
+    assertAiOnline("retrieveMemories");
     const resp = await openai.embeddings.create({ model: "text-embedding-3-small", input: query });
     const vec = resp.data[0].embedding;
     if (!Array.isArray(vec) || vec.length !== 1536) {

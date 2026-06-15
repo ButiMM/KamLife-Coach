@@ -19,13 +19,26 @@ async function sendParts(
   const mediaUrls = Array.isArray(replyMedia) ? replyMedia.filter(Boolean) : (replyMedia ? [replyMedia] : []);
   const sendOne = async (params: Record<string, unknown>, label: string) => {
     const delays = [0, 2000, 5000, 10000];
+    const bodyLen = typeof params.body === "string" ? (params.body as string).length : 0;
+    const hasMedia = Array.isArray(params.mediaUrl) && (params.mediaUrl as unknown[]).length > 0;
     for (let d = 0; d < delays.length; d++) {
       if (delays[d] > 0) await new Promise(r => setTimeout(r, delays[d]));
-      try { await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]); return; }
-      catch (e: any) { if (d === delays.length - 1) console.error(`[TEXT_ASYNC] ${label} failed: ${e.message}`); }
+      try {
+        await twilioC.messages.create(params as unknown as Parameters<typeof twilioC.messages.create>[0]);
+        return;
+      } catch (e: any) {
+        // Structured failure log: Twilio error code + body length make silent drops diagnosable.
+        // Code 21617 = body over 1600 chars; 63016/63021 = media fetch/format rejected.
+        console.error(`[TWILIO_SEND] ${label} attempt ${d + 1}/${delays.length} failed — code=${e?.code ?? "?"} status=${e?.status ?? "?"} bodyLen=${bodyLen} media=${hasMedia} msg="${(e?.message || "").slice(0, 160)}"`);
+        if (d === delays.length - 1) console.error(`[TWILIO_SEND] ${label} GAVE UP after ${delays.length} attempts — reply NOT delivered`);
+      }
     }
   };
-  const textParts = parts.filter(p => p.trim());
+  // Hard safety net: never hand Twilio a body over the 1600 limit even if a caller
+  // forgot to splitMessage. Re-split any oversized part here so text always lands.
+  const textParts = parts
+    .filter(p => p.trim())
+    .flatMap(p => (p.length > 1500 ? splitMessage(p, 1500) : [p]));
   // Text is ALWAYS sent standalone; media ALWAYS follows as its own message(s).
   // We deliberately do NOT ride text as a media caption. Twilio rejects the WHOLE
   // message — text included — if it cannot fetch/validate the media URL (bad GIF host,
@@ -136,7 +149,13 @@ function escapeXml(text: string): string {
     .replace(/'/g, "&apos;");
 }
 
-function splitMessage(text: string, maxLen = 3800): string[] {
+// Twilio HARD-CAPS the WhatsApp message body at 1600 characters. A body over 1600
+// is rejected outright with error 21617 — the message never sends. A full workout is
+// ~2200+ chars, so at the old 3800 limit the workout text was ONE oversized part that
+// Twilio silently rejected, while the separate image still delivered — producing the
+// "Today's workout returns a photo and no text" bug. 1500 leaves margin under 1600.
+const TWILIO_WHATSAPP_BODY_LIMIT = 1500;
+function splitMessage(text: string, maxLen = TWILIO_WHATSAPP_BODY_LIMIT): string[] {
   if (/\n\n---\n\n/.test(text)) {
     const days = text.split(/\n\n---\n\n/);
     const result: string[] = [];

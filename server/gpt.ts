@@ -8,6 +8,7 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
+import { assertAiOnline } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
@@ -33,6 +34,7 @@ function releaseSlot(): void {
 // Wrapped inside concurrency limiter so max 25 calls run at once.
 // ============================================================
 async function withOpenAIRetry<T>(fn: () => Promise<T>, label = "openai"): Promise<T> {
+  assertAiOnline(label); // offline test mode: throw instantly so the caller's fallback fires (no network, no backoff)
   await acquireSlot();
   try {
     const MAX_RETRIES = 3;
@@ -1162,6 +1164,7 @@ export async function generateMilestoneVoiceScript(
     : "Direct, warm and real — a genuine moment, spoken like you mean it, not recited.";
 
   try {
+    assertAiOnline("milestoneVoiceScript"); // offline test mode: skip network, fall through to deterministic script
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 120,

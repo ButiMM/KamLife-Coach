@@ -299,24 +299,6 @@ export async function handleEarlyCommands(ctx: {
   }
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
-    // Cooldown: if we already delivered a full workout in the last 5 minutes, don't resend.
-    // This prevents 3 identical bench-press images when the user taps "workout" rapidly
-    // because they think the first reply didn't arrive.
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentWorkoutSends = await db.select({ intent: chatHistory.intent })
-      .from(chatHistory)
-      .where(and(
-        eq(chatHistory.userId, user.id),
-        gte(chatHistory.createdAt, fiveMinutesAgo),
-      ))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(10);
-    if (recentWorkoutSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
-      const cooldownReply = `Your workout is just above ↑ — it was sent a moment ago. Type *done* when you've finished the session.`;
-      await logChat(user.id, message, cooldownReply, "WORKOUT_COOLDOWN");
-      return cooldownReply;
-    }
-
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
       const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);

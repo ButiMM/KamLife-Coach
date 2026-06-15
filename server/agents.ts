@@ -1,6 +1,7 @@
 import OpenAI from "openai";
 import { queryFoodDatabase } from "./foods";
 import { HANDLING_CONFUSION } from "./coach-prompt";
+import { assertAiOnline } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -58,6 +59,7 @@ ${saFlags ? "\n" + saFlags : ""}${foodDbContext}${memoryContext ? "\n\nCOACH K M
 ${HARD_LIMIT}`;
 
   try {
+    assertAiOnline("agent");
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 200,
@@ -118,6 +120,7 @@ ${programme}
 ${HARD_LIMIT}`;
 
   try {
+    assertAiOnline("agent");
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 800,
@@ -170,6 +173,7 @@ ${saFlags ? "\n" + saFlags : ""}${memoryContext ? "\n\nCOACH K MEMORY — WHAT Y
 ${HARD_LIMIT}`;
 
   try {
+    assertAiOnline("agent");
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 150,
@@ -212,6 +216,7 @@ Their target: ${targetValue}
 ${HARD_LIMIT}`;
 
   try {
+    assertAiOnline("agent");
     const response = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       max_tokens: 100,
