@@ -36,6 +36,11 @@ export async function runCulturalCalendar(): Promise<void> {
 }
 
 export async function runWomensMonth(): Promise<void> {
+  // Guard: this is an AUGUST-only campaign (SA Women's Month). The cron fires
+  // every Monday, so without this check the "August — Women's Month" message
+  // goes out all year round — which is exactly what was happening. SAST = UTC+2.
+  const monthSAST = new Date(Date.now() + 2 * 3_600_000).getUTCMonth() + 1;
+  if (monthSAST !== 8) return;
   console.log("[SCHEDULER] JOB: Women's Month Monday message");
   const clients = await getActiveClients();
   const femaleIndicators = (client: { primaryFocusArea?: string | null; profileNotes?: string | null }) =>

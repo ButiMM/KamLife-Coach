@@ -24,7 +24,7 @@ export { getKamlifeProgramme } from "../programme";
 export { getShoppingList, formatShoppingList } from "../shopping-lists";
 export { PRICING } from "../../shared/pricing";
 export { selectVariantMessage, recordDelivery } from "../ab";
-export { asc, lte, count, inArray } from "drizzle-orm";
+export { asc, lte, count, inArray, isNotNull } from "drizzle-orm";
 
 // ============================================================
 // SCHEDULER STATE — persists last-run dates across restarts
@@ -363,6 +363,27 @@ let _lastSchedulerSendAt = 0;
 const _sendRatePerSec = Math.max(1, Number(process.env.SCHEDULER_SEND_RATE_PER_SEC) || 10);
 const SCHEDULER_MIN_GAP_MS = Math.round(1000 / _sendRatePerSec);
 
+// Record an outbound message in the client's chat history so the coach's GPT
+// context can SEE what it proactively sent. Without this, every scheduler
+// message (morning brief, weigh-in nudge, Women's Month, comeback, etc.) is
+// invisible to conversationHistory — so when a client replies to a proactive,
+// the coach has amnesia and hallucinates a contextless answer. Best-effort:
+// never block or fail a send because logging failed. Phone-number lookup: the
+// `to` passed by proactive jobs is the exact stored phoneNumber (whatsapp:+27…),
+// so an equality match resolves the user. Coach/admin alerts go to numbers with
+// no matching user row and are simply skipped — correct.
+async function logOutboundToHistory(to: string, body: string): Promise<void> {
+  const text = (body || "").trim();
+  if (!text) return; // media-only sends carry no text worth remembering
+  try {
+    const u = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, to)).limit(1);
+    if (!u.length) return;
+    await db.insert(chatHistory).values({ userId: u[0].id, messageIn: null, messageOut: text, intent: "PROACTIVE" });
+  } catch (e: any) {
+    console.warn(`[SCHEDULER] outbound history log failed (non-fatal) for ${to.slice(-8)}: ${e?.message || e}`);
+  }
+}
+
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();
   // Rate limit: enforce minimum gap between sends
@@ -393,6 +414,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
       recordTwilioSuccess();
       deliveryStats.sent++;
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
+      void logOutboundToHistory(to, body); // best-effort, non-blocking
       return;
     } catch (err: unknown) {
       const e = err as { status?: number; code?: number; message?: string };
@@ -402,6 +424,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
         deliveryStats.failed++;
         console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
         await sendSMSFallback(to, body);
+        void logOutboundToHistory(to, body); // best-effort, non-blocking
         return;
       }
       const isTransient = !e?.status || e.status === 429 || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";

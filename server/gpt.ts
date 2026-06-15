@@ -272,8 +272,12 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .catch(() => [] as { day: string; total: number }[]),
     ]);
 
+    // Count only days the CLIENT actually spoke (messageIn present). Outbound-only
+    // rows (proactive sends, intent=PROACTIVE) have a null messageIn and must NOT
+    // count as engagement — otherwise a silent client who merely receives daily
+    // nudges looks fully active and silence detection never fires.
     const daysWithLogs = new Set(
-      recentChats.map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
+      recentChats.filter(c => (c.messageIn || "").trim()).map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
     ).size;
     const daysSilent = 7 - daysWithLogs;
 

@@ -1,6 +1,6 @@
 import {
   db, users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs,
-  eq, gte, and, lt, asc,
+  eq, gte, and, lt, asc, isNotNull,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimProactive, claimDailySlot,
   getActiveClients, isPaused, loadState, saveState,
   todaySAST, thisWeekUTC,
@@ -85,7 +85,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       if (!(await claimProactive(client.id, "sunday_report", thisWeekUTC(), { critical: true }))) continue;
       const name = client.name || "there";
       const [chats, workoutEntries, weightEntries, stepEntries] = await Promise.all([
-        db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, weekAgo))),
+        db.select().from(chatHistory).where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, weekAgo))),
         db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, weekAgo))),
         db.select().from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, weekAgo))).orderBy(asc(weightLogs.loggedAt)),
         db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
@@ -365,8 +365,10 @@ export async function runNsvCheckin(): Promise<void> {
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {
+      // Require a real client message (messageIn present) — outbound-only proactive
+      // rows must not count as engagement, or this check-in goes to silent clients.
       const recentActivity = await db.select({ id: chatHistory.id }).from(chatHistory)
-        .where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, sevenDaysAgo))).limit(1);
+        .where(and(eq(chatHistory.userId, client.id), isNotNull(chatHistory.messageIn), gte(chatHistory.createdAt, sevenDaysAgo))).limit(1);
       if (recentActivity.length === 0) continue;
       const name = client.name || "there";
       const week = client.programmeWeek || 1;
