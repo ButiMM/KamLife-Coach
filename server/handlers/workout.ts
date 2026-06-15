@@ -6,8 +6,9 @@
  */
 
 import { db } from "../db";
-import { users, workoutLogs, exerciseLogs, stepLogs } from "../../shared/schema";
+import { users, workoutLogs, exerciseLogs, stepLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
+import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
 import {
   buildDayWorkout, buildDay2Workout, buildDay3Workout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
@@ -67,6 +68,30 @@ export async function handleWorkoutCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
+
+  // ---- WORKOUT DIFFICULTY FEEDBACK — the post-session "how was it?" loop ----
+  // Only interpret "too easy / just right / too hard" as session feedback when a
+  // workout was actually delivered or logged in the last 6 hours, and the message
+  // isn't about food/money/the app. This recency gate is what keeps "this diet is
+  // too hard" from being misread as workout feedback — no state machine needed.
+  const feedbackKind = classifyWorkoutFeedback(m);
+  if (
+    feedbackKind
+    && !/\b(diet|eat|eating|food|meal|protein|carbs?|expensive|money|afford|app|bot|coach|subscription|price|pay)\b/i.test(m)
+    && (m.split(/\s+/).length <= 8 || /\b(workout|session|training|gym|that|it|today)\b/i.test(m))
+  ) {
+    const sixHoursAgo = new Date(Date.now() - 6 * 3600_000);
+    const recent = await db.select({ intent: chatHistory.intent }).from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sixHoursAgo)))
+      .orderBy(desc(chatHistory.createdAt)).limit(12);
+    const hadWorkout = recent.some(r => ["WORKOUT_DONE", "WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""));
+    if (hadWorkout) {
+      const reply = workoutFeedbackReply(feedbackKind, firstName);
+      storeMemory(phone, `Workout difficulty: last session felt "${feedbackKind.replace("_", " ")}"`, "workout").catch(() => {});
+      await logChat(user.id, message, reply, "WORKOUT_FEEDBACK");
+      return reply;
+    }
+  }
 
   // ---- "MY LIFTS" — show recent exercise history ----
   if (["my lifts", "lifts", "lift history", "my lift history", "my exercises", "exercise history", "log my lifts"].includes(m)) {
@@ -459,7 +484,7 @@ export async function handleWorkoutCommands(ctx: {
       }, 60_000);
     }
 
-    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----

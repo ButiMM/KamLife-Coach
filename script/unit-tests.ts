@@ -12,6 +12,7 @@ import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from ".
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
+import { classifyWorkoutFeedback } from "../server/workout-feedback";
 
 let passed = 0;
 let failed = 0;
@@ -935,6 +936,31 @@ test("triage: sortByRisk puts red first, then most-silent within a level", () =>
   assert.equal(sorted[0].triage.level, "red");
   assert.equal(sorted[0].daysSinceActive, 8, "most-silent red comes before less-silent red");
   assert.equal(sorted[3].triage.level, "green");
+});
+
+// ============================================================
+// Workout difficulty feedback classifier (pure)
+// ============================================================
+
+test("feedback: 'too easy' → too_easy", () => {
+  assert.equal(classifyWorkoutFeedback("that was too easy"), "too_easy");
+});
+test("feedback: 'felt easy, need more' → too_easy", () => {
+  assert.equal(classifyWorkoutFeedback("felt easy, need more next time"), "too_easy");
+});
+test("feedback: 'too hard' → too_hard", () => {
+  assert.equal(classifyWorkoutFeedback("that was too hard"), "too_hard");
+});
+test("feedback: 'it kicked my butt' → too_hard", () => {
+  assert.equal(classifyWorkoutFeedback("brutal, it kicked my ass"), "too_hard");
+});
+test("feedback: 'just right' / 'perfect' → just_right", () => {
+  assert.equal(classifyWorkoutFeedback("that was just right"), "just_right");
+  assert.equal(classifyWorkoutFeedback("perfect session"), "just_right");
+});
+test("feedback: unrelated message → null", () => {
+  assert.equal(classifyWorkoutFeedback("what's for dinner"), null);
+  assert.equal(classifyWorkoutFeedback("log 2 eggs"), null);
 });
 
 // ============================================================
