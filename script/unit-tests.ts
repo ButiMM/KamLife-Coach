@@ -11,6 +11,7 @@ import { calculateTargets, calculateStepsTarget } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
+import { computeClientRisk, sortByRisk } from "../server/client-triage";
 
 let passed = 0;
 let failed = 0;
@@ -888,6 +889,52 @@ test("score: muscle_gain rewards gaining, fat_loss rewards losing (same change, 
   const gaining = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: 0.4 });
   const losingOnBulk = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: -0.4 });
   assert.ok(gaining.score > losingOnBulk.score, "muscle_gain must credit a gain over a loss");
+});
+
+// ============================================================
+// Client triage — "who needs help today" risk classifier (pure)
+// ============================================================
+
+const ACTIVE_ON_TRACK = {
+  daysSinceActive: 0, daysSinceSignup: 30, hasOpenUrgentEscalation: false,
+  subscriptionStatus: "active", plannedSessionsPerWeek: 3, workoutsLast7: 3,
+};
+
+test("triage: safety escalation is always red, beats everything", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, hasOpenUrgentEscalation: true });
+  assert.equal(t.level, "red");
+  assert.match(t.reason, /escalation/i);
+});
+test("triage: cancelled subscription is red (win-back)", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, subscriptionStatus: "cancelled" });
+  assert.equal(t.level, "red");
+});
+test("triage: silent 5+ days is red", () => {
+  assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 6 }).level, "red");
+});
+test("triage: quiet 2-4 days is yellow", () => {
+  assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 3 }).level, "yellow");
+});
+test("triage: active but missing most sessions is yellow", () => {
+  assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 1, workoutsLast7: 0 }).level, "yellow");
+});
+test("triage: active and on track is green", () => {
+  assert.equal(computeClientRisk(ACTIVE_ON_TRACK).level, "green");
+});
+test("triage: brand-new signup with no messages yet is green (onboarding, not silent)", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: null, daysSinceSignup: 0 });
+  assert.equal(t.level, "green");
+});
+test("triage: old account that never engaged is red", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: null, daysSinceSignup: 10 });
+  assert.equal(t.level, "red");
+});
+test("triage: sortByRisk puts red first, then most-silent within a level", () => {
+  const mk = (level: "red"|"yellow"|"green", days: number|null) => ({ triage: { level, reason: "", nextAction: "" }, daysSinceActive: days });
+  const sorted = sortByRisk([mk("green", 0), mk("red", 2), mk("yellow", 1), mk("red", 8)]);
+  assert.equal(sorted[0].triage.level, "red");
+  assert.equal(sorted[0].daysSinceActive, 8, "most-silent red comes before less-silent red");
+  assert.equal(sorted[3].triage.level, "green");
 });
 
 // ============================================================

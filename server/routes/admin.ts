@@ -1,10 +1,11 @@
 import type { Express } from "express";
 import { db } from "../db";
 import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos } from "../../shared/schema";
-import { eq, desc, asc, and, gte, isNull, or } from "drizzle-orm";
+import { eq, desc, asc, and, gte, isNull, or, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
 import { requireAdminKey } from "./auth";
+import { computeClientRisk, sortByRisk } from "../client-triage";
 import type { RouteDeps } from "./types";
 import { sendWhatsApp } from "../scheduler";
 import { generateVoiceNote } from "../tts";
@@ -49,6 +50,76 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       });
     } catch (err) {
       res.status(500).json({ message: "Failed to fetch users" });
+    }
+  });
+
+  // ── Triage queue: "who needs help today" (read-only intervention queue) ──
+  // Classifies clients currently in coaching (active/trial) plus churned (cancelled)
+  // into red/yellow/green so the coach acts on the right person first. Pure read —
+  // never touches the message pipeline. Uses grouped queries (no N+1).
+  app.get("/api/triage", requireAdminKey, async (_req: any, res) => {
+    try {
+      const now = Date.now();
+      const sevenDaysAgo = new Date(now - 7 * 86400000);
+
+      const [clients, lastChats, recentWorkouts, openEsc] = await Promise.all([
+        db.select({
+          id: users.id, name: users.name, phoneNumber: users.phoneNumber,
+          subscriptionStatus: users.subscriptionStatus, createdAt: users.createdAt,
+          trainingDaysPerWeek: users.trainingDaysPerWeek,
+        }).from(users).where(inArray(users.subscriptionStatus, ["active", "trial", "cancelled"])),
+        db.select({ userId: chatHistory.userId, last: sql<string>`MAX(${chatHistory.createdAt})` })
+          .from(chatHistory).groupBy(chatHistory.userId),
+        db.select({ userId: workoutLogs.userId, cnt: sql<number>`COUNT(*)::int` })
+          .from(workoutLogs).where(gte(workoutLogs.loggedAt, sevenDaysAgo)).groupBy(workoutLogs.userId),
+        db.select({ userId: escalations.userId })
+          .from(escalations).where(and(eq(escalations.status, "open"), inArray(escalations.priority, ["urgent", "high"]))),
+      ]);
+
+      const lastChatMap = new Map(lastChats.map(r => [r.userId, r.last ? new Date(r.last).getTime() : null]));
+      const workoutMap = new Map(recentWorkouts.map(r => [r.userId, r.cnt]));
+      const escSet = new Set(openEsc.map(r => r.userId));
+      const daysBetween = (then: number) => Math.floor((now - then) / 86400000);
+
+      const rows = clients.map(c => {
+        const lastChat = lastChatMap.get(c.id) ?? null;
+        const daysSinceActive = lastChat !== null ? daysBetween(lastChat) : null;
+        const daysSinceSignup = c.createdAt ? daysBetween(new Date(c.createdAt).getTime()) : 999;
+        const triage = computeClientRisk({
+          daysSinceActive,
+          daysSinceSignup,
+          hasOpenUrgentEscalation: escSet.has(c.id),
+          subscriptionStatus: c.subscriptionStatus || "inactive",
+          plannedSessionsPerWeek: c.trainingDaysPerWeek || 0,
+          workoutsLast7: workoutMap.get(c.id) || 0,
+        });
+        return {
+          id: c.id,
+          name: c.name || "(no name)",
+          phone: c.phoneNumber,
+          waLink: `https://wa.me/${String(c.phoneNumber || "").replace(/[^\d]/g, "")}`,
+          subscriptionStatus: c.subscriptionStatus,
+          daysSinceActive,
+          workoutsLast7: workoutMap.get(c.id) || 0,
+          level: triage.level,
+          reason: triage.reason,
+          nextAction: triage.nextAction,
+        };
+      });
+
+      const sorted = sortByRisk(rows.map(r => ({ ...r, triage: { level: r.level, reason: r.reason, nextAction: r.nextAction } })))
+        .map(({ triage, ...r }) => r);
+      const summary = {
+        red: rows.filter(r => r.level === "red").length,
+        yellow: rows.filter(r => r.level === "yellow").length,
+        green: rows.filter(r => r.level === "green").length,
+        total: rows.length,
+      };
+      console.log(`[ADMIN AUDIT] GET /api/triage — ${summary.red} red, ${summary.yellow} yellow — ${new Date().toISOString()}`);
+      res.json({ summary, clients: sorted });
+    } catch (err) {
+      console.error("[TRIAGE]", err);
+      res.status(500).json({ message: "Failed to build triage queue" });
     }
   });
 
@@ -372,6 +443,84 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       console.error("[ADMIN] /api/admin/activity error:", err);
       res.status(500).json({ message: err.message || "Failed to fetch activity" });
     }
+  });
+
+  // ── Admin: HTML triage queue ("who needs help today") ──
+  // Self-contained page (same sessionStorage key auth as /admin/activity) that
+  // renders /api/triage as a red→yellow→green action list with one-tap WhatsApp.
+  app.get("/admin/triage", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>KamLife — Triage</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { --bg:#0b0d10; --fg:#e8e8e8; --muted:#8a8f98; --card:#14171c; --row:#1a1e25; --red:#e5484d; --yellow:#f0a500; --green:#31d0aa; }
+  * { box-sizing:border-box; } body { background:var(--bg); color:var(--fg); font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; margin:0; }
+  header { padding:16px 20px; border-bottom:1px solid #22262c; display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; }
+  h1 { font-size:16px; margin:0; font-weight:600; }
+  .summary { display:flex; gap:8px; padding:12px 20px; border-bottom:1px solid #22262c; background:var(--card); flex-wrap:wrap; }
+  .pill { border-radius:999px; padding:4px 12px; font-size:12px; font-weight:600; background:var(--row); }
+  .pill.red { color:var(--red); } .pill.yellow { color:var(--yellow); } .pill.green { color:var(--green); }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th,td { text-align:left; padding:10px 12px; border-bottom:1px solid #1d2026; vertical-align:top; }
+  th { color:var(--muted); font-weight:500; font-size:11px; letter-spacing:.05em; text-transform:uppercase; }
+  tr:hover td { background:var(--row); }
+  .dot { display:inline-block; width:10px; height:10px; border-radius:50%; margin-right:6px; }
+  .dot.red { background:var(--red); } .dot.yellow { background:var(--yellow); } .dot.green { background:var(--green); }
+  .who { font-weight:500; } .muted { color:var(--muted); }
+  a.wa { color:var(--green); text-decoration:none; border:1px solid #2a2f37; border-radius:6px; padding:4px 8px; white-space:nowrap; }
+  a.wa:hover { background:var(--row); }
+  .empty,.error { padding:40px 20px; text-align:center; color:var(--muted); } .error { color:var(--red); }
+  button { background:transparent; color:var(--muted); border:1px solid #2a2f37; border-radius:4px; padding:4px 10px; cursor:pointer; font:inherit; }
+</style></head>
+<body>
+<header><h1>🚦 Triage — who needs help today</h1>
+  <div class="muted"><span id="meta">Loading…</span> · <button id="refresh">refresh</button> · <button id="logout">logout</button></div>
+</header>
+<div class="summary" id="summary"></div>
+<div id="content"><div class="empty">Loading…</div></div>
+<script>
+(function(){
+  var KEY="kamlife-dashboard-key";
+  function getKey(){ var k=sessionStorage.getItem(KEY); if(!k){ k=prompt("Dashboard key:"); if(k) sessionStorage.setItem(KEY,k); } return k; }
+  function esc(s){ return String(s==null?"":s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;").replaceAll('"',"&quot;").replaceAll("'","&#39;"); }
+  var content=document.getElementById("content"), summary=document.getElementById("summary"), meta=document.getElementById("meta");
+  function silentLabel(d){ return d==null?"never":(d===0?"today":d+"d"); }
+  async function load(){
+    var key=getKey(); if(!key){ content.innerHTML='<div class="error">No key.</div>'; return; }
+    try {
+      var resp=await fetch("/api/triage",{headers:{"x-dashboard-key":key}});
+      if(resp.status===401){ sessionStorage.removeItem(KEY); content.innerHTML='<div class="error">Unauthorized — refresh to re-enter the key.</div>'; return; }
+      if(!resp.ok){ content.innerHTML='<div class="error">HTTP '+resp.status+'</div>'; return; }
+      render(await resp.json());
+    } catch(e){ content.innerHTML='<div class="error">Error: '+esc(e.message||e)+'</div>'; }
+  }
+  function render(data){
+    var s=data.summary||{red:0,yellow:0,green:0,total:0};
+    meta.textContent=s.total+" clients";
+    summary.innerHTML='<span class="pill red">🔴 '+s.red+' red</span><span class="pill yellow">🟡 '+s.yellow+' yellow</span><span class="pill green">🟢 '+s.green+' green</span>';
+    var rows=(data.clients||[]);
+    if(!rows.length){ content.innerHTML='<div class="empty">No clients in coaching yet.</div>'; return; }
+    var html='<table><thead><tr><th>Status</th><th>Client</th><th>Why</th><th>Next action</th><th>Last seen</th><th>Sessions/7d</th><th></th></tr></thead><tbody>';
+    rows.forEach(function(c){
+      html+='<tr>'
+        +'<td><span class="dot '+esc(c.level)+'"></span>'+esc(c.level)+'</td>'
+        +'<td><span class="who">'+esc(c.name)+'</span><br><span class="muted">'+esc(c.phone)+'</span></td>'
+        +'<td>'+esc(c.reason)+'</td>'
+        +'<td>'+esc(c.nextAction)+'</td>'
+        +'<td class="muted">'+silentLabel(c.daysSinceActive)+'</td>'
+        +'<td class="muted">'+esc(c.workoutsLast7)+'</td>'
+        +'<td><a class="wa" href="'+esc(c.waLink)+'" target="_blank" rel="noopener">WhatsApp →</a></td>'
+        +'</tr>';
+    });
+    content.innerHTML=html+'</tbody></table>';
+  }
+  document.getElementById("refresh").onclick=load;
+  document.getElementById("logout").onclick=function(){ sessionStorage.removeItem(KEY); location.reload(); };
+  load();
+})();
+</script>
+</body></html>`);
   });
 
   // ── Admin: HTML activity dashboard (browser-friendly view of the above) ──
