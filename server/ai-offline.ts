@@ -16,6 +16,12 @@
 export const AI_OFFLINE =
   process.env.OFFLINE_AI === "1" || process.env.KAMLIFE_DB_STUB === "1";
 
+// One clear signal at startup instead of total silence — so a reader of CI output knows
+// WHY there are no GPT responses, without us printing a stack trace per skipped call.
+if (AI_OFFLINE) {
+  console.log("[AI_OFFLINE] OpenAI calls disabled for test mode — handlers fall back deterministically");
+}
+
 /** Marker used by isAiOfflineError() to detect expected offline throws vs real errors. */
 const AI_OFFLINE_MARKER = "__ai_offline__";
 

@@ -36,9 +36,10 @@ async function sendParts(
   };
   // Hard safety net: never hand Twilio a body over the 1600 limit even if a caller
   // forgot to splitMessage. Re-split any oversized part here so text always lands.
+  // Uses the single TWILIO_WHATSAPP_BODY_LIMIT constant — same value splitMessage defaults to.
   const textParts = parts
     .filter(p => p.trim())
-    .flatMap(p => (p.length > 1500 ? splitMessage(p, 1500) : [p]));
+    .flatMap(p => (p.length > TWILIO_WHATSAPP_BODY_LIMIT ? splitMessage(p, TWILIO_WHATSAPP_BODY_LIMIT) : [p]));
   // Text is ALWAYS sent standalone; media ALWAYS follows as its own message(s).
   // We deliberately do NOT ride text as a media caption. Twilio rejects the WHOLE
   // message — text included — if it cannot fetch/validate the media URL (bad GIF host,

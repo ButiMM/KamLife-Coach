@@ -571,25 +571,33 @@ const HAS_SUBSTANTIVE_QUESTION = (m: string) =>
 const QUANTITY_WORD = /\b(\d+|one|two|three|four|five|half|a\s+cup|a\s+bowl|a\s+plate|a\s+tin|a\s+scoop|tbsp|tsp|grams?|kg|ml|litre)\b/i;
 
 // directFoodScan fires when: no question, no frustration, no log trigger, no future planning,
-// has food (assumed true below), ≤12 words, AND (2+ foods simulated by token count OR quantity word).
-// We test the non-food-scanner conditions here.
-const wouldDirectScan = (m: string, foodCount: number) => {
+// has food, ≤12 words, at least ONE exact food match, AND (2+ exact matches OR a quantity word).
+// Mirrors food-context.ts directFoodScan exactly:
+//   exactFoodCount >= 1 && (exactFoodCount >= 2 || hasQuantityWord)
+// exactFoodCount is modelled separately from foodCount so the tests can prove a fuzzy-only
+// match (exactFoodCount=0) never auto-logs — that is real evidence the scanner won't write
+// to the food log on a guess.
+const wouldDirectScan = (m: string, foodCount: number, exactFoodCount: number) => {
   const lo = m.toLowerCase();
   if (IS_QUESTION(lo)) return false;
   if (IS_FRUSTRATION(lo)) return false;
   if (HAS_LOG_TRIGGER.test(lo)) return false;
   if (IS_FUTURE_PLANNING.test(lo)) return false;
   if (m.split(/\s+/).length > 12) return false;
-  return foodCount >= 2 || QUANTITY_WORD.test(lo);
+  if (foodCount < 1) return false;
+  if (exactFoodCount < 1) return false; // a fuzzy guess alone is never enough to auto-log
+  return exactFoodCount >= 2 || QUANTITY_WORD.test(lo);
 };
 
 // Full gate: would the food scanner fire? (mirrors food-context.ts logic exactly)
 // foodCount: how many SA foods were found (0 = no food detected, controls hasActualFood)
+// exactFoodCount: how many were EXACT matches (defaults to foodCount — i.e. all exact —
+//   so existing exact-match corpus cases stay valid; pass a smaller value to model fuzzy).
 // Mirrors the gate at food-context.ts: (!isQuestion || foodLogOverride) && !isFrustration
 //   && !isEmotionalOnly && !isFuturePlanning && hasActualFood && (hasLogTrigger || directFoodScan)
 // isEmotionalOnly depends on the soft-struggle detector (not regex-reproducible here);
 // the corpus below contains no emotional-struggle messages, so it is treated as false.
-const wouldLog = (m: string, foodCount: number) => {
+const wouldLog = (m: string, foodCount: number, exactFoodCount: number = foodCount) => {
   const lo = m.toLowerCase();
   const hasLogTrig = HAS_LOG_TRIGGER.test(lo);
   const hasFood = foodCount > 0;
@@ -597,7 +605,7 @@ const wouldLog = (m: string, foodCount: number) => {
   const isFuturePlan = IS_FUTURE_PLANNING.test(lo);
   const isQ = IS_QUESTION(lo);
   const isFrus = IS_FRUSTRATION(lo);
-  const directScan = hasFood && wouldDirectScan(m, foodCount);
+  const directScan = hasFood && wouldDirectScan(m, foodCount, exactFoodCount);
   return (!isQ || foodLogOverride) && !isFrus && !isFuturePlan && hasFood && (hasLogTrig || directScan);
 };
 
@@ -779,6 +787,28 @@ test("gate BLOCKS: 'this is nonsense, wrong again' (pure frustration, no eating 
 // But frustration phrased as a correction of a logged meal SHOULD still log:
 test("gate LOGS: 'no that's wrong, I had chicken not beef' (correction with eating verb)", () => {
   assert.ok(wouldLog("no that's wrong, I had chicken not beef", 2), "meal correction must still log despite frustration words");
+});
+
+// --- directFoodScan: exact-vs-fuzzy match modelling (food-context.ts requires exactFoodCount >= 1) ---
+// A bare food message with only FUZZY matches (exactFoodCount=0) must NOT auto-log — a guess
+// is never enough evidence to write to the food log without an eating verb.
+test("gate BLOCKS: 'something with mince' (2 fuzzy, 0 exact — no auto-log on a guess)", () => {
+  assert.ok(!wouldLog("something with mince and stuff", 2, 0), "fuzzy-only matches must not directFoodScan");
+});
+test("gate BLOCKS: bare single fuzzy food (1 fuzzy, 0 exact)", () => {
+  assert.ok(!wouldLog("some kind of stew", 1, 0), "single fuzzy match must not directFoodScan");
+});
+// Two EXACT matches with no eating verb SHOULD auto-log (directFoodScan).
+test("gate LOGS: 'rice and chicken' (2 exact, directFoodScan)", () => {
+  assert.ok(wouldLog("rice and chicken", 2, 2), "two exact bare foods should directFoodScan");
+});
+// One EXACT match alone (no quantity, no verb) must NOT auto-log — needs 2 exact OR a quantity.
+test("gate BLOCKS: 'chicken' (1 exact, no quantity, no verb)", () => {
+  assert.ok(!wouldLog("chicken", 1, 1), "single exact food without quantity must not directFoodScan");
+});
+// One EXACT match WITH a quantity word SHOULD auto-log.
+test("gate LOGS: '2 eggs' (1 exact + quantity, directFoodScan)", () => {
+  assert.ok(wouldLog("2 eggs", 1, 1), "single exact food with quantity should directFoodScan");
 });
 
 // ============================================================
