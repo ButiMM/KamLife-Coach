@@ -156,27 +156,38 @@ export async function handleFoodContext(ctx: {
     } else {
       const todayStartCorr = sastDayStart();
       try {
-        const [lastFoodLog, lastMealLogCorr] = await Promise.all([
-          db.select({ id: chatHistory.id })
-            .from(chatHistory)
-            .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
-            .orderBy(desc(chatHistory.createdAt))
-            .limit(1),
-          db.select({ id: mealLogs.id })
-            .from(mealLogs)
-            .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartCorr)))
-            .orderBy(desc(mealLogs.loggedAt))
-            .limit(1),
-        ]);
+        // Get the last FOOD_LOG chat entry — we need its timestamp to find the
+        // RIGHT meal log to delete. Without this, correcting breakfast after logging
+        // a snack would delete the snack (most-recent) instead of breakfast.
+        const [lastFoodLog] = await db.select({ id: chatHistory.id, createdAt: chatHistory.createdAt })
+          .from(chatHistory)
+          .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStartCorr)))
+          .orderBy(desc(chatHistory.createdAt))
+          .limit(1);
+        // Find the meal log whose loggedAt is closest to (within 2 minutes of) the
+        // chatHistory entry we just found. This correctly pairs "log at 8am" with
+        // "mealLog at 8am" even when later meals exist.
+        const corrWindowStart = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() - 120_000) : todayStartCorr;
+        const corrWindowEnd   = lastFoodLog ? new Date(new Date(lastFoodLog.createdAt!).getTime() + 120_000) : new Date();
+        const [lastMealLogCorr] = await db.select({ id: mealLogs.id })
+          .from(mealLogs)
+          .where(and(
+            eq(mealLogs.userId, user.id),
+            gte(mealLogs.loggedAt, corrWindowStart),
+            lt(mealLogs.loggedAt, corrWindowEnd),
+          ))
+          .orderBy(desc(mealLogs.loggedAt))
+          .limit(1);
+        const lastFoodLogArr = lastFoodLog ? [lastFoodLog] : [];
         // Wrap delete + recount + cache update in a transaction — all succeed or none do
         await db.transaction(async (tx) => {
-          if (lastFoodLog.length > 0) {
-            await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog[0].id));
+          if (lastFoodLog) {
+            await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
           }
-          if (lastMealLogCorr.length > 0) {
-            await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr[0].id));
+          if (lastMealLogCorr) {
+            await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr.id));
           }
-          if (lastFoodLog.length > 0 || lastMealLogCorr.length > 0) {
+          if (lastFoodLog || lastMealLogCorr) {
             const recomputed = await recomputeTodayFoodTotals(user.id);
             await tx.update(users).set({
               todayCalories: recomputed.calories,

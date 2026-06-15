@@ -299,6 +299,23 @@ export async function handleEarlyCommands(ctx: {
   }
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
+    // 5-minute cooldown: if we already delivered a full workout recently, return a short
+    // "it's above ↑" reply instead of re-sending the full text again.
+    // The cooldown only triggers on re-requests AFTER the delivery fix (text now reliably
+    // lands at 1500-char chunks), so this won't trap users whose first request failed.
+    // We check WORKOUT_VIEW, WORKOUT_MISSED_CATCHUP and WORKOUT_HOLIDAY intents.
+    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
+    const recentSends = await db.select({ intent: chatHistory.intent })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, fiveMinAgo)))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(10);
+    if (recentSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
+      const cool = `Your workout was just sent — scroll up ↑ to see it. Type *done* when you finish the session.`;
+      await logChat(user.id, message, cool, "WORKOUT_COOLDOWN");
+      return cool;
+    }
+
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
       const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);

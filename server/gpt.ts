@@ -8,7 +8,7 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
-import { assertAiOnline } from "./ai-offline";
+import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
@@ -758,7 +758,7 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
     foodFallbackCache.set(cacheKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
     return result;
   } catch (err) {
-    console.warn("[gptFoodFallback] error:", err);
+    if (!isAiOfflineError(err)) console.warn("[gptFoodFallback] error:", err);
     return null;
   }
 }
@@ -879,7 +879,7 @@ Your task: Identify ONLY the food items in the user's message that are completel
     console.log(`[gptFoodSupplement] Found ${foods.length} extras: ${foods.map(f => f.name).join(', ')}`);
     return foods.length > 0 ? foods : null;
   } catch (err) {
-    console.warn("[gptFoodSupplement] error:", err);
+    if (!isAiOfflineError(err)) console.warn("[gptFoodSupplement] error:", err);
     return null;
   }
 }
@@ -1067,6 +1067,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
     return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
   } catch (err: any) {
+    if (isAiOfflineError(err)) return "Eish Coach K had a moment. Try that again.";
     const status = err?.status ?? err?.statusCode ?? 0;
     const code = err?.code ?? "";
     const msg = err?.message ?? "";
@@ -1187,7 +1188,7 @@ export async function generateMilestoneVoiceScript(
       return { script, emotion };
     }
   } catch (err) {
-    console.warn("[VOICE_SCRIPT] GPT failed, using fallback:", err);
+    if (!isAiOfflineError(err)) console.warn("[VOICE_SCRIPT] GPT failed, using fallback:", err);
   }
 
   return { script: fallbacks[milestoneType], emotion };
@@ -1309,7 +1310,7 @@ Examples:
 
     return { intent, confidence, canonical };
   } catch (err) {
-    console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
+    if (!isAiOfflineError(err)) console.warn("[INTENT] Classifier error (non-fatal, falling back):", err);
     return { intent: "OTHER", confidence: 0 };
   }
 }

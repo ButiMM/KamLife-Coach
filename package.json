@@ -16,7 +16,8 @@
     "db:push": "drizzle-kit push",
     "backfill:steps": "tsx script/backfill-step-targets.ts",
     "diagnose:voice": "tsx script/diagnose-voice.ts",
-    "test:routing": "tsx script/routing-audit.ts"
+    "test:routing": "tsx script/routing-audit.ts",
+    "diagnose:env": "tsx script/diagnose-env.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

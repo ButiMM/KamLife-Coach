@@ -1,7 +1,7 @@
 import OpenAI from "openai";
 import { queryFoodDatabase } from "./foods";
 import { HANDLING_CONFUSION } from "./coach-prompt";
-import { assertAiOnline } from "./ai-offline";
+import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -70,7 +70,7 @@ ${HARD_LIMIT}`;
     });
     return response.choices[0]?.message?.content?.trim() || "Log that and keep your protein up today.";
   } catch (err) {
-    console.error("[NUTRITION_AGENT]", err);
+    if (!isAiOfflineError(err)) console.error("[NUTRITION_AGENT]", err);
     return "Eish Coach K had a moment. Try that again.";
   }
 }
@@ -131,7 +131,7 @@ ${HARD_LIMIT}`;
     });
     return response.choices[0]?.message?.content?.trim() || "Check the programme above and get your session done today.";
   } catch (err) {
-    console.error("[PROGRAMMING_AGENT]", err);
+    if (!isAiOfflineError(err)) console.error("[PROGRAMMING_AGENT]", err);
     return "Eish Coach K had a moment. Try that again.";
   }
 }
@@ -184,7 +184,7 @@ ${HARD_LIMIT}`;
     });
     return response.choices[0]?.message?.content?.trim() || "That feeling is real. One session changes everything — do it today.";
   } catch (err) {
-    console.error("[MINDSET_AGENT]", err);
+    if (!isAiOfflineError(err)) console.error("[MINDSET_AGENT]", err);
     return "Eish Coach K had a moment. Try that again.";
   }
 }
@@ -227,7 +227,7 @@ ${HARD_LIMIT}`;
     });
     return response.choices[0]?.message?.content?.trim() || "Logged. Keep going.";
   } catch (err) {
-    console.error("[ADMIN_AGENT]", err);
+    if (!isAiOfflineError(err)) console.error("[ADMIN_AGENT]", err);
     return "Eish Coach K had a moment. Try that again.";
   }
 }

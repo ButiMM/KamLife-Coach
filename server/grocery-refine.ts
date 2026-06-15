@@ -12,6 +12,7 @@
 // ============================================================
 
 import OpenAI from "openai";
+import { assertAiOnline } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -106,6 +107,7 @@ Close with exactly ONE line: tell them to send what they eat each day (photo or 
 
 Voice: direct, warm, SA. No exclamation marks. No "great list". No corporate tone.`;
 
+  assertAiOnline("groceryRefine");
   const resp = await openai.chat.completions.create({
     model: "gpt-4o",
     max_tokens: 900,

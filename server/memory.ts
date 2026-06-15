@@ -1,6 +1,6 @@
 import { pool } from "./db";
 import OpenAI from "openai";
-import { assertAiOnline } from "./ai-offline";
+import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -93,7 +93,7 @@ export async function storeMemory(phone: string, content: string, category: stri
     // Prune stale low-importance memories occasionally (1-in-20 writes)
     if (Math.random() < 0.05) pruneOldMemories(phone).catch(() => {});
   } catch (err) {
-    console.error("[MEMORY] Store error:", err);
+    if (!isAiOfflineError(err)) console.error("[MEMORY] Store error:", err);
   }
 }
 
@@ -112,7 +112,7 @@ export async function retrieveMemories(phone: string, query: string): Promise<st
     );
     return result.rows.map((r: any) => r.content as string);
   } catch (err) {
-    console.error("[MEMORY] Retrieve error:", err);
+    if (!isAiOfflineError(err)) console.error("[MEMORY] Retrieve error:", err);
     return [];
   }
 }

@@ -13,6 +13,7 @@
  */
 
 import OpenAI from "openai";
+import { assertAiOnline } from "./ai-offline";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused } from "./scheduler/shared";
@@ -211,6 +212,7 @@ RULES:
 - Hard limit: 75 words. No filler. No banned phrases.`;
 
   try {
+    assertAiOnline("weeklyRecap");
     const res = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [{ role: "user", content: prompt }],

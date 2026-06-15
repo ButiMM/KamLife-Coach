@@ -460,16 +460,23 @@ export function getExerciseDemoFormCue(exerciseName: string): string {
 
 /**
  * Scans a workout text block for the first bolded exercise name (*Exercise Name*)
- * and returns its image URL, or null.
+ * and returns its CDN GIF URL, or null.
+ *
+ * IMPORTANT: Only returns a URL when a real animated GIF has been uploaded to the CDN
+ * (slug is in UPLOADED_GIF_SLUGS). Static fallback images are deliberately NOT sent with
+ * workout replies — the workout text already includes YouTube tutorial links per exercise
+ * that WhatsApp previews as rich cards. Sending a static bench-press JPG ON TOP of those
+ * creates redundant image spam, especially when users request the workout more than once.
+ * Enable by uploading GIFs to CDN and adding their slugs to UPLOADED_GIF_SLUGS above.
  */
 export function getPrimaryWorkoutGifUrl(workoutText: string): string | null {
+  if (!CUSTOM_CDN || UPLOADED_GIF_SLUGS.size === 0) return null;
   const boldMatches = workoutText.match(/\*([^*]+)\*/g) || [];
   for (const match of boldMatches) {
     const name = match.replace(/\*/g, "").trim();
     const url = getExerciseGifUrl(name);
     if (url) return url;
   }
-  // Fallback: try plain exercise name patterns on numbered lines
   const lines = workoutText.split("\n");
   for (const line of lines) {
     const cleaned = line.replace(/^[0-9️⃣•\-\s]+/, "").split("—")[0].trim().toLowerCase();

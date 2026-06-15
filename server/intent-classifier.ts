@@ -11,6 +11,7 @@
 // messages against human-labelled ground truth.
 
 import OpenAI from "openai";
+import { assertAiOnline } from "./ai-offline";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -82,6 +83,7 @@ export async function classifyIntent(message: string): Promise<IntentClassificat
   if (!trimmed) return { intent: "UNKNOWN", confidence: 0, reasoning: "empty message" };
 
   try {
+    assertAiOnline("intent-classifier");
     const resp = await openai.chat.completions.create({
       model: "gpt-4o-mini",
       temperature: 0,

@@ -135,6 +135,12 @@ const CASES: Case[] = [
     expect: [/84[.,]5/] },
   { name: "weight: question must not log", msg: "What should my weight be for my height?",
     reject: [/logged/i] },
+  { name: "weight: retrospective 'last week it was 83kg' must NOT log today's weight (prod bug 2026-06-15)", msg: "Last week it was 83 kg",
+    reject: [/weight logged|83kg.*target|targets updated/i] },
+  { name: "weight: 'I used to weigh 90kg' must NOT log (prod bug 2026-06-15)", msg: "I used to weigh 90kg",
+    reject: [/weight logged|90kg.*target|targets updated/i] },
+  { name: "weight: 'I started at 95kg' must NOT log (prod bug 2026-06-15)", msg: "I started at 95kg",
+    reject: [/weight logged|95kg.*target|targets updated/i] },
 
   // ── SLEEP ───────────────────────────────────────────────────────────────
   { name: "sleep: hours log", msg: "I slept 7 hours",
@@ -173,6 +179,14 @@ const CASES: Case[] = [
     reject: [/nothing pending/i] },
   { name: "food: question about food must not log", msg: "Is rice bad for fat loss?",
     reject: [/Meal total|logged/i] },
+  { name: "food: 'does chicken and rice have protein' must not log (prod bug 2026-06-15)", msg: "does chicken and rice have protein",
+    reject: [/Meal total|kcal.*protein|logged/i] },
+  { name: "food: 'I had 2 eggs, is that enough protein?' must not silently log (prod bug 2026-06-15)", msg: "I had 2 eggs, is that enough protein?",
+    reject: [/Meal total.*2 eggs|logged.*2 eggs/i] },
+  { name: "food: 'my cousin works at KFC' must NOT return KFC guide (prod bug 2026-06-15)", msg: "My cousin works at KFC",
+    reject: [/Coach K Pick|Streetwise|Quarter chicken|kcal.*protein/i] },
+  { name: "food: 'I ate at KFC for lunch' SHOULD return KFC guide", msg: "I ate at KFC for lunch today",
+    expect: [/KFC|Coach K Pick|Streetwise/i] },
 
   // ── FOOD LOG MGMT ───────────────────────────────────────────────────────
   { name: "mgmt: remove last meal removes ONE entry, never wipes the day (audit catch)", msg: "remove last meal",

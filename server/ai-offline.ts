@@ -16,9 +16,22 @@
 export const AI_OFFLINE =
   process.env.OFFLINE_AI === "1" || process.env.KAMLIFE_DB_STUB === "1";
 
-/** Throws a fast, recognisable error when AI is offline. Caller's catch handles fallback. */
+/** Marker used by isAiOfflineError() to detect expected offline throws vs real errors. */
+const AI_OFFLINE_MARKER = "__ai_offline__";
+
+/** Throws a fast, silent offline marker when AI is disabled. */
 export function assertAiOnline(label: string): void {
   if (AI_OFFLINE) {
-    throw new Error(`[ai-offline] ${label} skipped — AI_OFFLINE is set`);
+    const err = new Error(`[ai-offline] ${label}`);
+    (err as any)[AI_OFFLINE_MARKER] = true;
+    throw err;
   }
+}
+
+/**
+ * Returns true when the error came from assertAiOnline — i.e. it is expected
+ * test-mode behavior, not a real failure. Use in catch blocks to skip error logging.
+ */
+export function isAiOfflineError(err: unknown): boolean {
+  return !!(err && (err as any)[AI_OFFLINE_MARKER]);
 }

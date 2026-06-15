@@ -359,7 +359,10 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
   const trimmed = (reply || "").trim();
   const umLower = userMessage.toLowerCase();
 
-  const looksFoodLog = /\b(ate|had|have|having|eating|i had|i ate|breakfast|lunch|dinner|supper|snack|just had|just ate|meal was|food was)\b/i.test(userMessage);
+  // "have" alone is too broad — "does chicken have protein?" contains "have" but is a question.
+  // Only use eating-specific verbs: had/ate/having/eating/just had/just ate/meal labels.
+  const looksFoodLog = /\b(ate|had|having|eating|i had|i ate|just had|just ate|meal was|food was)\b/i.test(userMessage)
+    || /\b(breakfast|lunch|dinner|supper|snack)\b/i.test(userMessage) && !/^(what|how|is|does|do |can |should |are |will )/i.test(userMessage.trim());
   const looksSteps = /\b(screenshot|step|steps|walk|walked|km|miles)\b/i.test(userMessage);
   const looksVoice = /\b(voice|audio|note)\b/i.test(userMessage);
 
