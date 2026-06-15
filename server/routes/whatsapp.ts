@@ -26,16 +26,17 @@ async function sendParts(
     }
   };
   const textParts = parts.filter(p => p.trim());
-  // One image rides as the caption of the first text part (workout GIFs, equipment images —
-  // unchanged behaviour). Two or more images: keep the text clean and send each as its own
-  // message, since WhatsApp caps media captions at ~1024 chars and separate cards read better.
-  const captionFirst = mediaUrls.length === 1 && textParts.length > 0;
+  // Text is ALWAYS sent standalone; media ALWAYS follows as its own message(s).
+  // We deliberately do NOT ride text as a media caption. Twilio rejects the WHOLE
+  // message — text included — if it cannot fetch/validate the media URL (bad GIF host,
+  // 404, wrong content-type) OR if the caption exceeds WhatsApp's caption cap (~1600
+  // chars, which a full workout blows past). That silently swallowed entire workout
+  // replies — "Today's workout" returned nothing — while text-only menus delivered fine.
+  // Decoupling guarantees the reply text always lands; a failed image only loses the image.
   for (let i = 0; i < textParts.length; i++) {
-    const params: Record<string, unknown> = { from: fromNum, to: phone, body: textParts[i].trim() };
-    if (i === 0 && captionFirst) params.mediaUrl = [mediaUrls[0]];
-    await sendOne(params, `part ${i + 1}`);
+    await sendOne({ from: fromNum, to: phone, body: textParts[i].trim() }, `part ${i + 1}`);
   }
-  for (let k = captionFirst ? 1 : 0; k < mediaUrls.length; k++) {
+  for (let k = 0; k < mediaUrls.length; k++) {
     await sendOne({ from: fromNum, to: phone, mediaUrl: [mediaUrls[k]] }, `media ${k + 1}`);
   }
 }
