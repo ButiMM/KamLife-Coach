@@ -108,7 +108,13 @@ export async function handleEarlyCommands(ctx: {
 
   if (/\b(protein)\b.*\b(target|goal|daily|mine|my)\b/i.test(m) || m === "my protein" || m === "protein target") {
     const prot = user.proteinTarget || 120;
-    return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), tinned tuna (25g per tin).`;
+    const _pNotes = (user.profileNotes || "").toLowerCase();
+    const _protSources = _pNotes.includes("diet:vegan")
+      ? "cooked lentils (18g per cup), firm tofu (12g per 100g), soya mince (20g per 50g dry), sugar beans (15g per cup)"
+      : _pNotes.includes("diet:vegetarian")
+      ? "eggs (6g each), cottage cheese (12g per 100g), Greek yoghurt (10g per 100g), sugar beans (15g per cup)"
+      : "eggs (6g each), pilchards (22g per tin), frozen chicken breast (28g per 100g), tinned tuna (25g per tin)";
+    return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: ${_protSources}.`;
   }
 
   // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak".
@@ -251,6 +257,40 @@ export async function handleEarlyCommands(ctx: {
       const reply = `Got it — programme updated to *${modeLabel}*. Your next session will reflect that.\n\nReply *workout* to see today's updated session.`;
       await logChat(user.id, message, reply, "EQUIPMENT_UPDATE");
       return reply;
+    }
+  }
+
+  // ---- DIETARY PREFERENCE UPDATE — existing clients declaring halal / vegetarian / vegan ----
+  if (
+    /\b(i.?m|i am|i eat|i only eat|i.?m now|i.?ve become|i.?ve gone|turned|i.?m a)\b.*\b(halal|vegetarian|veggie|vegan|plant.?based)\b/i.test(m) ||
+    /\b(halal|vegetarian|veggie|vegan|plant.?based)\b.*\b(only|diet|food|eating|lifestyle|eater)\b/i.test(m) ||
+    /\b(i (don.?t|no longer|stopped|gave up) eat(ing)?)\b.*\b(meat|pork|chicken|beef|fish|pilchards|animal)\b/i.test(m) ||
+    /\b(change|update)\b.*\b(diet(ary)?|food preference|eating)\b.*\b(halal|vegetarian|veggie|vegan|plant.?based)\b/i.test(m)
+  ) {
+    let _newDietFlag: string | null = null;
+    if (/\bvegan\b/i.test(m) || /\bplant.?based\b/i.test(m)) _newDietFlag = "diet:vegan";
+    else if (/\b(vegetarian|veggie)\b/i.test(m) || /\b(don.?t|no longer|stopped|gave up)\s+eat(ing)?\b.*\b(meat|chicken|beef|fish|pilchards|animal)\b/i.test(m.toLowerCase())) _newDietFlag = "diet:vegetarian";
+    else if (/\b(halal|muslim|islam|haram)\b/i.test(m)) _newDietFlag = "diet:halal";
+
+    if (_newDietFlag) {
+      const _existingNotes = (user.profileNotes || "").replace(/\bdiet:\w+\b/g, "").trim();
+      const _updatedNotes = _existingNotes ? `${_existingNotes} ${_newDietFlag}` : _newDietFlag;
+      await db.update(users).set({ profileNotes: _updatedNotes }).where(eq(users.phoneNumber, phone));
+      user.profileNotes = _updatedNotes;
+      const _dietLabel = _newDietFlag === "diet:vegan" ? "vegan" : _newDietFlag === "diet:vegetarian" ? "vegetarian" : "halal";
+      const _dietProteins = _newDietFlag === "diet:vegan"
+        ? "tofu, lentils, sugar beans, soya mince"
+        : _newDietFlag === "diet:vegetarian"
+        ? "eggs, cottage cheese, sugar beans, tofu"
+        : "chicken, beef, lamb, eggs, legumes (halal-certified)";
+      const _dietNote = _newDietFlag === "diet:halal"
+        ? "I'll never suggest pork or alcohol-containing ingredients."
+        : _newDietFlag === "diet:vegan"
+        ? "I'll only suggest plant-based proteins from now on."
+        : "I'll keep it meat-free from now on.";
+      const _dietReply = `${firstName ? firstName + ", g" : "G"}ot it — updated to *${_dietLabel}*. ${_dietNote}\n\nYour protein sources from now on: *${_dietProteins}*.\n\nType *meal plan* to get an updated eating plan.`;
+      await logChat(user.id, message, _dietReply, "DIET_PREFERENCE_UPDATE");
+      return _dietReply;
     }
   }
 
@@ -1186,8 +1226,11 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const budget = user.weeklyFoodBudget || "100_300";
     const goal = user.goalType || "fat_loss";
     const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
-    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("tuna");
-    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose");
+    const _sdPNotes = (user.profileNotes || "").toLowerCase();
+    const _sdVegan = _sdPNotes.includes("diet:vegan");
+    const _sdVeg = _sdPNotes.includes("diet:vegetarian") || _sdVegan;
+    const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard") || otherNotes.includes("tuna") || _sdVeg;
+    const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk") || otherNotes.includes("lactose") || _sdVegan;
     const noPeanuts = otherNotes.includes("peanut");
     const medicals = (user.medicalConditions || "").split(",").map((s: string) => s.trim());
     const isLowGI = medicals.includes("diabetes") || medicals.includes("pcos");
@@ -1195,11 +1238,21 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const lunchCal = Math.round((user.calorieTarget || 1800) * 0.35);
     const dinnerCal = Math.round((user.calorieTarget || 1800) * 0.28);
     const carbAlt = isLowGI ? "½ cup samp and beans" : goal === "muscle_gain" ? "1 cup brown rice" : "1 medium sweet potato";
-    const protAlt = noFish ? (budget === "under_100" ? "3 boiled eggs" : "150g chicken thigh") : (budget === "under_100" ? "1 tin pilchards" : "2 eggs + baked beans");
+    const protAlt = _sdVegan
+      ? (budget === "under_100" ? "1 cup cooked lentils" : "150g firm tofu")
+      : _sdVeg
+      ? (budget === "under_100" ? "3 boiled eggs" : "200g cottage cheese")
+      : noFish
+      ? (budget === "under_100" ? "3 boiled eggs" : "150g chicken thigh")
+      : (budget === "under_100" ? "1 tin pilchards" : "2 eggs + baked beans");
+    const _sdBf = _sdVegan
+      ? (isLowGI ? "½ cup oats + soya milk + banana" : goal === "muscle_gain" ? "1 cup oats + soya milk + peanut butter" : "½ cup oats + soya milk + 2 tbsp peanut butter")
+      : (isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? "3 eggs scrambled + 1 cup oats + banana" : "½ cup oats + 2 boiled eggs");
+    const _sdDinner = _sdVegan ? "soya mince + cabbage" : _sdVeg ? "2 eggs + cabbage" : "½ tin pilchards + cabbage";
     const dairySnack = noDairy ? "baked beans ½ tin — 110 cal, 7g protein" : "low fat yoghurt 150g — 100 cal, 10g protein";
     const pbItem = noPeanuts ? "1 extra boiled egg" : "1 tbsp peanut butter";
 
-    return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${isLowGI ? `½ cup oats + ${noDairy ? "water" : "low fat milk"} + 2 boiled eggs` : goal === "muscle_gain" ? `3 eggs scrambled + 1 cup oats + banana` : `${isLowGI ? "samp and beans ½ cup" : "½ cup oats"} + 2 boiled eggs`} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${noFish ? "2 eggs + cabbage" : "½ tin pilchards + cabbage"} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
+    return `*${swapDay} — Alternative Meals*\n\nBreakfast: ${_sdBf} — ${bfCal} cal\n\nLunch: ${protAlt} + ${carbAlt} + spinach — ${lunchCal} cal\n\nSnack: ${goal === "muscle_gain" ? `${pbItem} + banana` : dairySnack}\n\nDinner: ${_sdDinner} — ${dinnerCal} cal\n\nReply SWAP [any other day] to swap another day.`;
   }
 
   // ============================================================

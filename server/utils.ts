@@ -266,6 +266,20 @@ const _PROTEIN_POOLS: Record<string, _ProteinOption[]> = {
   ],
 };
 
+// Vegetarian pools (no meat, no fish — eggs and dairy OK)
+const _VEG_PROTEIN_POOLS: Record<string, _ProteinOption[]> = {
+  low:    [{ label: "eggs", portion: "4 boiled eggs" }, { label: "cottage cheese", portion: "200g cottage cheese" }, { label: "sugar beans", portion: "1 cup cooked beans" }],
+  medium: [{ label: "eggs", portion: "4 boiled eggs" }, { label: "cottage cheese", portion: "200g cottage cheese" }, { label: "sugar beans", portion: "1 cup beans" }, { label: "tofu", portion: "150g firm tofu" }],
+  high:   [{ label: "cottage cheese", portion: "200g cottage cheese" }, { label: "eggs", portion: "4 boiled eggs" }, { label: "firm tofu", portion: "150g tofu" }, { label: "Greek yoghurt", portion: "200g Greek yoghurt" }],
+};
+
+// Vegan pools (no animal products — plant only)
+const _VEGAN_PROTEIN_POOLS: Record<string, _ProteinOption[]> = {
+  low:    [{ label: "sugar beans", portion: "1 cup cooked beans" }, { label: "cooked lentils", portion: "1 cup cooked lentils" }, { label: "soya mince", portion: "50g dry soya mince" }],
+  medium: [{ label: "firm tofu", portion: "150g tofu" }, { label: "cooked lentils", portion: "1 cup cooked lentils" }, { label: "sugar beans", portion: "1 cup beans" }, { label: "soya mince", portion: "80g dry soya mince" }],
+  high:   [{ label: "firm tofu", portion: "200g tofu" }, { label: "cooked lentils", portion: "1 cup cooked lentils" }, { label: "soya mince", portion: "100g dry soya mince" }, { label: "sugar beans", portion: "1 cup beans" }],
+};
+
 function _budgetTier(user: ProteinUser): "low" | "medium" | "high" {
   const b = (user.budgetLevel || "").toLowerCase();
   const wfb = user.weeklyFoodBudget || "";
@@ -274,18 +288,22 @@ function _budgetTier(user: ProteinUser): "low" | "medium" | "high" {
   return "low";
 }
 
-export function proteinHint(user: ProteinUser, gap: number): string {
-  const noFish = /fish allergy/i.test(user.profileNotes || "");
+function _getPool(user: ProteinUser): _ProteinOption[] {
+  const notes = (user.profileNotes || "").toLowerCase();
   const tier = _budgetTier(user);
-  const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // 0–6 SAST
-
+  if (notes.includes("diet:vegan")) return _VEGAN_PROTEIN_POOLS[tier];
+  if (notes.includes("diet:vegetarian")) return _VEG_PROTEIN_POOLS[tier];
+  const noFish = /fish allergy/i.test(user.profileNotes || "") || notes.includes("diet:vegetarian");
   let pool = _PROTEIN_POOLS[tier];
   if (noFish) pool = pool.filter(o => !o.label.includes("tuna"));
-  if (!pool.length) pool = _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
+  return pool.length ? pool : _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
+}
 
+export function proteinHint(user: ProteinUser, gap: number): string {
+  const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay(); // 0–6 SAST
+  const pool = _getPool(user);
   const primary = pool[dow % pool.length];
   const secondary = pool[(dow + 2) % pool.length];
-
   if (gap > 50) {
     return `Add ${primary.label} and ${secondary.label} to every meal today.`;
   }
@@ -294,14 +312,8 @@ export function proteinHint(user: ProteinUser, gap: number): string {
 
 // Returns two varied protein label strings (comma-separated) for use in coaching messages.
 export function proteinOptions(user: ProteinUser): string {
-  const noFish = /fish allergy/i.test(user.profileNotes || "");
-  const tier = _budgetTier(user);
   const dow = new Date(Date.now() + 2 * 3_600_000).getUTCDay();
-
-  let pool = _PROTEIN_POOLS[tier];
-  if (noFish) pool = pool.filter(o => !o.label.includes("tuna"));
-  if (!pool.length) pool = _PROTEIN_POOLS.low.filter(o => !o.label.includes("tuna"));
-
+  const pool = _getPool(user);
   const a = pool[dow % pool.length].label;
   const b = pool[(dow + 1) % pool.length].label;
   const c = pool[(dow + 3) % pool.length].label;

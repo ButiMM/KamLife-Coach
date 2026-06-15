@@ -100,8 +100,12 @@ export async function runComebackProtocol(): Promise<void> {
         const [f] = await db.select({ c: count() }).from(chatHistory)
           .where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, entryDate)));
         const logged = (f?.c || 0) > 0;
+        const _cbNotes = (client.profileNotes || "").toLowerCase();
+        const _cbVegan = _cbNotes.includes("diet:vegan");
+        const _cbVeg = _cbNotes.includes("diet:vegetarian") || _cbVegan;
+        const _proteinList = _cbVegan ? "tofu, lentils, beans, soya mince" : _cbVeg ? "eggs, cottage cheese, beans" : "eggs, chicken, pilchards, beans";
         await sendWhatsApp(client.phoneNumber, logged
-          ? `${name}, two days back and you're logging again. That's the comeback working — momentum beats motivation every time.\n\nToday, one upgrade: protein at every meal. Eggs, chicken, pilchards, beans. That single thing moves the needle more than anything else. What's for breakfast?`
+          ? `${name}, two days back and you're logging again. That's the comeback working — momentum beats motivation every time.\n\nToday, one upgrade: protein at every meal. ${_proteinList}. That single thing moves the needle more than anything else. What's for breakfast?`
           : `${name}, you said you're back — but I haven't seen a meal yet. No stress, no lecture. The comeback isn't a grand gesture, it's one small log.\n\nSend me what you're eating right now. One line. That's the whole task today.`);
         nudged++;
         continue;

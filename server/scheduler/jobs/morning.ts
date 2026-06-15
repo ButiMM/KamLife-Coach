@@ -260,10 +260,23 @@ export async function runMorningCheckin(): Promise<void> {
 
         // Identify the chronically weakest meal slot from 14-day data
         const MAIN_SLOTS = ["breakfast", "lunch", "dinner"];
+        const _cn = (client.profileNotes || "").toLowerCase();
+        const _isVegan = _cn.includes("diet:vegan");
+        const _isVeg = _cn.includes("diet:vegetarian") || _isVegan;
         const SLOT_FIX: Record<string, string> = {
-          breakfast: `Tomorrow: lead breakfast with 3 eggs or 200g Greek yoghurt before anything else.`,
-          lunch: `Today: anchor lunch with chicken, tuna, or eggs — before adding rice or bread.`,
-          dinner: `Tonight: lead dinner with 200g chicken, fish, or eggs before anything else.`,
+          breakfast: _isVegan
+            ? `Tomorrow: lead breakfast with soya yoghurt or ½ cup oats + peanut butter before anything else.`
+            : `Tomorrow: lead breakfast with 3 eggs or 200g Greek yoghurt before anything else.`,
+          lunch: _isVegan
+            ? `Today: anchor lunch with tofu, lentils, or sugar beans — before adding rice or bread.`
+            : _isVeg
+            ? `Today: anchor lunch with eggs, cottage cheese, or beans — before adding rice or bread.`
+            : `Today: anchor lunch with chicken, tuna, or eggs — before adding rice or bread.`,
+          dinner: _isVegan
+            ? `Tonight: lead dinner with soya mince, lentils, or tofu before anything else.`
+            : _isVeg
+            ? `Tonight: lead dinner with eggs, cottage cheese, or beans before anything else.`
+            : `Tonight: lead dinner with 200g chicken, fish, or eggs before anything else.`,
         };
         const qualifyingSlots = (mealSlotRows as { mealLabel: string | null; avgProt: number; logCount: number }[])
           .filter(r => r.mealLabel && MAIN_SLOTS.includes(r.mealLabel) && r.logCount >= 3);
