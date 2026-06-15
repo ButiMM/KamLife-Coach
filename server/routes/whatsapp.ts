@@ -40,6 +40,31 @@ async function sendParts(
   }
 }
 
+// ── Bot marker rendering ──
+// handleMessage replies can embed two bot-only markers:
+//   [BUTTONS:A|B|C]   — quick-reply options
+//   [MEDIA:https://…] — one or more images (workout GIFs, portion guides)
+//
+// Buttons are NOT sent as real WhatsApp interactive buttons: the Twilio Content API
+// requires Meta template approval and silently drops unapproved sends. We used to render
+// them as a numbered list ("1. Today's workout"), but the global single-digit shortcuts
+// (1=workout, 2=steps, 3=food…) are FIXED and don't match each menu's button order — so a
+// rendered "3. My progress" actually fired food logging, and "1. Log food" on a rest day
+// delivered a workout. Every button label has a working text handler, so we render them as
+// type-able keyword prompts and let the client reply with the word — which always routes right.
+//
+// Shared by the text AND voice paths so neither leaks raw markers (voice replies that carry
+// a workout GIF + buttons previously sent the literal "[MEDIA:…][BUTTONS:…]" text).
+function renderReplyMarkers(reply: string): { text: string; media: string[] } {
+  const withButtons = reply.replace(/\s*\[BUTTONS:([^\]]+)\]/g, (_, opts) => {
+    const labels = opts.split("|").map((b: string) => b.trim()).filter(Boolean);
+    return labels.length ? `\n\n${labels.map((b: string) => `▸ *${b}*`).join("\n")}` : "";
+  });
+  const media = [...withButtons.matchAll(/\[MEDIA:(https?:\/\/[^\]]+)\]/g)].map(mm => mm[1]);
+  const text = media.length ? withButtons.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/g, "").trim() : withButtons;
+  return { text, media };
+}
+
 // ── Async text processor ──
 // All text messages are handled async so Twilio gets an instant 200 and never times out.
 // The real reply is delivered via outbound Twilio API once handleMessage resolves.
@@ -55,18 +80,8 @@ async function processTextAsync(
   try {
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
 
-    // Strip [BUTTONS:...] — send numbered options inline via proven sendParts path.
-    // Twilio Content API (used by sendWhatsAppButtons) requires Meta template approval
-    // in production and silently drops unapproved messages with no error surfaced.
-    const cleanedReply = reply.replace(/\s*\[BUTTONS:([^\]]+)\]/g, (_, opts) => {
-      const labels = opts.split("|").map((b: string) => b.trim()).filter(Boolean);
-      return `\n\n${labels.map((b: string, i: number) => `*${i + 1}.* ${b}`).join("\n")}`;
-    });
-
-    // Extract ALL [MEDIA:url] markers — a reply can carry more than one image (e.g. both
-    // portion guides). WhatsApp sends one media item per message, so sendParts fans them out.
-    const replyMediaUrls = [...cleanedReply.matchAll(/\[MEDIA:(https?:\/\/[^\]]+)\]/g)].map(mm => mm[1]);
-    const cleanReply = replyMediaUrls.length ? cleanedReply.replace(/\s*\[MEDIA:https?:\/\/[^\]]+\]/g, "").trim() : cleanedReply;
+    // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
+    const { text: cleanReply, media: replyMediaUrls } = renderReplyMarkers(reply);
 
     // Image messages without a GIF/media attachment go through the coalescing buffer
     // so that album bursts (N photos sent together) result in ONE combined reply.
@@ -97,8 +112,11 @@ async function processVoiceAsync(
 ): Promise<void> {
   try {
     const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
-    const parts = splitMessage(reply);
-    await sendParts(phone, parts, null);
+    // Render markers too — a voice note can trigger a workout (GIF + buttons) or a menu,
+    // and previously those markers were sent to the client as literal text.
+    const { text, media } = renderReplyMarkers(reply);
+    const parts = splitMessage(text);
+    await sendParts(phone, parts, media);
     console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-6)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
