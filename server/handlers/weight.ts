@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users, weightLogs } from "../../shared/schema";
-import { eq, and, gte, asc, desc } from "drizzle-orm";
+import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
 
@@ -84,6 +84,16 @@ export async function handleWeightLog(
   await db.update(users).set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein }).where(eq(users.phoneNumber, phone));
 
   const todayWeightStart = sastDayStart();
+  // The true "last log" for the change comparison is the most recent weigh-in BEFORE today —
+  // NOT user.currentWeight, which can still hold a stale onboarding number and produced the
+  // nonsense "up 15.8kg from last log" when a client first weighed in on the system.
+  const [lastPriorLog] = await db.select({ weight: weightLogs.weight })
+    .from(weightLogs)
+    .where(and(eq(weightLogs.userId, user.id), lt(weightLogs.loggedAt, todayWeightStart)))
+    .orderBy(desc(weightLogs.loggedAt))
+    .limit(1);
+  const lastLoggedKg = lastPriorLog ? parseFloat(String(lastPriorLog.weight)) : null;
+
   const existingToday = await db.select({ id: weightLogs.id }).from(weightLogs)
     .where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, todayWeightStart)))
     .limit(1);
@@ -122,9 +132,11 @@ export async function handleWeightLog(
     }
   } catch (e) { console.warn("[non-fatal]", e); }
 
+  // Compare against the genuine previous weigh-in. On the very first log there is no
+  // prior entry, so we say nothing rather than inventing a change off a stale baseline.
   let changeNote = "";
-  if (prevKg > 0 && Math.abs(newKg - prevKg) > 0.1) {
-    const diff = newKg - prevKg;
+  if (lastLoggedKg !== null && Math.abs(newKg - lastLoggedKg) > 0.1) {
+    const diff = newKg - lastLoggedKg;
     const direction = diff < 0 ? `⬇️ down ${Math.abs(diff).toFixed(1)}kg` : `⬆️ up ${diff.toFixed(1)}kg`;
     changeNote = ` ${direction} from last log.`;
   }

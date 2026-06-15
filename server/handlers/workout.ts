@@ -97,8 +97,11 @@ export async function handleWorkoutCommands(ctx: {
     /\b(?:weigh(?:ed|s|ing)?|morning weight|body weight|on the scale|scale said|scale reads|weighed in|my weight)\b.*\b(\d{2,3}(?:\.\d+)?)\s*kg\b/i.test(m)
     || /\b(\d{2,3}(?:\.\d+)?)\s*kg\b.*\b(?:today|this morning|just weighed)\b/i.test(m)
   );
+  // Retrospective brake: "I weighed 83kg last week", "I started at 95kg", "used to be 90kg"
+  // are HISTORICAL — they must not overwrite today's weight or recalc targets off a past number.
+  const isRetrospectiveWeight = /\b(last\s+(?:week|month|year|time)|used\s+to|back\s+(?:then|in|when)|previously|a\s+(?:week|month|year)\s+ago|(?:weeks?|months?|years?)\s+ago|started\s+(?:at|on|out|off)|when\s+i\s+(?:started|began))\b/i.test(m);
 
-  if ((isStandaloneWeight || isWeightCheckIn) && !EXERCISE_PATTERN.test(m)) {
+  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !EXERCISE_PATTERN.test(m)) {
     const kgMatch = m.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
     if (kgMatch) {
       const kg = parseFloat(kgMatch[1]);

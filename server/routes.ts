@@ -417,6 +417,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       normalizedQuestion = pre.intent === "QUESTION" && pre.confidence >= 0.8;
       const ACTION_INTENTS = new Set<ClassifiedIntent>(["FOOD_LOG", "FOOD_PLANNED", "MEAL_COPY", "STEPS", "WORKOUT_LOG", "WEIGHT", "GOAL_CHANGE", "TOTALS_QUERY"]);
       let canon = ((pre as IntentClassification).canonical || "").trim();
+      // Retrospective-weight brake: "last week it was 83kg", "I used to weigh 90kg",
+      // "I started at 95kg" are HISTORICAL context, not today's weigh-in. The classifier
+      // sees "83kg" and wants to rewrite it to a current WEIGHT log — which would overwrite
+      // currentWeight, recalc targets off a past number, and print a bogus "down 0.3kg".
+      // Drop the canonical so the original message falls through to a conversational reply.
+      if (pre.intent === "WEIGHT" && /\b(last\s+(?:week|month|year|time)|used\s+to|back\s+(?:then|in|when)|previously|a\s+(?:week|month|year)\s+ago|(?:weeks?|months?|years?)\s+ago|started\s+(?:at|on|out|off)|when\s+i\s+(?:started|began|was)|before\s+i|in\s+\d{4}|earlier\s+this|was\s+\d{2,3}(?:\.\d+)?\s*kg)\b/i.test(originalMBeforeNorm)) {
+        canon = "";
+      }
       // Tense brake: FOOD_PLANNED is only valid when the CLIENT used future words.
       // A bare food list ("Lunch / Tin fish / Rice / Mixed veggies") is an eaten meal —
       // the most common logging format. If the classifier guessed future tense the
