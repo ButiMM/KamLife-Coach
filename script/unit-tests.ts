@@ -5,6 +5,8 @@
  */
 
 import assert from "node:assert/strict";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
@@ -802,6 +804,45 @@ test("back-off: every-other-day halves volume for drifting users", () => {
   let fired = 0;
   for (let day = 0; day < 10; day++) if (routineNudgeAllowed(2, day)) fired++;
   assert.equal(fired, 5, `2-day-silent should fire 5/10 days, got ${fired}`);
+});
+
+// ============================================================
+// DATE-HYGIENE GUARD — no hardcoded years in proactive message text
+// ------------------------------------------------------------
+// A hardcoded year ("Log your first food of 2025") or any literal date baked
+// into a client-facing string goes stale and the coach starts stating things
+// that are false. Scheduler messages must derive the year/month/day at runtime.
+// This scans every scheduler message string and fails if a 4-digit year is
+// embedded. Years inside quotes only — numeric constants like setTimeout(r,2000)
+// are ignored because they are not string content.
+// ============================================================
+test("no hardcoded years in scheduler message strings", () => {
+  const jobsDir = join(process.cwd(), "server", "scheduler", "jobs");
+  const files = [
+    ...readdirSync(jobsDir).filter(f => f.endsWith(".ts")).map(f => join(jobsDir, f)),
+    join(process.cwd(), "server", "scheduler.ts"),
+  ];
+  const strLiteral = /`[^`]*`|"[^"]*"|'[^']*'/g;
+  const yearPattern = /\b(?:19|20)\d{2}\b/;
+  const violations: string[] = [];
+
+  for (const file of files) {
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) return; // skip comments
+      const strings = line.match(strLiteral) || [];
+      for (const s of strings) {
+        if (yearPattern.test(s)) {
+          violations.push(`    ${file.split("/server/")[1]}:${i + 1} → ${s.slice(0, 80)}`);
+        }
+      }
+    });
+  }
+  assert.equal(
+    violations.length, 0,
+    `Hardcoded year(s) found in scheduler message text — derive the year at runtime instead:\n${violations.join("\n")}`,
+  );
 });
 
 // ============================================================

@@ -250,7 +250,7 @@ export async function initScheduler(): Promise<void> {
       await runWeightReminder();
     } catch (e) { console.error("[SCHEDULER] runWeightReminder failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 5 * * 1",     async () => {                        // 7am SAST progress summary
+  cron.schedule("0 10 * * 1",    async () => {                        // 12pm SAST progress summary — moved off the 6–7am cluster so the morning brief + weigh-in aren't followed by a third message minutes later
     try {
       const today = todaySAST();
       if (hasRunToday("monday_progress", today)) return;
@@ -262,7 +262,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 5 * * 1",     () => safe("runWomensMonth",         runWomensMonth),         { timezone: "UTC" }); // 7am SAST Women's Month (Aug only)
   cron.schedule("0 5 * * 1",     () => safe("runPhaseAdvancement",    runPhaseAdvancement),    { timezone: "UTC" }); // 7am SAST phase check
   cron.schedule("0 4 * * 1",     () => safe("runTrainingDataLog",     runTrainingDataLog),     { timezone: "UTC" }); // 6am SAST training data log
-  cron.schedule("0 6 * * 1",     async () => {                        // 8am SAST grocery list
+  cron.schedule("0 11 * * 1",    async () => {                        // 1pm SAST grocery list — early afternoon, in time to plan the week's shop without stacking on the morning
     try {
       const today = todaySAST();
       if (hasRunToday("monday_groceries", today)) return;
@@ -270,7 +270,7 @@ export async function initScheduler(): Promise<void> {
       await runMondayGroceries();
     } catch (e) { console.error("[SCHEDULER] runMondayGroceries failed:", e); }
   }, { timezone: "UTC" });
-  cron.schedule("0 6 * * 1",     () => safe("runWeeklyMondayCheckin", runWeeklyMondayCheckin), { timezone: "UTC" }); // 8am SAST
+  cron.schedule("0 16 * * 1",    () => safe("runWeeklyMondayCheckin", runWeeklyMondayCheckin), { timezone: "UTC" }); // 6pm SAST — evening check-in lands when people have time to reply
   cron.schedule("0 7 * * 1",     () => safe("runGoalCheck",           runGoalCheck),           { timezone: "UTC" }); // 9am SAST
 
   // ── Weekly — Tuesday & Thursday ───────────────────────────────────────────

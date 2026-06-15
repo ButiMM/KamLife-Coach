@@ -63,6 +63,11 @@ export async function runWomensMonth(): Promise<void> {
 }
 
 export async function runNewYearReset(): Promise<void> {
+  // Guard: this fires on 2 January only. The cron is set for Jan 2, but a manual
+  // trigger or misconfig must never send "January 2nd" on the wrong day. SAST=UTC+2.
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  if (sast.getUTCMonth() !== 0 || sast.getUTCDate() !== 2) return;
+  const year = sast.getUTCFullYear();
   console.log("[SCHEDULER] JOB: New Year reset");
   const clients = await getActiveClients();
   for (const client of clients) {
@@ -72,7 +77,7 @@ export async function runNewYearReset(): Promise<void> {
       const name = client.name || "there";
       const workouts = client.totalWorkoutsCompleted || 0;
       const days = Math.floor((Date.now() - new Date(client.programmeStartDate || Date.now()).getTime()) / 86_400_000);
-      await sendWhatsApp(client.phoneNumber, `${name}, January 2nd. The gym is full of people who will be gone by February. You have ${workouts > 0 ? `${workouts} sessions and ${days} days` : "your programme"} already built. You are not starting. You are continuing. That is the difference. Log your first food of 2025 today.`);
+      await sendWhatsApp(client.phoneNumber, `${name}, January 2nd. The gym is full of people who will be gone by February. You have ${workouts > 0 ? `${workouts} sessions and ${days} days` : "your programme"} already built. You are not starting. You are continuing. That is the difference. Log your first food of ${year} today.`);
     } catch (err) { console.error(`[SCHEDULER] New Year reset error — ${client.phoneNumber}:`, err); }
   }
 }
