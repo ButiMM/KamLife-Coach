@@ -7,6 +7,7 @@ import { db } from "../db";
 import { stepLogs, workoutLogs, weightLogs, mealLogs } from "../../shared/schema";
 import { eq, and, gte, asc, desc, sql } from "drizzle-orm";
 import { calculateTargets } from "../targets";
+import { computeProgressScore, renderProgressScore } from "../progress-score";
 import { logChat } from "./chat-log";
 
 export async function handleProgressCheck(ctx: {
@@ -93,7 +94,23 @@ export async function handleProgressCheck(ctx: {
           `Behind by ${missedCount}${missedCount > 1 ? " sessions" : " session"}, ${fn}. Stop the bleed today — one session changes the week.`,
           `${fn}, ${missedCount} session${missedCount > 1 ? "s" : ""} short. No recapping — get today's done and move on.`,
         ]);
-    const progressReply = `*Your 7-Day Progress Check*\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
+    // KamLife Progress Score — beyond-the-scale composite, from values already computed
+    // above (no extra queries). Surfaced so a flat scale never reads as failure.
+    const score = computeProgressScore({
+      completedSessions,
+      plannedSessions,
+      avgDailyProtein: avgDailyProt,
+      proteinTarget: protTarget,
+      avgSteps,
+      stepsTarget,
+      foodLogDays: weekFoodLogDays,
+      weightLogCount: recentWeights.length,
+      weightChangeKg: weightChange !== null ? parseFloat(weightChange) : null,
+      goalType: user.goalType || "fat_loss",
+    });
+    const scoreBlock = renderProgressScore(score);
+
+    const progressReply = `*Your 7-Day Progress Check*\n\n${scoreBlock}\n\n${sessionSentence}\n${stepSentence}\n${weightSentence}\n${foodSentence}\n${verdictSentence}`;
 
     // ---- COACHING ANALYSIS — the ONE thing to fix next week ----
     // A 7-day summary is useful. A 7-day summary that names the single biggest

@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
+import { computeProgressScore } from "../server/progress-score";
 
 let passed = 0;
 let failed = 0;
@@ -809,6 +810,84 @@ test("gate BLOCKS: 'chicken' (1 exact, no quantity, no verb)", () => {
 // One EXACT match WITH a quantity word SHOULD auto-log.
 test("gate LOGS: '2 eggs' (1 exact + quantity, directFoodScan)", () => {
   assert.ok(wouldLog("2 eggs", 1, 1), "single exact food with quantity should directFoodScan");
+});
+
+// ============================================================
+// KamLife Progress Score — beyond-the-scale composite (pure function)
+// ============================================================
+
+const PERFECT_WEEK = {
+  completedSessions: 3, plannedSessions: 3,
+  avgDailyProtein: 130, proteinTarget: 130,
+  avgSteps: 10000, stepsTarget: 10000,
+  foodLogDays: 7,
+  weightLogCount: 3, weightChangeKg: -0.5,
+  goalType: "fat_loss",
+};
+
+test("score: a perfect week is 100/100", () => {
+  const s = computeProgressScore(PERFECT_WEEK);
+  assert.equal(s.score, 100, "all components maxed must total 100");
+  assert.ok(s.bottleneck.startsWith("None"), "no bottleneck on a perfect week");
+});
+
+test("score: a totally silent week is 0/100", () => {
+  const s = computeProgressScore({
+    completedSessions: 0, plannedSessions: 3,
+    avgDailyProtein: 0, proteinTarget: 130,
+    avgSteps: 0, stepsTarget: 10000,
+    foodLogDays: 0,
+    weightLogCount: 0, weightChangeKg: null,
+    goalType: "fat_loss",
+  });
+  assert.equal(s.score, 0, "nothing logged must score 0");
+});
+
+test("score: never exceeds 100 even when metrics beat target", () => {
+  const s = computeProgressScore({
+    ...PERFECT_WEEK,
+    completedSessions: 6, avgDailyProtein: 220, avgSteps: 18000,
+  });
+  assert.equal(s.score, 100, "over-performing components are capped, not stacked over 100");
+});
+
+// THE retention case: weight is flat (bad scale read) but habits are strong.
+// The score must stay high so a flat scale never reads as failure.
+test("score: scale flat but habits strong still scores high (retention case)", () => {
+  const s = computeProgressScore({
+    completedSessions: 3, plannedSessions: 3,
+    avgDailyProtein: 125, proteinTarget: 130,
+    avgSteps: 9500, stepsTarget: 10000,
+    foodLogDays: 6,
+    weightLogCount: 3, weightChangeKg: 0.0, // flat
+    goalType: "fat_loss",
+  });
+  assert.ok(s.score >= 80, `flat-scale-but-consistent should stay >=80, got ${s.score}`);
+});
+
+test("score: identifies the single lowest area as the bottleneck", () => {
+  // Everything strong except steps (0 logged) → steps is the bottleneck.
+  const s = computeProgressScore({
+    completedSessions: 3, plannedSessions: 3,
+    avgDailyProtein: 130, proteinTarget: 130,
+    avgSteps: 0, stepsTarget: 10000,
+    foodLogDays: 7,
+    weightLogCount: 2, weightChangeKg: -0.4,
+    goalType: "fat_loss",
+  });
+  assert.equal(s.bottleneck, "Steps", "the empty steps area must be named the bottleneck");
+});
+
+test("score: recomposition rewards a flat weight (goal-aware trend)", () => {
+  const recompFlat = computeProgressScore({ ...PERFECT_WEEK, goalType: "recomposition", weightChangeKg: 0.1 });
+  const recompBig  = computeProgressScore({ ...PERFECT_WEEK, goalType: "recomposition", weightChangeKg: 3.0 });
+  assert.ok(recompFlat.score > recompBig.score, "recomp should score a stable weight above a big swing");
+});
+
+test("score: muscle_gain rewards gaining, fat_loss rewards losing (same change, opposite credit)", () => {
+  const gaining = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: 0.4 });
+  const losingOnBulk = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: -0.4 });
+  assert.ok(gaining.score > losingOnBulk.score, "muscle_gain must credit a gain over a loss");
 });
 
 // ============================================================
