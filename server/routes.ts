@@ -289,10 +289,29 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     return medDisclaimer;
   }
 
+  // ---- FRUSTRATION HELPERS — shared intent guard used by both frustration handlers ----
+  // Prevents frustration intercepts from swallowing clear action requests.
+  // "Today's workout" + "Omg" in the same message → action wins, frustration is ignored.
+  const HAS_CLEAR_ACTION = /\b(today.?s workout|my workout|workout|training session|log food|log steps|steps|my progress|shopping list|meal plan|menu|protein|calories|water)\b/i.test(m);
+
+  // ---- BRIEF FRUSTRATION — short expressive outbursts with no action request ----
+  // "Omg", "wtf", "ugh", "seriously?" etc. fall through to GPT without this guard.
+  // GPT sees recent workout history and re-writes a hallucinated workout — exactly the
+  // wrong response. Catch these early and return a short deterministic reply instead.
+  const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
+  if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
+    const _bfName = user.name?.split(" ")[0] || "";
+    const _bfReply = `${_bfName ? `${_bfName}, ` : ""}what specifically didn't work? Tell me and I'll fix it.\n\nOr type *menu* to see your options.`;
+    await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
+    return _bfReply;
+  }
+
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
   // Catches frustration messages so the bot does NOT respond with a workout programme or payment link.
   // A single STRONG signal is enough to intercept — waiting for 2 signals caused the
   // "I'm not paying for this nonsense" → payment link bug (only 1 signal counted, fell through to payment handler).
+  // HAS_CLEAR_ACTION guard: when the client pairs frustration with an explicit request
+  // ("Today's workout omg it's not working"), the action must win — frustration handler skips.
   const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|doesn.?t work|nothing works|broken|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
@@ -303,7 +322,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
   ].filter(Boolean).length;
 
-  if (STRONG_FRUSTRATION || frustrationSignalCount >= 2) {
+  if ((STRONG_FRUSTRATION || frustrationSignalCount >= 2) && !HAS_CLEAR_ACTION) {
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
