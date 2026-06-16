@@ -1274,8 +1274,8 @@ export async function handleLifecycle(ctx: {
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
     const calRemaining = calTarget - totalCal;
-    const hour = new Date().getHours();
-    const isLateEnough = hour >= 16; // After 4pm, low intake is a real problem
+    const hour = new Date(Date.now() + 2 * 3_600_000).getUTCHours(); // SAST hour — getHours() is UTC on Railway
+    const isLateEnough = hour >= 16; // After 4pm SAST, low intake is a real problem
 
     // Coaching note based on intake vs target
     let diaryCoachNote = "";
@@ -1455,7 +1455,7 @@ export async function handleLifecycle(ctx: {
   // ---- UNDER-EATING WARNING — client logs very low calories ----
   const todayCalCheck = (user.todayCaloriesDate === sastToday()) ? (user.todayCalories || 0) : 0; // toISOString() is UTC — drifts from SAST 00:00–02:00; sastToday() matches stored format
   const calTarget2 = user.calorieTarget || 1800;
-  const isLateDay = new Date().getHours() >= 16;
+  const isLateDay = new Date(Date.now() + 2 * 3_600_000).getUTCHours() >= 16; // SAST hour — getHours() is UTC on Railway
   const isUnderEating =
     isLateDay &&
     todayCalCheck > 0 &&

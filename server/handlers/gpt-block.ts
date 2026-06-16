@@ -39,8 +39,8 @@ export async function handleGptBlock(ctx: {
 
   // ---- EVERYTHING ELSE → GPT decides ----
   const now = new Date();
-  const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long" });
-  const hour = now.getHours();
+  const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
+  const hour = new Date(Date.now() + 2 * 3_600_000).getUTCHours(); // SAST hour — getHours() is UTC on Railway, telling the model the wrong time of day
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   const clientName = user.name || "there";
   const trainingMode = user.trainingMode || "home";
