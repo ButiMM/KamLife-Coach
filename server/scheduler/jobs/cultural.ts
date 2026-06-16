@@ -19,7 +19,7 @@ export function getSACulturalEvent(month: number, day: number): ((name: string) 
 }
 
 export async function runCulturalCalendar(): Promise<void> {
-  const now = new Date();
+  const now = new Date(Date.now() + 2 * 3_600_000); // SAST = UTC+2
   const month = now.getMonth() + 1;
   const day = now.getDate();
   const eventFn = getSACulturalEvent(month, day);

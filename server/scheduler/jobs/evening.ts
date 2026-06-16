@@ -45,7 +45,7 @@ export async function runEveningAccountability(): Promise<void> {
       const protTarget = client.proteinTarget || 120;
       const stepsTarget = client.stepsTarget || 8000;
       const trainingDays = client.trainingDaysPerWeek || 3;
-      const dow = new Date().getUTCDay();
+      const dow = new Date(Date.now() + 2 * 3_600_000).getDay(); // SAST = UTC+2
       const isTrainingDay = (TRAINING_SCHEDULES[trainingDays] || TRAINING_SCHEDULES[3]).includes(dow);
 
       const [mealSum] = await db.select({
