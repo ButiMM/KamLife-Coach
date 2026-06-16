@@ -1171,7 +1171,7 @@ export async function handleLifecycle(ctx: {
     const avgSteps = recentS.length > 0 ? Math.round(recentS.reduce((s: number, l: any) => s + l.steps, 0) / recentS.length) : 0;
     const stepsTarget = user.stepsTarget || 8500;
     const hasWeight = recentWt.length > 0;
-    const todayStr = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }).split("/").reverse().join("-");
+    const todayStr = sastToday(); // must match how todayCaloriesDate is stored (YYYY-MM-DD); en-ZA toLocaleDateString gives DD-MM-YYYY and never matched
     const todayProtein = user.todayCaloriesDate === todayStr ? (user.todayProteinG || 0) : 0;
     const todayCalsForAdvice = user.todayCaloriesDate === todayStr ? (user.todayCalories || 0) : 0;
     const protTarget = user.proteinTarget || 120;
@@ -1453,7 +1453,7 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- UNDER-EATING WARNING — client logs very low calories ----
-  const todayCalCheck = (user.todayCaloriesDate === new Date().toISOString().slice(0, 10)) ? (user.todayCalories || 0) : 0;
+  const todayCalCheck = (user.todayCaloriesDate === sastToday()) ? (user.todayCalories || 0) : 0; // toISOString() is UTC — drifts from SAST 00:00–02:00; sastToday() matches stored format
   const calTarget2 = user.calorieTarget || 1800;
   const isLateDay = new Date().getHours() >= 16;
   const isUnderEating =

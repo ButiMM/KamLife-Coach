@@ -1072,6 +1072,46 @@ test("no hardcoded years in scheduler message strings", () => {
 });
 
 // ============================================================
+// Date-key format consistency.
+// todayCaloriesDate is stored as YYYY-MM-DD (via sastToday()). The
+// `toLocaleDateString("en-ZA", …).split("/").reverse().join("-")` idiom
+// produces DD-MM-YYYY, which silently never matches the stored value —
+// it zeroed today's calories/protein in every reader that used it
+// (lifecycle.ts weekly advice + gpt-block food-pattern ceiling signal).
+// These are date KEYS for comparison, not display. Ban the pattern so it
+// cannot creep back. Time display (toLocaleTimeString) is unaffected —
+// the guard requires both "en-ZA" and ".reverse()" on the same line.
+// ============================================================
+test("no DD-MM-YYYY date-key pattern (en-ZA + reverse) in server code", () => {
+  const serverDir = join(process.cwd(), "server");
+  const tsFiles: string[] = [];
+  const walk = (dir: string) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (entry.name.endsWith(".ts")) tsFiles.push(full);
+    }
+  };
+  walk(serverDir);
+
+  const violations: string[] = [];
+  for (const file of tsFiles) {
+    const lines = readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      const trimmed = line.trim();
+      if (trimmed.startsWith("//") || trimmed.startsWith("*")) return; // skip comments
+      if (/en-ZA/.test(line) && /\.reverse\(\)/.test(line)) {
+        violations.push(`    ${file.split("/server/")[1]}:${i + 1} → ${trimmed.slice(0, 90)}`);
+      }
+    });
+  }
+  assert.equal(
+    violations.length, 0,
+    `DD-MM-YYYY date-key pattern found — use sastToday() (YYYY-MM-DD) for any value compared against todayCaloriesDate:\n${violations.join("\n")}`,
+  );
+});
+
+// ============================================================
 // Results
 // ============================================================
 

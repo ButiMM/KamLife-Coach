@@ -9,7 +9,7 @@ import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart } from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday } from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { sendWhatsApp } from "../scheduler";
 
@@ -563,7 +563,7 @@ SA voice. Direct. Coach forward, not backward.`;
   const gptFoodMatch = scanForSAFoods(m);
   const isFoodLog = !isLogCommand && !isQuestion && !isFrustration && hasLogTrigger && gptFoodMatch.length > 0;
   if (isFoodLog) {
-    const _todayStrP = new Date().toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }).split("/").reverse().join("-");
+    const _todayStrP = sastToday(); // must match stored todayCaloriesDate (YYYY-MM-DD); en-ZA gave DD-MM-YYYY so _calCeilingForPattern was always false
     const _todayCalsP = user.todayCaloriesDate === _todayStrP ? (user.todayCalories || 0) : 0;
     const _calCeilingForPattern = (user.calorieTarget || 0) > 0 && (_todayCalsP - (user.calorieTarget || 0)) >= 100;
     const pattern = await checkFoodPatterns(user.id, _calCeilingForPattern);
