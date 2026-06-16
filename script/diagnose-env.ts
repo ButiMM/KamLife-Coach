@@ -26,7 +26,7 @@ const VARS: Array<{
   { key: "COACH_ALERT_PHONE",            severity: "WARN",     hint: "Coach NOT notified on safety alerts or crisis messages",            redact: false },
   { key: "TWILIO_SMS_NUMBER",            severity: "INFO",     hint: "SMS fallback for critical payment alerts disabled",                  redact: false },
   { key: "MEDIA_BASE_URL",              severity: "INFO",     hint: "CDN for exercise GIFs — static fallbacks used until set",            redact: false },
-  { key: "PROACTIVE_PAUSED",            severity: "INFO",     hint: "Current proactive messaging state",                                  redact: false },
+  { key: "PROACTIVE_PAUSED",            severity: "INFO",     hint: "NOT SET = proactive messaging is ACTIVE. Set to 'true' to pause all proactive sends.", redact: false },
   { key: "MAX_PROACTIVE_PER_DAY",       severity: "INFO",     hint: "Daily proactive message cap (default 3)",                           redact: false },
   { key: "NORMALIZER",                  severity: "INFO",     hint: "Normalizer killswitch — 'off' disables GPT message rewriting",       redact: false },
   { key: "PAYFAST_SANDBOX",            severity: "INFO",     hint: "PayFast mode — should be empty/absent in production",                redact: false },
@@ -37,8 +37,34 @@ function redact(value: string): string {
   return value.slice(0, 4) + "***" + value.slice(-2);
 }
 
+/**
+ * Presence is NOT validity. A var can be SET to an obvious placeholder (the PayFast
+ * "your-merchant-id" defaults) or be malformed (the variable NAME pasted into the
+ * value field, e.g. value = "MEDIA_BASE_URL=https://..."). Either way the app is
+ * misconfigured even though the var technically "exists" — which is exactly the
+ * false-green this script used to print. Returns a human reason, or null if it looks real.
+ */
+function looksLikePlaceholder(key: string, raw: string): string | null {
+  const v = raw.trim();
+  const lower = v.toLowerCase();
+  if (v.includes(`${key}=`))
+    return `the value contains "${key}=" — the variable NAME was pasted into the value field`;
+  if (lower.includes("placeholder"))
+    return "contains the word 'placeholder'";
+  if (/\.invalid(\b|\/|$)/.test(lower))
+    return "points at the reserved .invalid domain (never resolves)";
+  if (/^your[-_ .]/.test(lower))
+    return "starts with 'your-' — this is the default placeholder, not a real value";
+  if (/(^|[^a-z])example\.com($|[^a-z])/.test(lower))
+    return "points at example.com";
+  if (["changeme", "change-me", "todo", "tbd", "xxx", "dummy", "your-value", "value"].includes(lower))
+    return `is the literal "${v}"`;
+  return null;
+}
+
 let criticalFail = 0;
 let warnCount = 0;
+let placeholderCount = 0;
 
 console.log("\n╔══════════════════════════════════════════════════════╗");
 console.log("║          KamLife Coach — Environment Diagnostics     ║");
@@ -47,32 +73,49 @@ console.log("╚═════════════════════�
 for (const v of VARS) {
   const value = process.env[v.key];
   const present = !!value;
+  const placeholderReason = present ? looksLikePlaceholder(v.key, value!) : null;
   const displayValue = present
     ? (v.redact ? redact(value!) : value!)
     : "— NOT SET —";
 
-  const icon = present
-    ? "✅"
-    : v.severity === "CRITICAL" ? "❌" : v.severity === "WARN" ? "⚠️ " : "ℹ️ ";
-
-  const status = present ? "PRESENT" : `MISSING (${v.severity})`;
+  let icon: string;
+  if (!present) {
+    icon = v.severity === "CRITICAL" ? "❌" : v.severity === "WARN" ? "⚠️ " : "ℹ️ ";
+  } else if (placeholderReason) {
+    icon = "🔶";
+  } else {
+    icon = "✅";
+  }
 
   console.log(`${icon} ${v.key}`);
   console.log(`   Value : ${displayValue}`);
+
   if (!present) {
     console.log(`   Impact: ${v.hint}`);
     if (v.severity === "CRITICAL") criticalFail++;
     if (v.severity === "WARN") warnCount++;
+  } else if (placeholderReason) {
+    placeholderCount++;
+    console.log(`   ⚠️  PLACEHOLDER — ${placeholderReason}`);
+    console.log(`   Impact: ${v.hint}`);
+    // A placeholder in a CRITICAL/WARN var is as broken as the var being missing.
+    if (v.severity === "CRITICAL") criticalFail++;
+    else if (v.severity === "WARN") warnCount++;
   }
   console.log();
 }
 
 console.log("──────────────────────────────────────────────────────");
-if (criticalFail === 0 && warnCount === 0) {
-  console.log("✅  All variables present. Ready to deploy.\n");
-} else {
-  if (criticalFail > 0) console.log(`❌  ${criticalFail} CRITICAL var(s) missing — DO NOT deploy until fixed.`);
-  if (warnCount > 0)    console.log(`⚠️   ${warnCount} WARN var(s) missing — investigate before deploy.`);
-  console.log();
-  process.exit(criticalFail > 0 ? 1 : 0);
+if (placeholderCount > 0) {
+  console.log(`🔶  ${placeholderCount} variable(s) are set to placeholder/malformed values — fix the ones flagged above.`);
 }
+if (criticalFail === 0 && warnCount === 0 && placeholderCount === 0) {
+  console.log("✅  All variables present and real. Ready to deploy.\n");
+} else if (criticalFail === 0 && warnCount === 0) {
+  console.log("⚠️   No missing/critical blockers, but the placeholder value(s) above must be fixed before launch.\n");
+} else {
+  if (criticalFail > 0) console.log(`❌  ${criticalFail} CRITICAL var(s) missing or placeholder — DO NOT deploy until fixed.`);
+  if (warnCount > 0)    console.log(`⚠️   ${warnCount} WARN var(s) missing or placeholder — investigate before deploy.`);
+  console.log();
+}
+process.exit(criticalFail > 0 ? 1 : 0);

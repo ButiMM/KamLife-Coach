@@ -58,8 +58,13 @@ _Last updated: 2026-05-23_
 
 ## Launch checklist (verify in Railway before first customer)
 
-- [ ] `PAYFAST_PASSPHRASE` is set in Railway env vars
-- [ ] `PAYFAST_MERCHANT_ID` and `PAYFAST_MERCHANT_KEY` are set
+> ⚠️ **Presence ≠ validity.** `npm run diagnose:env` now flags placeholder/malformed
+> values (e.g. `your-merchant-id`, or the variable name pasted into the value field).
+> A var showing 🔶 PLACEHOLDER is as broken as one that is missing. Run it in Railway
+> (`railway run npm run diagnose:env`) and fix every ❌ and 🔶 before launch.
+
+- [ ] `PAYFAST_PASSPHRASE` is set to the REAL passphrase (not the `your-…` placeholder)
+- [ ] `PAYFAST_MERCHANT_ID` and `PAYFAST_MERCHANT_KEY` are set to REAL values (not `your-merchant-id`)
 - [ ] `OPENAI_API_KEY` (or `AI_INTEGRATIONS_OPENAI_API_KEY`) is set
 - [ ] `TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_WHATSAPP_NUMBER` are set
 - [ ] `COACH_DASHBOARD_KEY` is set and stored securely (not in code)
