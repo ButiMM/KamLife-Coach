@@ -381,6 +381,17 @@ export async function runAutoCalAdjust(): Promise<void> {
             newCal  = Math.max(calFloor, currentCal - 100);
             newProt = Math.min(currentProt + 10, 220);
             msg = `${name}, your weight has held steady for 3 weeks — your body has adapted to the current deficit. Two small adjustments:\n\n📉 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (higher protein protects muscle while we cut)\n\nSmall change, big impact over time. Keep training, keep logging.`;
+
+            // Plateau detection (runs 1h earlier, same Sunday) tells fat_loss/recomposition
+            // clients in this same |change|<=0.5kg band to "keep protein the same" — directly
+            // contradicting the protein bump above. Apply the target update either way (it's
+            // the real, correct adjustment), but skip the duplicate WhatsApp send so the client
+            // doesn't get two conflicting automated messages an hour apart. The new targets still
+            // surface naturally at their next weigh-in via the existing "Targets updated" note.
+            const [plateauAlreadySent] = await db.select({ id: sentProactive.id }).from(sentProactive)
+              .where(and(eq(sentProactive.userId, client.id), eq(sentProactive.messageKey, "plateau"), eq(sentProactive.dedupeWindow, thisWeekUTC())))
+              .limit(1);
+            if (plateauAlreadySent) msg = null;
           }
         } else if (goal === "muscle_gain") {
           if (change <= 0.3 && currentCal < 3500) {
@@ -406,7 +417,7 @@ export async function runAutoCalAdjust(): Promise<void> {
           const patch: Partial<typeof client> = { calorieTarget: newCal };
           if (newProt !== null) (patch as any).proteinTarget = newProt;
           await db.update(users).set(patch as any).where(eq(users.id, client.id));
-          await sendWhatsApp(client.phoneNumber, msg!);
+          if (msg) await sendWhatsApp(client.phoneNumber, msg);
           adjusted++;
         }
       } catch { /* skip individual client errors */ }
