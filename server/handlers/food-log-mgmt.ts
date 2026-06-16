@@ -6,13 +6,8 @@
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
-import { sastDayStart } from "../utils";
+import { sastDayStart, sastToday } from "../utils";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
-
-function sastToday(): string {
-  const sast = new Date(Date.now() + 2 * 3_600_000);
-  return sast.toISOString().slice(0, 10);
-}
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 

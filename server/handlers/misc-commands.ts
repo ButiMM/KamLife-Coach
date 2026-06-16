@@ -1073,7 +1073,7 @@ export async function handleMiscCommands(ctx: {
     else locked.push("🔒 First Session — Complete 1 workout");
 
     if (totalWorkouts >= 10) badges.push("💪 *Getting Serious* — 10 workouts done");
-    else if (totalWorkouts >= 1) locked.push("🔒 Getting Serious — Complete 10 workouts (${10 - totalWorkouts} to go)");
+    else if (totalWorkouts >= 1) locked.push(`🔒 Getting Serious — Complete 10 workouts (${10 - totalWorkouts} to go)`);
 
     if (totalWorkouts >= 25) badges.push("🔥 *Quarter Century* — 25 workouts smashed");
     else if (totalWorkouts >= 10) locked.push(`🔒 Quarter Century — Complete 25 workouts (${25 - totalWorkouts} to go)`);
