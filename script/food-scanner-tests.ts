@@ -59,11 +59,24 @@ test("'sugar free red bull' logs as 0 kcal", () => {
 test("plain 'red bull' stays ~113 kcal", () => {
   assert.ok(kcal("red bull") >= 100, `expected >=100, got ${kcal("red bull")}`);
 });
-test("plain 'energy drink' stays ~113 kcal", () => {
-  assert.ok(kcal("energy drink") >= 100, `expected >=100, got ${kcal("energy drink")}`);
-});
 test("plain 'monster' stays full sugar", () => {
   assert.ok(kcal("monster") >= 200, `expected >=200, got ${kcal("monster")}`);
+});
+
+// ── Generic "energy drink" must not silently overwrite a stated/unrecognised brand ──
+// Regression: "energy drink" used to be a bare alias on the Red Bull entry, so ANY
+// message containing that generic phrase — regardless of the actual brand named —
+// got silently logged as Red Bull's exact numbers. Now it has no deterministic match
+// and falls through to the GPT fallback, which can reason about the actual text.
+test("generic 'energy drink' (no brand) has no deterministic match", () => {
+  assert.equal(scanForSAFoods("energy drink").length, 0);
+});
+test("unrecognised-brand 'nasty energy drink' does not get silently logged as Red Bull", () => {
+  assert.ok(!names("nasty energy drink").includes("Red Bull"));
+});
+test("'monster energy' resolves to the correct Monster Energy drink entry, not Red Bull", () => {
+  assert.ok(names("monster energy").includes("Monster Energy drink"), `got ${names("monster energy")}`);
+  assert.ok(kcal("monster energy") >= 200, `expected >=200, got ${kcal("monster energy")}`);
 });
 
 // ── A sugar-free MILK coffee still has calories (only fizzy/energy go to 0) ──
