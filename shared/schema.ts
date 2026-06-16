@@ -107,6 +107,10 @@ export const users = pgTable(
   (table) => {
     return {
       phoneIdx: index("users_phone_idx").on(table.phoneNumber),
+      subOnboardIdx: index("users_sub_onboard_idx").on(
+        table.subscriptionStatus,
+        table.onboardingState,
+      ),
     };
   },
 );

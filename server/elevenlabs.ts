@@ -71,6 +71,9 @@ export async function textToSpeech(text: string, emotion: VoiceEmotion = "warm")
         model_id: "eleven_multilingual_v2",
         voice_settings: VOICE_SETTINGS[emotion] || VOICE_SETTINGS.warm,
       }),
+      // Node's global fetch has no default timeout — a stalled TLS connection would
+      // hang this voice job forever and wedge the rest of the batch. Cap it.
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -111,6 +114,7 @@ export async function scribeTranscribe(
       method: "POST",
       headers: { "xi-api-key": apiKey },
       body: formData,
+      signal: AbortSignal.timeout(30_000),
     });
 
     if (!response.ok) {
@@ -136,6 +140,7 @@ export async function getElevenLabsQuota(): Promise<{ used: number; limit: numbe
   try {
     const res = await fetch(`${ELEVENLABS_BASE}/user/subscription`, {
       headers: { "xi-api-key": apiKey },
+      signal: AbortSignal.timeout(10_000),
     });
     if (!res.ok) return null;
     const data = await res.json() as { character_count: number; character_limit: number };

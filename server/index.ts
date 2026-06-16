@@ -29,6 +29,22 @@ if (process.env.SENTRY_DSN) {
   console.log("[SENTRY] Error monitoring active");
 }
 
+// ── Last-resort process guards ───────────────────────────────────────────────
+// Without these, a single unhandled promise rejection crashes the whole server
+// (Node 20's default), dropping every in-flight WhatsApp reply and risking a
+// restart loop. We log + report instead of exiting: this is an always-on,
+// solo-operator coach bot where staying up beats a clean restart, and Express
+// already isolates per-request errors. Genuinely fatal states (port in use,
+// dead DB pool) surface through their own paths.
+process.on("unhandledRejection", (reason: any) => {
+  console.error("[UNHANDLED_REJECTION]", reason?.stack || reason);
+  if (process.env.SENTRY_DSN) Sentry.captureException(reason);
+});
+process.on("uncaughtException", (err: any) => {
+  console.error("[UNCAUGHT_EXCEPTION]", err?.stack || err);
+  if (process.env.SENTRY_DSN) Sentry.captureException(err);
+});
+
 async function runMigrations(): Promise<void> {
   // ── PHASE 1: Create all tables if they don't exist (fresh Railway deploy) ──
   const createTables = [
@@ -399,9 +415,25 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS workout_streak INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_renews_at TIMESTAMP`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS payment_reference TEXT`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories NUMERIC DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories INTEGER DEFAULT 0`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_calories_date TEXT`,
-    `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_protein_g NUMERIC DEFAULT 0`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS today_protein_g INTEGER DEFAULT 0`,
+    // Corrective: older DBs got these columns as NUMERIC (pg returns NUMERIC as a
+    // *string*, which silently breaks `todayCalories + x` arithmetic). Convert to
+    // INTEGER to match the Drizzle source of truth. Idempotent — the guard means it
+    // only rewrites while the column is still numeric, so it's a no-op on every
+    // subsequent boot.
+    `DO $$
+     BEGIN
+       IF (SELECT data_type FROM information_schema.columns
+           WHERE table_name='users' AND column_name='today_calories') = 'numeric' THEN
+         ALTER TABLE users ALTER COLUMN today_calories TYPE INTEGER USING ROUND(today_calories)::integer;
+       END IF;
+       IF (SELECT data_type FROM information_schema.columns
+           WHERE table_name='users' AND column_name='today_protein_g') = 'numeric' THEN
+         ALTER TABLE users ALTER COLUMN today_protein_g TYPE INTEGER USING ROUND(today_protein_g)::integer;
+       END IF;
+     END $$;`,
     // Gender (male/female), age, and buddy system — added for intelligence layer
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS gender TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS age INTEGER`,
@@ -420,6 +452,9 @@ async function runMigrations(): Promise<void> {
     `CREATE TABLE IF NOT EXISTS user_integrations (id UUID PRIMARY KEY DEFAULT gen_random_uuid(), user_id UUID NOT NULL REFERENCES users(id), provider TEXT NOT NULL, access_token TEXT, refresh_token TEXT, token_expiry TIMESTAMP, last_sync_at TIMESTAMP, is_active BOOLEAN NOT NULL DEFAULT true, created_at TIMESTAMP DEFAULT NOW())`,
     `CREATE UNIQUE INDEX IF NOT EXISTS user_integrations_user_provider_idx ON user_integrations(user_id, provider)`,
     `CREATE INDEX IF NOT EXISTS user_integrations_user_idx ON user_integrations(user_id)`,
+    // Hot path: scheduler getActiveClients() + signup/payment-recovery jobs filter
+    // users on (subscription_status, onboarding_state) on every cron run. Index it.
+    `CREATE INDEX IF NOT EXISTS users_sub_onboard_idx ON users(subscription_status, onboarding_state)`,
   ];
 
   let applied = 0;
