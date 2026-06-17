@@ -7,6 +7,8 @@
 // no new commands, no lessons, no GPT calls. Lines ride inside replies that
 // already exist.
 
+import { sastToday } from "./utils";
+
 type EduEvent = "meal" | "totals" | "steps";
 
 interface EduCtx {
@@ -24,10 +26,6 @@ const taught = new Map<string, Set<string>>();
 // Max one education line per user per day — coaching, not a curriculum.
 const taughtToday = new Map<string, string>();
 
-function dayKeySAST(): string {
-  const d = new Date(Date.now() + 2 * 3_600_000);
-  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-}
 
 function daysOnProgramme(user: any): number {
   const start = user?.programmeStartDate || user?.createdAt;
@@ -36,14 +34,14 @@ function daysOnProgramme(user: any): number {
 }
 
 function claim(userId: string, concept: string): boolean {
-  if (taughtToday.get(userId) === dayKeySAST()) return false;
+  if (taughtToday.get(userId) === sastToday()) return false;
   const set = taught.get(userId) || new Set<string>();
   if (set.has(concept)) return false;
   set.add(concept);
   if (taught.size > 5000) taught.clear();
   if (taughtToday.size > 5000) taughtToday.clear();
   taught.set(userId, set);
-  taughtToday.set(userId, dayKeySAST());
+  taughtToday.set(userId, sastToday());
   return true;
 }
 

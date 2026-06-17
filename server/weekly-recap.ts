@@ -291,8 +291,8 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
   const appUrlIsPublicHttps = appUrl.startsWith("https://");
   console.log(`[RECAP] Base URL: ${appUrl} | source: ${process.env.APP_URL ? "APP_URL" : railwayDomain ? "RAILWAY_PUBLIC_DOMAIN" : "fallback"} | HTTPS: ${appUrlIsPublicHttps} | ElevenLabs: ${elevenLabsReady}`);
 
-  // Get Monday of current week as the week identifier
-  const d = new Date();
+  // Get Monday of current SAST week as the week identifier
+  const d = new Date(Date.now() + 2 * 3_600_000); // shift to SAST before computing calendar week
   const day = d.getUTCDay();
   const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff));

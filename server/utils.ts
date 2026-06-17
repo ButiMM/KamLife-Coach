@@ -227,7 +227,7 @@ export function mealDateLabel(date: Date): string {
   if (diffDays === 0) return "today";
   if (diffDays === 1) return "yesterday";
   const days = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
-  return days[new Date(date).getDay()] || `${diffDays} days ago`;
+  return days[mealSAST.getUTCDay()] || `${diffDays} days ago`;
 }
 
 export function getDisplayName(user: any): string {
