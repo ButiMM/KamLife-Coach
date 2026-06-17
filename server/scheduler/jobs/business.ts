@@ -377,7 +377,10 @@ export async function runAutoCalAdjust(): Promise<void> {
         let msg:     string | null = null;
 
         if (goal === "fat_loss") {
-          if (change >= -0.3 && currentCal > calFloor) {
+          // Plateau window: |change| < 0.5kg — neither losing meaningfully nor gaining.
+          // The one-sided change >= -0.3 would fire on significant weight GAIN too ("held steady"
+          // being factually wrong). Use abs so we only trigger for true no-movement.
+          if (Math.abs(change) < 0.5 && currentCal > calFloor) {
             newCal  = Math.max(calFloor, currentCal - 100);
             newProt = Math.min(currentProt + 10, 220);
             msg = `${name}, your weight has held steady for 3 weeks — your body has adapted to the current deficit. Two small adjustments:\n\n📉 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (higher protein protects muscle while we cut)\n\nSmall change, big impact over time. Keep training, keep logging.`;
@@ -394,9 +397,17 @@ export async function runAutoCalAdjust(): Promise<void> {
             if (plateauAlreadySent) msg = null;
           }
         } else if (goal === "muscle_gain") {
-          if (change <= 0.3 && currentCal < 3500) {
+          // Fire only when stalled or losing (change < 0.1kg over 3 weeks).
+          // change <= 0.3 incorrectly fired when someone was losing weight significantly,
+          // sending "weight hasn't moved" when they were actually down 2kg.
+          if (change < 0.1 && currentCal < 3500) {
             newCal = Math.min(3500, currentCal + 150);
-            msg = `${name}, your weight has not moved in 3 weeks — for muscle gain, that means you need more fuel. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g. Your body needs the surplus to grow.`;
+            if (change < -0.3) {
+              // Losing weight on a muscle-gain programme — clearer message than "hasn't moved"
+              msg = `${name}, you are losing weight on a muscle-building programme — down ${Math.abs(change).toFixed(1)}kg in 3 weeks. That is the wrong direction. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g.`;
+            } else {
+              msg = `${name}, your weight has not moved in 3 weeks — for muscle gain, that means you need more fuel. Calories bumped: *${currentCal} → ${newCal} kcal/day*.\n\nAdd carbs around training: rice, oats, sweet potato, banana before gym. Protein stays at ${currentProt}g. Your body needs the surplus to grow.`;
+            }
           }
         } else if (goal === "recomposition") {
           if (change > 1.0 && currentCal > calFloor) {
