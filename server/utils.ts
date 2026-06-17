@@ -1,6 +1,18 @@
 const INVALID_NAMES = new Set(["HI", "HEY", "HELLO", "YES", "NO", "OK", "OKAY", "MENU", "HELP", "DONE", "USER", "THERE"]);
 
 
+// Normalise any SA phone format to bare international digits, so a number entered in
+// BETA_TESTERS ("0682002798", "+27 68 200 2798", "whatsapp:+27682002798") compares
+// equal to the digits-only MSISDN we get off a WhatsApp webhook ("27682002798").
+// Returns "" for empty/junk input so an empty allowlist entry never matches.
+export function normaliseMsisdn(raw: string): string {
+  let d = (raw || "").replace(/\D/g, "");
+  if (!d) return "";
+  if (d.length === 10 && d.startsWith("0")) d = "27" + d.slice(1); // SA local 0XX… → 27XX…
+  else if (d.length === 9) d = "27" + d;                            // bare 9-digit local, no leading 0
+  return d;
+}
+
 export function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
   return sast.toISOString().slice(0, 10);

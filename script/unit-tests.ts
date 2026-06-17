@@ -13,6 +13,7 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
+import { normaliseMsisdn } from "../server/utils";
 
 let passed = 0;
 let failed = 0;
@@ -1109,6 +1110,33 @@ test("no DD-MM-YYYY date-key pattern (en-ZA + reverse) in server code", () => {
     violations.length, 0,
     `DD-MM-YYYY date-key pattern found — use sastToday() (YYYY-MM-DD) for any value compared against todayCaloriesDate:\n${violations.join("\n")}`,
   );
+});
+
+// ============================================================
+// BETA_TESTERS phone normalisation — an allowlist entry in any SA format must
+// compare equal to the digits-only MSISDN from a WhatsApp webhook.
+// ============================================================
+test("normaliseMsisdn: SA local 0-prefixed → 27…", () => {
+  assert.equal(normaliseMsisdn("0682002798"), "27682002798");
+});
+test("normaliseMsisdn: +27 with spaces → 27…", () => {
+  assert.equal(normaliseMsisdn("+27 68 200 2798"), "27682002798");
+});
+test("normaliseMsisdn: whatsapp:-prefixed international → 27…", () => {
+  assert.equal(normaliseMsisdn("whatsapp:+27682002798"), "27682002798");
+});
+test("normaliseMsisdn: bare 9-digit local → 27…", () => {
+  assert.equal(normaliseMsisdn("682002798"), "27682002798");
+});
+test("normaliseMsisdn: all SA formats of one number collapse to the same key", () => {
+  const forms = ["0682002798", "+27682002798", "27682002798", "+27 68 200 2798", "whatsapp:+27682002798"];
+  const keys = new Set(forms.map(normaliseMsisdn));
+  assert.equal(keys.size, 1, `expected one canonical key, got ${[...keys].join(", ")}`);
+});
+test("normaliseMsisdn: empty / junk input returns '' (never matches an allowlist)", () => {
+  assert.equal(normaliseMsisdn(""), "");
+  assert.equal(normaliseMsisdn("   "), "");
+  assert.equal(normaliseMsisdn("not-a-number"), "");
 });
 
 // ============================================================

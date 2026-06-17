@@ -38,7 +38,7 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -187,12 +187,35 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     user.subscriptionStatus = "active";
   }
 
+  // ---- BETA TESTER ALLOWLIST — comma/space/newline-separated numbers in BETA_TESTERS ----
+  // Testers get a rolling non-expiring trial: full product access AND inclusion in the
+  // scheduler's active-client set (so they receive proactive messages and can test
+  // frequency), without ever hitting the 7-day trial wall. Kept as status="trial" (not
+  // "active") so they still surface on the Beta Testers admin page. The Beta Testers
+  // page advertises this env var — this is the code that finally enforces it.
+  const betaTesterPhones = (process.env.BETA_TESTERS || "")
+    .split(/[,\s]+/)
+    .map(normaliseMsisdn)
+    .filter(Boolean);
+  const isBetaTester = !isCoach && betaTesterPhones.includes(normaliseMsisdn(userPhone));
+  if (isBetaTester) {
+    // Refresh the bypass on every message so a tester who goes quiet for a week is never
+    // cut off — the moment they message again, access is extended a year out.
+    const farBypass = new Date(Date.now() + 365 * 86_400_000);
+    const bypassThin = !user.betaBypassUntil || new Date(user.betaBypassUntil) < new Date(Date.now() + 30 * 86_400_000);
+    if (user.subscriptionStatus !== "active" && (user.subscriptionStatus !== "trial" || bypassThin)) {
+      await db.update(users).set({ subscriptionStatus: "trial", betaBypassUntil: farBypass }).where(eq(users.phoneNumber, phone));
+      user.subscriptionStatus = "trial";
+      user.betaBypassUntil = farBypass;
+    }
+  }
+
   // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
   // Safety messages (chest pain, crisis, emergency) always bypass.
   // Onboarding is handled before this point and bypasses via onboardingState check.
   const trialExpired = user.subscriptionStatus === "trial" &&
     user.betaBypassUntil && new Date(user.betaBypassUntil) < new Date();
-  if ((user.subscriptionStatus === 'inactive' || trialExpired) && !isCoach) {
+  if ((user.subscriptionStatus === 'inactive' || trialExpired) && !isCoach && !isBetaTester) {
     const isSafety = /\b(chest pain|chest hurts?|chest is (tight|sore|aching|burning)|pain in my chest|chest tightness|can.?t breathe|shortness of breath|can.?t catch my breath|heart racing|heart pounding|dizziness|feeling faint|emergency|hospital|ambulance|crisis|suicid|hurt myself)\b/i.test(m);
     if (!isSafety) {
       const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
