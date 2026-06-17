@@ -684,11 +684,12 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
   // ---- ASK_POPIA ----
   if (state === "ASK_POPIA") {
+    const lower = msg.toLowerCase(); // phones auto-capitalise "Yes" — match case-insensitively
     const consentWords = ["yes", "agree", "consent", "ok", "okay", "yebo", "ja", "sure", "accept", "i agree", "i consent", "yes coach", "i do"];
     const isConsent = consentWords.some(k => {
-      if (msg === k) return true;
-      if (k.includes(" ")) return msg.includes(k); // multi-word phrases
-      return new RegExp(`\\b${k}\\b`).test(msg);   // single-word: whole-word only
+      if (lower === k) return true;
+      if (k.includes(" ")) return lower.includes(k); // multi-word phrases
+      return new RegExp(`\\b${k}\\b`).test(lower);   // single-word: whole-word only
     });
     if (isConsent) {
       await db.update(users).set({ popiConsent: true, popiConsentAt: new Date(), onboardingState: "WELCOME" }).where(eq(users.phoneNumber, phone));

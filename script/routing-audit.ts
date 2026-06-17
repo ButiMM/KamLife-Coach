@@ -300,6 +300,29 @@ const CASES: Case[] = [
     reject: [/10177|ambulance|medical emergency/i] },
   { name: "safety: genuine 'I think I'm having a stroke' still fires emergency", msg: "I think I'm having a stroke",
     expect: [/10177|ambulance|emergency/i] },
+
+  // ── ONBOARDING / POPIA CONSENT — must be case-insensitive (prod bug 2026-06-17) ──
+  // Phones auto-capitalise the first letter, so clients reply "Yes". The consent
+  // check was case-sensitive and looped the agreement prompt forever, blocking
+  // EVERY new client from onboarding. All capitalised forms below must accept.
+  { name: "popia: capitalised 'Yes' accepts consent — no re-prompt loop (prod bug 2026-06-17)", msg: "Yes",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/what'?s your name/i], reject: [/need your agreement/i, /reply \*?yes\*? to continue/i] },
+  { name: "popia: shouty 'YES' accepts consent", msg: "YES",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/what'?s your name/i], reject: [/need your agreement/i] },
+  { name: "popia: 'Yebo' (Zulu yes, capitalised) accepts consent", msg: "Yebo",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/what'?s your name/i], reject: [/need your agreement/i] },
+  { name: "popia: 'I Agree' (capitalised phrase) accepts consent", msg: "I Agree",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/what'?s your name/i], reject: [/need your agreement/i] },
+  { name: "popia: lowercase 'yes' still accepts (regression guard)", msg: "yes",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/what'?s your name/i], reject: [/need your agreement/i] },
+  { name: "popia: 'No' still refuses (capitalised refusal not mistaken for consent)", msg: "No",
+    user: { onboardingState: "ASK_POPIA", popiConsent: false },
+    expect: [/without consent|cannot store|cannot coach/i], reject: [/what'?s your name/i] },
 ];
 
 async function main() {
