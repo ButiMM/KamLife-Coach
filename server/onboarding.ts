@@ -48,8 +48,12 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
 
   // Full command list only when explicitly asked (menu/help) or the user is lost.
   // A greeting gets a coach, not a sitemap.
+  // Gym users: surface the photograph-a-machine feature. Dumbbell/home users don't need it.
+  const machineLine = mode === "gym"
+    ? `\n📸 *At the gym?* Send a photo of any machine — I'll tell you if it's right for today and how to use it.`
+    : "";
   const commandsBlock = opts?.showCommands
-    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.\n💪 _workout_ · _done_ · _tomorrow's session_\n📊 _my progress_ · _weight 82_ · _steps 6000_\n🛒 _shopping list_ · _meal prep_ · _supplements_\n⚙️ _my water_ · _badges_ · _referral_ · _connect steps_ · _pause_`
+    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.${machineLine}\n💪 _workout_ · _done_ · _tomorrow's session_\n📊 _my progress_ · _weight 82_ · _steps 6000_\n🛒 _shopping list_ · _meal prep_ · _supplements_\n⚙️ _my water_ · _badges_ · _referral_ · _connect steps_ · _pause_`
     : "";
 
   const tail = `${commandsBlock}${trialLine}`;

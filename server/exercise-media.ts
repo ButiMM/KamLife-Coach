@@ -361,48 +361,47 @@ const EXERCISE_SLUGS: Record<string, string> = {
  *  - Parenthetical suffixes like "(heavier)" or "(wide stance)"
  *  - Trailing noise words like "machine", "with dumbbell"
  */
-export function getExerciseGifUrl(exerciseName: string): string | null {
+function urlForSlug(slug: string): string | null {
+  // Only serve a CDN .gif for slugs we KNOW have been uploaded. Otherwise fall
+  // back to the guaranteed-working free-exercise-db still image. This prevents the
+  // footgun where setting MEDIA_BASE_URL (e.g. for portion images) silently points
+  // every exercise at a .gif that 404s. Add slugs to UPLOADED_GIF_SLUGS as you
+  // upload them — until then, the still image always shows.
+  if (CUSTOM_CDN && UPLOADED_GIF_SLUGS.has(slug)) return `${CUSTOM_CDN}/ex/${slug}.gif`;
+  return EXERCISE_MEDIA[slug] || null;
+}
+
+/**
+ * Resolves an exercise name (programme name OR short client phrase) to its canonical
+ * slug, or null. Same multi-pass resolution getExerciseGifUrl relied on — extracted so
+ * callers that need the slug itself (machine ↔ programme matching) share one source of
+ * truth with the image lookup. Returns the slug regardless of whether media exists for it.
+ */
+export function resolveExerciseSlug(exerciseName: string): string | null {
   const name = exerciseName.toLowerCase().trim();
 
-  function urlForSlug(slug: string): string | null {
-    // Only serve a CDN .gif for slugs we KNOW have been uploaded. Otherwise fall
-    // back to the guaranteed-working free-exercise-db still image. This prevents the
-    // footgun where setting MEDIA_BASE_URL (e.g. for portion images) silently points
-    // every exercise at a .gif that 404s. Add slugs to UPLOADED_GIF_SLUGS as you
-    // upload them — until then, the still image always shows.
-    if (CUSTOM_CDN && UPLOADED_GIF_SLUGS.has(slug)) return `${CUSTOM_CDN}/ex/${slug}.gif`;
-    return EXERCISE_MEDIA[slug] || null;
-  }
-
   // 1. Direct lookup
-  let slug = EXERCISE_SLUGS[name];
-  if (slug) return urlForSlug(slug);
+  if (EXERCISE_SLUGS[name]) return EXERCISE_SLUGS[name];
 
   // 2. Handle "Exercise A / Exercise B" — try each alternative left to right
   if (name.includes(" / ")) {
     for (const part of name.split(" / ")) {
-      slug = EXERCISE_SLUGS[part.trim()];
-      if (slug) return urlForSlug(slug);
+      if (EXERCISE_SLUGS[part.trim()]) return EXERCISE_SLUGS[part.trim()];
     }
   }
 
   // 3. Strip parenthetical suffixes like "(heavier)", "(wide stance)", "(from floor)"
   const noParens = name.replace(/\s*\([^)]*\)\s*/g, "").trim();
-  if (noParens !== name) {
-    slug = EXERCISE_SLUGS[noParens];
-    if (slug) return urlForSlug(slug);
-  }
+  if (noParens !== name && EXERCISE_SLUGS[noParens]) return EXERCISE_SLUGS[noParens];
 
   // 4. Strip common equipment prefixes and retry
   const prefixStripped = name.replace(/^(machine|cable|smith|barbell|assisted|seated|standing|lying|dumbbell|resistance band|bodyweight)\s+/, "");
   if (prefixStripped !== name) {
-    slug = EXERCISE_SLUGS[prefixStripped];
-    if (slug) return urlForSlug(slug);
+    if (EXERCISE_SLUGS[prefixStripped]) return EXERCISE_SLUGS[prefixStripped];
     // Also try splitting on " / " after stripping
     if (prefixStripped.includes(" / ")) {
       for (const part of prefixStripped.split(" / ")) {
-        slug = EXERCISE_SLUGS[part.trim()];
-        if (slug) return urlForSlug(slug);
+        if (EXERCISE_SLUGS[part.trim()]) return EXERCISE_SLUGS[part.trim()];
       }
     }
   }
@@ -411,26 +410,24 @@ export function getExerciseGifUrl(exerciseName: string): string | null {
   const noTrail = name
     .replace(/\s+(with\s+\w+|on\s+\w+|each\s+(arm|leg|side)|machine|barbell)$/, "")
     .trim();
-  if (noTrail !== name) {
-    slug = EXERCISE_SLUGS[noTrail];
-    if (slug) return urlForSlug(slug);
-  }
+  if (noTrail !== name && EXERCISE_SLUGS[noTrail]) return EXERCISE_SLUGS[noTrail];
 
   // 6. Replace hyphens with spaces — programme names use "Single-Leg" but slugs use "single leg"
   const noHyphens = name.replace(/-/g, " ").trim();
-  if (noHyphens !== name) {
-    slug = EXERCISE_SLUGS[noHyphens];
-    if (slug) return urlForSlug(slug);
-  }
+  if (noHyphens !== name && EXERCISE_SLUGS[noHyphens]) return EXERCISE_SLUGS[noHyphens];
 
   // 7. Strip trailing 's' to match singular slug entries ("walking lunges" → "walking lunge")
   if (name.endsWith("s") && name.length > 4) {
     const singular = name.slice(0, -1);
-    slug = EXERCISE_SLUGS[singular];
-    if (slug) return urlForSlug(slug);
+    if (EXERCISE_SLUGS[singular]) return EXERCISE_SLUGS[singular];
   }
 
   return null;
+}
+
+export function getExerciseGifUrl(exerciseName: string): string | null {
+  const slug = resolveExerciseSlug(exerciseName);
+  return slug ? urlForSlug(slug) : null;
 }
 
 /**

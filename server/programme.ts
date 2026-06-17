@@ -3,6 +3,8 @@
 // All workout programme content and builder functions
 // ============================================================
 
+import { resolveExerciseSlug } from "./exercise-media";
+
 // ============================================================
 // TYPE DEFINITIONS
 // ============================================================
@@ -14,6 +16,21 @@ export type Exercise = {
   mistake: string;
   modification: string;
   youtube?: string;
+};
+
+/**
+ * An exercise from the user's CURRENT day, enriched with its canonical slug and the
+ * phase/week-adjusted set/rep prescription. Used by the gym-machine photo coach so it can
+ * answer "is this machine in my plan today, and what exactly am I doing on it?" — pulling
+ * the real prescription (not a hardcoded cue table) so there is one source of truth.
+ */
+export type DayExercise = {
+  name: string;
+  slug: string | null;
+  setsDisplay: string;
+  description: string;
+  mistake: string;
+  modification: string;
 };
 
 // ============================================================
@@ -1355,7 +1372,8 @@ function formatGymDay(
   goal = "fat_loss",
   isDumbbell = false,
   injuries = "none",
-  experience = ""
+  experience = "",
+  showMachineHint = false
 ): string {
   const isBeginner = experience === "beginner" || experience === "";
   const wCtx = getWeekContext(phase, week, isBeginner);
@@ -1399,6 +1417,9 @@ function formatGymDay(
     out += `⚠️ *Skipped (injury):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
   }
 
+  if (showMachineHint) {
+    out += `📸 *Not sure which machine is which?* Snap a photo of any machine and send it to me — I'll tell you if it's the right one for today and exactly how to use it.\n\n`;
+  }
   out += `Reply *DONE* when finished.\n\n`;
   out += finisher;
   out += `\n\n🚶 *After:* 15–20 min walk. No running — this is active recovery, not extra cardio.`;
@@ -1794,7 +1815,46 @@ export function buildDayWorkout(user: any): string {
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
   const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience, true);
+}
+
+/**
+ * Returns the user's CURRENT day exercises as structured DayExercise[] (slug + real
+ * phase/week prescription), or null for walk-only users (no machines to coach). Mirrors
+ * buildDayWorkout's routing exactly — same day selection — but returns data, not text,
+ * so the machine-photo coach can match a photographed machine against today's plan.
+ */
+export function getCurrentDayExercises(user: any): { exercises: DayExercise[]; label: string } | null {
+  const mode = user.trainingMode || "home";
+  if (mode === "walk_only" || mode === "walk") return null;
+
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const gender = user.gender || "male";
+  const day = user.programmeDayInWeek || 1;
+
+  let raw: { exercises: Exercise[]; label: string };
+  if (mode === "gym_dumbbell") {
+    raw = getNewDbDay(trainingDays, day, gender);
+  } else if (mode !== "gym") {
+    raw = getNewHomeDay(trainingDays, day, gender);
+  } else {
+    raw = getNewGymDay(trainingDays, day, gender, user.primaryFocusArea === "glutes_legs");
+  }
+
+  const phase = user.programmePhase || 1;
+  const week = user.programmeWeek || 1;
+  const isBeginner = (user.trainingExperience || "beginner").toLowerCase() === "beginner";
+  const wCtx = getWeekContext(phase, week, isBeginner);
+
+  const exercises: DayExercise[] = raw.exercises.map((ex) => ({
+    name: ex.name,
+    slug: resolveExerciseSlug(ex.name),
+    setsDisplay: getExerciseSets(ex, wCtx.sets, wCtx.reps, phase),
+    description: ex.description,
+    mistake: ex.mistake,
+    modification: ex.modification,
+  }));
+  return { exercises, label: raw.label };
 }
 
 // ============================================================
