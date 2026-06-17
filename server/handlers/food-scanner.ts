@@ -212,6 +212,37 @@ function redirectSugarFreeDrinks(foods: SAFood[], lower: string): SAFood[] {
   return hasSpecificZero ? out.filter(o => o.name !== zeroEntry.name) : out;
 }
 
+// Processed-meat / dish nouns that take a meat word as an ADJECTIVE. The trailing
+// noun is its own food (Viennas, Polony…) whose alias does NOT contain the meat word,
+// so the substring dedup can't see the collision.
+const MEAT_MODIFIER_NOUNS = "viennas?|russians?|polony|polonny|poloni|sausages?|nuggets?|burgers?|patty|patties|schnitzels?|kievs?|strips?|fingers?|mayo|pies?|wraps?|bacon|ham|wors";
+// Meat words that carry a BARE single-word alias on a standalone cut entry, mapped to
+// that cut. Only "chicken" (→ "Chicken thigh") does today; the map keeps it extensible.
+const GENERIC_MEAT_CUTS: Record<string, string[]> = {
+  chicken: ["Chicken thigh"],
+};
+
+// Drop a phantom meat CUT that's actually qualifying a different processed food.
+// "2 chicken viennas" matches both "chicken" → Chicken thigh AND "viennas" → Viennas;
+// the Chicken thigh is protein the client never ate (and the "2" then doubles it).
+// We only drop the cut when EVERY occurrence of the meat word sits immediately before
+// such a noun — a real standalone "chicken and rice" or "chicken thigh and viennas"
+// keeps its chicken.
+function dropModifierMeats(foods: SAFood[], lower: string): SAFood[] {
+  let out = foods;
+  for (const [meat, cutNames] of Object.entries(GENERIC_MEAT_CUTS)) {
+    if (!out.some(f => cutNames.includes(f.name))) continue;
+    const asModifier = new RegExp(`\\b${meat}\\s+(?:${MEAT_MODIFIER_NOUNS})\\b`, "i").test(lower);
+    if (!asModifier) continue;
+    // Standalone = the meat word appears NOT immediately followed by a modifier noun
+    // ("chicken and rice", or "chicken thigh" where "thigh" isn't a modifier noun).
+    const standalone = new RegExp(`\\b${meat}\\b(?!\\s+(?:${MEAT_MODIFIER_NOUNS}))`, "i").test(lower);
+    if (standalone) continue;
+    out = out.filter(f => !cutNames.includes(f.name));
+  }
+  return out;
+}
+
 export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
@@ -267,7 +298,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   // exactOnly: callers gating AUTO-logging (no eating verb present) must not act on
   // fuzzy guesses — fuzzy matched "building phase" to mopani worms and logged a fake
   // meal over a goal-change request (caught by routing-audit).
-  if (matched.length > 0 || opts?.exactOnly) return redirectSugarFreeDrinks(matched, lower);
+  if (matched.length > 0 || opts?.exactOnly) return redirectSugarFreeDrinks(dropModifierMeats(matched, lower), lower);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];
@@ -347,7 +378,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
   }
 
-  return redirectSugarFreeDrinks(cleaned, lower);
+  return redirectSugarFreeDrinks(dropModifierMeats(cleaned, lower), lower);
 }
 
 export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {

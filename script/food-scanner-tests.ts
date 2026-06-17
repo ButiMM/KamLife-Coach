@@ -95,6 +95,37 @@ test("'sugar free mocha' keeps milk calories (not zeroed)", () => {
   assert.ok(kcal("sugar free mocha") > 100, `expected >100, got ${kcal("sugar free mocha")}`);
 });
 
+// ── A meat word used as an ADJECTIVE must not log a phantom cut ──────────────
+// Production failure (screenshot): "2 chicken viennas" logged Chicken thigh (39g
+// protein) PLUS Viennas, and the "2" doubled the phantom to ~78g — nearly tripling
+// the meal's real protein. "chicken" is only an adjective for "viennas" here.
+test("'2 chicken viennas' logs Viennas only — no phantom Chicken thigh", () => {
+  const n = names("2 chicken viennas");
+  assert.ok(n.includes("Viennas"), `expected Viennas, got ${n}`);
+  assert.ok(!n.includes("Chicken thigh"), `should NOT log Chicken thigh, got ${n}`);
+});
+test("the exact breakfast log does not fabricate Chicken thigh", () => {
+  const n = names("3 slices of white bread, 2 scrambled eggs, 2 chicken viennas and cup of black coffee");
+  assert.ok(!n.includes("Chicken thigh"), `should NOT log Chicken thigh, got ${n}`);
+  assert.ok(n.includes("Viennas"), `expected Viennas, got ${n}`);
+});
+test("'chicken polony' does not also log Chicken thigh", () => {
+  assert.ok(!names("chicken polony").includes("Chicken thigh"), `got ${names("chicken polony")}`);
+});
+// Must-not-break: a genuine standalone chicken log still resolves to a chicken food.
+test("bare 'chicken' still logs Chicken thigh (standalone, not a modifier)", () => {
+  assert.ok(names("i had chicken for lunch").includes("Chicken thigh"), `got ${names("i had chicken for lunch")}`);
+});
+test("'chicken and rice' still resolves to a chicken-containing meal", () => {
+  const n = names("chicken and rice");
+  assert.ok(n.some(x => /chicken/i.test(x)), `expected a chicken food, got ${n}`);
+});
+test("'chicken thigh and viennas' keeps BOTH (chicken stated standalone)", () => {
+  const n = names("chicken thigh and viennas");
+  assert.ok(n.includes("Chicken thigh"), `expected Chicken thigh, got ${n}`);
+  assert.ok(n.includes("Viennas"), `expected Viennas, got ${n}`);
+});
+
 // ── SA McDonald's breakfast recognised (real menu item, not generic guess) ──
 test("'mcdonalds breakfast' matches the SA Big Breakfast", () => {
   assert.ok(names("mcdonalds breakfast").includes("McDonald's Big Breakfast (SA)"));
