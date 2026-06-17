@@ -13,7 +13,7 @@ import type OpenAI from "openai";
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import { db } from "../db";
 import {
-  users, chatHistory, stepLogs, mealLogs, progressPhotos, weightLogs,
+  users, chatHistory, stepLogs, mealLogs, progressPhotos,
 } from "../../shared/schema";
 import { eq, and, gte, lt, asc, desc, sql } from "drizzle-orm";
 import {
@@ -23,6 +23,7 @@ import {
 import { askCoachK } from "../gpt";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
+import { handleWeightLog } from "./weight";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
@@ -304,9 +305,7 @@ export async function handleMediaMessage(ctx: {
               const scaleText = (scaleOcr.choices[0]?.message?.content || "").trim();
               const weightKg = parseFloat(scaleText.replace(/[^0-9.]/g, ""));
               if (!isNaN(weightKg) && weightKg > 30 && weightKg < 300) {
-                await db.insert(weightLogs).values({ userId: user.id, weight: String(weightKg) });
-                await db.update(users).set({ currentWeight: String(weightKg) }).where(eq(users.id, user.id));
-                const scaleReply = `Logged — ${weightKg} kg. Consistent weigh-ins are how we track real progress. Same time each week for an accurate comparison.`;
+                const scaleReply = await handleWeightLog(phone, user, weightKg);
                 await logChat(user.id, "[Scale Photo]", scaleReply, "WEIGHT_LOG");
                 return scaleReply;
               }

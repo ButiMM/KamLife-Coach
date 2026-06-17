@@ -222,13 +222,13 @@ export async function runStreakAtRisk(): Promise<void> {
     for (const l of logs) {
       if (!l.loggedAt) continue;
       const d = new Date(new Date(l.loggedAt).getTime() + 2 * 3_600_000);
-      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`);
+      days.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(d.getUTCDate()).padStart(2, "0")}`);
     }
     let streak = 0;
     const cur = new Date(Date.now() + 2 * 3_600_000);
     cur.setUTCDate(cur.getUTCDate() - 1);
     while (true) {
-      const key = `${cur.getUTCFullYear()}-${cur.getUTCMonth()}-${cur.getUTCDate()}`;
+      const key = `${cur.getUTCFullYear()}-${String(cur.getUTCMonth() + 1).padStart(2, "0")}-${String(cur.getUTCDate()).padStart(2, "0")}`;
       if (!days.has(key)) break;
       streak++;
       cur.setUTCDate(cur.getUTCDate() - 1);

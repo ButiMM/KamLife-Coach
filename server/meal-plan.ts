@@ -163,9 +163,9 @@ const SNACK_PREMIUM: FoodItem[] = [
 function makeLowGI(item: FoodItem): FoodItem {
   const [desc, kcal, prot] = item;
   const newDesc = desc
+    .replace(/\+ ½ cup pap/g, "+ ½ cup oats (savoury)")
     .replace(/½ cup pap/g, "½ cup samp and beans")
     .replace(/1 cup pap/g, "½ cup samp and beans")
-    .replace(/\+ ½ cup pap/g, "+ ½ cup oats (savoury)")
     .replace(/pap \+/g, "sweet potato +");
   return [newDesc, kcal, prot];
 }

@@ -123,7 +123,8 @@ export async function buildClientProfile(user: {
     for (const w of allWorkouts) {
       if (!w.loggedAt) continue;
       const d = new Date(new Date(w.loggedAt).getTime() + 2 * 3_600_000);
-      const wk = `${d.getUTCFullYear()}-W${String(Math.ceil((d.getUTCDate() + new Date(d.getUTCFullYear(), 0, 1).getDay()) / 7)).padStart(2, "0")}`;
+      const dayOfYear = Math.floor((d.getTime() - Date.UTC(d.getUTCFullYear(), 0, 1)) / 86_400_000);
+      const wk = `${d.getUTCFullYear()}-W${String(Math.floor(dayOfYear / 7)).padStart(2, "0")}`;
       workoutsByWeek[wk] = (workoutsByWeek[wk] || 0) + 1;
     }
     const bestWeekSessions = Object.values(workoutsByWeek).length > 0
@@ -143,8 +144,9 @@ export async function buildClientProfile(user: {
     const protByWeek: Record<string, number[]> = {};
     for (const d of allMealDays) {
       if (!d.day || d.protein === 0) continue;
-      const dt = new Date(d.day);
-      const wk = `${dt.getFullYear()}-W${String(Math.ceil((dt.getDate() + new Date(dt.getFullYear(), 0, 1).getDay()) / 7)).padStart(2, "0")}`;
+      const dt = new Date(d.day + "T00:00:00Z");
+      const dayOfYear = Math.floor((dt.getTime() - Date.UTC(dt.getUTCFullYear(), 0, 1)) / 86_400_000);
+      const wk = `${dt.getUTCFullYear()}-W${String(Math.floor(dayOfYear / 7)).padStart(2, "0")}`;
       protByWeek[wk] = protByWeek[wk] || [];
       protByWeek[wk].push(d.protein);
     }

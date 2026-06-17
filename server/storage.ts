@@ -163,7 +163,6 @@ export class DatabaseStorage implements IStorage {
     ).orderBy(desc(users.lastActiveAt));
 
     const flagged: FlaggedUser[] = [];
-    const inactiveUsers: typeof activeUsers = [];
     const recentlyActiveUsers: typeof activeUsers = [];
 
     for (const user of activeUsers) {

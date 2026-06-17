@@ -147,9 +147,9 @@ export function buildContext(user: any): string {
 // ============================================================
 
 export function getSAContextFlags(user?: any): string {
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const day = now.getDate();
+  const now = new Date(Date.now() + 2 * 3_600_000); // SAST — budget mode and month context must reflect SA calendar date
+  const month = now.getUTCMonth() + 1;
+  const day = now.getUTCDate();
   const flags: string[] = [];
 
   if (day >= 20) {
