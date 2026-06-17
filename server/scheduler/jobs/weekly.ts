@@ -256,8 +256,8 @@ export async function runWeekendFoodAudit(): Promise<void> {
         .from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo))).orderBy(asc(chatHistory.createdAt));
       if (foodLogs.length < 5) continue;
 
-      const weekdayLogs = foodLogs.filter(l => { const d = new Date(l.createdAt!).getDay(); return d !== 0 && d !== 6; });
-      const weekendLogs = foodLogs.filter(l => { const d = new Date(l.createdAt!).getDay(); return d === 0 || d === 6; });
+      const weekdayLogs = foodLogs.filter(l => { const d = new Date(new Date(l.createdAt!).getTime() + 2 * 3_600_000).getUTCDay(); return d !== 0 && d !== 6; });
+      const weekendLogs = foodLogs.filter(l => { const d = new Date(new Date(l.createdAt!).getTime() + 2 * 3_600_000).getUTCDay(); return d === 0 || d === 6; });
       if (weekendLogs.length === 0 || weekdayLogs.length === 0) continue;
 
       const HIGH_CAL = ["kfc", "mcdonalds", "nandos", "pizza", "kotas", "vetkoek", "beer", "wine", "braai", "chips", "cake", "chocolate", "dessert", "ice cream", "takeaway", "takeaways", "cool drink", "coke", "fanta", "sprite", "pap en vleis"];

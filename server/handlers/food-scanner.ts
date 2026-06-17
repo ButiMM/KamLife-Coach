@@ -169,11 +169,15 @@ const SUGARY_DRINK_RE = /\b(coke|cola|coca[\s-]?cola|pepsi|sprite|fanta|stoney|s
 
 // Detect an explicit sugar-free intent in the raw message.
 function hasSugarFreeIntent(lower: string): boolean {
-  if (/\b(zero[\s-]?sugar|sugar[\s-]?free|sugarfree|no[\s-]?sugar|no[\s-]?cal|zero[\s-]?cal|diet)\b/i.test(lower)) return true;
+  if (/\b(zero[\s-]?sugar|sugar[\s-]?free|sugarfree|no[\s-]?sugar|no[\s-]?cal|zero[\s-]?cal)\b/i.test(lower)) return true;
   // "<drink> zero" or "zero <drink>" — e.g. "red bull zero", "zero coke"
   const drinkWords = "coke|cola|pepsi|sprite|fanta|stoney|sparletta|powerade|energade|lucozade|monster|red\\s?bull|redbull|energy|cool\\s?drink|cooldrink|soda";
   if (new RegExp(`\\b(?:${drinkWords})\\b[\\w\\s]{0,12}\\bzero\\b`, "i").test(lower)) return true;
   if (new RegExp(`\\bzero\\b[\\w\\s]{0,12}\\b(?:${drinkWords})\\b`, "i").test(lower)) return true;
+  // "diet" must be adjacent to a drink word ("diet coke") — a bare "diet" anywhere in the
+  // message ("my diet has been bad, had a monster energy") must not zero out a real drink.
+  if (new RegExp(`\\bdiet\\b[\\w\\s]{0,12}\\b(?:${drinkWords})\\b`, "i").test(lower)) return true;
+  if (new RegExp(`\\b(?:${drinkWords})\\b[\\w\\s]{0,12}\\bdiet\\b`, "i").test(lower)) return true;
   return false;
 }
 

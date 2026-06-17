@@ -243,6 +243,9 @@ export async function buildPatternSummary(user: any): Promise<string> {
   const proteinTarget = user.proteinTarget || 120;
   const programmeWeek = user.programmeWeek || 1;
   const today = new Date();
+  // SAST-shifted copy for calendar-date checks (e.g. "after the 20th") — today itself
+  // must stay raw/UTC since it also feeds sastDayStart(), which applies its own +2h shift.
+  const todaySAST = new Date(today.getTime() + 2 * 3_600_000);
   const sevenDaysAgo = sastDayStart(new Date(today.getTime() - 7 * 86_400_000));
   const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
   const twentyEightDaysAgo = new Date(today.getTime() - 28 * 86_400_000);
@@ -289,7 +292,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
     // count as engagement — otherwise a silent client who merely receives daily
     // nudges looks fully active and silence detection never fires.
     const daysWithLogs = new Set(
-      recentChats.filter(c => (c.messageIn || "").trim()).map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
+      recentChats.filter(c => (c.messageIn || "").trim()).map(c => new Date(new Date(c.createdAt || "").getTime() + 2 * 3_600_000).toLocaleDateString("en-ZA"))
     ).size;
     const daysSilent = 7 - daysWithLogs;
 
@@ -392,11 +395,11 @@ export async function buildPatternSummary(user: any): Promise<string> {
     }
 
     const weekendChats = recentChats.filter(c => {
-      const day = new Date(c.createdAt || "").getDay();
+      const day = new Date(new Date(c.createdAt || "").getTime() + 2 * 3_600_000).getUTCDay();
       return day === 0 || day === 6;
     });
     const weekdayChats = recentChats.filter(c => {
-      const day = new Date(c.createdAt || "").getDay();
+      const day = new Date(new Date(c.createdAt || "").getTime() + 2 * 3_600_000).getUTCDay();
       return day >= 1 && day <= 5;
     });
     if (weekdayChats.length > 3 && weekendChats.length === 0) {
@@ -404,7 +407,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
     }
 
     const foodLogDays = new Set(
-      recentChats.filter(c => c.intent === "FOOD_LOG").map(c => new Date(c.createdAt || "").toLocaleDateString("en-ZA"))
+      recentChats.filter(c => c.intent === "FOOD_LOG").map(c => new Date(new Date(c.createdAt || "").getTime() + 2 * 3_600_000).toLocaleDateString("en-ZA"))
     ).size;
     if (foodLogDays >= 5) {
       parts.push("Food logging is consistent this week — solid habit.");
@@ -413,7 +416,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
     }
 
     if (programmeWeek === 3) parts.push("Currently in week 3 of the programme — the danger zone.");
-    if (today.getDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
+    if (todaySAST.getUTCDate() >= 20) parts.push("Date is after the 20th — budget mode active.");
 
     // ── 28-day trajectory scoring ────────────────────────────────────────────
     const plannedSessions28 = (user.trainingDaysPerWeek || 3) * 4;
@@ -465,7 +468,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
     console.error("[PATTERN] buildPatternSummary error:", err);
     const fallback = [`PATTERN CONTEXT: ${name}.`];
     if (programmeWeek === 3) fallback.push("Week 3 — danger zone.");
-    if (today.getDate() >= 20) fallback.push("Budget mode active.");
+    if (todaySAST.getUTCDate() >= 20) fallback.push("Budget mode active.");
     return fallback.join(" ");
   }
 }
@@ -595,14 +598,17 @@ export async function gptFoodFallback(
   message: string,
   user: { goalType?: string | null; calorieTarget?: number | null; proteinTarget?: number | null },
 ): Promise<GptFoodFallbackResult | null> {
-  const cacheKey = normaliseFoodCacheKey(message);
+  const goal = user.goalType || "fat_loss";
+  // Cache key is bucketed by goal — the cached coach_note is generated FOR that goal
+  // (fat_loss vs muscle_gain read very differently), so two users logging the same
+  // food with different goals must never share a cached note (was a real cross-user leak).
+  const cacheKey = `${goal}:${normaliseFoodCacheKey(message)}`;
   const cached = foodFallbackCache.get(cacheKey);
   if (cached && cached.expiresAt > Date.now()) {
     return { ...cached.result, fromCache: true };
   }
 
   try {
-    const goal = user.goalType || "fat_loss";
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
 

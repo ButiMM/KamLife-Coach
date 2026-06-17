@@ -54,6 +54,17 @@ test("'coke zero' logs as 0 kcal", () => {
 test("'sugar free red bull' logs as 0 kcal", () => {
   assert.equal(kcal("sugar free red bull"), 0);
 });
+test("'diet coke' logs as 0 kcal", () => {
+  assert.equal(kcal("diet coke"), 0);
+});
+// A bare "diet" elsewhere in the message must NOT zero out an unrelated drink —
+// "my diet has been bad" is not "diet coke". Regression for a real mislogging bug.
+test("'my diet has been bad, had a monster energy' keeps full-sugar calories", () => {
+  assert.ok(kcal("my diet has been bad, had a monster energy today") >= 150, `expected >=150, got ${kcal("my diet has been bad, had a monster energy today")}`);
+});
+test("'trying to fix my diet, had a red bull' keeps full-sugar calories", () => {
+  assert.ok(kcal("trying to fix my diet, had a red bull") >= 100, `expected >=100, got ${kcal("trying to fix my diet, had a red bull")}`);
+});
 
 // ── Full-sugar drinks (no modifier) must KEEP their calories ─────────────────
 test("plain 'red bull' stays ~113 kcal", () => {

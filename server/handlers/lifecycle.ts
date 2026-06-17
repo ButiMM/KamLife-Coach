@@ -1507,7 +1507,7 @@ export async function handleLifecycle(ctx: {
     }
 
     if (goal === "muscle_gain") {
-      scaleReply = `${name ? name.slice(2) + ", the" : "The"} scale going up is the goal on a muscle-building programme. If it is not moving, you are likely not eating enough. Your body cannot build muscle in a deficit — it needs fuel.\n\nAre you hitting your calorie and protein targets consistently? That is where muscle gain starts.`;
+      scaleReply = `${user.name ? user.name + ", the" : "The"} scale going up is the goal on a muscle-building programme. If it is not moving, you are likely not eating enough. Your body cannot build muscle in a deficit — it needs fuel.\n\nAre you hitting your calorie and protein targets consistently? That is where muscle gain starts.`;
     }
 
     await logChat(user.id, message, scaleReply, "SCALE_STUCK");

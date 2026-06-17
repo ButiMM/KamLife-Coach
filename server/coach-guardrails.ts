@@ -10,6 +10,9 @@ export type GuardrailResult = {
 };
 
 const PREMIUM_FOOD_RE = /\b(greek\s*yog(?:h)?urt|quinoa|salmon|avocado toast|woolworths)\b/i;
+// Separate global-flagged copy for replace-all — keeping it distinct from PREMIUM_FOOD_RE
+// avoids any .test()/.lastIndex statefulness footgun on the shared module-level regex.
+const PREMIUM_FOOD_RE_ALL = /\b(greek\s*yog(?:h)?urt|quinoa|salmon|avocado toast|woolworths)\b/gi;
 const GENERIC_ASK_RE = /\bwhat do you need from me right now\??\b/i;
 const HARD_TRAINING_RE = /\b(squat|deadlift|run|sprint|jump|plyometric|heavy)\b/i;
 
@@ -63,7 +66,7 @@ export function enforceCoachGuardrails(input: string, context: GuardrailContext)
   const lowBudget = budget === "under_100" || budget === "under_50" || budget === "50_100";
   if (lowBudget && PREMIUM_FOOD_RE.test(reply)) {
     violations.push("BUDGET_MISMATCH");
-    reply = `${reply.replace(PREMIUM_FOOD_RE, "eggs or pilchards")} For your budget, eggs, pilchards, and sugar beans are priority proteins.`;
+    reply = `${reply.replace(PREMIUM_FOOD_RE_ALL, "eggs or pilchards")} For your budget, eggs, pilchards, and sugar beans are priority proteins.`;
   }
 
   const hasKnownInjury = injuries && injuries !== "none";
