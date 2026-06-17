@@ -33,7 +33,7 @@ export default function Analytics() {
             {revenue?.computedAt && (
               <span className="text-xs text-muted-foreground bg-white dark:bg-card px-3 py-1.5 rounded-full border border-border">
                 <Clock className="w-3 h-3 inline mr-1" />
-                Data as of {new Date(revenue.computedAt).toLocaleTimeString()}
+                Data as of {new Date(revenue.computedAt).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg" })}
               </span>
             )}
           </div>

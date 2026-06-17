@@ -588,8 +588,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       const target = user.stepsTarget || 8500;
       const stepIsRetro = isRetroactiveMeal(message);
       const stepLoggedAt = stepIsRetro ? parseMealDate(message) : new Date();
-      const stepDayStart = new Date(stepLoggedAt);
-      stepDayStart.setUTCHours(0, 0, 0, 0);
+      const stepDayStart = sastDayStart(stepLoggedAt);
       const stepDayEnd = new Date(stepDayStart.getTime() + 86_400_000);
       const existingStep = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
         .from(stepLogs)

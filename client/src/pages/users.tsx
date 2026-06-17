@@ -134,7 +134,7 @@ export default function UsersList() {
                       </div>
                     </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
-                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString() : "-"}
+                      {user.createdAt ? new Date(user.createdAt).toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }) : "-"}
                     </TableCell>
                     <TableCell className="text-right">
                       <DropdownMenu>

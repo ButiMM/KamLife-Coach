@@ -36,20 +36,18 @@ export default function AdminTest() {
     onSuccess: (data, variables) => {
       setResults(prev => ({ ...prev, [variables]: data }));
     },
+    onError: (error: Error) => {
+      alert(`Test failed: ${error.message}`);
+    },
   });
 
   const triggerMutation = useMutation({
     mutationFn: async () => {
-      console.log("Trigger Daily Messages clicked");
-      // Hit the shared API contract path
       const response = await fetch(api.admin.triggerDaily.path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ liveMode }),
       });
-      
-      console.log("Response:", response);
-      
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(`Status ${response.status}: ${errorText}`);

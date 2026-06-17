@@ -14,6 +14,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
 import { authHeaders } from "@/lib/queryClient";
+import { api } from "@shared/routes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -100,7 +101,7 @@ export default function UserDetail() {
       return res.json();
     },
     onSuccess: (_, status) => {
-      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] });
+      queryClient.invalidateQueries({ queryKey: [api.users.get.path, userId] });
       toast({ title: status === "active" ? "Account activated" : "Account deactivated", description: status === "active" ? "Client now has full access" : "Client access suspended" });
     },
     onError: (err: any) => toast({ title: "Failed to update subscription", description: err.message, variant: "destructive" }),
@@ -133,7 +134,7 @@ export default function UserDetail() {
     },
     onSuccess: () => {
       setNewAction("");
-      queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] });
+      queryClient.invalidateQueries({ queryKey: [api.users.get.path, userId] });
     },
     onError: () => toast({ title: "Failed to add action", variant: "destructive" }),
   });
@@ -148,7 +149,8 @@ export default function UserDetail() {
       if (!res.ok) throw new Error("Failed to update action");
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.users.get.path, userId] }),
+    onError: () => toast({ title: "Failed to update action", variant: "destructive" }),
   });
 
   const deleteActionMutation = useMutation({
@@ -160,7 +162,8 @@ export default function UserDetail() {
       if (!res.ok) throw new Error("Failed to delete action");
       return res.json();
     },
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: [`/api/users/${userId}`, userId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: [api.users.get.path, userId] }),
+    onError: () => toast({ title: "Failed to delete action", variant: "destructive" }),
   });
 
   const user = userData?.user;

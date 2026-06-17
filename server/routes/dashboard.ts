@@ -540,7 +540,7 @@ export function registerDashboardRoutes(app: Express, deps: Pick<RouteDeps, "log
       const conditions = statusFilter === "all" ? [] : [eq(escalations.status, statusFilter)];
 
       const rows = await db.select({
-        id: escalations.id, reason: escalations.reason, triggerMessage: escalations.triggerMessage,
+        id: escalations.id, userId: escalations.userId, reason: escalations.reason, triggerMessage: escalations.triggerMessage,
         status: escalations.status, priority: escalations.priority, claimedBy: escalations.claimedBy,
         resolution: escalations.resolution, createdAt: escalations.createdAt, claimedAt: escalations.claimedAt,
         resolvedAt: escalations.resolvedAt, slaDeadline: escalations.slaDeadline,

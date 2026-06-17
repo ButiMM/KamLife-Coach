@@ -31,10 +31,12 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       const page = Math.max(1, parseInt(String(req.query.page || "1")));
       const limit = Math.min(100, Math.max(1, parseInt(String(req.query.limit || "50"))));
       const offset = (page - 1) * limit;
+      const statusFilter = req.query.status as string | undefined;
+      const whereClause = statusFilter ? eq(users.subscriptionStatus, statusFilter) : undefined;
 
       const [all, total] = await Promise.all([
-        db.select().from(users).orderBy(desc(users.createdAt)).limit(limit).offset(offset),
-        db.select({ count: sql`count(*)` }).from(users),
+        db.select().from(users).where(whereClause).orderBy(desc(users.createdAt)).limit(limit).offset(offset),
+        db.select({ count: sql`count(*)` }).from(users).where(whereClause),
       ]);
 
       console.log(`[ADMIN AUDIT] GET /api/users — page ${page}, limit ${limit} — ${new Date().toISOString()}`);

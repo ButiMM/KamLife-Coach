@@ -31,6 +31,7 @@ interface Escalation {
   userGoal: string | null;
   slaBreach: boolean;
   slaRemaining: number | null;
+  userId: string | null;
 }
 
 const PRIORITY_STYLES: Record<string, string> = {
@@ -173,8 +174,8 @@ export default function Escalations() {
                     </div>
                   </div>
                   <div className="flex gap-2 shrink-0">
-                    {e.userPhone && (
-                      <Link href={`/users/${e.userPhone}`}>
+                    {e.userId && (
+                      <Link href={`/users/${e.userId}`}>
                         <Button size="sm" variant="outline" className="text-xs">View Client</Button>
                       </Link>
                     )}

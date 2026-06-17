@@ -88,7 +88,7 @@ export default function Dashboard() {
             </div>
             {metrics?.computedAt && (
               <span className="text-xs text-muted-foreground">
-                Data as of {new Date(metrics.computedAt).toLocaleTimeString()}
+                Data as of {new Date(metrics.computedAt).toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg" })}
               </span>
             )}
           </div>
@@ -218,7 +218,7 @@ export default function Dashboard() {
                       </div>
                       <div className="flex items-center gap-4">
                         <span className="text-sm text-muted-foreground hidden sm:block">
-                            Last active: {user.lastLogDate ? new Date(user.lastLogDate).toLocaleDateString() : 'Never'}
+                            Last active: {user.lastLogDate ? new Date(user.lastLogDate).toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }) : 'Never'}
                         </span>
                         <Link href={`/users/${user.id}`}>
                             <Button size="sm" variant="secondary" className="group-hover:bg-primary group-hover:text-white transition-colors">
@@ -273,7 +273,7 @@ export default function Dashboard() {
                         <StatusRow label="PayFast Payments" status={health?.checks?.payfast?.status === "online" ? "online" : health ? "offline" : "idle"} />
                         <StatusRow label="Database" status={health?.checks?.database?.status === "online" ? "online" : health ? "offline" : "idle"} />
                     </div>
-                    {health && <p className="text-xs text-muted-foreground mt-3">Last checked: {new Date().toLocaleTimeString()}</p>}
+                    {health && <p className="text-xs text-muted-foreground mt-3">Last checked: {new Date().toLocaleTimeString("en-ZA", { timeZone: "Africa/Johannesburg" })}</p>}
                 </div>
             </div>
           </div>

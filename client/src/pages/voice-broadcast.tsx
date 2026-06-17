@@ -58,7 +58,7 @@ export default function VoiceBroadcast() {
   const { data: usersData } = useQuery<{ total: number }>({
     queryKey: ["/api/admin/voice-broadcast/active-count"],
     queryFn: () =>
-      fetch("/api/users?limit=1", { credentials: "include" })
+      fetch("/api/users?limit=1&status=active", { credentials: "include" })
         .then(r => r.json())
         .then(d => ({ total: d.pagination?.total ?? 0 })),
   });

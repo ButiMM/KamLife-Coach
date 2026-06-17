@@ -287,7 +287,7 @@ export function useUploadProgressPhoto(userId: string) {
       return res.json() as Promise<{ photo: ProgressPhotoEntry }>;
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["/api/users/", userId] });
+      qc.invalidateQueries({ queryKey: [api.users.get.path, userId] });
     },
   });
 }
