@@ -13,7 +13,7 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables } from "../server/utils";
 
 let passed = 0;
 let failed = 0;
@@ -1137,6 +1137,18 @@ test("normaliseMsisdn: empty / junk input returns '' (never matches an allowlist
   assert.equal(normaliseMsisdn(""), "");
   assert.equal(normaliseMsisdn("   "), "");
   assert.equal(normaliseMsisdn("not-a-number"), "");
+});
+
+// ── WhatsApp template variables (Twilio Content API contentVariables) ─────────
+test("buildContentVariables: builds a keyed JSON string for the template", () => {
+  assert.equal(buildContentVariables({ "1": "Kam", "2": 5 }), '{"1":"Kam","2":"5"}');
+});
+test("buildContentVariables: no variables → undefined (never an empty '{}')", () => {
+  assert.equal(buildContentVariables(undefined), undefined);
+  assert.equal(buildContentVariables({}), undefined);
+});
+test("buildContentVariables: drops null/undefined/empty values", () => {
+  assert.equal(buildContentVariables({ "1": "Kam", "2": null, "3": undefined, "4": "" }), '{"1":"Kam"}');
 });
 
 // ============================================================

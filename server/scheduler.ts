@@ -7,7 +7,7 @@
 import cron from "node-cron";
 import { pool } from "./db";
 import {
-  deliveryStats, sendWhatsApp,
+  deliveryStats, sendWhatsApp, sendWhatsAppTemplate,
   loadState, saveState, todaySAST, hasRunToday,
   weeklyKeyedSent, dailyProactiveCount, recordJobRun,
   escalations, sentProactive,
@@ -56,7 +56,7 @@ import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runComebackProtocol } from "./scheduler/jobs/comeback";
 
 // Re-export for routes.ts + index.ts consumers
-export { sendWhatsApp, deliveryStats };
+export { sendWhatsApp, sendWhatsAppTemplate, deliveryStats };
 
 // ============================================================
 // MIDNIGHT PURGE — clears stale in-memory dedupe entries

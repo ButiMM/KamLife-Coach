@@ -13,6 +13,17 @@ export function normaliseMsisdn(raw: string): string {
   return d;
 }
 
+// Twilio's Content API wants template variables as a JSON STRING keyed "1","2",…
+// (matching the {{1}},{{2}} placeholders in the approved template). Returns undefined
+// when there are no usable variables, so we never send an empty "{}" — which some
+// template configs reject — and never send null/undefined values.
+export function buildContentVariables(vars?: Record<string, string | number | null | undefined>): string | undefined {
+  if (!vars) return undefined;
+  const entries = Object.entries(vars).filter(([, v]) => v !== undefined && v !== null && String(v) !== "");
+  if (entries.length === 0) return undefined;
+  return JSON.stringify(Object.fromEntries(entries.map(([k, v]) => [k, String(v)])));
+}
+
 export function sastToday(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
   return sast.toISOString().slice(0, 10);
