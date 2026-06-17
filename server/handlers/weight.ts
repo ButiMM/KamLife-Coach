@@ -8,9 +8,9 @@ import { storeMemory } from "../memory";
  * Assess whether a weight-change rate is safe, concerning or dangerous for the given goal.
  * Returns null when there's not enough data or the change is negligible.
  *
- * Safe bands (evidence-based):
- *  fat_loss:    0–0.5 kg/wk excellent, 0.5–1 ok, 1–1.5 warn, >1.5 alert, >2.5 danger
- *  recomposition: 0–0.4 kg/wk fine, 0.4–0.75 warn, >0.75 alert
+ * Safe bands expressed as % of current bodyweight per week (scales correctly for all sizes):
+ *  fat_loss:    0–0.5% BW excellent, 0.5–1% ok, 1–1.5% warn, 1.5–2% alert, >2% danger
+ *  recomposition: 0–0.4% BW fine, 0.4–0.75% warn, >0.75% alert
  *  muscle_gain: should be gaining or flat; any consistent loss is a problem
  */
 export function assessWeightRate(
@@ -20,21 +20,26 @@ export function assessWeightRate(
   proteinTarget: number,
   calorieTarget: number,
   name: string,
+  currentWeightKg: number,
 ): string | null {
-  if (weeksSinceStart < 1 || Math.abs(totalChangeKg) < 0.5) return null;
+  if (weeksSinceStart < 1 || Math.abs(totalChangeKg) < 0.3) return null;
   const pace = Math.abs(totalChangeKg) / weeksSinceStart;
   const nm = name ? `${name}, ` : "";
 
   if (totalChangeKg < 0 && (goal === "fat_loss" || goal === "recomposition")) {
-    const maxSafe = goal === "fat_loss" ? 1.0 : 0.75;
-    const maxWarn = goal === "fat_loss" ? 1.5 : 0.75;
-    if (pace <= (goal === "fat_loss" ? 0.5 : 0.4)) {
+    // Bands expressed as % of current bodyweight per week — correct for all body sizes.
+    // 0.5–1% BW/week is the evidence-based fat loss target (TBD; Helms et al.).
+    const excellentBand = goal === "fat_loss" ? currentWeightKg * 0.005 : currentWeightKg * 0.004;
+    const maxSafe      = goal === "fat_loss" ? currentWeightKg * 0.01  : currentWeightKg * 0.0075;
+    const maxWarn      = goal === "fat_loss" ? currentWeightKg * 0.015 : currentWeightKg * 0.0075;
+    const dangerBand   = currentWeightKg * 0.02;
+    if (pace <= excellentBand) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ✅ right on target, sustainable.`;
     } else if (pace <= maxSafe) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ✅ good, at the high end of safe. Keep protein at ${proteinTarget}g daily.`;
     } else if (pace <= maxWarn) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ⚠️ *faster than ideal.* At this pace you're likely losing muscle alongside fat. Hit ${proteinTarget}g protein every single day — that's what protects your muscle while you lose fat.`;
-    } else if (pace <= 2.5) {
+    } else if (pace <= dangerBand) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — 🚨 *this is too fast.* Losing this quickly causes muscle loss, metabolic slowdown and rebound weight gain. Add 200 kcal/day and hit ${proteinTarget}g protein. Your target is ${calorieTarget} kcal — are you reaching it?`;
     } else {
       return `🚨 *${nm}this weight loss rate is dangerous.* ${pace.toFixed(2)}kg per week — that's crash-diet territory. At this pace your body is burning muscle, not just fat, and your metabolism will slow down hard. Please tell me what you've been eating — something is seriously wrong with your intake.`;
@@ -160,7 +165,7 @@ export async function handleWeightLog(
       const totalChange = newKg - startKg;
       const weeksSinceStart = Math.max(1, (Date.now() - new Date(journeyFirstLog.loggedAt!).getTime()) / (7 * 86_400_000));
       const firstName = (user.name || "").split(" ")[0] || "";
-      const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", newProtein, newCals, firstName);
+      const rateNote = assessWeightRate(totalChange, weeksSinceStart, user.goalType || "fat_loss", newProtein, newCals, firstName, newKg);
       if (rateNote) journeyNote = `\n\n${rateNote}`;
     }
   } catch { /* non-fatal */ }
@@ -193,15 +198,19 @@ export async function handleWeightLog(
   }
 
   const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
-  const recentWeightLogs = await db.select({ weight: weightLogs.weight })
+  const sevenDaysAgo  = new Date(Date.now() -  7 * 86_400_000);
+  const recentWeightLogs = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
     .from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, threeWeeksAgo)))
     .orderBy(asc(weightLogs.loggedAt));
   let plateauNote = "";
-  if (recentWeightLogs.length >= 3) {
-    const oldest3w = parseFloat(String(recentWeightLogs[0].weight));
-    const change3w = Math.abs(newKg - oldest3w);
-    if (change3w < 0.5) {
-      plateauNote = `\n\nWeight has barely moved in 3 weeks. Cut carb portions by a third this week and add a 20-minute walk daily.`;
+  // Compare 7-day rolling averages instead of single weigh-ins — eliminates daily water-weight noise.
+  const last7  = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() >= sevenDaysAgo.getTime());
+  const older  = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() <  sevenDaysAgo.getTime());
+  if (last7.length >= 3 && older.length >= 3) {
+    const avg7     = last7.reduce((s, r)  => s + parseFloat(String(r.weight)), 0) / last7.length;
+    const avgOlder = older.reduce((s, r)  => s + parseFloat(String(r.weight)), 0) / older.length;
+    if (Math.abs(avg7 - avgOlder) < 0.5) {
+      plateauNote = `\n\n7-day average has not moved in 3 weeks. Your body has adapted — this is normal, not failure. Options: tighten portions slightly, add a 20-minute daily walk, or take a 1–2 week diet break at maintenance. Pick one and commit for a week.`;
     }
   }
 
