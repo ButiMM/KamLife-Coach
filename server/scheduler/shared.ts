@@ -61,7 +61,7 @@ export function hasRunToday(key: string, dateStr: string): boolean {
 }
 
 export function thisWeekUTC(): string {
-  const d = new Date();
+  const d = new Date(Date.now() + 2 * 3_600_000); // SAST week boundary
   const day = d.getUTCDay();
   const diff = d.getUTCDate() - day + (day === 0 ? -6 : 1);
   const monday = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), diff));
