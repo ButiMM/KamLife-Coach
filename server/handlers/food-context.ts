@@ -1283,7 +1283,16 @@ export async function handleFoodContext(ctx: {
   // ---- GPT FOOD FALLBACK (no SA foods detected but clear food intent) ----
   const voiceFallbackTooLong = m.split(/\s+/).filter(Boolean).length > 50;
   const hasStrongFoodTrigger = /\b(i ate|i had|i've had|ive had|just had|just ate|just finished eating|for breakfast|for lunch|for dinner|for supper|for brunch|for snack|breakfast was|lunch was|dinner was|supper was|brunch was|meal was|meal is|food was|i'm eating|im eating|i am eating|i'll have|gonna have|going to have|pre.?workout meal|post.?workout meal|had a\b|had some\b|had the\b|had my\b|ate a\b|ate some\b|ate the\b|ate my\b|having a\b|having some\b|having my\b)\b/i.test(m);
-  if (!isQuestion && !isEmotionalOnly && hasStrongFoodTrigger && !hasActualFood && !voiceFallbackTooLong) {
+  // FAIL OPEN: the SA database will never be comprehensive. A bare food statement with no
+  // trigger phrase and no DB match ("two boerewors rolls and a Coke", "kota and chips") used
+  // to slip past BOTH the database and GPT and get logged as nothing. Now any short,
+  // declarative, non-question/non-emotional message also gets one shot at the GPT food
+  // extractor — which self-filters non-food via is_food, so we only LOG when GPT confirms food.
+  const looksLikeBareFoodStatement = !isFuturePlanning && !isFrustration && !hasSubstantiveQuestion
+    && m.split(/\s+/).filter(Boolean).length <= 12;
+  const tryGptFood = !isQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
+    && (hasStrongFoodTrigger || looksLikeBareFoodStatement);
+  if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
     if (gptFallbackResult) {
       const calorieTarget = user.calorieTarget || 1800;
@@ -1365,11 +1374,16 @@ export async function handleFoodContext(ctx: {
         : "";
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}`;
     }
-    // GPT returned null — can't identify the food. Ask for clarification instead of silently dropping.
-    console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
-    const clarifyReply = `I didn't catch what food that was — can you describe it as something like "chicken breast and rice" or "2 slices of bread with peanut butter"? The more specific, the more accurate your log.`;
-    await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
-    return clarifyReply;
+    // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),
+    // ask them to clarify rather than silently dropping. But if we only got here on the loose
+    // bare-statement path, GPT judging it non-food means it probably IS non-food — fall through
+    // to normal chat so a non-food message never gets answered with "describe your food".
+    if (hasStrongFoodTrigger) {
+      console.warn(`[GPT-FOOD-FALLBACK] null result for: "${message.slice(0, 80)}" — asking for clarification`);
+      const clarifyReply = `I didn't catch what food that was — can you describe it as something like "chicken breast and rice" or "2 slices of bread with peanut butter"? The more specific, the more accurate your log.`;
+      await logChat(user.id, message, clarifyReply, "FOOD_CLARIFY");
+      return clarifyReply;
+    }
   }
 
   return null;

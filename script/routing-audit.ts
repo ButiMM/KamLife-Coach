@@ -301,6 +301,15 @@ const CASES: Case[] = [
   { name: "safety: genuine 'I think I'm having a stroke' still fires emergency", msg: "I think I'm having a stroke",
     expect: [/10177|ambulance|emergency/i] },
 
+  // ── FAIL-OPEN FOOD RECOGNITION — bare food statements reach GPT (prod bug 2026-06-18) ──
+  // The SA database can't be comprehensive, so a bare food log with no "I had/ate" trigger
+  // now also goes to the GPT food extractor. Offline (no real GPT) we can only assert the
+  // SAFETY property: a non-food short statement must NOT be answered with "describe your food".
+  { name: "fail-open: non-food short statement does NOT get food-clarify reply", msg: "feeling good today",
+    reject: [/didn'?t catch what food/i] },
+  { name: "fail-open: another non-food short statement falls through cleanly", msg: "almost at the gym now",
+    reject: [/didn'?t catch what food/i] },
+
   // ── SWITCH ENERGY DRINK — brand name, not swap verb (prod bug 2026-06-18) ──────────
   // "Switch" is an SA energy drink brand. "Switch energy drink" must log calories,
   // not return healthier-swap advice. The swap guide fires only when "switch" is used
