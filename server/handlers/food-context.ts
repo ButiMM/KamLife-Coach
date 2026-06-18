@@ -870,7 +870,12 @@ export async function handleFoodContext(ctx: {
         for (const alias of allAliases) {
           const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
           const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
-          const qtyBefore = qtyDirect || qtyWithFiller;
+          // Fallback: "3 stashes of bread", "2 chunks of pap" — voice mishearings produce non-standard unit
+          // words. "N <word> of <food>" almost always means N portions, so apply the quantity.
+          const qtyWithAnyFiller = !qtyDirect && !qtyWithFiller
+            ? normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+\\w+s?\\s+of\\s+(?:${escapeRegex(alias)})`, "i"))
+            : null;
+          const qtyBefore = qtyDirect || qtyWithFiller || qtyWithAnyFiller;
           if (qtyBefore) {
             const userQty = parseFloat(qtyBefore[1]);
             const defaultQty = portionDefaultCount(f.typicalPortionDescription);

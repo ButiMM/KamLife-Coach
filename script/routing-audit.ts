@@ -301,6 +301,19 @@ const CASES: Case[] = [
   { name: "safety: genuine 'I think I'm having a stroke' still fires emergency", msg: "I think I'm having a stroke",
     expect: [/10177|ambulance|emergency/i] },
 
+  // ── SWITCH ENERGY DRINK — brand name, not swap verb (prod bug 2026-06-18) ──────────
+  // "Switch" is an SA energy drink brand. "Switch energy drink" must log calories,
+  // not return healthier-swap advice. The swap guide fires only when "switch" is used
+  // as a VERB ("switch to", "switch from", "switch away") not as a brand noun.
+  { name: "switch: 'Switch energy drink' logs as food, does not give swap advice (prod bug 2026-06-18)", msg: "Switch energy drink",
+    reject: [/healthier swaps for energy drinks/i, /rooibos tea/i] },
+  { name: "switch: 'I had a switch' does not trigger swap advice", msg: "I had a switch",
+    reject: [/healthier swaps for energy drinks/i] },
+  { name: "switch: 'switch to healthier energy drink' still gives swap advice (regression guard)", msg: "how do I switch to a healthier energy drink",
+    expect: [/rooibos|black coffee|sparkling water|healthier|swaps?/i] },
+  { name: "switch: 'swap my energy drink' still gives swap advice (regression guard)", msg: "what can I swap my energy drink for",
+    expect: [/rooibos|black coffee|sparkling water|healthier|swaps?/i] },
+
   // ── ONBOARDING / POPIA CONSENT — must be case-insensitive (prod bug 2026-06-17) ──
   // Phones auto-capitalise the first letter, so clients reply "Yes". The consent
   // check was case-sensitive and looped the agreement prompt forever, blocking

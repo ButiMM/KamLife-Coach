@@ -870,7 +870,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   }
 
   // ---- DRINK SWAP — intercept BEFORE food swap so "energy drink switch" doesn't get food alternatives ----
-  const isDrinkSwap = /\b(switch|swap|replace|instead of|alternative|substitute|other option)\b/i.test(m)
+  // "Switch" alone is an SA energy drink brand — only treat it as the VERB when it has directional
+  // context ("switch to", "switch from", "switch away"). Bare "Switch energy drink" is a food log, not a swap request.
+  const switchAsVerb = /\bswitch\s+(?:to|from|away|off|out|up)\b/i.test(m) || /\b(?:how|should|can)\s+(?:do\s+)?(?:i\s+)?switch\b/i.test(m);
+  const isDrinkSwap = (/\b(swap|replace|instead of|alternative|substitute|other option)\b/i.test(m) || switchAsVerb)
     && /\b(energy drink|red bull|monster|redbull|powerade|sports drink|energy|coffee|fizzy|cold drink|soda|cool drink|juice)\b/i.test(m);
   const isJustDrinkQuery = /\b(energy drink switch|drink alternatives|what (can|should) i drink|healthier drink|better drink option)\b/i.test(m);
   if (isDrinkSwap || isJustDrinkQuery) {
