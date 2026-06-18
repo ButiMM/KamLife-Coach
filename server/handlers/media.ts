@@ -24,6 +24,7 @@ import { askCoachK } from "../gpt";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
+import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
@@ -689,7 +690,7 @@ ESTIMATION: State specific calories and protein for ALL food and drink items vis
 COACHING: One sentence on whether this meal works for their ${goal} goal. If good — say exactly why. If not — suggest a better way to prepare THE SAME FOOD they are already eating (e.g. grilled instead of fried, less oil, bigger portion of protein). NEVER suggest a completely different cheaper food — if they are eating fish, coach them on fish. If they are eating steak, coach them on steak. If they are eating sushi, coach them on sushi. Meet the client where they are.
 
 FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food — check these specific cases first:
-- If it shows plain water only — a glass of water, a water bottle, a tap running, or a refillable bottle (no branded label, no calories to track) — respond with EXACTLY: WATER
+- If it shows plain water only — a glass of water, a water bottle, a tap running, or a refillable bottle (no branded label, no calories to track) — estimate: (1) the bottle's total capacity in ml by looking for printed size markings or estimating from shape/label (common SA sizes: 500ml, 750ml, 1L, 1.5L, 2L), and (2) approximately what fraction of the bottle has already been consumed based on the current fill level visible. Then respond with EXACTLY: WATER:Xml where X is the millilitres already consumed (capacity × depletion fraction), e.g. a 2L bottle that is 3/4 empty = WATER:1500ml, a 500ml bottle that is half empty = WATER:250ml. If the bottle looks completely full and nothing has been drunk yet, respond WATER:0ml.
 - If it shows a handwritten or typed grocery/shopping list, a receipt from a grocery store, or a list of items to BUY (not to eat right now) — respond with EXACTLY: GROCERY_LIST: [list the items you can read, comma-separated, in plain English]
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
@@ -718,9 +719,21 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         : "Eish, I cannot make out the food clearly. Take the photo in better light and send again — or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       // Sentinel checks must come before the length guard — "NOT_FOOD" is 8 chars and
       // "WATER" is 5 chars, both below the < 10 threshold that catches garbled replies.
-      if (/^WATER\b/i.test(visionReply || "")) {
-        console.log(`[FOOD_VISION] water_bottle detected user=${user.id.slice(-6)}`);
-        const waterReply = `That's water 💧 — good. To log today's intake just type: *water 500ml* (or however much you've had). What have you eaten today?`;
+      const waterSentinelMatch = (visionReply || "").match(/^WATER:(\d+(?:\.\d+)?)\s*ml\b/i);
+      if (waterSentinelMatch || /^WATER$/i.test(visionReply || "")) {
+        const ml = waterSentinelMatch ? parseFloat(waterSentinelMatch[1]) : 0;
+        console.log(`[FOOD_VISION] water_bottle detected ml=${ml} user=${user.id.slice(-6)}`);
+        if (ml >= 50) {
+          // Auto-log the estimated consumed amount by reusing the water handler
+          const syntheticM = `${Math.round(ml)}ml water`;
+          const autoLogged = await handleWater({ phone, message: syntheticM, m: syntheticM, user });
+          if (autoLogged) {
+            // Prepend a note that this was read from the photo
+            return `📸 Read from your photo: ${autoLogged}`;
+          }
+        }
+        // Bottle looks full or estimation failed — prompt for amount
+        const waterReply = `That's water 💧 — good. To log today's intake just type: *water 500ml* (or however much you've had).`;
         await logChat(user.id, "[Water photo]", waterReply, "WATER_LOG");
         return waterReply;
       }
@@ -736,7 +749,7 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
         // Check if this looks like a cooking ingredient/product (spray, oil, sauce, spice, etc.)
         const isIngredient = /\b(spray|oil|sauce|spice|seasoning|sugar|salt|flour|stock|baking|butter|margarine|cook.?n|cook and bake|spray.?n.?cook)\b/i.test(message || "");
         if (isIngredient) {
-          return `Got it — that's a cooking ingredient, not a meal to log. If you're adding it to a dish, just tell me what you made: "chicken with non-stick spray" and I'll include it. What did you eat?`;
+          return `Got it — that's a cooking ingredient. If you're adding it to a dish, tell me what you made (e.g. "chicken with non-stick spray") and I'll log the full meal.`;
         }
         // Photo isn't food, but the caption names real food — log from the caption.
         if (captionHasFood) {

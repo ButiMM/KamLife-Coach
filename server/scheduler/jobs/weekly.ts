@@ -191,7 +191,8 @@ export async function runSundayWeeklyReport(): Promise<void> {
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
 
       try {
-        const newDay = ((client.programmeDayInWeek || 1) % 4) + 1;
+        const daysInCycle = client.trainingDaysPerWeek || 4;
+        const newDay = ((client.programmeDayInWeek || 1) % daysInCycle) + 1;
         const newWeek = newDay === 1 ? (weekNum + 1) : weekNum;
         await db.update(users).set({ programmeDayInWeek: newDay, programmeWeek: newWeek }).where(eq(users.id, client.id));
       } catch { /* non-critical */ }
