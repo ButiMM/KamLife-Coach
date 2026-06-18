@@ -197,22 +197,159 @@ export async function handleWeightLog(
     }
   }
 
-  const threeWeeksAgo = new Date(Date.now() - 21 * 86_400_000);
-  const sevenDaysAgo  = new Date(Date.now() -  7 * 86_400_000);
+  // ── 4-week history for trend analysis, plateau detection, streak count ──
+  const fourWeeksAgo = new Date(Date.now() - 28 * 86_400_000);
+  const sevenDaysAgo = new Date(Date.now() -  7 * 86_400_000);
   const recentWeightLogs = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
-    .from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, threeWeeksAgo)))
+    .from(weightLogs).where(and(eq(weightLogs.userId, user.id), gte(weightLogs.loggedAt, fourWeeksAgo)))
     .orderBy(asc(weightLogs.loggedAt));
-  let plateauNote = "";
-  // Compare 7-day rolling averages instead of single weigh-ins — eliminates daily water-weight noise.
-  const last7  = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() >= sevenDaysAgo.getTime());
-  const older  = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() <  sevenDaysAgo.getTime());
-  if (last7.length >= 3 && older.length >= 3) {
-    const avg7     = last7.reduce((s, r)  => s + parseFloat(String(r.weight)), 0) / last7.length;
-    const avgOlder = older.reduce((s, r)  => s + parseFloat(String(r.weight)), 0) / older.length;
-    if (Math.abs(avg7 - avgOlder) < 0.5) {
-      plateauNote = `\n\n7-day average has not moved in 3 weeks. Your body has adapted — this is normal, not failure. Options: tighten portions slightly, add a 20-minute daily walk, or take a 1–2 week diet break at maintenance. Pick one and commit for a week.`;
+
+  // ── Consecutive weigh-in streak (counts today) ──
+  let weighInStreak = 0;
+  {
+    const allRecentDays = new Set(recentWeightLogs.map(r => {
+      const d = new Date(new Date(r.loggedAt!).getTime() + 2 * 3_600_000); // SAST
+      return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,"0")}-${String(d.getUTCDate()).padStart(2,"0")}`;
+    }));
+    const check = new Date(Date.now() + 2 * 3_600_000);
+    while (true) {
+      const key = `${check.getUTCFullYear()}-${String(check.getUTCMonth()+1).padStart(2,"0")}-${String(check.getUTCDate()).padStart(2,"0")}`;
+      if (!allRecentDays.has(key)) break;
+      weighInStreak++;
+      check.setUTCDate(check.getUTCDate() - 1);
     }
   }
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration || journeyNote}${targetsNote}${plateauNote}`;
+  // ── Recent trend: rate over the last 14 days ──
+  // Use the oldest point in the 14-day window as the baseline. This is more meaningful than the
+  // all-time average because it reflects what the body is doing RIGHT NOW.
+  const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000);
+  const recentWindow = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() >= twoWeeksAgo.getTime());
+  let recentRateKgPerWeek: number | null = null;
+  if (recentWindow.length >= 3) {
+    const oldest = recentWindow[0];
+    const newest = recentWindow[recentWindow.length - 1];
+    const daySpan = (new Date(newest.loggedAt!).getTime() - new Date(oldest.loggedAt!).getTime()) / 86_400_000;
+    if (daySpan >= 5) {
+      recentRateKgPerWeek = (parseFloat(String(newest.weight)) - parseFloat(String(oldest.weight))) / (daySpan / 7);
+    }
+  }
+
+  // ── Trend-based calorie adjustment ──
+  // Standard targets from calculateTargets are a good baseline but don't account for the actual
+  // trajectory. If the client is losing too fast or too slow, adjust accordingly.
+  let finalCals = newCals;
+  let finalProtein = newProtein;
+  let calAdjust = 0;
+  let trendLabel = "";
+  let trendStatus = "";
+
+  if (recentRateKgPerWeek !== null) {
+    const rate = recentRateKgPerWeek;
+    const rateStr = `${rate >= 0 ? "+" : ""}${rate.toFixed(2)}kg/week`;
+
+    if (goal === "fat_loss") {
+      // Ideal: -0.25 to -0.75kg/week
+      if (rate < -0.85) {
+        calAdjust = 150;
+        trendLabel = `📉 *${rateStr} over 2 weeks*`;
+        trendStatus = `⚠️ too fast — losing muscle alongside fat. Adding 150 kcal to protect your muscle.`;
+      } else if (rate < -0.75) {
+        calAdjust = 100;
+        trendLabel = `📉 *${rateStr} over 2 weeks*`;
+        trendStatus = `at the aggressive end. Adding 100 kcal — sustainable pace matters more than speed.`;
+      } else if (rate <= -0.2) {
+        calAdjust = 0;
+        trendLabel = `📉 *${rateStr} over 2 weeks*`;
+        trendStatus = `✅ right on target. Keep going.`;
+      } else if (rate < 0) {
+        calAdjust = -100;
+        trendLabel = `📉 *${rateStr} over 2 weeks*`;
+        trendStatus = `slower than ideal. Removing 100 kcal to get progress moving.`;
+      } else {
+        calAdjust = -150;
+        trendLabel = `📈 *${rateStr} over 2 weeks*`;
+        trendStatus = `weight is going up on a fat loss programme. Removing 150 kcal and review your food log.`;
+      }
+    } else if (goal === "muscle_gain") {
+      // Ideal: +0.1 to +0.35kg/week
+      if (rate > 0.45) {
+        calAdjust = -100;
+        trendLabel = `📈 *${rateStr} over 2 weeks*`;
+        trendStatus = `gaining fast — some of that will be fat. Pulling back 100 kcal to keep it lean.`;
+      } else if (rate >= 0.08) {
+        calAdjust = 0;
+        trendLabel = `📈 *${rateStr} over 2 weeks*`;
+        trendStatus = `✅ ideal lean gain pace. Stay exactly here.`;
+      } else if (rate > -0.1) {
+        calAdjust = 100;
+        trendLabel = `➡️ *${rateStr} over 2 weeks*`;
+        trendStatus = `scale isn't moving — muscle growth needs a surplus. Adding 100 kcal.`;
+      } else {
+        calAdjust = 150;
+        trendLabel = `📉 *${rateStr} over 2 weeks*`;
+        trendStatus = `losing weight on a muscle gain programme. Adding 150 kcal — you need a surplus to build.`;
+      }
+    } else if (goal === "recomposition") {
+      trendLabel = `➡️ *${rateStr} over 2 weeks*`;
+      if (Math.abs(rate) <= 0.3) {
+        trendStatus = `✅ scale is stable while body composition is shifting. Exactly right.`;
+      } else if (rate < -0.3) {
+        trendStatus = `dropping a bit fast for recomp. Make sure you're hitting your calorie target each day.`;
+      } else {
+        trendStatus = `slight upward drift. Tighten carbs on rest days.`;
+      }
+    }
+
+    if (calAdjust !== 0) {
+      finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
+      await db.update(users).set({ calorieTarget: finalCals }).where(eq(users.phoneNumber, phone));
+    }
+  }
+
+  // ── Plateau detection (3-week rolling averages) ──
+  let plateauNote = "";
+  const last7Logs = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() >= sevenDaysAgo.getTime());
+  const olderLogs = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() <  sevenDaysAgo.getTime());
+  if (last7Logs.length >= 3 && olderLogs.length >= 3) {
+    const avg7     = last7Logs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / last7Logs.length;
+    const avgOlder = olderLogs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / olderLogs.length;
+    if (Math.abs(avg7 - avgOlder) < 0.4 && !trendStatus.includes("✅")) {
+      plateauNote = `\n\n_3-week average hasn't moved. Your body has adapted. Options: tighten portions slightly, add a 20-minute daily walk, or take a 1–2 week diet break at maintenance calories. Pick one and commit for a week._`;
+    }
+  }
+
+  // ── Prediction to goal ──
+  let predictionNote = "";
+  const targetKgRaw = parseFloat(user.targetWeightKg || "0");
+  if (targetKgRaw > 0 && recentRateKgPerWeek !== null && Math.abs(recentRateKgPerWeek) >= 0.05) {
+    const remaining = targetKgRaw - newKg;
+    const weeksToGoal = remaining / recentRateKgPerWeek;
+    if (weeksToGoal > 0 && weeksToGoal < 104) {
+      const wks = Math.round(weeksToGoal);
+      const eta = new Date(Date.now() + weeksToGoal * 7 * 86_400_000);
+      const monthName = eta.toLocaleString("en-ZA", { month: "long" });
+      predictionNote = `\n_At this pace: ${Math.abs(remaining).toFixed(1)}kg to go — ~${wks} week${wks !== 1 ? "s" : ""} (around ${monthName})._`;
+    }
+  }
+
+  // ── Streak acknowledgment ──
+  let streakNote = "";
+  if (weighInStreak >= 14) {
+    streakNote = `\n_${weighInStreak} consecutive weigh-ins. This data is reliable because of your consistency._`;
+  } else if (weighInStreak >= 7) {
+    streakNote = `\n_${weighInStreak} days of daily weigh-ins — the trend is accurate._`;
+  }
+
+  // ── Targets line ──
+  const calChanged = Math.abs(finalCals - prevCals) > 20 || Math.abs(finalProtein - prevProtein) > 2;
+  const adjustNote = calAdjust !== 0 ? ` (${calAdjust > 0 ? "+" : ""}${calAdjust} kcal — ${trendStatus.replace(/[✅⚠️🚨]/g, "").trim()})` : "";
+  const targetsLine = calChanged
+    ? `\n\n*Targets updated: ${finalCals} kcal/day | ${finalProtein}g protein.*${adjustNote}`
+    : `\n\nTargets: ${finalCals} kcal/day | ${finalProtein}g protein.`;
+
+  // ── Trend line (only when we have recent data) ──
+  const trendLine = trendLabel ? `\n\n${trendLabel} — ${trendStatus}` : (milestoneCelebration ? "" : journeyNote);
+
+  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${predictionNote}${streakNote}${plateauNote}`;
 }
