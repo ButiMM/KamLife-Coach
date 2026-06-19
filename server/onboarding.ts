@@ -579,8 +579,8 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     firstWorkout = `Your Day 1 workout is ready — reply *1* or *workout* and I'll send it straight through.`;
   }
 
-  const weightDisplay = actualWeight !== 75 ? `\n*Weight:* ${actualWeight}kg` : "";
-  const heightDisplay = heightCm !== 170 ? ` · ${heightCm}cm` : "";
+  const weightDisplay = u.currentWeight != null ? `\n*Weight:* ${actualWeight}kg` : "";
+  const heightDisplay = u.heightCm != null ? ` · ${heightCm}cm` : "";
   const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
 
   const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. Your friend gets 50% off month 1. You get R50 credit when they subscribe.` : "";
