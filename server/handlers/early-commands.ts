@@ -342,7 +342,7 @@ export async function handleEarlyCommands(ctx: {
         "Scheduled rest. This is when the adaptation happens — don't skip the recovery.",
         "Today's job: eat well, sleep well, move lightly. No workout needed.",
       ]);
-      const restReply = `*${state.todayName} — Rest Day.*\n\n${restNote}\n\nNext training day: *${state.nextTrainingName}*.\n\nHit your food and steps today. Reply *workout* only if you want to train anyway.`;
+      const restReply = `*${state.todayName} — Rest Day.*\n\n${restNote}\n\nNext training day: *${state.nextTrainingName}*.\n\nHit your food and steps today.`;
       await logChat(user.id, message, restReply, "REST_DAY_INFO");
       return restReply;
     }

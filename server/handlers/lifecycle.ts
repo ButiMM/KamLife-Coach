@@ -587,7 +587,7 @@ export async function handleLifecycle(ctx: {
           const daysAgo = Math.floor((Date.now() - new Date(lastMeas[0].loggedAt || "").getTime()) / 86400000);
           if (Math.abs(diff) < 0.1) compareNote = ` Same as your last measurement ${daysAgo} days ago.`;
           else if (diff < 0) compareNote = ` Down ${Math.abs(diff).toFixed(1)}cm from ${prev}cm (${daysAgo} days ago). Moving in the right direction.`;
-          else compareNote = ` Up ${diff.toFixed(1)}cm from ${prev}cm (${daysAgo} days ago). Check your nutrition consistency.`;
+          else compareNote = ` Up ${diff.toFixed(1)}cm from ${prev}cm (${daysAgo} days ago) — measurements can shift day to day. Keep logging and we'll track the trend.`;
         }
       } catch (e) { console.warn("[non-fatal]", e); }
       await db.insert(bodyMeasurements).values({ userId: user.id, measurementType: measType, value: measValue.toString() });
@@ -692,7 +692,7 @@ export async function handleLifecycle(ctx: {
         ? existingNotes.replace(/paused_until:\d{4}-\d{2}-\d{2}/, `paused_until:${pauseUntil}`)
         : `${existingNotes ? existingNotes + " | " : ""}paused_until:${pauseUntil}`;
       await db.update(users).set({ awaitingInputType: null, profileNotes: pausedNotes }).where(eq(users.phoneNumber, phone));
-      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nR199 is R6.63/day. When things ease up, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
+      const priceReply = `Understood, ${name}. Paused for 30 days — no check-ins, your programme and progress are saved.\n\nWhen you're ready, reply *back* and we pick up exactly where you left off.\n\n_To cancel completely, reply *cancel* again._`;
       await logChat(user.id, message, priceReply, "CANCEL_SAVE_PAUSE_PRICE");
       return priceReply;
     }

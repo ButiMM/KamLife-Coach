@@ -59,7 +59,7 @@ export function assessWeightRate(
   }
 
   if (totalChangeKg > 0 && goal === "fat_loss") {
-    return `📈 Up *${totalChangeKg.toFixed(1)}kg* since starting. Weight is moving the wrong way for fat loss — tighten carb portions and hit ${proteinTarget}g protein every day.`;
+    return `📈 Up *${totalChangeKg.toFixed(1)}kg* since starting. Could be water or sodium — weigh again tomorrow morning, same conditions. If the trend holds, let's look at your food together.`;
   }
 
   return `${totalChangeKg < 0 ? "📉" : "📈"} Total change: *${totalChangeKg > 0 ? "+" : ""}${totalChangeKg.toFixed(1)}kg*.`;

@@ -1142,10 +1142,19 @@ export function getDayType(
 function getGymDay(
   daySlot: 1 | 2 | 3,
   isDumbbell: boolean,
-  isGlutesFocus: boolean
+  isGlutesFocus: boolean,
+  gender: string = "male"
 ): Exercise[] {
   if (isGlutesFocus) {
     const map = { 1: GYM_GLUTES_DAY_A, 2: GYM_GLUTES_DAY_B, 3: GYM_GLUTES_DAY_C };
+    return map[daySlot];
+  }
+  if (isDumbbell) {
+    const map = {
+      1: DB_3DAY_A,
+      2: DB_3DAY_B,
+      3: gender === "female" ? DB_3DAY_C_WOMEN : DB_3DAY_C_MEN,
+    };
     return map[daySlot];
   }
   const map = { 1: NEW_3DAY_A, 2: NEW_3DAY_B, 3: NEW_3DAY_C_MEN };
@@ -1625,10 +1634,9 @@ export function getKamlifeProgramme(user: any, todayOnly = false): string {
   if (isDumbbell) {
     if (todayOnly) {
       const day = user.programmeDayInWeek || 1;
-      const daySlot = (((day - 1) % 4) + 1);
-      const slotClamped = (daySlot <= 3 ? daySlot : 1) as 1 | 2 | 3;
-      const exercises = getGymDay(slotClamped, true, false);
-      const label = daySlot === 4 ? "Dumbbell Full Body D (Volume)" : daySlotLabel(slotClamped, false, true);
+      const dbTrainingDays = user.trainingDaysPerWeek || 3;
+      const dbGender = user.gender || "male";
+      const { exercises, label } = getNewDbDay(dbTrainingDays, day, dbGender);
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";

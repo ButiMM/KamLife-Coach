@@ -21,7 +21,7 @@ export async function runMonthEndBudget(): Promise<void> {
       } else if (budget === "100_300") {
         budgetMsg = `${name}, month end approaching. Your R100 week plan — eggs 12 pack R45, pilchards 3 tins R36, cabbage R8, onions R8, pap 2kg R15. Enough for the full week. Shop at Shoprite or Boxer this weekend.`;
       } else {
-        budgetMsg = `${name}, month end coming. You have more budget flexibility than most clients — still prioritise protein. Pre-cook chicken, buy oats in bulk, and prep your meals Sunday. Consistency over the month end is what separates people who get results.`;
+        budgetMsg = `${name}, month end coming. Pre-cook chicken in bulk, buy oats for the week, and prep Sunday — that's what keeps the nutrition consistent when the week gets busy.`;
       }
       if (await claimDailySlot(client.id, "month_end_budget")) { await sendWhatsApp(client.phoneNumber, budgetMsg); }
     } catch (err) { console.error(`[SCHEDULER] Month-end budget error — ${client.phoneNumber}:`, err); }
@@ -83,7 +83,7 @@ export async function runPaymentFailureRecovery(): Promise<void> {
       } else if (daysSinceFail === 3) {
         await sendCriticalAlert(client.phoneNumber, `${name} — your coaching's been paused 3 days. You're in Week ${client.programmeWeek || 1} with ${workouts} sessions done, and all of it is saved.\n\nWhenever you're ready to pick back up, this fixes it in 30 seconds:\n${payLink}`);
       } else if (daysSinceFail === 7) {
-        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nIf money is tight right now, I get it — reply *pay* when you are ready and I will send a fresh link. No pressure, no expiry on your data.\n\nIf you want to stop completely, reply *STOP* and I won't message again.`);
+        await sendCriticalAlert(client.phoneNumber, `${name}, last message about this — your subscription has been paused for a week.\n\n${workouts} sessions. Every meal logged. Every step counted. That work is not lost.\n\nWhen you're ready, reply *pay* and I'll send a fresh link. No pressure, no expiry on your data.\n\nIf you'd like to stop completely, reply *STOP* and I won't message again.`);
       }
     } catch (err) { console.error(`[SCHEDULER] Payment recovery error — ${client.phoneNumber}:`, err); }
   }
@@ -112,7 +112,7 @@ export async function runSignupNudge(): Promise<void> {
           }
         } else if (daysSince === 3 && client.subscriptionStatus === "inactive") {
           if (await claimCritical(client.id, "signup_nudge", todaySAST())) {
-            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here.\n\nEvery day you wait is a day behind. R199/month — R6.63/day:\n${payLink}`);
+            await sendCriticalAlert(client.phoneNumber, `${name}, your programme is still here and ready to go.\n\nR199/month — activate when you're ready:\n${payLink}`);
           }
         }
       } else if (!isNewSignup && cancelled) {
