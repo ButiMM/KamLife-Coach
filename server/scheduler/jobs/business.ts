@@ -220,7 +220,7 @@ export async function runStepLeaderboard(): Promise<void> {
     let boardBase = `*🏆 Weekly Step Leaderboard*\n\n`;
     for (let i = 0; i < Math.min(5, ranked.length); i++) {
       const r = ranked[i];
-      boardBase += `${i < 3 ? medals[i] : `${i + 1}.`} ${r.name.split(" ")[0]} — ${r.avg.toLocaleString()} avg/day\n`;
+      boardBase += `${i < 3 ? medals[i] : `${i + 1}.`} ${(r.name || "Member").split(" ")[0]} — ${r.avg.toLocaleString()} avg/day\n`;
     }
     let sent = 0;
     for (const r of ranked) {

@@ -175,7 +175,7 @@ export async function runDietBreakCheck(): Promise<void> {
       const restored = client.dietBreakCalTarget!;
       await db.update(users).set({ calorieTarget: restored, dietBreakEndsAt: null, dietBreakCalTarget: null }).where(eq(users.id, client.id));
       const name = (client.name || "").split(" ")[0] || "there";
-      await sendWhatsApp(client.phoneNumber, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full. Now we push harder than before. Log your food today.`).catch(() => {});
+      await sendWhatsApp(client.phoneNumber, `${name}, diet break is done. Back to the deficit.\n\n*Your targets from today:*\n• Calories: ${restored} kcal/day\n• Protein: ${client.proteinTarget || 120}g/day — unchanged\n\nYour metabolism is reset. Your glycogen is full. Now we push harder than before. Log your food today.`).catch((e: unknown) => console.error("[monday] diet-break restore WA failed:", client.id, e));
       await new Promise(r => setTimeout(r, 300));
     }
     if (expired.length > 0) console.log(`[SCHEDULER] Diet break expired: ${expired.length} clients restored`);

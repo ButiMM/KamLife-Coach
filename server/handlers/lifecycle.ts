@@ -109,16 +109,17 @@ export async function handleLifecycle(ctx: {
         const r = top10[i];
         const medal = i < 3 ? medals[i] : `${i + 1}.`;
         const isYou = r.uid === user.id;
-        const firstName = r.name.split(" ")[0];
+        const parts = (r.name || "").split(" ");
+        const firstName = parts[0] || "Member";
         // Anonymise: show first name + last initial only
-        const displayName = r.name.includes(" ") ? `${firstName} ${r.name.split(" ")[1][0]}.` : firstName;
+        const displayName = parts.length > 1 && parts[1] ? `${firstName} ${parts[1][0]}.` : firstName;
         board += `${medal} ${isYou ? `*${displayName} (YOU)*` : displayName} — ${r.avg.toLocaleString()} avg/day (${r.days}d)\n`;
       }
 
       if (myRank > 0 && myRank <= 10) {
         board += `\nYou are *#${myRank}*. ${myRank === 1 ? "Leading the pack. Don't stop." : myRank <= 3 ? "Podium position. Push for #1." : "Keep climbing."}`;
       } else if (myRank > 10) {
-        board += `\n---\n${myRank}. *${myEntry?.name.split(" ")[0] || "You"} (YOU)* — ${myEntry?.avg.toLocaleString()} avg/day\n\nYou are #${myRank} of ${ranked.length}. Log more steps to climb.`;
+        board += `\n---\n${myRank}. *${myEntry?.name?.split(" ")[0] || "You"} (YOU)* — ${myEntry?.avg.toLocaleString()} avg/day\n\nYou are #${myRank} of ${ranked.length}. Log more steps to climb.`;
       } else {
         board += `\nYou haven't logged steps this week. Send your step count to join the leaderboard.`;
       }
