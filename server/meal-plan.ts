@@ -251,6 +251,16 @@ export function generateMealPlan(opts: MealPlanOptions): string {
     notes.includes("lactose") ||
     notes.includes("milk");
   const noPeanuts = notes.includes("peanut");
+  const isVegetarian =
+    notes.includes("vegetarian") ||
+    notes.includes("no meat") ||
+    notes.includes("no chicken") ||
+    notes.includes("no beef") ||
+    notes.includes("plant-based") ||
+    medicals.includes("vegetarian");
+  const isVegan =
+    notes.includes("vegan") ||
+    medicals.includes("vegan");
 
   // Pick pools based on budget
   const budget = weeklyFoodBudget || "100_300";
@@ -278,6 +288,18 @@ export function generateMealPlan(opts: MealPlanOptions): string {
     ? SNACK_PREMIUM
     : SNACK_MID;
 
+  // Meat keywords for vegetarian/vegan filtering
+  const MEAT_WORDS = ["chicken", "mince", "beef", "steak", "lamb", "pork", "biltong", "hake", "pilchard", "tuna", "fish", "salmon", "sardine", "polony", "vienna"];
+  const filterMeat = (pool: FoodItem[]) =>
+    pool.filter(([d]) => !MEAT_WORDS.some(w => d.toLowerCase().includes(w)));
+  const DAIRY_WORDS_VEGAN = ["yoghurt", "milk", "cheese", "cottage cheese", "whey"];
+  const filterVegan = (pool: FoodItem[]) =>
+    pool.filter(([d]) => !DAIRY_WORDS_VEGAN.some(w => d.toLowerCase().includes(w)) && !d.toLowerCase().includes("egg"));
+
+  const safeBfPool = isVegan ? filterVegan(filterMeat(bfPool)) : isVegetarian ? filterMeat(bfPool) : bfPool;
+  const safeLunchPool = isVegan ? filterVegan(filterMeat(lunchPool)) : isVegetarian ? filterMeat(lunchPool) : lunchPool;
+  const safeDinnerPool = isVegan ? filterVegan(filterMeat(dinnerPool)) : isVegetarian ? filterMeat(dinnerPool) : dinnerPool;
+
   // Remove snacks with peanut butter if allergic
   const safeSnackPool = noPeanuts
     ? snackPool.filter(([d]) => !d.toLowerCase().includes("peanut"))
@@ -291,9 +313,9 @@ export function generateMealPlan(opts: MealPlanOptions): string {
   // Build 3 days using different offsets so meals rotate
   const days: DayPlan[] = [];
   for (let d = 0; d < 3; d++) {
-    const bf = pickItem(bfPool, d, isLowGI);
-    const ln = pickItem(lunchPool, d, isLowGI);
-    const dn = pickItem(dinnerPool, d, isLowGI);
+    const bf = pickItem(safeBfPool.length > 0 ? safeBfPool : bfPool, d, isLowGI);
+    const ln = pickItem(safeLunchPool.length > 0 ? safeLunchPool : lunchPool, d, isLowGI);
+    const dn = pickItem(safeDinnerPool.length > 0 ? safeDinnerPool : dinnerPool, d, isLowGI);
     const sn = pickItem(finalSnackPool.length > 0 ? finalSnackPool : snackPool, d, isLowGI);
 
     let breakfast = buildMeal("🌅", "Breakfast", bf);
@@ -334,8 +356,9 @@ export function generateMealPlan(opts: MealPlanOptions): string {
   const bLabel = budgetLabel[budget] || "R100–R300/week";
   const lowGINote = isLowGI ? " · Low GI only" : "";
   const noFishNote = noFish ? " · Fish-free" : "";
+  const veganNote = isVegan ? " · Vegan" : isVegetarian ? " · Vegetarian" : "";
 
-  const header = `*Your 3-Day Meal Plan*\nGoal: ${goalLabel} · ${calorieTarget} kcal/day · ${proteinTarget}g protein${lowGINote}${noFishNote}\nBudget: ${bLabel}`;
+  const header = `*Your 3-Day Meal Plan*\nGoal: ${goalLabel} · ${calorieTarget} kcal/day · ${proteinTarget}g protein${lowGINote}${noFishNote}${veganNote}\nBudget: ${bLabel}`;
 
   // Footer tip
   const footerTips: Record<string, string> = {

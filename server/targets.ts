@@ -33,6 +33,7 @@ export function calculateTargets(
     retired: 1.2,
     stay_home_parent: 1.3,
     retail_physical: 1.5,
+    domestic_worker: 1.45,
     postpartum_breastfeeding: 1.35,
     "1": 1.35,  // student
     "2": 1.3,   // office

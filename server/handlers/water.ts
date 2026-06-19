@@ -33,7 +33,7 @@ export async function handleWater(ctx: {
     if (unit === "ml" || unit === "millilitre" || unit === "milliliter") litres = amount / 1000;
     else if (unit === "glass" || unit === "glasses") litres = amount * 0.25;
     else if (unit === "cup" || unit === "cups") litres = amount * 0.25;
-    else if (unit === "bottle" || unit === "bottles") litres = amount * 0.5;
+    else if (unit === "bottle" || unit === "bottles") litres = amount * 0.5; // assumes 500ml; say "750ml bottle" or "1L bottle" for accuracy
 
     const today = sastToday();
     const lastReset = user.waterLastResetDate;
@@ -93,11 +93,14 @@ export async function handleWater(ctx: {
         ]);
       }
     } else {
+      const bottleSizeHint = (unit === "bottle" || unit === "bottles")
+        ? ` _(if your bottle is not 500ml, say "750ml bottle" or "1L bottle")_`
+        : "";
       waterReply = pick([
-        `Logged ${litres}L. Total today: ${newTotal}L / ${waterTarget}L — ${remaining}L to go.`,
-        `${litres}L added. Running total: ${newTotal}L / ${waterTarget}L target. ${remaining}L left.`,
-        `Water logged: ${newTotal}L today. ${remaining}L still to hit your target.`,
-        `${newTotal}L so far today. ${remaining}L to reach ${waterTarget}L.`,
+        `Logged ${litres}L.${bottleSizeHint} Total today: ${newTotal}L / ${waterTarget}L — ${remaining}L to go.`,
+        `${litres}L added.${bottleSizeHint} Running total: ${newTotal}L / ${waterTarget}L target. ${remaining}L left.`,
+        `Water logged: ${newTotal}L today.${bottleSizeHint} ${remaining}L still to hit your target.`,
+        `${newTotal}L so far today.${bottleSizeHint} ${remaining}L to reach ${waterTarget}L.`,
       ]);
     }
     await logChat(user.id, message, waterReply, "WATER_LOG");

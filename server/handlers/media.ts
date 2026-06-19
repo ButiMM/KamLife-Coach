@@ -641,6 +641,50 @@ export async function handleMediaMessage(ctx: {
         }
       }
 
+      // ---- WATER BOTTLE / HYDRATION PHOTO ----
+      // Detect water bottles or glasses before falling through to food vision.
+      // Caption hints: "my water", "water bottle", "how much", "how full"
+      const isWaterCaption = /\b(my water|water bottle|water glass|hydration|how much water|how full|filled|refill|drinking water)\b/i.test(message || "");
+      if (isWaterCaption || /^(water|💧)$/i.test((message || "").trim())) {
+        try {
+          const bottleCheck = await withTimeout("bottle_check", 8000, () => openai.chat.completions.create({
+            model: "gpt-4o-mini", max_tokens: 80, temperature: 0,
+            messages: [
+              { role: "system", content: `You are analysing a photo. Reply with JSON only: {"isBottle": true/false, "sizeMl": number or null, "fillPct": number 0-100 or null}.\nisBottle: true if the photo primarily shows a water bottle, glass, cup, or drinking container.\nsizeMl: your best estimate of the container's capacity in ml (500 for a standard bottle, 750 for a gym bottle, 1000 for a 1L bottle, 330 for a small bottle, 250 for a glass).\nfillPct: how full it appears (100 = completely full, 50 = half, 0 = empty).` },
+              { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
+            ],
+          }));
+          const raw = bottleCheck.choices[0]?.message?.content?.trim() || "{}";
+          const cleaned = raw.replace(/```json|```/g, "").trim();
+          const parsed = JSON.parse(cleaned) as { isBottle?: boolean; sizeMl?: number | null; fillPct?: number | null };
+          if (parsed.isBottle) {
+            const sizeMl = parsed.sizeMl || 500;
+            const fillPct = parsed.fillPct ?? 100;
+            const drankMl = Math.round(sizeMl * (fillPct / 100));
+            const litres = Math.round(drankMl / 100) / 10;
+            // Estimate remaining based on fill
+            const sizeLabel = sizeMl >= 900 ? `${(sizeMl / 1000).toFixed(1)}L` : `${sizeMl}ml`;
+            const fillLabel = fillPct >= 90 ? "full" : fillPct >= 60 ? "about two-thirds full" : fillPct >= 35 ? "about half full" : fillPct >= 10 ? "nearly empty" : "empty";
+            const waterTarget = Math.max(2.0, Math.round((parseFloat(user.currentWeight || "75")) * 0.033 * 10) / 10);
+            const todayStr = sastToday();
+            const waterUpdated = await db.update(users).set({
+              todayWater: sql`CASE WHEN water_last_reset_date = ${todayStr} THEN COALESCE(today_water::numeric, 0) + ${litres} ELSE ${litres} END`,
+              waterLastResetDate: todayStr,
+            }).where(eq(users.id, user.id)).returning({ todayWater: users.todayWater });
+            const newTotal = Math.round((Number(waterUpdated[0]?.todayWater) || litres) * 10) / 10;
+            const remaining = Math.max(0, Math.round((waterTarget - newTotal) * 10) / 10);
+            const targetHit = newTotal >= waterTarget;
+            const bottleReply = targetHit
+              ? `${sizeLabel} bottle, ${fillLabel} — that puts you at ${newTotal}L today. ✅ Water target hit.`
+              : `${sizeLabel} bottle, ${fillLabel} — logged ${litres}L. Total today: ${newTotal}L / ${waterTarget}L. ${remaining}L to go.`;
+            await logChat(user.id, "[Water Bottle Photo]", bottleReply, "WATER_LOG");
+            return bottleReply;
+          }
+        } catch {
+          // vision failed or not a bottle — fall through to food
+        }
+      }
+
       // ---- FOOD PHOTO ----
       // Detect "is this okay?" captions — client is asking for approval, not just logging
       const isApprovalCaption = /^[?!¿]+$/.test((message || "").trim())
