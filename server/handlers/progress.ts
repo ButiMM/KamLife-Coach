@@ -127,7 +127,7 @@ export async function handleProgressCheck(ctx: {
         return `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Reply *1* right now and do today's workout. 20 minutes changes the week.`;
       }
       if (weekFoodLogDays < 3) {
-        return `*Fix this week:* Log your food. ${weekFoodLogDays}/7 days isn't enough for me to see where the problem is. I cannot coach what I cannot see. Start tonight: just log dinner, even if it wasn't perfect.`;
+        return `*Fix this week:* Log your food — even just dinner each night gives me enough to actually help. Right now I've only got ${weekFoodLogDays}/7 days, so let's start tonight, even if the meal wasn't perfect.`;
       }
       if (avgDailyProt > 0 && proteinPct < 0.75) {
         const gap = protTarget - avgDailyProt;

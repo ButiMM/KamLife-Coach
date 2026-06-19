@@ -305,7 +305,7 @@ export async function handleMiscCommands(ctx: {
       cal += activeDays >= 24 ? `Elite consistency. This is how results happen.` :
              activeDays >= 18 ? `Good consistency. Fill the gaps and watch what happens.` :
              activeDays >= 10 ? `Building the habit. More dots = more results.` :
-             `Too many empty days. One workout and one step log today — start filling the calendar.`;
+             `Plenty of room to fill in — and that's the opportunity. One workout and one step log today starts the next streak.`;
 
       await logChat(user.id, message, cal, "HABIT_CALENDAR");
       return cal;
@@ -387,7 +387,7 @@ export async function handleMiscCommands(ctx: {
         (grade === "A" ? `Elite consistency${name ? `, ${name}` : ""}. This is how bodies change. Keep it going.` :
          grade === "B" ? `Strong month. Tighten up the gaps and A is yours next month.` :
          grade === "C" ? `Room to improve. Focus on showing up — 3 workouts and 8,500 steps every single day.` :
-         `Inconsistent month. The programme works when you work it. New month, fresh start. One workout today.`);
+         `Tough month — but you're still here, and that counts for a lot. Fresh month ahead: one workout today is all it takes to start again. I've got you.`);
 
       await logChat(user.id, message, report, "MONTHLY_REPORT");
       return report;

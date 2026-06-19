@@ -1071,7 +1071,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
     }
 
-    return response.choices[0]?.message?.content?.trim() || "Sharp. Keep moving forward.";
+    return response.choices[0]?.message?.content?.trim() || "Sorry, I missed that one — send it to me again?";
   } catch (err: any) {
     if (isAiOfflineError(err)) return "Eish Coach K had a moment. Try that again.";
     const status = err?.status ?? err?.statusCode ?? 0;

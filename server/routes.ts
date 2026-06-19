@@ -605,7 +605,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       steps = Math.round(minutes * 100);
     }
     if (!isNaN(steps) && steps > 0 && steps <= 100) {
-      return `That step count looks off. Did you mean ${steps * 100} steps? Send your actual count — e.g. "8500 steps" or "walked 5km".`;
+      return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
       const target = user.stepsTarget || 8500;

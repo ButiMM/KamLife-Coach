@@ -182,7 +182,7 @@ ${HARD_LIMIT}`;
         { role: "user", content: message }
       ]
     });
-    return response.choices[0]?.message?.content?.trim() || "That feeling is real. One session changes everything — do it today.";
+    return response.choices[0]?.message?.content?.trim() || "I hear you — that's a lot to carry. Talk to me, what's weighing on you most right now?";
   } catch (err) {
     if (!isAiOfflineError(err)) console.error("[MINDSET_AGENT]", err);
     return "Eish Coach K had a moment. Try that again.";

@@ -473,7 +473,7 @@ SA voice. Direct. Coach forward, not backward.`;
     const hasObviousWeightSignal = /\b(?:\d{2,3}(?:\.\d+)?\s*kg\b|weigh|scale|body weight)\b/i.test(m);
     const hasObviousWorkout = /\b(?:gym|workout|training|trained|session|lift|squat|bench|press|done|finished)\b/i.test(m);
     if (!hasObviousFoodSignal && !hasObviousStepSignal && !hasObviousWeightSignal && !hasObviousWorkout) {
-      const clarifyReply = `Didn't catch that — was that a *food log*, *workout update*, or a question?\n\nReply:\n• *food* then what you ate (e.g. "food — 2 eggs and toast")\n• *done* if you just trained\n• Or just ask me anything directly`;
+      const clarifyReply = `Sorry, I didn't quite catch that — what's up? If you're logging food just tell me what you ate, or ask me anything directly.`;
       await logChat(user.id, message, clarifyReply, "UNCLEAR");
       return clarifyReply;
     }

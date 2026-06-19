@@ -137,7 +137,7 @@ export async function runEveningAccountability(): Promise<void> {
               : `protein at ${todayProt}g — get to ${protTarget}g`;
           msg = `${name}, ${done} today. ${gap}. One more thing before bed.`;
         } else {
-          msg = `${name}, nothing logged today. I can only coach what I can see — log one meal tonight, that's the whole job.`;
+          msg = `${name}, no logs yet today — no stress. Just send me your last meal before bed and we keep the momentum going.`;
         }
       }
 
