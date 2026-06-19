@@ -43,7 +43,7 @@ export async function runMondayProgress(): Promise<void> {
     if (client.lastActiveAt && new Date(client.lastActiveAt) < threeDaysAgo) continue;
     if (!canSendProactive(client.id)) continue;
     try {
-      const name = client.name?.split(" ")[0] || "Champ";
+      const name = client.name?.split(" ")[0] || "there";
       const [wk] = await db.select({ c: count() }).from(workoutLogs).where(and(eq(workoutLogs.userId, client.id), gte(workoutLogs.loggedAt, sevenDaysAgo)));
       const [fl] = await db.select({ c: count() }).from(chatHistory).where(and(eq(chatHistory.userId, client.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, sevenDaysAgo)));
       const [sl] = await db.select({ c: count() }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, sevenDaysAgo)));

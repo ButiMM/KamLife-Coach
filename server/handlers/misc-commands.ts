@@ -196,9 +196,9 @@ export async function handleMiscCommands(ctx: {
     // Calorie target already hit — suggesting more food contradicts the day's assessment
     if (todayCals > 0 && calLeftRaw <= 0) {
       const protNote = protLeft > 20
-        ? `${protLeft}g protein short — carry it to tomorrow.`
-        : "Protein on track. ✅";
-      suggestion += `Calorie target reached. ${protNote}\n\nNo more food needed today — water only.`;
+        ? `You're about ${protLeft}g short on protein — a small protein snack (eggs, yoghurt, biltong) is a good shout if you're hungry.`
+        : "Protein's on track. ✅";
+      suggestion += `You've hit your calories for today. ${protNote}\n\nIf you're genuinely hungry, keep it light and protein-first — no need to force more food.`;
       await logChat(user.id, message, suggestion, "MEAL_SUGGESTION");
       return suggestion;
     }

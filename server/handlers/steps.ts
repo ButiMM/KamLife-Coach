@@ -30,7 +30,7 @@ export async function getStepStreak(userId: string): Promise<number> {
 
 const STEP_RESPONSES_LOW = [
   (steps: number, remaining: number, target: number) =>
-    `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. Walk to the shop, take the stairs, park further. Close that gap before bed.`,
+    `${steps.toLocaleString()} steps logged — you are ${remaining.toLocaleString()} short of your ${target.toLocaleString()} target. A 15-minute walk before bed, or taking the stairs, closes most of that gap.`,
   (steps: number, remaining: number, target: number) =>
     `${steps.toLocaleString()} steps today. ${remaining.toLocaleString()} more will hit your target. A 15-minute walk is about 1,500 steps — go.`,
   (steps: number, remaining: number, target: number) =>
@@ -56,9 +56,9 @@ const STEP_RESPONSES_GOOD = [
 
 const STEP_RESPONSES_TARGET = [
   (steps: number, target: number) =>
-    `${steps.toLocaleString()} steps — target hit. ✅ This daily discipline is what separates results from excuses. Same again tomorrow.`,
+    `${steps.toLocaleString()} steps — target hit. ✅ That daily consistency is exactly what drives results. Same again tomorrow.`,
   (steps: number, target: number) =>
-    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your fat loss. Do not skip tomorrow.`,
+    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your fat loss. Keep the rhythm going tomorrow.`,
   (steps: number, target: number) =>
     `${steps.toLocaleString()} steps done. ✅ Above target and earning it. Your body is changing because you are consistent — keep it up.`,
   (steps: number, target: number) =>

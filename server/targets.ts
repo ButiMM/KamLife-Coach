@@ -70,7 +70,8 @@ export function calculateTargets(
   // ── Safety floors by gender ──
   // Breastfeeding: 1,800 kcal is the clinical minimum — below this, milk supply drops
   const minCal = isBreastfeeding ? 1800 : (isFemale ? 1200 : 1500);
-  calorieTarget = Math.max(minCal, Math.min(4500, calorieTarget));
+  // NaN guard: if any input (weight/age/height/bmr) was non-numeric, never ship "NaN kcal".
+  calorieTarget = Number.isFinite(calorieTarget) ? Math.max(minCal, Math.min(4500, calorieTarget)) : minCal;
 
   // ── Protein target ──
   // Fat loss: higher protein preserves muscle
@@ -83,7 +84,7 @@ export function calculateTargets(
     general: isFemale ? 1.6 : 1.8,
     health_condition: isFemale ? 1.6 : 2.0,
   };
-  let proteinTarget = Math.round(weightKg * (proteinMult[goalType] || 2.0));
+  let proteinTarget = Math.round((Number.isFinite(weightKg) ? weightKg : 75) * (proteinMult[goalType] || 2.0));
 
   // Breastfeeding: minimum 70g protein — quality matters for breast milk composition
   if (isBreastfeeding) proteinTarget = Math.max(70, proteinTarget);

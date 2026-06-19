@@ -985,7 +985,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       if (totalPhotoKcal > 0 && (goal === "fat_loss" || goal === "recomposition")) {
         const calTarget = user.calorieTarget || 1800;
         if (totalPhotoKcal > Math.round(calTarget * 0.38)) {
-          photoCoachNudge = `\n\nHeavy meal — logged. Balance it: go lighter on your next meal and push the steps today.`;
+          photoCoachNudge = `\n\nBig meal — logged, no stress. Keep the next one lighter and you're balanced for the day.`;
         }
       }
 

@@ -87,7 +87,7 @@ SA FOOD KNOWLEDGE YOU MUST APPLY (do not ignore these):
 - DOUBLE CREAM YOGURT → swap to low-fat Greek yogurt for fat loss.
 
 OUTPUT FORMAT (one WhatsApp message, no --- separators):
-Line 1: "Here's your list cleaned up for ${goalLabel}, ${firstName || "champ"} — shop straight off this:"
+Line 1: "${firstName ? `Here's your list cleaned up for ${goalLabel}, ${firstName}` : `Here's your list cleaned up for ${goalLabel}`} — shop straight off this:"
 Then sections with *bold* headers (only include a section if it has items):
 *PROTEIN* — lean proteins, buy plenty, no portion limit
 *CARBS* — one fist or cup per meal

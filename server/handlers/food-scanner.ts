@@ -565,18 +565,17 @@ export function buildFoodLogReply(p: {
     if (calRemaining <= 0 && effectiveRemaining <= -100) {
       const overBy = Math.abs(effectiveRemaining);
       if (extraStepsBurned >= 80) {
-        dayAssessment = `\n_Over on calories, but your step count offset ~${extraStepsBurned} kcal. Net surplus: ~${overBy} kcal. Keep dinner lean._`;
+        dayAssessment = `\n_Over on calories, but your steps offset ~${extraStepsBurned} kcal. Net surplus: ~${overBy} kcal. Keep the next meal lean and you're fine._`;
       } else if (overBy >= 800) {
-        dayAssessment = `\n_⚠️ You're ~${overBy} kcal over your target. That's a significant surplus. No more food today — water only. One bad day doesn't break progress, but don't add to it._`;
+        dayAssessment = `\n_You're ~${overBy} kcal over today — it happens, no panic. If you eat again, keep it light: protein and veg. One day doesn't undo your progress._`;
       } else if (overBy >= 400) {
-        dayAssessment = `\n_You're ${overBy} kcal over. Close the day now — no dinner, or at most a small protein and veg if you're hungry. Don't add to the surplus._`;
+        dayAssessment = `\n_~${overBy} kcal over. If you're eating again, make it lean — grilled protein and some veg. Tomorrow's a clean slate._`;
       } else {
         dayAssessment = `\n_${pick([
-          "Calorie ceiling hit — final meal must be lean. Protein and veg only.",
-          "Target reached. Close the day clean: protein and vegetables, nothing else.",
-          "Done on calories. Dinner = lean protein + veg. No starch.",
-          "Calorie cap hit. Last meal: grilled protein and greens — that's it.",
-          "You've hit the limit. Strip dinner down to protein and vegetables only.",
+          "You're at your calories for today — if you eat again, lean is the move: protein and veg.",
+          "Calories are done for the day. A light protein-and-veg meal is perfect if you're still hungry.",
+          "On your limit. Keep the last meal protein-forward and light if you can.",
+          "Hit your target. Anything else today, keep it lean — protein and greens.",
         ])}_`;
       }
     } else if (calRemaining <= 0 && effectiveRemaining > -100) {
@@ -673,19 +672,18 @@ export function buildFoodLogReply(p: {
       // genuinely behind (>35% of daily target still outstanding). Stops constant
       // protein lectures on breakfast oats, lunch rice, etc.
       coachNote = `\n\n${pick([
-        "Carbs without protein — fix it next meal. Add eggs, chicken, or legumes.",
-        "No protein this meal — balance it next time with a real protein source.",
-        "Carb-heavy. Pair the next meal with protein to keep your total on track.",
-        "Protein gap — sort it next meal. Eggs, chicken, or tinned fish.",
+        "Good fuel. When you can, add eggs, beans, or pilchards to round it out.",
+        "Nice and filling. If there's protein in the house, add it next meal — no rush.",
+        "Solid carbs. A protein source next meal keeps your total on track when you can manage it.",
+        "That'll keep you going. Eggs or tinned fish next meal would round it off nicely.",
       ])}`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText
         && !calorieCeilingHit
         && proteinRemaining > proteinTarget * 0.35) {
       coachNote = `\n\n${pick([
-        "Next meal needs protein. Pick one: eggs, chicken, or tuna.",
-        "Sort protein next meal — eggs or canned fish are the fastest fix.",
-        "Protein is low. Eggs, chicken, or something real at the next meal.",
-        "Get protein in next meal — eggs, tinned tuna, or grilled chicken.",
+        "If you've got protein at home — eggs, beans, tinned fish — next meal's a good time for it.",
+        "A bit of protein next meal would help — eggs or pilchards are the cheap, easy options.",
+        "When you can, get some protein in next meal. Eggs and tinned fish go a long way.",
       ])}`;
     }
   }
@@ -764,7 +762,7 @@ export function buildFoodLogReply(p: {
     const isMuscleBuild = goal === "muscle_gain";
     const NOTES = [
       `\n\n👀 _Coach K noticed: you're logging consistently. That's what separates the people who change from the people who try._`,
-      `\n\n⚡ _${daysSinceStart > 7 ? `Day ${daysSinceStart} in` : "Early days"}. Most people have already quit by now. You're still here._`,
+      `\n\n⚡ _${daysSinceStart > 7 ? `Day ${daysSinceStart} and still logging` : "Early days, and you're showing up"}. That consistency is the whole game._`,
       `\n\n🎯 _${fn}, one logged meal won't change your body. Fifty of them will. You're building the right habit._`,
       `\n\n💡 _Consistent food logging is the single highest-predictor habit in body transformation. You're doing the one thing that matters most._`,
       `\n\n🔒 _${fn}, this habit is more valuable than any supplement or gym programme. Keep locking it in._`,

@@ -42,7 +42,7 @@ export function assessWeightRate(
     } else if (pace <= dangerBand) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — 🚨 *this is too fast.* Losing this quickly causes muscle loss, metabolic slowdown and rebound weight gain. Add 200 kcal/day and hit ${proteinTarget}g protein. Your target is ${calorieTarget} kcal — are you reaching it?`;
     } else {
-      return `🚨 *${nm}this weight loss rate is dangerous.* ${pace.toFixed(2)}kg per week — that's crash-diet territory. At this pace your body is burning muscle, not just fat, and your metabolism will slow down hard. Please tell me what you've been eating — something is seriously wrong with your intake.`;
+      return `⚠️ *${nm}you're losing very fast — ${pace.toFixed(2)}kg a week.* Dropping this quickly can burn muscle and slow your metabolism, and it usually means you're not eating enough. Can you tell me what a normal day's food looks like for you? Let's make sure you're eating enough to do this safely.`;
     }
   }
 

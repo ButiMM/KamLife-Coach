@@ -81,7 +81,7 @@ export async function runMorningCheckin(): Promise<void> {
           if (shieldAvailable) {
             const updatedNotes = (client.profileNotes || "").replace(/streak_shield:\d{4}-\d{2}/, "").trim() + ` streak_shield:${currentMonth}`;
             await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, client.id));
-            await sendWhatsApp(phone, `Morning ${name}. Yesterday was a miss — but your *${wStreak}-session streak is protected* by your monthly shield.\n\nShield used. No more protection this month.\n\nLog today's session to keep the momentum going.`);
+            await sendWhatsApp(phone, `Morning ${name}. Good news — your *${wStreak}-session streak is safe*, your monthly shield's got yesterday covered.\n\nLog today's session and keep the momentum going. 💪`);
           } else {
             await sendWhatsApp(phone, `Morning ${name}. Send me your breakfast right now — one line is all I need. We start from here.`);
           }

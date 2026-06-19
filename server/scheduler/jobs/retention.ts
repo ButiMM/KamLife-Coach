@@ -134,12 +134,12 @@ export async function runComebackMessages(): Promise<void> {
     (name: string, wk: number) => `${name}, it has been a few days. Your programme is still here waiting. ${wk > 0 ? `You were on ${wk} workouts — do not let that go.` : ""} One session today changes the trajectory. What time are you training?`,
     (name: string, wk: number) => `${name}. No judgment. Life happens. But your goals have not changed.\n\n${wk >= 3 ? `You had a ${wk}-session streak going — that is worth protecting.` : "One workout today puts you back on track."}\n\nReply "menu" to see today's workout. That is all I am asking.`,
     (name: string, wk: number) => `${name}, quick check — you good? Have not heard from you in a few days.\n\nYour programme is ready whenever you are. Just reply "menu" and we pick up exactly where you left off.\n\nNo reset. No guilt. Just forward.`,
-    (name: string, wk: number) => `${name}, I noticed you have been quiet. That is usually when the excuses win.\n\nBut not today. ${wk >= 5 ? `${wk} sessions done already — that is more than most people do in a month.` : "Every session counts."}\n\nReply *done* after your next workout. I will be here.`,
+    (name: string, wk: number) => `${name}, noticed you've been quiet — no judgment, life gets busy.\n\n${wk >= 5 ? `${wk} sessions already done — that's real progress, worth picking back up.` : "One session today gets you moving again."}\n\nReply *done* after your next workout. I'll be here.`,
   ];
 
   let sent = 0;
   for (const client of silentClients) {
-    const name = client.name?.split(" ")[0] || "Champ";
+    const name = client.name?.split(" ")[0] || "there";
     const wk = client.totalWorkoutsCompleted || 0;
     const msg = comebacks[sent % comebacks.length](name, wk);
     // Once per day per client — DB-backed so a recycle on a comeback day can't re-send.
