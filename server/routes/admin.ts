@@ -729,7 +729,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
         .limit(250);
 
       const messageFor = (name?: string | null) =>
-        `Coach K check-in 💪 ${name || "Champion"} — quick one: reply with today's steps, water, and meals so I can adjust your targets.`;
+        `Coach K check-in 💪 ${name ? name : "Hey"} — quick one: reply with today's steps, water, and meals so I can adjust your targets.`;
 
       let sent = 0;
       let failed = 0;

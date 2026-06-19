@@ -83,6 +83,7 @@ export function registerPaymentRoutes(app: Express) {
       }
       const paramString = Object.entries(data)
         .filter(([k]) => k !== "signature")
+        .sort(([a], [b]) => a.localeCompare(b)) // PayFast ITN spec: keys must be sorted alphabetically before hashing
         .map(([k, v]) => `${k}=${encodeURIComponent(String(v)).replace(/%20/g, "+")}`)
         .join("&");
       const signatureBase = `${paramString}&passphrase=${encodeURIComponent(passphrase)}`;

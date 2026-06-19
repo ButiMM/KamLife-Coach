@@ -496,7 +496,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           }
         }
       }
-    } catch { /* non-fatal — original message proceeds */ }
+    } catch (normErr) { console.warn("[NORMALIZER] exception — original message proceeds:", normErr instanceof Error ? normErr.message : normErr); }
   }
 
   // ---- FOOD LOG MANAGEMENT (reset, remove, show) ----
