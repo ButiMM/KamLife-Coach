@@ -701,7 +701,7 @@ export async function handleFoodContext(ctx: {
     const plannedNames = foodsInMsg.map(f => f.name).join(", ");
     const plannedLabel = extractMealLabel(message);
     const swapNote = junkPlanned.length > 0
-      ? `\n\nOne flag: ${junkPlanned.map(f => f.name).join(" and ")} — ${junkPlanned[0].notes ? junkPlanned[0].notes.split(".")[0] + "." : "empty calories."} Swap for water and the meal is solid.`
+      ? `\n\nIf you want to swap anything out later, I can suggest alternatives — just ask.`
       : `\n\nGood plan — solid choices in there.`;
     const plannedReply = `Sounds like ${plannedLabel || "a meal"} in the making — ${plannedNames}.${swapNote}\n\n_Not logged yet._ When you've eaten, reply *ate it* and I'll log it.`;
     await logChat(user.id, message, plannedReply, "FOOD_PLANNED");

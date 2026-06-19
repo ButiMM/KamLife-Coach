@@ -611,7 +611,7 @@ export async function handleMediaMessage(ctx: {
 
           return ackMsg;
         } else {
-          return `${progressCountLabel}, ${clientName}. That is your baseline — the before. The photo you will look back at in 8 weeks and not believe.\n\nSend your next one in 30 days. I will compare them side by side and tell you exactly what changed — muscle, posture, body shape. Everything. Keep showing up.`;
+          return `${progressCountLabel}, ${clientName}. Baseline saved.\n\nSend your next one in 30 days — same lighting, same pose if you can. I'll compare them side by side and show you exactly what shifted. Keep training.`;
         }
       }
 

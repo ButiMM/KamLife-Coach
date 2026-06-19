@@ -10,7 +10,7 @@ export function getSACulturalEvent(month: number, day: number): ((name: string) 
   if (month === 8 && day === 9) return (n) =>
     `Women's Day, ${n}. To every woman on this programme — the strength you are building in the gym is the same strength that carries everything else. Today's session is for you. Do it for you. Reply "today" for your workout.`;
   if (month === 9 && day === 24) return (n) =>
-    `Heritage Day, ${n}. National Braai Day. Here is your braai coaching: boerewors — 36g protein per coil, high fat. Chicken — always remove skin. Corn on the braai — fine as a carb. Potato salad — skip the mayo or go small. Beer — 150 calories each, zero protein. Enjoy the braai and log your food tonight.`;
+    `Heritage Day, ${n}! 🇿🇦 However you're celebrating — braai, potjie, or a family spread — keep it simple: protein first (meat, chicken without the skin, or beans and chakalaka if you're plant-based), go easy on the sides, and properly enjoy yourself. Log it tonight and we carry on tomorrow.`;
   if (month === 12 && day === 1) return (n) =>
     `${n}, December starts today. This is the month most programmes fall apart. Two rules for the whole month: protein at every meal and at least one training session per week. Everything else is negotiable. Festive season is not an excuse. It is a test.`;
   if (month === 12 && day === 16) return (n) =>
