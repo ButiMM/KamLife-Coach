@@ -131,7 +131,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       }
 
       const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey", "mince", "biltong", "sardines", "lentils"];
-      const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "vetkoek", "kotas", "polony", "cool drink", "alcohol", "beer", "wine", "magwinya", "fat cake", "spur", "steers", "wimpy", "debonairs", "red bull", "monster energy", "energy drink", "fanta", "coke", "sprite", "fizzy drink", "oros"];
+      const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "cool drink", "alcohol", "beer", "wine", "spur", "steers", "wimpy", "debonairs", "red bull", "monster energy", "energy drink", "fanta", "coke", "sprite", "fizzy drink", "oros"];
       const foodDays = new Set(foodLogs.map(c => new Date(c.createdAt!).toDateString())).size;
       const proteinDays = new Set(foodLogs.filter(l => PROTEIN_RICH.some(w => (l.messageIn || "").toLowerCase().includes(w))).map(c => new Date(c.createdAt!).toDateString())).size;
       const proteinHitRate = foodDays > 0 ? Math.round((proteinDays / foodDays) * 100) : 0;
@@ -145,7 +145,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const junkCount = foodLogs.filter(l => JUNK.some(w => (l.messageIn || "").toLowerCase().includes(w))).length;
       const noProteinDays = foodDays - proteinDays;
       let warning = "";
-      if (junkCount >= 3) warning = `⚠️ Junk appeared ${junkCount}x — one bad meal is recoverable, four is a pattern.`;
+      if (junkCount >= 3) warning = `Takeaways & cooldrinks showed up ${junkCount}x this week — no stress, enjoy them now and then. Just keep the other days protein-first.`;
       else if (noProteinDays >= 3) warning = `⚠️ ${noProteinDays} days with no protein logged — eggs, pilchards, or beans at every meal.`;
       else if (completedSessions === 0) warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
 
@@ -261,7 +261,7 @@ export async function runWeekendFoodAudit(): Promise<void> {
       const weekendLogs = foodLogs.filter(l => { const d = new Date(new Date(l.createdAt!).getTime() + 2 * 3_600_000).getUTCDay(); return d === 0 || d === 6; });
       if (weekendLogs.length === 0 || weekdayLogs.length === 0) continue;
 
-      const HIGH_CAL = ["kfc", "mcdonalds", "nandos", "pizza", "kotas", "vetkoek", "beer", "wine", "braai", "chips", "cake", "chocolate", "dessert", "ice cream", "takeaway", "takeaways", "cool drink", "coke", "fanta", "sprite", "pap en vleis"];
+      const HIGH_CAL = ["kfc", "mcdonalds", "nandos", "pizza", "kotas", "vetkoek", "beer", "wine", "chips", "cake", "chocolate", "dessert", "ice cream", "takeaway", "takeaways", "cool drink", "coke", "fanta", "sprite"];
       const GOOD_PROTEIN = ["chicken breast", "pilchards", "eggs", "tuna", "beef mince", "greek yogurt", "cottage cheese"];
 
       const weekdayJunk = weekdayLogs.filter(l => HIGH_CAL.some(k => (l.messageIn || "").toLowerCase().includes(k))).length;
