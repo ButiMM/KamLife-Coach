@@ -219,7 +219,11 @@ export async function runMorningCheckin(): Promise<void> {
       // Positive framing for short streaks, loss framing for meaningful ones
       const streakParts: string[] = [];
       if (wStreak >= 10) {
-        streakParts.push(`🔥 *${wStreak}-session streak* — don't be the one who broke a ${wStreak}-session run`);
+        streakParts.push(
+          trajectory === "ON_A_RUN" || trajectory === "ON_TRACK"
+            ? `🔥 *${wStreak}-session streak* — keep it going`
+            : `🔥 *${wStreak}-session streak* — you have built real momentum here`
+        );
       } else if (wStreak >= 5) {
         streakParts.push(`🔥 *${wStreak}-session streak* — protect it`);
       } else if (wStreak >= 2) {

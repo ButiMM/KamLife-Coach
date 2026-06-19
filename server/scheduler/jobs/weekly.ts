@@ -93,7 +93,11 @@ export async function runSundayWeeklyReport(): Promise<void> {
         db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt }).from(stepLogs).where(and(eq(stepLogs.userId, client.id), gte(stepLogs.loggedAt, weekAgo))),
       ]);
 
+      const clientAgeDays = client.createdAt
+        ? Math.floor((Date.now() - new Date(client.createdAt).getTime()) / 86_400_000)
+        : 999;
       if (chats.length === 0) {
+        if (clientAgeDays < 2) continue; // just onboarded today — skip
         await sendWhatsApp(client.phoneNumber, `${name}, nothing logged this week. The restart is simple — send me what you're eating right now. One meal. That's the whole task.`);
         continue;
       }
@@ -148,7 +152,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const noProteinDays = foodDays - proteinDays;
       let warning = "";
       if (junkCount >= 3) warning = `Takeaways & cooldrinks showed up ${junkCount}x this week — no stress, enjoy them now and then. Just keep the other days protein-first.`;
-      else if (noProteinDays >= 3) warning = `⚠️ ${noProteinDays} days with no protein logged — eggs, pilchards, or beans at every meal.`;
+      else if (noProteinDays >= 3) warning = `Protein: ${noProteinDays} days this week without protein logged. Even one egg or a tin of pilchards counts — start with one meal tonight.`;
       else if (completedSessions === 0) warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
 
       let focus = "";

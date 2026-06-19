@@ -74,7 +74,7 @@ export async function runMondayProgress(): Promise<void> {
         } else if (diff > 0.3 && goal === "muscle_gain") {
           lines.push(`⚖️ Up ${diff.toFixed(1)}kg — good for muscle gain. Track lifts to confirm strength is going up.`);
         } else if (diff > 0.5 && goal === "fat_loss") {
-          lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week. Review your weekend eating and portion sizes.`);
+          lines.push(`⚖️ Up ${diff.toFixed(1)}kg this week — could be water or sodium from the weekend. Stay on programme and weigh again Wednesday.`);
         }
       }
 
