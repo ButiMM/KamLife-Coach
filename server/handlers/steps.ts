@@ -58,7 +58,7 @@ const STEP_RESPONSES_TARGET = [
   (steps: number, target: number) =>
     `${steps.toLocaleString()} steps — target hit. ✅ That daily consistency is exactly what drives results. Same again tomorrow.`,
   (steps: number, target: number) =>
-    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your fat loss. Keep the rhythm going tomorrow.`,
+    `Target crushed — ${steps.toLocaleString()} steps. ✅ Every step counts toward your goal. Keep the rhythm going tomorrow.`,
   (steps: number, target: number) =>
     `${steps.toLocaleString()} steps done. ✅ Above target and earning it. Your body is changing because you are consistent — keep it up.`,
   (steps: number, target: number) =>

@@ -4,10 +4,11 @@ import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
 
 export const JUNK_WORDS = [
-  "kfc", "kota", "fat cake", "magwinya", "vetkoek", "niknaks", "cool drink", "fanta",
-  "hennessy", "henny", "alcohol", "polony", "viennas", "steers", "burger", "pizza",
+  "kfc", "niknaks", "cool drink", "fanta",
+  "hennessy", "henny", "alcohol", "steers", "burger", "pizza",
   "chips", "beer", "wine", "chocolate", "sweets", "biscuit",
   "russian sausage", // "russian salad" is not junk — only the processed sausage is
+  // Removed: kota, fat cake, magwinya, vetkoek, polony, viennas — SA cultural / budget staples
 ];
 
 function isJunk(msg: string): boolean {
@@ -30,7 +31,7 @@ export async function checkFoodPatterns(userId: string, calorieCeilingHit = fals
 
     const junkStreak = last3.filter(msg => isJunk(msg)).length;
     if (junkStreak >= 3) {
-      return `⚠️ *Pattern alert:* Three junk food logs in a row. This is the pattern that blocks results. Next meal: protein + vegetables first, everything else after.`;
+      return `Three takeaway/junk logs in a row — noticed. No drama. Just make the next meal protein-first: eggs, chicken, beans, or tuna. That's the reset.`;
     }
 
     // Positive reset: if damage control was sent today and the most recent meal is clean, acknowledge the recovery
