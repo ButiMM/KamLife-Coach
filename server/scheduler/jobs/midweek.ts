@@ -56,7 +56,7 @@ export async function runMidweekSessionCheck(): Promise<void> {
     if (isPaused(client)) continue;
     const daysSilent = client.lastActiveAt
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
-      : 0;
+      : 999; // null = never interacted; comeback job owns these, not midweek check
     // Skip clients already caught by the 3+ day silence re-engagement flow
     if (daysSilent > 4) continue;
 
@@ -78,7 +78,7 @@ export async function runMidweekSessionCheck(): Promise<void> {
       if (!await claimDailySlot(client.id, "midweek_session")) continue;
 
       const name = (client.name || "there").split(" ")[0];
-      const remaining = trainingDays - count;
+      const remaining = trainingDays - scheduled;
       const msg = [
         `${name}, Wednesday. Halfway through the week.`,
         `Zero sessions logged so far — but you still have ${remaining} training day${remaining > 1 ? "s" : ""} left before Sunday.`,

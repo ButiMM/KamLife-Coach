@@ -59,8 +59,10 @@ export async function runFridayWeekendStrategy(): Promise<void> {
         ``,
         sessions >= (client.trainingDaysPerWeek || 3) && foodDays >= 5
           ? `Sharp week, ${name}. Two rules this weekend — protein at every meal and one session before Sunday night. That is it.`
+          : sessions === 0 && new Date(client.createdAt || 0).getTime() > Date.now() - 7 * 86_400_000
+          ? `${name}, first week is about building the habit. Get one session in before Sunday and you'll be on track from day one.`
           : sessions === 0
-          ? `Zero sessions this week. One workout before Sunday — just one. You have 48 hours.`
+          ? `Zero sessions this week — still time to change that. One session before Sunday is all it takes. Reply *1* right now.`
           : `Weekend is where most people lose the week. Two rules only — protein at every meal and one session before Sunday night.`,
       ].filter(Boolean);
 
@@ -191,7 +193,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
 
       try {
-        const daysInCycle = client.trainingDaysPerWeek || 4;
+        const daysInCycle = client.trainingDaysPerWeek || 3;
         const newDay = ((client.programmeDayInWeek || 1) % daysInCycle) + 1;
         const newWeek = newDay === 1 ? (weekNum + 1) : weekNum;
         await db.update(users).set({ programmeDayInWeek: newDay, programmeWeek: newWeek }).where(eq(users.id, client.id));
