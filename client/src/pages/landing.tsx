@@ -4,15 +4,18 @@ import { useQuery } from "@tanstack/react-query";
 import {
   Mic, Camera, Keyboard, Plus, Minus, CheckCircle,
   RefreshCw, Flame, Dumbbell, Heart,
+  ChevronLeft, Phone, Video, Wifi, CheckCheck,
 } from "lucide-react";
 
 // ── Brand tokens ──────────────────────────────────────────────────────────────
-const LIME      = "#AAFF00";
-const WA_GREEN  = "#25D366";
-const BG        = "#0B0B0B";
-const CARD      = "#141414";
-const CARD2     = "#1A1A1A";
-const BORDER    = "#242424";
+// KamLife brand — "Orange energy + Deep navy authority" (from theme tokens)
+const ACCENT    = "#F97316";   // brand orange (primary)
+const NAVY      = "#13224D";   // deep navy (authority) — for section depth
+const WA_GREEN  = "#25D366";   // WhatsApp channel green (action buttons only)
+const BG        = "#0A0A0C";
+const CARD      = "#141416";
+const CARD2     = "#1A1A1D";
+const BORDER    = "#26262B";
 
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
@@ -38,14 +41,14 @@ function WaBtn({ href, children, large }: { href: string; children: React.ReactN
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <p className="text-xs font-bold uppercase tracking-[0.25em] mb-4" style={{ color: LIME }}>
+    <p className="text-xs font-bold uppercase tracking-[0.25em] mb-4" style={{ color: ACCENT }}>
       {children}
     </p>
   );
 }
 
 const PERSONAS = [
-  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: LIME, quote: "Tried the gym 4 times in 3 years. Always quit by month 2. This is month 7. Down 11kg.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
+  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: ACCENT, quote: "Tried the gym 4 times in 3 years. Always quit by month 2. This is month 7. Down 11kg.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
   { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Lost 9kg in 10 weeks eating pap and eggs. Never weighed a single gram of food.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
   { initials: "KM", name: "Kamogelo M.", city: "Pretoria", avatarBg: "#281616", avatarText: "#FF6B35", quote: "I'm diabetic, 97kg. Coach K built around my meds and budget. Down 14kg in 5 months.", tags: ["DIABETIC", "BUDGET EATING", "RECOMP"] },
   { initials: "SN", name: "Sipho N.", city: "Durban", avatarBg: "#162818", avatarText: "#22c55e", quote: "Skinny my whole life. Gained 7kg muscle in 4 months eating rice, eggs, and pilchards.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
@@ -75,7 +78,7 @@ export default function LandingPage() {
       <nav style={{ background: "rgba(11,11,11,0.97)", borderBottom: `1px solid ${BORDER}` }}
         className="sticky top-0 z-50 px-6 lg:px-16 py-4 flex items-center justify-between">
         <span className="text-2xl font-black tracking-tight select-none">
-          KAM<span style={{ color: LIME }}>LIFE</span>
+          KAM<span style={{ color: ACCENT }}>LIFE</span>
         </span>
         <div className="hidden md:flex items-center gap-8">
           {[["How It Works", "#how-it-works"], ["Features", "#features"], ["Pricing", "#pricing"], ["FAQ", "#faq"]].map(([label, href]) => (
@@ -94,8 +97,8 @@ export default function LandingPage() {
             src={HERO_VIDEO_URL} autoPlay muted loop playsInline preload="metadata" />
         ) : (
           <>
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 70% at 10% 50%, rgba(170,255,0,0.06) 0%, transparent 65%)" }} />
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 60% at 90% 80%, rgba(37,211,102,0.04) 0%, transparent 65%)" }} />
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 70% at 10% 50%, rgba(249,115,22,0.06) 0%, transparent 65%)" }} />
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 60% at 90% 80%, rgba(19,34,77,0.35) 0%, transparent 65%)" }} />
           </>
         )}
         {HERO_VIDEO_URL && <div className="absolute inset-0 bg-black/55" />}
@@ -108,8 +111,8 @@ export default function LandingPage() {
             <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 text-xs font-semibold text-white/60 mb-6"
               style={{ background: "rgba(255,255,255,0.04)" }}>
               <span className="relative flex h-1.5 w-1.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: LIME }} />
-                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: LIME }} />
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: ACCENT }} />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: ACCENT }} />
               </span>
               Now accepting South African clients
             </div>
@@ -120,23 +123,27 @@ export default function LandingPage() {
             </p>
 
             <h1 className="text-[clamp(44px,7vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-8">
-              <span className="block text-white">A TRAINER CHARGES</span>
-              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R3,000 A SESSION.</span>
-              <span className="block" style={{ color: LIME }}>COACH K. R199. DAILY.</span>
+              <span className="block text-white">ONE TRAINER SESSION:</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R500.</span>
+              <span className="block" style={{ color: ACCENT }}>COACH K: R199/MONTH.</span>
             </h1>
 
             <p className="text-lg text-white/55 max-w-lg leading-relaxed mb-10">
-              Knows pap, pilchards, braai, and KFC by name. Sends your programme on Day 1.
-              Adjusts your calories every week based on your actual weigh-ins.
+              A whole month of daily coaching costs less than a single PT session.
+              Knows pap, pilchards, braai, and KFC by name. Programme on Day 1, calories adjusted every week.
             </p>
 
-            <div className="flex flex-col sm:flex-row gap-3 mb-8">
+            <div className="flex flex-col sm:flex-row gap-3 mb-3">
               <WaBtn href={WA_LINK} large>Start 7-Day Free Trial</WaBtn>
               <a href="#how-it-works"
                 className="inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-semibold text-white/60 border border-white/12 hover:border-white/25 hover:text-white transition-all">
                 See how it works
               </a>
             </div>
+
+            <p className="text-sm text-white/35 mb-7">
+              The button opens WhatsApp — say "hi" and Coach K takes it from there. No app, no forms.
+            </p>
 
             <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/30">
               <span>7 days free</span><span>·</span>
@@ -157,69 +164,113 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="hidden lg:flex justify-center items-center relative">
             {/* Floating stats card */}
-            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "16px", position: "absolute", top: "15%", right: "-10px", zIndex: 10 }}
+            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "16px", position: "absolute", top: "11%", right: "-14px", zIndex: 30 }}
               className="px-4 py-3 shadow-2xl">
               <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-0.5">Today's intake</div>
               <div className="text-2xl font-black text-white">1,267 <span className="text-sm font-normal text-white/30">/ 2,200 cal</span></div>
               <div className="w-full h-1.5 rounded-full mt-2" style={{ background: "#222" }}>
-                <div className="h-1.5 rounded-full" style={{ width: "57%", background: LIME }} />
+                <div className="h-1.5 rounded-full" style={{ width: "57%", background: ACCENT }} />
               </div>
             </div>
 
-            {/* Phone frame */}
-            <div style={{ background: "#111", border: `1px solid #2a2a2a`, borderRadius: "28px", width: "290px" }} className="shadow-2xl overflow-hidden">
-              {/* Chat header */}
-              <div style={{ background: "#1a1a1a", borderBottom: `1px solid ${BORDER}` }} className="px-4 py-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-full flex items-center justify-center font-black text-sm shrink-0"
-                  style={{ background: LIME, color: "#000" }}>K</div>
-                <div className="flex-1">
-                  <div className="text-sm font-bold text-white">Coach K</div>
-                  <div className="text-[11px] flex items-center gap-1.5" style={{ color: WA_GREEN }}>
-                    <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: WA_GREEN }} />
-                    online
-                  </div>
-                </div>
-              </div>
+            {/* ── Phone device ── */}
+            <div className="relative" style={{ width: "302px" }}>
+              {/* Side buttons */}
+              <div className="absolute" style={{ left: "-2.5px", top: "96px", width: "3px", height: "22px", borderRadius: "2px", background: "#3a3a40" }} />
+              <div className="absolute" style={{ left: "-2.5px", top: "140px", width: "3px", height: "44px", borderRadius: "2px", background: "#3a3a40" }} />
+              <div className="absolute" style={{ left: "-2.5px", top: "196px", width: "3px", height: "44px", borderRadius: "2px", background: "#3a3a40" }} />
+              <div className="absolute" style={{ right: "-2.5px", top: "160px", width: "3px", height: "64px", borderRadius: "2px", background: "#3a3a40" }} />
 
-              {/* Chat body */}
-              <div className="p-3 space-y-3" style={{ background: "#0d0d0d", minHeight: "300px" }}>
-                {/* Coach message */}
-                <div className="flex gap-2 items-end">
-                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center font-black text-[9px]"
-                    style={{ background: LIME, color: "#000" }}>K</div>
-                  <div style={{ background: "#1e1e1e", borderRadius: "4px 14px 14px 14px", border: `1px solid ${BORDER}` }}
-                    className="px-3 py-2 max-w-[82%]">
-                    <p className="text-[11px] text-white leading-relaxed">Good morning Thabo! 🌅 You're at 847 cal. Here's your lunch suggestion:</p>
-                    <p className="text-[10px] mt-1.5 font-semibold" style={{ color: LIME }}>Pap + spinach + 2 eggs = 420 cal ✓</p>
-                    <span className="text-[9px] text-white/20 mt-0.5 block">09:02 ✓✓</span>
-                  </div>
-                </div>
-                {/* User reply */}
-                <div className="flex justify-end">
-                  <div style={{ background: "#1d3a2a", borderRadius: "14px 4px 14px 14px" }} className="px-3 py-2 max-w-[80%]">
-                    <p className="text-[11px] text-white">Had the pap, added pilchards instead 🙏</p>
-                    <span className="text-[9px] text-white/20 mt-0.5 block text-right">09:14 ✓✓</span>
-                  </div>
-                </div>
-                {/* Coach response */}
-                <div className="flex gap-2 items-end">
-                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center font-black text-[9px]"
-                    style={{ background: LIME, color: "#000" }}>K</div>
-                  <div style={{ background: "#1e1e1e", borderRadius: "4px 14px 14px 14px", border: `1px solid ${BORDER}` }}
-                    className="px-3 py-2 max-w-[82%]">
-                    <p className="text-[11px] text-white leading-relaxed">Even better! Pilchards = 35g protein 💪 Logged: 420 cal. You're crushing today.</p>
-                    <span className="text-[9px] text-white/20 mt-0.5 block">09:15 ✓✓</span>
-                  </div>
-                </div>
-              </div>
+              {/* Titanium frame */}
+              <div style={{ background: "linear-gradient(145deg, #34343a 0%, #18181b 55%, #28282d 100%)", borderRadius: "46px", padding: "11px" }}
+                className="shadow-2xl">
+                {/* Screen */}
+                <div className="relative overflow-hidden" style={{ background: "#0B141A", borderRadius: "35px" }}>
 
-              {/* Input bar */}
-              <div style={{ background: "#1a1a1a", borderTop: `1px solid ${BORDER}` }} className="px-3 py-2.5 flex items-center gap-2">
-                <div className="flex-1 rounded-full px-3 py-1.5 text-[10px] text-white/20" style={{ background: "#252525" }}>
-                  Message Coach K…
-                </div>
-                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
-                  <Mic className="w-3 h-3 text-white" />
+                  {/* Dynamic Island */}
+                  <div className="absolute left-1/2 -translate-x-1/2 z-20" style={{ top: "9px", width: "94px", height: "27px", background: "#000", borderRadius: "16px" }} />
+
+                  {/* iOS status bar */}
+                  <div className="relative flex items-center justify-between px-6 pt-3 pb-1.5" style={{ background: "#202C33" }}>
+                    <span className="text-[12px] font-semibold text-white tracking-tight">9:41</span>
+                    <div className="flex items-center gap-1.5">
+                      <div className="flex items-end gap-[2px]" style={{ height: "11px" }}>
+                        {[5, 7, 9, 11].map((h, i) => (
+                          <div key={i} style={{ width: "3px", height: `${h}px`, background: "#fff", borderRadius: "1px" }} />
+                        ))}
+                      </div>
+                      <Wifi className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                      <div className="flex items-center" style={{ gap: "1px" }}>
+                        <div style={{ width: "21px", height: "11px", borderRadius: "3px", border: "1px solid rgba(255,255,255,0.45)", padding: "1.5px" }}>
+                          <div style={{ width: "78%", height: "100%", background: "#fff", borderRadius: "1px" }} />
+                        </div>
+                        <div style={{ width: "1.5px", height: "4px", background: "rgba(255,255,255,0.45)", borderRadius: "0 1px 1px 0" }} />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* WhatsApp chat header */}
+                  <div className="flex items-center gap-2 px-3 py-2" style={{ background: "#202C33" }}>
+                    <ChevronLeft className="w-5 h-5 text-white/80 shrink-0" />
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center font-black text-sm shrink-0"
+                      style={{ background: ACCENT, color: "#1a1a1a" }}>K</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-[13px] font-semibold text-white leading-tight">Coach K</div>
+                      <div className="text-[10px] text-white/45 leading-tight">online</div>
+                    </div>
+                    <Video className="w-[18px] h-[18px] text-white/80 shrink-0" />
+                    <Phone className="w-4 h-4 text-white/80 shrink-0" />
+                  </div>
+
+                  {/* Chat body */}
+                  <div className="px-3 py-3 space-y-2" style={{ background: "#0B141A", minHeight: "292px" }}>
+                    {/* date pill */}
+                    <div className="flex justify-center mb-1">
+                      <span className="text-[9px] text-white/45 px-2.5 py-0.5 rounded-md" style={{ background: "#182229" }}>TODAY</span>
+                    </div>
+                    {/* incoming */}
+                    <div className="flex justify-start">
+                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
+                        <p className="text-[11.5px] text-white/95 leading-relaxed">Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
+                        <p className="text-[11.5px] text-white/95 font-semibold leading-relaxed mt-0.5">Pap + spinach + 2 eggs = 420 cal</p>
+                        <span className="text-[9px] text-white/35 block text-right mt-0.5">09:02</span>
+                      </div>
+                    </div>
+                    {/* outgoing */}
+                    <div className="flex justify-end">
+                      <div style={{ background: "#005C4B", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
+                        <p className="text-[11.5px] text-white/95 leading-relaxed">Had the pap, added pilchards instead</p>
+                        <span className="flex items-center justify-end gap-1 mt-0.5">
+                          <span className="text-[9px] text-white/45">09:14</span>
+                          <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
+                        </span>
+                      </div>
+                    </div>
+                    {/* incoming */}
+                    <div className="flex justify-start">
+                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
+                        <p className="text-[11.5px] text-white/95 leading-relaxed">Even better — pilchards = 35g protein. Logged 420 cal. You're crushing today.</p>
+                        <span className="text-[9px] text-white/35 block text-right mt-0.5">09:15</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Input bar */}
+                  <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: "#0B141A" }}>
+                    <div className="flex-1 flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: "#202C33" }}>
+                      <Plus className="w-3.5 h-3.5 text-white/40 shrink-0" />
+                      <span className="text-[11px] text-white/35">Message</span>
+                      <Camera className="w-3.5 h-3.5 text-white/40 ml-auto shrink-0" />
+                    </div>
+                    <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
+                      <Mic className="w-4 h-4 text-white" />
+                    </div>
+                  </div>
+
+                  {/* Home indicator */}
+                  <div className="flex justify-center pb-2 pt-1" style={{ background: "#0B141A" }}>
+                    <div style={{ width: "112px", height: "4px", borderRadius: "4px", background: "rgba(255,255,255,0.45)" }} />
+                  </div>
                 </div>
               </div>
             </div>
@@ -235,7 +286,7 @@ export default function LandingPage() {
             <div key={ri} className="flex shrink-0 items-center">
               {["No contracts", "Built for South Africa", "100% on WhatsApp", "2,400+ South Africans coached", "4.9/5 average rating", "R199/month", "7-day free trial", "Real-food meal plans", "Cancel anytime"].map(item => (
                 <span key={item} className="inline-flex items-center gap-3 px-6 text-sm font-semibold text-white/30">
-                  <span className="w-1 h-1 rounded-full shrink-0" style={{ background: LIME }} />
+                  <span className="w-1 h-1 rounded-full shrink-0" style={{ background: ACCENT }} />
                   {item}
                 </span>
               ))}
@@ -250,8 +301,8 @@ export default function LandingPage() {
           <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/25 text-center mb-8">Real results from real South Africans — no influencers</p>
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
             {[
-              { name: "Zanele M.", city: "Cape Town", result: "−15kg", time: "16 weeks", start: "from 92kg", goal: "FAT LOSS", color: LIME },
-              { name: "Lerato K.", city: "Johannesburg", result: "−22kg", time: "6 months", start: "from 108kg", goal: "FAT LOSS", color: LIME },
+              { name: "Zanele M.", city: "Cape Town", result: "−15kg", time: "16 weeks", start: "from 92kg", goal: "FAT LOSS", color: ACCENT },
+              { name: "Lerato K.", city: "Johannesburg", result: "−22kg", time: "6 months", start: "from 108kg", goal: "FAT LOSS", color: ACCENT },
               { name: "Sipho N.", city: "Durban", result: "+7kg", time: "12 weeks", start: "from 61kg", goal: "MUSCLE", color: "#6B8AFF" },
               { name: "Bongani T.", city: "Soweto", result: "−11kg", time: "10 weeks", start: "from 89kg", goal: "RECOMP", color: "#22c55e" },
             ].map(r => (
@@ -271,7 +322,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── STATS BAR ── */}
-      <div style={{ borderBottom: `1px solid ${BORDER}`, background: "#0E0E0E" }} className="py-8 px-6">
+      <div style={{ borderBottom: `1px solid ${BORDER}`, background: NAVY }} className="py-8 px-6">
         <div className="max-w-4xl mx-auto flex flex-wrap justify-center gap-x-14 gap-y-5">
           {[
             { v: "R6.63",     l: "Per day" },
@@ -280,7 +331,7 @@ export default function LandingPage() {
             { v: "WhatsApp",  l: "No app needed" },
           ].map(s => (
             <div key={s.l} className="text-center">
-              <div className="text-3xl font-black" style={{ color: LIME }}>{s.v}</div>
+              <div className="text-3xl font-black" style={{ color: ACCENT }}>{s.v}</div>
               <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mt-1">{s.l}</div>
             </div>
           ))}
@@ -295,7 +346,7 @@ export default function LandingPage() {
             <h2 className="text-[clamp(42px,8vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-5">
               <span className="block text-white">GYM OR NO GYM.</span>
               <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>PERFECT DIET OR REAL LIFE.</span>
-              <span className="block" style={{ color: LIME }}>JUST GO.</span>
+              <span className="block" style={{ color: ACCENT }}>JUST GO.</span>
             </h2>
             <p className="text-white/45 text-lg max-w-lg mb-14">
               The fitness industry makes this complicated so they can sell you supplements.
@@ -305,7 +356,7 @@ export default function LandingPage() {
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
             {[
-              { Icon: Dumbbell,  color: LIME,      bg: "rgba(170,255,0,0.10)",    title: "Gym or Home — Both Work.", body: "Got a gym membership? Great. Don't have one? Also great. Coach K builds your programme for where you actually train." },
+              { Icon: Dumbbell,  color: ACCENT,      bg: "rgba(249,115,22,0.10)",    title: "Gym or Home — Both Work.", body: "Got a gym membership? Great. Don't have one? Also great. Coach K builds your programme for where you actually train." },
               { Icon: Flame,     color: "#FF6B35", bg: "rgba(255,107,53,0.10)",   title: "No Perfect Eating.",       body: "Ate a kota? Had a braai? Ate late? Coach K adjusts — doesn't judge. Perfect diets last 3 days. Real-life plans last forever." },
               { Icon: RefreshCw, color: "#6B8AFF", bg: "rgba(107,138,255,0.10)", title: "Miss a Day? Just Come Back.", body: "Life happens. Loadshedding, deadlines, sick kids. Missed Monday doesn't mean the week is ruined. Coach K meets you where you are." },
             ].map(item => (
@@ -325,7 +376,7 @@ export default function LandingPage() {
       </section>
 
       {/* ── PERSONAS ── */}
-      <section className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
+      <section className="py-28 px-6 lg:px-16" style={{ background: NAVY }}>
         <div className="max-w-6xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
@@ -333,7 +384,7 @@ export default function LandingPage() {
             <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9] mb-6">
               <span className="block text-white">IF YOU'VE TRIED BEFORE</span>
               <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>AND QUIT —</span>
-              <span className="block" style={{ color: LIME }}>READ THIS.</span>
+              <span className="block" style={{ color: ACCENT }}>READ THIS.</span>
             </h2>
             <p className="text-white/45 text-lg max-w-xl">
               Real clients. Real lives. Real South Africa. No gym rats. No influencers.
@@ -386,8 +437,8 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
             {([
               {
-                badge: "BODY RECOMP", badgeColor: LIME, badgeText: "#000",
-                Icon: RefreshCw, iconColor: LIME, popular: true,
+                badge: "BODY RECOMP", badgeColor: ACCENT, badgeText: "#000",
+                Icon: RefreshCw, iconColor: ACCENT, popular: true,
                 img: "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=700&auto=format&fit=crop&q=75",
                 heading: "Lose Fat. Build Muscle. Simultaneously.",
                 body: "The holy grail. Coach K designs your training and nutrition to burn fat while adding lean muscle. No \"bulk then cut\" — just steady progress.",
@@ -411,11 +462,11 @@ export default function LandingPage() {
               },
             ] as const).map(g => (
               <div key={g.badge}
-                style={{ background: CARD, border: `1px solid ${g.popular ? LIME + "50" : BORDER}` }}
+                style={{ background: CARD, border: `1px solid ${g.popular ? ACCENT + "50" : BORDER}` }}
                 className="rounded-2xl overflow-hidden relative group hover:border-white/20 transition-all">
                 {g.popular && (
                   <div className="absolute top-4 right-4 z-20 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
-                    style={{ background: LIME, color: "#000" }}>
+                    style={{ background: ACCENT, color: "#000" }}>
                     MOST POPULAR
                   </div>
                 )}
@@ -478,13 +529,13 @@ export default function LandingPage() {
       </section>
 
       {/* ── FOOD LOGGING ── */}
-      <section className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
+      <section className="py-28 px-6 lg:px-16" style={{ background: NAVY }}>
         <div className="max-w-6xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
             <Label>Food Logging</Label>
             <h2 className="text-[clamp(32px,6.5vw,80px)] font-black uppercase tracking-tight leading-[0.9] mb-5">
-              <span style={{ color: LIME }}>LOG FOOD</span> THE WAY YOU<br />
+              <span style={{ color: ACCENT }}>LOG FOOD</span> THE WAY YOU<br />
               ACTUALLY <span style={{ color: "rgba(255,255,255,0.2)" }}>COMMUNICATE.</span>
             </h2>
             <p className="text-white/45 text-lg max-w-lg">
@@ -496,7 +547,7 @@ export default function LandingPage() {
             {/* Method cards */}
             <div className="space-y-3">
               {[
-                { Icon: Mic,      color: LIME,      bg: "rgba(170,255,0,0.10)",    title: "Voice Note", desc: '"I had two eggs and toast for breakfast" — Coach K logs it automatically with calories and protein.' },
+                { Icon: Mic,      color: ACCENT,      bg: "rgba(249,115,22,0.10)",    title: "Voice Note", desc: '"I had two eggs and toast for breakfast" — Coach K logs it automatically with calories and protein.' },
                 { Icon: Camera,   color: "#22c55e", bg: "rgba(34,197,94,0.10)",    title: "Photo",      desc: "Snap your plate. Coach K identifies the food and estimates portions — even pap, kota, and braai meat." },
                 { Icon: Keyboard, color: "#6B8AFF", bg: "rgba(107,138,255,0.10)", title: "Text",       desc: 'Type naturally. "Chicken breyani for lunch" — understood and logged in seconds.' },
               ].map(m => (
@@ -548,7 +599,7 @@ export default function LandingPage() {
                   <span className="font-bold text-white">1,342 / 2,200 cal</span>
                 </div>
                 <div className="w-full h-2 rounded-full" style={{ background: "#222" }}>
-                  <div className="h-2 rounded-full" style={{ width: "61%", background: LIME }} />
+                  <div className="h-2 rounded-full" style={{ width: "61%", background: ACCENT }} />
                 </div>
                 <div className="flex justify-between text-xs text-white/25 mt-1.5">
                   <span>858 cal remaining</span>
@@ -568,7 +619,7 @@ export default function LandingPage() {
             <Label>How It Works</Label>
             <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9]">
               <span className="block text-white">THREE STEPS.</span>
-              <span className="block" style={{ color: LIME }}>DONE.</span>
+              <span className="block" style={{ color: ACCENT }}>DONE.</span>
             </h2>
           </motion.div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -579,7 +630,7 @@ export default function LandingPage() {
             ].map(item => (
               <div key={item.n} style={{ background: CARD, border: `1px solid ${BORDER}` }}
                 className="rounded-2xl p-8 hover:border-white/15 transition-all">
-                <div className="text-7xl font-black mb-4 leading-none" style={{ color: LIME, opacity: 0.25 }}>{item.n}</div>
+                <div className="text-7xl font-black mb-4 leading-none" style={{ color: ACCENT, opacity: 0.25 }}>{item.n}</div>
                 <h3 className="text-xl font-black text-white mb-3">{item.title}</h3>
                 <p className="text-white/45 text-sm leading-relaxed">{item.body}</p>
               </div>
@@ -589,14 +640,14 @@ export default function LandingPage() {
       </section>
 
       {/* ── PRICING ── */}
-      <section id="pricing" className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
+      <section id="pricing" className="py-28 px-6 lg:px-16" style={{ background: NAVY }}>
         <div className="max-w-6xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }} transition={{ duration: 0.5 }} className="text-center mb-14">
             <Label>Pricing</Label>
             <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9]">
               <span className="text-white">ONE PLAN. </span>
-              <span style={{ color: LIME }}>EVERYTHING.</span>
+              <span style={{ color: ACCENT }}>EVERYTHING.</span>
             </h2>
             <p className="text-white/35 mt-4 text-lg">All goals. All fitness levels. WhatsApp only. Cancel anytime.</p>
           </motion.div>
@@ -617,13 +668,13 @@ export default function LandingPage() {
                 <div className="text-xs font-bold uppercase tracking-wider text-white/30 mb-3">vs. a personal trainer</div>
                 <div className="flex items-center justify-between">
                   <div className="text-center">
-                    <div className="text-2xl font-black text-white/20 line-through">R3,000</div>
-                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Per trainer session</div>
+                    <div className="text-2xl font-black text-white/20 line-through">R500</div>
+                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">One trainer session</div>
                   </div>
                   <div className="text-white/20 text-2xl font-black">→</div>
                   <div className="text-center">
-                    <div className="text-4xl font-black" style={{ color: LIME }}>R199</div>
-                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Per month · unlimited</div>
+                    <div className="text-4xl font-black" style={{ color: ACCENT }}>R199</div>
+                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">A whole month · daily</div>
                   </div>
                 </div>
               </div>
@@ -634,9 +685,9 @@ export default function LandingPage() {
               <div className="absolute top-0 left-0 right-0 h-[2px] hidden lg:block" style={{ background: "transparent" }} />
               <div>
                 <div className="flex items-center justify-between mb-6">
-                  <span className="text-sm font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>Coach K</span>
+                  <span className="text-sm font-black uppercase tracking-[0.2em]" style={{ color: ACCENT }}>Coach K</span>
                   <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
-                    style={{ background: "rgba(170,255,0,0.12)", color: LIME }}>
+                    style={{ background: "rgba(249,115,22,0.12)", color: ACCENT }}>
                     Founding Member Price
                   </span>
                 </div>
@@ -657,7 +708,7 @@ export default function LandingPage() {
                     "7-day free trial — programme sent on Day 1",
                   ].map(item => (
                     <li key={item} className="flex items-start gap-2.5 text-sm">
-                      <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: LIME }} />
+                      <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: ACCENT }} />
                       <span className="text-white/65">{item}</span>
                     </li>
                   ))}
@@ -678,7 +729,7 @@ export default function LandingPage() {
         <div className="max-w-2xl mx-auto">
           <Label>FAQ</Label>
           <h2 className="text-5xl font-black uppercase tracking-tight mb-12">
-            COMMON <span style={{ color: LIME }}>QUESTIONS.</span>
+            COMMON <span style={{ color: ACCENT }}>QUESTIONS.</span>
           </h2>
           <div className="space-y-2">
             {[
@@ -710,14 +761,14 @@ export default function LandingPage() {
       </section>
 
       {/* ── FINAL CTA ── */}
-      <section className="py-28 px-6 text-center" style={{ background: "#0E0E0E" }}>
+      <section className="py-28 px-6 text-center" style={{ background: NAVY }}>
         <div className="max-w-3xl mx-auto">
           <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true }} transition={{ duration: 0.5 }}>
             <h2 className="text-[clamp(40px,8vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-6">
-              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R199/MONTH.</span>
-              <span className="block text-white">A TRAINER CHARGES THAT</span>
-              <span className="block" style={{ color: LIME }}>FOR 40 MINUTES.</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R199 A MONTH.</span>
+              <span className="block text-white">A TRAINER CHARGES R500</span>
+              <span className="block" style={{ color: ACCENT }}>FOR ONE SESSION.</span>
             </h2>
             <p className="text-white/40 text-lg mb-10 max-w-lg mx-auto">
               3 questions on WhatsApp. Programme on Day 1. Coaching every day after that.
@@ -732,7 +783,7 @@ export default function LandingPage() {
       <footer style={{ borderTop: `1px solid ${BORDER}`, background: "#0B0B0B" }}
         className="py-10 px-6 lg:px-16">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <span className="text-xl font-black">KAM<span style={{ color: LIME }}>LIFE</span></span>
+          <span className="text-xl font-black">KAM<span style={{ color: ACCENT }}>LIFE</span></span>
           <div className="flex flex-wrap justify-center sm:justify-end items-center gap-x-6 gap-y-1 text-sm text-white/25">
             <span>Built for South Africa</span>
             <a href="/privacy" className="hover:text-white/50 transition-colors">Privacy Policy (POPIA)</a>
