@@ -504,7 +504,7 @@ export async function handleMiscCommands(ctx: {
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
       : 0;
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
-    const name = user.name || "Champ";
+    const name = user.name || "there";
     return `*${name}'s Progress*\n\n✅ Workouts completed: *${user.totalWorkoutsCompleted || 0}*\n📅 Days on programme: *${daysOn}*\n📊 Programme week: *${user.programmeWeek || 1}*\n⚖️ Current weight: *${w}*\n\nFor your full 7-day breakdown send *this week*.`;
   }
   if (["targets", "my targets", "goals"].includes(m)) {
@@ -546,7 +546,7 @@ export async function handleMiscCommands(ctx: {
       } else if (user.currentWeight) {
         weightLine = `\n⚖️ Current weight: ${user.currentWeight}kg`;
       }
-      const name = user.name || "Champ";
+      const name = user.name || "there";
       const statsReply = `*${name}'s Journey with Coach K* 💪\n\n✅ Workouts completed: ${totalWorkouts}\n👟 Total steps logged: ${totalSteps.toLocaleString()}\n📅 Days on programme: ${daysOn}\n🔥 Current streak: ${streak} day${streak !== 1 ? "s" : ""}${weightLine}\n\nThis is what you have built. Keep going.`;
       await logChat(user.id, message, statsReply, "STATS_LOOKUP");
       return statsReply;
@@ -1062,7 +1062,7 @@ export async function handleMiscCommands(ctx: {
     const wsBadgeYestSAST = new Date(Date.now() + 2 * 3_600_000 - 86_400_000).toISOString().slice(0, 10);
     const waterStreak = (user.waterLastResetDate === wsBadgeTodaySAST || user.waterLastResetDate === wsBadgeYestSAST) ? (user.waterStreak || 0) : 0;
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
-    const name = user.name?.split(" ")[0] || "Champ";
+    const name = user.name?.split(" ")[0] || "there";
 
     // Calculate badges earned
     const badges: string[] = [];
@@ -1207,7 +1207,7 @@ export async function handleMiscCommands(ctx: {
 
   // ---- SHARE CARD — "share my progress", "share" ----
   if (m === "share" || m === "share my progress" || m === "share progress" || m === "brag" || /\b(share\s*my|share\s*progress|tell\s*everyone|brag)\b/i.test(m)) {
-    const name = user.name?.split(" ")[0] || "Champion";
+    const name = user.name?.split(" ")[0] || "there";
     const totalWorkouts = user.totalWorkoutsCompleted || 0;
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
     const streak = user.workoutStreak || 0;

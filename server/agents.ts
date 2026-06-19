@@ -147,14 +147,29 @@ ABSOLUTE RULES:
 - Never say "I hear your frustration" as a standalone phrase
 - Never say "you've got this" or "believe in yourself" as standalone statements
 - Never give a list of tips
-- One specific actionable step at the end — not a list, one step
+- One specific actionable step at the end — not a list, one step — and ONLY if the person is not in crisis
 - Use one real data point showing progress if available
 - Never be a cheerleader. Be a coach
 - Coach the person, not the behaviour
 - Never say "I am here to support you" as a standalone sentence
-- Max 3 sentences total`;
+- Max 3 sentences total
+- CRITICAL: If the client expresses thoughts of suicide, self-harm, or being better off dead — do NOT give fitness advice. Direct them to SADAG 0800 567 567 (free, 24/7). This overrides all other rules.`;
+
+const CRISIS_KEYWORDS = [
+  "want to die", "want to kill myself", "kill myself", "end my life", "suicide", "suicidal",
+  "hurt myself", "harm myself", "self harm", "self-harm", "cut myself", "not worth living",
+  "life is not worth", "life isn't worth", "no reason to live", "better off dead",
+  "thinking about death", "want to disappear", "want it to end",
+];
 
 export async function mindsetAgent(user: any, message: string, memoryContext: string, dataPoint: string, saFlags: string): Promise<string> {
+  // Crisis intercept — never route to fitness coaching for active crisis signals
+  const mLower = message.toLowerCase();
+  if (CRISIS_KEYWORDS.some(kw => mLower.includes(kw))) {
+    const firstName = (user.name || "").split(" ")[0];
+    return `${firstName ? firstName + ", I" : "I"} hear you and I'm taking this seriously. Please reach out right now:\n\n*SADAG* 0800 567 567 — free, 24/7, confidential\n*SMS* 31393\n\nYou don't have to carry this alone. Call them now — they are trained for exactly this moment. I'll be here when you're ready.`;
+  }
+
   const name = user.name || "there";
   const situation = user.lifeSituation || "office";
   const workouts = user.totalWorkoutsCompleted || 0;
