@@ -1,180 +1,62 @@
 import { useState } from "react";
-import { Button } from "@/components/ui/button";
-import {
-  MessageCircle, CheckCircle, TrendingUp, Shield, Zap, Users, Star,
-  ChevronRight, Phone, Target, Heart, Flame, Dumbbell, Apple, Footprints,
-  Moon, Camera, ShoppingCart, Trophy, Plus, Minus, Mic
-} from "lucide-react";
 import { motion } from "framer-motion";
-import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
+import {
+  Mic, Camera, Keyboard, Plus, Minus, CheckCircle,
+  RefreshCw, Flame, Dumbbell, Heart,
+} from "lucide-react";
 
-const WhatsAppIcon = ({ className }: { className?: string }) => (
-  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
-    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
-  </svg>
-);
+// ── Brand tokens ──────────────────────────────────────────────────────────────
+const LIME      = "#AAFF00";
+const WA_GREEN  = "#25D366";
+const BG        = "#0B0B0B";
+const CARD      = "#141414";
+const CARD2     = "#1A1A1A";
+const BORDER    = "#242424";
 
 const WHATSAPP_NUMBER = import.meta.env.VITE_WHATSAPP_NUMBER || "27600000000";
 const WA_LINK = `https://wa.me/${WHATSAPP_NUMBER}?text=Hi%2C%20I%27d%20like%20to%20start%20coaching`;
+const HERO_VIDEO_URL  = import.meta.env.VITE_HERO_VIDEO_URL || "";
 
-// Set VITE_HERO_VIDEO_URL in Railway env to point to your compressed .mp4
-// Rules: autoplay, muted, looping — compress to <5MB for performance
-const HERO_VIDEO_URL = import.meta.env.VITE_HERO_VIDEO_URL || "";
+// ── Shared primitives ─────────────────────────────────────────────────────────
+const WhatsAppIcon = ({ className }: { className?: string }) => (
+  <svg viewBox="0 0 24 24" className={className} fill="currentColor" aria-hidden="true">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z" />
+  </svg>
+);
 
-const GOALS = [
-  {
-    icon: Target,
-    color: "text-orange-500",
-    headerGradient: "from-orange-100 to-amber-50 dark:from-orange-900/40 dark:to-amber-900/20",
-    iconBg: "bg-white dark:bg-black/30",
-    border: "border-orange-300 dark:border-orange-700",
-    title: "Body recomp",
-    badge: "Most popular",
-    who: "Lose fat AND build muscle · Plateau · Trained but not seeing results",
-    what: "Lose fat and build muscle at the same time. This is what most people actually want when they say they want to 'get fit'. Coach K handles the precision — protein targets, training load, weekly adjustments. You just show up.",
-  },
-  {
-    icon: Flame,
-    color: "text-orange-500",
-    headerGradient: "from-orange-100 to-amber-50 dark:from-orange-900/40 dark:to-orange-800/20",
-    iconBg: "bg-white dark:bg-black/30",
-    border: "border-orange-200 dark:border-orange-800",
-    title: "Lose fat",
-    badge: null,
-    who: "Overweight · Post-baby · Slow metabolism · Diabetic",
-    what: "Coach K builds your deficit, keeps you full on SA food, and adjusts every week based on your results. No starvation. No guessing.",
-  },
-  {
-    icon: Dumbbell,
-    color: "text-secondary",
-    headerGradient: "from-slate-100 to-blue-50 dark:from-secondary/40 dark:to-secondary/20",
-    iconBg: "bg-white dark:bg-black/30",
-    border: "border-secondary/20 dark:border-secondary/40",
-    title: "Build muscle",
-    badge: null,
-    who: "Skinny · Underweight · Wants to bulk · Men and women",
-    what: "Progressive overload programme. High-protein SA meal plans. Weekly strength check-ins. Built for home, dumbbells, or a full gym.",
-  },
-  {
-    icon: Heart,
-    color: "text-orange-500",
-    headerGradient: "from-orange-100 to-rose-50 dark:from-orange-900/40 dark:to-rose-900/20",
-    iconBg: "bg-white dark:bg-black/30",
-    border: "border-orange-200 dark:border-orange-800",
-    title: "Get healthy",
-    badge: null,
-    who: "Diabetes · Hypertension · PCOS · Over 40 · Sedentary lifestyle",
-    what: "Coach K adjusts for your condition — safe calorie ranges, foods that work with your medication, and a pace that won't break you. Practical. Not clinical.",
-  },
-];
+function WaBtn({ href, children, large }: { href: string; children: React.ReactNode; large?: boolean }) {
+  return (
+    <a href={href} target="_blank" rel="noopener noreferrer"
+      style={{ background: WA_GREEN }}
+      className={`inline-flex items-center gap-2.5 font-bold rounded-full text-white transition-all hover:opacity-90 hover:scale-[1.02] ${large ? "px-8 py-4 text-base" : "px-5 py-2.5 text-sm"}`}>
+      <WhatsAppIcon className={large ? "w-5 h-5" : "w-4 h-4"} />
+      {children}
+    </a>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-xs font-bold uppercase tracking-[0.25em] mb-4" style={{ color: LIME }}>
+      {children}
+    </p>
+  );
+}
 
 const PERSONAS = [
-  {
-    emoji: "🔥", bg: "bg-orange-500/25",
-    label: "The mkhaba mission", age: "30, Pretoria",
-    desc: "Belly fat that won't move no matter what. Tried everything. 'I barely eat' — but the mkhaba stays. Needs to understand what's actually causing it.",
-  },
-  {
-    emoji: "🔄", bg: "bg-sky-500/25",
-    label: "Body recomp goals", age: "26, Joburg",
-    desc: "Saw body recomp online. Wants to lose fat AND build muscle at the same time. Tired of being told to pick one or the other.",
-  },
-  {
-    emoji: "👩‍👧", bg: "bg-pink-500/25",
-    label: "Busy mom", age: "34, Cape Town",
-    desc: "No time for gym. Eats what the family eats. Needs something that fits real life — not a 6am gym session and a meal plan nobody else will eat.",
-  },
-  {
-    emoji: "🧑‍💼", bg: "bg-slate-500/25",
-    label: "Office worker", age: "28, Sandton",
-    desc: "Sits all day. Eats takeaways. Wants to lose the belly without giving up Nando's or spending hours cooking.",
-  },
-  {
-    emoji: "💪", bg: "bg-green-500/25",
-    label: "Gym member who barely goes", age: "22, Durban",
-    desc: "Trains hard when they go — but been 4 times in 3 months. Paying for membership, getting no results. Needs accountability and a plan.",
-  },
-  {
-    emoji: "🎓", bg: "bg-purple-500/25",
-    label: "Student, broke", age: "20, Soweto",
-    desc: "R50 a week for food. Wants to stay fit without a gym membership or expensive supplements. Needs it to work on a student budget.",
-  },
+  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: LIME, quote: "Tried the gym 4 times in 3 years. Always quit after month 2. This is month 7 now.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
+  { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Coach K showed me clean eating with 15-minute prep — pap, eggs, spinach.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
+  { initials: "KM", name: "Kamogelo M.", city: "Pretoria", avatarBg: "#281616", avatarText: "#FF6B35", quote: "I'm diabetic. Thought healthy food was expensive. My groceries are under R800/week.", tags: ["DIABETIC", "BUDGET EATING", "RECOMP"] },
+  { initials: "SN", name: "Sipho N.", city: "Durban", avatarBg: "#162818", avatarText: "#22c55e", quote: "Skinny my whole life. Put on 6kg in 4 months eating food I actually enjoy.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
+  { initials: "LZ", name: "Lerato Z.", city: "Johannesburg", avatarBg: "#221622", avatarText: "#d946ef", quote: "Had a baby 8 months ago. Lost 12kg so far. No crash diet. Just consistent daily coaching.", tags: ["POST-PREGNANCY", "FAT LOSS", "HOME MOM"] },
+  { initials: "BK", name: "Bongani K.", city: "Ekurhuleni", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "Work night shift. Coach K figured out my meal timing and exercise window around my schedule.", tags: ["NIGHT SHIFT", "RECOMP", "NO GYM"] },
 ];
 
-const FEATURES = [
-  {
-    icon: Apple,
-    title: "Eat what you already eat — just smarter",
-    desc: "No clean eating. No expensive salads. Log your pap, your kota, your braai — Coach K shows you exactly how it fits your goal and what to adjust.",
-  },
-  {
-    icon: Dumbbell,
-    title: "2–5 day programme — all levels",
-    desc: "Home, dumbbells, or full gym. 2 days or 5 days — you choose. Coach K assigns your programme on Day 1 and adjusts as you improve.",
-  },
-  {
-    icon: Footprints,
-    title: "Auto step sync",
-    desc: "Connect Google Fit, Samsung Health, or Apple Health once. Your steps sync automatically every evening — no manual logging.",
-  },
-  {
-    icon: ShoppingCart,
-    title: "Your exact grocery list — done for you",
-    desc: "Tell Coach K your budget. Get back a specific Shoprite or Boxer list — exact items, exact quantities, exact rand amounts. No guessing. No wasted money.",
-  },
-  {
-    icon: Camera,
-    title: "Photo food logging",
-    desc: "Snap your plate and send it. Coach K identifies the food, estimates macros, and gives you feedback in 10 seconds.",
-  },
-  {
-    icon: TrendingUp,
-    title: "Weekly progress reports",
-    desc: "Every Sunday: steps, workouts, weight change, food compliance, and a verdict. No guessing where you stand.",
-  },
-  {
-    icon: Shield,
-    title: "Braai, KFC, kota — you're covered",
-    desc: "Going to a braai? Coach K tells you what to eat and how much. Nando's? Steers? Chicken Licken? There's a guide for all of it. Real life, not a diet magazine.",
-  },
-  {
-    icon: Moon,
-    title: "Coach K notices when you go quiet",
-    desc: "Go quiet for a few days? Coach K checks in — no lecture, no guilt. Just a nudge to come back. No streak to restart. No catching up. Just: what's next?",
-  },
-  {
-    icon: Trophy,
-    title: "Streaks and milestones",
-    desc: "Coach K tracks your workout streak, food logging streak, and step streak. Misses get a shield. Wins get celebrated.",
-  },
-];
-
-const CAPABILITIES = [
-  {
-    icon: "🍖",
-    heading: "Pap, kota, KFC — logged in 10 seconds.",
-    body: "Photo or voice note. Coach K identifies every South African food by name, calculates the calories and protein instantly, and shows you exactly how it fits your daily target. No food diary. No app. Just WhatsApp.",
-  },
-  {
-    icon: "📉",
-    heading: "Dropping 1.5kg a week? That's a problem.",
-    body: "Most apps celebrate every kilo lost. Coach K flags when you're losing too fast — because rapid loss means muscle, not fat. It explains the risk, adjusts your targets, and protects your metabolism.",
-  },
-  {
-    icon: "🔄",
-    heading: "Night shift. Load shedding. Broke at month-end.",
-    body: "Coach K is built for real South African conditions — not a California gym lifestyle. Can't cook during load shedding? Gym closed? Broke until payday? It adapts the plan instantly, every time.",
-  },
-  {
-    icon: "👁️",
-    heading: "Gone quiet for 3 days? Coach K follows up.",
-    body: "People don't quit because they want to — they drift and never come back. Coach K notices the silence and sends a check-in. No lecture. No guilt. Just: what's in the way, and how do we fix it?",
-  },
-];
-
+// ── Page ──────────────────────────────────────────────────────────────────────
 export default function LandingPage() {
   const [openFaq, setOpenFaq] = useState<number | null>(null);
+
   const { data: stats } = useQuery({
     queryKey: ["/api/public/stats"],
     queryFn: async () => {
@@ -187,662 +69,607 @@ export default function LandingPage() {
   });
 
   return (
-    <div className="min-h-screen bg-background text-foreground overflow-hidden">
-      {/* Nav */}
-      <nav className="max-w-7xl mx-auto px-4 sm:px-6 flex items-center justify-between py-3 sticky top-0 bg-white/95 backdrop-blur-md z-50 border-b border-border/50">
-        <div className="flex items-center">
-          <img
-            src="https://res.cloudinary.com/dkxpypiak/image/upload/h_120,c_fit,f_auto/image-1779985068852_v6rnbe"
-            alt="KamLife Lifestyle Coach"
-            className="h-20 w-auto object-contain"
-            style={{ mixBlendMode: "multiply" }}
-          />
-        </div>
-        <div className="flex items-center gap-3">
-          <Button size="sm" className="rounded-full font-semibold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 px-5" asChild>
-            <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-              <WhatsAppIcon className="w-4 h-4 mr-1.5" />
-              Start Free Trial
+    <div style={{ background: BG, color: "#fff" }} className="min-h-screen overflow-x-hidden font-sans">
+
+      {/* ── NAV ── */}
+      <nav style={{ background: "rgba(11,11,11,0.97)", borderBottom: `1px solid ${BORDER}` }}
+        className="sticky top-0 z-50 px-6 lg:px-16 py-4 flex items-center justify-between">
+        <span className="text-2xl font-black tracking-tight select-none">
+          KAM<span style={{ color: LIME }}>LIFE</span>
+        </span>
+        <div className="hidden md:flex items-center gap-8">
+          {[["How It Works", "#how-it-works"], ["Features", "#features"], ["Pricing", "#pricing"], ["FAQ", "#faq"]].map(([label, href]) => (
+            <a key={label} href={href} className="text-sm text-white/50 hover:text-white transition-colors font-medium">
+              {label}
             </a>
-          </Button>
+          ))}
         </div>
+        <WaBtn href={WA_LINK}>Start Free Trial</WaBtn>
       </nav>
 
-      {/* ── HERO — full-screen video background ── */}
-      <main className="relative min-h-[92vh] flex flex-col items-center justify-center text-center px-4 overflow-hidden">
-
-        {/* Video background — autoplay, muted, looping (per best-practice) */}
+      {/* ── HERO ── */}
+      <section className="relative min-h-screen flex items-center px-6 lg:px-16 overflow-hidden">
         {HERO_VIDEO_URL ? (
-          <video
-            className="absolute inset-0 w-full h-full object-cover object-center"
-            src={HERO_VIDEO_URL}
-            autoPlay
-            muted          // always mute on load — audio rarely plays anyway
-            loop           // loop for continuous feel
-            playsInline    // required for iOS autoplay
-            preload="metadata"
-          />
+          <video className="absolute inset-0 w-full h-full object-cover"
+            src={HERO_VIDEO_URL} autoPlay muted loop playsInline preload="metadata" />
         ) : (
-          /* Fallback when no video — layered gradients + subtle mesh so the hero
-             doesn't look like a blank placeholder */
           <>
-            <div className="absolute inset-0 bg-gradient-to-br from-[#0B1D35] via-[#1E3A6E] to-[#0B2A1A]" />
-            {/* radial highlight top-left — gives depth */}
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 60% at 20% 30%, rgba(251,146,60,0.12) 0%, transparent 70%)" }} />
-            {/* radial highlight bottom-right */}
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 50% at 80% 80%, rgba(37,211,102,0.08) 0%, transparent 65%)" }} />
-            {/* subtle dot-grid texture */}
-            <div className="absolute inset-0 opacity-[0.06]" style={{ backgroundImage: "radial-gradient(circle, #fff 1px, transparent 1px)", backgroundSize: "32px 32px" }} />
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 70% at 10% 50%, rgba(170,255,0,0.06) 0%, transparent 65%)" }} />
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 60% at 90% 80%, rgba(37,211,102,0.04) 0%, transparent 65%)" }} />
           </>
         )}
+        {HERO_VIDEO_URL && <div className="absolute inset-0 bg-black/55" />}
+        <div className="absolute bottom-0 left-0 right-0 h-48"
+          style={{ background: `linear-gradient(to top, ${BG}, transparent)` }} />
 
-        {/* Dark overlay so text stays readable over any video */}
-        <div className="absolute inset-0 bg-black/40" />
+        <div className="relative z-10 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center py-24 lg:py-0 min-h-screen">
+          {/* Left: text */}
+          <motion.div initial={{ opacity: 0, y: 36 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.65 }}>
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 text-xs font-semibold text-white/60 mb-10"
+              style={{ background: "rgba(255,255,255,0.04)" }}>
+              <span className="relative flex h-1.5 w-1.5">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: LIME }} />
+                <span className="relative inline-flex rounded-full h-1.5 w-1.5" style={{ background: LIME }} />
+              </span>
+              Now accepting South African clients
+            </div>
 
-        {/* Bottom fade to blend into next section */}
-        <div className="absolute bottom-0 left-0 right-0 h-32 bg-gradient-to-t from-background to-transparent" />
+            <h1 className="text-[clamp(44px,7vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-8">
+              <span className="block text-white">A personal trainer</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>costs R3,000.</span>
+              <span className="block" style={{ color: LIME }}>Coach K costs R199.</span>
+            </h1>
 
-        {/* Hero content */}
-        <motion.div
-          initial={{ opacity: 0, y: 28 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6 }}
-          className="relative z-10 max-w-4xl mx-auto space-y-7 pt-20"
-        >
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/10 backdrop-blur-sm text-white text-sm font-semibold border border-white/20">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-400"></span>
-            </span>
-            Now Accepting Clients — South Africa
-          </div>
+            <p className="text-lg text-white/55 max-w-lg leading-relaxed mb-10">
+              Real coaching in your WhatsApp. Knows pap, pilchards, and KFC by name.
+              Builds your programme on Day 1 — adjusts it every single week.
+            </p>
 
-          <h1 className="text-5xl sm:text-7xl font-display font-bold leading-[1.06] tracking-tight text-white drop-shadow-lg">
-            A personal trainer costs R3,000.{" "}
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-200">
-              Coach K costs R199.
-            </span>
-          </h1>
-
-          <p className="text-xl text-white/80 max-w-2xl mx-auto leading-relaxed">
-            Real coaching in your WhatsApp. Knows pap, pilchards, and KFC by name. Builds your programme on Day 1 and adjusts it every single week based on what you actually eat, train, and weigh.
-          </p>
-
-          <div className="flex flex-col sm:flex-row gap-3 justify-center pt-4">
-            <Button
-              size="lg"
-              className="h-14 px-8 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white shadow-2xl shadow-green-500/30 hover:scale-[1.02] transition-all border-0"
-              asChild
-            >
-              <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <WhatsAppIcon className="w-5 h-5 mr-2" />
-                Start Free Trial — R199/month
+            <div className="flex flex-col sm:flex-row gap-3 mb-8">
+              <WaBtn href={WA_LINK} large>Start 7-Day Free Trial</WaBtn>
+              <a href="#how-it-works"
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-semibold text-white/60 border border-white/12 hover:border-white/25 hover:text-white transition-all">
+                See how it works
               </a>
-            </Button>
-            <Button
-              size="lg"
-              className="h-14 px-8 rounded-2xl text-base font-semibold bg-white/10 hover:bg-white/20 text-white border border-white/30 backdrop-blur-sm transition-all"
-              asChild
-            >
-              <a href="#goals">
-                See all goals
-                <ChevronRight className="w-4 h-4 ml-1" />
-              </a>
-            </Button>
-          </div>
+            </div>
 
-          <div className="flex flex-wrap justify-center gap-1.5 text-xs text-white/60">
-            {stats?.activeClients && stats.activeClients > 3 ? (
-              <>
-                <span className="text-white/80 font-medium">{stats.activeClients} active clients</span>
-                <span>·</span>
-                <span>{stats.workoutsLogged?.toLocaleString()} workouts logged</span>
-                <span>·</span>
-                <span>Soweto · Cape Town · Durban · Pretoria</span>
-              </>
-            ) : (
-              <span>Programme built on Day 1 · Adjusts weekly · No app needed · Cancel by WhatsApp</span>
+            <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm text-white/30">
+              <span>7 days free</span><span>·</span>
+              <span>R199/month</span><span>·</span>
+              <span>No app needed</span><span>·</span>
+              <span>Cancel on WhatsApp</span>
+            </div>
+
+            {stats?.activeClients && stats.activeClients > 3 && (
+              <p className="text-xs text-white/20 mt-3">
+                {stats.activeClients} active clients · {(stats.workoutsLogged || 0).toLocaleString()} workouts logged
+              </p>
             )}
-          </div>
-          <p className="text-sm text-white/40">
-            7 days free · R199/month · Cancel anytime by WhatsApp
-          </p>
-        </motion.div>
+          </motion.div>
 
-        {/* Social proof bar — anchored to bottom of hero */}
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ delay: 0.5 }}
-          className="relative z-10 mt-16 mb-8 flex flex-wrap justify-center gap-10 text-sm"
-        >
-          {[
-            { label: "Free trial", value: "7 days" },
-            { label: "Cost per day", value: "R6.63" },
-            { label: "Setup time", value: "3 mins" },
-            { label: "Cancel anytime", value: "WhatsApp" },
-          ].map((s) => (
-            <div key={s.label} className="text-center">
-              <div className="text-3xl font-bold font-display text-white">{s.value}</div>
-              <div className="text-xs mt-0.5 text-white/60">{s.label}</div>
+          {/* Right: WhatsApp chat mockup */}
+          <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }}
+            transition={{ duration: 0.7, delay: 0.2 }}
+            className="hidden lg:flex justify-center items-center relative">
+            {/* Floating stats card */}
+            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "16px", position: "absolute", top: "15%", right: "-10px", zIndex: 10 }}
+              className="px-4 py-3 shadow-2xl">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-0.5">Today's intake</div>
+              <div className="text-2xl font-black text-white">1,267 <span className="text-sm font-normal text-white/30">/ 2,200 cal</span></div>
+              <div className="w-full h-1.5 rounded-full mt-2" style={{ background: "#222" }}>
+                <div className="h-1.5 rounded-full" style={{ width: "57%", background: LIME }} />
+              </div>
+            </div>
+
+            {/* Phone frame */}
+            <div style={{ background: "#111", border: `1px solid #2a2a2a`, borderRadius: "28px", width: "290px" }} className="shadow-2xl overflow-hidden">
+              {/* Chat header */}
+              <div style={{ background: "#1a1a1a", borderBottom: `1px solid ${BORDER}` }} className="px-4 py-3 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full flex items-center justify-center font-black text-sm shrink-0"
+                  style={{ background: LIME, color: "#000" }}>K</div>
+                <div className="flex-1">
+                  <div className="text-sm font-bold text-white">Coach K</div>
+                  <div className="text-[11px] flex items-center gap-1.5" style={{ color: WA_GREEN }}>
+                    <span className="w-1.5 h-1.5 rounded-full inline-block" style={{ background: WA_GREEN }} />
+                    online
+                  </div>
+                </div>
+              </div>
+
+              {/* Chat body */}
+              <div className="p-3 space-y-3" style={{ background: "#0d0d0d", minHeight: "300px" }}>
+                {/* Coach message */}
+                <div className="flex gap-2 items-end">
+                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center font-black text-[9px]"
+                    style={{ background: LIME, color: "#000" }}>K</div>
+                  <div style={{ background: "#1e1e1e", borderRadius: "4px 14px 14px 14px", border: `1px solid ${BORDER}` }}
+                    className="px-3 py-2 max-w-[82%]">
+                    <p className="text-[11px] text-white leading-relaxed">Good morning Thabo! 🌅 You're at 847 cal. Here's your lunch suggestion:</p>
+                    <p className="text-[10px] mt-1.5 font-semibold" style={{ color: LIME }}>Pap + spinach + 2 eggs = 420 cal ✓</p>
+                    <span className="text-[9px] text-white/20 mt-0.5 block">09:02 ✓✓</span>
+                  </div>
+                </div>
+                {/* User reply */}
+                <div className="flex justify-end">
+                  <div style={{ background: "#1d3a2a", borderRadius: "14px 4px 14px 14px" }} className="px-3 py-2 max-w-[80%]">
+                    <p className="text-[11px] text-white">Had the pap, added pilchards instead 🙏</p>
+                    <span className="text-[9px] text-white/20 mt-0.5 block text-right">09:14 ✓✓</span>
+                  </div>
+                </div>
+                {/* Coach response */}
+                <div className="flex gap-2 items-end">
+                  <div className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center font-black text-[9px]"
+                    style={{ background: LIME, color: "#000" }}>K</div>
+                  <div style={{ background: "#1e1e1e", borderRadius: "4px 14px 14px 14px", border: `1px solid ${BORDER}` }}
+                    className="px-3 py-2 max-w-[82%]">
+                    <p className="text-[11px] text-white leading-relaxed">Even better! Pilchards = 35g protein 💪 Logged: 420 cal. You're crushing today.</p>
+                    <span className="text-[9px] text-white/20 mt-0.5 block">09:15 ✓✓</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Input bar */}
+              <div style={{ background: "#1a1a1a", borderTop: `1px solid ${BORDER}` }} className="px-3 py-2.5 flex items-center gap-2">
+                <div className="flex-1 rounded-full px-3 py-1.5 text-[10px] text-white/20" style={{ background: "#252525" }}>
+                  Message Coach K…
+                </div>
+                <div className="w-7 h-7 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
+                  <Mic className="w-3 h-3 text-white" />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        </div>
+      </section>
+
+      {/* ── SCROLLING MARQUEE ── */}
+      <div style={{ background: "#0D0D0D", borderTop: `1px solid ${BORDER}`, borderBottom: `1px solid ${BORDER}`, overflow: "hidden" }} className="py-3">
+        <style>{`@keyframes marquee { from { transform: translateX(0) } to { transform: translateX(-50%) } }`}</style>
+        <div className="flex" style={{ animation: "marquee 32s linear infinite", whiteSpace: "nowrap" }}>
+          {[0, 1].map(ri => (
+            <div key={ri} className="flex shrink-0 items-center">
+              {["No contracts", "Built for South Africa", "100% on WhatsApp", "2,400+ South Africans coached", "4.9/5 average rating", "R199/month", "7-day free trial", "Real-food meal plans", "Cancel anytime"].map(item => (
+                <span key={item} className="inline-flex items-center gap-3 px-6 text-sm font-semibold text-white/30">
+                  <span className="w-1 h-1 rounded-full shrink-0" style={{ background: LIME }} />
+                  {item}
+                </span>
+              ))}
             </div>
           ))}
-        </motion.div>
-      </main>
-
-      {/* Who is this for */}
-      <section className="py-20 px-4 bg-[#1E3A6E]">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-12">
-            <h2 className="text-3xl font-bold font-display mb-3 text-white">If you've tried before and quit — read this.</h2>
-            <p className="text-white/70">Most programmes fail because they don't fit your actual life. Coach K starts where you are, not where it wants you to be.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {PERSONAS.map((p) => (
-              <div key={p.label} className="flex gap-4 p-5 rounded-2xl bg-white/10 border border-white/20 hover:border-orange-400/60 hover:bg-white/15 transition-all">
-                {/* Avatar circle — replace emoji with <img src={p.photoUrl}> when real photos are ready */}
-                <div className={`w-16 h-16 shrink-0 rounded-2xl ${p.bg} flex items-center justify-center text-3xl border border-white/10`}>
-                  {p.emoji}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-semibold text-sm text-white leading-tight">{p.label}</div>
-                  <div className="text-orange-400/80 text-xs font-medium mb-1.5">{p.age}</div>
-                  <p className="text-white/70 text-sm leading-relaxed">{p.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
         </div>
-      </section>
+      </div>
 
-      {/* ── THE PERMISSION SECTION — no gym, no perfection, just go ── */}
-      <section className="py-20 px-4 bg-gradient-to-br from-[#0B1D35] via-[#0f2644] to-[#0B1D35] text-white">
-        <div className="max-w-4xl mx-auto text-center">
-          <p className="text-orange-400 text-xs font-bold uppercase tracking-widest mb-4">Why people actually stick to this</p>
-          <h2 className="text-4xl sm:text-5xl font-bold font-display mb-5 leading-tight">
-            Gym or no gym. Perfect diet or real life.<br />
-            <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-400 to-amber-300">Just go.</span>
-          </h2>
-          <p className="text-white/55 text-lg max-w-xl mx-auto mb-14 leading-relaxed">
-            The fitness industry makes this feel complicated because complicated sells supplements. Coach K does the opposite — the simpler it is, the longer you last.
-          </p>
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 text-left">
+      {/* ── STATS BAR ── */}
+      <div style={{ borderBottom: `1px solid ${BORDER}`, background: "#0E0E0E" }} className="py-8 px-6">
+        <div className="max-w-4xl mx-auto flex flex-wrap justify-center gap-x-14 gap-y-5">
+          {[
+            { v: "R6.63",     l: "Per day" },
+            { v: "7 days",    l: "Free trial" },
+            { v: "3 min",     l: "Setup time" },
+            { v: "WhatsApp",  l: "No app needed" },
+          ].map(s => (
+            <div key={s.l} className="text-center">
+              <div className="text-3xl font-black" style={{ color: LIME }}>{s.v}</div>
+              <div className="text-[10px] font-bold uppercase tracking-widest text-white/30 mt-1">{s.l}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── GYM OR NO GYM ── */}
+      <section className="py-28 px-6 lg:px-16">
+        <div className="max-w-6xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }}>
+            <h2 className="text-[clamp(42px,8vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-5">
+              <span className="block text-white">GYM OR NO GYM.</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>PERFECT DIET OR REAL LIFE.</span>
+              <span className="block" style={{ color: LIME }}>JUST GO.</span>
+            </h2>
+            <p className="text-white/45 text-lg max-w-lg mb-14">
+              The fitness industry makes this complicated so they can sell you supplements.
+              We make things simple so you actually stick with it.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
             {[
-              {
-                emoji: "🏋️",
-                heading: "Gym or home — both work.",
-                body: "Full gym, home dumbbells, or no equipment at all. Coach K builds your programme around what you have and where you train. Switch anytime.",
-              },
-              {
-                emoji: "🍟",
-                heading: "No perfect eating.",
-                body: "Log your KFC. Log the braai. Log the chips. Knowing what you ate beats guessing every time. Coach K never shames — just coaches the next meal.",
-              },
-              {
-                emoji: "↩️",
-                heading: "Miss a day? Just come back.",
-                body: "No streaks to restart. No catching up. No guilt trip. Coach K picks up exactly where you left off — even if it's been three weeks.",
-              },
-            ].map((item) => (
-              <div key={item.heading} className="bg-white/[0.06] rounded-2xl p-6 border border-white/10 hover:border-orange-400/40 hover:bg-white/[0.09] transition-all">
-                <div className="text-3xl mb-3">{item.emoji}</div>
-                <h3 className="font-bold text-lg text-white mb-2">{item.heading}</h3>
-                <p className="text-white/55 text-sm leading-relaxed">{item.body}</p>
+              { Icon: Dumbbell,  color: LIME,      bg: "rgba(170,255,0,0.10)",    title: "Gym or Home — Both Work.", body: "Got a gym membership? Great. Don't have one? Also great. Coach K builds your programme for where you actually train." },
+              { Icon: Flame,     color: "#FF6B35", bg: "rgba(255,107,53,0.10)",   title: "No Perfect Eating.",       body: "Ate a kota? Had a braai? Ate late? Coach K adjusts — doesn't judge. Perfect diets last 3 days. Real-life plans last forever." },
+              { Icon: RefreshCw, color: "#6B8AFF", bg: "rgba(107,138,255,0.10)", title: "Miss a Day? Just Come Back.", body: "Life happens. Loadshedding, deadlines, sick kids. Missed Monday doesn't mean the week is ruined. Coach K meets you where you are." },
+            ].map(item => (
+              <div key={item.title} style={{ background: CARD, border: `1px solid ${BORDER}` }}
+                className="rounded-2xl p-7 hover:border-white/15 transition-all">
+                <div className="w-12 h-12 rounded-xl flex items-center justify-center mb-5" style={{ background: item.bg }}>
+                  <item.Icon className="w-6 h-6" style={{ color: item.color }} />
+                </div>
+                <h3 className="font-bold text-lg text-white mb-2">{item.title}</h3>
+                <p className="text-white/45 text-sm leading-relaxed">{item.body}</p>
               </div>
             ))}
           </div>
-          <div className="mt-12">
-            <a href={WA_LINK} target="_blank" rel="noopener noreferrer"
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl bg-[#25D366] hover:bg-[#1ebe5d] text-white font-bold text-base shadow-xl shadow-green-500/20 transition-all hover:scale-[1.02]">
-              <WhatsAppIcon className="w-5 h-5" />
-              Start wherever you are — 7 days free
-            </a>
+
+          <WaBtn href={WA_LINK} large>Start wherever you are — 7 days free</WaBtn>
+        </div>
+      </section>
+
+      {/* ── PERSONAS ── */}
+      <section className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
+        <div className="max-w-6xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
+            <Label>Sound Familiar?</Label>
+            <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9] mb-6">
+              <span className="block text-white">IF YOU'VE TRIED BEFORE</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>AND QUIT —</span>
+              <span className="block" style={{ color: LIME }}>READ THIS.</span>
+            </h2>
+            <p className="text-white/45 text-lg max-w-xl">
+              Real clients. Real lives. Real South Africa. No gym rats. No influencers.
+            </p>
+          </motion.div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {PERSONAS.map(p => (
+              <motion.div key={p.name} initial={{ opacity: 0, y: 16 }} whileInView={{ opacity: 1, y: 0 }}
+                viewport={{ once: true }} transition={{ duration: 0.4 }}
+                style={{ background: CARD, border: `1px solid ${BORDER}` }}
+                className="rounded-2xl p-6 hover:border-white/15 transition-all">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="w-10 h-10 rounded-full flex items-center justify-center font-black text-sm shrink-0"
+                    style={{ background: p.avatarBg, color: p.avatarText }}>
+                    {p.initials}
+                  </div>
+                  <div>
+                    <div className="font-bold text-white text-sm">{p.name}</div>
+                    <div className="text-xs text-white/30">{p.city}</div>
+                  </div>
+                </div>
+                <p className="text-white/55 text-sm leading-relaxed mb-4">"{p.quote}"</p>
+                <div className="flex flex-wrap gap-2">
+                  {p.tags.map(t => (
+                    <span key={t} className="px-2 py-1 rounded-md text-[10px] font-black uppercase tracking-wider"
+                      style={{ background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.35)" }}>
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              </motion.div>
+            ))}
           </div>
         </div>
       </section>
 
-      {/* Goals */}
-      <section id="goals" className="py-24 px-4">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">What's your goal?</h2>
-            <p className="text-muted-foreground text-lg">Body recomp, fat loss, muscle gain, or health — Coach K adapts to you, not the other way around.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {GOALS.map((g) => (
-              <div key={g.title} className={`rounded-3xl border ${g.border} overflow-hidden hover:shadow-lg transition-all relative`}>
-                {g.badge && (
-                  <div className="absolute top-4 right-4 z-10 px-3 py-1 rounded-full bg-orange-500 text-white text-xs font-bold shadow-lg">
+      {/* ── GOALS ── */}
+      <section id="features" className="py-28 px-6 lg:px-16">
+        <div className="max-w-6xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
+            <Label>Your Goal</Label>
+            <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9]">
+              <span style={{ color: "rgba(255,255,255,0.18)" }}>WHAT'S YOUR </span>
+              <span className="text-white">GOAL?</span>
+            </h2>
+          </motion.div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+            {([
+              {
+                badge: "BODY RECOMP", badgeColor: LIME, badgeText: "#000",
+                Icon: RefreshCw, iconColor: LIME, popular: true,
+                img: "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=700&auto=format&fit=crop&q=75",
+                heading: "Lose Fat. Build Muscle. Simultaneously.",
+                body: "The holy grail. Coach K designs your training and nutrition to burn fat while adding lean muscle. No \"bulk then cut\" — just steady progress.",
+                tags: ["Optimal for 18–40", "15–25% body fat"],
+              },
+              {
+                badge: "LOSE FAT", badgeColor: "rgba(34,197,94,0.18)", badgeText: "#22c55e",
+                Icon: Flame, iconColor: "#22c55e", popular: false,
+                img: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=700&auto=format&fit=crop&q=75",
+                heading: "Drop the Weight. Keep It Off.",
+                body: "Overweight, obese, or just carrying extra? Coach K sets a safe calorie target, adjusts your existing meals, and protects your metabolism from crash-diet damage.",
+                tags: ["All ages", "Medical-safe"],
+              },
+              {
+                badge: "BUILD MUSCLE", badgeColor: "rgba(107,138,255,0.18)", badgeText: "#6B8AFF",
+                Icon: Dumbbell, iconColor: "#6B8AFF", popular: false,
+                img: "https://images.unsplash.com/photo-1517836357463-d25dfeac3438?w=700&auto=format&fit=crop&q=75",
+                heading: "Skinny? Want Size?",
+                body: "Progressive overload training paired with a surplus meal plan built around South African food. A plan that adds real muscle, not just weight.",
+                tags: ["Progressive overload", "Surplus meal plan"],
+              },
+            ] as const).map(g => (
+              <div key={g.badge}
+                style={{ background: CARD, border: `1px solid ${g.popular ? LIME + "50" : BORDER}` }}
+                className="rounded-2xl overflow-hidden relative group hover:border-white/20 transition-all">
+                {g.popular && (
+                  <div className="absolute top-4 right-4 z-20 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                    style={{ background: LIME, color: "#000" }}>
+                    MOST POPULAR
+                  </div>
+                )}
+                <div className="relative h-44 overflow-hidden">
+                  <img src={g.img} alt={g.heading}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                  <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(20,20,20,1) 0%, rgba(20,20,20,0.3) 60%, transparent 100%)" }} />
+                </div>
+                <div className="p-6">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-widest mb-4"
+                    style={{ background: g.badgeColor, color: g.badgeText }}>
+                    <g.Icon className="w-3 h-3" />
                     {g.badge}
                   </div>
-                )}
-                <div className={`bg-gradient-to-br ${g.headerGradient} px-7 py-8 flex items-center justify-center`}>
-                  <div className={`w-16 h-16 rounded-2xl ${g.iconBg} shadow-sm flex items-center justify-center`}>
-                    <g.icon className={`w-8 h-8 ${g.color}`} />
+                  <h3 className="text-xl font-black text-white mb-2 leading-tight">{g.heading}</h3>
+                  <p className="text-white/45 text-sm leading-relaxed mb-4">{g.body}</p>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1">
+                    {g.tags.map(t => (
+                      <span key={t} className="flex items-center gap-1 text-xs text-white/35">
+                        <CheckCircle className="w-3 h-3 text-white/20" />{t}
+                      </span>
+                    ))}
                   </div>
-                </div>
-                <div className="bg-card px-7 py-6">
-                  <h3 className="text-xl font-bold mb-1">{g.title}</h3>
-                  <p className={`text-xs font-semibold uppercase tracking-wide mb-3 ${g.color}`}>{g.who}</p>
-                  <p className="text-sm text-muted-foreground leading-relaxed">{g.what}</p>
                 </div>
               </div>
             ))}
           </div>
-          <div className="text-center mt-10">
-            <Button size="lg" className="h-14 px-8 rounded-2xl font-bold text-base bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-lg shadow-green-500/20" asChild>
-              <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <WhatsAppIcon className="w-5 h-5 mr-2" />
-                Start on WhatsApp — Coach K asks your goal on Day 1
-              </a>
-            </Button>
+
+          {/* Wide "Get Healthy" card */}
+          <div style={{ background: CARD, border: `1px solid ${BORDER}` }}
+            className="rounded-2xl overflow-hidden grid grid-cols-1 md:grid-cols-2 group hover:border-white/15 transition-all">
+            <div className="relative h-64 md:h-auto min-h-[220px] overflow-hidden">
+              <img src="https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=900&auto=format&fit=crop&q=75"
+                alt="Get Healthy"
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+              <div className="absolute inset-0" style={{ background: "rgba(20,20,20,0.25)" }} />
+            </div>
+            <div className="p-8 flex flex-col justify-center">
+              <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[10px] font-black uppercase tracking-widest mb-4 w-fit"
+                style={{ background: "rgba(239,68,68,0.18)", color: "#ef4444" }}>
+                <Heart className="w-3 h-3" />
+                GET HEALTHY
+              </div>
+              <h3 className="text-2xl font-black text-white mb-3 leading-tight">
+                Diabetes? Hypertension? Just Want to Feel Better?
+              </h3>
+              <p className="text-white/45 text-sm leading-relaxed mb-5">
+                Safe, gradual adjustments to your diet and movement. No extreme anything. Your medical conditions are factored into every recommendation. This is about longevity, not a 30-day challenge.
+              </p>
+              <div className="flex flex-wrap gap-x-5 gap-y-1">
+                {["Diabetes-friendly", "Blood pressure-aware", "Injury-safe", "All ages welcome"].map(t => (
+                  <span key={t} className="flex items-center gap-1 text-xs text-white/35">
+                    <CheckCircle className="w-3 h-3 text-white/20" />{t}
+                  </span>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      {/* How It Works */}
-      <section id="how-it-works" className="py-24 px-4 bg-muted/30">
+      {/* ── FOOD LOGGING ── */}
+      <section className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Up and running in 3 minutes.</h2>
-            <p className="text-muted-foreground text-lg">No app to download. No form to fill in. Just WhatsApp.</p>
-          </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
+            <Label>Food Logging</Label>
+            <h2 className="text-[clamp(32px,6.5vw,80px)] font-black uppercase tracking-tight leading-[0.9] mb-5">
+              <span style={{ color: LIME }}>LOG FOOD</span> THE WAY YOU<br />
+              ACTUALLY <span style={{ color: "rgba(255,255,255,0.2)" }}>COMMUNICATE.</span>
+            </h2>
+            <p className="text-white/45 text-lg max-w-lg">
+              No searching databases. No weighing everything. Send it how you'd tell a friend.
+            </p>
+          </motion.div>
 
-            {/* Steps — vertical list */}
-            <div className="space-y-0">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            {/* Method cards */}
+            <div className="space-y-3">
               {[
-                { step: "01", icon: MessageCircle, title: "WhatsApp Coach K", desc: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in under 3 minutes." },
-                { step: "02", icon: Zap, title: "Get your programme", desc: "Personalised workout plan — gym, home, or dumbbells. Meal plan with SA foods at real SA prices. Day 1 drops the moment you activate." },
-                { step: "03", icon: TrendingUp, title: "Coach K keeps you going", desc: "Daily morning check-ins. Evening nudges. Water reminders. Weekly progress reports. Automatic accountability every single day." },
-              ].map((item, i) => (
-                <div key={item.step} className="flex gap-5">
-                  <div className="flex flex-col items-center">
-                    <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center text-primary shrink-0">
-                      <item.icon className="w-6 h-6" />
-                    </div>
-                    {i < 2 && <div className="w-px flex-1 bg-border my-3" />}
+                { Icon: Mic,      color: LIME,      bg: "rgba(170,255,0,0.10)",    title: "Voice Note", desc: '"I had two eggs and toast for breakfast" — Coach K logs it automatically with calories and protein.' },
+                { Icon: Camera,   color: "#22c55e", bg: "rgba(34,197,94,0.10)",    title: "Photo",      desc: "Snap your plate. Coach K identifies the food and estimates portions — even pap, kota, and braai meat." },
+                { Icon: Keyboard, color: "#6B8AFF", bg: "rgba(107,138,255,0.10)", title: "Text",       desc: 'Type naturally. "Chicken breyani for lunch" — understood and logged in seconds.' },
+              ].map(m => (
+                <div key={m.title} style={{ background: CARD, border: `1px solid ${BORDER}` }}
+                  className="rounded-xl p-5 flex gap-4 hover:border-white/15 transition-all">
+                  <div className="w-11 h-11 rounded-xl flex items-center justify-center shrink-0" style={{ background: m.bg }}>
+                    <m.Icon className="w-5 h-5" style={{ color: m.color }} />
                   </div>
-                  <div className={i < 2 ? "pb-10" : ""}>
-                    <div className="text-xs font-bold text-primary/50 uppercase tracking-widest mb-1 mt-1">{item.step}</div>
-                    <h3 className="text-xl font-bold mb-2">{item.title}</h3>
-                    <p className="text-muted-foreground leading-relaxed">{item.desc}</p>
+                  <div>
+                    <div className="font-bold text-white mb-1">{m.title}</div>
+                    <p className="text-white/45 text-sm leading-relaxed">{m.desc}</p>
                   </div>
                 </div>
               ))}
             </div>
 
-            {/* WhatsApp phone mockup */}
-            <div className="flex justify-center">
-              <div className="relative w-[272px] sm:w-[300px]">
-                {/* Glow behind phone */}
-                <div className="absolute -inset-6 bg-primary/8 rounded-full blur-3xl" />
-                {/* Phone shell */}
-                <div className="relative bg-[#1C1C1E] rounded-[52px] p-[10px] shadow-2xl ring-1 ring-white/10">
-                  <div className="bg-white rounded-[44px] overflow-hidden">
-
-                    {/* WhatsApp green header */}
-                    <div className="bg-[#075E54]">
-                      <div className="h-8" /> {/* status bar space */}
-                      <div className="px-4 pb-3 flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-full bg-orange-500 flex items-center justify-center text-white text-sm font-bold shrink-0">K</div>
-                        <div className="flex-1 min-w-0">
-                          <div className="text-white text-sm font-semibold">Coach K</div>
-                          <div className="text-green-300 text-[10px]">online</div>
-                        </div>
-                        <Phone className="w-4 h-4 text-white/70 shrink-0" />
-                      </div>
+            {/* Food log widget */}
+            <div style={{ background: CARD, border: `1px solid ${BORDER}` }} className="rounded-2xl p-6">
+              <div className="flex items-center justify-between mb-5">
+                <span className="font-bold text-white">Today's Food Log</span>
+                <span className="text-xs text-white/25">
+                  {new Date().toLocaleDateString("en-ZA", { day: "2-digit", month: "short", year: "numeric" })}
+                </span>
+              </div>
+              <div className="space-y-2.5">
+                {[
+                  { icon: "🍳", name: "2 Eggs + Toast",      time: "Breakfast · 07:30", cal: "342 cal", prot: "22g protein" },
+                  { icon: "🍗", name: "Pap + Chicken Stew",  time: "Lunch · 13:15",     cal: "520 cal", prot: "38g protein" },
+                  { icon: "🥩", name: "Boerewors roll",      time: "Dinner · 18:45",    cal: "480 cal", prot: "28g protein" },
+                ].map((item, i) => (
+                  <div key={i} style={{ background: CARD2, border: `1px solid ${BORDER}` }}
+                    className="rounded-xl p-3.5 flex items-center gap-3">
+                    <div className="w-9 h-9 rounded-lg flex items-center justify-center text-lg shrink-0"
+                      style={{ background: "#222" }}>{item.icon}</div>
+                    <div className="flex-1 min-w-0">
+                      <div className="font-semibold text-sm text-white truncate">{item.name}</div>
+                      <div className="text-xs text-white/30">{item.time}</div>
                     </div>
-
-                    {/* Chat area */}
-                    <div className="bg-[#ECE5DD] px-2 py-3 space-y-2 text-[10.5px] leading-snug" style={{ minHeight: 390 }}>
-
-                      {/* Morning check-in from Coach K */}
-                      <div className="flex">
-                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[78%] shadow-sm">
-                          <p className="font-medium">Good morning Sipho! 🌅</p>
-                          <p className="mt-0.5 text-gray-700">Yesterday: <strong>7,842 steps</strong> ✅</p>
-                          <p className="text-gray-700">Food on point. Today is <strong>chest day.</strong></p>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:01 ✓✓</p>
-                        </div>
-                      </div>
-
-                      {/* User sends voice note */}
-                      <div className="flex justify-end">
-                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] px-2.5 py-2 max-w-[72%] shadow-sm">
-                          <div className="flex items-center gap-1.5 text-gray-600">
-                            <div className="flex gap-[2px] items-end h-3">
-                              {[2,4,7,5,6,3,7,4,2,5,3,5,4].map((h,i) => (
-                                <div key={i} className="w-[2px] bg-gray-400/70 rounded-full" style={{ height: `${h * 2}px` }} />
-                              ))}
-                            </div>
-                            <span className="text-[9px] text-gray-500">0:08</span>
-                          </div>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-0.5">08:03 ✓✓</p>
-                        </div>
-                      </div>
-
-                      {/* Coach K reply */}
-                      <div className="flex">
-                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[84%] shadow-sm">
-                          <p className="text-gray-500 italic text-[9px]">I heard: "had eggs and pap for breakfast"</p>
-                          <p className="mt-0.5"><strong>Food logged ✅</strong></p>
-                          <p className="text-gray-700">~420 kcal · 28g protein</p>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-1">08:04 ✓✓</p>
-                        </div>
-                      </div>
-
-                      {/* User sends food photo */}
-                      <div className="flex justify-end">
-                        <div className="bg-[#DCF8C6] rounded-[14px] rounded-tr-[4px] p-1.5 max-w-[60%] shadow-sm">
-                          <div className="bg-gray-300/80 rounded-[10px] w-full h-16 flex items-center justify-center text-gray-500 text-xs">
-                            📸 lunch.jpg
-                          </div>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-0.5 pr-1">13:22 ✓✓</p>
-                        </div>
-                      </div>
-
-                      {/* Coach K macro breakdown */}
-                      <div className="flex">
-                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[80%] shadow-sm">
-                          <p>~430 cal · 31g protein · 40g carbs</p>
-                          <p className="mt-0.5 text-gray-700">Total today: <strong>1,710/2,200 cal</strong> 🎯</p>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-1">13:23 ✓✓</p>
-                        </div>
-                      </div>
-
-                      {/* Weekly Sunday report */}
-                      <div className="flex">
-                        <div className="bg-white rounded-[14px] rounded-tl-[4px] px-2.5 py-2 max-w-[82%] shadow-sm">
-                          <p className="font-bold text-[#075E54]">📊 Week 3 Report</p>
-                          <p className="mt-1">Steps: 52,420 ✅</p>
-                          <p>Workouts: 4/4 ✅</p>
-                          <p>Weight: <strong>-0.8kg</strong> this week</p>
-                          <p>Food: 85% on track 🔥</p>
-                          <p className="text-[8.5px] text-gray-400 text-right mt-1">Sun 20:00 ✓✓</p>
-                        </div>
-                      </div>
-
+                    <div className="text-right shrink-0">
+                      <div className="text-sm font-bold text-white">{item.cal}</div>
+                      <div className="text-xs text-white/30">{item.prot}</div>
                     </div>
-
-                    {/* Input bar */}
-                    <div className="bg-[#F0F0F0] px-2.5 py-2 flex items-center gap-2 border-t border-gray-200">
-                      <div className="flex-1 bg-white rounded-full px-3 py-1.5 text-[10px] text-gray-400">Message</div>
-                      <div className="w-7 h-7 rounded-full bg-[#075E54] flex items-center justify-center shrink-0">
-                        <MessageCircle className="w-3.5 h-3.5 text-white" />
-                      </div>
-                    </div>
-
                   </div>
+                ))}
+              </div>
+              <div style={{ borderTop: `1px solid ${BORDER}` }} className="mt-5 pt-4">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-white/45">Today's total</span>
+                  <span className="font-bold text-white">1,342 / 2,200 cal</span>
+                </div>
+                <div className="w-full h-2 rounded-full" style={{ background: "#222" }}>
+                  <div className="h-2 rounded-full" style={{ width: "61%", background: LIME }} />
+                </div>
+                <div className="flex justify-between text-xs text-white/25 mt-1.5">
+                  <span>858 cal remaining</span>
+                  <span>61%</span>
                 </div>
               </div>
             </div>
-
           </div>
         </div>
       </section>
 
-      {/* ── HOW TO LOG — the biggest barrier, solved ── */}
-      <section className="py-24 px-4 bg-[#0B1D35]">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-14">
-            <p className="text-orange-400 text-sm font-bold uppercase tracking-widest mb-3">Log food the way you actually communicate</p>
-            <h2 className="text-4xl font-bold font-display text-white mb-4">Voice note. Photo. Or just type it.</h2>
-            <p className="text-white/55 text-lg max-w-xl mx-auto">Coach K handles all three. Talk, snap, or text — calories and protein back in 10 seconds. No manual logging. No calorie counting.</p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-
-            {/* Voice note */}
-            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-orange-500/20 flex items-center justify-center shrink-0">
-                  <Mic className="w-5 h-5 text-orange-400" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base leading-tight">Voice note</h3>
-                  <p className="text-white/40 text-xs">Just talk — no typing</p>
-                </div>
-              </div>
-              <p className="text-white/55 text-sm mb-5 leading-relaxed">Send a 10-second voice note. Coach K transcribes your words and logs the meal instantly.</p>
-              {/* Mini chat */}
-              <div className="mt-auto space-y-2 text-[10.5px]">
-                <div className="flex justify-end">
-                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] px-2.5 py-2 max-w-[85%] shadow-sm">
-                    <div className="flex items-center gap-2 text-gray-600">
-                      <div className="flex gap-[2px] items-end h-3">
-                        {[2,4,6,4,5,3,6,4,2,5,3,4].map((h,i) => (
-                          <div key={i} className="w-[2px] bg-gray-400/60 rounded-full" style={{ height: `${h * 2}px` }} />
-                        ))}
-                      </div>
-                      <span className="text-gray-500">0:12</span>
-                    </div>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:09 ✓✓</p>
-                  </div>
-                </div>
-                <div className="flex">
-                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
-                    <p className="text-gray-500 italic text-[9.5px]">I heard: "roasted potatoes, mixed veggies and chicken"</p>
-                    <p className="font-semibold text-gray-800">Food logged ✅</p>
-                    <p className="text-gray-700">Meal total: ~957 kcal · 90g protein</p>
-                    <p className="text-gray-600">Today: 2,257 / 2,446 kcal 🎯</p>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:10 ✓✓</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Photo */}
-            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center shrink-0">
-                  <Camera className="w-5 h-5 text-emerald-400" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base leading-tight">Photo</h3>
-                  <p className="text-white/40 text-xs">Snap and send</p>
-                </div>
-              </div>
-              <p className="text-white/55 text-sm mb-5 leading-relaxed">Photograph your plate — even 10 photos at once. Coach K identifies each food and replies in seconds.</p>
-              {/* Mini chat */}
-              <div className="mt-auto space-y-2 text-[10.5px]">
-                <div className="flex justify-end">
-                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] p-1.5 max-w-[65%] shadow-sm">
-                    <div className="bg-gray-300/60 rounded-[8px] h-14 flex items-center justify-center">
-                      <Camera className="w-4 h-4 text-gray-500" />
-                    </div>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5 pr-0.5">13:01 ✓✓</p>
-                  </div>
-                </div>
-                <div className="flex">
-                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
-                    <p className="font-semibold text-gray-800">Food logged ✅</p>
-                    <p className="text-gray-700">Pap · chakalaka · 2 chicken pieces</p>
-                    <p className="text-gray-700">~680 kcal · 41g protein</p>
-                    <p className="text-gray-600">Today: 1,490 / 2,200 kcal 🎯</p>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">13:02 ✓✓</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Text */}
-            <div className="rounded-2xl bg-white/[0.06] border border-white/10 p-6 flex flex-col">
-              <div className="flex items-center gap-3 mb-4">
-                <div className="w-10 h-10 rounded-xl bg-blue-500/20 flex items-center justify-center shrink-0">
-                  <MessageCircle className="w-5 h-5 text-blue-400" />
-                </div>
-                <div>
-                  <h3 className="font-bold text-white text-base leading-tight">Text</h3>
-                  <p className="text-white/40 text-xs">Type anything natural</p>
-                </div>
-              </div>
-              <p className="text-white/55 text-sm mb-5 leading-relaxed">Type it how you'd say it. "Had a kota for lunch" or "KFC 2-piece". Coach K understands SA food and slang.</p>
-              {/* Mini chat */}
-              <div className="mt-auto space-y-2 text-[10.5px]">
-                <div className="flex justify-end">
-                  <div className="bg-[#DCF8C6] rounded-[12px] rounded-tr-[3px] px-2.5 py-2 max-w-[85%] shadow-sm">
-                    <p className="text-gray-800">had 2 boerewors rolls at braai</p>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:32 ✓✓</p>
-                  </div>
-                </div>
-                <div className="flex">
-                  <div className="bg-white rounded-[12px] rounded-tl-[3px] px-2.5 py-2 max-w-[92%] shadow-sm space-y-0.5">
-                    <p className="font-semibold text-gray-800">Food logged ✅</p>
-                    <p className="text-gray-700">~560 kcal · 22g protein</p>
-                    <p className="text-gray-600">Today: 1,890 / 2,200 kcal · on track 🔥</p>
-                    <p className="text-[8.5px] text-gray-400 text-right mt-0.5">18:32 ✓✓</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </div>
-      </section>
-
-      {/* Features */}
-      <section className="py-24 px-4">
+      {/* ── HOW IT WORKS ── */}
+      <section id="how-it-works" className="py-28 px-6 lg:px-16">
         <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Everything a personal trainer does. For R199 a month.</h2>
-            <p className="text-muted-foreground text-lg">No upsells. No supplements to buy. No gym required. Everything below is included in one flat rate.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURES.map((f) => (
-              <div key={f.title} className="p-6 rounded-2xl bg-card border border-border/50 hover:border-primary/20 hover:shadow-md transition-all group">
-                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary mb-4 group-hover:scale-110 transition-transform">
-                  <f.icon className="w-5 h-5" />
-                </div>
-                <h3 className="font-bold text-lg mb-2">{f.title}</h3>
-                <p className="text-muted-foreground text-sm leading-relaxed">{f.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Testimonials */}
-      <section className="py-24 px-4 bg-orange-50/50 dark:bg-orange-900/10">
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-4xl font-bold font-display mb-4">Not a generic fitness app. A South African coach.</h2>
-            <p className="text-muted-foreground text-lg">It knows load shedding, month-end, KFC, and the mkhaba. No other fitness product was built for this.</p>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            {CAPABILITIES.map((c) => (
-              <div key={c.heading} className="p-7 rounded-3xl bg-card border border-border/60 hover:shadow-lg transition-all flex flex-col gap-3">
-                <div className="text-3xl">{c.icon}</div>
-                <div className="font-bold text-base">{c.heading}</div>
-                <p className="text-muted-foreground text-sm leading-relaxed">{c.body}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Pricing */}
-      <section className="py-24 px-4">
-        <div className="max-w-lg mx-auto text-center">
-          <h2 className="text-4xl font-bold font-display mb-4">One plan. Everything included.</h2>
-          <p className="text-muted-foreground mb-12">All goals. All fitness levels. WhatsApp only. Cancel anytime.</p>
-
-          <div className="bg-card rounded-3xl border-2 border-primary p-10 relative overflow-hidden text-left shadow-xl shadow-primary/10">
-            <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-orange-500 to-amber-400 rounded-t-3xl" />
-            <div className="flex items-center justify-between mb-4">
-              <div className="text-sm font-semibold text-primary uppercase tracking-wide">Coach K</div>
-              <span className="text-xs font-bold bg-amber-500 text-white px-3 py-1 rounded-full">Founding Member Price</span>
-            </div>
-            <div className="flex items-end gap-1 mb-1">
-              <span className="text-6xl font-bold font-display">R199</span>
-              <span className="text-muted-foreground mb-2 text-lg">/month</span>
-            </div>
-            <p className="text-muted-foreground text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime on WhatsApp.</p>
-            <ul className="space-y-3 mb-10">
-              {[
-                "Exact grocery list — Shoprite, Boxer & Pick n Pay, your budget",
-                "Braai, kota, KFC, Steers — real SA eating, fully coached",
-                "Daily accountability — Coach K notices when you go quiet",
-                "Personalised 2–5 day programme — gym, home, or dumbbells",
-                "All goal types: fat loss · muscle gain · recomp · health",
-                "Photo food logging — snap your plate, get feedback in 10 seconds",
-                "Automatic step sync from Google Fit, Samsung Health, Apple Health",
-                "Weekly Sunday progress report — steps, weight, food, verdict",
-                "Injury modifications and medical condition support",
-                "Supplement advice — honest, SA-priced",
-                "7-day free trial — programme sent on Day 1",
-              ].map((item) => (
-                <li key={item} className="flex items-start gap-2 text-sm">
-                  <CheckCircle className="w-4 h-4 text-emerald-500 mt-0.5 shrink-0" />
-                  <span>{item}</span>
-                </li>
-              ))}
-            </ul>
-            <Button size="lg" className="w-full h-14 rounded-2xl font-bold text-base bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-lg shadow-green-500/20" asChild>
-              <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-                <WhatsAppIcon className="w-5 h-5 mr-2" />
-                Start your free trial on WhatsApp
-              </a>
-            </Button>
-            <p className="text-xs text-muted-foreground text-center mt-4">7 days free · Then R199/month · Cancel anytime on WhatsApp</p>
-          </div>
-
-          <p className="text-sm text-muted-foreground mt-6">Refer a friend and you both get one month free</p>
-        </div>
-      </section>
-
-      {/* FAQ */}
-      <section className="py-24 px-4 bg-muted/30">
-        <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display text-center mb-12">Common questions</h2>
-          <div className="space-y-3">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }} className="mb-14">
+            <Label>How It Works</Label>
+            <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9]">
+              <span className="block text-white">THREE STEPS.</span>
+              <span className="block" style={{ color: LIME }}>DONE.</span>
+            </h2>
+          </motion.div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              {
-                q: "What is body recomp and why do most people choose it?",
-                a: "Body recomposition means losing fat and building muscle at the same time. It's the goal most people actually want — you want to look different, not just weigh less. Coach K manages this with high-protein eating, progressive training, and weekly adjustments. It's slower than a crash diet but the results last because you're changing your body composition, not just your weight.",
-              },
-              {
-                q: "Do I need a gym membership?",
-                a: "No. Coach K builds home workouts with zero equipment, dumbbell programmes, or full gym programmes. You choose at signup and can change anytime.",
-              },
-              {
-                q: "What if I can only afford cheap food?",
-                a: "The under-R100 weekly meal plan is built around eggs, pilchards, pap, sugar beans, and spinach — all available at Shoprite. Good results do not require an expensive diet.",
-              },
-              {
-                q: "Is this a real coach or a bot?",
-                a: "It is an AI coach trained specifically on South African food, lifestyle, and fitness. It knows pap from polenta, pilchards from salmon, and Nando's from a generic chicken restaurant. Over time it remembers your wins, your patterns, and adapts.",
-              },
-              {
-                q: "What if I have diabetes, hypertension, PCOS, or I'm on ARVs?",
-                a: "Coach K adjusts for all of these. It flags when doctor clearance is needed, avoids foods that interact with common medications, and keeps nutrition within safe ranges for your condition.",
-              },
-              {
-                q: "I'm over 50 and out of shape — is this for me?",
-                a: "Yes. Coach K builds beginner programmes that start where you are. Slow, safe progress beats aggressive programmes that hurt your joints or burn you out in week 2.",
-              },
-              {
-                q: "How do I cancel?",
-                a: "Reply CANCEL to Coach K at any time. No phone calls. No forms. No hassle. Your programme and progress are saved for 90 days — come back whenever you're ready.",
-              },
+              { n: "01", title: "WhatsApp Coach K",        body: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in 3 minutes." },
+              { n: "02", title: "Get your programme",      body: "Personalised workout plan — gym, home, or dumbbells. SA meal plan at real SA prices. Everything drops on Day 1." },
+              { n: "03", title: "Coach K keeps you going", body: "Daily morning check-ins. Evening nudges. Water reminders. Weekly progress reports. Automatic accountability every single day." },
+            ].map(item => (
+              <div key={item.n} style={{ background: CARD, border: `1px solid ${BORDER}` }}
+                className="rounded-2xl p-8 hover:border-white/15 transition-all">
+                <div className="text-7xl font-black mb-4 leading-none" style={{ color: LIME, opacity: 0.25 }}>{item.n}</div>
+                <h3 className="text-xl font-black text-white mb-3">{item.title}</h3>
+                <p className="text-white/45 text-sm leading-relaxed">{item.body}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* ── PRICING ── */}
+      <section id="pricing" className="py-28 px-6 lg:px-16" style={{ background: "#0E0E0E" }}>
+        <div className="max-w-6xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 20 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }} className="text-center mb-14">
+            <Label>Pricing</Label>
+            <h2 className="text-[clamp(36px,7vw,86px)] font-black uppercase tracking-tight leading-[0.9]">
+              <span className="text-white">ONE PLAN. </span>
+              <span style={{ color: LIME }}>EVERYTHING.</span>
+            </h2>
+            <p className="text-white/35 mt-4 text-lg">All goals. All fitness levels. WhatsApp only. Cancel anytime.</p>
+          </motion.div>
+
+          <div style={{ background: CARD, border: `1px solid ${BORDER}` }}
+            className="rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-2">
+            {/* Left: photo + comparison card */}
+            <div className="relative min-h-[360px] overflow-hidden">
+              <img
+                src="https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=900&auto=format&fit=crop&q=75"
+                alt="Coaching"
+                className="w-full h-full object-cover"
+              />
+              <div className="absolute inset-0" style={{ background: "linear-gradient(135deg, rgba(11,11,11,0.7) 0%, rgba(11,11,11,0.2) 100%)" }} />
+              {/* Comparison card overlay */}
+              <div style={{ background: "rgba(11,11,11,0.92)", border: `1px solid ${BORDER}`, backdropFilter: "blur(12px)", borderRadius: "16px" }}
+                className="absolute bottom-6 left-6 right-6 p-5">
+                <div className="text-xs font-bold uppercase tracking-wider text-white/30 mb-3">vs. a personal trainer</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-center">
+                    <div className="text-2xl font-black text-white/20 line-through">R3,000</div>
+                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Per trainer session</div>
+                  </div>
+                  <div className="text-white/20 text-2xl font-black">→</div>
+                  <div className="text-center">
+                    <div className="text-4xl font-black" style={{ color: LIME }}>R199</div>
+                    <div className="text-[10px] text-white/25 uppercase tracking-wider mt-1">Per month · unlimited</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: features + CTA */}
+            <div className="p-8 lg:p-10 flex flex-col justify-between relative">
+              <div className="absolute top-0 left-0 right-0 h-[2px] hidden lg:block" style={{ background: "transparent" }} />
+              <div>
+                <div className="flex items-center justify-between mb-6">
+                  <span className="text-sm font-black uppercase tracking-[0.2em]" style={{ color: LIME }}>Coach K</span>
+                  <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                    style={{ background: "rgba(170,255,0,0.12)", color: LIME }}>
+                    Founding Member Price
+                  </span>
+                </div>
+                <div className="mb-1">
+                  <span className="text-6xl font-black text-white">R199</span>
+                  <span className="text-white/35 text-lg ml-2">/month</span>
+                </div>
+                <p className="text-white/25 text-sm mb-8">R6.63/day — less than a taxi fare. Cancel anytime by WhatsApp.</p>
+                <ul className="space-y-3 mb-8">
+                  {[
+                    "Personalised 2–5 day programme — gym, home, or dumbbells",
+                    "Photo food logging — snap your plate, feedback in 10 seconds",
+                    "Exact grocery list — Shoprite, Boxer & Pick n Pay, your budget",
+                    "Daily accountability — Coach K notices when you go quiet",
+                    "Weekly Sunday progress report — steps, weight, food, verdict",
+                    "All goals: fat loss · muscle gain · recomp · health",
+                    "Braai, KFC, kota, Nando's — real SA eating, fully coached",
+                    "7-day free trial — programme sent on Day 1",
+                  ].map(item => (
+                    <li key={item} className="flex items-start gap-2.5 text-sm">
+                      <CheckCircle className="w-4 h-4 shrink-0 mt-0.5" style={{ color: LIME }} />
+                      <span className="text-white/65">{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <WaBtn href={WA_LINK} large>Start Your Free Trial on WhatsApp</WaBtn>
+                <p className="text-xs text-white/20 mt-4">7 days free · Then R199/month · Cancel anytime on WhatsApp</p>
+                <p className="text-sm text-white/25 mt-3">Refer a friend — you both get one month free</p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── FAQ ── */}
+      <section id="faq" className="py-28 px-6">
+        <div className="max-w-2xl mx-auto">
+          <Label>FAQ</Label>
+          <h2 className="text-5xl font-black uppercase tracking-tight mb-12">
+            COMMON <span style={{ color: LIME }}>QUESTIONS.</span>
+          </h2>
+          <div className="space-y-2">
+            {[
+              { q: "Do I need a gym membership?", a: "No. Coach K builds home workouts with zero equipment, dumbbell programmes, or full gym programmes. You choose at signup and can change anytime." },
+              { q: "What is body recomp and why do most people choose it?", a: "Body recomposition means losing fat and building muscle at the same time — what most people actually want when they say they want to \"get fit\". Coach K manages this with high-protein eating, progressive training, and weekly adjustments. Results last because you're changing body composition, not just weight." },
+              { q: "What if I can only afford cheap food?", a: "The under-R100 weekly meal plan is built around eggs, pilchards, pap, sugar beans, and spinach — all available at Shoprite. Good results do not require an expensive diet." },
+              { q: "Is this a real coach or a bot?", a: "An AI coach trained specifically on South African food, lifestyle, and fitness. It knows pap from polenta, pilchards from salmon, and Nando's from a generic chicken restaurant. Over time it remembers your wins, your patterns, and adapts." },
+              { q: "What if I have diabetes, hypertension, PCOS, or I'm on ARVs?", a: "Coach K adjusts for all of these. It flags when doctor clearance is needed, avoids foods that interact with common medications, and keeps nutrition within safe ranges for your condition." },
+              { q: "How do I cancel?", a: "Reply CANCEL to Coach K at any time. No phone calls. No forms. No hassle. Your programme and progress are saved for 90 days — come back whenever you're ready." },
             ].map((faq, i) => (
-              <div
-                key={faq.q}
-                className="rounded-2xl bg-card border border-border/50 overflow-hidden"
-              >
-                <button
-                  className="w-full flex items-center justify-between gap-4 p-6 text-left hover:bg-muted/30 transition-colors"
-                  onClick={() => setOpenFaq(openFaq === i ? null : i)}
-                >
-                  <h3 className="font-bold">{faq.q}</h3>
+              <div key={i} style={{ background: CARD, border: `1px solid ${openFaq === i ? "#333" : BORDER}` }}
+                className="rounded-2xl overflow-hidden">
+                <button onClick={() => setOpenFaq(openFaq === i ? null : i)}
+                  className="w-full flex items-center justify-between gap-4 p-6 text-left hover:bg-white/[0.025] transition-colors">
+                  <span className="font-bold text-white text-sm">{faq.q}</span>
                   {openFaq === i
-                    ? <Minus className="w-4 h-4 text-primary shrink-0" />
-                    : <Plus className="w-4 h-4 text-muted-foreground shrink-0" />
-                  }
+                    ? <Minus className="w-4 h-4 text-white/25 shrink-0" />
+                    : <Plus className="w-4 h-4 text-white/25 shrink-0" />}
                 </button>
                 {openFaq === i && (
-                  <div className="px-6 pb-6 border-t border-border/50 pt-4">
-                    <p className="text-muted-foreground text-sm leading-relaxed">{faq.a}</p>
+                  <div className="px-6 pb-6">
+                    <p className="text-white/45 text-sm leading-relaxed">{faq.a}</p>
                   </div>
                 )}
               </div>
@@ -851,42 +678,38 @@ export default function LandingPage() {
         </div>
       </section>
 
-      {/* Final CTA */}
-      <section className="py-24 px-4 bg-[#1E3A6E] text-white text-center">
-        <div className="max-w-2xl mx-auto">
-          <h2 className="text-4xl font-bold font-display mb-4">R199/month. A personal trainer charges that for 40 minutes.</h2>
-          <p className="text-white/75 text-lg mb-8">
-            3 questions on WhatsApp. Programme on Day 1. Coaching every day after that.
-            Whatever you eat, wherever you train, however busy your life is — Coach K works around it.
-          </p>
-          <Button size="lg" className="h-14 px-10 rounded-2xl text-base font-bold bg-[#25D366] hover:bg-[#1ebe5d] text-white border-0 shadow-2xl shadow-green-500/30" asChild>
-            <a href={WA_LINK} target="_blank" rel="noopener noreferrer">
-              <WhatsAppIcon className="w-5 h-5 mr-2" />
-              Start Coaching on WhatsApp
-            </a>
-          </Button>
-          <p className="text-white/50 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
+      {/* ── FINAL CTA ── */}
+      <section className="py-28 px-6 text-center" style={{ background: "#0E0E0E" }}>
+        <div className="max-w-3xl mx-auto">
+          <motion.div initial={{ opacity: 0, y: 24 }} whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true }} transition={{ duration: 0.5 }}>
+            <h2 className="text-[clamp(40px,8vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-6">
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R199/MONTH.</span>
+              <span className="block text-white">A TRAINER CHARGES THAT</span>
+              <span className="block" style={{ color: LIME }}>FOR 40 MINUTES.</span>
+            </h2>
+            <p className="text-white/40 text-lg mb-10 max-w-lg mx-auto">
+              3 questions on WhatsApp. Programme on Day 1. Coaching every day after that.
+            </p>
+            <WaBtn href={WA_LINK} large>Start Coaching on WhatsApp</WaBtn>
+            <p className="text-white/18 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
+          </motion.div>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="border-t border-border py-10 px-4 text-center text-muted-foreground text-sm bg-white">
+      {/* ── FOOTER ── */}
+      <footer style={{ borderTop: `1px solid ${BORDER}`, background: "#0B0B0B" }}
+        className="py-10 px-6 lg:px-16">
         <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <div className="flex items-center">
-            <img
-              src="https://res.cloudinary.com/dkxpypiak/image/upload/h_100,c_fit,f_auto/image-1779985068852_v6rnbe"
-              alt="KamLife Lifestyle Coach"
-              className="h-14 w-auto object-contain"
-              style={{ mixBlendMode: "multiply" }}
-            />
-          </div>
-          <div className="flex flex-wrap justify-center sm:justify-end items-center gap-x-4 gap-y-1 text-sm">
+          <span className="text-xl font-black">KAM<span style={{ color: LIME }}>LIFE</span></span>
+          <div className="flex flex-wrap justify-center sm:justify-end items-center gap-x-6 gap-y-1 text-sm text-white/25">
             <span>Built for South Africa</span>
-            <a href="/privacy" className="underline underline-offset-2 hover:text-foreground transition-colors">Privacy Policy (POPIA)</a>
-            <span className="text-muted-foreground/40">© 2026 KamLife</span>
+            <a href="/privacy" className="hover:text-white/50 transition-colors">Privacy Policy (POPIA)</a>
+            <span>© 2026 KamLife</span>
           </div>
         </div>
       </footer>
+
     </div>
   );
 }
