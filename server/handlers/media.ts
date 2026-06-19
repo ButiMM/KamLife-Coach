@@ -203,9 +203,50 @@ export async function handleMediaMessage(ctx: {
             uncaptionedType = "food"; // fallback if step OCR fails
           }
           if (uncaptionedType === "exercise") {
-            const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
-            await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
-            return exReply;
+            const isFormCheckCaption = /\b(form|check|correct|right|wrong|how does|how do i look|am i doing|my form|check my|is this right|watch me|look at me)\b/i.test(message || "");
+            if (isFormCheckCaption) {
+              const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
+              await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
+              return exReply;
+            }
+            // Reference screenshot — TikTok/IG workout save. Identify the exercise(s).
+            try {
+              const exerciseIdRes = await withTimeout("exercise_identify", 10000, () =>
+                openai.chat.completions.create({
+                  model: "gpt-4o-mini", max_tokens: 250, temperature: 0,
+                  messages: [
+                    { role: "system", content: `Identify all exercises visible in this screenshot (likely from TikTok, Instagram, or a fitness video). Reply with JSON only:
+{"exercises":[{"name":"exercise name","muscles":"primary muscles targeted","reps":"reps shown or null","sets":"sets shown or null"}],"category":"push|pull|legs|core|cardio|full_body","difficulty":"beginner|intermediate|advanced"}
+List EVERY distinct exercise visible. If none can be identified, reply: {"exercises":[],"category":null,"difficulty":null}` },
+                    { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
+                  ],
+                })
+              );
+              const raw = exerciseIdRes.choices[0]?.message?.content?.trim() || "{}";
+              const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim()) as {
+                exercises: Array<{ name: string; muscles: string; reps?: string | null; sets?: string | null }>;
+                category?: string | null;
+                difficulty?: string | null;
+              };
+              if (parsed.exercises?.length > 0) {
+                const lines = parsed.exercises.map(e => {
+                  const setsReps = e.sets && e.reps ? ` (${e.sets}×${e.reps})` : e.reps ? ` (${e.reps} reps)` : "";
+                  return `• *${e.name}*${setsReps} — ${e.muscles}`;
+                }).join("\n");
+                const meta = [
+                  parsed.category ? parsed.category.replace("_", " ") : null,
+                  parsed.difficulty ? parsed.difficulty + " level" : null,
+                ].filter(Boolean).join(", ");
+                const exSaveReply = `I can see:\n\n${lines}${meta ? `\n\n${meta.charAt(0).toUpperCase() + meta.slice(1)}.` : ""}\n\nSend me a screenshot for each move you want form tips on. Reply *done* once you've completed the session to log it.`;
+                await logChat(user.id, "[Workout Screenshot]", exSaveReply, "WORKOUT_SCREENSHOT");
+                return exSaveReply;
+              }
+            } catch (e) {
+              console.warn("[exercise_identify]", e);
+            }
+            const exFallback = `I can see a workout screenshot — what exercise is this? Tell me the move and I'll tell you which muscles it hits and whether it fits your programme.`;
+            await logChat(user.id, "[Exercise Photo]", exFallback, "EXERCISE_PHOTO");
+            return exFallback;
           }
           if ((uncaptionedType as any) === "equipment") {
             // Only treat as a HOME-EQUIPMENT DECLARATION when the caption clearly says
@@ -1290,9 +1331,19 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
     }
   }
 
-  // ---- FORM CHECK VIDEO ----
+  // ---- VIDEO (form check OR workout save from TikTok/IG) ----
   if (ctype.startsWith("video/")) {
     const isFormCheck = /\b(form|check|correct|right|wrong|how does|how do i look|am i doing|check my|my form|form check|squat form|deadlift form|bench form|my squat|my deadlift|my bench|watch this|look at this)\b/i.test(message);
+
+    // Workout save — user forwarded a TikTok or Instagram workout video
+    const isWorkoutSave = !isFormCheck && /\b(this workout|try this|these exercises|what exercises|what are these|save this|what is this|add this|do this|can i do this|is this good|found this|check this out|these moves|new workout|workout i saw|is this a good workout)\b/i.test(message || "")
+      || (!isFormCheck && message && /\b(workout|routine|circuit|hiit|leg day|push day|pull day|glute|cardio|abs|core)\b/i.test(message));
+    if (isWorkoutSave || (!isFormCheck && !message?.trim())) {
+      const videoSaveReply = `Got the workout video 💪\n\nTo identify every exercise: screenshot the move you want to know about (pause on it) and send the screenshot here — I'll name it, tell you which muscles it hits, and you can reply *done* to log the session.\n\nOr just list what you did — e.g. *"hip thrusts, RDLs, leg curls"* — and I'll give you the full breakdown.`;
+      await logChat(user.id, "[Workout Video]", videoSaveReply, "WORKOUT_VIDEO_SAVE");
+      return videoSaveReply;
+    }
+
     const exerciseHint = /\b(squat|deadlift|rdl|bench|row|press|curl|hip thrust|lunge|pull.?up)\b/i.exec(message);
     const exerciseName = exerciseHint ? exerciseHint[1] : null;
     const clientNameVid = user.name || "there";
