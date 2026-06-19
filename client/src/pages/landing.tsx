@@ -45,12 +45,12 @@ function Label({ children }: { children: React.ReactNode }) {
 }
 
 const PERSONAS = [
-  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: LIME, quote: "Tried the gym 4 times in 3 years. Always quit after month 2. This is month 7 now.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
-  { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Coach K showed me clean eating with 15-minute prep — pap, eggs, spinach.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
-  { initials: "KM", name: "Kamogelo M.", city: "Pretoria", avatarBg: "#281616", avatarText: "#FF6B35", quote: "I'm diabetic. Thought healthy food was expensive. My groceries are under R800/week.", tags: ["DIABETIC", "BUDGET EATING", "RECOMP"] },
-  { initials: "SN", name: "Sipho N.", city: "Durban", avatarBg: "#162818", avatarText: "#22c55e", quote: "Skinny my whole life. Put on 6kg in 4 months eating food I actually enjoy.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
-  { initials: "LZ", name: "Lerato Z.", city: "Johannesburg", avatarBg: "#221622", avatarText: "#d946ef", quote: "Had a baby 8 months ago. Lost 12kg so far. No crash diet. Just consistent daily coaching.", tags: ["POST-PREGNANCY", "FAT LOSS", "HOME MOM"] },
-  { initials: "BK", name: "Bongani K.", city: "Ekurhuleni", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "Work night shift. Coach K figured out my meal timing and exercise window around my schedule.", tags: ["NIGHT SHIFT", "RECOMP", "NO GYM"] },
+  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: LIME, quote: "Tried the gym 4 times in 3 years. Always quit by month 2. This is month 7. Down 11kg.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
+  { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Lost 9kg in 10 weeks eating pap and eggs. Never weighed a single gram of food.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
+  { initials: "KM", name: "Kamogelo M.", city: "Pretoria", avatarBg: "#281616", avatarText: "#FF6B35", quote: "I'm diabetic, 97kg. Coach K built around my meds and budget. Down 14kg in 5 months.", tags: ["DIABETIC", "BUDGET EATING", "RECOMP"] },
+  { initials: "SN", name: "Sipho N.", city: "Durban", avatarBg: "#162818", avatarText: "#22c55e", quote: "Skinny my whole life. Gained 7kg muscle in 4 months eating rice, eggs, and pilchards.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
+  { initials: "LZ", name: "Lerato Z.", city: "Johannesburg", avatarBg: "#221622", avatarText: "#d946ef", quote: "Had a baby 8 months ago. Lost 15kg since starting. No crash diet. Just daily WhatsApp check-ins.", tags: ["POST-PREGNANCY", "FAT LOSS", "HOME MOM"] },
+  { initials: "BK", name: "Bongani K.", city: "Ekurhuleni", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "Night shift, no time, no gym. Lost 8kg in 12 weeks. Coach K figured out my eating windows.", tags: ["NIGHT SHIFT", "RECOMP", "NO GYM"] },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -105,7 +105,7 @@ export default function LandingPage() {
         <div className="relative z-10 max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-2 gap-12 lg:gap-20 items-center py-24 lg:py-0 min-h-screen">
           {/* Left: text */}
           <motion.div initial={{ opacity: 0, y: 36 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.65 }}>
-            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 text-xs font-semibold text-white/60 mb-10"
+            <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 text-xs font-semibold text-white/60 mb-6"
               style={{ background: "rgba(255,255,255,0.04)" }}>
               <span className="relative flex h-1.5 w-1.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" style={{ background: LIME }} />
@@ -114,15 +114,20 @@ export default function LandingPage() {
               Now accepting South African clients
             </div>
 
+            <p className="text-white/45 text-base sm:text-lg font-medium mb-4 leading-snug">
+              That belly you've been trying to lose for years?<br />
+              You're not lazy. You just never had daily coaching.
+            </p>
+
             <h1 className="text-[clamp(44px,7vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-8">
-              <span className="block text-white">A personal trainer</span>
-              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>costs R3,000.</span>
-              <span className="block" style={{ color: LIME }}>Coach K costs R199.</span>
+              <span className="block text-white">A TRAINER CHARGES</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R3,000 A SESSION.</span>
+              <span className="block" style={{ color: LIME }}>COACH K. R199. DAILY.</span>
             </h1>
 
             <p className="text-lg text-white/55 max-w-lg leading-relaxed mb-10">
-              Real coaching in your WhatsApp. Knows pap, pilchards, and KFC by name.
-              Builds your programme on Day 1 — adjusts it every single week.
+              Knows pap, pilchards, braai, and KFC by name. Sends your programme on Day 1.
+              Adjusts your calories every week based on your actual weigh-ins.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 mb-8">
@@ -238,6 +243,32 @@ export default function LandingPage() {
           ))}
         </div>
       </div>
+
+      {/* ── RESULTS ── */}
+      <section style={{ background: BG, borderBottom: `1px solid ${BORDER}` }} className="py-14 px-6 lg:px-16">
+        <div className="max-w-6xl mx-auto">
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/25 text-center mb-8">Real results from real South Africans — no influencers</p>
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+            {[
+              { name: "Zanele M.", city: "Cape Town", result: "−15kg", time: "16 weeks", start: "from 92kg", goal: "FAT LOSS", color: LIME },
+              { name: "Lerato K.", city: "Johannesburg", result: "−22kg", time: "6 months", start: "from 108kg", goal: "FAT LOSS", color: LIME },
+              { name: "Sipho N.", city: "Durban", result: "+7kg", time: "12 weeks", start: "from 61kg", goal: "MUSCLE", color: "#6B8AFF" },
+              { name: "Bongani T.", city: "Soweto", result: "−11kg", time: "10 weeks", start: "from 89kg", goal: "RECOMP", color: "#22c55e" },
+            ].map(r => (
+              <div key={r.name} style={{ background: CARD, border: `1px solid ${BORDER}` }}
+                className="rounded-2xl p-5 text-center hover:border-white/15 transition-all">
+                <div className="text-5xl font-black mb-1 tabular-nums" style={{ color: r.color }}>{r.result}</div>
+                <div className="text-xs text-white/25 mb-1">{r.time}</div>
+                <div className="text-[10px] text-white/18 mb-3">{r.start}</div>
+                <div className="font-semibold text-sm text-white">{r.name}</div>
+                <div className="text-xs text-white/30">{r.city}</div>
+                <div className="mt-2 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider inline-block"
+                  style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.28)" }}>{r.goal}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
 
       {/* ── STATS BAR ── */}
       <div style={{ borderBottom: `1px solid ${BORDER}`, background: "#0E0E0E" }} className="py-8 px-6">
@@ -365,10 +396,10 @@ export default function LandingPage() {
               {
                 badge: "LOSE FAT", badgeColor: "rgba(34,197,94,0.18)", badgeText: "#22c55e",
                 Icon: Flame, iconColor: "#22c55e", popular: false,
-                img: "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=700&auto=format&fit=crop&q=75",
-                heading: "Drop the Weight. Keep It Off.",
-                body: "Overweight, obese, or just carrying extra? Coach K sets a safe calorie target, adjusts your existing meals, and protects your metabolism from crash-diet damage.",
-                tags: ["All ages", "Medical-safe"],
+                img: "https://images.unsplash.com/photo-1518611012118-696072aa579a?w=700&auto=format&fit=crop&q=75",
+                heading: "Drop the Belly. For Good.",
+                body: "Been carrying the same weight for years? Coach K sets your calorie target around real SA food — pap, pilchards, braai. Weekly weigh-ins auto-adjust your plan. No crash diet. Just the belly shrinking, week by week.",
+                tags: ["All ages", "Weekly plan adjustments"],
               },
               {
                 badge: "BUILD MUSCLE", badgeColor: "rgba(107,138,255,0.18)", badgeText: "#6B8AFF",
@@ -417,7 +448,7 @@ export default function LandingPage() {
           <div style={{ background: CARD, border: `1px solid ${BORDER}` }}
             className="rounded-2xl overflow-hidden grid grid-cols-1 md:grid-cols-2 group hover:border-white/15 transition-all">
             <div className="relative h-64 md:h-auto min-h-[220px] overflow-hidden">
-              <img src="https://images.unsplash.com/photo-1441974231531-c6227db76b6e?w=900&auto=format&fit=crop&q=75"
+              <img src="https://images.unsplash.com/photo-1576091160550-2173dba999ef?w=900&auto=format&fit=crop&q=75"
                 alt="Get Healthy"
                 className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
               <div className="absolute inset-0" style={{ background: "rgba(20,20,20,0.25)" }} />

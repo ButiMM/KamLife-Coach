@@ -670,7 +670,7 @@ export async function handleMediaMessage(ctx: {
         messages: [
           {
             role: "system",
-            content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein. SA voice — direct, warm, specific. Never generic. Max 3 sentences. End with exactly one specific action. Never say "Reply MENU". Never say "I hope this helps".${isApprovalCaption ? ` IMPORTANT: This client is asking "is this okay to eat?" — after identifying the food and its calories/protein, give a DIRECT yes/no verdict for their ${goal} goal, explain why in one sentence, and tell them exactly how much to eat or what to pair it with. Log it.` : ""}`,
+            content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein. SA voice — direct, warm, specific. Never generic. Max 3 sentences. End with exactly one specific action. When suggesting additions or swaps, never recommend a food already visible in this meal. Never say "Reply MENU". Never say "I hope this helps".${isApprovalCaption ? ` IMPORTANT: This client is asking "is this okay to eat?" — after identifying the food and its calories/protein, give a DIRECT yes/no verdict for their ${goal} goal, explain why in one sentence, and tell them exactly how much to eat or what to pair it with. Log it.` : ""}`,
           },
           {
             role: "user",
@@ -951,7 +951,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
-          photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target."}_`;
+          photoDailyTotal = `\n\n---\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target ✅"}_`;
         }
         await db.update(users).set({
           todayCalories: totals.calories,
