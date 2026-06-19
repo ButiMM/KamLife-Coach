@@ -84,7 +84,7 @@ export async function handleGptBlock(ctx: {
 - Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
 - Steps today: ${stepStatus}${progContext}${weightLine}
 - Goal: ${user.goalType || "fat_loss"}
-USE THIS DATA. If they are over on calories — acknowledge it matter-of-factly with the number, no guilt trip. If short on protein — check the hour: if before 19:00 SAST, weave in one affordable SA food they can add to their next meal (eggs, pilchards, peanut butter, beans, chicken); if 19:00 or later, briefly note they can pick it up at tomorrow's breakfast. NEVER frame a protein or calorie gap as a failure — frame it as the next opportunity. Do not ignore this data. NEVER ask the client for information shown above (weight, goal, targets, today's numbers) — you already have it; asking again destroys trust.`;
+THIS DATA IS BACKGROUND — use it to answer what the client actually asked, NOT as a reason to lecture. Only bring up calories or protein if the client raises it, asks what to eat, or asks how they are doing. When you do: state numbers matter-of-factly, no guilt trip, and frame any gap as the next opportunity, never a failure. Do not tack on unsolicited "add more protein" advice — most messages just need a warm, direct answer. NEVER ask the client for information shown above (weight, goal, targets, today's numbers) — you already have it; asking again destroys trust.`;
   } catch (e) { /* non-fatal — context is best-effort */ }
 
   // Fix 9 — Conversation context memory: last 10 exchanges, alternating Client/Coach K format
