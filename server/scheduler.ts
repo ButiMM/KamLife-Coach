@@ -336,5 +336,21 @@ export async function initScheduler(): Promise<void> {
   // ── Annual ────────────────────────────────────────────────────────────────
   cron.schedule("0 5 2 1 *",     () => safe("runNewYearReset",        runNewYearReset),        { timezone: "UTC" }); // Jan 2
 
+  // ── Infrastructure health: daily DB-backup setup reminder ─────────────────
+  // Fires once/day at 9am SAST (7am UTC) until R2_BUCKET is set in Railway.
+  // Self-silences the moment the secret is added — no manual cleanup needed.
+  cron.schedule("0 7 * * *", async () => {
+    if (process.env.R2_BUCKET) return; // backup configured — nothing to do
+    const today = todaySAST();
+    if (loadState()["backup_setup_reminder"] === today) return;
+    saveState("backup_setup_reminder", today);
+    const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
+    if (!coachPhone) return;
+    await sendWhatsApp(
+      `whatsapp:${coachPhone.replace(/\D/g, "")}`,
+      `⚠️ *KamLife DB backup not active*\n\nThe GitHub Actions backup job exists but is missing its secrets — no backup has run yet.\n\nAdd these 5 secrets under *GitHub → Settings → Secrets → Actions*:\n\n• \`BACKUP_DATABASE_URL\` — public Railway Postgres URL (*.proxy.rlwy.net)\n• \`R2_ACCESS_KEY_ID\`\n• \`R2_SECRET_ACCESS_KEY\`\n• \`R2_BUCKET\` (e.g. kamlife-db-backups)\n• \`R2_ENDPOINT\` (https://<id>.r2.cloudflarestorage.com)\n\nSee *docs/backup-restore.md* for the full 5-min guide.\n\nThis reminder stops the moment \`R2_BUCKET\` is set in Railway.`
+    ).catch(e => console.error("[BACKUP REMINDER] send failed:", e));
+  }, { timezone: "UTC" });
+
   console.log("[SCHEDULER] All cron jobs registered.");
 }
