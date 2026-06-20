@@ -85,6 +85,51 @@ const SLUG_MUSCLE: Record<string, MuscleGroup[]> = {
   "plank-shoulder-tap": ["core"],
 };
 
+// Movement PATTERN per slug. Two machines are only valid substitutes when they share
+// BOTH a muscle group AND a movement pattern — otherwise the engine offers nonsense like
+// "use this shoulder PRESS in place of your lateral RAISE" (both "shoulders", totally
+// different movements). A compound press is never a swap for an isolation raise.
+type MovePattern =
+  | "knee-dominant"      // squat-family compounds
+  | "quad-isolation" | "ham-isolation"
+  | "hip-hinge" | "hip-extension"
+  | "calf"
+  | "horizontal-push" | "vertical-push" | "chest-isolation" | "delt-isolation"
+  | "vertical-pull" | "horizontal-pull" | "rear-delt"
+  | "biceps" | "triceps" | "core";
+
+const SLUG_PATTERN: Record<string, MovePattern> = {
+  "squat": "knee-dominant", "smith-squat": "knee-dominant", "barbell-back-squat": "knee-dominant",
+  "hack-squat": "knee-dominant", "leg-press": "knee-dominant", "goblet-squat": "knee-dominant",
+  "sumo-squat": "knee-dominant", "bulgarian-split-squat": "knee-dominant",
+  "reverse-lunge": "knee-dominant", "step-up": "knee-dominant",
+  "leg-extension": "quad-isolation",
+  "leg-curl": "ham-isolation",
+  "rdl": "hip-hinge",
+  "hip-thrust": "hip-extension", "glute-bridge": "hip-extension", "cable-kickback": "hip-extension",
+  "calf-raise": "calf", "seated-calf-raise": "calf",
+  "chest-press": "horizontal-push", "barbell-bench-press": "horizontal-push",
+  "incline-dumbbell-press": "horizontal-push", "dumbbell-floor-press": "horizontal-push",
+  "push-up": "horizontal-push",
+  "chest-fly": "chest-isolation",
+  "shoulder-press": "vertical-push",
+  "lateral-raise": "delt-isolation",
+  "face-pull": "rear-delt",
+  "lat-pulldown": "vertical-pull",
+  "seated-row": "horizontal-pull", "barbell-row": "horizontal-pull", "bent-over-row": "horizontal-pull",
+  "single-arm-row": "horizontal-pull", "chest-supported-row": "horizontal-pull",
+  "resistance-band-row": "horizontal-pull", "door-frame-row": "horizontal-pull", "table-row": "horizontal-pull",
+  "bicep-curl": "biceps", "cable-bicep-curl": "biceps", "doorframe-curl": "biceps",
+  "tricep-pushdown": "triceps", "tricep-overhead-extension": "triceps",
+  "tricep-kickback": "triceps", "chair-tricep-dip": "triceps",
+  "plank": "core", "dead-bug": "core", "cable-crunch": "core",
+  "plank-leg-raise": "core", "plank-shoulder-tap": "core",
+};
+
+function patternForSlug(slug: string | null): MovePattern | null {
+  return slug ? (SLUG_PATTERN[slug] || null) : null;
+}
+
 // Setup steps — the part a true beginner gets stuck on (seat height, pad position, pins,
 // how to unrack). Only machines that genuinely need adjusting are listed; slugs without an
 // entry simply skip the setup line in the reply.
@@ -208,11 +253,16 @@ export function matchMachineToDay(
     if (slugMatch || textMatch) return { kind: "exact", prescribed: ex };
   }
 
-  // Tier 2 — substitute: same muscle group as a prescribed exercise.
-  if (photographedMuscles.length > 0) {
+  // Tier 2 — substitute: same muscle group AND same movement pattern as a prescribed
+  // exercise. Requiring the pattern to match stops cross-pattern nonsense — a shoulder
+  // PRESS is not a swap for a lateral RAISE even though both are "shoulders".
+  const photographedPattern = patternForSlug(photographedSlug);
+  if (photographedMuscles.length > 0 && photographedPattern) {
     for (const ex of day.exercises) {
       const exMuscles = musclesForSlug(ex.slug);
-      if (exMuscles.some((m) => photographedMuscles.includes(m))) {
+      const sameMuscle = exMuscles.some((m) => photographedMuscles.includes(m));
+      const samePattern = patternForSlug(ex.slug) === photographedPattern;
+      if (sameMuscle && samePattern) {
         return { kind: "substitute", prescribed: ex };
       }
     }

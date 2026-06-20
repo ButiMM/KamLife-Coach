@@ -100,6 +100,79 @@ function getMachineSlug(machineId: string): string | null {
   return null;
 }
 
+/**
+ * Identify a gym machine from a photo and return ready-to-send coaching, or null if the
+ * machine can't be recognised. Pulled out of the inline equipment branch so it can ALSO be
+ * used as a fallback when the food path misfires on a gym photo (e.g. cluttered, plate-loaded
+ * machines that the first classifier missed) — a machine photo must never get a food error.
+ */
+async function coachGymMachineFromPhoto(
+  openai: OpenAI, user: any, base64: string, contentType: string,
+): Promise<string | null> {
+  try {
+    const machineIdRes = await withTimeout("equipment_id", 9000, () =>
+      openai.chat.completions.create({
+        model: "gpt-4o-mini", max_tokens: 15, temperature: 0,
+        messages: [
+          {
+            role: "system",
+            content: `Identify the gym machine or equipment in this photo. Reply with ONLY the equipment name, 2-5 words. Use these terms: leg press, smith machine, lat pulldown, cable machine, chest press machine, shoulder press machine, leg extension machine, leg curl machine, hip thrust machine, seated row machine, hack squat machine, pec deck, squat rack, dumbbells, barbell, resistance bands, pull-up bar, calf raise machine, cable bicep curl, cable lateral raise, face pull. The machine may be plate-loaded (big weight plates on pegs) or have a weight stack — judge by its shape and the seat/pad/handle layout, not the plates. If you genuinely cannot tell, reply: unknown.`,
+          },
+          { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
+        ],
+      })
+    );
+    const machineRaw = machineIdRes.choices[0]?.message?.content?.trim().toLowerCase() || "unknown";
+    console.log(`[EQUIPMENT_ID] identified="${machineRaw}" user=${user.id}`);
+    if (machineRaw === "unknown" || machineRaw.length <= 2) return null;
+
+    const slug = getMachineSlug(machineRaw);
+    const displayName = machineRaw.replace(/\b\w/g, (c: string) => c.toUpperCase());
+
+    if (machineRaw.includes("dumbbell")) {
+      let reply = `*Dumbbells* — your programme uses these.\n\nReply *workout* to see exactly what you are doing today with them.\n\nOr type *show me* followed by any exercise name for a form demo.`;
+      const dumbbellImg = getExerciseGifUrl("bicep-curl");
+      if (dumbbellImg) reply += `\n[MEDIA:${dumbbellImg}]`;
+      return reply;
+    }
+
+    const imageUrl = slug ? getExerciseGifUrl(slug) : null;
+    let day = null;
+    try { day = getCurrentDayExercises(user); } catch { /* no programme yet */ }
+    const match = matchMachineToDay(slug, machineRaw, day);
+    const setup = machineSetup(slug);
+    const setupLine = setup ? `⚙️ *Setup:* ${setup}\n` : "";
+
+    let reply: string;
+    if (match.kind === "exact" && match.prescribed) {
+      const p = match.prescribed;
+      reply = `✅ *That's the ${displayName} — exactly what your plan calls for today.*\n\n`
+        + `📋 *Your sets:* ${p.setsDisplay}\n`
+        + setupLine
+        + `✅ *How:* ${p.description}\n`
+        + `⚠️ *Don't:* ${p.mistake}`;
+    } else if (match.kind === "substitute" && match.prescribed) {
+      const p = match.prescribed;
+      reply = `*That's a ${displayName}* — not the exact machine your plan names, but it trains the same muscles the same way. Use it today, no problem.\n\n`
+        + `📋 *Swap it in for your ${primaryExerciseName(p.name)} — same sets:* ${p.setsDisplay}\n`
+        + setupLine
+        + `✅ *How:* ${machineHowTo(slug)}`;
+    } else {
+      reply = `*${displayName}*\n\n`
+        + setupLine
+        + `✅ *How:* ${machineHowTo(slug)}`;
+      reply += day
+        ? `\n\nThis isn't on today's session — reply *workout* to see what you're doing today.`
+        : `\n\nReply *workout* to get your programme.`;
+    }
+    if (imageUrl) reply += `\n[MEDIA:${imageUrl}]`;
+    return reply;
+  } catch (e) {
+    console.warn("[coachGymMachineFromPhoto] vision failed:", e);
+    return null;
+  }
+}
+
 // ============================================================
 // HANDLE MEDIA MESSAGE
 // Called from handleMessage when mediaUrl is present.
@@ -259,76 +332,13 @@ List EVERY distinct exercise visible. If none can be identified, reply: {"exerci
             }
 
             // ── Smart machine identification → match against today's real plan ──────
-            // Identify the machine, then check it against the client's ACTUAL day:
             //   exact      → "that's the machine your plan calls for — here's your sets + how"
-            //   substitute → "not the exact one, but same muscles — swap it in"
+            //   substitute → "same muscles, same movement — swap it in"
             //   other      → "here's how to use it; it's not on today's plan"
             // Prescription (sets/how/mistake) comes from the user's real programme, so the
             // photo reply never contradicts their workout text.
-            let equipReply = ``;
-            try {
-              const machineIdRes = await withTimeout("equipment_id", 8000, () =>
-                openai.chat.completions.create({
-                  model: "gpt-4o-mini", max_tokens: 15, temperature: 0,
-                  messages: [
-                    {
-                      role: "system",
-                      content: `Identify the gym machine or equipment in this photo. Reply with ONLY the equipment name, 2-5 words. Use these terms: leg press, smith machine, lat pulldown, cable machine, chest press machine, shoulder press machine, leg extension machine, leg curl machine, hip thrust machine, seated row machine, hack squat machine, pec deck, squat rack, dumbbells, barbell, resistance bands, pull-up bar, calf raise machine, cable bicep curl, cable lateral raise, face pull. If unclear, reply: unknown.`
-                    },
-                    { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] }
-                  ]
-                })
-              );
-
-              const machineRaw = machineIdRes.choices[0]?.message?.content?.trim().toLowerCase() || "unknown";
-              console.log(`[EQUIPMENT_ID] identified="${machineRaw}" user=${user.id}`);
-
-              if (machineRaw !== "unknown" && machineRaw.length > 2) {
-                const slug = getMachineSlug(machineRaw);
-                const imageUrl = slug ? getExerciseGifUrl(slug) : null;
-                const displayName = machineRaw.replace(/\b\w/g, (c: string) => c.toUpperCase());
-
-                if (machineRaw.includes("dumbbell")) {
-                  equipReply = `*Dumbbells* — your programme uses these.\n\nReply *workout* to see exactly what you are doing today with them.\n\nOr type *show me* followed by any exercise name for a form demo.`;
-                  const dumbbellImg = getExerciseGifUrl("bicep-curl");
-                  if (dumbbellImg) equipReply += `\n[MEDIA:${dumbbellImg}]`;
-                } else {
-                  // Match against the client's real day (null = walk-only / no programme yet)
-                  let day = null;
-                  try { day = getCurrentDayExercises(user); } catch { /* no programme yet */ }
-                  const match = matchMachineToDay(slug, machineRaw, day);
-                  const setup = machineSetup(slug);
-                  const setupLine = setup ? `⚙️ *Setup:* ${setup}\n` : "";
-
-                  if (match.kind === "exact" && match.prescribed) {
-                    const p = match.prescribed;
-                    equipReply = `✅ *That's the ${displayName} — exactly what your plan calls for today.*\n\n`
-                      + `📋 *Your sets:* ${p.setsDisplay}\n`
-                      + setupLine
-                      + `✅ *How:* ${p.description}\n`
-                      + `⚠️ *Don't:* ${p.mistake}`;
-                  } else if (match.kind === "substitute" && match.prescribed) {
-                    const p = match.prescribed;
-                    equipReply = `*That's a ${displayName}* — not the exact machine your plan names, but it trains the same muscles. Use it today, no problem.\n\n`
-                      + `📋 *Swap it in for your ${primaryExerciseName(p.name)} — same sets:* ${p.setsDisplay}\n`
-                      + setupLine
-                      + `✅ *How:* ${machineHowTo(slug)}`;
-                  } else {
-                    equipReply = `*${displayName}*\n\n`
-                      + setupLine
-                      + `✅ *How:* ${machineHowTo(slug)}`;
-                    equipReply += day
-                      ? `\n\nThis isn't on today's session — reply *workout* to see what you're doing today.`
-                      : `\n\nReply *workout* to get your programme.`;
-                  }
-                  if (imageUrl) equipReply += `\n[MEDIA:${imageUrl}]`;
-                }
-              }
-            } catch (e) {
-              console.warn("[EQUIPMENT_ID] vision failed:", e);
-            }
-
-            if (!equipReply) equipReply = `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
+            const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType))
+              || `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
             return equipReply;
           }
@@ -848,6 +858,17 @@ BEST GUESS RULE: For images that ARE food, always make your best estimate even i
           console.log(`[FOOD_VISION] not_food photo but caption has food — logging from caption user=${user.id.slice(-6)}`);
           return handleMessage(phone, message);
         }
+        // Misclassified gym photo? The first classifier didn't route it to equipment and
+        // food vision says it isn't food — try machine coaching before giving up, so a gym
+        // machine never dead-ends on "send a photo of your plate".
+        if (noCaption) {
+          const machineReply = await coachGymMachineFromPhoto(openai, user, base64, contentType);
+          if (machineReply) {
+            console.log(`[FOOD_VISION] not_food recovered as gym machine user=${user.id.slice(-6)}`);
+            await logChat(user.id, "[Equipment Photo]", machineReply, "EQUIPMENT_ID");
+            return machineReply;
+          }
+        }
         return mealLabelMatch ? mealAsk : "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
       if (/^GROCERY_LIST:/i.test(visionReply)) {
@@ -1082,7 +1103,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
       await logMediaFailure(user.id, "vision", err, photoFailMs);
-      return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
+      // Only steer them to "what you ate" if the caption was actually about food. A gym
+      // machine or step screenshot that fails here must never get a food error.
+      const hadFoodContext = !!(message && message.trim() && scanForSAFoods(message).length > 0);
+      return hadFoodContext
+        ? "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown."
+        : "Eish, I couldn't process that image right now. If it's a meal, type what you ate (e.g. *chicken and rice*). If it's a gym machine, tell me which one — or reply *workout* for today's session. If it's your steps, send a clear screenshot of the step count.";
     }
   }
 
