@@ -12,6 +12,7 @@ import { detectLanguage } from "../constants";
 import { checkGptRateLimit, sastDayStart, sastToday } from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { sendWhatsApp } from "../scheduler";
+import { safetyGate } from "../verifiers/response-gate";
 
 export async function handleGptBlock(ctx: {
   phone: string;
@@ -521,7 +522,12 @@ SA voice. Direct. Coach forward, not backward.`;
     gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
   }
 
-  const finalReply = sanitizeCoachReply(langPrefix ? `${langPrefix}${gptReply}` : gptReply, message, user.weeklyFoodBudget, user.injuries);
+  // ── Safety gate: injury/medical conflict detection + LLM revision ──────────
+  // Runs in ~1ms on the fast path (no injuries/no conflicts). LLM revision only
+  // fires when a pattern conflict is detected — adds ~400ms in that case.
+  const rawReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
+  const gateResult = await safetyGate(rawReply, user, message);
+  const finalReply = sanitizeCoachReply(gateResult.response, message, user.weeklyFoodBudget, user.injuries);
 
   // ---- MEMORY: store important facts for future sessions ----
   try {

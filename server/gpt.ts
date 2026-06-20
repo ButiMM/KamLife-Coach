@@ -8,6 +8,7 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
+import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
@@ -824,8 +825,19 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
       fromCache: false,
     };
 
-    foodFallbackCache.set(cacheKey, { result, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
-    return result;
+    // ── Self-verifying loop: math → SA reference → LLM plausibility ──────────
+    // Runs before cache write so every caller gets the verified estimate.
+    // Fail-open: any error returns the original result unchanged.
+    const verified = await verifyMealEstimate(message, result, user).catch(() => ({
+      result, passes: 0, corrected: false, log: [] as string[],
+    }));
+    if (verified.corrected) {
+      console.log(`[gptFoodFallback] verifier corrected estimate in ${verified.passes} pass(es): ${verified.log.join(" | ")}`);
+    }
+    const finalResult = verified.result as GptFoodFallbackResult;
+
+    foodFallbackCache.set(cacheKey, { result: finalResult, expiresAt: Date.now() + FOOD_CACHE_TTL_MS });
+    return finalResult;
   } catch (err) {
     if (!isAiOfflineError(err)) console.warn("[gptFoodFallback] error:", err);
     return null;
