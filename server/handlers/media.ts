@@ -34,6 +34,7 @@ import { getExerciseGifUrl } from "../exercise-media";
 import { getCurrentDayExercises } from "../programme";
 import { matchMachineToDay, machineSetup, machineHowTo, primaryExerciseName } from "../machine-coach";
 import { scribeTranscribe } from "../elevenlabs";
+import { extractVideoFrames } from "../video-frames";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -174,6 +175,81 @@ async function coachGymMachineFromPhoto(
 }
 
 // ============================================================
+// WORKOUT IDENTIFICATION (TikTok/IG screenshots & video frames)
+// ============================================================
+
+interface IdentifiedExercise {
+  name: string;
+  muscles?: string;
+  reps?: string | null;
+  sets?: string | null;
+}
+interface WorkoutIdResult {
+  exercises: IdentifiedExercise[];
+  category?: string | null;
+  difficulty?: string | null;
+}
+
+/**
+ * Identify every distinct exercise across one screenshot or several video frames.
+ * Single image → cheap gpt-4o-mini (often just reading an on-screen list); multiple
+ * frames → gpt-4o (needs to read the movement). Throws on a malformed reply — callers catch.
+ */
+async function identifyExercisesFromImages(
+  openai: OpenAI,
+  images: Array<{ b64: string; ct: string }>,
+  model = "gpt-4o",
+): Promise<WorkoutIdResult> {
+  const userContent: ChatCompletionContentPart[] = [
+    {
+      type: "text",
+      text: images.length > 1
+        ? "These are frames from a workout video, in order. Identify every DISTINCT exercise shown across all the frames — do not list the same exercise twice."
+        : "This is a screenshot of a workout — the exercises may be listed as on-screen text/caption or shown being performed. Identify every exercise.",
+    },
+    ...images.map(im => ({
+      type: "image_url" as const,
+      image_url: { url: `data:${im.ct};base64,${im.b64}`, detail: (images.length > 1 ? "low" : "auto") as "low" | "auto" },
+    })),
+  ];
+  const res = await withTimeout("workout_identify", 25000, () => openai.chat.completions.create({
+    model,
+    max_tokens: 400,
+    temperature: 0,
+    messages: [
+      {
+        role: "system",
+        content: `You identify exercises from workout images or video frames for a fitness coach. Reply with JSON ONLY:
+{"exercises":[{"name":"exercise name","muscles":"primary muscles worked","reps":"reps if visible or null","sets":"sets if visible or null"}],"category":"push|pull|legs|core|cardio|upper|full_body|null","difficulty":"beginner|intermediate|advanced|null"}
+List each distinct exercise ONCE, in the order performed. Use common exercise names (hip thrust, RDL, lat pulldown, push-up, lateral raise). If you cannot identify any exercise, reply exactly {"exercises":[],"category":null,"difficulty":null}.`,
+      },
+      { role: "user", content: userContent },
+    ],
+  }));
+  const raw = res.choices[0]?.message?.content?.trim() || "{}";
+  return JSON.parse(raw.replace(/```json|```/g, "").trim()) as WorkoutIdResult;
+}
+
+/** Turn an identified workout into a WhatsApp-ready breakdown, or "" if nothing was found. */
+function formatWorkoutBreakdown(parsed: WorkoutIdResult | null): string {
+  const ex = parsed?.exercises;
+  if (!ex || ex.length === 0) return "";
+  const lines = ex.slice(0, 12).map((e, i) => {
+    const setsReps = e.sets && e.reps ? ` (${e.sets}×${e.reps})` : e.reps ? ` (${e.reps} reps)` : "";
+    return `${i + 1}. *${e.name}*${setsReps}${e.muscles ? ` — ${e.muscles}` : ""}`;
+  }).join("\n");
+  const metaBits = [
+    parsed?.category ? String(parsed.category).replace(/_/g, " ") : null,
+    parsed?.difficulty ? `${parsed.difficulty} level` : null,
+  ].filter(Boolean);
+  const meta = metaBits.length ? `\n\n_${metaBits.join(", ")}_` : "";
+  const firstMove = ex[0].name.toLowerCase();
+  return `Here's the workout — *${ex.length} exercise${ex.length !== 1 ? "s" : ""}*:\n\n${lines}${meta}`
+    + `\n\n• Reply *show me ${firstMove}* for a form demo on any move`
+    + `\n• Reply *done* once you've trained and I'll log the session`;
+}
+
+// ============================================================
 // HANDLE MEDIA MESSAGE
 // Called from handleMessage when mediaUrl is present.
 // ============================================================
@@ -282,42 +358,16 @@ export async function handleMediaMessage(ctx: {
               await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
               return exReply;
             }
-            // Reference screenshot — TikTok/IG workout save. Identify the exercise(s).
-            try {
-              const exerciseIdRes = await withTimeout("exercise_identify", 10000, () =>
-                openai.chat.completions.create({
-                  model: "gpt-4o-mini", max_tokens: 250, temperature: 0,
-                  messages: [
-                    { role: "system", content: `Identify all exercises visible in this screenshot (likely from TikTok, Instagram, or a fitness video). Reply with JSON only:
-{"exercises":[{"name":"exercise name","muscles":"primary muscles targeted","reps":"reps shown or null","sets":"sets shown or null"}],"category":"push|pull|legs|core|cardio|full_body","difficulty":"beginner|intermediate|advanced"}
-List EVERY distinct exercise visible. If none can be identified, reply: {"exercises":[],"category":null,"difficulty":null}` },
-                    { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
-                  ],
-                })
-              );
-              const raw = exerciseIdRes.choices[0]?.message?.content?.trim() || "{}";
-              const parsed = JSON.parse(raw.replace(/```json|```/g, "").trim()) as {
-                exercises: Array<{ name: string; muscles: string; reps?: string | null; sets?: string | null }>;
-                category?: string | null;
-                difficulty?: string | null;
-              };
-              if (parsed.exercises?.length > 0) {
-                const lines = parsed.exercises.map(e => {
-                  const setsReps = e.sets && e.reps ? ` (${e.sets}×${e.reps})` : e.reps ? ` (${e.reps} reps)` : "";
-                  return `• *${e.name}*${setsReps} — ${e.muscles}`;
-                }).join("\n");
-                const meta = [
-                  parsed.category ? parsed.category.replace("_", " ") : null,
-                  parsed.difficulty ? parsed.difficulty + " level" : null,
-                ].filter(Boolean).join(", ");
-                const exSaveReply = `I can see:\n\n${lines}${meta ? `\n\n${meta.charAt(0).toUpperCase() + meta.slice(1)}.` : ""}\n\nSend me a screenshot for each move you want form tips on. Reply *done* once you've completed the session to log it.`;
-                await logChat(user.id, "[Workout Screenshot]", exSaveReply, "WORKOUT_SCREENSHOT");
-                return exSaveReply;
-              }
-            } catch (e) {
-              console.warn("[exercise_identify]", e);
+            // Reference screenshot — a TikTok/IG workout the client saved. Identify the moves.
+            const shotParsed = await identifyExercisesFromImages(
+              openai, [{ b64: base64, ct: contentType }], "gpt-4o-mini",
+            ).catch((e) => { console.warn("[exercise_identify]", e); return null; });
+            const shotBreakdown = formatWorkoutBreakdown(shotParsed);
+            if (shotBreakdown) {
+              await logChat(user.id, "[Workout Screenshot]", shotBreakdown, "WORKOUT_SCREENSHOT");
+              return shotBreakdown;
             }
-            const exFallback = `I can see a workout screenshot — what exercise is this? Tell me the move and I'll tell you which muscles it hits and whether it fits your programme.`;
+            const exFallback = `I can see a workout screenshot but couldn't pick out the exercises clearly. Just type or voice-note the moves — e.g. *"hip thrusts, RDLs, leg curls"* — and I'll break them all down.`;
             await logChat(user.id, "[Exercise Photo]", exFallback, "EXERCISE_PHOTO");
             return exFallback;
           }
@@ -1365,9 +1415,41 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
     const isWorkoutSave = !isFormCheck && /\b(this workout|try this|these exercises|what exercises|what are these|save this|what is this|add this|do this|can i do this|is this good|found this|check this out|these moves|new workout|workout i saw|is this a good workout)\b/i.test(message || "")
       || (!isFormCheck && message && /\b(workout|routine|circuit|hiit|leg day|push day|pull day|glute|cardio|abs|core)\b/i.test(message));
     if (isWorkoutSave || (!isFormCheck && !message?.trim())) {
-      const videoSaveReply = `Got the workout video 💪\n\nTo identify every exercise: screenshot the move you want to know about (pause on it) and send the screenshot here — I'll name it, tell you which muscles it hits, and you can reply *done* to log the session.\n\nOr just list what you did — e.g. *"hip thrusts, RDLs, leg curls"* — and I'll give you the full breakdown.`;
-      await logChat(user.id, "[Workout Video]", videoSaveReply, "WORKOUT_VIDEO_SAVE");
-      return videoSaveReply;
+      const fallbackMsg = `I couldn't pick out the exercises from that video clearly. Two easy ways:\n\n1. Take *one screenshot* that shows the moves (most workout videos list them on screen) and send it\n2. Or just type or voice-note the exercises — e.g. *"hip thrusts, RDLs, leg curls"*\n\nEither way I'll break them down and can slot them into your plan.`;
+      // Download → frame-extract → identify, all async, so the webhook replies fast.
+      // The breakdown lands as a follow-up WhatsApp message (same pattern as photo comparison).
+      (async () => {
+        try {
+          const sid = process.env.TWILIO_ACCOUNT_SID || "";
+          const token = process.env.TWILIO_AUTH_TOKEN || "";
+          const auth = "Basic " + Buffer.from(`${sid}:${token}`).toString("base64");
+          const vr = await fetch(mediaUrl, { headers: { Authorization: auth } });
+          if (!vr.ok) { await sendWhatsApp(phone, fallbackMsg); return; }
+          const vlen = parseInt(vr.headers.get("content-length") || "0", 10);
+          if (vlen > 20 * 1024 * 1024) {
+            await sendWhatsApp(phone, `That clip's a bit large for me to process. Take *one screenshot* showing the moves and send it, or just type the exercises — I'll break them down.`);
+            return;
+          }
+          const vbuf = await vr.arrayBuffer();
+          const vct = (vr.headers.get("content-type") || ctype || "video/mp4").split(";")[0].trim();
+          const vext = (vct.split("/")[1] || "mp4").replace("quicktime", "mov");
+          const frames = await extractVideoFrames(vbuf, vext, 8);
+          if (frames.length === 0) { await sendWhatsApp(phone, fallbackMsg); return; }
+          const parsed = await identifyExercisesFromImages(
+            openai, frames.map(b => ({ b64: b, ct: "image/jpeg" })), "gpt-4o",
+          ).catch((e) => { console.warn("[WORKOUT_VIDEO] identify", e); return null; });
+          const breakdown = formatWorkoutBreakdown(parsed);
+          if (!breakdown) { await sendWhatsApp(phone, fallbackMsg); return; }
+          await logChat(user.id, "[Workout Video]", breakdown, "WORKOUT_VIDEO");
+          await sendWhatsApp(phone, breakdown);
+        } catch (e) {
+          console.error(`[WORKOUT_VIDEO] error:`, e);
+          await sendWhatsApp(phone, fallbackMsg);
+        }
+      })();
+      const ack = `Got the workout video 💪 Give me a few seconds — I'm breaking down every exercise in it...`;
+      await logChat(user.id, "[Workout Video]", ack, "WORKOUT_VIDEO_ACK");
+      return ack;
     }
 
     const exerciseHint = /\b(squat|deadlift|rdl|bench|row|press|curl|hip thrust|lunge|pull.?up)\b/i.exec(message);
