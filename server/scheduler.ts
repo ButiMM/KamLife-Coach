@@ -11,7 +11,7 @@ import {
   loadState, saveState, todaySAST, hasRunToday,
   weeklyKeyedSent, dailyProactiveCount, recordJobRun,
   escalations, sentProactive,
-  db, lt, eq, lte, and,
+  db, lt, eq, lte, and, sql,
 } from "./scheduler/shared";
 
 // Job imports
@@ -336,20 +336,72 @@ export async function initScheduler(): Promise<void> {
   // ── Annual ────────────────────────────────────────────────────────────────
   cron.schedule("0 5 2 1 *",     () => safe("runNewYearReset",        runNewYearReset),        { timezone: "UTC" }); // Jan 2
 
-  // ── Infrastructure health: daily DB-backup setup reminder ─────────────────
-  // Fires once/day at 9am SAST (7am UTC) until R2_BUCKET is set in Railway.
-  // Self-silences the moment the secret is added — no manual cleanup needed.
+  // ── Daily setup-checklist reminder ────────────────────────────────────────
+  // Fires once/day at 9am SAST (7am UTC). Builds a WhatsApp message listing
+  // every uncompleted infrastructure item that requires a human action.
+  // Each line silences itself the moment the corresponding env var / DB table
+  // is present — the whole message disappears when everything is done.
   cron.schedule("0 7 * * *", async () => {
-    if (process.env.R2_BUCKET) return; // backup configured — nothing to do
-    const today = todaySAST();
-    if (loadState()["backup_setup_reminder"] === today) return;
-    saveState("backup_setup_reminder", today);
     const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
     if (!coachPhone) return;
-    await sendWhatsApp(
-      `whatsapp:${coachPhone.replace(/\D/g, "")}`,
-      `⚠️ *KamLife DB backup not active*\n\nThe GitHub Actions backup job exists but is missing its secrets — no backup has run yet.\n\nAdd these 5 secrets under *GitHub → Settings → Secrets → Actions*:\n\n• \`BACKUP_DATABASE_URL\` — public Railway Postgres URL (*.proxy.rlwy.net)\n• \`R2_ACCESS_KEY_ID\`\n• \`R2_SECRET_ACCESS_KEY\`\n• \`R2_BUCKET\` (e.g. kamlife-db-backups)\n• \`R2_ENDPOINT\` (https://<id>.r2.cloudflarestorage.com)\n\nSee *docs/backup-restore.md* for the full 5-min guide.\n\nThis reminder stops the moment \`R2_BUCKET\` is set in Railway.`
-    ).catch(e => console.error("[BACKUP REMINDER] send failed:", e));
+
+    const items: string[] = [];
+
+    // 1. DB backup — most critical; data loss is unrecoverable
+    if (!process.env.R2_BUCKET) {
+      items.push(
+        "🔴 *DB Backup* — no backup running. Add 5 GitHub secrets (BACKUP_DATABASE_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_ENDPOINT). Guide: docs/backup-restore.md"
+      );
+    }
+
+    // 2. Schema migration — gptCosts table + cascade deletes + indexes
+    try {
+      await db.execute(sql`SELECT 1 FROM gpt_costs LIMIT 1`);
+    } catch (e: any) {
+      if (String(e?.message).includes("does not exist")) {
+        items.push(
+          "🔴 *Schema migration pending* — new tables/indexes not applied. Run: npm run db:push (from Railway shell or local with DATABASE_URL set)"
+        );
+      }
+    }
+
+    // 3. Coach alert phone — required for all scheduler + safety alerts
+    if (!process.env.COACH_ALERT_PHONE) {
+      items.push(
+        "🟠 *COACH_ALERT_PHONE missing* — crisis alerts, scheduler failures, and SLA breaches won't reach you. Set in Railway env vars."
+      );
+    }
+
+    // 4. SMS fallback — critical payment alerts need this for redundancy
+    if (!process.env.TWILIO_SMS_NUMBER) {
+      items.push(
+        "🟠 *TWILIO_SMS_NUMBER missing* — payment failure SMS fallback is disabled. Buy a Twilio number and set this in Railway."
+      );
+    }
+
+    // 5. Exercise GIF CDN — missing = workout messages send text-only
+    if (!process.env.MEDIA_BASE_URL) {
+      items.push(
+        "🟡 *MEDIA_BASE_URL missing* — exercise GIFs won't load in workout messages. Set CDN root in Railway, then upload 21 GIF files."
+      );
+    }
+
+    if (items.length === 0) return; // everything done — go silent
+
+    const today = todaySAST();
+    if (loadState()["setup_checklist_reminder"] === today) return;
+    saveState("setup_checklist_reminder", today);
+
+    const msg = [
+      `📋 *KamLife Setup Checklist* — ${items.length} item${items.length > 1 ? "s" : ""} pending`,
+      "",
+      items.join("\n\n"),
+      "",
+      "This message disappears item-by-item as you complete each one.",
+    ].join("\n");
+
+    await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, msg)
+      .catch(e => console.error("[SETUP CHECKLIST] send failed:", e));
   }, { timezone: "UTC" });
 
   console.log("[SCHEDULER] All cron jobs registered.");
