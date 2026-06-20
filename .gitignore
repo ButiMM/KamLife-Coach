@@ -23,6 +23,7 @@ tmp/
 !CLAUDE.md
 !LAUNCH_BLOCKERS.md
 !TESTING_CHECKLIST.md
+!docs/backup-restore.md
 
 # Marketing assets (local only — not for repo)
 marketing/

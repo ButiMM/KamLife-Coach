@@ -1,0 +1,100 @@
+name: Database Backup
+
+# Backs up the Railway Postgres database to Cloudflare R2 every 6 hours.
+# Runs independently of the app container, so it works even if the app is down.
+# Setup + restore instructions: docs/backup-restore.md
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   BACKUP_DATABASE_URL  - PUBLIC Postgres connection string (the *.proxy.rlwy.net
+#                          one from Railway, NOT the *.railway.internal URL)
+#   R2_ACCESS_KEY_ID     - Cloudflare R2 API token access key id
+#   R2_SECRET_ACCESS_KEY - Cloudflare R2 API token secret
+#   R2_BUCKET            - R2 bucket name (e.g. kamlife-db-backups)
+#   R2_ENDPOINT          - https://<account-id>.r2.cloudflarestorage.com
+
+on:
+  schedule:
+    - cron: "17 */6 * * *" # 00:17, 06:17, 12:17, 18:17 UTC
+  workflow_dispatch: {} # lets you trigger a backup manually from the Actions tab
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # aws-cli (preinstalled on the runner) talks to R2 via these.
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: auto
+      AWS_EC2_METADATA_DISABLED: "true"
+      R2_BUCKET: ${{ secrets.R2_BUCKET }}
+      R2_ENDPOINT: ${{ secrets.R2_ENDPOINT }}
+      DATABASE_URL: ${{ secrets.BACKUP_DATABASE_URL }}
+      RETENTION_DAYS: "30"
+    steps:
+      - name: Guard — required secrets present
+        run: |
+          set -euo pipefail
+          missing=""
+          for v in DATABASE_URL AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY R2_BUCKET R2_ENDPOINT; do
+            if [ -z "${!v:-}" ]; then missing="$missing $v"; fi
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::Missing required secrets:$missing"
+            exit 1
+          fi
+
+      - name: Install postgresql-client 17
+        run: |
+          set -euo pipefail
+          sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
+          curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq postgresql-client-17
+          pg_dump --version
+
+      - name: Dump + compress
+        run: |
+          set -euo pipefail
+          STAMP="$(date -u +%Y%m%d-%H%M%S)"
+          echo "STAMP=$STAMP" >> "$GITHUB_ENV"
+          FILE="kamlife-${STAMP}.sql.gz"
+          echo "FILE=$FILE" >> "$GITHUB_ENV"
+          # --no-owner/--no-privileges so the dump restores cleanly under any role.
+          pg_dump --no-owner --no-privileges "$DATABASE_URL" | gzip -9 > "/tmp/${FILE}"
+          SIZE=$(stat -c%s "/tmp/${FILE}")
+          echo "Dump size: ${SIZE} bytes"
+          # A real dump of this schema is never this small — guard against silent empty backups.
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::Dump suspiciously small (${SIZE} bytes) — treating as failed"
+            exit 1
+          fi
+
+      - name: Upload to R2
+        run: |
+          set -euo pipefail
+          aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/daily/${FILE}" --endpoint-url "$R2_ENDPOINT"
+          echo "Uploaded s3://${R2_BUCKET}/daily/${FILE}"
+
+      - name: Prune backups older than retention window
+        continue-on-error: true # backup already succeeded; pruning is best-effort
+        run: |
+          set -euo pipefail
+          CUTOFF=$(date -u -d "-${RETENTION_DAYS} days" +%Y%m%d)
+          echo "Deleting daily backups dated before ${CUTOFF}"
+          aws s3 ls "s3://${R2_BUCKET}/daily/" --endpoint-url "$R2_ENDPOINT" \
+            | awk '{print $4}' | while read -r key; do
+              [ -z "$key" ] && continue
+              d=$(echo "$key" | sed -n 's/^kamlife-\([0-9]\{8\}\)-.*/\1/p')
+              if [ -n "$d" ] && [ "$d" -lt "$CUTOFF" ]; then
+                echo "  pruning $key"
+                aws s3 rm "s3://${R2_BUCKET}/daily/${key}" --endpoint-url "$R2_ENDPOINT"
+              fi
+            done
+
+      - name: Summary
+        run: echo "✅ Backup complete — daily/${FILE} on R2 (retention ${RETENTION_DAYS}d)"
