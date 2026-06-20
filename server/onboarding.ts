@@ -544,8 +544,14 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    subscriptionStatus: "trial",
-    betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+    // Only grant a free trial on the very first onboarding. If the user already has
+    // any subscription status (active, inactive, trial — even an expired one that was
+    // set on a prior onboarding), do NOT reset it. This closes the trial-restart exploit
+    // where someone re-onboards to get a fresh 7-day trial every time.
+    ...(!u.subscriptionStatus ? {
+      subscriptionStatus: "trial",
+      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+    } : {}),
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
@@ -1246,8 +1252,11 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      subscriptionStatus: "trial",
-      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+      // Gate trial to first-ever onboarding — do NOT restart if user already has any status
+      ...(!u.subscriptionStatus ? {
+        subscriptionStatus: "trial",
+        betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
+      } : {}),
       onboardingState: "COMPLETE",
       popiConsent: true,
       popiConsentAt: new Date(),

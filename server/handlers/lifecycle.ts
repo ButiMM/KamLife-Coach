@@ -63,39 +63,33 @@ export async function handleLifecycle(ctx: {
   if (m === "leaderboard" || m === "leader board" || m === "rankings" || m === "step leaderboard" || m === "top steps" || m === "9" || m === "challenge") {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
-      // Get all users who logged steps this week, compute their daily averages
-      const allStepLogs = await db.select({
-        userId: stepLogs.userId,
-        steps: stepLogs.steps,
-      }).from(stepLogs).where(gte(stepLogs.loggedAt, sevenDaysAgo));
 
-      // Aggregate by user
-      const userSteps: Record<string, { total: number; days: number }> = {};
-      for (const log of allStepLogs) {
-        if (!userSteps[log.userId]) userSteps[log.userId] = { total: 0, days: 0 };
-        userSteps[log.userId].total += log.steps;
-        userSteps[log.userId].days++;
-      }
+      // Single GROUP BY query — no N+1. Aggregates total steps and distinct days
+      // per user for the last 7 days, joined with the users table for names.
+      const rows = await db
+        .select({
+          uid: users.id,
+          name: users.name,
+          total: sql<number>`SUM(${stepLogs.steps})`.as("total"),
+          days: sql<number>`COUNT(DISTINCT DATE(${stepLogs.loggedAt}))`.as("days"),
+        })
+        .from(stepLogs)
+        .innerJoin(users, eq(stepLogs.userId, users.id))
+        .where(gte(stepLogs.loggedAt, sevenDaysAgo))
+        .groupBy(users.id, users.name)
+        .orderBy(sql`SUM(${stepLogs.steps}) DESC`);
 
-      // Get names for all participating users
-      const participantIds = Object.keys(userSteps);
-      if (participantIds.length === 0) {
+      if (rows.length === 0) {
         return `No step logs this week yet. Be the first — send your step count now.`;
       }
 
-      const participants = await db.select({ id: users.id, name: users.name })
-        .from(users).where(sql`${users.id} = ANY(${participantIds})`);
-      const nameMap: Record<string, string> = {};
-      for (const p of participants) nameMap[p.id] = p.name || "Anonymous";
-
-      // Sort by average steps descending
-      const ranked = participantIds.map(uid => ({
-        uid,
-        name: nameMap[uid] || "Anonymous",
-        avg: Math.round(userSteps[uid].total / userSteps[uid].days),
-        days: userSteps[uid].days,
-        total: userSteps[uid].total,
-      })).sort((a, b) => b.avg - a.avg);
+      const ranked = rows.map(r => ({
+        uid: r.uid,
+        name: r.name || "Anonymous",
+        total: Number(r.total),
+        days: Number(r.days),
+        avg: Number(r.days) > 0 ? Math.round(Number(r.total) / Number(r.days)) : 0,
+      }));
 
       // Find current user's rank
       const myRank = ranked.findIndex(r => r.uid === user.id) + 1;

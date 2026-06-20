@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles } from "../../shared/schema";
 import { eq, desc, asc, and, gte, isNull, or, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
@@ -22,8 +22,46 @@ function escapeHtml(s: string): string {
     .replace(/'/g, "&#39;");
 }
 
+// ── In-memory fixed-window rate limiter for admin/dashboard routes ──
+// No npm dependency (express-rate-limit is not installed). Keyed by req.ip plus
+// the dashboard key header (if present) so a stolen/brute-forced key can't hammer
+// endpoints or exfiltrate every user fast. 60 requests per 60s per key.
+// Lazy cleanup evicts expired entries opportunistically so the Map can't grow
+// unbounded across many distinct IPs/keys.
+const RATE_WINDOW_MS = 60_000;
+const RATE_MAX = 60;
+const rateBuckets = new Map<string, { count: number; resetAt: number }>();
+
+function adminRateLimit(req: any, res: any, next: any) {
+  const now = Date.now();
+
+  // Opportunistic eviction of expired windows — bounded sweep keeps it cheap.
+  for (const [k, v] of rateBuckets) {
+    if (now >= v.resetAt) rateBuckets.delete(k);
+  }
+
+  const ip = req.ip || req.socket?.remoteAddress || "unknown";
+  const keyHeader = (req.headers["x-dashboard-key"] as string) || "";
+  const bucketKey = `${ip}|${keyHeader}`;
+
+  const bucket = rateBuckets.get(bucketKey);
+  if (!bucket || now >= bucket.resetAt) {
+    rateBuckets.set(bucketKey, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return next();
+  }
+
+  bucket.count += 1;
+  if (bucket.count > RATE_MAX) {
+    return res.status(429).json({ error: "Too many requests, slow down" });
+  }
+  return next();
+}
+
 export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleMessage" | "logChat">) {
   const { handleMessage, logChat } = deps;
+
+  // Apply rate limiter to all admin and user-data routes.
+  app.use(["/api/admin", "/api/users", "/api/triage"], adminRateLimit);
 
   // ── List all users (paginated) ──
   app.get("/api/users", requireAdminKey, async (req: any, res) => {
@@ -920,6 +958,57 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       res.setHeader("Content-Disposition", `attachment; filename="kamlife-users-${date}.csv"`);
       return res.send(csv);
     } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Export failed" });
+    }
+  });
+
+  // ── POPIA data subject access request — full personal data export ──
+  // Produces a JSON blob of every table row for this user, suitable for
+  // emailing in response to a POPIA Section 23 access request. Admin only.
+  app.get("/api/admin/user/:id/export", requireAdminKey, async (req, res) => {
+    const userId = req.params.id;
+    try {
+      const [profile] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+      if (!profile) return res.status(404).json({ error: "User not found" });
+
+      const [chats, steps, workouts, weights, meals, measurements, photos, weeklies, clothing, exercises, actions] =
+        await Promise.all([
+          db.select().from(chatHistory).where(eq(chatHistory.userId, userId)),
+          db.select().from(stepLogs).where(eq(stepLogs.userId, userId)),
+          db.select().from(workoutLogs).where(eq(workoutLogs.userId, userId)),
+          db.select().from(weightLogs).where(eq(weightLogs.userId, userId)),
+          db.select().from(mealLogs).where(eq(mealLogs.userId, userId)),
+          db.select().from(bodyMeasurements).where(eq(bodyMeasurements.userId, userId)),
+          db.select({ id: progressPhotos.id, photoNumber: progressPhotos.photoNumber, contentType: progressPhotos.contentType, loggedAt: progressPhotos.loggedAt }).from(progressPhotos).where(eq(progressPhotos.userId, userId)),
+          db.select().from(weeklyCheckins).where(eq(weeklyCheckins.userId, userId)),
+          db.select().from(clothingCheckins).where(eq(clothingCheckins.userId, userId)),
+          db.select().from(exerciseLogs).where(eq(exerciseLogs.userId, userId)),
+          db.select().from(clientActions).where(eq(clientActions.userId, userId)),
+        ]);
+
+      const exportData = {
+        exportedAt: new Date().toISOString(),
+        exportedBy: "admin",
+        profile: { ...profile, progressPhotoBase64: "[redacted — use /progress-photos endpoint]" },
+        chatHistory: chats,
+        stepLogs: steps,
+        workoutLogs: workouts,
+        weightLogs: weights,
+        mealLogs: meals,
+        bodyMeasurements: measurements,
+        progressPhotos: photos,
+        weeklyCheckins: weeklies,
+        clothingCheckins: clothing,
+        exerciseLogs: exercises,
+        clientActions: actions,
+      };
+
+      console.log(`[ADMIN AUDIT] POPIA EXPORT — user ${userId} — ${new Date().toISOString()}`);
+      res.setHeader("Content-Type", "application/json");
+      res.setHeader("Content-Disposition", `attachment; filename="popia-export-${userId.slice(0, 8)}-${new Date().toISOString().slice(0, 10)}.json"`);
+      return res.json(exportData);
+    } catch (err: any) {
+      console.error("[ADMIN] POPIA export error:", err);
       return res.status(500).json({ error: err.message || "Export failed" });
     }
   });

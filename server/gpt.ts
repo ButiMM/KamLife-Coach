@@ -1,6 +1,6 @@
 import OpenAI from "openai";
 import { db } from "./db";
-import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs, mealLogs } from "../shared/schema";
+import { users, chatHistory, weightLogs, stepLogs, workoutLogs, exerciseLogs, mealLogs, gptCosts } from "../shared/schema";
 import { eq, desc, and, gte, lt, sql } from "drizzle-orm";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { getPhaseNames } from "./programme";
@@ -62,8 +62,71 @@ const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
 });
 
+// ── Prompt-injection sanitiser for user-supplied free-text fields ──
+// A user who types "ignore previous instructions" in their name or injury field
+// could corrupt the system prompt. We neutralise the most common injection
+// patterns and enforce a length cap so the profile block stays bounded.
+// This is defence-in-depth; GPT still interprets context sensibly for benign content.
+export function sanitizeProfileField(v: string | null | undefined, maxLen = 200): string {
+  if (!v) return "";
+  let s = v
+    .slice(0, maxLen * 2)             // trim before heavy work
+    .replace(/\r?\n|\r/g, " ")        // collapse newlines to spaces (breaks multi-line injection)
+    .replace(/\t/g, " ")
+    .replace(/\s{2,}/g, " ")          // collapse repeated whitespace
+    .trim()
+    .slice(0, maxLen);
+  // Neutralise the most common prompt-injection openers
+  const injectionPatterns = [
+    /ignore\s+(all\s+)?previous\s+instructions?/gi,
+    /disregard\s+(all\s+)?previous\s+instructions?/gi,
+    /forget\s+(all\s+)?previous\s+instructions?/gi,
+    /you\s+are\s+now\s+a\s+/gi,
+    /act\s+as\s+(if\s+)?/gi,
+    /system\s*:/gi,
+    /assistant\s*:/gi,
+    /\[INST\]/gi,
+    /<\|im_start\|>/gi,
+  ];
+  for (const re of injectionPatterns) {
+    s = s.replace(re, "[filtered]");
+  }
+  return s;
+}
+
+// ── Per-call GPT cost recorder ──
+// Fire-and-forget: never throws, never blocks a coaching reply.
+// Model prices (per 1M tokens, USD) as of mid-2025.
+const GPT_PRICE_PER_1M: Record<string, { prompt: number; completion: number }> = {
+  "gpt-4o":           { prompt: 2.50,  completion: 10.00 },
+  "gpt-4o-mini":      { prompt: 0.15,  completion: 0.60  },
+  "gpt-4o-2024-11-20":{ prompt: 2.50,  completion: 10.00 },
+  "gpt-4o-mini-2024-07-18": { prompt: 0.15, completion: 0.60 },
+};
+
+export function recordGptCost(opts: {
+  userId?: string | null;
+  model: string;
+  feature?: string;
+  promptTokens: number;
+  completionTokens: number;
+}): void {
+  const { userId, model, feature, promptTokens, completionTokens } = opts;
+  const prices = GPT_PRICE_PER_1M[model] ?? GPT_PRICE_PER_1M["gpt-4o-mini"];
+  const costUsd = (promptTokens * prices.prompt + completionTokens * prices.completion) / 1_000_000;
+  db.insert(gptCosts).values({
+    userId: userId ?? null,
+    model,
+    feature: feature ?? null,
+    promptTokens,
+    completionTokens,
+    costUsd: costUsd.toFixed(6),
+  }).catch(e => console.warn("[gptCosts] insert failed (non-fatal):", e?.message || e));
+}
+
 export function buildContext(user: any): string {
-  const name = getDisplayName(user) || "a client";
+  // Sanitize all free-text user fields before they enter the system prompt.
+  const name = sanitizeProfileField(getDisplayName(user)) || "a client";
   const goal = user.goalType || "general fitness";
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
@@ -79,13 +142,13 @@ export function buildContext(user: any): string {
   const situation = user.lifeSituation || "";
   const job = user.jobType || "";
   const activity = user.activityLevel || "";
-  const focus = user.primaryFocusArea || "";
-  const injuries = user.injuries || "none";
+  const focus = sanitizeProfileField(user.primaryFocusArea) || "";
+  const injuries = sanitizeProfileField(user.injuries) || "none";
   const age = user.age || 30;
   const water = user.todayWater || 0;
   const experience = user.trainingExperience || "beginner";
 
-  const medicalConditions = user.medicalConditions || "none";
+  const medicalConditions = sanitizeProfileField(user.medicalConditions) || "none";
   const hasMedical = medicalConditions !== "none" && medicalConditions.trim() !== "";
   const medicalDisclaimer = hasMedical
     ? `\nMEDICAL NOTE: This client has: ${medicalConditions}. When giving condition-specific advice (diet, exercise modification, medication timing), ALWAYS end with a one-sentence reminder to consult their doctor or healthcare provider for personalised medical guidance. Never diagnose, never contraindicate prescribed medication, never tell them to stop medication.`
@@ -1069,6 +1132,7 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
         : (inputTokens / 1000) * 0.005   + (outputTokens / 1000) * 0.015;
       const costZAR = costUSD * 18.5;
       console.log(`[COST] ${model} | in:${inputTokens} out:${outputTokens} | $${costUSD.toFixed(5)} (~R${costZAR.toFixed(4)}) | user:${user.id?.slice(-6)}`);
+      recordGptCost({ userId: user.id, model, feature: "coach", promptTokens: inputTokens, completionTokens: outputTokens });
     }
 
     return response.choices[0]?.message?.content?.trim() || "Sorry, I missed that one — send it to me again?";
@@ -1309,9 +1373,10 @@ Examples:
       : 0.5;
     const canonical = typeof parsed.canonical === "string" ? parsed.canonical.trim().slice(0, 400) : "";
 
-    if (response.usage && userId) {
+    if (response.usage) {
       const costUSD = (response.usage.prompt_tokens * 0.00015 + response.usage.completion_tokens * 0.0006) / 1000;
-      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%)${canonical ? ` canon="${canonical.slice(0, 60)}"` : ""} tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)} user:${userId.slice(-6)}`);
+      console.log(`[INTENT] ${intent}(${Math.round(confidence * 100)}%)${canonical ? ` canon="${canonical.slice(0, 60)}"` : ""} tokens:${response.usage.total_tokens} $${costUSD.toFixed(5)}${userId ? ` user:${userId.slice(-6)}` : ""}`);
+      recordGptCost({ userId: userId ?? null, model: "gpt-4o-mini", feature: "classify", promptTokens: response.usage.prompt_tokens ?? 0, completionTokens: response.usage.completion_tokens ?? 0 });
     }
 
     return { intent, confidence, canonical };

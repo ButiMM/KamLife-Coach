@@ -36,6 +36,7 @@ import { matchMachineToDay, machineSetup, machineHowTo, primaryExerciseName } fr
 import { variantGuideHint } from "../exercise-variants";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
+import { assertSafeMediaUrl } from "../net-guard";
 
 // ── SAST today string (YYYY-MM-DD) ──
 function sastToday(): string {
@@ -286,6 +287,12 @@ export async function handleMediaMessage(ctx: {
       const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
       const imgAuthHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
       const imgDownloadStart = Date.now();
+      try {
+        await assertSafeMediaUrl(mediaUrl);
+      } catch (e) {
+        console.warn("[media][ssrf-block]", "image_download", mediaUrl, (e as Error)?.message);
+        return "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown.";
+      }
       const imageResponse = await withTimeout("image_download", 12000, () => fetch(mediaUrl, {
         headers: { Authorization: imgAuthHeader },
       }));
@@ -535,6 +542,12 @@ export async function handleMediaMessage(ctx: {
                   let albumKcal = 0, albumProt = 0;
                   const albumParts: string[] = [];
                   for (const extraUrl of albumExtras.slice(0, 3)) {
+                    try {
+                      await assertSafeMediaUrl(extraUrl);
+                    } catch (e) {
+                      console.warn("[media][ssrf-block]", "album_food", extraUrl.slice(-20), (e as Error)?.message);
+                      continue;
+                    }
                     const r = await fetch(extraUrl, { headers: { Authorization: albumAuthHeader } }).catch(() => null);
                     if (!r?.ok) { console.warn(`[ALBUM_FOOD] download failed url=${extraUrl.slice(-20)}`); continue; }
                     const buf = await r.arrayBuffer();
@@ -641,6 +654,12 @@ export async function handleMediaMessage(ctx: {
           const imgAuthHeaderProg = "Basic " + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID || ""}:${process.env.TWILIO_AUTH_TOKEN || ""}`).toString("base64");
           for (const extraUrl of albumExtrasProgress) {
             try {
+              try {
+                await assertSafeMediaUrl(extraUrl);
+              } catch (e) {
+                console.warn("[media][ssrf-block]", "progress_album", extraUrl.slice(-20), (e as Error)?.message);
+                continue;
+              }
               const r = await fetch(extraUrl, { headers: { Authorization: imgAuthHeaderProg } });
               if (!r.ok) continue;
               const buf = await r.arrayBuffer();
@@ -1023,6 +1042,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const imgAuthHeaderExtra = "Basic " + Buffer.from(`${process.env.TWILIO_ACCOUNT_SID || ""}:${process.env.TWILIO_AUTH_TOKEN || ""}`).toString("base64");
         for (const extraUrl of extraImageUrls.slice(0, 3)) {
           try {
+            try {
+              await assertSafeMediaUrl(extraUrl);
+            } catch (e) {
+              console.warn("[media][ssrf-block]", "image_download_extra", extraUrl.slice(-20), (e as Error)?.message);
+              continue;
+            }
             const extraResp = await withTimeout("image_download_extra", 10000, () => fetch(extraUrl, { headers: { Authorization: imgAuthHeaderExtra } }));
             if (!extraResp.ok) continue;
             const extraBuf = await extraResp.arrayBuffer();
@@ -1175,6 +1200,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const twilioSid = process.env.TWILIO_ACCOUNT_SID || "";
       const twilioToken = process.env.TWILIO_AUTH_TOKEN || "";
       const authHeader = "Basic " + Buffer.from(`${twilioSid}:${twilioToken}`).toString("base64");
+
+      try {
+        await assertSafeMediaUrl(mediaUrl);
+      } catch (e) {
+        console.warn("[media][ssrf-block]", "audio_download", mediaUrl, (e as Error)?.message);
+        return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
+      }
 
       let audioResponse = await withTimeout("audio_download_1", 12000, () => fetch(mediaUrl, { headers: { Authorization: authHeader } }));
       if (!audioResponse.ok) {

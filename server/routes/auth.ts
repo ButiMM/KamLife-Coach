@@ -2,7 +2,7 @@ import type { Express, Request } from "express";
 import crypto from "crypto";
 
 function createSessionToken(secret: string): string {
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
+  const exp = Date.now() + 4 * 60 * 60 * 1000;
   const payload = `admin:${exp}`;
   const sig = crypto.createHmac("sha256", secret).update(payload).digest("hex");
   return `${payload}.${sig}`;
@@ -108,7 +108,7 @@ export function registerAuthRoutes(app: Express) {
       httpOnly: true,
       sameSite: "strict" as const,
       secure: process.env.NODE_ENV === "production",
-      maxAge: 24 * 60 * 60 * 1000,
+      maxAge: 4 * 60 * 60 * 1000,
       path: "/",
     });
     return res.json({ success: true });

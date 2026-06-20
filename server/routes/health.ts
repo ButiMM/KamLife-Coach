@@ -19,6 +19,19 @@ export function registerHealthRoutes(app: Express) {
     }
   });
 
+  // ── Readiness probe — 200 only when the DB is reachable, else 503 ──
+  // Distinct from /health (liveness): orchestrators use this to decide whether the
+  // instance can serve traffic. Kept fast and side-effect-free (single SELECT 1).
+  app.get("/health/ready", async (_req, res) => {
+    try {
+      await db.execute(sql`SELECT 1`);
+      res.json({ ready: true, timestamp: new Date().toISOString() });
+    } catch (e: any) {
+      console.error("[HEALTH] Readiness DB check failed:", e.message);
+      res.status(503).json({ ready: false, reason: "database unavailable", timestamp: new Date().toISOString() });
+    }
+  });
+
   // ── Public stats for landing page (no auth — aggregate only) ──
   app.get("/api/public/stats", async (_req, res) => {
     try {

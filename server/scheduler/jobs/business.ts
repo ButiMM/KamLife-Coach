@@ -32,7 +32,10 @@ export async function runSubscriptionExpiryCheck(): Promise<void> {
   console.log("[SCHEDULER] JOB: Subscription expiry check");
   const clients = await getActiveClients({ ignorePause: true }); // billing must run even when coaching is paused
   const now = Date.now();
-  const threeDaysMs = 3 * 86_400_000;
+  // Grace period is configurable so ops can extend it during bank holidays or PayFast
+  // outages without a code deploy. Default 3 days matches PayFast's retry window.
+  const graceDays = Math.max(1, parseInt(process.env.SUBSCRIPTION_GRACE_PERIOD_DAYS || "3", 10));
+  const threeDaysMs = graceDays * 86_400_000;
   for (const client of clients) {
     if (isPaused(client)) continue;
     try {

@@ -56,9 +56,29 @@ export function registerPaymentRoutes(app: Express) {
   });
 
   // ── PayFast ITN webhook ──
+  // PayFast's production servers send ITNs from a known CIDR range.
+  // Requests from any other IP are logged as suspicious (not rejected outright,
+  // because the signature check is the authoritative guard and PayFast occasionally
+  // uses new IPs before updating their docs — but the log lets us spot spoofing).
+  // Sandbox/local bypasses the check when NODE_ENV !== 'production'.
+  const PAYFAST_IP_RANGES = [
+    // PayFast production — https://developers.payfast.co.za/docs#step_4_verify_itn
+    "197.97.145.", // 197.97.145.144/28
+    "41.74.179.",  // 41.74.179.192/27
+  ];
+  function isPayFastIp(ip: string): boolean {
+    if (process.env.NODE_ENV !== "production") return true;
+    const clean = ip.replace(/^::ffff:/, ""); // strip IPv4-mapped prefix
+    return PAYFAST_IP_RANGES.some(prefix => clean.startsWith(prefix));
+  }
+
   app.post("/webhook/payfast", async (req: any, res: any) => {
     res.sendStatus(200);
     const itnId = `ITN-${Date.now()}`;
+    const requestIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+    if (!isPayFastIp(requestIp)) {
+      console.warn(`[PAYFAST:${itnId}] ⚠️  ITN from non-PayFast IP: ${requestIp} — proceeding but flagged for review`);
+    }
     try {
       const data = req.body as Record<string, string>;
       const paymentStatus = data.payment_status;
@@ -239,6 +259,40 @@ export function registerPaymentRoutes(app: Express) {
             body: `${name}, your KamLife Coach subscription has been cancelled. Your progress is saved — you can rejoin anytime. Reply *join* when you are ready.`
           }).catch(() => {});
         }
+      } else if (paymentStatus === "PENDING") {
+        // EFT / manual payments show PENDING before COMPLETE. Log and wait — do NOT
+        // activate the subscription yet. A subsequent COMPLETE ITN will activate.
+        console.log(`[PAYFAST:${itnId}] Payment PENDING — ${normalisedPhone} | R${amountGross} — awaiting COMPLETE`);
+      } else if (paymentStatus === "REFUND" || paymentStatus === "REFUNDED") {
+        // User was refunded — suspend access immediately.
+        await db.update(users).set({
+          subscriptionStatus: "inactive",
+          cancelledAt: new Date(),
+        }).where(eq(users.phoneNumber, normalisedPhone));
+        console.log(`[PAYFAST:${itnId}] Payment REFUNDED — ${normalisedPhone} — subscription deactivated`);
+        await db.insert(adminEvents).values({
+          action: "subscription_refunded",
+          targetPhone: normalisedPhone,
+          reason: `PayFast REFUND ITN received`,
+          meta: { pfPaymentId, amountGross },
+        }).catch(e => console.error("[PAYFAST] adminEvents insert failed:", e));
+        if (fromNum) {
+          const name = targetUser.name || "there";
+          await twilioC.messages.create({
+            from: fromNum, to: normalisedPhone,
+            body: `${name}, your KamLife Coach payment has been refunded. Your access has been paused. If this is a mistake, reply *pay* or contact us at support@kamlifecoach.co.za.`,
+          }).catch(() => {});
+        }
+      } else if (paymentStatus === "REFUND_REVERSED") {
+        // Chargeback reversed — reinstate if the user is still inactive.
+        if (targetUser.subscriptionStatus === "inactive") {
+          const renewsAt = new Date(Date.now() + 30 * 86_400_000);
+          await db.update(users).set({ subscriptionStatus: "active", subscriptionRenewsAt: renewsAt, cancelledAt: null })
+            .where(eq(users.phoneNumber, normalisedPhone));
+          console.log(`[PAYFAST:${itnId}] REFUND_REVERSED — ${normalisedPhone} — subscription reinstated`);
+        }
+      } else {
+        console.warn(`[PAYFAST:${itnId}] Unhandled payment_status: ${paymentStatus} — logged but no action taken`);
       }
     } catch (err) {
       console.error(`[PAYFAST:${itnId}] Webhook processing error:`, err);

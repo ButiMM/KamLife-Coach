@@ -480,9 +480,34 @@ declare module "http" {
 
 // Progress photo uploads (/api/users) and voice broadcast uploads (/api/admin)
 // can be up to ~8MB base64. All other JSON endpoints get a tight 100kb cap.
+// In production we ship a real Content-Security-Policy. styleSrc allows
+// 'unsafe-inline' because the bundled dashboard CSS needs it — but scriptSrc
+// deliberately does NOT, so injected inline scripts can't execute (XSS brake).
+// In development CSP stays off: Vite's HMR client injects inline scripts and a
+// strict policy breaks the dev server. crossOriginEmbedderPolicy stays off in
+// both so WhatsApp/Twilio iframes and cross-origin media keep loading.
+const isProd = process.env.NODE_ENV === "production";
 app.use(helmet({
-  contentSecurityPolicy: false, // CSP managed per-page; disabling globally to avoid breaking Vite/WA iframes
+  contentSecurityPolicy: isProd
+    ? {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          imgSrc: ["'self'", "data:", "https:"],
+          connectSrc: ["'self'", "https:"],
+          frameAncestors: ["'self'"],
+          objectSrc: ["'none'"],
+          baseUri: ["'self'"],
+        },
+      }
+    : false,
   crossOriginEmbedderPolicy: false,
+  // Sensible defaults kept on explicitly: nosniff, clickjacking protection,
+  // and a strict referrer policy.
+  noSniff: true,
+  frameguard: { action: "sameorigin" },
+  referrerPolicy: { policy: "no-referrer" },
 }));
 
 app.use(
@@ -580,27 +605,43 @@ async function activateCoachAccount(): Promise<void> {
   }
 
   // ---- STARTUP ENV VALIDATION ----
-  const REQUIRED_ENV: Array<{ key: string; warn: boolean; hint: string }> = [
-    { key: "DATABASE_URL", warn: false, hint: "PostgreSQL connection required — app will crash without this" },
-    { key: "TWILIO_ACCOUNT_SID", warn: true, hint: "WhatsApp messages will not send" },
-    { key: "TWILIO_AUTH_TOKEN", warn: true, hint: "WhatsApp messages will not send" },
-    { key: "TWILIO_WHATSAPP_NUMBER", warn: true, hint: "WhatsApp messages will not send" },
-    { key: "AI_INTEGRATIONS_OPENAI_API_KEY", warn: true, hint: "GPT coaching responses will fail" },
-    { key: "COACH_DASHBOARD_KEY", warn: true, hint: "Dashboard admin access blocked until this is set" },
-    { key: "PAYFAST_MERCHANT_ID", warn: true, hint: "Payment links will not work" },
-    { key: "PAYFAST_MERCHANT_KEY", warn: true, hint: "PayFast payment link generation will fail" },
-    { key: "PAYFAST_PASSPHRASE", warn: true, hint: "PayFast ITN signature validation will reject every payment notification — users who pay will not be activated" },
-    { key: "APP_URL", warn: true, hint: "Payment links and PayFast callbacks will use fallback domain — set to your Railway URL" },
+  // `critical: true` vars HARD-FAIL the boot in production — better to crash loud
+  // (and let Railway restart) than serve a silently broken bot that drops payments
+  // or every WhatsApp reply. In development the same vars only warn so local work
+  // isn't blocked. `presentKeys` lists accepted aliases — the OpenAI key is read
+  // under two names across the codebase, so either satisfies the check.
+  const REQUIRED_ENV: Array<{ key: string; critical: boolean; hint: string; presentKeys?: string[] }> = [
+    { key: "DATABASE_URL", critical: true, hint: "PostgreSQL connection required — app will crash without this" },
+    { key: "TWILIO_ACCOUNT_SID", critical: true, hint: "WhatsApp messages will not send" },
+    { key: "TWILIO_AUTH_TOKEN", critical: true, hint: "WhatsApp messages will not send" },
+    { key: "TWILIO_WHATSAPP_NUMBER", critical: true, hint: "WhatsApp messages will not send" },
+    { key: "OPENAI_API_KEY", critical: true, hint: "GPT coaching responses will fail", presentKeys: ["OPENAI_API_KEY", "AI_INTEGRATIONS_OPENAI_API_KEY"] },
+    { key: "COACH_DASHBOARD_KEY", critical: false, hint: "Dashboard admin access blocked until this is set" },
+    { key: "PAYFAST_MERCHANT_ID", critical: true, hint: "Payment links will not work" },
+    { key: "PAYFAST_MERCHANT_KEY", critical: false, hint: "PayFast payment link generation will fail" },
+    { key: "PAYFAST_PASSPHRASE", critical: true, hint: "PayFast ITN signature validation will reject every payment notification — users who pay will not be activated" },
+    { key: "APP_URL", critical: false, hint: "Payment links and PayFast callbacks will use fallback domain — set to your Railway URL" },
   ];
 
-  const missing = REQUIRED_ENV.filter(e => !process.env[e.key]);
+  const isPresent = (e: typeof REQUIRED_ENV[number]) =>
+    (e.presentKeys ?? [e.key]).some(k => !!process.env[k]);
+  const missing = REQUIRED_ENV.filter(e => !isPresent(e));
   if (missing.length > 0) {
     for (const e of missing) {
-      if (e.warn) {
-        console.warn(`[STARTUP] ⚠️  Missing env var: ${e.key} — ${e.hint}`);
-      } else {
+      if (e.critical) {
         console.error(`[STARTUP] ❌  CRITICAL: Missing env var: ${e.key} — ${e.hint}`);
+      } else {
+        console.warn(`[STARTUP] ⚠️  Missing env var: ${e.key} — ${e.hint}`);
       }
+    }
+  }
+
+  // Hard-fail in production if any critical var is missing — refuse to boot broken.
+  if (process.env.NODE_ENV === "production") {
+    const missingCritical = missing.filter(e => e.critical).map(e => e.key);
+    if (missingCritical.length > 0) {
+      console.error(`[STARTUP] ❌  Refusing to start in production — missing critical env vars: ${missingCritical.join(", ")}`);
+      throw new Error(`Missing critical env vars in production: ${missingCritical.join(", ")}`);
     }
   }
 
@@ -641,11 +682,12 @@ async function activateCoachAccount(): Promise<void> {
       }
       process.exit(0);
     });
-    // Force-exit after 15s if connections don't drain
+    // Force-exit after 30s if connections don't drain — long enough for a cron
+    // fan-out (e.g. proactive batch) already in flight to finish before the kill.
     setTimeout(() => {
       console.error("[SHUTDOWN] Force exit after timeout");
       process.exit(1);
-    }, 15_000).unref();
+    }, 30_000).unref();
   };
 
   process.on("SIGTERM", () => shutdown("SIGTERM"));

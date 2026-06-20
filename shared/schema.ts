@@ -123,13 +123,13 @@ export const weightLogs = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     weight: numeric("weight").notNull(),
     loggedAt: timestamp("logged_at").defaultNow(),
   },
   (table) => {
     return {
-      userWeightIdx: index("weight_logs_user_idx").on(table.userId),
+      userWeightIdx: index("weight_logs_user_idx").on(table.userId, table.loggedAt),
     };
   },
 );
@@ -142,13 +142,13 @@ export const workoutLogs = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     workoutCompleted: boolean("workout_completed").default(false),
     loggedAt: timestamp("logged_at").defaultNow(),
   },
   (table) => {
     return {
-      userWorkoutIdx: index("workout_logs_user_idx").on(table.userId),
+      userWorkoutIdx: index("workout_logs_user_idx").on(table.userId, table.loggedAt),
     };
   },
 );
@@ -161,13 +161,13 @@ export const stepLogs = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     steps: integer("steps").notNull(),
     loggedAt: timestamp("logged_at").defaultNow(),
   },
   (table) => {
     return {
-      userStepIdx: index("step_logs_user_idx").on(table.userId),
+      userStepIdx: index("step_logs_user_idx").on(table.userId, table.loggedAt),
     };
   },
 );
@@ -182,7 +182,7 @@ export const mealLogs = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     loggedAt: timestamp("logged_at").defaultNow().notNull(),
     rawMessage: text("raw_message"),            // what user sent
     source: text("source").notNull(),           // 'sa_scanner' | 'gpt_fallback' | 'photo' | 'retro'
@@ -210,7 +210,7 @@ export const weeklyCheckins = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     weekStartDate: date("week_start_date").notNull(),
     weight: numeric("weight"),
     waistCm: numeric("waist_cm"),
@@ -232,7 +232,7 @@ export const chatHistory = pgTable("chat_history", {
   id: serial("id").primaryKey(),
   userId: uuid("user_id")
     .notNull()
-    .references(() => users.id),
+    .references(() => users.id, { onDelete: "cascade" }),
   messageIn: text("message_in"),
   messageOut: text("message_out"),
   intent: text("intent"),
@@ -250,7 +250,7 @@ export const clothingCheckins = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     jeansFit: text("jeans_fit"),
     energyLevel: text("energy_level"),
     stomachFeel: text("stomach_feel"),
@@ -273,14 +273,14 @@ export const bodyMeasurements = pgTable(
       .default(sql`gen_random_uuid()`),
     userId: uuid("user_id")
       .notNull()
-      .references(() => users.id),
+      .references(() => users.id, { onDelete: "cascade" }),
     measurementType: text("measurement_type").notNull(),
     value: text("value").notNull(),
     loggedAt: timestamp("logged_at").defaultNow(),
   },
   (table) => {
     return {
-      userMeasurementIdx: index("body_measurements_user_idx").on(table.userId),
+      userMeasurementIdx: index("body_measurements_user_idx").on(table.userId, table.loggedAt),
     };
   },
 );
@@ -289,21 +289,21 @@ export const exerciseLogs = pgTable(
   "exercise_logs",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: uuid("user_id").notNull().references(() => users.id),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     exerciseName: text("exercise_name").notNull(),
     weightKg: numeric("weight_kg"),
     reps: integer("reps"),
     sets: integer("sets"),
     loggedAt: timestamp("logged_at").defaultNow(),
   },
-  (table) => ({ userExerciseIdx: index("exercise_logs_user_idx").on(table.userId) }),
+  (table) => ({ userExerciseIdx: index("exercise_logs_user_idx").on(table.userId, table.loggedAt) }),
 );
 
 export const progressPhotos = pgTable(
   "progress_photos",
   {
     id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-    userId: uuid("user_id").notNull().references(() => users.id),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     photoNumber: integer("photo_number").notNull().default(1),
     photoBase64: text("photo_base64").notNull(),
     contentType: text("content_type").notNull().default("image/jpeg"),
@@ -319,7 +319,7 @@ export const progressPhotosRelations = relations(progressPhotos, ({ one }) => ({
 // === ESCALATION INBOX — human-review queue with SLA timers ===
 export const escalations = pgTable("escalations", {
   id: serial("id").primaryKey(),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   reason: text("reason").notNull(), // e.g. "injury", "billing", "frustrated", "medical", "manual"
   triggerMessage: text("trigger_message"), // the user message that triggered escalation
   status: text("status").notNull().default("open"), // open | claimed | resolved | expired
@@ -367,6 +367,26 @@ export const paymentEvents = pgTable("payment_events", {
   uniqueEvent: uniqueIndex("payment_events_unique_idx").on(table.provider, table.providerPaymentId),
 }));
 
+// === GPT COSTS — per-call token + cost ledger for unit-economics visibility ===
+// Every OpenAI call (coach reply, food vision, workout ID, classifier) writes one row.
+// Aggregate by user/day/month to see real margin per client and catch runaway usage.
+// Writes are best-effort/fire-and-forget — a logging failure must never break coaching.
+export const gptCosts = pgTable("gpt_costs", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }), // nullable: pre-user classifiers
+  model: text("model").notNull(),
+  feature: text("feature"), // 'coach' | 'food_vision' | 'workout_id' | 'classify' | 'voice' | ...
+  promptTokens: integer("prompt_tokens").notNull().default(0),
+  completionTokens: integer("completion_tokens").notNull().default(0),
+  costUsd: numeric("cost_usd", { precision: 12, scale: 6 }).notNull().default("0"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userDateIdx: index("gpt_costs_user_date_idx").on(table.userId, table.createdAt),
+  dateIdx: index("gpt_costs_date_idx").on(table.createdAt),
+}));
+
+export type GptCost = typeof gptCosts.$inferSelect;
+
 // === SENT PROACTIVE — durable dedupe for scheduled messages ===
 // Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
 // The unique index below guarantees the same (user, messageKey, window) can only
@@ -377,7 +397,7 @@ export const paymentEvents = pgTable("payment_events", {
 // is the triple, so different windows for the same message are fine.
 export const sentProactive = pgTable("sent_proactive", {
   id: serial("id").primaryKey(),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   messageKey: text("message_key").notNull(),
   dedupeWindow: text("dedupe_window").notNull(),
   sentAt: timestamp("sent_at").defaultNow().notNull(),
@@ -407,7 +427,7 @@ export const abExperiments = pgTable("ab_experiments", {
 export const abAssignments = pgTable("ab_assignments", {
   id: serial("id").primaryKey(),
   experimentId: integer("experiment_id").notNull().references(() => abExperiments.id),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   variant: text("variant").notNull(), // "A" or "B"
   delivered: boolean("delivered").default(false),
   responded: boolean("responded").default(false),
@@ -454,7 +474,7 @@ export const messages = pgTable("messages", {
 // === HEALTH APP INTEGRATIONS — Google Fit / Apple Shortcuts step sync ===
 export const userIntegrations = pgTable("user_integrations", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   provider: text("provider").notNull(), // 'google_fit'
   accessToken: text("access_token"),
   refreshToken: text("refresh_token"),
@@ -469,7 +489,7 @@ export const userIntegrations = pgTable("user_integrations", {
 
 export const clientActions = pgTable("client_actions", {
   id: serial("id").primaryKey(),
-  userId: uuid("user_id").notNull().references(() => users.id),
+  userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   content: text("content").notNull(),
   dueAt: timestamp("due_at"),
   completedAt: timestamp("completed_at"),

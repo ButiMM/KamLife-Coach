@@ -175,9 +175,10 @@ export async function initScheduler(): Promise<void> {
 
   schedulerInitialised = true;
 
-  // Safe job runner — catches, logs, records run telemetry, and alerts coach on repeated failures
+  // Safe job runner — catches, logs, records run telemetry, and alerts coach on failure.
+  // opts.critical = true → alert on the VERY FIRST failure (default: alert after 2 in a row).
   const jobFailureCounts: Record<string, number> = {};
-  function safe(name: string, fn: () => Promise<void>): void {
+  function safe(name: string, fn: () => Promise<void>, opts?: { critical?: boolean }): void {
     const started = Date.now();
     fn().then(() => {
       recordJobRun(name, true, Date.now() - started);
@@ -187,12 +188,13 @@ export async function initScheduler(): Promise<void> {
       jobFailureCounts[name] = (jobFailureCounts[name] || 0) + 1;
       const failures = jobFailureCounts[name];
       console.error(`[SCHEDULER] ${name} failed (x${failures}):`, e);
-      // Alert coach after 2 consecutive failures on any critical job
+      const isCritical = opts?.critical ?? false;
+      const alertThreshold = isCritical ? 1 : 2;
       const criticalJobs = ["runMorningCheckin", "runEveningAccountability", "runSundayWeeklyReport", "runPhaseAdvancement", "runSubscriptionExpiryCheck"];
-      if (failures >= 2 && criticalJobs.includes(name)) {
+      if (failures >= alertThreshold && (isCritical || criticalJobs.includes(name))) {
         const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
         if (coachPhone) {
-          const alertMsg = `⚠️ KamLife Scheduler Alert: "${name}" has failed ${failures} times in a row.\n\nError: ${String(e).slice(0, 200)}\n\nCheck Railway logs immediately.`;
+          const alertMsg = `⚠️ KamLife Scheduler Alert: "${name}" has failed ${failures} time${failures === 1 ? "" : "s"}${failures === 1 ? "" : " in a row"}.\n\nError: ${String(e).slice(0, 200)}\n\nCheck Railway logs immediately.`;
           sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, alertMsg).catch(() => {});
         }
       }
@@ -203,7 +205,7 @@ export async function initScheduler(): Promise<void> {
   safe("runStepSyncCatchup", runStepSyncCatchup);
 
   // ── Daily jobs ────────────────────────────────────────────────────────────
-  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin),           { timezone: "UTC" }); // 6am SAST
+  cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin, { critical: true }), { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability),    { timezone: "UTC" }); // 7pm SAST
   cron.schedule("2 4 * * *",    () => safe("runWeek3Intervention",      runWeek3Intervention),        { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 6 * * *",    () => safe("runMilestoneCelebrations",  runMilestoneCelebrations),    { timezone: "UTC" }); // 8am SAST

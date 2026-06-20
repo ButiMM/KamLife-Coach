@@ -44,9 +44,9 @@ if (!STUB && !process.env.DATABASE_URL) {
 }
 
 function makeRealPool() {
-  // Railway postgres allows 100 connections; default 50 for the app leaves headroom
-  // for admin/migrations. Tunable as the base grows (DB_POOL_MAX).
-  const max = Math.max(5, Number(process.env.DB_POOL_MAX) || 50);
+  // Railway postgres allows 100 connections; default 25 for the app leaves headroom
+  // for admin/migrations and a second replica. Tunable as the base grows (DB_POOL_MAX).
+  const max = Math.max(5, Number(process.env.DB_POOL_MAX) || 25);
   // Kill a pathological query before it pins a connection and cascades into pool
   // exhaustion (set 0 to disable).
   const stmtTimeout = process.env.PG_STATEMENT_TIMEOUT_MS !== undefined

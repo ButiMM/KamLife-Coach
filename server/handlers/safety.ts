@@ -10,10 +10,49 @@ import {
   users, chatHistory, stepLogs, workoutLogs, weightLogs,
   weeklyCheckins, clothingCheckins, bodyMeasurements,
   mealLogs, progressPhotos, escalations, abAssignments, exerciseLogs,
-  sentProactive, clientActions,
+  sentProactive, clientActions, adminEvents,
 } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
+
+// Send a Twilio message with exponential-backoff retries. On complete failure,
+// records a row in adminEvents so the coach can find missed alerts on reload.
+async function sendAlertWithRetry(opts: {
+  label: string;
+  from: string;
+  to: string;
+  body: string;
+  phone: string;
+  name: string;
+  originalMessage: string;
+}): Promise<void> {
+  const { label, from, to, body, phone, name, originalMessage } = opts;
+  const delays = [500, 1500, 4500];
+  for (let i = 0; i < delays.length; i++) {
+    try {
+      const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
+      await alertClient.messages.create({ from, to, body });
+      console.log(`[${label}] Coach alert sent to ${to} (attempt ${i + 1})`);
+      return;
+    } catch (e: any) {
+      const isLast = i === delays.length - 1;
+      console.error(`[${label}] Alert send failed (attempt ${i + 1}${isLast ? ", FINAL" : ""}):`, e?.message || e);
+      if (!isLast) await new Promise(r => setTimeout(r, delays[i]));
+    }
+  }
+  // All retries exhausted — write to adminEvents so the coach sees it on reload
+  try {
+    await db.insert(adminEvents).values({
+      action: "crisis_alert_failed",
+      targetPhone: phone,
+      reason: `${label}: all 3 Twilio send attempts failed`,
+      meta: { clientName: name, messageSnippet: originalMessage.slice(0, 200) },
+    });
+    console.error(`[${label}] ⚠️  Recorded crisis_alert_failed in adminEvents for ${phone}`);
+  } catch (dbErr) {
+    console.error(`[${label}] ⚠️  Also failed to write adminEvents:`, dbErr);
+  }
+}
 
 // ── Crisis detection ──────────────────────────────────────────
 const CRISIS_PHRASES = [
@@ -53,18 +92,16 @@ export async function runSafetyGuards(
     if (!coachAlertPhone) {
       console.error(`[CRISIS] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${crisisName} (${phone}). Message: "${message.slice(0, 150)}"`);
     } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      try {
-        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
-        await alertClient.messages.create({
-          from: fromNum,
-          to: `whatsapp:${coachAlertPhone}`,
-          body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
-        });
-        console.log(`[CRISIS] Coach alert sent to ${coachAlertPhone}`);
-      } catch (e) {
-        console.error(`[CRISIS] ⚠️  COACH ALERT SEND FAILED — coach NOT notified! Client: ${crisisName} (${phone}). Error:`, e);
-      }
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+      await sendAlertWithRetry({
+        label: "CRISIS",
+        from: fromNum!,
+        to: `whatsapp:${coachAlertPhone}`,
+        body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
+        phone,
+        name: crisisName,
+        originalMessage: message,
+      });
     }
     return crisisReply;
   }
@@ -87,18 +124,16 @@ export async function runSafetyGuards(
     if (!coachAlertPhone) {
       console.error(`[ACUTE_MEDICAL] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${acuteName} (${phone}). Message: "${message.slice(0, 150)}"`);
     } else if (process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN) {
-      try {
-        const alertClient = twilio(process.env.TWILIO_ACCOUNT_SID, process.env.TWILIO_AUTH_TOKEN);
-        const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
-        await alertClient.messages.create({
-          from: fromNum,
-          to: `whatsapp:${coachAlertPhone}`,
-          body: `🚨 MEDICAL ALERT\nClient: ${acuteName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been directed to call 10177. Please check on this client.`,
-        });
-        console.log(`[ACUTE_MEDICAL] Coach alert sent to ${coachAlertPhone}`);
-      } catch (e) {
-        console.error(`[ACUTE_MEDICAL] ⚠️  COACH ALERT SEND FAILED — coach NOT notified! Client: ${acuteName} (${phone}). Error:`, e);
-      }
+      const fromNum = process.env.TWILIO_WHATSAPP_NUMBER?.startsWith("whatsapp:") ? process.env.TWILIO_WHATSAPP_NUMBER : `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER}`;
+      await sendAlertWithRetry({
+        label: "ACUTE_MEDICAL",
+        from: fromNum!,
+        to: `whatsapp:${coachAlertPhone}`,
+        body: `🚨 MEDICAL ALERT\nClient: ${acuteName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been directed to call 10177. Please check on this client.`,
+        phone,
+        name: acuteName,
+        originalMessage: message,
+      });
     }
     return acuteReply;
   }
