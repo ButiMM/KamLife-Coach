@@ -12,6 +12,7 @@ import {
 import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
 import { SUPPLEMENT_GUIDE } from "../constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExerciseDemoFormCue } from "../exercise-media";
+import { matchVariantGuideRequest, formatVariantGuide } from "../exercise-variants";
 import {
   buildDayWorkout, buildDayWorkoutForType, buildFullProgramme,
   getKamlifeProgramme, getDayType,
@@ -1560,6 +1561,23 @@ export async function handleMiscCommands(ctx: {
     // Generic substitution advice
     const reply = `Tell me which exercise you cannot do and I will give you alternatives.\n\nExamples:\n• "can't do squats" (knee issue)\n• "alternative to deadlift" (back concern)\n• "can't do pull-ups" (not strong enough yet)\n• "instead of bench press" (shoulder pain)\n\nI have alternatives for every exercise — ${mode === "gym" ? "gym" : "home"} options based on your setup.`;
     return reply;
+  }
+
+  // ---- EXERCISE VARIANTS GUIDE — "show me shoulder press", "types of leg press", "row options" ----
+  // A GENERIC movement name ("shoulder press") means "which machine is this and how do I use
+  // it" — clients without a trainer ask this constantly. Show the menu of real-world variants
+  // with how-to-spot-each. A SPECIFIC variant ("machine shoulder press") or an explicit form
+  // request ("shoulder press form") returns null here and falls through to the single-image
+  // demo below — so the guide can safely point users at "<movement> form" without looping.
+  {
+    const famKey = matchVariantGuideRequest(m);
+    if (famKey) {
+      const guide = formatVariantGuide(famKey);
+      if (guide) {
+        await logChat(user.id, message, `${famKey} variants guide`, "EXERCISE_VARIANTS");
+        return guide;
+      }
+    }
   }
 
   // ---- EXERCISE DEMO — "show me squat", "how to do a bicep curl", "squat form" ----

@@ -33,6 +33,7 @@ import { sendWhatsApp } from "../scheduler/shared";
 import { getExerciseGifUrl } from "../exercise-media";
 import { getCurrentDayExercises } from "../programme";
 import { matchMachineToDay, machineSetup, machineHowTo, primaryExerciseName } from "../machine-coach";
+import { variantGuideHint } from "../exercise-variants";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 
@@ -166,6 +167,8 @@ async function coachGymMachineFromPhoto(
         ? `\n\nThis isn't on today's session — reply *workout* to see what you're doing today.`
         : `\n\nReply *workout* to get your programme.`;
     }
+    const hint = variantGuideHint(slug);
+    if (hint) reply += `\n\n${hint}`;
     if (imageUrl) reply += `\n[MEDIA:${imageUrl}]`;
     return reply;
   } catch (e) {
