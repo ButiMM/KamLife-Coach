@@ -16,71 +16,20 @@
  */
 
 import OpenAI from "openai";
+import { extractBodyParts, checkExercisesAgainstInjuries } from "./injury-rules";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY,
 });
 
-// ── Injury → contraindicated exercise keywords ────────────────────────────────
-// Keys are body-part tokens extracted from the injuries field.
-// Values are exercise phrases to flag in the response (case-insensitive).
-const INJURY_CONTRAINDICATIONS: Record<string, string[]> = {
-  knee: [
-    "squat", "lunge", "leg press", "leg extension", "jumping",
-    "plyometric", "box jump", "step up", "step-up", "sprint", "running",
-    "jogging", "bulgarian", "pistol squat",
-  ],
-  back: [
-    "deadlift", "bent over row", "bent-over row", "good morning",
-    "sit-up", "sit up", "crunch", "roman chair", "back extension",
-    "suitcase carry", "jefferson curl",
-  ],
-  shoulder: [
-    "overhead press", "shoulder press", "military press", "lateral raise",
-    "front raise", "upright row", "arnold press", "clean and press",
-    "pull-up", "chin-up", "dip",
-  ],
-  hip: [
-    "hip thrust", "squat", "lunge", "deadlift", "step up", "step-up",
-    "leg press", "cable kickback",
-  ],
-  ankle: [
-    "jump", "jumping", "sprint", "sprinting", "box jump", "plyometric",
-    "calf raise", "rope skipping",
-  ],
-  wrist: [
-    "push-up", "pushup", "bench press", "bicep curl", "wrist curl",
-    "pull-up", "plank", "front rack", "clean",
-  ],
-  neck: ["overhead press", "upright row", "neck curl", "neck extension"],
-};
-
-// ── Body part extraction from free-text injury description ───────────────────
-function extractBodyParts(injuries: string): string[] {
-  const lower = injuries.toLowerCase();
-  const parts: string[] = [];
-  if (/knee|patella|acl|mcl|meniscus/i.test(lower)) parts.push("knee");
-  if (/back|spine|lumbar|herniat|disc|sciatica|lower back|upper back/i.test(lower)) parts.push("back");
-  if (/shoulder|rotator|cuff|labrum/i.test(lower)) parts.push("shoulder");
-  if (/hip|iliopsoas|it band|iliotib/i.test(lower)) parts.push("hip");
-  if (/ankle|achilles|plantar/i.test(lower)) parts.push("ankle");
-  if (/wrist|carpal|forearm.*pain|tendon.*wrist/i.test(lower)) parts.push("wrist");
-  if (/neck|cervical/i.test(lower)) parts.push("neck");
-  return parts;
-}
+// Injury → contraindicated-exercise knowledge lives in ./injury-rules so the
+// programme validator and this response gate reason about injuries identically.
 
 // ── Check response for contraindicated exercises ──────────────────────────────
 function checkInjuryConflicts(response: string, bodyParts: string[]): string[] {
-  const lower = response.toLowerCase();
-  const conflicts: string[] = [];
-  for (const part of bodyParts) {
-    const banned = INJURY_CONTRAINDICATIONS[part] || [];
-    const found = banned.filter(ex => lower.includes(ex));
-    if (found.length > 0) {
-      conflicts.push(`Response recommends "${found.join('", "')}" but client has ${part} injury`);
-    }
-  }
-  return conflicts;
+  // checkExercisesAgainstInjuries returns "loads knee: squat, lunge" per part —
+  // re-phrase for the gate's conflict log / revision prompt.
+  return checkExercisesAgainstInjuries(response, bodyParts).map(c => `Response ${c} but client has matching injury`);
 }
 
 // ── Check response against medical conditions ─────────────────────────────────

@@ -4,6 +4,20 @@
 // ============================================================
 
 import { resolveExerciseSlug } from "./exercise-media";
+import { validateProgramme } from "./verifiers/programme-validator";
+
+// Verify pass — appends an injury-safety note when the delivered workout still
+// contains a movement that loads a flagged injury. The programme builder already
+// filters injured exercises; this is an INDEPENDENT checker with a different
+// keyword set, so the two cross-check each other and any filter gap is caught.
+// No-op (returns text unchanged) for clients with no injuries.
+function withSafetyNote(text: string, user: any): string {
+  try {
+    return text + validateProgramme(text, user?.injuries).warningNote;
+  } catch {
+    return text;
+  }
+}
 
 // ============================================================
 // TYPE DEFINITIONS
@@ -1584,6 +1598,10 @@ const HOME_DAYS: Record<number, HomeEx[]> = {
 // ============================================================
 
 export function getKamlifeProgramme(user: any, todayOnly = false): string {
+  return withSafetyNote(getKamlifeProgrammeInner(user, todayOnly), user);
+}
+
+function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
   const mode = user.trainingMode || "home";
   const exp = (user.trainingExperience || "beginner").toLowerCase();
   const age = user.age || 30;
@@ -1785,6 +1803,10 @@ function filterInjuredGymExercises(exercises: Exercise[], injuries: string): { s
 }
 
 export function buildDayWorkout(user: any): string {
+  return withSafetyNote(buildDayWorkoutInner(user), user);
+}
+
+function buildDayWorkoutInner(user: any): string {
   const mode = user.trainingMode || "home";
   const phase = user.programmePhase || 1;
   const phaseNames = getPhaseNames();
@@ -1907,7 +1929,7 @@ export function buildFullProgramme(user: any): string {
   // through buildDay1Workout so they get dumbbell exercises, not machine work
   const isFemaleGluteFocusFull = user.primaryFocusArea === "glutes_legs";
   if (isFemaleGluteFocusFull && mode === "gym") {
-    return `*Your 3-Day Programme — Shoulders, Back, Arms, Glutes, Hamstrings, Calves*\nTrain Monday, Wednesday, Friday or Tuesday, Thursday, Saturday. Never two days in a row.\n\n${FEMALE_DAY_A}`;
+    return withSafetyNote(`*Your 3-Day Programme — Shoulders, Back, Arms, Glutes, Hamstrings, Calves*\nTrain Monday, Wednesday, Friday or Tuesday, Thursday, Saturday. Never two days in a row.\n\n${FEMALE_DAY_A}`, user);
   }
 
   // 4-day upper/lower: send Upper (Day 1) first — Lower follows after DONE.
@@ -1915,7 +1937,7 @@ export function buildFullProgramme(user: any): string {
   const trainingDays = user.trainingDaysPerWeek || 3;
   const exp = user.trainingExperience || "beginner";
   if (mode === "gym" && trainingDays >= 4 && (exp === "intermediate" || exp === "advanced")) {
-    return `*4-Day Upper/Lower Split — Week ${week}*\nMonday + Thursday: Upper Body. Tuesday + Friday: Lower Body. Rest Wednesday, Saturday, Sunday.\n\n${INTERMEDIATE_GYM_UPPER}`;
+    return withSafetyNote(`*4-Day Upper/Lower Split — Week ${week}*\nMonday + Thursday: Upper Body. Tuesday + Friday: Lower Body. Rest Wednesday, Saturday, Sunday.\n\n${INTERMEDIATE_GYM_UPPER}`, user);
   }
 
   // Gym + dumbbell: deliver Day 1 only — following days unlock after DONE is logged
@@ -1972,7 +1994,7 @@ export function buildDayWorkoutForType(
     ytLinks.push(`${num}. ${ex.name}: ${yt}`);
   }
   workout += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
-  return workout;
+  return withSafetyNote(workout, user);
 }
 
 // ============================================================

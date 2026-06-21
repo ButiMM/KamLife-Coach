@@ -294,7 +294,32 @@ export async function runWeeklyKpiReport(): Promise<void> {
     } catch (e) { console.warn("[KPI] A/B section error:", e); }
     const escSection = `\n\n*Escalations*\nNew this week: ${escNewRow?.c || 0} | Resolved: ${escResolvedRow?.c || 0}\nOpen: ${escOpenRow?.c || 0}${(escUrgentRow?.c || 0) > 0 ? ` ⚠️ ${escUrgentRow?.c} URGENT` : ""}`;
     const foodSourceSection = foodSources.length > 0 ? `\nSources: ${foodSources.join(", ")}` : "";
-    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} | SA scanner: ${scannerPct}% | GPT: ${fallbackPct}%${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}`;
+
+    // ── Actionable brief — turn the numbers into prioritised "do this" items ──
+    // Each action only appears when its metric crosses a threshold worth acting on,
+    // so a healthy week produces a short list (or none). Ordered most-urgent first.
+    const deliveryTotal = deliveryStats.sent + deliveryStats.failed;
+    const deliveryFailPct = deliveryTotal > 0 ? Math.round((deliveryStats.failed / deliveryTotal) * 100) : 0;
+    const actions: { p: number; text: string }[] = [];
+    if ((escUrgentRow?.c || 0) > 0)
+      actions.push({ p: 1, text: `🔴 ${escUrgentRow?.c} URGENT escalation${(escUrgentRow?.c || 0) > 1 ? "s" : ""} open — clear the dashboard inbox first.` });
+    if (deliveryFailPct >= 15)
+      actions.push({ p: 1, text: `🔴 WhatsApp delivery failing ${deliveryFailPct}% — check Twilio sender quality before it becomes a ban.` });
+    if (atRisk >= 1)
+      actions.push({ p: 2, text: `🟠 ${atRisk} active client${atRisk > 1 ? "s" : ""} silent 48h+ — a personal check-in now prevents churn.` });
+    if (churned >= 1)
+      actions.push({ p: 2, text: `🟠 ${churned} on churn risk (14d+) — the winback flow is running, but a human note converts best.` });
+    if (newThisWeek === 0)
+      actions.push({ p: 2, text: `🟠 0 new signups this week — top of funnel is dry. Post / share the link.` });
+    if (weekFoodLogsCount >= 20 && fallbackPct >= 35)
+      actions.push({ p: 3, text: `🟡 SA scanner missed ${fallbackPct}% of foods (GPT fallback) — add the top misses to the food DB to cut cost + latency.` });
+    if (paying === 0 && totalClients >= 3)
+      actions.push({ p: 1, text: `🔴 0 paying clients — activation is the single most important number. Review the signup→pay flow.` });
+    const actionSection = actions.length
+      ? `\n\n*🎯 Do this week* (priority order)\n${actions.sort((a, b) => a.p - b.p).map(a => a.text).join("\n")}`
+      : `\n\n*🎯 Do this week*\n✅ No fires. Focus on growth — one new acquisition channel.`;
+
+    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} | SA scanner: ${scannerPct}% | GPT: ${fallbackPct}%${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}${actionSection}`;
     await sendWhatsApp(`whatsapp:${coachPhone}`, report);
     console.log(`[KPI] Weekly report sent to coach`);
   } catch (e) { console.error("[KPI] Weekly report error:", e); }

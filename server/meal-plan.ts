@@ -11,6 +11,8 @@
 // Split with \n\n---\n\n so Twilio sends each day as a separate WA message.
 // ============================================================
 
+import { validateMealPlan, type DayTotals } from "./verifiers/meal-plan-validator";
+
 export type MealPlanOptions = {
   calorieTarget: number;
   proteinTarget: number;
@@ -371,7 +373,30 @@ export function generateMealPlan(opts: MealPlanOptions): string {
   };
   const footer = footerTips[goalType] || footerTips.fat_loss;
 
+  // ── Verify pass: check the built plan against the client's actual targets ──
+  // and re-scan for dietary violations the pools/filters should have removed.
+  const dayTotals: DayTotals[] = days.map(d => ({
+    day: d.day,
+    kcal: d.meals.reduce((s, m) => s + m.kcal, 0),
+    protein: d.meals.reduce((s, m) => s + m.protein, 0),
+  }));
+  const allItemsText = days
+    .flatMap(d => d.meals.map(m => m.items))
+    .join(" | ")
+    .toLowerCase();
+  const validation = validateMealPlan({
+    dayTotals,
+    calorieTarget,
+    proteinTarget,
+    allItemsText,
+    isVegetarian,
+    isVegan,
+    noFish,
+    noDairy,
+    noPeanuts,
+  });
+
   // Join with ---  so Twilio splits into separate WA messages
   const parts = [header, ...days.map(formatDay), footer];
-  return parts.join("\n\n---\n\n");
+  return parts.join("\n\n---\n\n") + validation.adjustmentNote;
 }

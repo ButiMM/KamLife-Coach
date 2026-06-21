@@ -115,6 +115,11 @@ export async function runInjuryFollowup(): Promise<void> {
   }
 }
 
+// Plateau intervention LOOP — detect → intervene → verify after 7 days → iterate.
+// State lives in users.profileNotes as `plateau_intervention:YYYY-MM-DD:WEIGHT`,
+// durable across container restarts (same pattern as streak_shield/paused_until).
+// A plateau isn't "handled" by one message — the loop keeps changing one variable
+// at a time and checking the scale until the weight actually moves.
 export async function runPlateauDetection(): Promise<void> {
   console.log("[SCHEDULER] JOB: Plateau detection");
   const clients = await getActiveClients();
@@ -128,6 +133,53 @@ export async function runPlateauDetection(): Promise<void> {
       if (client.goalType !== "fat_loss" && client.goalType !== "recomposition") continue;
       const recentActivity = await db.select({ id: chatHistory.id }).from(chatHistory).where(and(eq(chatHistory.userId, client.id), gte(chatHistory.createdAt, fourteenDaysAgo))).limit(1);
       if (recentActivity.length === 0) continue;
+
+      const notes = client.profileNotes || "";
+      const interventionMatch = notes.match(/plateau_intervention:(\d{4}-\d{2}-\d{2}):([\d.]+)/);
+
+      // ── STAGE 2 — verify an intervention issued ~7 days ago ──────────────────
+      if (interventionMatch) {
+        const issuedDate = new Date(interventionMatch[1]);
+        const baselineWeight = parseFloat(interventionMatch[2]);
+        const daysSince = Math.floor((Date.now() - issuedDate.getTime()) / 86_400_000);
+        if (daysSince < 7) continue; // give the change time to work
+
+        const sinceWeights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+          .from(weightLogs)
+          .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, issuedDate)))
+          .orderBy(desc(weightLogs.loggedAt)).limit(1);
+        const clearedNotes = notes.replace(/\s*plateau_intervention:\d{4}-\d{2}-\d{2}:[\d.]+/, "").trim();
+
+        if (sinceWeights.length === 0) {
+          // Can't verify without a weigh-in — clear the marker and ask for one.
+          if (await claimProactive(client.id, "plateau_followup_noweight", thisWeekUTC())) {
+            await db.update(users).set({ profileNotes: clearedNotes }).where(eq(users.id, client.id));
+            await sendWhatsApp(client.phoneNumber, `${name}, it's been a week since we changed your plan to break the plateau. I need a weigh-in to know if it worked — step on the scale this morning and send me the number.`);
+          }
+          continue;
+        }
+
+        const newWeight = parseFloat(String(sinceWeights[0].weight));
+        const moved = baselineWeight - newWeight; // +ve = weight lost (good for fat loss)
+
+        if (moved >= 0.4) {
+          // Success — the loop exits, weight is moving again.
+          if (await claimProactive(client.id, "plateau_broken", thisWeekUTC())) {
+            await db.update(users).set({ profileNotes: clearedNotes }).where(eq(users.id, client.id));
+            await sendWhatsApp(client.phoneNumber, `${name}, it worked — down ${moved.toFixed(1)}kg since we changed your plan. The plateau's broken. This is the proof that adjusting one variable at a time works. Hold the carb portions where they are now.`);
+          }
+        } else {
+          // Still stuck — iterate with a DIFFERENT lever and re-arm the loop.
+          if (await claimProactive(client.id, "plateau_iterate", thisWeekUTC())) {
+            const reStamped = `${clearedNotes} plateau_intervention:${todaySAST()}:${newWeight}`.trim();
+            await db.update(users).set({ profileNotes: reStamped }).where(eq(users.id, client.id));
+            await sendWhatsApp(client.phoneNumber, `${name}, still holding after the carb change — so we change a different lever this week. Add 2,000 steps to your daily target and move your biggest meal earlier in the day. Same protein. Weigh in again in 7 days. We keep adjusting until it moves.`);
+          }
+        }
+        continue;
+      }
+
+      // ── STAGE 1 — detect a fresh 3-week plateau and issue the first change ───
       const recentWeights = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, twentyOneDaysAgo))).orderBy(asc(weightLogs.loggedAt));
       if (recentWeights.length < 2) continue;
       const oldest = parseFloat(String(recentWeights[0].weight));
@@ -136,6 +188,9 @@ export async function runPlateauDetection(): Promise<void> {
       // DB claim (weekly window) replaces the old state-file flag, which a container
       // recycle would wipe — causing a repeat plateau message on restart.
       if (!(await claimProactive(client.id, "plateau", thisWeekUTC()))) continue;
+      // Record the intervention + baseline weight so Stage 2 can verify in 7 days.
+      const stampedNotes = `${notes} plateau_intervention:${todaySAST()}:${newest}`.trim();
+      await db.update(users).set({ profileNotes: stampedNotes }).where(eq(users.id, client.id));
       await sendWhatsApp(client.phoneNumber, `${name}, your weight has been stable for 3 weeks. This is a plateau and it is normal — your body adapts. Here is the fix: this week, cut your carb portions by one third. Keep protein the same. Add a 20-minute walk on top of your normal routine. Weigh in again in 7 days. Plateaus break when you change one variable at a time.`);
     } catch (err) { console.error(`[SCHEDULER] Plateau detection error — ${client.phoneNumber}:`, err); }
   }

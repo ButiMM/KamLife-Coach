@@ -11,6 +11,7 @@ import { eq, gte, and, lt, desc, or, sql, like } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
+import { checkOutboundMessage } from "../verifiers/proactive-gate";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
@@ -394,6 +395,14 @@ async function logOutboundToHistory(to: string, body: string): Promise<void> {
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
   resetDeliveryStatsIfNeeded();
+  // Sanity gate — block template-rendering leaks ("undefined kcal", "NaN", "${name}")
+  // before they ever reach a client. A broken message is worse than a missed one.
+  const outboundCheck = checkOutboundMessage(body);
+  if (!outboundCheck.safe) {
+    deliveryStats.failed++;
+    console.error(`[OUTBOUND_GATE] BLOCKED send to ${to.slice(-8)} — ${outboundCheck.reason}. Body: ${String(body).slice(0, 120)}`);
+    return;
+  }
   // Rate limit: enforce minimum gap between sends
   const now = Date.now();
   const gap = now - _lastSchedulerSendAt;
