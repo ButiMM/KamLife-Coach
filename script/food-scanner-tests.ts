@@ -203,6 +203,45 @@ test("cross-output: genuine 'steak and eggs' (no overlapping siblings) NOT flagg
   assert.deepEqual(fab("i had steak and eggs for breakfast", ["Steak", "Eggs"]), []);
 });
 
+// ── REGRESSION: the REAL scanner path — the bug that actually shipped ────────────
+// The phantom "Chicken and rice" was NOT from GPT; it was the SA scanner matching the
+// combo-meal DB entry off the words "rice and chicken" that the normalizer created when
+// it rewrote "Lunch / Lentils / Rice / Chicken breast" into prose. The combo dedup that
+// would have caught it only ran on the fuzzy path, so an exact match skipped it entirely.
+// These tests run the PRODUCTION scanForSAFoods on the exact strings from the screenshots.
+test("SCANNER: 'Lunch / Lentils / Rice / Chicken breast' → 3 clean items, no composite", () => {
+  const n = names("Lunch / Lentils / Rice / Chicken breast");
+  assert.ok(n.includes("Chicken breast"), `expected Chicken breast, got ${n}`);
+  assert.ok(n.includes("Lentils"), `expected Lentils, got ${n}`);
+  assert.ok(n.some(x => /rice/i.test(x)), `expected a rice, got ${n}`);
+  assert.ok(!n.includes("Chicken and rice"), `phantom composite must not appear, got ${n}`);
+});
+test("SCANNER: normalizer prose 'i had lentils, rice and chicken breast for lunch' → no composite", () => {
+  const n = names("i had lentils, rice and chicken breast for lunch");
+  assert.ok(n.includes("Chicken breast"), `expected Chicken breast, got ${n}`);
+  assert.ok(n.includes("Lentils"), `expected Lentils, got ${n}`);
+  assert.ok(n.some(x => /rice/i.test(x)), `expected a rice, got ${n}`);
+  assert.ok(!n.includes("Chicken and rice"), `phantom composite must not appear, got ${n}`);
+});
+test("SCANNER: no double-counted chicken — chicken appears in at most one matched item", () => {
+  const n = names("i had lentils, rice and chicken breast for lunch");
+  const chickenItems = n.filter(x => /chicken/i.test(x));
+  assert.equal(chickenItems.length, 1, `chicken must be counted once, got ${chickenItems.join(", ")}`);
+});
+test("SCANNER: genuine dish 'chicken and rice' KEEPS the calibrated combo", () => {
+  const n = names("chicken and rice for lunch");
+  assert.ok(n.includes("Chicken and rice"), `genuine combo should be kept, got ${n}`);
+});
+test("SCANNER: 'pasta bolognaise' keeps the combo (components only inferred)", () => {
+  assert.ok(names("pasta bolognaise").includes("Pasta bolognaise"), `got ${names("pasta bolognaise")}`);
+});
+test("SCANNER: 'brown rice and chicken breast' keeps BOTH explicit items, drops combo", () => {
+  const n = names("brown rice and chicken breast");
+  assert.ok(n.includes("Chicken breast"), `expected Chicken breast, got ${n}`);
+  assert.ok(n.includes("Brown rice"), `expected Brown rice, got ${n}`);
+  assert.ok(!n.includes("Chicken and rice"), `composite must not appear, got ${n}`);
+});
+
 // ── No double / contradictory "protein target hit" in one reply ──────────────
 // buildFoodLogReply assembles a coach note AND a protein tip; both could once
 // independently declare "Protein target hit ✅" in the same message (and the

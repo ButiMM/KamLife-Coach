@@ -243,6 +243,92 @@ function dropModifierMeats(foods: SAFood[], lower: string): SAFood[] {
   return out;
 }
 
+// Combo meal → standalone components it bundles. Module-scoped so it's available to
+// BOTH the substring dedup (a combo's long alias must not suppress a standalone
+// component) AND the combo dedup in finalizeMatches.
+const COMBO_OVERRIDES: Record<string, string[]> = {
+  "Pasta bolognaise": ["Pasta (spaghetti)", "Beef mince"],
+  "Chicken stir-fry with rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
+  "Chicken and rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
+  "Eggs on toast": ["Eggs", "Brown bread", "White bread"],
+  "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef"],
+  "Pap and wors": ["Pap (stiff maize porridge)", "Boerewors"],
+  "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Brown rice", "White rice"],
+  "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
+  "Boerewors roll": ["Boerewors", "Brown bread", "White bread"],
+  "Peanut butter on bread": ["Peanut butter", "Peanut butter (smooth)", "Brown bread", "White bread"],
+  "Chicken and pap": ["Chicken breast", "Chicken thigh", "Pap (stiff maize porridge)"],
+  "Fish and chips": ["Hake (frozen, battered)", "Chips (slap chips)"],
+  "Pap and pilchards": ["Pap (stiff maize porridge)", "Pilchards in tomato sauce"],
+  "Pap and spinach": ["Pap (stiff maize porridge)", "Spinach", "Morogo (wild spinach)"],
+  "Pilchards on toast": ["Pilchards in tomato sauce", "Brown bread", "White bread"],
+  "Rice and beans": ["Brown rice", "White rice", "Sugar beans"],
+  "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
+  "Vetkoek with mince": ["Vetkoek", "Beef mince"],
+  "Cereal with milk": ["Corn Flakes", "Full cream milk"],
+};
+
+const COMBO_NAMES = new Set(Object.keys(COMBO_OVERRIDES));
+
+// Final cleanup applied to EVERY scanner return path (this used to live only after
+// fuzzy matching, so when exact matching succeeded — the common case — it was skipped
+// entirely, which is how "i had lentils, rice and chicken breast" logged both
+// "Chicken breast" AND the phantom "Chicken and rice", double-counting the chicken).
+//
+// Combo dedup decides which to keep when a combo meal and its components both matched:
+//   - 2+ components ALSO matched separately  → the client listed them individually
+//     ("...rice and chicken breast...") and the combo is a phantom from word adjacency
+//     → DROP THE COMBO, keep the granular items.
+//   - ≤1 component matched → the client named the dish ("chicken and rice") and the
+//     stray component is the spurious substring → keep the combo, drop the component.
+function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
+  let cleaned = [...matched];
+
+  // PASS 3: Combo meal dedup
+  const comboNames = cleaned.filter(f => COMBO_OVERRIDES[f.name]).map(f => f.name);
+  if (comboNames.length > 0) {
+    const STOP = new Set(["and", "with", "the", "for", "on", "of", "in", "a"]);
+    const dropCombos = new Set<string>();
+    const dropComponents = new Set<string>();
+    for (const cn of comboNames) {
+      const components = COMBO_OVERRIDES[cn];
+      const presentComponents = cleaned.filter(f => f.name !== cn && components.includes(f.name));
+      // A component is "genuinely listed" (not just inferred from the combo's own words)
+      // when its name carries a distinguishing word — one that is NOT part of the combo's
+      // name — that actually appears in the client's text. "Chicken breast" beside the
+      // combo "Chicken and rice" qualifies via "breast"; "Brown rice"/"Chicken thigh"
+      // inferred from the bare phrase "chicken and rice" do not (no "brown"/"thigh" typed).
+      const comboWords = new Set(cn.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean));
+      const genuine = presentComponents.filter(c => {
+        const distinguishing = c.name.toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/)
+          .filter(w => w.length >= 3 && !STOP.has(w) && !comboWords.has(w));
+        return distinguishing.some(w => new RegExp(`\\b${escapeRegex(w)}\\b`, "i").test(lower));
+      });
+      if (genuine.length >= 1) {
+        dropCombos.add(cn); // client named a part explicitly — the combo is the phantom
+      } else {
+        for (const c of components) dropComponents.add(c); // dish named — drop stray parts
+      }
+    }
+    cleaned = cleaned.filter(f => !dropCombos.has(f.name) && !dropComponents.has(f.name));
+  }
+
+  // PASS 4: Alias collision cleanup
+  const names = new Set(cleaned.map(f => f.name));
+  if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
+    cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
+  }
+  if (names.has("Eggs") && names.has("Whole egg (boiled)")) {
+    cleaned = cleaned.filter(f => f.name !== "Whole egg (boiled)");
+  }
+  if (names.has("Chicken breast") && names.has("Chicken thigh")) {
+    const prefersBreast = /\b(breast|fillet|fillet[s]?)\b/i.test(lower);
+    cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
+  }
+
+  return redirectSugarFreeDrinks(dropModifierMeats(cleaned, lower), lower);
+}
+
 export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
@@ -274,12 +360,17 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   }
 
   // DEDUP PASS 2: drop shorter alias if it appears inside a longer matched alias
-  // No category restriction — "butter" inside "peanut butter" is dominated regardless of category
+  // No category restriction — "butter" inside "peanut butter" is dominated regardless of category.
+  // EXCEPTION: a combo meal ("Chicken and rice", alias "rice and chicken") must NOT suppress a
+  // standalone component ("rice" → Brown rice). They are different dishes, not alias variants of
+  // one food — the combo↔component relationship is resolved later by finalizeMatches, which needs
+  // the standalone component to survive in order to detect a phantom combo from word adjacency.
   for (const entry of deduped) {
     const dominated = deduped.some(other =>
       other.food.name !== entry.food.name &&
       other.alias.length > entry.alias.length &&
-      other.alias.includes(entry.alias)
+      other.alias.includes(entry.alias) &&
+      !COMBO_NAMES.has(other.food.name)
     );
     if (!dominated) {
       // The generic zero-drink entry aliases every brand's zero variant
@@ -298,7 +389,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   // exactOnly: callers gating AUTO-logging (no eating verb present) must not act on
   // fuzzy guesses — fuzzy matched "building phase" to mopani worms and logged a fake
   // meal over a goal-change request (caught by routing-audit).
-  if (matched.length > 0 || opts?.exactOnly) return redirectSugarFreeDrinks(dropModifierMeats(matched, lower), lower);
+  if (matched.length > 0 || opts?.exactOnly) return finalizeMatches(matched, lower);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];
@@ -331,54 +422,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     }
   }
 
-  // PASS 3: Combo meal dedup — if a combo meal matched, remove standalone components
-  const COMBO_OVERRIDES: Record<string, string[]> = {
-    "Pasta bolognaise": ["Pasta (spaghetti)", "Beef mince"],
-    "Chicken stir-fry with rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
-    "Chicken and rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
-    "Eggs on toast": ["Eggs", "Brown bread", "White bread"],
-    "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef"],
-    "Pap and wors": ["Pap (stiff maize porridge)", "Boerewors"],
-    "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Brown rice", "White rice"],
-    "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
-    "Boerewors roll": ["Boerewors", "Brown bread", "White bread"],
-    "Peanut butter on bread": ["Peanut butter", "Peanut butter (smooth)", "Brown bread", "White bread"],
-    "Chicken and pap": ["Chicken breast", "Chicken thigh", "Pap (stiff maize porridge)"],
-    "Fish and chips": ["Hake (frozen, battered)", "Chips (slap chips)"],
-    "Pap and pilchards": ["Pap (stiff maize porridge)", "Pilchards in tomato sauce"],
-    "Pap and spinach": ["Pap (stiff maize porridge)", "Spinach", "Morogo (wild spinach)"],
-    "Pilchards on toast": ["Pilchards in tomato sauce", "Brown bread", "White bread"],
-    "Rice and beans": ["Brown rice", "White rice", "Sugar beans"],
-    "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
-    "Vetkoek with mince": ["Vetkoek", "Beef mince"],
-    "Cereal with milk": ["Corn Flakes", "Full cream milk"],
-  };
-
-  const comboNames = matched.filter(f => COMBO_OVERRIDES[f.name]).map(f => f.name);
-  if (comboNames.length > 0) {
-    const toRemove = new Set<string>();
-    for (const cn of comboNames) {
-      for (const component of COMBO_OVERRIDES[cn]) toRemove.add(component);
-    }
-    return matched.filter(f => !toRemove.has(f.name));
-  }
-
-  // PASS 4: Alias collision cleanup
-  const names = new Set(matched.map(f => f.name));
-  let cleaned = [...matched];
-
-  if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
-    cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
-  }
-  if (names.has("Eggs") && names.has("Whole egg (boiled)")) {
-    cleaned = cleaned.filter(f => f.name !== "Whole egg (boiled)");
-  }
-  if (names.has("Chicken breast") && names.has("Chicken thigh")) {
-    const prefersBreast = /\b(breast|fillet|fillet[s]?)\b/i.test(lower);
-    cleaned = cleaned.filter(f => f.name !== (prefersBreast ? "Chicken thigh" : "Chicken breast"));
-  }
-
-  return redirectSugarFreeDrinks(dropModifierMeats(cleaned, lower), lower);
+  return finalizeMatches(matched, lower);
 }
 
 export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {
