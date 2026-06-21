@@ -97,6 +97,90 @@ function getStreakNote(userId: string, streak: number, name: string): string {
   return note;
 }
 
+interface CommitFoodLogParams {
+  userId: string;
+  phone: string;
+  rawMessage: string;
+  source: string;
+  kcalInt: number;
+  proteinInt: number;
+  carbsInt: number;
+  fatInt: number;
+  items: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }>;
+  mealLabel: string | null | undefined;
+  loggedAt: Date;
+}
+
+interface CommitFoodLogResult {
+  ok: boolean;
+  wasDup: boolean;
+  prevCals: number;
+  runningCals: number;
+  runningProtein: number;
+}
+
+// Single chokepoint for every food-log write. All three scanner paths funnel through here so
+// any future guard (fabrication check, duplicate detector, verifier) is applied everywhere.
+async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
+  let prevCals = 0;
+  try {
+    const existingTotals = await recomputeTodayFoodTotals(params.userId);
+    prevCals = existingTotals.calories;
+  } catch { /* non-fatal */ }
+
+  const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
+  const rawSlice = params.rawMessage.slice(0, 1000);
+  const recentDup = await db.select({ id: mealLogs.id })
+    .from(mealLogs)
+    .where(and(
+      eq(mealLogs.userId, params.userId),
+      gte(mealLogs.loggedAt, dedupWindow),
+      eq(mealLogs.kcalInt, params.kcalInt),
+      eq(mealLogs.rawMessage, rawSlice),
+    ))
+    .limit(1);
+
+  let insertOk = true;
+  const wasDup = recentDup.length > 0;
+  if (!wasDup) {
+    try {
+      await db.insert(mealLogs).values({
+        userId: params.userId,
+        rawMessage: rawSlice,
+        source: params.source,
+        kcalInt: params.kcalInt,
+        proteinInt: params.proteinInt,
+        carbsInt: params.carbsInt,
+        fatInt: params.fatInt,
+        items: params.items,
+        mealLabel: params.mealLabel,
+        loggedAt: params.loggedAt,
+      });
+      invalidatePatternCache(params.userId);
+      invalidateFoodTotalsCache(params.userId);
+      console.log(`[MEAL_LOG] saved — user=...${String(params.userId || "").slice(-6)} kcal=${params.kcalInt} prot=${params.proteinInt} label=${params.mealLabel || "none"}`);
+    } catch (e) {
+      console.error("[MEAL_LOG] insert failed — user:", String(params.userId || "").slice(-6), e);
+      insertOk = false;
+    }
+  }
+
+  let runningCals = prevCals + params.kcalInt;
+  let runningProtein = params.proteinInt;
+  try {
+    const freshTotals = await recomputeTodayFoodTotals(params.userId);
+    runningCals = freshTotals.calories;
+    runningProtein = freshTotals.protein;
+    await db.update(users).set({
+      todayCalories: runningCals,
+      todayProteinG: runningProtein,
+      todayCaloriesDate: sastToday(),
+    }).where(eq(users.phoneNumber, params.phone));
+  } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", String(params.userId || "").slice(-6), e); }
+
+  return { ok: insertOk, wasDup, prevCals, runningCals, runningProtein };
+}
+
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
 export async function handleFoodContext(ctx: {
@@ -988,17 +1072,11 @@ export async function handleFoodContext(ctx: {
         ).join("\n");
       }
 
-      const todayStr = sastToday();
-      let prevCals = 0;
       let todayStepCount = 0;
       try {
-        const [existingTotals, stepRow] = await Promise.all([
-          recomputeTodayFoodTotals(user.id),
-          db.select({ steps: stepLogs.steps }).from(stepLogs)
-            .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
-            .orderBy(desc(stepLogs.loggedAt)).limit(1),
-        ]);
-        prevCals = existingTotals.calories;
+        const stepRow = await db.select({ steps: stepLogs.steps }).from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())))
+          .orderBy(desc(stepLogs.loggedAt)).limit(1);
         todayStepCount = stepRow[0]?.steps || 0;
       } catch { /* non-fatal */ }
 
@@ -1073,90 +1151,56 @@ export async function handleFoodContext(ctx: {
 
       const scannerLoggedAt = parseMealDate(message);
       const scannerIsRetro = isRetroactiveMeal(message);
-      let mealLogInsertOk = true;
-      try {
-        // Insert BEFORE computing running totals — eliminates race window where two concurrent
-        // food logs both read 0 prior calories before either has written to DB
-        const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
-        const rawSlice = message.slice(0, 1000);
-        const recentDup = await db.select({ id: mealLogs.id })
-          .from(mealLogs)
-          .where(and(
-            eq(mealLogs.userId, user.id),
-            gte(mealLogs.loggedAt, dedupWindow),
-            eq(mealLogs.kcalInt, totalCals),
-            eq(mealLogs.rawMessage, rawSlice),
-          ))
-          .limit(1);
-        if (recentDup.length === 0) {
-        // Carbs/fat per food: take the LOWER of two estimates.
-        //  • dry estimate  = per-100g × portion grams — overcounts cooked staples
-        //    (rice/pasta/lentils per-100g is dry weight, the portion is cooked: 3-4× too high)
-        //  • ratio estimate = portion calories × that macro's energy share — overcounts
-        //    alcohol (beer/wine calories are ethanol, not in 4P+4C+9F)
-        // The two error modes never hit the same food, so min() yields the right value
-        // for both. These totals feed the coach's "authoritative" daily macros (gpt.ts),
-        // so an inflated carb count was making the coach wrongly tell clients to cut staples.
-        const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
-        const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-          const dry = grams * (f.carbsPer100g || 0) / 100;
-          const e = macroEnergy(f);
-          const ratio = e > 0 ? (f.adjustedCalories || 0) * (4 * (f.carbsPer100g || 0) / e) / 4 : dry;
-          return s + Math.min(dry, ratio);
-        }, 0));
-        const totalFat = Math.round(allAdjustedFoods.reduce((s, f: any) => {
-          const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
-          const dry = grams * (f.fatPer100g || 0) / 100;
-          const e = macroEnergy(f);
-          const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
-          return s + Math.min(dry, ratio);
-        }, 0));
-        const items = allAdjustedFoods.map(f => ({
-          name: f.name,
-          grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
-          kcal: f.adjustedCalories,
-          protein: f.adjustedProtein,
-          category: f.category,
-        }));
-        const firstSegLabel = mealSegments.find(s => s.label)?.label || extractMealLabel(message);
-          await db.insert(mealLogs).values({
-            userId: user.id,
-            rawMessage: message.slice(0, 1000),
-            source: scannerIsRetro ? "retro" : "sa_scanner",
-            kcalInt: totalCals,
-            proteinInt: Math.round(totalProtein),
-            carbsInt: totalCarbs,
-            fatInt: totalFat,
-            items,
-            mealLabel: firstSegLabel,
-            loggedAt: scannerLoggedAt,
-          });
-          invalidatePatternCache(user.id);
-          invalidateFoodTotalsCache(user.id);
-          console.log(`[MEAL_LOG] saved — user=...${String(user.id || "").slice(-6)} kcal=${totalCals} prot=${Math.round(totalProtein)} label=${firstSegLabel || "none"}`);
-        }
-      } catch (e) { mealLogInsertOk = false; console.error("[MEAL_LOG] mealLogs insert failed — user:", user.id?.slice(-6), "kcal:", e); }
-
-      if (!mealLogInsertOk) {
+      // Carbs/fat per food: take the LOWER of two estimates.
+      //  • dry estimate  = per-100g × portion grams — overcounts cooked staples
+      //    (rice/pasta/lentils per-100g is dry weight, the portion is cooked: 3-4× too high)
+      //  • ratio estimate = portion calories × that macro's energy share — overcounts
+      //    alcohol (beer/wine calories are ethanol, not in 4P+4C+9F)
+      // The two error modes never hit the same food, so min() yields the right value
+      // for both. These totals feed the coach's "authoritative" daily macros (gpt.ts),
+      // so an inflated carb count was making the coach wrongly tell clients to cut staples.
+      const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
+      const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
+        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+        const dry = grams * (f.carbsPer100g || 0) / 100;
+        const e = macroEnergy(f);
+        const ratio = e > 0 ? (f.adjustedCalories || 0) * (4 * (f.carbsPer100g || 0) / e) / 4 : dry;
+        return s + Math.min(dry, ratio);
+      }, 0));
+      const totalFat = Math.round(allAdjustedFoods.reduce((s, f: any) => {
+        const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
+        const dry = grams * (f.fatPer100g || 0) / 100;
+        const e = macroEnergy(f);
+        const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
+        return s + Math.min(dry, ratio);
+      }, 0));
+      const firstSegLabel = mealSegments.find(s => s.label)?.label || extractMealLabel(message);
+      const scannerItems = allAdjustedFoods.map(f => ({
+        name: f.name,
+        grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
+        kcal: f.adjustedCalories,
+        protein: f.adjustedProtein,
+        category: f.category,
+      }));
+      const committed = await commitFoodLog({
+        userId: user.id,
+        phone,
+        rawMessage: message.slice(0, 1000),
+        source: scannerIsRetro ? "retro" : "sa_scanner",
+        kcalInt: totalCals,
+        proteinInt: Math.round(totalProtein),
+        carbsInt: totalCarbs,
+        fatInt: totalFat,
+        items: scannerItems,
+        mealLabel: firstSegLabel,
+        loggedAt: scannerLoggedAt,
+      });
+      if (!committed.ok) {
         const failReply = `Eish — I worked out that meal (~${totalCals} kcal | ${Math.round(totalProtein)}g protein) but couldn't save it just now. Send it again in a moment and I'll log it.`;
         await logChat(user.id, message, failReply, "FOOD_LOG_FAILED");
         return failReply;
       }
-
-      // Recompute AFTER insert — fresh totals include just-inserted meal and any concurrent meals
-      let runningCals = prevCals + totalCals;
-      let runningProtein = Math.round(totalProtein);
-      try {
-        const freshTotals = await recomputeTodayFoodTotals(user.id);
-        runningCals = freshTotals.calories;
-        runningProtein = freshTotals.protein;
-        await db.update(users).set({
-          todayCalories: runningCals,
-          todayProteinG: runningProtein,
-          todayCaloriesDate: todayStr,
-        }).where(eq(users.phoneNumber, phone));
-      } catch (e) { console.error("[MEAL_LOG] calorie update failed — user:", user.id?.slice(-6), e); }
+      const { prevCals, runningCals, runningProtein } = committed;
 
       const reply = buildFoodLogReply({
         foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
@@ -1203,59 +1247,26 @@ export async function handleFoodContext(ctx: {
         const foodLines = gptFallbackResult.foods.map(f =>
           `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
         ).join("\n");
-        const todayStr = sastToday();
-        let fbPrevCals = 0;
-        try {
-          const existingTotals = await recomputeTodayFoodTotals(user.id);
-          fbPrevCals = existingTotals.calories;
-        } catch { /* non-fatal */ }
         const fbIsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
         const fbIsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
-        try {
-          const items = gptFallbackResult.foods.map((f: any) => ({
+        const gptLoggedAt = parseMealDate(message);
+        const gptIsRetro = isRetroactiveMeal(message);
+        const committed = await commitFoodLog({
+          userId: user.id,
+          phone,
+          rawMessage: message.slice(0, 1000),
+          source: gptIsRetro ? "retro" : "gpt_fallback",
+          kcalInt: gptFallbackResult.totalKcal,
+          proteinInt: gptFallbackResult.totalProtein,
+          carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
+          fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
+          items: gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
-          }));
-          const gptLoggedAt = parseMealDate(message);
-          const gptIsRetro = isRetroactiveMeal(message);
-          const gptDedupWindow = new Date(Date.now() - 4 * 60 * 1000);
-          const gptRecentDup = await db.select({ id: mealLogs.id })
-            .from(mealLogs)
-            .where(and(
-              eq(mealLogs.userId, user.id),
-              gte(mealLogs.loggedAt, gptDedupWindow),
-              eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
-              eq(mealLogs.rawMessage, message.slice(0, 1000)),
-            ))
-            .limit(1);
-          if (gptRecentDup.length === 0) {
-            await db.insert(mealLogs).values({
-              userId: user.id,
-              rawMessage: message.slice(0, 1000),
-              source: gptIsRetro ? "retro" : "gpt_fallback",
-              kcalInt: gptFallbackResult.totalKcal,
-              proteinInt: gptFallbackResult.totalProtein,
-              carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
-              fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
-              items,
-              mealLabel: extractMealLabel(message),
-              loggedAt: gptLoggedAt,
-            });
-            invalidatePatternCache(user.id);
-            invalidateFoodTotalsCache(user.id);
-          }
-        } catch (e) { console.error("[MEAL_LOG] gpt-fallback mealLogs insert failed — user:", user.id?.slice(-6), e); }
-        let runningCals = fbPrevCals + gptFallbackResult.totalKcal;
-        let runningProtein = gptFallbackResult.totalProtein;
-        try {
-          const freshTotals = await recomputeTodayFoodTotals(user.id);
-          runningCals = freshTotals.calories;
-          runningProtein = freshTotals.protein;
-          await db.update(users).set({
-            todayCalories: runningCals,
-            todayProteinG: runningProtein,
-            todayCaloriesDate: todayStr,
-          }).where(eq(users.phoneNumber, phone));
-        } catch (e) { console.error("[MEAL_LOG] gpt-fallback calorie update failed — user:", user.id?.slice(-6), e); }
+          })),
+          mealLabel: extractMealLabel(message),
+          loggedAt: gptLoggedAt,
+        });
+        const { prevCals: fbPrevCals, runningCals, runningProtein } = committed;
         const fallbackReply = buildFoodLogReply({
           foodLines, mealLabel: fbIsDessert ? "Dessert" : fbIsSnack ? "Snack" : "Meal total",
           totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
@@ -1299,59 +1310,26 @@ export async function handleFoodContext(ctx: {
       const foodLines = gptFallbackResult.foods.map((f: any) =>
         `• ${f.name}: ~${f.kcal} kcal, ${f.protein_g}g protein (${f.portion_desc})`
       ).join("\n");
-      const todayStr = sastToday();
-      let fb2PrevCals = 0;
-      try {
-        const existingTotals = await recomputeTodayFoodTotals(user.id);
-        fb2PrevCals = existingTotals.calories;
-      } catch { /* non-fatal */ }
       const fb2IsSnack = /\bsnack\b/i.test(m) || (gptFallbackResult.totalKcal < 250 && gptFallbackResult.totalProtein <= 4);
       const fb2IsDessert = /\b(dessert|treat|pudding|cake|chocolate|ice cream|biscuit|cookie)\b/i.test(m);
-      try {
-        const items = gptFallbackResult.foods.map((f: any) => ({
+      const fb2LoggedAt = parseMealDate(message);
+      const fb2IsRetro = isRetroactiveMeal(message);
+      const committed2 = await commitFoodLog({
+        userId: user.id,
+        phone,
+        rawMessage: message.slice(0, 1000),
+        source: fb2IsRetro ? "retro" : "gpt_fallback",
+        kcalInt: gptFallbackResult.totalKcal,
+        proteinInt: gptFallbackResult.totalProtein,
+        carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
+        fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
+        items: gptFallbackResult.foods.map((f: any) => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
-        }));
-        const fb2LoggedAt = parseMealDate(message);
-        const fb2IsRetro = isRetroactiveMeal(message);
-        const fb2DedupWindow = new Date(Date.now() - 4 * 60 * 1000);
-        const fb2RecentDup = await db.select({ id: mealLogs.id })
-          .from(mealLogs)
-          .where(and(
-            eq(mealLogs.userId, user.id),
-            gte(mealLogs.loggedAt, fb2DedupWindow),
-            eq(mealLogs.kcalInt, gptFallbackResult.totalKcal),
-            eq(mealLogs.rawMessage, message.slice(0, 1000)),
-          ))
-          .limit(1);
-        if (fb2RecentDup.length === 0) {
-          await db.insert(mealLogs).values({
-            userId: user.id,
-            rawMessage: message.slice(0, 1000),
-            source: fb2IsRetro ? "retro" : "gpt_fallback",
-            kcalInt: gptFallbackResult.totalKcal,
-            proteinInt: gptFallbackResult.totalProtein,
-            carbsInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.carbs_g) || 0), 0)),
-            fatInt: Math.round(gptFallbackResult.foods.reduce((s: number, f: any) => s + (Number(f.fat_g) || 0), 0)),
-            items,
-            mealLabel: extractMealLabel(message),
-            loggedAt: fb2LoggedAt,
-          });
-          invalidatePatternCache(user.id);
-          invalidateFoodTotalsCache(user.id);
-        }
-      } catch (e) { console.error("[MEAL_LOG] gpt-fallback mealLogs insert failed — user:", user.id?.slice(-6), e); }
-      let runningCals = fb2PrevCals + gptFallbackResult.totalKcal;
-      let runningProtein = gptFallbackResult.totalProtein;
-      try {
-        const freshTotals = await recomputeTodayFoodTotals(user.id);
-        runningCals = freshTotals.calories;
-        runningProtein = freshTotals.protein;
-        await db.update(users).set({
-          todayCalories: runningCals,
-          todayProteinG: runningProtein,
-          todayCaloriesDate: todayStr,
-        }).where(eq(users.phoneNumber, phone));
-      } catch (e) { console.error("[MEAL_LOG] gpt-fallback calorie update failed — user:", user.id?.slice(-6), e); }
+        })),
+        mealLabel: extractMealLabel(message),
+        loggedAt: fb2LoggedAt,
+      });
+      const { prevCals: fb2PrevCals, runningCals, runningProtein } = committed2;
       const fallbackReply = buildFoodLogReply({
         foodLines, mealLabel: fb2IsDessert ? "Dessert" : fb2IsSnack ? "Snack" : "Meal total",
         totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
