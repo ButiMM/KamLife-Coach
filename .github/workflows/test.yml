@@ -1,0 +1,37 @@
+name: Tests
+
+# Runs the full test + type-check suite on every push and PR.
+#
+# WHY THIS EXISTS: a green test suite that only runs when someone remembers to type
+# `npm test` is worse than no suite — it gives false confidence. For months, bugs
+# (e.g. the fabricated-composite double-counting) were live in production while the
+# suite was green locally, because nothing forced the suite to run before a change
+# shipped. This workflow makes red/green an enforced gate, not a memory exercise.
+#
+# The whole suite is pure (no real DB, no network) — the food-scanner tests set a
+# dummy DATABASE_URL and the AI calls run in offline mode — so it runs anywhere.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch: {}
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Type check
+        run: npm run check
+      - name: Test suite
+        run: npm test

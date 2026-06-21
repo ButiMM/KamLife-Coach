@@ -168,6 +168,41 @@ test("single hyphenated dish (no and/with joiner) is not flagged", () => {
   assert.deepEqual(fab("lunch\nchicken stir-fry\ncoke", ["Chicken stir-fry", "Coke"]), []);
 });
 
+// ── REGRESSION: normalizer rewrites the list to PROSE before this runs ──────────
+// The front-door normalizer turns "Lunch / Lentils / Rice / Chicken breast" into
+// "i had lentils, rice and chicken breast for lunch". That prose form has shortShare
+// 0.5 (the trailing "chicken breast for lunch" segment is >4 words), so the old
+// list-only guard exited early and the phantom "Chicken and rice" (580 kcal / 56g)
+// leaked into the log alongside the real items — the exact bug in the screenshots.
+// These cases feed the function the SHAPE THE PIPELINE ACTUALLY PRODUCES, not the
+// raw list a unit test would hand-pick. CHECK 2 (cross-output) must catch it.
+test("REGRESSION: normalizer prose 'lentils, rice and chicken breast' — composite flagged", () => {
+  assert.deepEqual(
+    fab("i had lentils, rice and chicken breast for lunch",
+      ["Chicken breast", "Lentils", "Chicken and rice"]),
+    ["Chicken and rice"],
+  );
+});
+test("REGRESSION: raw slash list 'Lunch / Lentils / Rice / Chicken breast' — composite flagged", () => {
+  assert.deepEqual(
+    fab("Lunch / Lentils / Rice / Chicken breast",
+      ["Chicken breast", "Lentils", "Chicken and rice"]),
+    ["Chicken and rice"],
+  );
+});
+test("cross-output: composite sharing no word with siblings is NOT flagged (single legit dish)", () => {
+  assert.deepEqual(fab("i had a chicken and rice bowl", ["Chicken and rice bowl"]), []);
+});
+test("cross-output: 'chicken and pap' flagged when chicken + pap logged separately", () => {
+  assert.deepEqual(
+    fab("Chicken / Pap / Spinach", ["Chicken", "Pap", "Spinach", "Chicken and pap"]),
+    ["Chicken and pap"],
+  );
+});
+test("cross-output: genuine 'steak and eggs' (no overlapping siblings) NOT flagged", () => {
+  assert.deepEqual(fab("i had steak and eggs for breakfast", ["Steak", "Eggs"]), []);
+});
+
 // ── No double / contradictory "protein target hit" in one reply ──────────────
 // buildFoodLogReply assembles a coach note AND a protein tip; both could once
 // independently declare "Protein target hit ✅" in the same message (and the
