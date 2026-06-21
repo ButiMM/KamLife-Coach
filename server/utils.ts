@@ -136,21 +136,25 @@ export function isFutureIntent(message: string): boolean {
 }
 
 // Deterministic backstop against the GPT food estimator FABRICATING a composite
-// item. Demonstrated production failure: a client listed "rice / chicken livers /
-// mixed veggies" as separate items and the model logged a phantom "rice and chicken
-// (home cooked)" — inventing a second protein and inflating the meal's calories and
-// protein, then declaring the protein target hit. A prompt rule against this already
-// exists and the model ignores it, so this does NOT trust the model — it returns the
-// names of any fabricated composites so the caller can drop them rather than log a
-// wrong number.
+// item. Demonstrated production failures:
+//   - Client lists "rice / chicken livers / mixed veggies" → model logs phantom
+//     "rice and chicken (home cooked)", double-counting protein and hitting target.
+//   - Client lists "Lunch / Lentils / Rice / Chicken breast" → normalizer rewrites
+//     to "i had lentils, rice and chicken breast for lunch" → model logs "Chicken
+//     breast", "Lentils", AND "Chicken and rice" (580 kcal / 56g) — the composite
+//     steals chicken from the already-logged item and silently drops rice.
 //
-// Fires ONLY when BOTH hold (keeps false positives near zero):
-//   1. The client's message is an ENUMERATED LIST (foods one-per-line / comma /
-//      slash separated, mostly short segments) — never a flowing sentence, where a
-//      model legitimately joins "rice with grilled chicken".
-//   2. A returned item NAME joins two foods (and / with / & / +) AND that joined
-//      phrase is NOT what the client wrote — joiners are normalised, so a faithful
-//      "mac n cheese" → "mac and cheese" is kept; only invented merges are dropped.
+// Two independent checks, both required to be wrong before a composite leaks through:
+//
+//   CHECK 1 (list mode): fires when the message looks like an enumerated list.
+//     A returned name with a joiner that wasn't in the original message is fabricated.
+//
+//   CHECK 2 (cross-output contamination): fires regardless of message format.
+//     A returned name with a joiner that SHARES a significant word with another item
+//     in the SAME response is a composite of already-logged items — fabricated.
+//     This catches the normalizer-rewrite case where CHECK 1 can't fire because the
+//     list structure was flattened into prose ("i had lentils, rice and chicken breast
+//     for lunch" has shortShare 0.5, below the 0.6 threshold).
 export function findFabricatedComposites(
   userMessage: string,
   foods: Array<{ name: string }>,
@@ -162,9 +166,11 @@ export function findFabricatedComposites(
     .map(s => s.trim())
     .filter(Boolean)
     .filter(s => !/^(breakfast|lunch|dinner|supper|snack|brunch)\s*:?\s*$/i.test(s));
-  if (segs.length < 2) return []; // not an enumerated list — leave flowing prose alone
-  const shortShare = segs.filter(s => s.split(/\s+/).length <= 4).length / segs.length;
-  if (shortShare < 0.6) return [];
+
+  const shortShare = segs.length >= 2
+    ? segs.filter(s => s.split(/\s+/).length <= 4).length / segs.length
+    : 0;
+  const isListMessage = segs.length >= 2 && shortShare >= 0.6;
 
   // Canonicalise so every food-joiner becomes "and" in both strings — a client's
   // "mac n cheese" / "eggs & bacon" then matches the model's "mac and cheese".
@@ -176,15 +182,44 @@ export function findFabricatedComposites(
     .trim();
   const hay = canon(userMessage);
 
+  // Significant content words from a food name (excludes stopwords and very short words).
+  // Used for CHECK 2 cross-output matching.
+  const STOP_WORDS = new Set(["and", "with", "the", "for", "a", "an", "of", "in", "i", "had", "have"]);
+  const sigWords = (name: string): Set<string> => {
+    const n = name.toLowerCase().replace(/[^a-z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+    return new Set(n.split(" ").filter(w => w.length >= 3 && !STOP_WORDS.has(w)));
+  };
+
   const fabricated: string[] = [];
-  for (const f of foods) {
+  const allWordSets = foods.map(f => sigWords((f.name || "").replace(/\([^)]*\)/g, " ")));
+
+  for (let i = 0; i < foods.length; i++) {
+    const f = foods[i];
     const rawName = (f.name || "").replace(/\([^)]*\)/g, " "); // drop "(home cooked)" etc.
     const hasJoiner = /\b(?:and|with|n)\b/i.test(rawName) || /[&+]/.test(rawName);
     if (!hasJoiner) continue;
     const core = canon(rawName);
     if (core.split(" ").length < 3) continue; // need a real "X and Y" composite
-    if (hay.includes(core)) continue;          // client wrote it verbatim — trust it
-    fabricated.push(f.name);
+
+    // CHECK 1 (list mode): composite phrase not verbatim in an enumerated input
+    if (isListMessage && !hay.includes(core)) {
+      fabricated.push(f.name);
+      continue;
+    }
+
+    // CHECK 2 (cross-output): composite shares a significant word with another item
+    // in the same response — it's combining things already logged separately.
+    const myWords = allWordSets[i];
+    const sharesWordWithOther = allWordSets.some((otherWords, j) => {
+      if (j === i) return false;
+      for (const w of myWords) {
+        if (otherWords.has(w)) return true;
+      }
+      return false;
+    });
+    if (sharesWordWithOther) {
+      fabricated.push(f.name);
+    }
   }
   return fabricated;
 }

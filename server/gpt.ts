@@ -725,10 +725,12 @@ export async function gptFoodFallback(
           role: "system",
           content: `You extract nutritional data from South African WhatsApp fitness coaching messages.
 
-LISTED ITEMS — when the user lists foods separately (one per line, comma-separated, or as a bullet list), log EACH as a completely separate food item. NEVER create a combined "X and Y" entry when X and Y are already listed as separate items.
+LISTED ITEMS — when the user lists foods separately (one per line, comma-separated, slash-separated, or as a bullet list), OR when the message reads "i had X, Y and Z", log EACH as a COMPLETELY SEPARATE food item. NEVER create a combined "X and Y" entry when X and Y appear as distinct items.
 - "Rice / Chicken breast / Mixed veggies" → 3 separate items: rice, chicken breast, mixed veggies
 - "eggs, toast, banana" → 3 separate items
-- NEVER add a "rice and chicken" or "chicken with rice" composite when both were listed separately
+- "i had lentils, rice and chicken breast for lunch" → 3 separate items: lentils, rice, chicken breast
+- NEVER add a "rice and chicken" or "chicken with rice" composite when chicken and rice are already logged as separate items
+- CRITICAL: if you log "chicken breast" as one item, NEVER also log "chicken and rice" or "chicken with X" — that double-counts the chicken protein and breaks the calorie total
 
 COMPOUND NAMES — only applies when written as ONE continuous phrase (not a list):
 - "lemon cream biscuits" = one biscuit type (~100 kcal each)
