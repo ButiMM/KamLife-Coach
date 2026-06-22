@@ -91,14 +91,43 @@ export async function textToSpeech(text: string, emotion: VoiceEmotion = "warm")
 }
 
 /**
- * Transcribe audio using ElevenLabs Scribe v1.
+ * Keyterms that bias Scribe toward the words clients actually say in voice notes.
+ * Without these, Scribe substitutes the nearest common English words — "chest fly"
+ * becomes "just fly", "full stack" becomes garble. ElevenLabs uses sentence context
+ * to decide whether to apply each term, so a generous list does not over-correct.
+ * Constraints: ≤1000 terms, each ≤50 chars and ≤5 words.
+ */
+export const GYM_KEYTERMS: string[] = [
+  // Exercises
+  "chest fly", "cable fly", "chest press", "incline press", "bench press",
+  "lat pulldown", "seated row", "single arm row", "bent over row", "upright row",
+  "hip thrust", "Romanian deadlift", "RDL", "deadlift", "leg press",
+  "leg curl", "leg extension", "calf raise", "Bulgarian split squat", "squat",
+  "goblet squat", "lunge", "shoulder press", "overhead press", "lateral raise",
+  "front raise", "face pull", "bicep curl", "hammer curl", "tricep pushdown",
+  "tricep extension", "cable kickback", "push up", "pull up", "chin up",
+  "plank", "dead bug", "glute bridge",
+  // Loading / equipment
+  "full stack", "weight stack", "dumbbell", "barbell", "kettlebell",
+  "cable machine", "Smith machine", "drop set", "superset", "working set",
+  "reps", "sets",
+  // SA foods commonly mis-transcribed
+  "pap", "pilchards", "boerewors", "wors", "chakalaka", "morogo",
+  "samp", "samp and beans", "maas", "amasi", "biltong", "vetkoek",
+  "bunny chow", "chesa nyama", "braai",
+];
+
+/**
+ * Transcribe audio using ElevenLabs Scribe v2.
  * Better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa, etc.).
+ * `keyterms` bias the model toward domain words (exercise names, SA foods).
  * Returns the transcribed text, or null if not configured / fails.
  */
 export async function scribeTranscribe(
   audioBuffer: ArrayBuffer,
   ext: string,
   langHint?: string,
+  keyterms: string[] = GYM_KEYTERMS,
 ): Promise<string | null> {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) return null;
@@ -107,8 +136,11 @@ export async function scribeTranscribe(
     const formData = new FormData();
     const blob = new Blob([audioBuffer], { type: `audio/${ext}` });
     formData.append("file", blob, `audio.${ext}`);
-    formData.append("model_id", "scribe_v1");
+    formData.append("model_id", "scribe_v2");
     if (langHint) formData.append("language_code", langHint);
+    // ElevenLabs expects keyterms as REPEATED form fields, one per term (verified
+    // against the official JS SDK's multipart serialization), not a JSON string.
+    for (const term of keyterms) formData.append("keyterms", term);
 
     const response = await fetch(`${ELEVENLABS_BASE}/speech-to-text`, {
       method: "POST",
