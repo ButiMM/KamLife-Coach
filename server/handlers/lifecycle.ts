@@ -1301,7 +1301,11 @@ export async function handleLifecycle(ctx: {
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
-    const shoppingReply = formatShoppingList(list, user.name || undefined, goal);
+    const shoppingReply = formatShoppingList(list, user.name || undefined, goal, {
+      calorieTarget: user.calorieTarget || undefined,
+      proteinTarget: user.proteinTarget || undefined,
+      budgetTier: budget,
+    });
     await logChat(user.id, message, shoppingReply, "SHOPPING_LIST");
     return shoppingReply;
   }

@@ -574,11 +574,11 @@ export async function handleEarlyCommands(ctx: {
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
-    const fn = user.name?.split(" ")[0] || "";
-    const intentReply = GROCERY_INTENT_RE.test(m) && fn
-      ? `${fn}, here's your full shopping list — tailored to ${goal === "muscle_gain" ? "building muscle" : goal === "fat_loss" ? "fat loss" : "your goal"}. Screenshot this and shop straight off it.\n\n`
-      : "";
-    const reply = intentReply + formatShoppingList(list, intentReply ? undefined : (user.name || undefined), goal);
+    const reply = formatShoppingList(list, user.name || undefined, goal, {
+      calorieTarget: user.calorieTarget || undefined,
+      proteinTarget: user.proteinTarget || undefined,
+      budgetTier: budget,
+    });
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
   }
@@ -1232,7 +1232,11 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const goal = user.goalType || "fat_loss";
     const firstName = user.name?.split(" ")[0] || "there";
     const list = getShoppingList(budget, weekNum, goal);
-    const listText = formatShoppingList(list, firstName, goal);
+    const listText = formatShoppingList(list, firstName, goal, {
+      calorieTarget: user.calorieTarget || undefined,
+      proteinTarget: user.proteinTarget || undefined,
+      budgetTier: budget,
+    });
     const intro = goal === "muscle_gain"
       ? `${firstName}, a diet plan tells you what to eat — and most people stop following it by Wednesday. A shopping list builds the habit. Buy the right things and the eating takes care of itself.\n\n`
       : `${firstName}, diet plans don't work long-term — they're too rigid and people fall off. What actually works is buying the right things. Here's your goal-adjusted shopping list:\n\n`;

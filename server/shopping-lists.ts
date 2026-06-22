@@ -391,19 +391,39 @@ export function getShoppingList(budgetTier: string, weekNumber: number, goalType
   return goalType ? applyGoalModifications(base, goalType) : base;
 }
 
-export function formatShoppingList(list: ShoppingList, userName?: string, goalType?: string): string {
-  const greeting = userName ? `${userName}, here's` : "Here's";
+export interface ShoppingListTargets {
+  calorieTarget?: number;
+  proteinTarget?: number;
+  budgetTier?: string;
+}
 
-  // Goal-specific header
-  const goalHeaders: Record<string, string> = {
-    fat_loss: "🎯 _Fat loss focus — high protein, lower carbs, big on veggies_",
-    muscle_gain: "💪 _Muscle gain focus — extra protein, calorie-dense staples_",
-    recomposition: "🔄 _Body recomp — balanced protein & carbs_",
-    general: "",
-    health_condition: "",
+export function formatShoppingList(list: ShoppingList, userName?: string, goalType?: string, targets?: ShoppingListTargets): string {
+  const fn = userName?.split(" ")[0] || "";
+  const goal = goalType || "fat_loss";
+  const kcal = targets?.calorieTarget || (goal === "muscle_gain" ? 2600 : 1700);
+  const prot = targets?.proteinTarget || (goal === "muscle_gain" ? 160 : 120);
+
+  // Goal-specific intro that names their actual targets
+  const goalIntros: Record<string, string> = {
+    fat_loss:    `Your goal is fat loss. Every day: *${kcal} kcal* and *${prot}g protein*. Protein keeps you full and protects muscle — hit that number first, calories second.`,
+    muscle_gain: `Your goal is building muscle. Every day: *${kcal} kcal* and *${prot}g protein*. If you're not gaining, you're not eating enough — this list gives you what you need.`,
+    recomposition: `Your goal is body recomp — hold weight, swap fat for muscle. Every day: *${kcal} kcal* and *${prot}g protein*. Consistency over weeks beats any single perfect day.`,
   };
-  const goalHeader = goalType ? goalHeaders[goalType] || "" : "";
+  const intro = goalIntros[goal] || goalIntros["fat_loss"];
 
+  // Store advice by budget tier
+  const budgetTier = targets?.budgetTier || "100_300";
+  const storeAdvice: Record<string, string> = {
+    under_100:  `*Where to shop:* Shoprite or Boxer. Eggs, pilchards, oats — always cheapest there. Buy in bulk when you can.`,
+    "50_100":   `*Where to shop:* Shoprite or Boxer. Eggs, pilchards, oats — always cheapest there. Buy in bulk when you can.`,
+    "100_300":  `*Where to shop:* Pick n Pay or Checkers for the weekly run. Boxer/Shoprite for bulk items (oats, rice, eggs). Saves R80-150/week.`,
+    "300_600":  `*Where to shop:* Checkers or Spar for convenience. Pick n Pay for bulk proteins. Woolworths for fresh veg if budget allows.`,
+    over_600:   `*Where to shop:* Woolworths for quality cuts and fresh produce. Checkers for staples. Order online for bulk pantry items.`,
+    "500_plus": `*Where to shop:* Woolworths for quality cuts and fresh produce. Checkers for staples. Order online for bulk pantry items.`,
+  };
+  const store = storeAdvice[budgetTier] || storeAdvice["100_300"];
+
+  // Grouped items
   const grouped: Record<string, ShoppingItem[]> = {};
   for (const item of list.items) {
     if (!grouped[item.category]) grouped[item.category] = [];
@@ -411,13 +431,13 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
   }
 
   const categoryLabels: Record<string, string> = {
-    protein: "Protein",
-    carb: "Carbs",
-    veg: "Vegetables",
-    fruit: "Fruit",
-    dairy: "Dairy",
-    pantry: "Pantry",
-    supplement: "Supplements",
+    protein: "🥩 Protein",
+    carb: "🍚 Carbs",
+    veg: "🥦 Vegetables",
+    fruit: "🍌 Fruit",
+    dairy: "🥛 Dairy",
+    pantry: "🫙 Pantry",
+    supplement: "💊 Supplements",
   };
 
   const order = ["protein", "carb", "veg", "fruit", "dairy", "pantry", "supplement"];
@@ -427,18 +447,32 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     if (!items || items.length === 0) continue;
     body += `\n*${categoryLabels[cat]}:*\n`;
     for (const i of items) {
-      body += `• ${i.item} (${i.qty}) — ${i.price}\n`;
+      body += `• ${i.item} — ${i.price}\n`;
     }
   }
 
+  // Personalized daily structure based on goal and targets
+  const protPerMeal = Math.round(prot / 4);
+  const dailyStructures: Record<string, string> = {
+    fat_loss: `*Your daily structure (hits ${kcal} kcal / ${prot}g protein):*
+• Breakfast: 3 eggs + oats (½ cup dry) = ~400 kcal | ~30g protein
+• Lunch: 150g chicken or 1 tin pilchards + rice (½ cup) + veg = ~450 kcal | ~${protPerMeal}g protein
+• Dinner: 2 eggs or 100g chicken + sweet potato + veg = ~400 kcal | ~25g protein
+• Snack: 2 boiled eggs or cottage cheese = ~180 kcal | ~16g protein`,
+    muscle_gain: `*Your daily structure (hits ${kcal} kcal / ${prot}g protein):*
+• Breakfast: 4 eggs + 1 cup oats + banana = ~680 kcal | ~40g protein
+• Lunch: 200g chicken breast + 1 cup rice + veg = ~580 kcal | ~${protPerMeal}g protein
+• Dinner: 200g chicken or mince + sweet potato + veg = ~560 kcal | ~42g protein
+• Snack: 1 tin pilchards + 1 slice bread + 1 cup milk = ~380 kcal | ~35g protein`,
+    recomposition: `*Your daily structure (hits ${kcal} kcal / ${prot}g protein):*
+• Breakfast: 3 eggs + oats + fruit = ~520 kcal | ~32g protein
+• Lunch: 150g chicken + rice + veg = ~480 kcal | ~${protPerMeal}g protein
+• Dinner: 150g protein + sweet potato + big veg portion = ~450 kcal | ~35g protein
+• Snack: Greek yoghurt or 2 eggs = ~180 kcal | ~18g protein`,
+  };
+  const dailyStructure = dailyStructures[goal] || dailyStructures["fat_loss"];
+
   const ideas = list.mealIdeas.map(m => `• ${m}`).join("\n");
 
-  // Goal-specific tips at the bottom
-  const goalTips: Record<string, string> = {
-    fat_loss: "\n\n⚠️ _Portion control is everything. Weigh your carbs. Fill half your plate with veg before anything else._",
-    muscle_gain: "\n\n💡 _Eat every 3 hours. Never skip a meal. If you're not gaining, add an extra egg or PB toast._",
-  };
-  const tipLine = goalType ? goalTips[goalType] || "" : "";
-
-  return `${greeting} your shopping list for the week.\n*Budget: ${list.budgetLabel}*${goalHeader ? "\n" + goalHeader : ""}\n${body}\n*Est. total: ${list.estimatedTotal}* (covers ${list.coversDays} days)\n\n*Meal ideas this week:*\n${ideas}${tipLine}\n\n_Tick off as you buy. Send me a photo of your groceries when you're done!_`;
+  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}\n\n_Screenshot this. When you shop, tick off as you go. Then just send me what you eat each day — photo or words — and I track the numbers._`;
 }

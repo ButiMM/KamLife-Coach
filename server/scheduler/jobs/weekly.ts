@@ -192,7 +192,11 @@ export async function runSundayWeeklyReport(): Promise<void> {
         const budgetTier = client.weeklyFoodBudget || "100_300";
         const clientGoal = client.goalType || "fat_loss";
         const list = getShoppingList(budgetTier, weekNum + 1, clientGoal);
-        const shoppingMsg = formatShoppingList(list, name, clientGoal);
+        const shoppingMsg = formatShoppingList(list, name, clientGoal, {
+          calorieTarget: client.calorieTarget || undefined,
+          proteinTarget: client.proteinTarget || undefined,
+          budgetTier,
+        });
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
 

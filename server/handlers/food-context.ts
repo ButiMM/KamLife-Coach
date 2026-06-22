@@ -1091,22 +1091,13 @@ export async function handleFoodContext(ctx: {
       } catch { /* non-fatal */ }
 
       let junkNoteText = "";
-      if (junkFoods.length > 0) {
-        let note = junkFoods[0].notes || "";
-        // Strip advice that's already satisfied by other foods in the meal (e.g. "add eggs"
-        // when eggs are already in the log).
-        if (goodProteins.length > 0) {
-          note = note.replace(/Better (?:to choose|options?(?: exist| available)?)[^.]*\./i, "").replace(/Add (?:eggs|pilchards|protein)[^.]*\./i, "").trim();
-        }
-        if (note) {
-          // Prefix with the specific food name so the note reads as targeted advice, not a
-          // verdict on the whole meal. "Highly processed." after "Strong meal." is jarring;
-          // "⚠️ Viennas: highly processed..." is contextual.
-          const firstName = note.charAt(0).toUpperCase() + note.slice(1).toLowerCase();
-          junkNoteText = goodProteins.length > 0
-            ? `⚠️ ${junkFoods[0].name}: ${firstName.replace(/\.$/, "").toLowerCase()} — swap for extra ${goodProteins[0]?.name?.toLowerCase() || "chicken or eggs"} next time.`
-            : note;
-        }
+      if (junkFoods.length > 0 && goodProteins.length === 0) {
+        // Only surface the junk note when the meal has NO real protein at all.
+        // If someone ate viennas WITH eggs, the eggs are doing the work — the meal is fine.
+        // Flagging "Highly processed" after "Strong meal" contradicts the coach and shames
+        // the client for eating what they had on hand. Suppress it. The numbers tell the story.
+        const note = junkFoods[0].notes || "";
+        if (note) junkNoteText = note;
       }
       const isDiabeticClient = (user.medicalConditions || "").toLowerCase().includes("diabetes");
       if (isDiabeticClient) {
