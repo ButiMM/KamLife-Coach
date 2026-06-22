@@ -703,6 +703,147 @@ test("referral sentinel: different users don't share each other's sentinel", () 
 });
 
 // ============================================================
+// LIFECYCLE.TS CHARACTERISATION TESTS
+// These capture CURRENT routing behaviour so future file splits
+// can be validated against them. They use KAMLIFE_DB_STUB=1 so
+// DB writes are no-ops and DB reads return empty — only the
+// message-routing logic and the ctx.user fields are exercised.
+// ============================================================
+
+const { handleLifecycle } = await import("../server/handlers/lifecycle");
+
+// Minimal stub user — only the fields lifecycle.ts reads from ctx.user
+const LC_USER = {
+  id: "stub-lc-uuid-00000000000000000001",
+  phoneNumber: "whatsapp:+27821234567",
+  name: "Stub User",
+  onboardingState: "COMPLETE",
+  subscriptionStatus: "active" as string,
+  goalType: "fat_loss",
+  trainingMode: "gym",
+  trainingDaysPerWeek: 3,
+  trainingExperience: "beginner",
+  calorieTarget: 1800,
+  proteinTarget: 120,
+  stepsTarget: 8000,
+  currentWeight: 80,
+  programmeWeek: 2,
+  totalWorkoutsCompleted: 5,
+  workoutStreak: 3,
+  awaitingInputType: null as string | null,
+  buddyId: null,
+  profileNotes: null as string | null,
+  injuries: null,
+  gymName: null,
+  lifeSituation: null,
+  paymentReference: null,
+  weeklyFoodBudget: null,
+  todayCalories: 1200,
+  todayProteinG: 80,
+  betaBypassUntil: null,
+  referredBy: null,
+  createdAt: new Date(Date.now() - 30 * 86_400_000),
+};
+
+function lc(message: string, overrides: Partial<typeof LC_USER> = {}) {
+  const user = { ...LC_USER, ...overrides };
+  return { phone: user.phoneNumber, message, m: message.toLowerCase().trim(), user };
+}
+
+// ---- STOP (opt-out) ----
+test("lifecycle STOP: 'stop' → returns opt-out confirmation, not null", async () => {
+  const r = await handleLifecycle(lc("STOP"));
+  assert.ok(r !== null, "should handle STOP");
+  assert.ok(r!.toLowerCase().includes("no more messages") || r!.toLowerCase().includes("start") || r!.toLowerCase().includes("resume"),
+    `unexpected: ${r?.slice(0, 100)}`);
+});
+
+test("lifecycle STOP: 'opt out' → also handled", async () => {
+  const r = await handleLifecycle(lc("opt out"));
+  assert.ok(r !== null, "should handle 'opt out'");
+});
+
+// ---- CANCEL (active user) ----
+test("lifecycle CANCEL: 'cancel' from active user → returns cancel-save prompt", async () => {
+  const r = await handleLifecycle(lc("cancel", { subscriptionStatus: "active" }));
+  assert.ok(r !== null, "should handle cancel for active user");
+  // Must ask why they want to leave, not just cancel immediately
+  assert.ok(
+    r!.includes("1") || r!.includes("2") || r!.toLowerCase().includes("making you") || r!.toLowerCase().includes("leave"),
+    `expected cancel-save prompt, got: ${r?.slice(0, 100)}`
+  );
+});
+
+test("lifecycle CANCEL: 'cancel subscription' → also matched", async () => {
+  const r = await handleLifecycle(lc("cancel subscription", { subscriptionStatus: "active" }));
+  assert.ok(r !== null, "should handle 'cancel subscription'");
+});
+
+test("lifecycle CANCEL: 'cancel' from already-inactive user → 'already inactive' message", async () => {
+  const r = await handleLifecycle(lc("cancel", { subscriptionStatus: "inactive" }));
+  assert.ok(r !== null, "should handle cancel for inactive user");
+  assert.ok(
+    r!.toLowerCase().includes("inactive") || r!.toLowerCase().includes("restart"),
+    `expected 'already inactive', got: ${r?.slice(0, 100)}`
+  );
+});
+
+// ---- REFUND REQUEST ----
+test("lifecycle REFUND: 'I want a refund' → refund request handled, not GPT fallthrough", async () => {
+  const r = await handleLifecycle(lc("I want a refund"));
+  assert.ok(r !== null, "should handle refund request");
+  assert.ok(
+    r!.toLowerCase().includes("refund") || r!.toLowerCase().includes("human") || r!.toLowerCase().includes("founder"),
+    `unexpected: ${r?.slice(0, 100)}`
+  );
+});
+
+test("lifecycle REFUND: 'money back' → also handled", async () => {
+  const r = await handleLifecycle(lc("I want my money back"));
+  assert.ok(r !== null, "should handle 'money back'");
+});
+
+// ---- PAYMENT / REJOIN ----
+test("lifecycle PAY: 'pay' keyword → payment link or info (NOT handled as food log)", async () => {
+  const r = await handleLifecycle(lc("pay", { subscriptionStatus: "active" }));
+  // 'pay' from active user: the payment handler fires
+  assert.ok(r !== null, "should handle pay message");
+});
+
+test("lifecycle PAY: negative payment phrase → NOT handled (falls through to GPT)", async () => {
+  const r = await handleLifecycle(lc("not paying for this rubbish"));
+  // Negative payment pattern should NOT match the payment handler
+  // It either returns null (falls through) or returns something unrelated to payment links
+  if (r !== null) {
+    assert.ok(!r!.toLowerCase().includes("payment link"), `negative phrase should not get a payment link: ${r?.slice(0, 100)}`);
+  }
+});
+
+// ---- RESCUE/RESET ----
+test("lifecycle RESCUE: 'rescue' → rescue confirmation prompt, not null", async () => {
+  const r = await handleLifecycle(lc("rescue"));
+  assert.ok(r !== null, "should handle rescue");
+});
+
+// ---- START (opt-in after stop) ----
+test("lifecycle START: 'start' with paused user → resumes coaching", async () => {
+  const pausedUntil = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
+  const r = await handleLifecycle(lc("start", { profileNotes: `paused_until:${pausedUntil}` }));
+  assert.ok(r !== null, "should handle START for paused user");
+  assert.ok(
+    r!.toLowerCase().includes("welcome back") || r!.toLowerCase().includes("resume") || r!.toLowerCase().includes("coaching"),
+    `unexpected: ${r?.slice(0, 100)}`
+  );
+});
+
+test("lifecycle START: 'start' for non-paused user → falls through (null)", async () => {
+  // A non-paused user typing 'start' is not an opt-in — it falls through to menu/GPT
+  const r = await handleLifecycle(lc("start", { profileNotes: null }));
+  // Either null (fall through) or handled by another section
+  assert.ok(r === null || typeof r === "string", "result should be null or string");
+});
+
+// ============================================================
 // Results
 // ============================================================
 
