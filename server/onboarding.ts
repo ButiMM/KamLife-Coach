@@ -10,6 +10,23 @@ import { getDisplayName, sastDayStart } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 
 // ============================================================
+// ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
+// Single source of truth for every onboardingState the FSM uses. If a user lands
+// in a state not in this set, handleOnboarding logs it (instead of silently
+// returning nothing) so the silent-death bug is visible in logs/Sentry. This is
+// warn-only — it never blocks the flow.
+// ============================================================
+export const ONBOARDING_STATES = new Set<string>([
+  "START", "PRE_ONBOARD", "ASK_POPIA", "WELCOME", "COMPLETE", "BLOCKED_UNDERAGE",
+  "AWAITING_MEDICAL_NOTES",
+  "ASK_GENDER", "ASK_AGE", "ASK_AGE_NEW", "ASK_GOAL", "ASK_EXPERIENCE",
+  "ASK_TRAINING_DAYS", "ASK_SITUATION", "ASK_WORK_SCHEDULE", "ASK_EQUIPMENT",
+  "ASK_GYM_SETUP", "ASK_GYM_NAME", "ASK_HOME_EQUIPMENT", "ASK_WEIGHT_HEIGHT",
+  "ASK_WEIGHT_HEIGHT_FAST", "ASK_MEDICAL", "ASK_INJURIES", "ASK_DIETARY",
+  "ASK_BUDGET", "ASK_EMAIL", "ASK_FEMALE_FOCUS", "ASK_POSTPARTUM",
+]);
+
+// ============================================================
 // MENU TEXT — context-aware
 // ============================================================
 
@@ -634,6 +651,12 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 export async function handleOnboarding(user: any, message: string, phone: string): Promise<string> {
   const state = user.onboardingState || "START";
   const msg = message.trim();
+
+  // Warn-only state validation (#17/#41): surfaces an unknown state instead of
+  // a silent no-response. Does not block — the flow proceeds exactly as before.
+  if (!ONBOARDING_STATES.has(state)) {
+    console.error(`[ONBOARDING] Unknown state "${state}" for ${phone.slice(-4)} — falling through. This is a bug; add the state to ONBOARDING_STATES or fix the transition.`);
+  }
 
   // ---- BLOCKED states — hard exits ----
   if (state === "BLOCKED_UNDERAGE") {

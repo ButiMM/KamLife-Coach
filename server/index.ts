@@ -7,7 +7,7 @@ import { registerAudioRoutes } from "./replit_integrations/audio/routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
 import { initScheduler } from "./scheduler";
-import { initMemoryTable, initMealLogsTable } from "./memory";
+import { initMemoryTable } from "./memory";
 import { initFoodsTable } from "./foods";
 import { pool, db } from "./db";
 import { users } from "../shared/schema";
@@ -699,7 +699,7 @@ async function activateCoachAccount(): Promise<void> {
       initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));
-      initMealLogsTable().catch(e => console.error("[STARTUP] Meal logs init failed:", e));
+      // meal_logs is created by the canonical migration block above (was a duplicate here).
       activateCoachAccount().catch(e => console.error("[STARTUP] Coach activation failed:", e));
     },
   );
