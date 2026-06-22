@@ -3,6 +3,8 @@ import twilio from "twilio";
 import type { RouteDeps } from "./types";
 import { requireAdminKey } from "./auth";
 import { sendWhatsAppButtons } from "../twilio-interactive";
+import { db } from "../db";
+import { processedWebhooks } from "../../shared/schema";
 
 const TWILIO_FROM = () => process.env.TWILIO_WHATSAPP_NUMBER
   ? `whatsapp:${process.env.TWILIO_WHATSAPP_NUMBER.replace(/^whatsapp:/, "")}`
@@ -260,7 +262,9 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
   // MessageSid dedup: Twilio retries the webhook if we don't respond within 15s.
   // Since we ACK immediately with empty TwiML, retries should be rare — but if they
   // happen (network glitch, slow response), we must not double-process the same message.
-  const processedSids = new Map<string, number>(); // SID → timestamp
+  // DB-backed (processed_webhooks table) so restarts and multi-replica deployments don't
+  // allow re-processing. In-memory Map kept as fast fallback when DB is unavailable.
+  const processedSids = new Map<string, number>(); // SID → timestamp (fallback only)
 
   // ── Main Twilio WhatsApp webhook ──
   app.post("/twilio/whatsapp", async (req, res) => {
@@ -290,16 +294,29 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response><Message>Too many messages. Wait 60 seconds.</Message></Response>`);
       }
 
-      // MessageSid dedup — drop retries that arrive after we already ACK'd
+      // MessageSid dedup — drop Twilio retries. DB-backed so cross-replica + restart-safe.
       const msgSid = (req.body.MessageSid || "") as string;
       if (msgSid) {
         const now = Date.now();
-        if (processedSids.has(msgSid)) {
-          console.warn(`[WEBHOOK] Duplicate MessageSid ${msgSid} — dropping retry`);
-          return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+        try {
+          const inserted = await db.insert(processedWebhooks)
+            .values({ messageSid: msgSid })
+            .onConflictDoNothing()
+            .returning({ sid: processedWebhooks.messageSid });
+          if (!inserted.length) {
+            console.warn(`[WEBHOOK] Duplicate MessageSid ${msgSid} — dropping retry`);
+            return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+          }
+          processedSids.set(msgSid, now); // mirror in-memory for fast same-instance checks
+        } catch {
+          // DB unavailable — fall back to in-memory dedup only
+          if (processedSids.has(msgSid)) {
+            console.warn(`[WEBHOOK] Duplicate MessageSid ${msgSid} (in-memory fallback) — dropping retry`);
+            return res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
+          }
+          processedSids.set(msgSid, now);
         }
-        processedSids.set(msgSid, now);
-        // Evict entries older than 24h to prevent unbounded growth
+        // Evict stale in-memory entries to prevent unbounded growth
         if (processedSids.size > 2000) {
           for (const [k, v] of processedSids) {
             if (now - v > 86_400_000) processedSids.delete(k);

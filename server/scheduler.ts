@@ -11,7 +11,7 @@ import {
   loadState, saveState, todaySAST, hasRunToday,
   weeklyKeyedSent, dailyProactiveCount, recordJobRun,
   hydrateSchedulerStateFromDb,
-  escalations, sentProactive,
+  escalations, sentProactive, processedWebhooks,
   db, lt, eq, lte, and, sql,
 } from "./scheduler/shared";
 
@@ -75,6 +75,10 @@ cron.schedule("0 22 * * *", async () => {
   try {
     const thirtyDaysAgo = new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10);
     await db.delete(sentProactive).where(lt(sentProactive.dedupeWindow as Parameters<typeof lt>[0], thirtyDaysAgo));
+  } catch { /* non-fatal */ }
+  try {
+    const oneDayAgo = new Date(Date.now() - 86_400_000);
+    await db.delete(processedWebhooks).where(lt(processedWebhooks.processedAt, oneDayAgo));
   } catch { /* non-fatal */ }
   console.log("[SCHEDULER] dedupe purged — daily budget entries:", dailyProactiveCount.size);
 

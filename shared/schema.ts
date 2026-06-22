@@ -348,6 +348,16 @@ export const schedulerState = pgTable("scheduler_state", {
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
 
+// === PROCESSED WEBHOOKS — cross-replica Twilio MessageSid dedup ===
+// In-memory processedSids Map is wiped on container restart. A Twilio retry that hits a
+// fresh replica after a restart would be re-processed (duplicate GPT call, duplicate log).
+// This table stores the SID with a 24h TTL (rows purged nightly). ON CONFLICT DO NOTHING
+// means the INSERT is the atomic test-and-set — only one replica ever processes each SID.
+export const processedWebhooks = pgTable("processed_webhooks", {
+  messageSid: text("message_sid").primaryKey(),
+  processedAt: timestamp("processed_at").defaultNow().notNull(),
+});
+
 // === ADMIN EVENTS — immutable audit log for admin/manual interventions ===
 export const adminEvents = pgTable("admin_events", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

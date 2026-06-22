@@ -457,6 +457,10 @@ async function runMigrations(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS users_sub_onboard_idx ON users(subscription_status, onboarding_state)`,
     // Scheduler state — replaces the file-based .scheduler-state.json that is lost on container recycle.
     `CREATE TABLE IF NOT EXISTS scheduler_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMP NOT NULL DEFAULT NOW())`,
+    // Cross-replica Twilio webhook dedup — MessageSid PK prevents double-processing when a Twilio retry
+    // hits a different Railway replica or a fresh container after a restart.
+    `CREATE TABLE IF NOT EXISTS processed_webhooks (message_sid TEXT PRIMARY KEY, processed_at TIMESTAMP NOT NULL DEFAULT NOW())`,
+    `CREATE INDEX IF NOT EXISTS processed_webhooks_ts_idx ON processed_webhooks(processed_at)`,
   ];
 
   let applied = 0;

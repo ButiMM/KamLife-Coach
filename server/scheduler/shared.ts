@@ -16,7 +16,7 @@ import { checkOutboundMessage } from "../verifiers/proactive-gate";
 
 export { db, pool };
 export { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles };
-export { abExperiments, abAssignments } from "../../shared/schema";
+export { abExperiments, abAssignments, processedWebhooks } from "../../shared/schema";
 export { eq, gte, and, lt, desc, or, sql, sastDayStart };
 
 // ── Re-export heavy deps job files need ──────────────────────────────────────
