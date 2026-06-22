@@ -544,11 +544,10 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    // Only grant a free trial on the very first onboarding. If the user already has
-    // any subscription status (active, inactive, trial — even an expired one that was
-    // set on a prior onboarding), do NOT reset it. This closes the trial-restart exploit
-    // where someone re-onboards to get a fresh 7-day trial every time.
-    ...(!u.subscriptionStatus ? {
+    // betaBypassUntil is null until a trial is granted. Using it as the "never trialed"
+    // signal is safer than checking subscriptionStatus (which defaults to "inactive",
+    // making !u.subscriptionStatus always false). This closes the trial-restart exploit.
+    ...(!u.betaBypassUntil ? {
       subscriptionStatus: "trial",
       betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
     } : {}),
@@ -1252,8 +1251,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      // Gate trial to first-ever onboarding — do NOT restart if user already has any status
-      ...(!u.subscriptionStatus ? {
+      // betaBypassUntil null = never trialed. subscriptionStatus defaults to "inactive"
+      // (notNull), so checking it directly is always false. Use betaBypassUntil instead.
+      ...(!u.betaBypassUntil ? {
         subscriptionStatus: "trial",
         betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
       } : {}),

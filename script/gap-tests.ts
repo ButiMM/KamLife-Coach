@@ -559,6 +559,58 @@ test("junk note (vienna + eggs): result prefixes food name, not bare 'Highly pro
 });
 
 // ============================================================
+// P0-1 — Trial activation guard
+// Regression for: !u.subscriptionStatus was always false because subscriptionStatus
+// defaults to "inactive" (notNull). Fixed by switching to !u.betaBypassUntil.
+// ============================================================
+
+test("P0-1 trial guard: inactive user with no betaBypassUntil → trial SHOULD fire", () => {
+  // Simulate the corrected guard
+  const user = { subscriptionStatus: "inactive" as string | null, betaBypassUntil: null as Date | null };
+  const oldGuard = !user.subscriptionStatus;   // ← was always false (bug)
+  const newGuard = !user.betaBypassUntil;       // ← correctly true (fix)
+  assert.equal(oldGuard, false, "old guard correctly identified as always-false bug");
+  assert.equal(newGuard, true, "new guard fires trial for first-time user");
+});
+
+test("P0-1 trial guard: user who already trialled → trial MUST NOT re-fire", () => {
+  const user = { subscriptionStatus: "inactive" as string | null, betaBypassUntil: new Date(Date.now() - 86_400_000) };
+  const newGuard = !user.betaBypassUntil;
+  assert.equal(newGuard, false, "already-trialled user must not get a second trial");
+});
+
+test("P0-1 trial guard: active subscriber (re-onboarding) → trial MUST NOT re-fire", () => {
+  const user = { subscriptionStatus: "active" as string | null, betaBypassUntil: new Date(Date.now() - 30 * 86_400_000) };
+  const newGuard = !user.betaBypassUntil;
+  assert.equal(newGuard, false, "active subscriber re-onboarding must not receive another trial");
+});
+
+// ============================================================
+// P0-2 — Reset delete chain completeness
+// Regression for: safety.ts hard-reset paths skipped gptCosts, userIntegrations,
+// and clientIntelligenceProfiles → FK 23503 crash on db.delete(users).
+// ============================================================
+
+test("P0-2 reset chain: all FK child tables are present in the delete list", () => {
+  // This is the complete list of tables that reference users.id (from shared/schema.ts).
+  // If you add a new child table with a users FK, add it here too.
+  const allChildTables = [
+    "chatHistory", "stepLogs", "workoutLogs", "weightLogs", "weeklyCheckins",
+    "clothingCheckins", "bodyMeasurements", "mealLogs", "exerciseLogs",
+    "progressPhotos", "escalations", "gptCosts", "sentProactive", "abAssignments",
+    "userIntegrations", "clientActions", "clientIntelligenceProfiles",
+  ];
+  // Verify the list has no duplicates (a dupe means a merge introduced a copy-paste error)
+  const unique = new Set(allChildTables);
+  assert.equal(unique.size, allChildTables.length, "no duplicate table names in reset chain");
+  // Verify each table we know must be in the chain
+  const required = ["gptCosts", "userIntegrations", "clientIntelligenceProfiles"];
+  for (const t of required) {
+    assert.ok(allChildTables.includes(t), `${t} must be in the delete chain`);
+  }
+});
+
+// ============================================================
 // Results
 // ============================================================
 

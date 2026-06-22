@@ -11,6 +11,7 @@ import {
   weeklyCheckins, clothingCheckins, bodyMeasurements,
   mealLogs, progressPhotos, escalations, abAssignments, exerciseLogs,
   sentProactive, clientActions, adminEvents,
+  gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
@@ -201,35 +202,40 @@ export async function runSafetyGuards(
   // Two-step: bare "reset" asks for confirmation; "yes reset" actually wipes.
   if (m === "yes reset" || m === "yes, reset" || m === "confirm reset") {
     const existing = await db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    if (existing.length > 0) {
-      const uid = existing[0].id;
-      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
-      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
-      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
-      await db.delete(mealLogs).where(eq(mealLogs.userId, uid));
-      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
-      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-      await db.delete(escalations).where(eq(escalations.userId, uid));
-      await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
-      await db.delete(clientActions).where(eq(clientActions.userId, uid));
-      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
-      await db.delete(users).where(eq(users.id, uid));
-    }
-    await db.insert(users).values({
-      phoneNumber: phone,
-      subscriptionStatus: "inactive",
-      onboardingState: "WELCOME",
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      trainingMode: "home",
-      stepsTarget: 8500,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
+    await db.transaction(async (tx) => {
+      if (existing.length > 0) {
+        const uid = existing[0].id;
+        await tx.delete(gptCosts).where(eq(gptCosts.userId, uid));
+        await tx.delete(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, uid));
+        await tx.delete(userIntegrations).where(eq(userIntegrations.userId, uid));
+        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
+        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
+        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
+        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
+        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+        await tx.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+        await tx.delete(escalations).where(eq(escalations.userId, uid));
+        await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
+        await tx.delete(clientActions).where(eq(clientActions.userId, uid));
+        await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
+        await tx.delete(users).where(eq(users.id, uid));
+      }
+      await tx.insert(users).values({
+        phoneNumber: phone,
+        subscriptionStatus: "inactive",
+        onboardingState: "WELCOME",
+        programmePhase: 1,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        trainingMode: "home",
+        stepsTarget: 8500,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
     });
     return "Fresh start. What's your name?";
   }
@@ -247,35 +253,40 @@ export async function runSafetyGuards(
       return `⚠️ This will permanently delete all your data — workouts, food logs, weight history, everything.${sessionNote}\n\nReply *yes reset* to confirm, or anything else to go back.`;
     }
     // No meaningful data yet — wipe immediately
-    if (existing.length > 0) {
-      const uid = existing[0].id;
-      await db.delete(chatHistory).where(eq(chatHistory.userId, uid));
-      await db.delete(stepLogs).where(eq(stepLogs.userId, uid));
-      await db.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
-      await db.delete(weightLogs).where(eq(weightLogs.userId, uid));
-      await db.delete(mealLogs).where(eq(mealLogs.userId, uid));
-      await db.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
-      await db.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
-      await db.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
-      await db.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
-      await db.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
-      await db.delete(escalations).where(eq(escalations.userId, uid));
-      await db.delete(sentProactive).where(eq(sentProactive.userId, uid));
-      await db.delete(clientActions).where(eq(clientActions.userId, uid));
-      await db.delete(abAssignments).where(eq(abAssignments.userId, uid));
-      await db.delete(users).where(eq(users.id, uid));
-    }
-    await db.insert(users).values({
-      phoneNumber: phone,
-      subscriptionStatus: "inactive",
-      onboardingState: "WELCOME",
-      programmePhase: 1,
-      programmeWeek: 1,
-      programmeDayInWeek: 1,
-      trainingMode: "home",
-      stepsTarget: 8500,
-      createdAt: new Date(),
-      lastActiveAt: new Date(),
+    await db.transaction(async (tx) => {
+      if (existing.length > 0) {
+        const uid = existing[0].id;
+        await tx.delete(gptCosts).where(eq(gptCosts.userId, uid));
+        await tx.delete(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, uid));
+        await tx.delete(userIntegrations).where(eq(userIntegrations.userId, uid));
+        await tx.delete(chatHistory).where(eq(chatHistory.userId, uid));
+        await tx.delete(stepLogs).where(eq(stepLogs.userId, uid));
+        await tx.delete(workoutLogs).where(eq(workoutLogs.userId, uid));
+        await tx.delete(weightLogs).where(eq(weightLogs.userId, uid));
+        await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
+        await tx.delete(weeklyCheckins).where(eq(weeklyCheckins.userId, uid));
+        await tx.delete(clothingCheckins).where(eq(clothingCheckins.userId, uid));
+        await tx.delete(bodyMeasurements).where(eq(bodyMeasurements.userId, uid));
+        await tx.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+        await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
+        await tx.delete(escalations).where(eq(escalations.userId, uid));
+        await tx.delete(sentProactive).where(eq(sentProactive.userId, uid));
+        await tx.delete(clientActions).where(eq(clientActions.userId, uid));
+        await tx.delete(abAssignments).where(eq(abAssignments.userId, uid));
+        await tx.delete(users).where(eq(users.id, uid));
+      }
+      await tx.insert(users).values({
+        phoneNumber: phone,
+        subscriptionStatus: "inactive",
+        onboardingState: "WELCOME",
+        programmePhase: 1,
+        programmeWeek: 1,
+        programmeDayInWeek: 1,
+        trainingMode: "home",
+        stepsTarget: 8500,
+        createdAt: new Date(),
+        lastActiveAt: new Date(),
+      });
     });
     return "Fresh start. What's your name?";
   }
