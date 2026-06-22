@@ -237,6 +237,9 @@ export async function runSafetyGuards(
         lastActiveAt: new Date(),
       });
     });
+    await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
+      console.error("[RESET] memories delete failed (non-fatal):", e?.message)
+    );
     return "Fresh start. What's your name?";
   }
 
@@ -288,6 +291,9 @@ export async function runSafetyGuards(
         lastActiveAt: new Date(),
       });
     });
+    await pool.query("DELETE FROM memories WHERE phone = $1", [phone]).catch((e: any) =>
+      console.error("[RESET] memories delete failed (non-fatal):", e?.message)
+    );
     return "Fresh start. What's your name?";
   }
 
