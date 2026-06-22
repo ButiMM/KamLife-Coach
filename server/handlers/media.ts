@@ -1258,7 +1258,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
       const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
       const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
-      const whisperPrompt = "South African fitness coaching. Client may speak English, Zulu, Xhosa, Afrikaans, or switch between them. Fitness terms: reps, sets, protein, calories, steps, workout, gym, pap, pilchards.";
+      // Whisper uses the prompt as a vocabulary bias — including exercise names here is the
+      // single biggest lever on transcription accuracy. Without them, "chest fly" → "Just fly,
+      // dude", "full weight stack" → gibberish. Keep it as natural prose so Whisper reads it
+      // as prior context, not a word list. Under the 224-token API limit.
+      const whisperPrompt = "South African gym coaching. Today I did chest flies, cable flies, lat pulldowns, seated rows, single-arm rows, leg press, hip thrusts, Romanian deadlifts, RDLs, squats, Bulgarian split squats, lunges, leg curls, leg extensions, calf raises, shoulder press, lateral raises, face pulls, bicep curls, tricep pushdowns, bench press, incline press, push-ups, pull-ups, planks, dead bugs. Full weight stack, 20kg plates, 10kg plates, 80kg, dumbbells, barbell, cable machine. Sets, reps, protein grams, calories, kcal, steps, gym, pap, pilchards, wors. English, Zulu, Xhosa, Afrikaans.";
 
       let transcribedText: string | undefined;
       // Confidence signal only available from Whisper verbose_json path.
