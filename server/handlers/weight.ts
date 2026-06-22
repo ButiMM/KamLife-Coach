@@ -30,7 +30,11 @@ export function assessWeightRate(
     // Bands expressed as % of current bodyweight per week — correct for all body sizes.
     // 0.5–1% BW/week is the evidence-based fat loss target (TBD; Helms et al.).
     const excellentBand = goal === "fat_loss" ? currentWeightKg * 0.005 : currentWeightKg * 0.004;
-    const maxSafe      = goal === "fat_loss" ? currentWeightKg * 0.01  : currentWeightKg * 0.0075;
+    // recomposition has no separate "high end of safe" tier — per the band spec above,
+    // 0.4–0.75%/wk is the WARN tier. maxSafe collapses to the excellent boundary so the
+    // 0.4–0.75% range falls through to the ⚠️ "faster than ideal" branch instead of being
+    // mislabelled "good" (and the warn branch being unreachable dead code).
+    const maxSafe      = goal === "fat_loss" ? currentWeightKg * 0.01  : currentWeightKg * 0.004;
     const maxWarn      = goal === "fat_loss" ? currentWeightKg * 0.015 : currentWeightKg * 0.0075;
     const dangerBand   = currentWeightKg * 0.02;
     if (pace <= excellentBand) {
@@ -64,6 +68,34 @@ export function assessWeightRate(
 
   return `${totalChangeKg < 0 ? "📉" : "📈"} Total change: *${totalChangeKg > 0 ? "+" : ""}${totalChangeKg.toFixed(1)}kg*.`;
 }
+
+/**
+ * Least-squares weekly trend slope (kg/week) over a set of weigh-ins.
+ * Uses EVERY point, not just the endpoints, so one noisy reading (water, sodium, time of
+ * day) can't fabricate a "gaining fast"/"losing fast" signal the way a 2-point slope does.
+ * Returns null when there are too few points or too short a span to mean anything.
+ */
+export function weeklyTrendSlopeKg(
+  points: { dayOffset: number; kg: number }[],
+  minPoints = 3,
+  minSpanDays = 5,
+): number | null {
+  if (points.length < minPoints) return null;
+  const xs = points.map(p => p.dayOffset);
+  const span = Math.max(...xs) - Math.min(...xs);
+  if (span < minSpanDays) return null;
+  const n = points.length;
+  const meanX = xs.reduce((s, x) => s + x, 0) / n;
+  const meanY = points.reduce((s, p) => s + p.kg, 0) / n;
+  let num = 0, den = 0;
+  for (const p of points) {
+    num += (p.dayOffset - meanX) * (p.kg - meanY);
+    den += (p.dayOffset - meanX) ** 2;
+  }
+  if (den === 0) return null;
+  return (num / den) * 7;
+}
+
 import { sastDayStart } from "../utils";
 import { generateVoiceNote } from "../tts";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -225,15 +257,17 @@ export async function handleWeightLog(
   // all-time average because it reflects what the body is doing RIGHT NOW.
   const twoWeeksAgo = new Date(Date.now() - 14 * 86_400_000);
   const recentWindow = recentWeightLogs.filter(r => new Date(r.loggedAt!).getTime() >= twoWeeksAgo.getTime());
-  let recentRateKgPerWeek: number | null = null;
-  if (recentWindow.length >= 3) {
-    const oldest = recentWindow[0];
-    const newest = recentWindow[recentWindow.length - 1];
-    const daySpan = (new Date(newest.loggedAt!).getTime() - new Date(oldest.loggedAt!).getTime()) / 86_400_000;
-    if (daySpan >= 5) {
-      recentRateKgPerWeek = (parseFloat(String(newest.weight)) - parseFloat(String(oldest.weight))) / (daySpan / 7);
-    }
-  }
+  // Least-squares slope over EVERY point in the window — replaces the old 2-point (oldest
+  // vs newest) slope, which let a single noisy reading fabricate a trend and drive a
+  // calorie change off water weight.
+  const trendPoints = recentWindow.map(r => ({
+    dayOffset: new Date(r.loggedAt!).getTime() / 86_400_000,
+    kg: parseFloat(String(r.weight)),
+  }));
+  const recentSpanDays = trendPoints.length >= 2
+    ? Math.max(...trendPoints.map(p => p.dayOffset)) - Math.min(...trendPoints.map(p => p.dayOffset))
+    : 0;
+  const recentRateKgPerWeek = weeklyTrendSlopeKg(trendPoints, 3, 5);
 
   // ── Trend-based calorie adjustment ──
   // Standard targets from calculateTargets are a good baseline but don't account for the actual
@@ -301,9 +335,25 @@ export async function handleWeightLog(
       }
     }
 
-    if (calAdjust !== 0) {
+    // Only MOVE calories on a solid trend: ≥4 weigh-ins spanning ≥10 days, AND the most
+    // recent reading must not contradict the fortnight trend. A single weigh-in pointing
+    // the other way is noise — show the trend and explain, but never cut/add off it.
+    const lastLogDelta = lastLoggedKg !== null ? newKg - lastLoggedKg : null;
+    const latestContradictsTrend = lastLogDelta !== null && recentRateKgPerWeek !== null
+      && Math.abs(lastLogDelta) >= 0.2
+      && Math.sign(lastLogDelta) !== Math.sign(recentRateKgPerWeek);
+    const enoughForCalChange = recentWindow.length >= 4 && recentSpanDays >= 10;
+
+    if (calAdjust !== 0 && enoughForCalChange && !latestContradictsTrend) {
       finalCals = Math.max(1200, Math.min(4000, newCals + calAdjust));
       await db.update(users).set({ calorieTarget: finalCals }).where(eq(users.phoneNumber, phone));
+    } else if (calAdjust !== 0) {
+      // We see a direction but won't act on thin or self-contradictory data — keep targets,
+      // explain why, so the message stays coherent instead of "down 0.3kg" + "cutting 100 kcal".
+      calAdjust = 0;
+      trendStatus = latestContradictsTrend
+        ? `your last reading moved the other way — one weigh-in is noise, so I'm watching the trend, not changing your targets yet.`
+        : `I want a few more weigh-ins (daily is best) before I change your targets — keeps the call based on signal, not water weight.`;
     }
   }
 

@@ -22,7 +22,7 @@ process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+270
 import assert from "node:assert/strict";
 import { scalePortionDescription, extractMealLabel } from "../server/handlers/food-context";
 import { parseLiftLog } from "../server/handlers/workout";
-import { assessWeightRate } from "../server/handlers/weight";
+import { assessWeightRate, weeklyTrendSlopeKg } from "../server/handlers/weight";
 import { parseMealDate, isRetroactiveMeal, mealDateLabel } from "../server/utils";
 
 let passed = 0;
@@ -291,6 +291,59 @@ test("assessWeightRate: recomposition — safe loss pace → no message at all (
   const r = assessWeightRate(-0.4, 2, "recomposition", 130, 1900, "Kam", 80);
   assert.ok(r !== null); // returns message; just not a danger message
   assert.ok(!r!.includes("🚨"), `should not be danger: ${r}`);
+});
+
+// ============================================================
+// weeklyTrendSlopeKg — noise-resistant weight trend (regression, not 2-point)
+// ============================================================
+
+test("weeklyTrendSlopeKg: fewer than 3 points → null", () => {
+  assert.equal(weeklyTrendSlopeKg([{ dayOffset: 0, kg: 80 }, { dayOffset: 7, kg: 81 }]), null);
+});
+
+test("weeklyTrendSlopeKg: span under 5 days → null", () => {
+  assert.equal(weeklyTrendSlopeKg([
+    { dayOffset: 0, kg: 80 }, { dayOffset: 1, kg: 80.5 }, { dayOffset: 3, kg: 81 },
+  ]), null);
+});
+
+test("weeklyTrendSlopeKg: flat readings → ~0 kg/week", () => {
+  const s = weeklyTrendSlopeKg([
+    { dayOffset: 0, kg: 80 }, { dayOffset: 7, kg: 80 }, { dayOffset: 14, kg: 80 },
+  ]);
+  assert.ok(s !== null && Math.abs(s) < 1e-9, `got: ${s}`);
+});
+
+test("weeklyTrendSlopeKg: steady +0.5kg/week → slope ≈ 0.5", () => {
+  const s = weeklyTrendSlopeKg([
+    { dayOffset: 0, kg: 80 }, { dayOffset: 7, kg: 80.5 }, { dayOffset: 14, kg: 81 },
+  ]);
+  assert.ok(s !== null && Math.abs(s - 0.5) < 1e-9, `got: ${s}`);
+});
+
+test("weeklyTrendSlopeKg: a single end spike does NOT dominate like the old 2-point slope", () => {
+  const pts = [
+    { dayOffset: 0, kg: 80 }, { dayOffset: 7, kg: 80 },
+    { dayOffset: 13, kg: 80 }, { dayOffset: 14, kg: 82 },
+  ];
+  const regression = weeklyTrendSlopeKg(pts)!;
+  const twoPoint = (82 - 80) / (14 / 7); // old buggy method = 1.0 kg/wk
+  assert.ok(regression < twoPoint, `regression ${regression} should be < 2-point ${twoPoint}`);
+  assert.ok(regression > 0, `still detects the upward drift: ${regression}`);
+});
+
+test("weeklyTrendSlopeKg: screenshot case (dip after a rise) stays net-positive over the fortnight", () => {
+  const s = weeklyTrendSlopeKg([
+    { dayOffset: 0, kg: 82.1 }, { dayOffset: 13, kg: 84.1 }, { dayOffset: 14, kg: 83.8 },
+  ])!;
+  assert.ok(s > 0, `net upward over two weeks: ${s}`);
+});
+
+// H4 regression — recomp "faster than ideal" tier was dead code (maxSafe===maxWarn); now reachable
+test("assessWeightRate: recomposition — 0.5%/wk loss → ⚠️ faster than ideal (not 'good')", () => {
+  // pace = 0.8/2 = 0.4 kg/wk = 0.5% of 80kg → between excellent(0.32) and maxWarn(0.6)
+  const r = assessWeightRate(-0.8, 2, "recomposition", 130, 1900, "Kam", 80);
+  assert.ok(r !== null && r.includes("faster than ideal"), `got: ${r}`);
 });
 
 // ============================================================
