@@ -1,5 +1,8 @@
 import type { Express, Request } from "express";
 import crypto from "crypto";
+import { db } from "../db";
+import { adminEvents } from "../../shared/schema";
+import { and, eq, gte, sql } from "drizzle-orm";
 
 function createSessionToken(secret: string): string {
   const exp = Date.now() + 4 * 60 * 60 * 1000;
@@ -63,7 +66,10 @@ export function requireAdminKey(req: any, res: any, next: any) {
   return res.status(401).json({ message: "Unauthorized" });
 }
 
-// Brute-force protection for the login endpoint (in-memory, per IP)
+// Brute-force protection for the login endpoint.
+// In-memory map is the fast path for the current instance; DB is the authoritative
+// cross-replica source so an attacker can't bypass the 5-attempt lock by hitting
+// different Railway replicas. Both are checked; either can block the login.
 const loginAttempts = new Map<string, { count: number; lockedUntil: number }>();
 setInterval(() => {
   const now = Date.now();
@@ -72,18 +78,53 @@ setInterval(() => {
   }
 }, 5 * 60_000);
 
+const LOCKOUT_WINDOW_MS = 15 * 60_000;
+const MAX_ATTEMPTS = 5;
+
+async function getFailedAttemptsDb(ip: string): Promise<number> {
+  try {
+    const since = new Date(Date.now() - LOCKOUT_WINDOW_MS);
+    const result = await db.select({ n: sql<string>`count(*)` })
+      .from(adminEvents)
+      .where(and(
+        eq(adminEvents.action, "login_failed"),
+        gte(adminEvents.performedAt, since),
+        sql`meta->>'ip' = ${ip}`,
+      ));
+    return parseInt(result[0]?.n || "0", 10);
+  } catch {
+    return 0; // fail open — in-memory guard still applies
+  }
+}
+
+async function recordFailedAttemptDb(ip: string): Promise<void> {
+  try {
+    await db.insert(adminEvents).values({ action: "login_failed", meta: { ip } });
+  } catch { /* non-fatal */ }
+}
+
 export function registerAuthRoutes(app: Express) {
-  app.post("/api/auth/login", (req: any, res: any) => {
+  app.post("/api/auth/login", async (req: any, res: any) => {
     const secret = process.env.COACH_DASHBOARD_KEY;
     if (!secret) return res.status(503).json({ message: "Dashboard not configured — set COACH_DASHBOARD_KEY env var" });
 
     const ip: string = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
     const now = Date.now();
+
+    // In-memory fast path: blocked on THIS replica already
     const attempt = loginAttempts.get(ip);
     if (attempt && now < attempt.lockedUntil) {
       return res.status(429).json({ message: "Too many failed attempts — try again in 15 minutes" });
     }
     if (attempt && now >= attempt.lockedUntil) loginAttempts.delete(ip);
+
+    // DB authoritative check: blocks IPs that hit other replicas too
+    const dbAttempts = await getFailedAttemptsDb(ip);
+    if (dbAttempts >= MAX_ATTEMPTS) {
+      // Also lock locally so subsequent checks are fast
+      loginAttempts.set(ip, { count: dbAttempts, lockedUntil: now + LOCKOUT_WINDOW_MS });
+      return res.status(429).json({ message: "Too many failed attempts — try again in 15 minutes" });
+    }
 
     const { password } = req.body || {};
     let match = false;
@@ -97,8 +138,9 @@ export function registerAuthRoutes(app: Express) {
     if (!match) {
       const entry = loginAttempts.get(ip) ?? { count: 0, lockedUntil: 0 };
       entry.count += 1;
-      if (entry.count >= 5) entry.lockedUntil = now + 15 * 60_000;
+      if (entry.count >= MAX_ATTEMPTS) entry.lockedUntil = now + LOCKOUT_WINDOW_MS;
       loginAttempts.set(ip, entry);
+      void recordFailedAttemptDb(ip); // cross-replica persistence, fire-and-forget
       return res.status(401).json({ message: "Invalid password" });
     }
 
