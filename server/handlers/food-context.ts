@@ -769,18 +769,35 @@ export async function handleFoodContext(ctx: {
   // NOTE: must use original `message` for line splitting — `m` collapses all whitespace to spaces.
   const dashLineCount = message.split("\n").filter(l => /^\s*-\s*\S/.test(l)).length;
   const SHOPPING_CONTEXT_RE = /\b(isle\s*by\s*isle|go\s*(?:isle|aisle)|aisle|what\s+i\s+have\s+(?:at\s+home|here)|have\s+at\s+home|at\s+home\s+i\s+(?:have|keep|stock)|what\s+i\s+(?:normally\s+)?(?:buy|stock|keep)|what.*(?:think|choose|chose)\s+(?:is\s+)?missing|shopping\s+list|groceries?|pantry|in\s+(?:my\s+)?fridge|what.?s\s+in\s+(?:my|the)\s+(?:fridge|pantry|house|cupboard)|i\s+stock|need\s+to\s+buy|running\s+low|picked\s+up\s+from|went\s+to\s+(?:the\s+)?(?:shop|store|checkers|shoprite|pick\s*n\s*pay|woolworths|spar))\b/i;
-  const isShoppingListMsg = !hasLogTrigger && ((dashLineCount >= 3 && SHOPPING_CONTEXT_RE.test(m)) || dashLineCount >= 7);
+  // Plain-line list safety net: 12+ non-empty lines with no eating verbs = grocery list.
+  // Routes.ts normally catches this with _isGroceryList before food-context runs, but if
+  // the list slips through (e.g., intro sentence + many items confusing the parser), this
+  // second gate prevents the food scanner from logging 25 grocery items as a 2330 kcal meal.
+  const _plainLineCount = message.split("\n").map(l => l.trim()).filter(l => l.length > 1).length;
+  const isPlainLineList = !hasLogTrigger && _plainLineCount >= 12;
+  const isShoppingListMsg = !hasLogTrigger && (
+    (dashLineCount >= 3 && SHOPPING_CONTEXT_RE.test(m)) ||
+    dashLineCount >= 7 ||
+    isPlainLineList
+  );
 
   if (isShoppingListMsg) {
-    const name = user.name?.split(" ")[0] || "";
+    const name = user.name?.split(" ")[0] || "there";
+    // Extract items — handle dashes, bullets, OR plain one-per-line
     const items = message.split("\n")
-      .filter(l => /^\s*-\s*\S/.test(l))
-      .map(l => l.replace(/^\s*-\s*/, "").trim())
-      .filter(Boolean);
-    const preview = items.slice(0, 3).join(", ");
-    const moreNote = items.length > 3 ? ` and ${items.length - 3} more` : "";
-    const shoppingReply = `${name ? name + ", t" : "T"}hat looks like your pantry list — ${preview}${moreNote}. Good staples to have.\n\n_I haven't logged these as a meal._ Those are ingredients, not food eaten today.\n\nTo log what you actually ate, tell me:\n*"I had oats and milk for breakfast"* or *"lunch was rice, tuna and eggs"*\n\nWhat did you eat today?`;
-    await logChat(user.id, message, shoppingReply, "SHOPPING_LIST_CLARIFY");
+      .map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim())
+      .filter(l => l.length > 1 && l.length < 80);
+    let shoppingReply: string;
+    try {
+      const { refineGroceryList } = await import("../grocery-refine");
+      shoppingReply = await refineGroceryList(items, user);
+      if (!shoppingReply) throw new Error("empty refine result");
+    } catch {
+      const preview = items.slice(0, 3).join(", ");
+      const moreNote = items.length > 3 ? ` and ${items.length - 3} more` : "";
+      shoppingReply = `${name}, got your list — ${preview}${moreNote}. I've noted your staples.\n\n_Not logged as a meal._ When you eat, just tell me: *"I had eggs and rice for lunch"* and I'll track the numbers.\n\nType *shopping list* and I'll send you your full goal-adjusted weekly list.`;
+    }
+    await logChat(user.id, message, shoppingReply, "SHOPPING_LIST");
     return shoppingReply;
   }
 

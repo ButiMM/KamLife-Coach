@@ -516,9 +516,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     .filter(l => l.length > 1 && l.length < 80);
   const _hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(m);
   const _isListFormat = _msgLines.filter(l => /^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])/.test(l)).length >= 4;
+  // 75% threshold instead of `every` — one item with a parenthetical note like
+  // "Chicken strips (I use these for wraps)" used to fail the `every(≤6 words)`
+  // check and let a 25-item grocery list fall through to the food scanner, which
+  // logged it as a 2330 kcal meal. Threshold catches real lists while allowing notes.
+  const _shortItemFraction = _cleanedItems.length > 0
+    ? _cleanedItems.filter(l => l.split(/\s+/).length <= 7).length / _cleanedItems.length
+    : 0;
   const _isGroceryList = !_hasEatingContext && _cleanedItems.length >= 8 && (
     _isListFormat ||
-    (_cleanedItems.every(l => l.split(/\s+/).length <= 6) && _msgLines.length >= 10)
+    (_shortItemFraction >= 0.75 && _msgLines.length >= 10)
   );
   if (_isGroceryList) {
     const clientName = user.name?.split(" ")[0] || "there";

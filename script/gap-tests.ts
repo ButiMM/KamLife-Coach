@@ -516,6 +516,31 @@ test("weeklyAvg divisor (M3): 3 logging days at 8 000 steps → weekly avg ≈ 3
 });
 
 // ============================================================
+// Grocery list detection — 25-item plain-text list must NOT be logged as food
+// (regression test for the bug where Kam's grocery list was logged as 2330 kcal)
+// ============================================================
+
+test("grocery detection: 25-item plain-text list (no bullets) → _isGroceryList=true", () => {
+  const groceryMessage = `but let me just try\n\nBeef\nChicken pieces\nRice\nMealie mealie\nSweet corn\nChicken strips (I use these for wraps)\nSweet potato fries\nLettuce\nCucumber\nFeta\nCarrots\nCabbage\nFruit juice\nConcentrated juice\nGreen tea\nHibiscus tea\nWraps\nCheese\nBread\nEggs\nWors\nPolony\nMince\nMixed vegetables\nOnions\nButternut\nApples\nBlueberries\nDried mango\nLemons`;
+  const msgLines = groceryMessage.split("\n").map(l => l.trim()).filter(Boolean);
+  const cleanedItems = msgLines
+    .map(l => l.replace(/^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])\s*/, "").trim())
+    .filter(l => l.length > 1 && l.length < 80);
+  const hasEatingContext = /\b(i had|i ate|i'm having|just had|just ate|for breakfast|for lunch|for dinner|for supper|this morning|had this)\b/i.test(groceryMessage.toLowerCase());
+  const isListFormat = msgLines.filter(l => /^(\[\s*[x✓\s]?\]|[-•*]|\d+[\.\)])/.test(l)).length >= 4;
+  const shortItemFraction = cleanedItems.length > 0
+    ? cleanedItems.filter(l => l.split(/\s+/).length <= 7).length / cleanedItems.length
+    : 0;
+  const isGroceryList = !hasEatingContext && cleanedItems.length >= 8 && (
+    isListFormat || (shortItemFraction >= 0.75 && msgLines.length >= 10)
+  );
+  assert.equal(hasEatingContext, false, "no eating verbs");
+  assert.ok(cleanedItems.length >= 8, `${cleanedItems.length} items found`);
+  assert.ok(shortItemFraction >= 0.75, `short fraction: ${shortItemFraction.toFixed(2)}`);
+  assert.equal(isGroceryList, true, "should be detected as grocery list");
+});
+
+// ============================================================
 // Junk note label — should be named ("⚠️ Viennas: ..."), not a bare verdict
 // ============================================================
 
