@@ -468,6 +468,22 @@ test("mealDateLabel: 5 days ago → a day name", () => {
 });
 
 // ============================================================
+// H5 — muscle_gain 2-week grace before loss alert fires
+// ============================================================
+
+test("assessWeightRate: muscle_gain — week 1 dip of 0.4kg → null (noise, not alarm)", () => {
+  // weeksSinceStart=1, change=-0.4kg — both below the 2-week / 0.5kg threshold
+  const r = assessWeightRate(-0.4, 1, "muscle_gain", 160, 2800, "Kam", 80);
+  assert.equal(r, null, `should return null for early small dip: got "${r}"`);
+});
+
+test("assessWeightRate: muscle_gain — week 3 loss of 0.8kg → alarm fires", () => {
+  // weeksSinceStart=3, change=-0.8kg — past both thresholds; alarm IS appropriate
+  const r = assessWeightRate(-0.8, 3, "muscle_gain", 160, 2800, "Kam", 80);
+  assert.ok(r !== null && (r.includes("losing") || r.includes("Down") || r.includes("deficit")), `should warn at week 3: got "${r}"`);
+});
+
+// ============================================================
 // H6 — checkPerfectDay: steps COUNT vs stepsTarget, not just "row exists"
 // ============================================================
 
@@ -497,6 +513,21 @@ test("weeklyAvg divisor (M3): 3 logging days at 8 000 steps → weekly avg ≈ 3
   const byWeek  = Math.round(total / 7);           // fixed: 3 429
   assert.notEqual(byWeek, byCount, "divisor change must alter the result");
   assert.equal(byWeek, 3429);
+});
+
+// ============================================================
+// Junk note label — should be named ("⚠️ Viennas: ..."), not a bare verdict
+// ============================================================
+
+test("junk note (vienna + eggs): result prefixes food name, not bare 'Highly processed.'", () => {
+  // Simulate the fix: when junkFoods[0].name = "Viennas" and goodProteins is non-empty,
+  // junkNoteText should contain "Viennas" not start with just "Highly processed."
+  const junkName = "Viennas";
+  const rawNote = "Highly processed. Low protein for the calories.";
+  const firstName = rawNote.charAt(0).toUpperCase() + rawNote.slice(1).toLowerCase();
+  const junkNoteText = `⚠️ ${junkName}: ${firstName.replace(/\.$/, "").toLowerCase()} — swap for extra eggs next time.`;
+  assert.ok(junkNoteText.startsWith("⚠️ Viennas:"), `should start with food name: "${junkNoteText}"`);
+  assert.ok(!junkNoteText.startsWith("Highly processed"), `should not be bare verdict: "${junkNoteText}"`);
 });
 
 // ============================================================

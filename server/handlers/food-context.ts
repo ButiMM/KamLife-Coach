@@ -1093,10 +1093,20 @@ export async function handleFoodContext(ctx: {
       let junkNoteText = "";
       if (junkFoods.length > 0) {
         let note = junkFoods[0].notes || "";
+        // Strip advice that's already satisfied by other foods in the meal (e.g. "add eggs"
+        // when eggs are already in the log).
         if (goodProteins.length > 0) {
-          note = note.replace(/Better to choose.*$/i, "").replace(/Add (?:eggs|pilchards|protein).*$/i, "").trim();
+          note = note.replace(/Better (?:to choose|options?(?: exist| available)?)[^.]*\./i, "").replace(/Add (?:eggs|pilchards|protein)[^.]*\./i, "").trim();
         }
-        if (note) junkNoteText = note;
+        if (note) {
+          // Prefix with the specific food name so the note reads as targeted advice, not a
+          // verdict on the whole meal. "Highly processed." after "Strong meal." is jarring;
+          // "⚠️ Viennas: highly processed..." is contextual.
+          const firstName = note.charAt(0).toUpperCase() + note.slice(1).toLowerCase();
+          junkNoteText = goodProteins.length > 0
+            ? `⚠️ ${junkFoods[0].name}: ${firstName.replace(/\.$/, "").toLowerCase()} — swap for extra ${goodProteins[0]?.name?.toLowerCase() || "chicken or eggs"} next time.`
+            : note;
+        }
       }
       const isDiabeticClient = (user.medicalConditions || "").toLowerCase().includes("diabetes");
       if (isDiabeticClient) {
@@ -1311,7 +1321,12 @@ export async function handleFoodContext(ctx: {
   // extractor — which self-filters non-food via is_food, so we only LOG when GPT confirms food.
   const looksLikeBareFoodStatement = !isFuturePlanning && !isFrustration && !hasSubstantiveQuestion
     && m.split(/\s+/).filter(Boolean).length <= 12;
+  // isFuturePlanning ("going to have 2L water", "I'll have chicken later") must never hit the
+  // GPT food extractor — the client hasn't eaten yet, so we'd generate a clarify-food reply
+  // for a water-planning or meal-planning message. The water handler already skips these correctly;
+  // without this guard the GPT path asks "I didn't catch what food that was."
   const tryGptFood = !isQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
+    && !isFuturePlanning
     && (hasStrongFoodTrigger || looksLikeBareFoodStatement);
   if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);

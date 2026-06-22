@@ -23,6 +23,10 @@ export function assessWeightRate(
   currentWeightKg: number,
 ): string | null {
   if (weeksSinceStart < 1 || Math.abs(totalChangeKg) < 0.3) return null;
+  // Muscle-gain clients often dip in the first 1-2 weeks (glycogen, water, adaptation).
+  // Don't fire the 🚨 alert until the pattern is established: ≥2 weeks AND ≥0.5kg loss.
+  // Before that it's noise, not a trend — alarming early destroys motivation without cause.
+  if (goal === "muscle_gain" && totalChangeKg < 0 && (weeksSinceStart < 2 || Math.abs(totalChangeKg) < 0.5)) return null;
   const pace = Math.abs(totalChangeKg) / weeksSinceStart;
   const nm = name ? `${name}, ` : "";
 

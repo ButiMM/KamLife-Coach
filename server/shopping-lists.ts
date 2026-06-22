@@ -125,7 +125,7 @@ const TIER_2_WEEK_B: ShoppingList = {
     { item: "Chicken breast (1kg)", qty: "1kg", price: "R90", category: "protein" },
     { item: "Baked beans (4 tins)", qty: "4", price: "R32", category: "protein" },
     { item: "Pilchards (2 tins)", qty: "2", price: "R24", category: "protein" },
-    { item: "Polony (500g)", qty: "500g", price: "R25", category: "protein" },
+    { item: "Baked beans (2 tins)", qty: "2", price: "R16", category: "protein" },
     { item: "Brown bread (2 loaves)", qty: "2", price: "R30", category: "carb" },
     { item: "Pasta (500g)", qty: "500g", price: "R15", category: "carb" },
     { item: "Oats (500g)", qty: "500g", price: "R25", category: "carb" },

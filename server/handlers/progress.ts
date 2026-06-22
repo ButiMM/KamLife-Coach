@@ -9,6 +9,7 @@ import { eq, and, gte, asc, desc, sql } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { computeProgressScore, renderProgressScore } from "../progress-score";
 import { logChat } from "./chat-log";
+import { weeklyTrendSlopeKg } from "./weight";
 
 export async function handleProgressCheck(ctx: {
   phone: string;
@@ -47,9 +48,21 @@ export async function handleProgressCheck(ctx: {
     const latestWeight = recentWeights.length >= 1
       ? parseFloat(String(recentWeights[recentWeights.length - 1].weight))
       : null;
-    const weightChange = recentWeights.length >= 2
-      ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
-      : null;
+    // Use regression slope rather than oldest-to-newest 2-point delta so a single
+    // spike reading can't flip the reported direction. If not enough data for
+    // regression, fall back to the direct delta.
+    const weightPoints = recentWeights.map(r => ({
+      dayOffset: Math.round(
+        (new Date(r.loggedAt!).getTime() - new Date(recentWeights[0].loggedAt!).getTime()) / 86_400_000,
+      ),
+      kg: parseFloat(String(r.weight)),
+    }));
+    const regressionSlope = weeklyTrendSlopeKg(weightPoints);
+    const weightChange = regressionSlope !== null
+      ? regressionSlope.toFixed(1)
+      : recentWeights.length >= 2
+        ? (parseFloat(String(recentWeights[recentWeights.length - 1].weight)) - parseFloat(String(recentWeights[0].weight))).toFixed(1)
+        : null;
     const weekFoodLogDays = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.logDays || 0;
     const weekTotalProt = (weekFoodRows as { totalProt: number; logDays: number }[])[0]?.totalProt || 0;
     const avgDailyProt = weekFoodLogDays > 0 ? Math.round(weekTotalProt / weekFoodLogDays) : 0;

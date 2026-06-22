@@ -566,12 +566,19 @@ export async function handleEarlyCommands(ctx: {
   }
 
   // ---- SHOPPING LIST command ----
-  if (m === "4" || ["shopping list", "shoppinglist", "shopping", "shop", "grocery list", "groceries", "my groceries", "weekly shop", "weekly shopping", "what to buy", "what should i buy", "what must i buy"].includes(m)) {
+  // Exact-phrase commands AND fuzzy "I don't know what to buy/eat" intent —
+  // common when clients struggle with consistency, not just lookup ("shopping list").
+  const GROCERY_INTENT_RE = /\b(i\s+don.?t\s+know\s+what\s+to\s+(?:eat|buy|cook|get)|i\s+don.?t\s+(?:know\s+)?(?:what\s+to|how\s+to)\s+(?:eat|buy|shop|cook)|recommend\s+(?:things?\s+(?:i\s+can|to)\s+(?:get|buy|eat)|what\s+(?:i\s+should|to)\s+(?:buy|eat|get))|(?:i\s+)?(?:hardly|never)\s+buy\s+(?:using\s+)?a\s+list|i\s+need\s+a\s+(?:food|grocery|shopping)\s+list|can\s+you\s+(?:make|give|send|build)\s+(?:me\s+)?a?\s*(?:grocery|shopping|food|weekly)\s+list|what\s+(?:food|groceries)\s+should\s+i\s+(?:buy|get|stock))\b/i;
+  if (m === "4" || ["shopping list", "shoppinglist", "shopping", "shop", "grocery list", "groceries", "my groceries", "weekly shop", "weekly shopping", "what to buy", "what should i buy", "what must i buy"].includes(m) || GROCERY_INTENT_RE.test(m)) {
     const budget = user.weeklyFoodBudget || "100_300";
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
-    const reply = formatShoppingList(list, user.name || undefined, goal);
+    const fn = user.name?.split(" ")[0] || "";
+    const intentReply = GROCERY_INTENT_RE.test(m) && fn
+      ? `${fn}, here's your full shopping list — tailored to ${goal === "muscle_gain" ? "building muscle" : goal === "fat_loss" ? "fat loss" : "your goal"}. Screenshot this and shop straight off it.\n\n`
+      : "";
+    const reply = intentReply + formatShoppingList(list, intentReply ? undefined : (user.name || undefined), goal);
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
   }
