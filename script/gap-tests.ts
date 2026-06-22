@@ -14,18 +14,21 @@
  *   weeklyAvg divisor        (routes.ts) — divide by 7 not row count [M3]
  */
 
-// Env BEFORE any server import — module side-effects depend on these.
+import assert from "node:assert/strict";
+
+// Env setup runs AFTER static imports are hoisted in ESM. Server modules use
+// dynamic imports below so db.ts loads only after KAMLIFE_DB_STUB is set.
 process.env.KAMLIFE_DB_STUB = "1";
 process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "sk-test-offline";
 process.env.TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID || "ACtest00000000000000000000000000";
 process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
-import assert from "node:assert/strict";
-import { scalePortionDescription, extractMealLabel } from "../server/handlers/food-context";
-import { parseLiftLog } from "../server/handlers/workout";
-import { assessWeightRate, weeklyTrendSlopeKg } from "../server/handlers/weight";
-import { parseMealDate, isRetroactiveMeal, mealDateLabel } from "../server/utils";
+// Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
+const { scalePortionDescription, extractMealLabel } = await import("../server/handlers/food-context");
+const { parseLiftLog } = await import("../server/handlers/workout");
+const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
+const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 
 let passed = 0;
 let failed = 0;
@@ -566,3 +569,4 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("✓ all gap checks passed\n");
+process.exit(0);
