@@ -169,6 +169,8 @@ export async function runSafetyGuards(
         await tx.delete(mealLogs).where(eq(mealLogs.userId, uid));
         await tx.delete(progressPhotos).where(eq(progressPhotos.userId, uid));
         await tx.delete(escalations).where(eq(escalations.userId, uid));
+        await tx.delete(exerciseLogs).where(eq(exerciseLogs.userId, uid));
+        await tx.delete(clientIntelligenceProfiles).where(eq(clientIntelligenceProfiles.userId, uid));
         await tx.update(users).set({
           phoneNumber: `[deleted-${uid}]`,
           name: null,

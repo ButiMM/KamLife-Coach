@@ -461,6 +461,35 @@ async function runMigrations(): Promise<void> {
     // hits a different Railway replica or a fresh container after a restart.
     `CREATE TABLE IF NOT EXISTS processed_webhooks (message_sid TEXT PRIMARY KEY, processed_at TIMESTAMP NOT NULL DEFAULT NOW())`,
     `CREATE INDEX IF NOT EXISTS processed_webhooks_ts_idx ON processed_webhooks(processed_at)`,
+    // meal_logs and gpt_costs were not in the original createTables block — add here so fresh
+    // deployments don't crash when food logging or cost tracking tries to INSERT.
+    `CREATE TABLE IF NOT EXISTS meal_logs (
+      id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      logged_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      raw_message TEXT,
+      source TEXT NOT NULL,
+      kcal_int INTEGER NOT NULL DEFAULT 0,
+      protein_int INTEGER NOT NULL DEFAULT 0,
+      carbs_int INTEGER NOT NULL DEFAULT 0,
+      fat_int INTEGER NOT NULL DEFAULT 0,
+      items JSONB,
+      meal_label TEXT,
+      corrected BOOLEAN NOT NULL DEFAULT false
+    )`,
+    `CREATE INDEX IF NOT EXISTS meal_logs_user_date_idx ON meal_logs(user_id, logged_at)`,
+    `CREATE TABLE IF NOT EXISTS gpt_costs (
+      id SERIAL PRIMARY KEY,
+      user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+      model TEXT NOT NULL,
+      feature TEXT,
+      prompt_tokens INTEGER NOT NULL DEFAULT 0,
+      completion_tokens INTEGER NOT NULL DEFAULT 0,
+      cost_usd NUMERIC(12,6) NOT NULL DEFAULT 0,
+      created_at TIMESTAMP NOT NULL DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS gpt_costs_user_date_idx ON gpt_costs(user_id, created_at)`,
+    `CREATE INDEX IF NOT EXISTS gpt_costs_date_idx ON gpt_costs(created_at)`,
   ];
 
   let applied = 0;
