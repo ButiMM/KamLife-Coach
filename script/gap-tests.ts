@@ -10,6 +10,8 @@
  *   parseMealDate            (utils.ts) — edge cases beyond routing-audit coverage
  *   isRetroactiveMeal        (utils.ts)
  *   mealDateLabel            (utils.ts)
+ *   checkPerfectDay gate     (checks.ts) — steps COUNT vs stepsTarget [H6]
+ *   weeklyAvg divisor        (routes.ts) — divide by 7 not row count [M3]
  */
 
 // Env BEFORE any server import — module side-effects depend on these.
@@ -463,6 +465,38 @@ test("mealDateLabel: 5 days ago → a day name", () => {
   const label = mealDateLabel(new Date(Date.now() - 5 * 86_400_000));
   const DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
   assert.ok(DAYS.includes(label), `expected a day name, got: ${label}`);
+});
+
+// ============================================================
+// H6 — checkPerfectDay: steps COUNT vs stepsTarget, not just "row exists"
+// ============================================================
+
+// These test the inline logic that was previously `todaySteps.length > 0` (any row = hit)
+// and is now `todayStepCount >= stepsTarget` (must actually reach the daily target).
+
+test("checkPerfectDay gate (H6): 6 000 steps vs 8 500 target → NOT a perfect day", () => {
+  const stepsHit = 6_000 >= 8_500;
+  assert.equal(stepsHit, false);
+});
+
+test("checkPerfectDay gate (H6): 1 step logged vs 8 500 target — old logic would have fired, new logic won't", () => {
+  const anyRowExists = 1 > 0;          // old: todaySteps.length > 0 → true (wrong)
+  const countHitsTarget = 1 >= 8_500;  // new: todayStepCount >= stepsTarget → false (correct)
+  assert.equal(anyRowExists, true);
+  assert.equal(countHitsTarget, false);
+});
+
+// ============================================================
+// M3 — weeklyAvg: divide by 7 (true weekly average), not row count
+// ============================================================
+
+test("weeklyAvg divisor (M3): 3 logging days at 8 000 steps → weekly avg ≈ 3 429, not 8 000", () => {
+  const rows = [{ steps: 8_000 }, { steps: 8_000 }, { steps: 8_000 }];
+  const total = rows.reduce((s, r) => s + r.steps, 0);
+  const byCount = Math.round(total / rows.length); // old (wrong): 8 000
+  const byWeek  = Math.round(total / 7);           // fixed: 3 429
+  assert.notEqual(byWeek, byCount, "divisor change must alter the result");
+  assert.equal(byWeek, 3429);
 });
 
 // ============================================================

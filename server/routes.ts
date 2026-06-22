@@ -628,14 +628,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       invalidatePatternCache(user.id);
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
       const [perfectDay, streak, recentStepLogs] = await Promise.all([
-        checkPerfectDay(user.id, user.proteinTarget || 120),
+        checkPerfectDay(user.id, user.proteinTarget || 120, user.stepsTarget || 8500),
         getStepStreak(user.id),
         db.select({ steps: stepLogs.steps }).from(stepLogs)
           .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
+          .orderBy(desc(stepLogs.loggedAt))
           .limit(7),
       ]);
       const weeklyAvg = recentStepLogs.length >= 3
-        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
+        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / 7)
         : undefined;
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user);
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";

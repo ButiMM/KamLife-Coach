@@ -130,7 +130,7 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
   }
 }
 
-export async function checkPerfectDay(userId: string, proteinTarget = 120): Promise<string | null> {
+export async function checkPerfectDay(userId: string, proteinTarget = 120, stepsTarget = 8500): Promise<string | null> {
   try {
     const todayStart = sastDayStart();
 
@@ -141,7 +141,7 @@ export async function checkPerfectDay(userId: string, proteinTarget = 120): Prom
     // user "122g short of your 165g target". Same source of truth now.
     const [todayWorkouts, todaySteps, proteinRow] = await Promise.all([
       db.select().from(workoutLogs).where(and(eq(workoutLogs.userId, userId), gte(workoutLogs.loggedAt, todayStart))).limit(1),
-      db.select().from(stepLogs).where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, todayStart))).limit(1),
+      db.select({ steps: stepLogs.steps }).from(stepLogs).where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, todayStart))).limit(1),
       db.select({
         totalProt: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
       }).from(mealLogs).where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, todayStart))),
@@ -149,9 +149,11 @@ export async function checkPerfectDay(userId: string, proteinTarget = 120): Prom
 
     const totalProt = Number(proteinRow[0]?.totalProt || 0);
     const proteinHit = totalProt >= proteinTarget * 0.9;
+    const todayStepCount = todaySteps[0]?.steps ?? 0;
+    const stepsHit = todayStepCount >= stepsTarget;
 
-    if (todayWorkouts.length > 0 && todaySteps.length > 0 && proteinHit) {
-      return `\n\n🏆 *Perfect day!* Workout done. Steps logged. Protein target hit (${totalProt}g / ${proteinTarget}g). This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
+    if (todayWorkouts.length > 0 && stepsHit && proteinHit) {
+      return `\n\n🏆 *Perfect day!* Workout done. Steps hit (${todayStepCount.toLocaleString()} / ${stepsTarget.toLocaleString()}). Protein target hit (${totalProt}g / ${proteinTarget}g). This is what transformation looks like — remember how this feels and repeat it tomorrow.`;
     }
     return null;
   } catch (e) {
