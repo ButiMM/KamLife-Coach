@@ -23,7 +23,7 @@ import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabe
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 
-function extractMealLabel(msg: string): string | null {
+export function extractMealLabel(msg: string): string | null {
   const lo = msg.toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
@@ -82,11 +82,21 @@ function hasUnmatchedFoodContent(message: string, matchedFoods: Array<{ name: st
 // Scale EVERY number in a portion description by the quantity — count AND grams.
 // "2 slices (60g)" ×2 must become "4 slices (120g)", never "4 slices (60g)";
 // a label whose grams contradict its count destroys trust in all the numbers.
-function scalePortionDescription(desc: string, quantity: number): string {
+const SINGULAR_UNITS = new Set([
+  "cup", "bowl", "scoop", "tablespoon", "teaspoon",
+  "serving", "portion", "piece", "packet", "slice", "biscuit", "roti",
+]);
+export function scalePortionDescription(desc: string, quantity: number): string {
   if (quantity === 1) return desc;
-  return desc.replace(/\d+(?:\.\d+)?/g, (n) => {
-    const scaled = parseFloat(n) * quantity;
-    return Number.isInteger(scaled) ? String(scaled) : String(Math.round(scaled * 10) / 10);
+  const scaled = desc.replace(/\d+(?:\.\d+)?/g, (n) => {
+    const result = parseFloat(n) * quantity;
+    return Number.isInteger(result) ? String(result) : String(Math.round(result * 10) / 10);
+  });
+  return scaled.replace(/(\d+(?:\.\d+)?)\s+([a-zA-Z]+)/g, (match, num, word) => {
+    if (parseFloat(num) > 1 && SINGULAR_UNITS.has(word.toLowerCase())) {
+      return `${num} ${word}s`;
+    }
+    return match;
   });
 }
 

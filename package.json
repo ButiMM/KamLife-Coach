@@ -12,7 +12,7 @@
     "test:safety": "tsx script/safety-audit.ts",
     "test:unit": "tsx script/unit-tests.ts",
     "test:scanner": "tsx script/food-scanner-tests.ts",
-    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts && tsx script/routing-audit.ts",
+    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts && tsx script/routing-audit.ts && tsx script/gap-tests.ts",
     "db:push": "drizzle-kit push",
     "backfill:steps": "tsx script/backfill-step-targets.ts",
     "diagnose:voice": "tsx script/diagnose-voice.ts",
