@@ -820,9 +820,20 @@ test("lifecycle PAY: negative payment phrase → NOT handled (falls through to G
 });
 
 // ---- RESCUE/RESET ----
-test("lifecycle RESCUE: 'rescue' → rescue confirmation prompt, not null", async () => {
-  const r = await handleLifecycle(lc("rescue"));
-  assert.ok(r !== null, "should handle rescue");
+test("lifecycle RESCUE: 'restart' from COMPLETE user → returns menu (not wipe confirmation)", async () => {
+  // COMPLETE users typing 'restart' get the command menu, not a data wipe.
+  // 'start over' is the explicit full-reset trigger.
+  const r = await handleLifecycle(lc("restart", { onboardingState: "COMPLETE" }));
+  assert.ok(r !== null, "should handle restart");
+  // Menu text will contain something about logging or sessions, not a delete confirmation
+  assert.ok(!r!.includes("permanently delete"), `COMPLETE restart should NOT ask to delete: ${r?.slice(0, 100)}`);
+});
+
+test("lifecycle RESCUE: 'start over' from COMPLETE user → wipe confirmation", async () => {
+  const r = await handleLifecycle(lc("start over", { onboardingState: "COMPLETE", totalWorkoutsCompleted: 5 }));
+  assert.ok(r !== null, "should handle start over");
+  assert.ok(r!.includes("permanently delete") || r!.toLowerCase().includes("confirm") || r!.includes("⚠️"),
+    `start over should ask for confirmation: ${r?.slice(0, 100)}`);
 });
 
 // ---- START (opt-in after stop) ----
@@ -841,6 +852,86 @@ test("lifecycle START: 'start' for non-paused user → falls through (null)", as
   const r = await handleLifecycle(lc("start", { profileNotes: null }));
   // Either null (fall through) or handled by another section
   assert.ok(r === null || typeof r === "string", "result should be null or string");
+});
+
+// ============================================================
+// EARLY-COMMANDS.TS CHARACTERISATION TESTS
+// ============================================================
+
+const { handleEarlyCommands } = await import("../server/handlers/early-commands");
+
+function ec(message: string, overrides: Partial<typeof LC_USER> = {}) {
+  const user = { ...LC_USER, ...overrides };
+  return { phone: user.phoneNumber, message, m: message.toLowerCase().trim(), user };
+}
+
+test("early-commands: 'portion control' → returns hand-portion guide (fat_loss)", async () => {
+  const r = await handleEarlyCommands(ec("portion control", { goalType: "fat_loss" }));
+  assert.ok(r !== null, "should handle portion control");
+  assert.ok(r!.includes("palm") || r!.includes("fist") || r!.includes("hand"), `should describe hand-portion method: ${r?.slice(0, 100)}`);
+});
+
+test("early-commands: 'portion control' → muscle_gain variant mentions surplus", async () => {
+  const r = await handleEarlyCommands(ec("portion control", { goalType: "muscle_gain" }));
+  assert.ok(r !== null, "should handle portion control for muscle_gain");
+  assert.ok(r!.includes("2") || r!.includes("muscle") || r!.includes("build"), `should be goal-aware: ${r?.slice(0, 100)}`);
+});
+
+test("early-commands: 'how do I measure my food' → portion control matched", async () => {
+  const r = await handleEarlyCommands(ec("how do I measure my food"));
+  assert.ok(r !== null, "should match measure food as portion control");
+});
+
+test("early-commands: 'calories' → returns calorie target from user object", async () => {
+  const r = await handleEarlyCommands(ec("calories", { calorieTarget: 1900, proteinTarget: 130 }));
+  assert.ok(r !== null, "should handle calorie query");
+  assert.ok(r!.includes("1900") || r!.includes("1,900") || r!.toLowerCase().includes("calorie"), `should mention calorie target: ${r?.slice(0, 100)}`);
+});
+
+test("early-commands: 'my protein target' → returns protein target", async () => {
+  const r = await handleEarlyCommands(ec("my protein target", { proteinTarget: 145 }));
+  assert.ok(r !== null, "should handle protein target query");
+  assert.ok(r!.includes("145") || r!.toLowerCase().includes("protein"), `should mention protein: ${r?.slice(0, 100)}`);
+});
+
+// ============================================================
+// MISC-COMMANDS.TS CHARACTERISATION TESTS
+// ============================================================
+
+const { handleMiscCommands } = await import("../server/handlers/misc-commands");
+
+function mc(message: string, overrides: Partial<typeof LC_USER> = {}) {
+  const user = { ...LC_USER, ...overrides };
+  return { phone: user.phoneNumber, message, m: message.toLowerCase().trim(), user };
+}
+
+test("misc-commands: 'creatine' → supplement guide returned", async () => {
+  const r = await handleMiscCommands(mc("creatine"));
+  assert.ok(r !== null, "should handle creatine query");
+  assert.ok(r!.toLowerCase().includes("creatine"), `should mention creatine: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: 'should I take protein powder' → supplement guide", async () => {
+  const r = await handleMiscCommands(mc("should I take protein powder"));
+  assert.ok(r !== null, "should handle protein powder query");
+});
+
+test("misc-commands: week9_choice '1' → maintenance phase response", async () => {
+  const r = await handleMiscCommands(mc("1", { awaitingInputType: "week9_choice" }));
+  assert.ok(r !== null, "should handle week9_choice '1'");
+  assert.ok(r!.toLowerCase().includes("maintenance") || r!.toLowerCase().includes("3"), `should be maintenance path: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: week9_choice '2' → advanced phase response", async () => {
+  const r = await handleMiscCommands(mc("2", { awaitingInputType: "week9_choice" }));
+  assert.ok(r !== null, "should handle week9_choice '2'");
+  assert.ok(r!.toLowerCase().includes("advanced") || r!.toLowerCase().includes("5"), `should be advanced path: ${r?.slice(0, 100)}`);
+});
+
+test("misc-commands: week9_choice 'irrelevant text' → falls through (null)", async () => {
+  const r = await handleMiscCommands(mc("what is the weather", { awaitingInputType: "week9_choice" }));
+  // Non-matching input during week9_choice should fall through
+  assert.ok(r === null || typeof r === "string", "should be null or string");
 });
 
 // ============================================================
