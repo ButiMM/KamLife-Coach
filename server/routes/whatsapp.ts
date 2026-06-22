@@ -132,7 +132,7 @@ async function processVoiceAsync(
     const { text, media } = renderReplyMarkers(reply);
     const parts = splitMessage(text);
     await sendParts(phone, parts, media);
-    console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-6)}`);
+    console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-4)}`);
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
     await sendParts(phone, ["I got your voice note but had a moment — please send it again or type your message."], null).catch(() => {});

@@ -10,6 +10,7 @@ import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentPr
 import { eq, gte, and, lt, desc, or, sql, like } from "drizzle-orm";
 import { readFileSync, writeFileSync, existsSync } from "fs";
 import { join } from "path";
+import { schedulerState } from "../../shared/schema";
 import { routineNudgeAllowed, dayOfYearSAST } from "./nudge-policy";
 import { checkOutboundMessage } from "../verifiers/proactive-gate";
 
@@ -33,7 +34,34 @@ export { asc, lte, count, inArray, isNotNull } from "drizzle-orm";
 
 export const STATE_FILE = join(process.cwd(), "server", ".scheduler-state.json");
 
+// In-memory cache — populated from DB on startup, kept in sync on every saveState call.
+// Survives container restarts because the DB is the source of truth.
+const _stateCache = new Map<string, string>();
+
+/** Hydrate in-memory state cache from DB. Call once on scheduler startup. */
+export async function hydrateSchedulerStateFromDb(): Promise<void> {
+  try {
+    const rows = await db.select().from(schedulerState);
+    for (const row of rows) _stateCache.set(row.key, row.value);
+    // Also load the legacy file as fallback for any keys not yet in DB
+    if (existsSync(STATE_FILE)) {
+      const file = JSON.parse(readFileSync(STATE_FILE, "utf-8") || "{}");
+      for (const [k, v] of Object.entries(file)) {
+        if (!_stateCache.has(k) && typeof v === "string") _stateCache.set(k, v);
+      }
+    }
+    console.log(`[SCHEDULER] State hydrated from DB: ${_stateCache.size} keys`);
+  } catch (e) {
+    console.error("[SCHEDULER] State hydration error:", e);
+  }
+}
+
 export function loadState(): Record<string, string> {
+  // Fast path: return from in-memory cache (hydrated from DB on startup)
+  if (_stateCache.size > 0) {
+    return Object.fromEntries(_stateCache);
+  }
+  // Cold-start fallback: read from file if cache not yet populated
   try {
     if (existsSync(STATE_FILE)) return JSON.parse(readFileSync(STATE_FILE, "utf-8"));
   } catch { /* ignore */ }
@@ -41,13 +69,19 @@ export function loadState(): Record<string, string> {
 }
 
 export function saveState(key: string, dateStr: string): void {
+  // Update in-memory cache immediately (synchronous — zero latency for callers)
+  _stateCache.set(key, dateStr);
+  // Write to DB asynchronously — fire-and-forget (never blocks a scheduler job)
+  db.insert(schedulerState)
+    .values({ key, value: dateStr, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: schedulerState.key, set: { value: dateStr, updatedAt: new Date() } })
+    .catch(e => console.error("[SCHEDULER] State DB write error (non-fatal):", e?.message || e));
+  // Also write to file as belt-and-suspenders backup
   try {
     const state = loadState();
     state[key] = dateStr;
     writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
-  } catch (e) {
-    console.error("[SCHEDULER] State save error:", e);
-  }
+  } catch { /* non-fatal */ }
 }
 
 export function todaySAST(): string {

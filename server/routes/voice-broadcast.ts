@@ -89,7 +89,7 @@ export function registerVoiceBroadcastRoutes(app: Express) {
           if (sent % 10 === 0) await new Promise(r => setTimeout(r, 1000));
         } catch (e: any) {
           failed++;
-          console.error(`[VOICE_BROADCAST] Failed to send to ${user.phone_number.slice(-6)}:`, e.message);
+          console.error(`[VOICE_BROADCAST] Failed to send to ${user.phone_number.slice(-4)}:`, e.message);
         }
       }
 

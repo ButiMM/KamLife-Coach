@@ -339,6 +339,15 @@ export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
 }));
 
+// === SCHEDULER STATE — global (non-per-user) job run tracking ===
+// Replaces the file-based .scheduler-state.json which is lost on container recycle.
+// Each key is a job name; value is the date/week string it last ran (e.g. "2026-06-22").
+export const schedulerState = pgTable("scheduler_state", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+});
+
 // === ADMIN EVENTS — immutable audit log for admin/manual interventions ===
 export const adminEvents = pgTable("admin_events", {
   id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),

@@ -90,7 +90,7 @@ export async function logMediaSuccess(userId: string, flow: string, totalMs: num
 }
 
 export function buildMediaTrace(phone: string, mediaType: string): string {
-  const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "").slice(-6) || "unknown";
+  const cleanPhone = phone.replace(/^whatsapp:/, "").replace(/\D/g, "").slice(-4) || "unknown";
   return `m_${Date.now().toString(36)}_${cleanPhone}_${(mediaType || "unknown").replace(/[^\w]/g, "").slice(0, 12)}`;
 }
 

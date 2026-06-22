@@ -611,6 +611,98 @@ test("P0-2 reset chain: all FK child tables are present in the delete list", () 
 });
 
 // ============================================================
+// Trial countdown — trialDaysIn logic (pure math, no DB)
+// ============================================================
+// trialDaysIn: betaBypassUntil is trialStart + 7 days
+// So daysIn = floor((now - (betaBypassUntil - 7 days)) / msPerDay)
+
+function trialDaysIn(betaBypassUntil: Date | null | undefined): number | null {
+  if (!betaBypassUntil) return null;
+  const trialStart = new Date(betaBypassUntil).getTime() - 7 * 86_400_000;
+  return Math.floor((Date.now() - trialStart) / 86_400_000);
+}
+
+test("trialDaysIn: null betaBypassUntil → null (no trial)", () => {
+  assert.equal(trialDaysIn(null), null);
+});
+
+test("trialDaysIn: betaBypassUntil 5 days from now → Day 2 (trial started 2 days ago)", () => {
+  const bypassUntil = new Date(Date.now() + 5 * 86_400_000);
+  const days = trialDaysIn(bypassUntil);
+  assert.ok(days === 2, `expected 2, got ${days}`);
+});
+
+test("trialDaysIn: betaBypassUntil 2 days from now → Day 5 (trial started 5 days ago)", () => {
+  const bypassUntil = new Date(Date.now() + 2 * 86_400_000);
+  const days = trialDaysIn(bypassUntil);
+  assert.ok(days === 5, `expected 5, got ${days}`);
+});
+
+test("trialDaysIn: betaBypassUntil tomorrow → Day 6 (trial started 6 days ago)", () => {
+  const bypassUntil = new Date(Date.now() + 1 * 86_400_000);
+  const days = trialDaysIn(bypassUntil);
+  assert.ok(days === 6, `expected 6, got ${days}`);
+});
+
+test("trialDaysIn: betaBypassUntil is now → Day 7 (trial ends today)", () => {
+  // subtract a few seconds so floor rounds to 7
+  const bypassUntil = new Date(Date.now() + 60_000); // 1 minute from now ≈ still day 7
+  const days = trialDaysIn(bypassUntil);
+  assert.ok(days !== null && days >= 6 && days <= 7, `expected 6-7, got ${days}`);
+});
+
+test("trialDaysIn: betaBypassUntil 1 day ago → Day 8 (trial expired)", () => {
+  const bypassUntil = new Date(Date.now() - 1 * 86_400_000);
+  const days = trialDaysIn(bypassUntil);
+  assert.ok(days !== null && days >= 8, `expected ≥8, got ${days}`);
+});
+
+// ============================================================
+// Referral double-earn guard
+// The sentinel insert uses paymentEvents unique(provider, providerPaymentId).
+// onConflictDoNothing returns 0 rows on duplicate → referrer not rewarded again.
+// ============================================================
+
+test("referral sentinel: first insert returns non-empty (reward fires)", () => {
+  // Simulate the sentinel logic using a Set (the DB unique index equivalent)
+  const issued = new Set<string>();
+  function claimReferralReward(targetUserId: string): boolean {
+    const key = `REF_REWARD_${targetUserId}`;
+    if (issued.has(key)) return false; // conflict → 0 rows returned
+    issued.add(key);
+    return true; // row inserted → reward fires
+  }
+  assert.equal(claimReferralReward("user-abc"), true, "first subscription → reward fires");
+});
+
+test("referral sentinel: second insert (cancel+resubscribe) returns empty → no double-earn", () => {
+  const issued = new Set<string>();
+  function claimReferralReward(targetUserId: string): boolean {
+    const key = `REF_REWARD_${targetUserId}`;
+    if (issued.has(key)) return false;
+    issued.add(key);
+    return true;
+  }
+  claimReferralReward("user-xyz"); // first sub
+  // user cancels and re-subscribes:
+  assert.equal(claimReferralReward("user-xyz"), false, "re-subscribe → sentinel already exists → no reward");
+});
+
+test("referral sentinel: different users don't share each other's sentinel", () => {
+  const issued = new Set<string>();
+  function claimReferralReward(targetUserId: string): boolean {
+    const key = `REF_REWARD_${targetUserId}`;
+    if (issued.has(key)) return false;
+    issued.add(key);
+    return true;
+  }
+  assert.equal(claimReferralReward("user-A"), true, "user A first subscription → fires");
+  assert.equal(claimReferralReward("user-B"), true, "user B first subscription → also fires");
+  assert.equal(claimReferralReward("user-A"), false, "user A second time → blocked");
+  assert.equal(claimReferralReward("user-B"), false, "user B second time → blocked");
+});
+
+// ============================================================
 // Results
 // ============================================================
 

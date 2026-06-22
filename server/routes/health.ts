@@ -1,7 +1,7 @@
 import type { Express } from "express";
 import path from "path";
 import { db, pool } from "../db";
-import { users, workoutLogs } from "../../shared/schema";
+import { users, workoutLogs, schedulerState } from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
 import { deliveryStats, jobRegistry, dailyProactiveCount, DAILY_PROACTIVE_CAP } from "../scheduler/shared";
@@ -116,6 +116,51 @@ export function registerHealthRoutes(app: Express) {
         onboardingFunnel: Object.fromEntries((funnelRows.rows as any[]).map(r => [r.state || "unknown", Number(r.n)])),
         subscriptions: Object.fromEntries((subRows.rows as any[]).map(r => [r.status || "unknown", Number(r.n)])),
         jobs: Object.fromEntries(jobRegistry.entries()),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Scheduler health — focused on-call view: overdue jobs, trial countdown status ──
+  app.get("/api/health/scheduler", requireAdminKey, async (_req, res) => {
+    try {
+      const now = Date.now();
+
+      // Jobs overdue: not run in 25h (allows the 1h scheduling window around each daily job)
+      const overdueJobs: string[] = [];
+      const healthyJobs: { name: string; lastRunAt: string; failures: number }[] = [];
+      for (const [name, info] of jobRegistry.entries()) {
+        if (!info.lastRunAt) { overdueJobs.push(`${name} (never run since restart)`); continue; }
+        const msSinceRun = now - new Date(info.lastRunAt).getTime();
+        if (msSinceRun > 25 * 3_600_000) {
+          overdueJobs.push(`${name} (${Math.round(msSinceRun / 3_600_000)}h ago, ${info.failures} failures)`);
+        } else {
+          healthyJobs.push({ name, lastRunAt: info.lastRunAt, failures: info.failures });
+        }
+      }
+
+      // Trial countdown breakdown — used to verify Day 2/5/7 jobs are targeting the right users
+      const trialResult = await db.execute(sql`
+        SELECT
+          COUNT(*)::int AS total_in_trial,
+          COUNT(*) FILTER (WHERE beta_bypass_until > NOW() + INTERVAL '4 days')::int AS day2_cohort,
+          COUNT(*) FILTER (WHERE beta_bypass_until BETWEEN NOW() + INTERVAL '2 days' AND NOW() + INTERVAL '4 days')::int AS day5_cohort,
+          COUNT(*) FILTER (WHERE beta_bypass_until BETWEEN NOW() AND NOW() + INTERVAL '2 days')::int AS day7_cohort
+        FROM users
+        WHERE subscription_status = 'trial' AND beta_bypass_until >= NOW()
+      `);
+
+      // Last-seen values from DB-backed scheduler state (survives restarts)
+      const stateRows = await db.select().from(schedulerState)
+        .orderBy(schedulerState.updatedAt);
+
+      res.json({
+        status: overdueJobs.length === 0 ? "ok" : "degraded",
+        timestamp: new Date().toISOString(),
+        jobs: { overdue: overdueJobs, healthy: healthyJobs, totalRegistered: jobRegistry.size },
+        trialCountdown: trialResult.rows[0] || {},
+        schedulerState: Object.fromEntries(stateRows.map(r => [r.key, { value: r.value, updatedAt: r.updatedAt }])),
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });

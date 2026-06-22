@@ -455,6 +455,8 @@ async function runMigrations(): Promise<void> {
     // Hot path: scheduler getActiveClients() + signup/payment-recovery jobs filter
     // users on (subscription_status, onboarding_state) on every cron run. Index it.
     `CREATE INDEX IF NOT EXISTS users_sub_onboard_idx ON users(subscription_status, onboarding_state)`,
+    // Scheduler state — replaces the file-based .scheduler-state.json that is lost on container recycle.
+    `CREATE TABLE IF NOT EXISTS scheduler_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TIMESTAMP NOT NULL DEFAULT NOW())`,
   ];
 
   let applied = 0;

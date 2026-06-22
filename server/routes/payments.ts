@@ -35,7 +35,7 @@ export function registerPaymentRoutes(app: Express) {
       const raw = (To || "");
       const phone = raw.startsWith("whatsapp:") ? raw : `whatsapp:${raw}`;
       if (MessageStatus === "failed" || MessageStatus === "undelivered") {
-        console.error(`[DELIVERY FAIL] ${phone.slice(-8)} | SID: ${MessageSid} | Status: ${MessageStatus} | Error: ${ErrorCode} — ${ErrorMessage || "no detail"}`);
+        console.error(`[DELIVERY FAIL] ${phone.slice(-4)} | SID: ${MessageSid} | Status: ${MessageStatus} | Error: ${ErrorCode} — ${ErrorMessage || "no detail"}`);
         db.select({ id: users.id }).from(users).where(eq(users.phoneNumber, phone)).limit(1)
           .then(rows => {
             if (rows[0]) {
@@ -48,7 +48,7 @@ export function registerPaymentRoutes(app: Express) {
             }
           }).catch(() => {});
       } else if (MessageStatus === "delivered") {
-        console.log(`[DELIVERY OK] ${phone.slice(-8)} | SID: ${MessageSid}`);
+        console.log(`[DELIVERY OK] ${phone.slice(-4)} | SID: ${MessageSid}`);
       }
     } catch (e) {
       console.error("[DELIVERY STATUS] Parse error:", e);
@@ -108,8 +108,13 @@ export function registerPaymentRoutes(app: Express) {
         .join("&");
       const signatureBase = `${paramString}&passphrase=${encodeURIComponent(passphrase)}`;
       const expectedSig = crypto.createHash("md5").update(signatureBase).digest("hex");
-      if (!data.signature || data.signature !== expectedSig) {
-        console.error(`[PAYFAST:${itnId}] REJECTED — signature ${!data.signature ? "missing" : "mismatch"} for ${safePhone}. Got: ${data.signature?.slice(0, 8)}... Expected: ${expectedSig.slice(0, 8)}...`);
+      const sigMissing = !data.signature;
+      const sigMismatch = !sigMissing && !crypto.timingSafeEqual(
+        Buffer.from(data.signature as string),
+        Buffer.from(expectedSig),
+      );
+      if (sigMissing || sigMismatch) {
+        console.error(`[PAYFAST:${itnId}] REJECTED — signature ${sigMissing ? "missing" : "mismatch"} for ${safePhone}.`);
         return;
       }
       console.log(`[PAYFAST:${itnId}] Signature valid`);
@@ -183,24 +188,41 @@ export function registerPaymentRoutes(app: Express) {
           }).where(eq(users.phoneNumber, normalisedPhone));
 
           if (wasInactive && targetUser.referredBy) {
-            // referredBy stores the inviter's user id (UUID), set in the "join CODE" flow —
-            // match on users.id, not users.referralCode, or the referrer is never found.
-            const [referrer] = await tx.select().from(users)
-              .where(eq(users.id, targetUser.referredBy))
-              .limit(1);
-            if (referrer && referrer.subscriptionStatus === "active") {
-              const newExpiry = new Date(
-                Math.max(Date.now(), new Date(referrer.subscriptionRenewsAt || Date.now()).getTime()) + 30 * 86_400_000
-              );
-              await tx.update(users)
-                .set({ subscriptionRenewsAt: newExpiry })
-                .where(eq(users.id, referrer.id));
-              referrerData = { phone: referrer.phoneNumber, name: referrer.name, newExpiry };
+            // Idempotent guard — only reward the referrer ONCE per referred user, ever.
+            // A user who cancels and re-subscribes would otherwise trigger the reward again.
+            // The payment_events unique index on (provider, providerPaymentId) is the lock.
+            const sentinel = await tx.insert(paymentEvents)
+              .values({
+                provider: "referral",
+                providerPaymentId: `REF_REWARD_${targetUser.id}`,
+                phone: normalisedPhone,
+                amountGross: "0",
+                paymentStatus: "REWARD",
+                rawBody: {},
+              })
+              .onConflictDoNothing()
+              .returning({ id: paymentEvents.id });
+
+            if (sentinel.length > 0) {
+              // referredBy stores the inviter's user id (UUID), set in the "join CODE" flow —
+              // match on users.id, not users.referralCode, or the referrer is never found.
+              const [referrer] = await tx.select().from(users)
+                .where(eq(users.id, targetUser.referredBy))
+                .limit(1);
+              if (referrer && referrer.subscriptionStatus === "active") {
+                const newExpiry = new Date(
+                  Math.max(Date.now(), new Date(referrer.subscriptionRenewsAt || Date.now()).getTime()) + 30 * 86_400_000
+                );
+                await tx.update(users)
+                  .set({ subscriptionRenewsAt: newExpiry })
+                  .where(eq(users.id, referrer.id));
+                referrerData = { phone: referrer.phoneNumber, name: referrer.name, newExpiry };
+              }
             }
           }
         });
 
-        console.log(`[PAYFAST] Payment COMPLETE — ${normalisedPhone} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
+        console.log(`[PAYFAST] Payment COMPLETE — ...${normalisedPhone.slice(-4)} | R${amountGross} | renews ${renewsAt.toISOString().slice(0, 10)}`);
 
         // Send notifications AFTER the transaction commits (Twilio calls can't be rolled back)
         if (referrerData) {
@@ -348,8 +370,21 @@ export function registerPaymentRoutes(app: Express) {
 
   // ── PayFast payment link generator ──
   // No admin gate — users hit this when clicking their pay link from WhatsApp.
+  // Rate-limited to prevent phone number enumeration and link-spam.
   // Security: PayFast validates the signature on the ITN; this endpoint only builds a URL.
-  app.get("/api/payfast/link", async (req: any, res: any) => {
+  const linkRateBuckets = new Map<string, { count: number; resetAt: number }>();
+  app.get("/api/payfast/link", (req: any, res: any, next: any) => {
+    const now = Date.now();
+    const ip = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "unknown";
+    const bucket = linkRateBuckets.get(ip);
+    if (!bucket || now >= bucket.resetAt) {
+      linkRateBuckets.set(ip, { count: 1, resetAt: now + 60_000 });
+      return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > 10) return res.status(429).json({ error: "Too many requests" });
+    return next();
+  }, async (req: any, res: any) => {
     try {
       const phone = decodeURIComponent(req.query.phone as string || "");
       if (!phone) return res.status(400).json({ error: "phone required" });

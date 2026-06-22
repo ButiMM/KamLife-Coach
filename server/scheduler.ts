@@ -10,6 +10,7 @@ import {
   deliveryStats, sendWhatsApp, sendWhatsAppTemplate,
   loadState, saveState, todaySAST, hasRunToday,
   weeklyKeyedSent, dailyProactiveCount, recordJobRun,
+  hydrateSchedulerStateFromDb,
   escalations, sentProactive,
   db, lt, eq, lte, and, sql,
 } from "./scheduler/shared";
@@ -55,6 +56,7 @@ import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runComebackProtocol } from "./scheduler/jobs/comeback";
 import { runQualityAudit } from "./scheduler/jobs/quality-audit";
+import { runTrialCountdown } from "./scheduler/jobs/trial";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, sendWhatsAppTemplate, deliveryStats };
@@ -176,6 +178,9 @@ export async function initScheduler(): Promise<void> {
 
   schedulerInitialised = true;
 
+  // Hydrate scheduler state from DB so job guards survive container restarts
+  await hydrateSchedulerStateFromDb();
+
   // Safe job runner — catches, logs, records run telemetry, and alerts coach on failure.
   // opts.critical = true → alert on the VERY FIRST failure (default: alert after 2 in a row).
   const jobFailureCounts: Record<string, number> = {};
@@ -216,6 +221,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("0 10 * * *",   () => safe("runPaymentFailureRecovery", runPaymentFailureRecovery),   { timezone: "UTC" }); // 12pm SAST
   cron.schedule("3 9 * * *",    () => safe("runSignupNudge",            runSignupNudge),              { timezone: "UTC" }); // 11am SAST
   cron.schedule("0 9 * * *",    () => safe("runWaterReminder",           runWaterReminder),            { timezone: "UTC" }); // 11am SAST
+  cron.schedule("30 7 * * *",   () => safe("runTrialCountdown",          runTrialCountdown),           { timezone: "UTC" }); // 9:30am SAST — trial Day 2/5/7 conversion
   cron.schedule("0 5 * * *",    () => safe("runCulturalCalendar",       runCulturalCalendar),         { timezone: "UTC" }); // 7am SAST
   cron.schedule("0 19 * * *",   () => safe("runStreakAtRisk",           runStreakAtRisk),             { timezone: "UTC" }); // 9pm SAST
   cron.schedule("0 15 * * *",   () => safe("runComebackProtocol",       runComebackProtocol),         { timezone: "UTC" }); // 5pm SAST — structured 7-day return arc
