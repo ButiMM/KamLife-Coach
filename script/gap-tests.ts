@@ -935,6 +935,58 @@ test("misc-commands: week9_choice 'irrelevant text' → falls through (null)", a
 });
 
 // ============================================================
+// MEDIA.TS CHARACTERISATION TESTS
+// Tests pure helpers and early-return paths that don't require
+// external API calls (OpenAI Vision / Whisper / image download).
+// ============================================================
+
+const { bumpVoiceFailure, clearVoiceFailure, handleMediaMessage } = await import("../server/handlers/media");
+const { default: OpenAI } = await import("openai");
+
+const testOpenAi = new OpenAI({ apiKey: "sk-test-offline" });
+
+// ---- VOICE FAILURE TRACKER ----
+test("media: bumpVoiceFailure — first call returns 1", () => {
+  const count = bumpVoiceFailure("media-test-uid-1");
+  assert.equal(count, 1);
+  clearVoiceFailure("media-test-uid-1"); // cleanup
+});
+
+test("media: bumpVoiceFailure — second call within window returns 2", () => {
+  const uid = "media-test-uid-2";
+  bumpVoiceFailure(uid);
+  const count = bumpVoiceFailure(uid);
+  assert.equal(count, 2);
+  clearVoiceFailure(uid);
+});
+
+test("media: clearVoiceFailure — resets counter to 0 (next bump returns 1)", () => {
+  const uid = "media-test-uid-3";
+  bumpVoiceFailure(uid);
+  bumpVoiceFailure(uid);
+  clearVoiceFailure(uid);
+  const count = bumpVoiceFailure(uid);
+  assert.equal(count, 1, "after clear, bump should return 1");
+  clearVoiceFailure(uid);
+});
+
+// ---- STICKER DETECTION ----
+test("media: sticker (image/webp, no caption) → sticker detection message, no API call", async () => {
+  const r = await handleMediaMessage({
+    phone: "whatsapp:+27821234567",
+    message: "",
+    mediaUrl: "https://media.twilio.com/sticker.webp",
+    mediaContentType: "image/webp",
+    allMediaUrls: [],
+    user: { ...LC_USER },
+    isCoach: false,
+    openai: testOpenAi,
+    handleMessage: async () => "",
+  });
+  assert.ok(r.includes("sticker"), `should mention sticker: ${r.slice(0, 100)}`);
+});
+
+// ============================================================
 // Results
 // ============================================================
 
