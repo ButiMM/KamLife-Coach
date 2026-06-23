@@ -365,10 +365,11 @@ const CASES: Case[] = [
   // consumption verb ("took"/"had"/"drank") to distinguish logging from Q&A.
   { name: "water+supplement: 'had 2 litres of water and took creatine' logs both (prod bug 2026-06-23)",
     msg: "had 2 litres of water and took my creatine",
-    expect: [/logged 2l|2l.*total|water|logged/i, /taken\s*✅|taken/i] },
+    // tryLogWater has 4 reply variants; all contain "so far today" or match one of the other patterns
+    expect: [/logged 2l|2l.*total|water|logged|so far today/i, /taken\s*✅|taken/i] },
   { name: "water+supplement: 'drank 500ml water and took magnesium' logs both (regression guard)",
     msg: "drank 500ml of water and took my magnesium",
-    expect: [/logged.*0\.5|500ml|0\.5l|water/i, /taken\s*✅|taken/i] },
+    expect: [/logged.*0\.5|500ml|0\.5l|water|so far today/i, /taken\s*✅|taken/i] },
 ];
 
 async function main() {

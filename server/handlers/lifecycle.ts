@@ -1106,7 +1106,7 @@ export async function handleLifecycle(ctx: {
     if (!user.profileNotes?.includes(langNote)) {
       const updatedNotes = (user.profileNotes || "").replace(/lang:[a-z]{2}/, langNote) || langNote;
       const finalNotes = updatedNotes.includes("lang:") ? updatedNotes : `${user.profileNotes ? user.profileNotes + " | " : ""}${langNote}`;
-      db.update(users).set({ profileNotes: finalNotes }).where(eq(users.phoneNumber, phone)).catch(() => {});
+      db.update(users).set({ profileNotes: finalNotes }).where(eq(users.phoneNumber, phone)).catch(e => console.error("[LANG_NOTE_UPDATE]", e?.message || e));
     }
   }
 

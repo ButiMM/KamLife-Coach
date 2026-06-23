@@ -205,7 +205,7 @@ export async function initScheduler(): Promise<void> {
         const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
         if (coachPhone) {
           const alertMsg = `⚠️ KamLife Scheduler Alert: "${name}" has failed ${failures} time${failures === 1 ? "" : "s"}${failures === 1 ? "" : " in a row"}.\n\nError: ${String(e).slice(0, 200)}\n\nCheck Railway logs immediately.`;
-          sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, alertMsg).catch(() => {});
+          sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, alertMsg).catch(alertErr => console.error("[SCHEDULER_ALERT_SEND]", alertErr?.message || alertErr));
         }
       }
     });
