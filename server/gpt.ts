@@ -1189,8 +1189,8 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       const alertPhone = process.env.COACH_ALERT_PHONE;
       if (alertPhone) {
         import("./scheduler/shared").then(({ sendCriticalAlert }) => {
-          sendCriticalAlert(alertPhone, `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`).catch(() => {});
-        }).catch(() => {});
+          sendCriticalAlert(alertPhone, `[KamLife] OpenAI API key invalid or expired (401). GPT is down. Check OPENAI_API_KEY in Railway.`).catch(e => console.error("[CRITICAL_ALERT_SEND]", e?.message || e));
+        }).catch(e => console.error("[CRITICAL_ALERT_IMPORT]", e?.message || e));
       }
       return "I'm having a technical issue on my end — give me a few minutes and try again. Your programme and targets are all saved.";
     }

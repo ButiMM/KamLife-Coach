@@ -279,7 +279,7 @@ export function registerPaymentRoutes(app: Express) {
           await twilioC.messages.create({
             from: fromNum, to: normalisedPhone,
             body: `${name}, your KamLife Coach subscription has been cancelled. Your progress is saved — you can rejoin anytime. Reply *join* when you are ready.`
-          }).catch(() => {});
+          }).catch(e => console.error("[TWILIO_CANCEL_NOTIFY]", e?.message || e));
         }
       } else if (paymentStatus === "PENDING") {
         // EFT / manual payments show PENDING before COMPLETE. Log and wait — do NOT
@@ -303,7 +303,7 @@ export function registerPaymentRoutes(app: Express) {
           await twilioC.messages.create({
             from: fromNum, to: normalisedPhone,
             body: `${name}, your KamLife Coach payment has been refunded. Your access has been paused. If this is a mistake, reply *pay* or contact us at support@kamlifecoach.co.za.`,
-          }).catch(() => {});
+          }).catch(e => console.error("[TWILIO_REFUND_NOTIFY]", e?.message || e));
         }
       } else if (paymentStatus === "REFUND_REVERSED") {
         // Chargeback reversed — reinstate if the user is still inactive.
@@ -388,6 +388,7 @@ export function registerPaymentRoutes(app: Express) {
     try {
       const phone = decodeURIComponent(req.query.phone as string || "");
       if (!phone) return res.status(400).json({ error: "phone required" });
+      if (!/^\+?\d{9,15}$/.test(phone.replace(/^whatsapp:/, ""))) return res.status(400).json({ error: "Invalid phone format" });
 
       const merchantId = process.env.PAYFAST_MERCHANT_ID;
       const merchantKey = process.env.PAYFAST_MERCHANT_KEY;

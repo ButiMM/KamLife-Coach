@@ -884,7 +884,7 @@ export async function handleFoodContext(ctx: {
       invalidateFoodTotalsCache(user.id);
       const recomp = await recomputeTodayFoodTotals(user.id);
       await db.update(users).set({ todayCalories: recomp.calories, todayProteinG: recomp.protein, todayCaloriesDate: sastToday() })
-        .where(eq(users.id, user.id)).catch(() => {});
+        .where(eq(users.id, user.id)).catch(e => console.error("[FOOD_TOTAL_UPDATE]", e?.message || e));
       const lines = multiPlan.map(p => {
         const cap = p.label.charAt(0).toUpperCase() + p.label.slice(1);
         return `*${cap}:* ${p.foods.map(f => f.name).join(", ")} — ${p.kcal} kcal | ${p.prot}g protein`;

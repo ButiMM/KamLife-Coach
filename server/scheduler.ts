@@ -150,7 +150,7 @@ cron.schedule("*/30 * * * *", async () => {
           const pct = Math.round((deliveryStats.failed / total) * 100);
           await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`,
             `⚠️ KamLife delivery alert: ${deliveryStats.failed}/${total} WhatsApp sends failed today (${pct}%).\n\nCheck Twilio status and your WhatsApp sender quality rating now — a high failure/block rate is the path to a number suspension.`
-          ).catch(() => {});
+          ).catch(e => console.error("[DELIVERY_ALERT_SEND]", e?.message || e));
         }
       }
     }

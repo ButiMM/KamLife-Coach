@@ -12,7 +12,7 @@
 > **Read this before touching anything related to the audit.** Update it in the
 > same commit as any fix.
 
-_Last verified: 2026-06-23 against `main` @ `5355119` and later._
+_Last verified: 2026-06-23 against `main` @ `fa311c7` and later (pass 3)._
 
 ---
 
@@ -126,8 +126,17 @@ scale work scheduled by real thresholds, or refactors too risky to do pre-launch
 - #45 — CI file-size guard so god-files can't grow
 - Created this tracker (the cure for the lost-context problem)
 
-### What changed in pass 2 (this session)
+### What changed in pass 2 (commits 97e2f64 → fa311c7)
 - #22 — confirmed conversion.ts unit tests existed; updated evidence pointer
 - #23 — added 9 sleep.ts unit tests (getSleepResponse all branches) in unit-tests.ts
 - #32 — added Origin CSRF guard to requireAdminKey cookie-auth path (auth.ts:53)
 - #36 — confirmed food-vision fallbacks at media.ts:1032 (NOT_FOOD) and media.ts:1189 (timeout/error)
+- Water production bugs fixed (commit fa311c7): "Water log" → GPT hallucination closed; combined water+supplement now logs both
+
+### What changed in pass 3 (this commit — beyond the 50-item audit)
+- Silent failure logging: `checkEscalation` failure now logs (routes.ts:118) — safety-critical
+- Silent failure logging: `sendCriticalAlert` failures now log (gpt.ts:1192) — operator alerting
+- Silent failure logging: Twilio cancellation/refund notification failures now log (payments.ts:282, 306)
+- Silent failure logging: daily delivery alert failure now logs (scheduler.ts:153)
+- Silent failure logging: food calorie total update failure now logs (food-context.ts:887)
+- Input validation: phone format validated before DB query on `/api/payfast/link` (payments.ts:390)

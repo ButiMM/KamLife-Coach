@@ -115,7 +115,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   const user = await getOrCreateUser(phone);
 
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
-  if (message && message.length > 2) checkEscalation(user.id, message).catch(() => {});
+  if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
 
   // ---- INTENT CLASSIFIER — structural reset plan item #2 ----
   // Fire early as a background Promise. Text messages only (not photo/voice).
