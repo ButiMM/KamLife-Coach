@@ -14,6 +14,7 @@ import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
 import { normaliseMsisdn, buildContentVariables } from "../server/utils";
+import { getSleepResponse } from "../server/handlers/sleep";
 
 let passed = 0;
 let failed = 0;
@@ -506,6 +507,50 @@ test("plain goal message returns null (no objection)", () => {
 test("money objection reply contains R6.63", () => {
   const r = handleConversionObjection(convCtx("No money right now"));
   assert.ok(r !== null && r.reply.includes("R6.63"), "money reply should frame the daily cost");
+});
+
+// ============================================================
+// getSleepResponse — pure function, no DB needed
+// ============================================================
+
+test("sleep: null hours + isBadSleep=true → cortisol advice", () => {
+  const r = getSleepResponse(null, true);
+  assert.ok(r.includes("cortisol") || r.includes("fat loss") || r.includes("Cortisol"), `unexpected: ${r}`);
+});
+test("sleep: null hours + isBadSleep=false → log prompt", () => {
+  const r = getSleepResponse(null, false);
+  assert.ok(r.includes("Log") || r.includes("log") || r.includes("hours"), `unexpected: ${r}`);
+});
+test("sleep: 3 hours (< 5) → hard-insufficient message with specific advice", () => {
+  const r = getSleepResponse(3, false);
+  assert.ok(r.includes("3 hours"), `should mention the hour count: ${r}`);
+  assert.ok(r.includes("not enough") || r.includes("screens"), `should warn about insufficient sleep: ${r}`);
+});
+test("sleep: 4 hours mentions the exact count", () => {
+  const r = getSleepResponse(4, false);
+  assert.ok(r.startsWith("4 hours"), `should start with the hour count: ${r}`);
+});
+test("sleep: 6 hours (low but >= 5) → low-sleep response mentioning 6", () => {
+  const r = getSleepResponse(6, false);
+  assert.ok(r.includes("6"), `low-sleep reply should reference the count: ${r}`);
+});
+test("sleep: 7 hours (good) → positive reinforcement", () => {
+  const r = getSleepResponse(7, false);
+  assert.ok(r.includes("7"), `good-sleep reply should reference the count: ${r}`);
+  assert.ok(r.includes("solid") || r.includes("quality") || r.includes("hours"), `should be positive: ${r}`);
+});
+test("sleep: 9 hours (good boundary) → still positive", () => {
+  const r = getSleepResponse(9, false);
+  assert.ok(r.includes("9"), `should reference 9 hours: ${r}`);
+});
+test("sleep: 10 hours (> 9) → oversleeping response mentioning energy check", () => {
+  const r = getSleepResponse(10, false);
+  assert.ok(r.includes("10"), `oversleep reply should mention count: ${r}`);
+  assert.ok(r.includes("energy") || r.includes("stress") || r.includes("burnout") || r.includes("iron"), `should flag potential burnout/anaemia: ${r}`);
+});
+test("sleep: 5 hours (exact low boundary) → low not critical response", () => {
+  const r = getSleepResponse(5, false);
+  assert.ok(r.includes("5"), `should mention 5 hours: ${r}`);
 });
 
 // ============================================================

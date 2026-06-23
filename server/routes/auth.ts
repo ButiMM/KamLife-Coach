@@ -49,8 +49,18 @@ export function requireAdminKey(req: any, res: any, next: any) {
   }
 
   // 1. httpOnly cookie — React dashboard
+  // CSRF guard: if Origin is present and doesn't match APP_URL, reject — prevents
+  // cross-origin form submissions from hijacking a logged-in admin session.
   const cookies = parseCookies(req);
-  if (cookies.admin_session && verifySessionToken(cookies.admin_session, secret)) return next();
+  if (cookies.admin_session && verifySessionToken(cookies.admin_session, secret)) {
+    const origin = req.headers.origin as string | undefined;
+    const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+    if (origin && appUrl && !origin.startsWith(appUrl)) {
+      console.warn(`[AUTH] CSRF guard: unexpected Origin "${origin}" on cookie-auth request`);
+      return res.status(403).json({ message: "Forbidden" });
+    }
+    return next();
+  }
 
   // 2. Header fallback — server-rendered /coach page uses x-dashboard-key directly.
   // Hash both values to equal length before timingSafeEqual — prevents key-length oracle via timing.

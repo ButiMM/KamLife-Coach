@@ -12,7 +12,7 @@
 > **Read this before touching anything related to the audit.** Update it in the
 > same commit as any fix.
 
-_Last verified: 2026-06-22 against `main` @ `e469053` and later._
+_Last verified: 2026-06-23 against `main` @ `5355119` and later._
 
 ---
 
@@ -57,8 +57,8 @@ _Last verified: 2026-06-22 against `main` @ `e469053` and later._
 | 19 | Replace meal verifier GPT w/ rules | 🟡 | WON'T-NOW | Already mostly deterministic: P1/P2 rule passes, GPT (`meal-verifier.ts`) only on suspicious items. Marginal gain to remove fully. |
 | 20 | Spend-cap env enforcement | ✅ | — | Same as #1 |
 | 21 | `/api/health/scheduler` endpoint | ✅ | — | `e91c703` — overdue jobs, trial cohorts, DB state |
-| 22 | Unit tests for `conversion.ts` | ❓ | DO-NOW | Verify file exists + add focused tests if logic is non-trivial |
-| 23 | Unit tests for `sleep.ts` | ❓ | DO-NOW | Same |
+| 22 | Unit tests for `conversion.ts` | ✅ | — | `script/unit-tests.ts:474` — 8 tests covering all 3 objection patterns (MONEY/STALL/PRICE) + null return; pure-function import, no DB |
+| 23 | Unit tests for `sleep.ts` | ✅ | — | `script/unit-tests.ts` — 9 tests covering null+badSleep, null+noSleep, <5h hard floor, low (<7h), good (7-9h), high (>9h) branches |
 | 24 | Char tests for `lifecycle.ts` | ✅ | — | `f3fc35f` |
 | 25 | Char tests for `media.ts` | ✅ | — | `4f15074` |
 | 26 | Remove hardcoded domain fallback | ⛔ | WON'T-NOW | `APP_URL || "https://kamlifecoach.co.za"` in several files. Audit said "crash if unset" — **rejected**: that risks a production outage if Railway env is briefly missing. Safer to keep the real-domain fallback. |
@@ -67,11 +67,11 @@ _Last verified: 2026-06-22 against `main` @ `e469053` and later._
 | 29 | Soft-delete users (no hard delete) | ⛔ | WON'T-NOW | Invasive — requires `WHERE deleted_at IS NULL` on every user SELECT (dozens of sites). High chance of introducing the exact bugs we're trying to avoid. Reset already clears child rows in a txn. Revisit deliberately, not in a sweep. |
 | 30 | PayFast payment nonce (replay) | ⛔ | DEFER+TRIGGER | Existing protections already strong: signature check + `paymentEvents` unique(provider,id) idempotency. Nonce is marginal. Trigger: any evidence of replayed-but-signed ITNs. |
 | 31 | MRR/ARPU from `shared/pricing.ts` only | ✅ | — | `dashboard.ts:6` imports `calculateMRR`; no hardcoded prices |
-| 32 | Origin/Referer check on admin POST | ❓ | DO-NOW | Header-key auth already CSRF-safe; add explicit Origin check as defence-in-depth if cheap |
+| 32 | Origin/Referer check on admin POST | ✅ | — | `server/routes/auth.ts:53` — cookie-auth path now checks `req.headers.origin` vs `APP_URL`; rejects with 403 on mismatch; header-key path unaffected (custom headers are already CSRF-safe) |
 | 33 | Stagger scheduler sends | ⛔ | DEFER+TRIGGER | Not needed at ~100 users. **Trigger: active users > 750**, or morning job runtime > 5 min. |
 | 34 | DB pool size tunable | ✅ | — | `db.ts:49` `DB_POOL_MAX` env, default 25 (raise via env when needed) |
 | 35 | Crisis detection beyond regex | ✅ | — | Keyword list expanded (`safety.ts:60`) — added "don't want to be here", "wish i was dead", "nothing to live for", etc. + existing SADAG/Lifeline + coach alert. Full semantic AI deliberately deferred (would add latency to the safety path). |
-| 36 | Food-vision failure fallback | 🟡 | DO-NOW | Fallbacks exist for steps/exercise vision (`media.ts:380`); confirming the main food-photo path has a "couldn't read it" reply |
+| 36 | Food-vision failure fallback | ✅ | — | `media.ts:1032` — `NOT_FOOD` sentinel returns "I can see that's not a food photo…"; `media.ts:1189` — timeout/exception path returns "Eish, I couldn't process that image right now…" with meal/machine/steps triage |
 | 37 | Wire pgvector memory systematically | ❓ | DEFER+TRIGGER | `retrieveMemories`/`storeMemory` exist; not hooked after every session. Retention feature, not a bug. Trigger: post-launch retention work. |
 | 38 | Quality-audit GPT → deterministic | 🟡 | WON'T-NOW | Already cost-optimized: one batched `gpt-4o-mini` call per run. Marginal gain to remove. |
 | 39 | Pagination cap on list endpoints | ✅ | — | `admin.ts:70` `Math.min(100, …)` |
@@ -109,20 +109,25 @@ Building them pre-launch is over-engineering that injects bugs.
 
 ## Honest tally (after this pass)
 
-- ✅ DONE: 32 items (verified) — incl. #3, #17, #35, #41, #45, #46 closed this pass
-- 🟡 PARTIAL (acceptable to ship): 4 — #19, #36, #38 (cost-optimized GPT / fallbacks present)
+- ✅ DONE: 37 items (verified) — incl. #22, #23, #32, #36 closed this pass
+- 🟡 PARTIAL (acceptable to ship): 2 — #19, #38 (cost-optimized GPT — marginal gain to remove)
 - ⛔ OPEN by design:
   - **DEFER+TRIGGER (scale — do when the threshold hits):** #30, #33, #37, #43, #44, #49, #50
   - **WON'T-NOW (risk > value pre-launch):** #6, #7, #8, #9 (god-file splits), #26, #29
-- ❓ being decided: #22/#23 (add small unit tests — safe follow-up), #32 (low value; header auth already CSRF-safe)
 
 **Nothing on this list is lost anymore.** Every deferred item has a written trigger.
 Every done item has evidence. The foundation is closed; what remains is either
 scale work scheduled by real thresholds, or refactors too risky to do pre-launch.
 
-### What changed in this pass (commit-linked)
+### What changed in pass 1 (commit 4e3a7cb + 2a44576)
 - #3 / #46 — killed the duplicate `meal_logs` DDL (schema drift gone)
 - #17 / #41 — onboarding state validation guard (surfaces silent-death bugs)
 - #35 — expanded crisis phrase detection
 - #45 — CI file-size guard so god-files can't grow
 - Created this tracker (the cure for the lost-context problem)
+
+### What changed in pass 2 (this session)
+- #22 — confirmed conversion.ts unit tests existed; updated evidence pointer
+- #23 — added 9 sleep.ts unit tests (getSleepResponse all branches) in unit-tests.ts
+- #32 — added Origin CSRF guard to requireAdminKey cookie-auth path (auth.ts:53)
+- #36 — confirmed food-vision fallbacks at media.ts:1032 (NOT_FOOD) and media.ts:1189 (timeout/error)
