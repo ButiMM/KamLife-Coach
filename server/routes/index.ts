@@ -11,6 +11,7 @@ export { registerHealthRoutes } from "./health";
 export { registerAdminRoutes } from "./admin";
 export { registerWhatsAppRoutes } from "./whatsapp";
 export { registerDashboardRoutes } from "./dashboard";
+export { registerFinanceRoutes } from "./finance";
 export { registerPaymentRoutes } from "./payments";
 export { registerCoachRoutes } from "./coach";
 export { registerVoiceBroadcastRoutes } from "./voice-broadcast";

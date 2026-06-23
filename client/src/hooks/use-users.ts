@@ -143,6 +143,67 @@ export function useRevenue() {
   });
 }
 
+export interface FinanceAlert {
+  level: "good" | "warn" | "bad";
+  title: string;
+  detail: string;
+  action: string;
+}
+
+export function useFinance() {
+  return useQuery({
+    queryKey: ["/api/dashboard/finance"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/finance", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch business health");
+      return res.json() as Promise<{
+        computedAt: string;
+        currency: string;
+        headline: {
+          netProfit: number;
+          netProfitDisplay: string;
+          profitable: boolean;
+          margin: number;
+          revenue: number;
+          totalCost: number;
+        };
+        moneyIn: {
+          mrr: number;
+          mrrDisplay: string;
+          payingUsers: number;
+          trialUsers: number;
+          totalUsers: number;
+          projectedNewPaying: number;
+          projectedMRR: number;
+          projectedMRRDisplay: string;
+          trialConversion: number;
+        };
+        moneyOut: {
+          total: number;
+          breakdown: { label: string; amount: number; measured: boolean; note: string }[];
+          aiByFeature: { feature: string; zar: number }[];
+        };
+        breakEven: {
+          payingNeeded: number | null;
+          payingNow: number;
+          toGo: number | null;
+          contributionPerUser: number;
+        };
+        assumptions: {
+          usdZar: number;
+          hostingZar: number;
+          whatsappPerUser: number;
+          payfastPct: number;
+          payfastFixed: number;
+          price: number;
+        };
+        alerts: FinanceAlert[];
+      }>;
+    },
+    refetchInterval: 60_000,
+  });
+}
+
 export function useFunnel() {
   return useQuery({
     queryKey: ["/api/dashboard/funnel"],

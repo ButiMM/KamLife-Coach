@@ -7,6 +7,7 @@ import NotFound from "@/pages/not-found";
 import LandingPage from "@/pages/landing";
 import Dashboard from "@/pages/dashboard";
 import Analytics from "@/pages/analytics";
+import Finance from "@/pages/finance";
 import UsersList from "@/pages/users";
 import UserDetail from "@/pages/user-detail";
 import BetaTesters from "@/pages/admin/beta-testers";
@@ -44,6 +45,7 @@ function Router() {
       <Route path="/privacy" component={PrivacyPolicy} />
       <Route path="/dashboard">{() => <AuthGuard component={Dashboard} />}</Route>
       <Route path="/analytics">{() => <AuthGuard component={Analytics} />}</Route>
+      <Route path="/finance">{() => <AuthGuard component={Finance} />}</Route>
       <Route path="/users">{() => <AuthGuard component={UsersList} />}</Route>
       <Route path="/users/:id">{() => <AuthGuard component={UserDetail} />}</Route>
       <Route path="/observability">{() => <AuthGuard component={Observability} />}</Route>

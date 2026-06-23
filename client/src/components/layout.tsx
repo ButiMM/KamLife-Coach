@@ -1,6 +1,6 @@
 import React from 'react';
 import { Link, useLocation } from "wouter";
-import { LayoutDashboard, Users, BarChart3, Activity, ShieldAlert, FlaskConical, Mic, LogOut, Menu, X } from "lucide-react";
+import { LayoutDashboard, Users, BarChart3, Activity, ShieldAlert, FlaskConical, Mic, LogOut, Menu, X, HeartPulse } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { markLoggedOut } from "@/lib/auth";
@@ -11,6 +11,7 @@ export function DashboardLayout({ children }: { children: React.ReactNode }) {
   const navItems = [
     { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
     { href: "/analytics", label: "Analytics", icon: BarChart3 },
+    { href: "/finance", label: "Business Health", icon: HeartPulse },
     { href: "/users", label: "Users", icon: Users },
     { href: "/voice-broadcast", label: "Voice Broadcast", icon: Mic },
     { href: "/observability", label: "Message Feed", icon: Activity },

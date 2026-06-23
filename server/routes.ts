@@ -742,6 +742,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
     registerAdminRoutes,
     registerWhatsAppRoutes,
     registerDashboardRoutes,
+    registerFinanceRoutes,
     registerPaymentRoutes,
     registerCoachRoutes,
     registerVoiceBroadcastRoutes,
@@ -757,6 +758,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   registerAdminRoutes(app, routeDeps);
   registerWhatsAppRoutes(app, routeDeps);
   registerDashboardRoutes(app, routeDeps);
+  registerFinanceRoutes(app);
   registerPaymentRoutes(app);
   registerCoachRoutes(app);
   registerVoiceBroadcastRoutes(app);
