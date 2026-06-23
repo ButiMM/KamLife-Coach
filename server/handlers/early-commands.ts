@@ -645,8 +645,11 @@ export async function handleEarlyCommands(ctx: {
           if (byLabel) return byLabel;
           if (hint === "breakfast") return sub[sub.length - 1]; // oldest = breakfast
           if (hint === "lunch" && sub.length >= 2) return sub[1]; // 2nd newest = lunch
+          // Hint given but no matching meal found — return null so the caller tells the
+          // user "no lunch found yesterday" instead of silently copying the wrong meal.
+          return null;
         }
-        return sub[0]; // default: most recent substantial meal
+        return sub[0]; // default: most recent substantial meal (no hint)
       };
 
       // For cross-meal, prefer today's meals as the source
@@ -676,7 +679,14 @@ export async function handleEarlyCommands(ctx: {
 
       if (!match) {
         const timeRef = daysBack >= 2 ? `in the last ${daysBack} days` : daysBack === 1 ? "yesterday" : "recently";
-        const noMatch = `Nothing found ${timeRef} to repeat. Tell me what you ate and I'll log it now.`;
+        // If a specific meal was requested (e.g. "same lunch as yesterday") but only a
+        // different meal exists, name it so the user can confirm rather than getting a
+        // generic "nothing found" that ignores what we DID find.
+        const anyMeal = findBestMeal(searchPool, null);
+        const hintName = sourceHint ? sourceHint.charAt(0).toUpperCase() + sourceHint.slice(1) : null;
+        const noMatch = hintName && anyMeal?.rawMessage
+          ? `No ${hintName} logged ${timeRef} — I only see: _${anyMeal.rawMessage.slice(0, 80)}_. Tell me what your ${hintName} was and I'll log it now.`
+          : `Nothing found ${timeRef} to repeat. Tell me what you ate and I'll log it now.`;
         await logChat(user.id, message, noMatch, "SAME_AS_YESTERDAY_MISS");
         return noMatch;
       }

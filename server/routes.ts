@@ -467,10 +467,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           const digitGroups = canonLower.match(/\d+/g) || [];
           const originalHasNumberWords = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|thousand|half)\b/i.test(m);
           const inventsNumbers = digitGroups.some(d => !m.includes(d) && !originalHasNumberWords);
+          // Retro-date brake: if the classifier adds "yesterday" to a WORKOUT_LOG canonical
+          // but the original message has no temporal reference, the workout handler would
+          // fire isRetroDone on a same-day lift note ("25kg squats, 6 reps") and reply
+          // "already got yesterday's workout logged" when the user was sharing a PB.
+          // Strip any invented "yesterday" before passing to handlers.
           if (!inventsNumbers) {
+            const RETRO_DATE_RE = /\b(yesterday|last night|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d+\s+days?\s+ago)\b/i;
+            if (pre.intent === "WORKOUT_LOG" && RETRO_DATE_RE.test(canonLower) && !RETRO_DATE_RE.test(m)) {
+              canon = canon.replace(RETRO_DATE_RE, "").replace(/\s{2,}/g, " ").trim();
+            }
             console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
             message = canon;
-            m = canonLower.replace(/\s+/g, " ").trim();
+            m = canon.toLowerCase().replace(/\s+/g, " ").trim();
           }
         }
       }

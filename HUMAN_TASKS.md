@@ -104,7 +104,7 @@ Two reusable infographics (same two for every client):
 - [ ] For the bot: upload to `MEDIA_BASE_URL/portions/` → tell Claude (1-line wire-up)
 
 ### 15. Landing page hero video (optional)
-- [ ] Compress an .mp4 under 5MB, host it, set `VITE_HERO_VIDEO_URL` in Railway BUILD variables
+- [ ] Compress an .mp4 under 5MB, host it, set `HERO_VIDEO_URL` in Railway Variables (runtime — no rebuild needed; `VITE_HERO_VIDEO_URL` is a build-time var baked into the bundle, so the server now reads `HERO_VIDEO_URL` at request time and serves it to the landing page)
 
 ### 16. Test PayFast end to end (15 min)
 - [ ] R1 sandbox payment from a test account

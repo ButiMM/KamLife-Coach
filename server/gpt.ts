@@ -1372,6 +1372,8 @@ STEPS        - steps/distance walked, a statement not a question → canonical: 
 WORKOUT_LOG  - ALREADY COMPLETED exercise/session → canonical: "workout done [yesterday]"
                MUST have explicit completion: "done", "finished", "trained", "just came from gym", "session complete"
                "Today's workout" alone = programme request = OTHER, not WORKOUT_LOG
+               Sharing a lift result ("hack squat 25kg 6 reps", "I did 25kg each side") after a session = OTHER, NOT WORKOUT_LOG — that's lift data, not a new session log
+               NEVER add "yesterday" to canonical unless the word "yesterday" (or equivalent retro date) is in the original
 WEIGHT       - body weight check-in → canonical: "<number>kg"
 GOAL_CHANGE  - wants different goal: building/bulking phase, cut, lean out, muscle composition → canonical: "change my goal to <muscle gain|fat loss|recomposition>"
 TOTALS_QUERY - asking today's calories/protein/remaining → canonical: "today's calories"
@@ -1398,7 +1400,9 @@ Examples:
 "Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}
 "Today's workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "Give me my workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
-"I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}`,
+"I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}
+"Hack squat I did 25kg each side for the first time. 6 reps" → {"intent":"OTHER","confidence":0.95,"canonical":""}
+"bench press 80kg 3x10" → {"intent":"OTHER","confidence":0.95,"canonical":""}`,
         },
         { role: "user", content: m.slice(0, 300) },
       ],

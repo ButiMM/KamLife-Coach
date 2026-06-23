@@ -117,9 +117,9 @@ All metrics use formulas from `shared/pricing.ts`.
 
 | Metric | Formula | Source |
 |--------|---------|--------|
-| MRR | paying_users x R149 | `calculateMRR()` |
-| ARPU | R149 (single tier) | `calculateARPU()` |
-| LTV | R149 / monthly_churn_rate | `calculateLTV()` |
+| MRR | paying_users x R199 | `calculateMRR()` |
+| ARPU | R199 (single tier) | `calculateARPU()` |
+| LTV | R199 / monthly_churn_rate | `calculateLTV()` |
 | Trial Conversion | paid / (trial + paid) x 100 | `calculateTrialConversion()` |
 | Churn Rate | (start + new - end) / start | `calculateChurnRate()` |
 | Activation Rate | onboarding_complete / total_signups | Computed in dashboard/funnel |
@@ -132,7 +132,7 @@ All metrics use formulas from `shared/pricing.ts`.
 ### What improved
 - **Dashboard actually works now.** Auth was broken — login returned the wrong thing. Fixed.
 - **One key to rule them all.** No more confusion about which env var unlocks which routes.
-- **Pricing is consistent everywhere.** R149 from WhatsApp messages to landing page to MRR dashboard. One source file controls all of it.
+- **Pricing is consistent everywhere.** R199 from WhatsApp messages to landing page to MRR dashboard. One source file controls all of it.
 - **The product is smarter.** A 15-year-old and a 65-year-old now get different coaching, different intensity, different tone. Walking targets build up over weeks instead of day-1 shock.
 - **Trial converts better.** New users see their first workout and shopping list immediately. Trial countdown creates urgency. Expiry message includes their progress.
 
