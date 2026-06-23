@@ -197,10 +197,30 @@ export function useFinance() {
           payfastFixed: number;
           price: number;
         };
+        trend: {
+          prevMonthAiZar: number;
+          thisMonthAiZar: number;
+          aiChange: number | null;
+        };
         alerts: FinanceAlert[];
       }>;
     },
     refetchInterval: 60_000,
+  });
+}
+
+export function useFinanceHistory() {
+  return useQuery({
+    queryKey: ["/api/dashboard/finance/history"],
+    queryFn: async () => {
+      const res = await fetch("/api/dashboard/finance/history", { headers: authHeaders() });
+      if (!res.ok) throw new Error("Failed to fetch finance history");
+      return res.json() as Promise<{
+        months: { label: string; aiZar: number }[];
+        usdZar: number;
+      }>;
+    },
+    staleTime: 10 * 60_000,
   });
 }
 

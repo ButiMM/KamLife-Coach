@@ -1,13 +1,14 @@
 import { DashboardLayout } from "@/components/layout";
-import { useFinance, type FinanceAlert } from "@/hooks/use-users";
+import { useFinance, useFinanceHistory, type FinanceAlert } from "@/hooks/use-users";
 import { Card } from "@/components/ui/card";
 import {
   TrendingUp, TrendingDown, Wallet, ArrowDownCircle, Target,
-  CheckCircle2, AlertTriangle, XCircle, Clock, Info,
+  CheckCircle2, AlertTriangle, XCircle, Clock, Info, BarChart2,
 } from "lucide-react";
 
 export default function Finance() {
   const { data: f, isLoading } = useFinance();
+  const { data: history } = useFinanceHistory();
 
   return (
     <DashboardLayout>
@@ -150,6 +151,45 @@ export default function Finance() {
                 )}
               </Card>
             </div>
+
+            {/* ── AI SPEND HISTORY (P&L trend) ── */}
+            {history && history.months.length > 0 && (
+              <Card className="p-6 border-border/50">
+                <h3 className="font-bold font-display flex items-center gap-2 mb-4">
+                  <BarChart2 className="w-5 h-5 text-blue-500" /> AI spend — last 6 months
+                </h3>
+                <p className="text-xs text-muted-foreground mb-4">
+                  Real measured costs from every GPT/vision/voice call. Use this to spot trends before they hurt margin.
+                  {f.trend.aiChange != null && (
+                    <span className={` ml-2 font-medium ${f.trend.aiChange > 20 ? "text-rose-500" : f.trend.aiChange < 0 ? "text-green-600" : "text-muted-foreground"}`}>
+                      {f.trend.aiChange > 0 ? `▲${f.trend.aiChange}%` : `▼${Math.abs(f.trend.aiChange)}%`} vs last month.
+                    </span>
+                  )}
+                </p>
+                <div className="space-y-2">
+                  {(() => {
+                    const max = Math.max(...history.months.map(m => m.aiZar), 1);
+                    return history.months.map((m, i) => (
+                      <div key={i} className="flex items-center gap-3">
+                        <span className="text-xs text-muted-foreground w-12 shrink-0">{m.label}</span>
+                        <div className="flex-1 bg-muted rounded-full h-2 overflow-hidden">
+                          <div
+                            className="h-2 rounded-full bg-blue-500 transition-all duration-500"
+                            style={{ width: `${(m.aiZar / max) * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-xs font-medium w-16 text-right shrink-0">
+                          {m.aiZar > 0 ? `R${m.aiZar.toLocaleString()}` : <span className="text-muted-foreground">R0</span>}
+                        </span>
+                      </div>
+                    ));
+                  })()}
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-3">
+                  Note: revenue and user-count history require monthly snapshots (not yet implemented). AI spend is the only cost with full historical data.
+                </p>
+              </Card>
+            )}
 
             {/* ── ASSUMPTIONS (honesty footer) ── */}
             <Card className="p-5 border-border/50 bg-muted/30">

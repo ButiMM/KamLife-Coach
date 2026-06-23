@@ -126,9 +126,25 @@ export function registerFinanceRoutes(app: Express): void {
       // Pipeline
       if (trialCount === 0 && payingCount > 0) alerts.push({ level: "warn", title: "Empty trial pipeline", detail: "No one is on trial — future growth will stall.", action: "Drive new signups (referrals, the WhatsApp link)." });
 
+      // ── Previous month's AI spend for trend context ──
+      const prevMonthStart = new Date(monthStart);
+      prevMonthStart.setUTCMonth(prevMonthStart.getUTCMonth() - 1);
+      const [prevAi] = await db
+        .select({ usd: sql<string>`COALESCE(SUM(${gptCosts.costUsd}), 0)` })
+        .from(gptCosts)
+        .where(sql`${gptCosts.createdAt} >= ${prevMonthStart} AND ${gptCosts.createdAt} < ${monthStart}`);
+      const prevAiCostZar = Number(prevAi?.usd || 0) * USD_ZAR;
+
       res.json({
         computedAt: new Date().toISOString(),
         currency: PRICING.currency,
+        trend: {
+          prevMonthAiZar: Math.round(prevAiCostZar),
+          thisMonthAiZar: Math.round(aiCostZar),
+          aiChange: aiCostZar > 0 && prevAiCostZar > 0
+            ? Math.round(((aiCostZar - prevAiCostZar) / prevAiCostZar) * 100)
+            : null,
+        },
         headline: {
           netProfit: r(netProfit),
           netProfitDisplay: `${netProfit < 0 ? "-" : "+"}R${r(Math.abs(netProfit)).toLocaleString()}`,
@@ -168,6 +184,47 @@ export function registerFinanceRoutes(app: Express): void {
     } catch (err) {
       console.error("[FINANCE] Error:", err);
       res.status(500).json({ error: "Failed to compute business health" });
+    }
+  });
+
+  // ── 6-month AI spend history — pulls directly from gpt_costs ──
+  app.get("/api/dashboard/finance/history", requireAdminKey, async (_req, res) => {
+    try {
+      const USD_ZAR = Number(process.env.USD_ZAR_RATE) || 18.5;
+
+      // Build array of the last 6 month-start timestamps (UTC)
+      const months: { label: string; start: Date; end: Date }[] = [];
+      for (let i = 5; i >= 0; i--) {
+        const d = new Date();
+        d.setUTCDate(1);
+        d.setUTCHours(0, 0, 0, 0);
+        d.setUTCMonth(d.getUTCMonth() - i);
+        const end = new Date(d);
+        end.setUTCMonth(end.getUTCMonth() + 1);
+        months.push({
+          label: d.toLocaleString("en-ZA", { month: "short", year: "2-digit", timeZone: "UTC" }),
+          start: d,
+          end,
+        });
+      }
+
+      const rows = await Promise.all(
+        months.map(async (m) => {
+          const [row] = await db
+            .select({ usd: sql<string>`COALESCE(SUM(${gptCosts.costUsd}), 0)` })
+            .from(gptCosts)
+            .where(sql`${gptCosts.createdAt} >= ${m.start} AND ${gptCosts.createdAt} < ${m.end}`);
+          return {
+            label: m.label,
+            aiZar: Math.round(Number(row?.usd || 0) * USD_ZAR),
+          };
+        })
+      );
+
+      res.json({ months: rows, usdZar: USD_ZAR });
+    } catch (err) {
+      console.error("[FINANCE_HISTORY] Error:", err);
+      res.status(500).json({ error: "Failed to fetch finance history" });
     }
   });
 }
