@@ -12,7 +12,7 @@
 > **Read this before touching anything related to the audit.** Update it in the
 > same commit as any fix.
 
-_Last verified: 2026-06-23 against `main` @ `fa311c7` and later (pass 3 + 4)._
+_Last verified: 2026-06-23 against `main` @ `fa311c7` and later (pass 3 + 4 + 5)._
 
 ---
 
@@ -142,7 +142,19 @@ scale work scheduled by real thresholds, or refactors too risky to do pre-launch
 - Input validation: phone format validated before DB query on `/api/payfast/link` (payments.ts:390)
 - Regression tests: 6 new routing-audit cases for water production bugs (script/routing-audit.ts)
 
-### What changed in pass 4 (this commit — full silent-catch sweep)
+### What changed in pass 4 (full silent-catch sweep)
 - Confirmed scheduler send idempotency already covers every per-user loop: every job uses `claimDailySlot`/`claimProactive`/`claimCritical` (DB-backed `sentProactive` table). No gap to close.
 - Silent failure logging: scheduler job failure ALERT send now logs if Twilio rejects it (scheduler.ts:208)
 - Silent failure logging: profile language-detection note update now logs on DB failure (lifecycle.ts:1109)
+
+### What changed in pass 5 (this commit — pricing source-of-truth enforcement)
+Triggered by an external CTO review flagging a stale R149 price fallback (#31 follow-up).
+- Fixed stale `?? 149` price fallback in `client/src/pages/dashboard.tsx:64` → now `?? PRICING.monthlyPriceZAR`
+- Fixed stale `?? 149` price fallback in `client/src/pages/analytics.tsx:56` → now `?? PRICING.monthlyPriceZAR`
+- Added `script/check-pricing.ts` — CI guard (wired into `npm test` + `npm run check:pricing`) that fails
+  if any shipping file (client/src, server, shared) reintroduces a numeric price fallback or a hardcoded
+  `R149`/`R99` string. Canonical `shared/pricing.ts` is exempt. Verified the guard fails on a known-bad
+  pattern (not a no-op), then passes clean (184 files).
+- NOTE (not code, deliberately not auto-changed): `docs/financial-viability-analysis.md` and
+  `docs/stabilization-summary.md` still model R149 in margin/LTV tables. Swapping the number alone would
+  make their arithmetic internally inconsistent — these need a deliberate finance recompute, not a sweep.

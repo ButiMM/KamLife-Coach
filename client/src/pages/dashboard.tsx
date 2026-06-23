@@ -11,6 +11,7 @@ import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { authHeaders, apiRequest } from "@/lib/queryClient";
 import { useToast } from "@/hooks/use-toast";
+import { PRICING } from "@shared/pricing";
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
@@ -60,7 +61,7 @@ export default function Dashboard() {
   const totalUsers = users?.length || 0;
   const activeUsers = users?.filter(u => u.subscriptionStatus === 'active').length || 0;
   const trialUsers = metrics?.trialClients ?? users?.filter(u => u.subscriptionStatus === 'trial').length ?? 0;
-  const mrr = metrics?.estimatedMRR ?? (activeUsers * (metrics?.pricePerUser ?? 149));
+  const mrr = metrics?.estimatedMRR ?? (activeUsers * (metrics?.pricePerUser ?? PRICING.monthlyPriceZAR));
 
   const displayedFlagged = (flaggedUsers || [])
     .filter(u => flagFilter === "all" || u.flagReason === flagFilter)

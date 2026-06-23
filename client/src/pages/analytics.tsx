@@ -1,6 +1,7 @@
 import { DashboardLayout } from "@/components/layout";
 import { useRevenue, useFunnel, useCohorts } from "@/hooks/use-users";
 import { Card } from "@/components/ui/card";
+import { PRICING } from "@shared/pricing";
 import {
   DollarSign,
   TrendingUp,
@@ -52,7 +53,7 @@ export default function Analytics() {
                 <MetricCard
                   label="MRR"
                   value={revenue?.current.mrrDisplay ?? "—"}
-                  sub={`${revenue?.current.payingUsers ?? 0} paying × R${revenue?.pricePerUser ?? 149}`}
+                  sub={`${revenue?.current.payingUsers ?? 0} paying × R${revenue?.pricePerUser ?? PRICING.monthlyPriceZAR}`}
                   color="text-green-600 bg-green-100 dark:bg-green-900/20"
                 />
                 <MetricCard
