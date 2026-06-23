@@ -9,6 +9,7 @@ import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { sendWhatsApp } from "../scheduler";
 import { scanForSAFoods, recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
+import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
@@ -1069,7 +1070,12 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
       const todaySuppLogs = await db.select({ id: chatHistory.id }).from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "SUPPLEMENT_LOG"), gte(chatHistory.createdAt, todayStart)));
       const suppStreakLine = todaySuppLogs.length >= 2 ? ` Day ${todaySuppLogs.length} in a row — that's the habit.` : "";
-      return `Taken ✅${suppStreakLine}\n\nSame time every day beats the perfect supplement stack. Set a phone alarm and make it automatic.`;
+      const suppReply = `Taken ✅${suppStreakLine}\n\nSame time every day beats the perfect supplement stack. Set a phone alarm and make it automatic.`;
+      // Combined log ("2 litres of water and 10g of creatine"): this supplement handler
+      // runs BEFORE the water handler in the pipeline, so without this the water half is
+      // silently dropped. Log any co-occurring water here and lead with its confirmation.
+      const waterCombined = await tryLogWater({ phone, message, m, user });
+      return waterCombined ? `${waterCombined}\n\n---\n\n${suppReply}` : suppReply;
     }
 
     // Specific supplement question — give a targeted answer, not the whole guide

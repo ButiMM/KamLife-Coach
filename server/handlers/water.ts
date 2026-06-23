@@ -9,7 +9,16 @@ import { eq, sql } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { sastToday } from "../utils";
 
-export async function handleWater(ctx: {
+/**
+ * Log water from a message that contains an amount + a water keyword. Returns the
+ * confirmation reply, or null if the message is not a loggable water entry.
+ *
+ * Exported separately from handleWater so the supplement handler (which runs EARLIER
+ * in the pipeline and would otherwise swallow a combined message like
+ * "2 litres of water and 10g of creatine") can still log the water instead of
+ * silently dropping it.
+ */
+export async function tryLogWater(ctx: {
   phone: string;
   message: string;
   m: string;
@@ -107,6 +116,28 @@ export async function handleWater(ctx: {
     return waterReply;
   }
 
+  return null;
+}
+
+export async function handleWater(ctx: {
+  phone: string;
+  message: string;
+  m: string;
+  user: any;
+}): Promise<string | null> {
+  const { phone, message, m, user } = ctx;
+
+  // Log water first (amount + water keyword).
+  const loggedWater = await tryLogWater(ctx);
+  if (loggedWater) return loggedWater;
+
+  // Re-derive the signals the fall-through blocks need (the logging block above lives
+  // in tryLogWater now, so these are no longer in scope here).
+  const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
+  const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
+  const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
+  const waterNotConsumed = /\b(haven.?t|hasn.?t|didn.?t|did\s+not|forgot|need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
+
   // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
   // e.g. "I drank water", "drank some water", "had water"
   if (!waterMatch && hasWaterKeyword && !waterIsQuestion && !waterNotConsumed && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
@@ -119,10 +150,14 @@ export async function handleWater(ctx: {
     return noAmtReply;
   }
 
-  // ---- WATER QUESTION HANDLER ----
+  // ---- WATER QUESTION / STATUS HANDLER ----
   const isWaterQuestion = /\b(how much water|water target|water goal|how many litres|how many liters|water should i drink|daily water|water recommendation|water intake|water per day)\b/i.test(m);
-  const isWaterOnlyMsg = /^water\s*$/i.test(m.trim());
-  if (isWaterQuestion || isWaterOnlyMsg) {
+  // Bare water commands with NO amount — "water", "water log", "log water", "my water",
+  // "water status/total/today/summary/count/tracker", "show water". These must show the
+  // water summary, never fall through to GPT (which has hallucinated "I can't help you
+  // with water" — a core feature it absolutely supports).
+  const isWaterStatusCmd = /^(water|water\s*log|log\s*water|my\s*water|water\s*status|water\s*total|water\s*today|water\s*summary|water\s*count|water\s*tracker|water\s*tracking|show\s*(my\s*)?water|check\s*(my\s*)?water)\s*\??$/i.test(m.trim());
+  if (isWaterQuestion || isWaterStatusCmd) {
     const todayW = parseFloat(user.todayWater as string || "0");
     const wKg = parseFloat(user.currentWeight as string || "0") || 75;
     const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);

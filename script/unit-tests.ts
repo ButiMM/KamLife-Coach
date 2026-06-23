@@ -1197,6 +1197,34 @@ test("buildContentVariables: drops null/undefined/empty values", () => {
 });
 
 // ============================================================
+// Water status command detection — a bare "water log" / "my water" must show the
+// summary, NEVER fall through to GPT (which hallucinated "I can't help you with
+// water" — a core feature it fully supports). Mirrors water.ts isWaterStatusCmd.
+// ============================================================
+const WATER_STATUS_CMD = /^(water|water\s*log|log\s*water|my\s*water|water\s*status|water\s*total|water\s*today|water\s*summary|water\s*count|water\s*tracker|water\s*tracking|show\s*(my\s*)?water|check\s*(my\s*)?water)\s*\??$/i;
+
+test("water status: 'water log' matches (the exact bug — was hitting GPT)", () => {
+  assert.ok(WATER_STATUS_CMD.test("water log"), "'water log' must show the water summary");
+});
+test("water status: 'log water' matches", () => {
+  assert.ok(WATER_STATUS_CMD.test("log water"), "'log water' must show the water summary");
+});
+test("water status: bare 'water' still matches", () => {
+  assert.ok(WATER_STATUS_CMD.test("water"), "bare 'water' must show the water summary");
+});
+test("water status: 'my water' / 'water today' / 'water status' match", () => {
+  assert.ok(WATER_STATUS_CMD.test("my water"), "'my water'");
+  assert.ok(WATER_STATUS_CMD.test("water today"), "'water today'");
+  assert.ok(WATER_STATUS_CMD.test("water status"), "'water status'");
+});
+test("water status: an actual water LOG ('i drank 2 litres of water') does NOT match (handled by the logger)", () => {
+  assert.ok(!WATER_STATUS_CMD.test("i drank 2 litres of water"), "amount-bearing logs go to the logging path, not the summary");
+});
+test("water status: an unrelated question does NOT match", () => {
+  assert.ok(!WATER_STATUS_CMD.test("is chicken healthy"), "non-water message must not match");
+});
+
+// ============================================================
 // Results
 // ============================================================
 
