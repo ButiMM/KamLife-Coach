@@ -345,6 +345,30 @@ const CASES: Case[] = [
   { name: "popia: 'No' still refuses (capitalised refusal not mistaken for consent)", msg: "No",
     user: { onboardingState: "ASK_POPIA", popiConsent: false },
     expect: [/without consent|cannot store|cannot coach/i], reject: [/what'?s your name/i] },
+
+  // ── WATER LOGGING — production bugs caught 2026-06-23 ───────────────────────────
+  // Bug 1: "Water log" fell through to GPT and returned "I can't help you with water"
+  // (a core feature). Fixed by catching bare water commands in isWaterStatusCmd.
+  { name: "water: 'water log' returns summary, not GPT hallucination (prod bug 2026-06-23)", msg: "water log",
+    expect: [/daily water target|water target|you have logged/i],
+    reject: [/can'?t help|cannot help|don'?t.*water|sorry/i] },
+  { name: "water: 'log water' returns summary (prod bug 2026-06-23)", msg: "log water",
+    expect: [/daily water target|water target|you have logged/i] },
+  { name: "water: 'my water' returns status (regression guard)", msg: "my water",
+    expect: [/daily water target|water target|you have logged/i] },
+  { name: "water: 'water status' returns status (regression guard)", msg: "water status",
+    expect: [/daily water target|water target|you have logged/i] },
+
+  // Bug 2: combined water+supplement messages — supplement handler ran first and returned
+  // without logging the water. Fixed by tryLogWater() being called from inside the
+  // supplement handler's logSupp path before returning. Note: logSupp requires a
+  // consumption verb ("took"/"had"/"drank") to distinguish logging from Q&A.
+  { name: "water+supplement: 'had 2 litres of water and took creatine' logs both (prod bug 2026-06-23)",
+    msg: "had 2 litres of water and took my creatine",
+    expect: [/logged 2l|2l.*total|water|logged/i, /taken\s*✅|taken/i] },
+  { name: "water+supplement: 'drank 500ml water and took magnesium' logs both (regression guard)",
+    msg: "drank 500ml of water and took my magnesium",
+    expect: [/logged.*0\.5|500ml|0\.5l|water/i, /taken\s*✅|taken/i] },
 ];
 
 async function main() {
