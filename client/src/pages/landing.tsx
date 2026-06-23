@@ -47,6 +47,19 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
+// Mini macro progress bar used inside the hero phone mockup
+function MacroBar({ label, val, max }: { label: string; val: number; max: number }) {
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="text-[8.5px] text-white/45 w-9 shrink-0">{label}</span>
+      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "#0B141A" }}>
+        <div className="h-1 rounded-full" style={{ width: `${Math.min(100, (val / max) * 100)}%`, background: ACCENT }} />
+      </div>
+      <span className="text-[8.5px] text-white/55 w-7 text-right shrink-0">{val}g</span>
+    </div>
+  );
+}
+
 const PERSONAS = [
   { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: ACCENT, quote: "Tried the gym 4 times in 3 years. Always quit by month 2. This is month 7. Down 11kg.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
   { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Lost 9kg in 10 weeks eating pap and eggs. Never weighed a single gram of food.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
@@ -97,8 +110,10 @@ export default function LandingPage() {
             src={HERO_VIDEO_URL} autoPlay muted loop playsInline preload="metadata" />
         ) : (
           <>
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 80% 70% at 10% 50%, rgba(249,115,22,0.06) 0%, transparent 65%)" }} />
-            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 60% 60% at 90% 80%, rgba(19,34,77,0.35) 0%, transparent 65%)" }} />
+            {/* Richer ambient background for when no hero video is set (set VITE_HERO_VIDEO_URL in Railway to enable video) */}
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 70% 65% at 12% 42%, rgba(249,115,22,0.14) 0%, transparent 60%)" }} />
+            <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 65% 65% at 88% 82%, rgba(19,34,77,0.45) 0%, transparent 62%)" }} />
+            <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)", backgroundSize: "48px 48px" }} />
           </>
         )}
         {HERO_VIDEO_URL && <div className="absolute inset-0 bg-black/55" />}
@@ -163,18 +178,33 @@ export default function LandingPage() {
           <motion.div initial={{ opacity: 0, x: 40 }} animate={{ opacity: 1, x: 0 }}
             transition={{ duration: 0.7, delay: 0.2 }}
             className="hidden lg:flex justify-center items-center relative">
-            {/* Floating stats card */}
-            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "16px", position: "absolute", top: "11%", right: "-14px", zIndex: 30 }}
-              className="px-4 py-3 shadow-2xl">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-0.5">Today's intake</div>
-              <div className="text-2xl font-black text-white">1,267 <span className="text-sm font-normal text-white/30">/ 2,200 cal</span></div>
-              <div className="w-full h-1.5 rounded-full mt-2" style={{ background: "#222" }}>
-                <div className="h-1.5 rounded-full" style={{ width: "57%", background: ACCENT }} />
+            {/* Soft glow panel so the phone pops off the dark hero (Pelicart insight #3 — visual separation) */}
+            <div className="absolute pointer-events-none" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: "430px", height: "610px", background: "radial-gradient(ellipse 55% 50% at 50% 45%, rgba(249,115,22,0.22) 0%, rgba(19,34,77,0.32) 46%, transparent 72%)", filter: "blur(38px)", zIndex: 0 }} />
+
+            {/* Floating stats card — top right (bigger numbers = proof, Pelicart insight #4) */}
+            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "18px", position: "absolute", top: "8%", right: "-18px", zIndex: 30 }}
+              className="px-5 py-3.5 shadow-2xl">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/35 mb-1">Today's intake</div>
+              <div className="text-3xl font-black text-white leading-none">1,267<span className="text-sm font-medium text-white/35"> / 2,200</span></div>
+              <div className="w-full h-2 rounded-full mt-2.5" style={{ background: "#222" }}>
+                <div className="h-2 rounded-full" style={{ width: "57%", background: ACCENT }} />
               </div>
+              <div className="text-[10px] text-white/40 mt-1.5">933 cal left today</div>
             </div>
 
             {/* ── Phone device ── */}
-            <div className="relative" style={{ width: "302px" }}>
+            <div className="relative" style={{ width: "302px", zIndex: 10 }}>
+              {/* Floating progress card — shows the OUTPUT of coaching, not just the process (Pelicart insight #2) */}
+              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "18px", position: "absolute", bottom: "78px", left: "-40px", zIndex: 30 }}
+                className="px-5 py-3.5 shadow-2xl">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-white/35 mb-1">This week</div>
+                <div className="flex items-baseline gap-1.5">
+                  <span className="text-3xl font-black leading-none" style={{ color: ACCENT }}>−1.2</span>
+                  <span className="text-sm font-medium text-white/45">kg</span>
+                </div>
+                <div className="text-[10px] text-white/40 mt-1.5">4/5 workouts · 12-day streak 🔥</div>
+              </div>
+
               {/* Side buttons */}
               <div className="absolute" style={{ left: "-2.5px", top: "96px", width: "3px", height: "22px", borderRadius: "2px", background: "#3a3a40" }} />
               <div className="absolute" style={{ left: "-2.5px", top: "140px", width: "3px", height: "44px", borderRadius: "2px", background: "#3a3a40" }} />
@@ -246,11 +276,16 @@ export default function LandingPage() {
                         </span>
                       </div>
                     </div>
-                    {/* incoming */}
+                    {/* incoming — macro card: shows the OUTPUT with real numbers (Pelicart insight #4) */}
                     <div className="flex justify-start">
-                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
-                        <p className="text-[11.5px] text-white/95 leading-relaxed">Even better — pilchards = 35g protein. Logged 420 cal. You're crushing today.</p>
-                        <span className="text-[9px] text-white/35 block text-right mt-0.5">09:15</span>
+                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
+                        <p className="text-[11.5px] text-white/95 leading-relaxed">Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
+                        <div className="mt-2 space-y-1">
+                          <MacroBar label="Protein" val={98} max={140} />
+                          <MacroBar label="Carbs" val={142} max={220} />
+                          <MacroBar label="Fat" val={41} max={70} />
+                        </div>
+                        <span className="text-[9px] text-white/35 block text-right mt-1">09:15</span>
                       </div>
                     </div>
                   </div>
