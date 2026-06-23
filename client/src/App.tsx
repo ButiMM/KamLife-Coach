@@ -20,6 +20,8 @@ import PaymentCancel from "@/pages/payment-cancel";
 import Login from "@/pages/login";
 import VoiceBroadcast from "@/pages/voice-broadcast";
 import PrivacyPolicy from "@/pages/privacy";
+import TermsOfService from "@/pages/terms";
+import CancellationPolicy from "@/pages/cancellation";
 
 function AuthGuard({ component: Component }: { component: React.ComponentType }) {
   const { data: isAuth, isLoading } = useQuery<boolean>({
@@ -43,6 +45,8 @@ function Router() {
       <Route path="/payment-success" component={PaymentSuccess} />
       <Route path="/payment-cancel" component={PaymentCancel} />
       <Route path="/privacy" component={PrivacyPolicy} />
+      <Route path="/terms" component={TermsOfService} />
+      <Route path="/cancellation" component={CancellationPolicy} />
       <Route path="/dashboard">{() => <AuthGuard component={Dashboard} />}</Route>
       <Route path="/analytics">{() => <AuthGuard component={Analytics} />}</Route>
       <Route path="/finance">{() => <AuthGuard component={Finance} />}</Route>

@@ -724,6 +724,57 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── TRUST: what Coach K can / cannot access ── */}
+      <section className="py-20 px-6">
+        <div className="max-w-4xl mx-auto">
+          <div className="text-center mb-10">
+            <Label>Privacy &amp; Safety</Label>
+            <h2 className="text-4xl font-black uppercase tracking-tight">WHAT COACH K <span style={{ color: ACCENT }}>KNOWS.</span></h2>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div style={{ background: CARD, border: `1px solid ${BORDER}` }} className="rounded-2xl p-6">
+              <p className="text-sm font-bold mb-4 text-white/60 uppercase tracking-widest">What Coach K can see</p>
+              <ul className="space-y-2.5">
+                {[
+                  "Your name and WhatsApp number",
+                  "Your fitness goal and training preference",
+                  "Food logs you send (text or photo)",
+                  "Steps, water, and workout completions you log",
+                  "Your weekly grocery budget",
+                  "Body weight you share voluntarily",
+                ].map(item => (
+                  <li key={item} className="flex items-start gap-2.5 text-sm text-white/55">
+                    <CheckCircle className="w-4 h-4 shrink-0 mt-0.5 text-green-400" />
+                    {item}
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div style={{ background: CARD, border: `1px solid ${BORDER}` }} className="rounded-2xl p-6">
+              <p className="text-sm font-bold mb-4 text-white/60 uppercase tracking-widest">What Coach K cannot see</p>
+              <ul className="space-y-2.5">
+                {[
+                  "Your bank account or card details",
+                  "Your payment information (PayFast handles that)",
+                  "Your WhatsApp contacts or call history",
+                  "Any data from other apps on your phone",
+                  "Your location",
+                  "Anything you don't explicitly send to Coach K",
+                ].map(item => (
+                  <li key={item} className="flex items-start gap-2.5 text-sm">
+                    <span className="w-4 h-4 shrink-0 mt-0.5 flex items-center justify-center rounded-full bg-white/8 text-white/30 text-xs font-bold">✕</span>
+                    <span className="line-through text-white/30">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <p className="text-center text-xs text-white/20 mt-5">
+            Your data is governed by POPIA. <a href="/privacy" className="underline text-white/30 hover:text-white/50">Full privacy policy →</a>
+          </p>
+        </div>
+      </section>
+
       {/* ── FAQ ── */}
       <section id="faq" className="py-28 px-6">
         <div className="max-w-2xl mx-auto">
@@ -739,6 +790,7 @@ export default function LandingPage() {
               { q: "Is this a real coach or a bot?", a: "An AI coach trained specifically on South African food, lifestyle, and fitness. It knows pap from polenta, pilchards from salmon, and Nando's from a generic chicken restaurant. Over time it remembers your wins, your patterns, and adapts." },
               { q: "What if I have diabetes, hypertension, PCOS, or I'm on ARVs?", a: "Coach K adjusts for all of these. It flags when doctor clearance is needed, avoids foods that interact with common medications, and keeps nutrition within safe ranges for your condition." },
               { q: "How do I cancel?", a: "Reply CANCEL to Coach K at any time. No phone calls. No forms. No hassle. Your programme and progress are saved for 90 days — come back whenever you're ready." },
+              { q: "Can I message Coach K in isiZulu, isiXhosa, or Afrikaans?", a: "Yes. Coach K understands isiZulu, isiXhosa, and Afrikaans — send in whichever language feels most natural. English works best for complex questions, but you'll be understood either way." },
             ].map((faq, i) => (
               <div key={i} style={{ background: CARD, border: `1px solid ${openFaq === i ? "#333" : BORDER}` }}
                 className="rounded-2xl overflow-hidden">
@@ -781,13 +833,48 @@ export default function LandingPage() {
 
       {/* ── FOOTER ── */}
       <footer style={{ borderTop: `1px solid ${BORDER}`, background: "#0B0B0B" }}
-        className="py-10 px-6 lg:px-16">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row justify-between items-center gap-4">
-          <span className="text-xl font-black">KAM<span style={{ color: ACCENT }}>LIFE</span></span>
-          <div className="flex flex-wrap justify-center sm:justify-end items-center gap-x-6 gap-y-1 text-sm text-white/25">
-            <span>Built for South Africa</span>
-            <a href="/privacy" className="hover:text-white/50 transition-colors">Privacy Policy (POPIA)</a>
-            <span>© 2026 KamLife</span>
+        className="py-14 px-6 lg:px-16">
+        <div className="max-w-6xl mx-auto">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-12">
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">Get Started</p>
+              <ul className="space-y-2.5 text-sm text-white/45">
+                <li><a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Start Free Trial</a></li>
+                <li><a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a></li>
+                <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
+                <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>
+                <li><a href="#faq" className="hover:text-white transition-colors">FAQ</a></li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">Support</p>
+              <ul className="space-y-2.5 text-sm text-white/45">
+                <li><span className="text-white/30">Reply <em>help</em> to Coach K</span></li>
+                <li><a href="mailto:support@kamlifecoach.co.za" className="hover:text-white transition-colors">Email Us</a></li>
+                <li><a href="/cancellation" className="hover:text-white transition-colors">Cancel / Refunds</a></li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">About</p>
+              <ul className="space-y-2.5 text-sm text-white/45">
+                <li><span className="text-white/30">Built for South Africa</span></li>
+                <li><span className="text-white/30">WhatsApp-native</span></li>
+                <li><span className="text-white/30">ZAR pricing — no forex</span></li>
+              </ul>
+            </div>
+            <div>
+              <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">Legal</p>
+              <ul className="space-y-2.5 text-sm text-white/45">
+                <li><a href="/privacy" className="hover:text-white transition-colors">Privacy Policy (POPIA)</a></li>
+                <li><a href="/terms" className="hover:text-white transition-colors">Terms of Service</a></li>
+                <li><a href="/cancellation" className="hover:text-white transition-colors">Refund Policy</a></li>
+                <li className="pt-2 text-white/25 text-xs leading-relaxed">Not affiliated with WhatsApp, Meta, or Twilio.</li>
+              </ul>
+            </div>
+          </div>
+          <div style={{ borderTop: `1px solid ${BORDER}` }} className="pt-6 flex flex-col sm:flex-row justify-between items-center gap-2">
+            <span className="text-xl font-black">KAM<span style={{ color: ACCENT }}>LIFE</span></span>
+            <span className="text-sm text-white/20">© 2026 KamLife Lifestyle Coach</span>
           </div>
         </div>
       </footer>
