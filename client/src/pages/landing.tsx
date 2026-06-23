@@ -47,15 +47,15 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
-// Mini macro progress bar used inside the hero phone mockup
+// Mini macro progress bar used inside the hero phone mockup (light bubble)
 function MacroBar({ label, val, max }: { label: string; val: number; max: number }) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[8.5px] text-white/45 w-9 shrink-0">{label}</span>
-      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "#0B141A" }}>
+      <span className="text-[8.5px] w-9 shrink-0" style={{ color: "#667781" }}>{label}</span>
+      <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "#E9EDEF" }}>
         <div className="h-1 rounded-full" style={{ width: `${Math.min(100, (val / max) * 100)}%`, background: ACCENT }} />
       </div>
-      <span className="text-[8.5px] text-white/55 w-7 text-right shrink-0">{val}g</span>
+      <span className="text-[8.5px] w-7 text-right shrink-0" style={{ color: "#111B21" }}>{val}g</span>
     </div>
   );
 }
@@ -78,11 +78,15 @@ export default function LandingPage() {
     queryFn: async () => {
       const res = await fetch("/api/public/stats");
       if (!res.ok) return null;
-      return res.json() as Promise<{ activeClients: number; workoutsLogged: number }>;
+      return res.json() as Promise<{ activeClients: number; workoutsLogged: number; heroVideoUrl?: string }>;
     },
     staleTime: 5 * 60_000,
     retry: false,
   });
+
+  // Runtime video URL (from server env) takes priority over the build-time VITE_ var,
+  // so the hero video works the moment HERO_VIDEO_URL is set in Railway — no rebuild needed.
+  const heroVideo = stats?.heroVideoUrl || HERO_VIDEO_URL;
 
   return (
     <div style={{ background: BG, color: "#fff" }} className="min-h-screen overflow-x-hidden font-sans">
@@ -105,18 +109,18 @@ export default function LandingPage() {
 
       {/* ── HERO ── */}
       <section className="relative min-h-screen flex items-center px-6 lg:px-16 overflow-hidden">
-        {HERO_VIDEO_URL ? (
+        {heroVideo ? (
           <video className="absolute inset-0 w-full h-full object-cover"
-            src={HERO_VIDEO_URL} autoPlay muted loop playsInline preload="metadata" />
+            src={heroVideo} autoPlay muted loop playsInline preload="metadata" />
         ) : (
           <>
-            {/* Richer ambient background for when no hero video is set (set VITE_HERO_VIDEO_URL in Railway to enable video) */}
+            {/* Richer ambient background for when no hero video is set (set HERO_VIDEO_URL in Railway to enable video) */}
             <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 70% 65% at 12% 42%, rgba(249,115,22,0.14) 0%, transparent 60%)" }} />
             <div className="absolute inset-0" style={{ background: "radial-gradient(ellipse 65% 65% at 88% 82%, rgba(19,34,77,0.45) 0%, transparent 62%)" }} />
             <div className="absolute inset-0 opacity-[0.04]" style={{ backgroundImage: "linear-gradient(rgba(255,255,255,0.6) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.6) 1px, transparent 1px)", backgroundSize: "48px 48px" }} />
           </>
         )}
-        {HERO_VIDEO_URL && <div className="absolute inset-0 bg-black/55" />}
+        {heroVideo && <div className="absolute inset-0 bg-black/55" />}
         <div className="absolute bottom-0 left-0 right-0 h-48"
           style={{ background: `linear-gradient(to top, ${BG}, transparent)` }} />
 
@@ -179,30 +183,30 @@ export default function LandingPage() {
             transition={{ duration: 0.7, delay: 0.2 }}
             className="hidden lg:flex justify-center items-center relative">
             {/* Soft glow panel so the phone pops off the dark hero (Pelicart insight #3 — visual separation) */}
-            <div className="absolute pointer-events-none" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: "430px", height: "610px", background: "radial-gradient(ellipse 55% 50% at 50% 45%, rgba(249,115,22,0.22) 0%, rgba(19,34,77,0.32) 46%, transparent 72%)", filter: "blur(38px)", zIndex: 0 }} />
+            <div className="absolute pointer-events-none" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: "520px", height: "740px", background: "radial-gradient(ellipse 55% 50% at 50% 45%, rgba(249,115,22,0.24) 0%, rgba(19,34,77,0.34) 46%, transparent 72%)", filter: "blur(44px)", zIndex: 0 }} />
 
-            {/* Floating stats card — top right (bigger numbers = proof, Pelicart insight #4) */}
-            <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "18px", position: "absolute", top: "8%", right: "-18px", zIndex: 30 }}
-              className="px-5 py-3.5 shadow-2xl">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/35 mb-1">Today's intake</div>
-              <div className="text-3xl font-black text-white leading-none">1,267<span className="text-sm font-medium text-white/35"> / 2,200</span></div>
-              <div className="w-full h-2 rounded-full mt-2.5" style={{ background: "#222" }}>
-                <div className="h-2 rounded-full" style={{ width: "57%", background: ACCENT }} />
-              </div>
-              <div className="text-[10px] text-white/40 mt-1.5">933 cal left today</div>
-            </div>
-
-            {/* ── Phone device ── */}
-            <div className="relative" style={{ width: "302px", zIndex: 10 }}>
-              {/* Floating progress card — shows the OUTPUT of coaching, not just the process (Pelicart insight #2) */}
-              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "18px", position: "absolute", bottom: "78px", left: "-40px", zIndex: 30 }}
-                className="px-5 py-3.5 shadow-2xl">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-white/35 mb-1">This week</div>
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-3xl font-black leading-none" style={{ color: ACCENT }}>−1.2</span>
-                  <span className="text-sm font-medium text-white/45">kg</span>
+            {/* ── Phone device — scaled up for a big, premium presence (Pelicart-style large device) ── */}
+            <div className="relative" style={{ width: "302px", zIndex: 10, transform: "scale(1.28)", transformOrigin: "center" }}>
+              {/* Floating stats card — top right (bigger numbers = proof, Pelicart insight #4) */}
+              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", top: "52px", right: "-42px", zIndex: 30 }}
+                className="px-3.5 py-2.5 shadow-2xl">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-white/35 mb-0.5">Today's intake</div>
+                <div className="text-xl font-black text-white leading-none">1,267<span className="text-[11px] font-medium text-white/35"> / 2,200</span></div>
+                <div className="rounded-full mt-1.5" style={{ width: "108px", height: "5px", background: "#222" }}>
+                  <div className="h-full rounded-full" style={{ width: "57%", background: ACCENT }} />
                 </div>
-                <div className="text-[10px] text-white/40 mt-1.5">4/5 workouts · 12-day streak 🔥</div>
+                <div className="text-[9px] text-white/40 mt-1">933 cal left today</div>
+              </div>
+
+              {/* Floating progress card — shows the OUTPUT of coaching, not just the process (Pelicart insight #2) */}
+              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", bottom: "64px", left: "-46px", zIndex: 30 }}
+                className="px-3.5 py-2.5 shadow-2xl">
+                <div className="text-[9px] font-bold uppercase tracking-wider text-white/35 mb-0.5">This week</div>
+                <div className="flex items-baseline gap-1">
+                  <span className="text-xl font-black leading-none" style={{ color: ACCENT }}>−1.2</span>
+                  <span className="text-[11px] font-medium text-white/45">kg</span>
+                </div>
+                <div className="text-[9px] text-white/40 mt-1">4/5 workouts · 12-day streak 🔥</div>
               </div>
 
               {/* Side buttons */}
@@ -215,87 +219,87 @@ export default function LandingPage() {
               <div style={{ background: "linear-gradient(145deg, #34343a 0%, #18181b 55%, #28282d 100%)", borderRadius: "46px", padding: "11px" }}
                 className="shadow-2xl">
                 {/* Screen */}
-                <div className="relative overflow-hidden" style={{ background: "#0B141A", borderRadius: "35px" }}>
+                <div className="relative overflow-hidden" style={{ background: "#FFFFFF", borderRadius: "35px" }}>
 
                   {/* Dynamic Island */}
                   <div className="absolute left-1/2 -translate-x-1/2 z-20" style={{ top: "9px", width: "94px", height: "27px", background: "#000", borderRadius: "16px" }} />
 
-                  {/* iOS status bar */}
-                  <div className="relative flex items-center justify-between px-6 pt-3 pb-1.5" style={{ background: "#202C33" }}>
-                    <span className="text-[12px] font-semibold text-white tracking-tight">9:41</span>
+                  {/* iOS status bar (light) */}
+                  <div className="relative flex items-center justify-between px-6 pt-3 pb-1.5" style={{ background: "#FFFFFF" }}>
+                    <span className="text-[12px] font-semibold tracking-tight" style={{ color: "#111B21" }}>9:41</span>
                     <div className="flex items-center gap-1.5">
                       <div className="flex items-end gap-[2px]" style={{ height: "11px" }}>
                         {[5, 7, 9, 11].map((h, i) => (
-                          <div key={i} style={{ width: "3px", height: `${h}px`, background: "#fff", borderRadius: "1px" }} />
+                          <div key={i} style={{ width: "3px", height: `${h}px`, background: "#111B21", borderRadius: "1px" }} />
                         ))}
                       </div>
-                      <Wifi className="w-3.5 h-3.5 text-white" strokeWidth={2.5} />
+                      <Wifi className="w-3.5 h-3.5" strokeWidth={2.5} style={{ color: "#111B21" }} />
                       <div className="flex items-center" style={{ gap: "1px" }}>
-                        <div style={{ width: "21px", height: "11px", borderRadius: "3px", border: "1px solid rgba(255,255,255,0.45)", padding: "1.5px" }}>
-                          <div style={{ width: "78%", height: "100%", background: "#fff", borderRadius: "1px" }} />
+                        <div style={{ width: "21px", height: "11px", borderRadius: "3px", border: "1px solid rgba(17,27,33,0.5)", padding: "1.5px" }}>
+                          <div style={{ width: "78%", height: "100%", background: "#111B21", borderRadius: "1px" }} />
                         </div>
-                        <div style={{ width: "1.5px", height: "4px", background: "rgba(255,255,255,0.45)", borderRadius: "0 1px 1px 0" }} />
+                        <div style={{ width: "1.5px", height: "4px", background: "rgba(17,27,33,0.5)", borderRadius: "0 1px 1px 0" }} />
                       </div>
                     </div>
                   </div>
 
-                  {/* WhatsApp chat header */}
-                  <div className="flex items-center gap-2 px-3 py-2" style={{ background: "#202C33" }}>
-                    <ChevronLeft className="w-5 h-5 text-white/80 shrink-0" />
+                  {/* WhatsApp chat header (light) */}
+                  <div className="flex items-center gap-2 px-3 py-2" style={{ background: "#FFFFFF", borderBottom: "1px solid #E9EDEF" }}>
+                    <ChevronLeft className="w-5 h-5 shrink-0" style={{ color: "#54656F" }} />
                     <div className="w-8 h-8 rounded-full flex items-center justify-center font-black text-sm shrink-0"
-                      style={{ background: ACCENT, color: "#1a1a1a" }}>K</div>
+                      style={{ background: ACCENT, color: "#fff" }}>K</div>
                     <div className="flex-1 min-w-0">
-                      <div className="text-[13px] font-semibold text-white leading-tight">Coach K</div>
-                      <div className="text-[10px] text-white/45 leading-tight">online</div>
+                      <div className="text-[13px] font-semibold leading-tight" style={{ color: "#111B21" }}>Coach K</div>
+                      <div className="text-[10px] leading-tight" style={{ color: "#25D366" }}>online</div>
                     </div>
-                    <Video className="w-[18px] h-[18px] text-white/80 shrink-0" />
-                    <Phone className="w-4 h-4 text-white/80 shrink-0" />
+                    <Video className="w-[18px] h-[18px] shrink-0" style={{ color: "#54656F" }} />
+                    <Phone className="w-4 h-4 shrink-0" style={{ color: "#54656F" }} />
                   </div>
 
-                  {/* Chat body */}
-                  <div className="px-3 py-3 space-y-2" style={{ background: "#0B141A", minHeight: "292px" }}>
+                  {/* Chat body (light — WhatsApp beige wallpaper) */}
+                  <div className="px-3 py-3 space-y-2" style={{ background: "#EFEAE2", minHeight: "292px" }}>
                     {/* date pill */}
                     <div className="flex justify-center mb-1">
-                      <span className="text-[9px] text-white/45 px-2.5 py-0.5 rounded-md" style={{ background: "#182229" }}>TODAY</span>
+                      <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
                     </div>
                     {/* incoming */}
                     <div className="flex justify-start">
-                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
-                        <p className="text-[11.5px] text-white/95 leading-relaxed">Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
-                        <p className="text-[11.5px] text-white/95 font-semibold leading-relaxed mt-0.5">Pap + spinach + 2 eggs = 420 cal</p>
-                        <span className="text-[9px] text-white/35 block text-right mt-0.5">09:02</span>
+                      <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
+                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
+                        <p className="text-[11.5px] font-semibold leading-relaxed mt-0.5" style={{ color: "#111B21" }}>Pap + spinach + 2 eggs = 420 cal</p>
+                        <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>09:02</span>
                       </div>
                     </div>
                     {/* outgoing */}
                     <div className="flex justify-end">
-                      <div style={{ background: "#005C4B", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
-                        <p className="text-[11.5px] text-white/95 leading-relaxed">Had the pap, added pilchards instead</p>
+                      <div style={{ background: "#D9FDD3", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
+                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Had the pap, added pilchards instead</p>
                         <span className="flex items-center justify-end gap-1 mt-0.5">
-                          <span className="text-[9px] text-white/45">09:14</span>
+                          <span className="text-[9px]" style={{ color: "#667781" }}>09:14</span>
                           <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
                         </span>
                       </div>
                     </div>
                     {/* incoming — macro card: shows the OUTPUT with real numbers (Pelicart insight #4) */}
                     <div className="flex justify-start">
-                      <div style={{ background: "#1F2C33", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
-                        <p className="text-[11.5px] text-white/95 leading-relaxed">Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
+                      <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
+                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
                         <div className="mt-2 space-y-1">
                           <MacroBar label="Protein" val={98} max={140} />
                           <MacroBar label="Carbs" val={142} max={220} />
                           <MacroBar label="Fat" val={41} max={70} />
                         </div>
-                        <span className="text-[9px] text-white/35 block text-right mt-1">09:15</span>
+                        <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>09:15</span>
                       </div>
                     </div>
                   </div>
 
-                  {/* Input bar */}
-                  <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: "#0B141A" }}>
-                    <div className="flex-1 flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: "#202C33" }}>
-                      <Plus className="w-3.5 h-3.5 text-white/40 shrink-0" />
-                      <span className="text-[11px] text-white/35">Message</span>
-                      <Camera className="w-3.5 h-3.5 text-white/40 ml-auto shrink-0" />
+                  {/* Input bar (light) */}
+                  <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: "#F0F2F5" }}>
+                    <div className="flex-1 flex items-center gap-2 rounded-full px-3 py-1.5" style={{ background: "#FFFFFF" }}>
+                      <Plus className="w-3.5 h-3.5 shrink-0" style={{ color: "#54656F" }} />
+                      <span className="text-[11px]" style={{ color: "#8696A0" }}>Message</span>
+                      <Camera className="w-3.5 h-3.5 ml-auto shrink-0" style={{ color: "#54656F" }} />
                     </div>
                     <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
                       <Mic className="w-4 h-4 text-white" />
@@ -303,8 +307,8 @@ export default function LandingPage() {
                   </div>
 
                   {/* Home indicator */}
-                  <div className="flex justify-center pb-2 pt-1" style={{ background: "#0B141A" }}>
-                    <div style={{ width: "112px", height: "4px", borderRadius: "4px", background: "rgba(255,255,255,0.45)" }} />
+                  <div className="flex justify-center pb-2 pt-1" style={{ background: "#F0F2F5" }}>
+                    <div style={{ width: "112px", height: "4px", borderRadius: "4px", background: "rgba(17,27,33,0.35)" }} />
                   </div>
                 </div>
               </div>

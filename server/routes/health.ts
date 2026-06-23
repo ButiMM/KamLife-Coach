@@ -42,10 +42,13 @@ export function registerHealthRoutes(app: Express) {
       res.json({
         activeClients: parseInt(String(clientCount[0]?.count || 0)),
         workoutsLogged: parseInt(String(workoutCount[0]?.count || 0)),
+        // Served at RUNTIME so the hero video works from a Railway env var without
+        // a rebuild (VITE_ vars are otherwise baked in only at build time).
+        heroVideoUrl: process.env.HERO_VIDEO_URL || process.env.VITE_HERO_VIDEO_URL || "",
       });
     } catch (e) {
       console.warn("[dashboard-stats]", e);
-      res.status(503).json({ activeClients: 0, workoutsLogged: 0 });
+      res.status(503).json({ activeClients: 0, workoutsLogged: 0, heroVideoUrl: process.env.HERO_VIDEO_URL || process.env.VITE_HERO_VIDEO_URL || "" });
     }
   });
 
