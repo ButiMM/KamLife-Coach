@@ -37,6 +37,7 @@ jobs:
       RETENTION_DAYS: "30"
     steps:
       - name: Guard — required secrets present
+        id: guard
         run: |
           set -euo pipefail
           missing=""
@@ -44,11 +45,20 @@ jobs:
             if [ -z "${!v:-}" ]; then missing="$missing $v"; fi
           done
           if [ -n "$missing" ]; then
-            echo "::error::Missing required secrets:$missing"
-            exit 1
+            echo "::warning::Backup SKIPPED — missing GitHub secrets:$missing"
+            echo "::warning::Go to repo Settings → Secrets and variables → Actions and add the 5 secrets listed at the top of db-backup.yml"
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            # On manual trigger, fail hard so the operator knows setup is incomplete
+            if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+              echo "::error::Manually triggered but secrets not configured:$missing"
+              exit 1
+            fi
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Install postgresql-client 17
+        if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
           sudo sh -c 'echo "deb https://apt.postgresql.org/pub/repos/apt $(lsb_release -cs)-pgdg main" > /etc/apt/sources.list.d/pgdg.list'
@@ -58,6 +68,7 @@ jobs:
           pg_dump --version
 
       - name: Dump + compress
+        if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
           STAMP="$(date -u +%Y%m%d-%H%M%S)"
@@ -75,12 +86,14 @@ jobs:
           fi
 
       - name: Upload to R2
+        if: steps.guard.outputs.skip != 'true'
         run: |
           set -euo pipefail
           aws s3 cp "/tmp/${FILE}" "s3://${R2_BUCKET}/daily/${FILE}" --endpoint-url "$R2_ENDPOINT"
           echo "Uploaded s3://${R2_BUCKET}/daily/${FILE}"
 
       - name: Prune backups older than retention window
+        if: steps.guard.outputs.skip != 'true'
         continue-on-error: true # backup already succeeded; pruning is best-effort
         run: |
           set -euo pipefail
@@ -97,4 +110,5 @@ jobs:
             done
 
       - name: Summary
-        run: echo "✅ Backup complete — daily/${FILE} on R2 (retention ${RETENTION_DAYS}d)"
+        if: steps.guard.outputs.skip != 'true'
+        run: echo "Backup complete — daily/${FILE} on R2 (retention ${RETENTION_DAYS}d)"
