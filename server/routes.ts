@@ -38,7 +38,7 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -471,11 +471,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           // but the original message has no temporal reference, the workout handler would
           // fire isRetroDone on a same-day lift note ("25kg squats, 6 reps") and reply
           // "already got yesterday's workout logged" when the user was sharing a PB.
-          // Strip any invented "yesterday" before passing to handlers.
+          // Strip any invented "yesterday" before passing to handlers. (pure helper, unit-tested)
           if (!inventsNumbers) {
-            const RETRO_DATE_RE = /\b(yesterday|last night|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d+\s+days?\s+ago)\b/i;
-            if (pre.intent === "WORKOUT_LOG" && RETRO_DATE_RE.test(canonLower) && !RETRO_DATE_RE.test(m)) {
-              canon = canon.replace(RETRO_DATE_RE, "").replace(/\s{2,}/g, " ").trim();
+            if (pre.intent === "WORKOUT_LOG") {
+              canon = stripInventedRetroDate(canon, originalMBeforeNorm);
             }
             console.log(`[NORMALIZER] ${pre.intent}(${Math.round(pre.confidence * 100)}%) "${message.slice(0, 80)}" → "${canon.slice(0, 80)}"`);
             message = canon;

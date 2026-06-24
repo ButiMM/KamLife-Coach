@@ -125,6 +125,23 @@ export function isRetroactiveMeal(message: string): boolean {
   return /\b(yesterday|last night|days? ago|on\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|last\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)|had this (saturday|sunday|monday|tuesday|wednesday|thursday|friday)|saturday|sunday)\b/.test(m);
 }
 
+// Retro-date hallucination brake for the normalizer. The intent classifier
+// (gpt-4o-mini) sometimes adds "yesterday" to a WORKOUT_LOG canonical when the
+// client never said it — e.g. "Hack squat 25kg, 6 reps" → "workout done
+// yesterday". That invented date makes the workout handler fire its retroactive
+// branch and reply "already got yesterday's workout logged" instead of crediting
+// today's session. This strips any retro-date token from `canonical` that does
+// NOT appear in `original`, so a real "...yesterday" is preserved and an invented
+// one is removed. Pure + unit-tested (production bug 2026-06-24).
+const RETRO_DATE_RE = /\b(yesterday|last night|last\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|\d+\s+days?\s+ago)\b/gi;
+export function stripInventedRetroDate(canonical: string, original: string): string {
+  const orig = original.toLowerCase();
+  // Only strip tokens the client did not actually write.
+  const cleaned = canonical.replace(RETRO_DATE_RE, (match) =>
+    orig.includes(match.toLowerCase()) ? match : "");
+  return cleaned.replace(/\s{2,}/g, " ").trim();
+}
+
 // Future-intent / hypothetical detector — stops PLANNED actions ("I'll walk 10k
 // tomorrow", "going to run 5km", "want to do yoga") from being logged as if already
 // done. Used by the step and cardio loggers, which match the activity + number

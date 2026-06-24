@@ -13,8 +13,9 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
+import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 
 let passed = 0;
 let failed = 0;
@@ -1222,6 +1223,91 @@ test("water status: an actual water LOG ('i drank 2 litres of water') does NOT m
 });
 test("water status: an unrelated question does NOT match", () => {
   assert.ok(!WATER_STATUS_CMD.test("is chicken healthy"), "non-water message must not match");
+});
+
+// ============================================================
+// selectMealToCopy — "same as yesterday" meal selection
+// Production bug 2026-06-24: only breakfast logged yesterday, client said
+// "same lunch as yesterday", bot copied the breakfast AS lunch.
+// ============================================================
+
+const DAY = 86_400_000;
+const T = (hoursAgo: number): Date => new Date(Date.now() - hoursAgo * 3_600_000);
+const meal = (over: Partial<CopyableMeal>): CopyableMeal =>
+  ({ kcalInt: 500, loggedAt: T(2), rawMessage: "some food", mealLabel: null, ...over });
+
+test("selectMealToCopy: THE BUG — 'lunch' hint with only a breakfast logged returns null (never copies breakfast as lunch)", () => {
+  const meals = [meal({ rawMessage: "3 boiled eggs, 2 slices brown bread and 1 chicken vienna for breakfast", mealLabel: "breakfast", kcalInt: 549, loggedAt: T(26) })];
+  assert.equal(selectMealToCopy(meals, "lunch"), null, "must NOT substitute breakfast when lunch was asked for");
+});
+
+test("selectMealToCopy: 'lunch' hint matches a meal whose raw text says lunch", () => {
+  const lunch = meal({ rawMessage: "rice and chicken for lunch", mealLabel: "lunch", loggedAt: T(28) });
+  const breakfast = meal({ rawMessage: "oats for breakfast", mealLabel: "breakfast", loggedAt: T(30) });
+  assert.equal(selectMealToCopy([breakfast, lunch], "lunch"), lunch);
+});
+
+test("selectMealToCopy: 'lunch' hint matches by stored label when raw text lacks the word", () => {
+  const lunch = meal({ rawMessage: "leftovers", mealLabel: "lunch", loggedAt: T(28) });
+  const dinner = meal({ rawMessage: "steak", mealLabel: "dinner", loggedAt: T(20) });
+  assert.equal(selectMealToCopy([dinner, lunch], "lunch"), lunch);
+});
+
+test("selectMealToCopy: no hint returns the most recent substantial meal", () => {
+  const older = meal({ rawMessage: "older", loggedAt: T(30), kcalInt: 600 });
+  const newer = meal({ rawMessage: "newer", loggedAt: T(10), kcalInt: 600 });
+  assert.equal(selectMealToCopy([older, newer], null), newer);
+});
+
+test("selectMealToCopy: empty history returns null", () => {
+  assert.equal(selectMealToCopy([], "lunch"), null);
+  assert.equal(selectMealToCopy([], null), null);
+});
+
+test("selectMealToCopy: skips trivial sub-150kcal logs (a black coffee is not 'lunch')", () => {
+  const coffee = meal({ rawMessage: "black coffee", mealLabel: "lunch", kcalInt: 5, loggedAt: T(28) });
+  // only a tiny coffee labelled lunch exists → not substantial, hint can't match → null
+  assert.equal(selectMealToCopy([coffee], "lunch"), null);
+});
+
+test("selectMealToCopy: breakfast hint returns the oldest substantial meal positionally", () => {
+  const b = meal({ rawMessage: "first meal", mealLabel: null, loggedAt: T(34), kcalInt: 400 });
+  const l = meal({ rawMessage: "second meal", mealLabel: null, loggedAt: T(28), kcalInt: 400 });
+  const d = meal({ rawMessage: "third meal", mealLabel: null, loggedAt: T(20), kcalInt: 400 });
+  assert.equal(selectMealToCopy([b, l, d], "breakfast"), b, "oldest = breakfast");
+});
+
+// ============================================================
+// stripInventedRetroDate — normalizer hallucination brake
+// Production bug 2026-06-24: lift PB share normalized to "workout done
+// yesterday" → bot said "already got yesterday's workout logged".
+// ============================================================
+
+test("stripInventedRetroDate: THE BUG — strips invented 'yesterday' not in the original", () => {
+  assert.equal(
+    stripInventedRetroDate("workout done yesterday", "hack squat I did 25kg each side for the first time. 6 reps"),
+    "workout done",
+  );
+});
+
+test("stripInventedRetroDate: keeps a REAL 'yesterday' the client actually wrote", () => {
+  assert.equal(
+    stripInventedRetroDate("workout done yesterday", "I trained legs yesterday"),
+    "workout done yesterday",
+  );
+});
+
+test("stripInventedRetroDate: strips invented 'last monday' but keeps real ones", () => {
+  assert.equal(stripInventedRetroDate("workout done last monday", "did chest and back"), "workout done");
+  assert.equal(stripInventedRetroDate("workout done last monday", "trained last monday"), "workout done last monday");
+});
+
+test("stripInventedRetroDate: strips invented 'N days ago'", () => {
+  assert.equal(stripInventedRetroDate("workout done 2 days ago", "squats and deadlifts today"), "workout done");
+});
+
+test("stripInventedRetroDate: no retro date → returns canonical unchanged (trimmed)", () => {
+  assert.equal(stripInventedRetroDate("workout done", "just finished my session"), "workout done");
 });
 
 // ============================================================

@@ -17,6 +17,7 @@ import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from ".
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
+import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -631,26 +632,11 @@ export async function handleEarlyCommands(ctx: {
         poolMeals = allMeals; // include today for cross-meal ("dinner same as lunch")
       }
 
-      // Find best match — no label required.
-      // Priority: rawMessage keyword → mealLabel → positional → most recent substantial meal.
-      const findBestMeal = (meals: typeof allMeals, hint: string | null) => {
-        const sub = meals
-          .filter(l => (l.kcalInt || 0) >= 150)
-          .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime());
-        if (sub.length === 0) return meals.find(l => (l.kcalInt || 0) >= 50) || null;
-        if (hint) {
-          const byRaw = sub.find(l => l.rawMessage && new RegExp(`\\b${hint}\\b`, "i").test(l.rawMessage));
-          if (byRaw) return byRaw;
-          const byLabel = sub.find(l => (l.mealLabel || "").toLowerCase() === hint);
-          if (byLabel) return byLabel;
-          if (hint === "breakfast") return sub[sub.length - 1]; // oldest = breakfast
-          if (hint === "lunch" && sub.length >= 2) return sub[1]; // 2nd newest = lunch
-          // Hint given but no matching meal found — return null so the caller tells the
-          // user "no lunch found yesterday" instead of silently copying the wrong meal.
-          return null;
-        }
-        return sub[0]; // default: most recent substantial meal (no hint)
-      };
+      // Find best match — no label required. Pure selection logic lives in
+      // server/meal-select.ts so the exact rules are unit-tested (the breakfast-
+      // copied-as-lunch production bug, 2026-06-24).
+      const findBestMeal = (meals: typeof allMeals, hint: string | null) =>
+        selectMealToCopy(meals as unknown as CopyableMeal[], hint) as unknown as (typeof allMeals)[number] | null;
 
       // For cross-meal, prefer today's meals as the source
       const todayMeals = poolMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);

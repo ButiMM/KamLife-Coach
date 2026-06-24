@@ -119,6 +119,10 @@ const CASES: Case[] = [
     expect: [/yesterday|logged|legs|session/i] },
   { name: "workout: food sentence with 'done' must not log workout (prod bug)", msg: "ate pizza yesterday, done with that",
     reject: [/session logged|workout logged|sessions in total/i] },
+  { name: "workout: lift PB share must NOT be read as retro workout (prod bug 2026-06-24)", msg: "Hack squat I did 25kg each side for the first time. 6 reps",
+    reject: [/already got yesterday'?s workout logged/i, /logged to yesterday/i] },
+  { name: "workout: lift log 'bench 80kg 3x10' logs lifts, not a retro session", msg: "bench press 80kg 3x10",
+    expect: [/logged|kg|aim|next/i], reject: [/already got yesterday'?s workout logged/i] },
   { name: "cardio: 'went for a 5km run' still logs (regression guard)", msg: "went for a 5km run this morning",
     expect: [/run|cardio|session|logged|good work|active|💪|✅|steps/i], reject: [/didn'?t catch/i] },
   { name: "cardio: question 'should I do 30 min yoga?' must NOT log (audit catch 2026-06-13)", msg: "Should I do 30 minutes of yoga today?",
@@ -237,6 +241,9 @@ const CASES: Case[] = [
     reject: [/copied from|♻️|Meal total/i] },
   { name: "repeat: 'not the same meal today' must NOT relog (audit catch 2026-06-13)", msg: "not the same meal today",
     reject: [/copied from|♻️|Meal total/i] },
+  { name: "repeat: 'same lunch as yesterday' with no history is honest, never fabricates (prod bug 2026-06-24)", msg: "Same lunch as yesterday",
+    expect: [/tell me what|what (?:you ate|your lunch)|no .* logged|nothing found/i],
+    reject: [/✅ \*Lunch logged\*|copied from breakfast/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",
