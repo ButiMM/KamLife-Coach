@@ -71,6 +71,7 @@ export async function handleProgressCheck(ctx: {
     const fn = user.name || "Hey";
     const goal = (user.goalType || "fat_loss").toLowerCase();
     const isMuscleGain = goal === "muscle_gain";
+    const isRecomp = goal === "recomposition";
     const stepsAboveTarget = avgSteps >= stepsTarget;
     const sessionSentence = completedSessions === plannedSessions
       ? `Training: ${completedSessions}/${plannedSessions} sessions — full week. ✅`
@@ -87,13 +88,19 @@ export async function handleProgressCheck(ctx: {
       ? weightChangeNum < 0
         ? isMuscleGain
           ? `Weight: down ${Math.abs(weightChangeNum)}kg this week — check your food. You should be in a surplus, not losing.`
+          : isRecomp
+          ? `Weight: down ${Math.abs(weightChangeNum)}kg — fat is dropping. Keep the training going to protect the muscle.`
           : `Weight: down ${Math.abs(weightChangeNum)}kg this week — moving in the right direction.`
         : weightChangeNum > 0
           ? isMuscleGain
             ? `Weight: up ${weightChange}kg this week — good. That's the direction you're building in.`
+            : isRecomp
+            ? `Weight: up ${weightChange}kg — small increases can be muscle gain (good). Large increases suggest excess calories. Check food.`
             : `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.`
           : isMuscleGain
             ? `Weight: holding steady — aim for a slow upward trend (0.2–0.4kg/week) to keep building.`
+            : isRecomp
+            ? `Weight: holding steady — this is normal and expected for recomp. Your body is trading fat for muscle at the same time. Track how your clothes fit and what you see in the mirror — that's the real data.`
             : `Weight: holding steady this week.`
       : latestWeight !== null
         ? `Weight: ${latestWeight}kg logged — keep weighing in daily to track your trend.`
@@ -161,15 +168,22 @@ export async function handleProgressCheck(ctx: {
       }
       if (trainingPct < 0.5) {
         const missed = plannedSessions - completedSessions;
-        return `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough${isMuscleGain ? " training stimulus to build muscle" : " training to drive fat loss"}. Do the next session today. Not tomorrow. Today.`;
+        return isRecomp
+          ? `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — for recomp, training IS the muscle retention signal. Without it, any deficit just strips muscle alongside fat. That is the opposite of recomp. Do the next session today.`
+          : `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough${isMuscleGain ? " training stimulus to build muscle" : " training to drive fat loss"}. Do the next session today. Not tomorrow. Today.`;
       }
       if (avgSteps > 0 && stepsPct < 0.7) {
-        const stepGap = stepsTarget - avgSteps;
-        return isMuscleGain
+        return isRecomp
+          ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. For recomp, walking keeps the NEAT burn going while training builds the muscle. Both are needed. 20-minute walk after dinner adds ~2,000 steps.`
+          : isMuscleGain
           ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Not about burning — just stay active for recovery and health. 20-minute walk after dinner is enough.`
           : `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Fix: 20-minute walk after dinner every day. That adds ~2,000 steps and closes the calorie gap your food started.`;
       }
-      return isMuscleGain
+      return isRecomp
+        ? fn
+          ? `${fn}, solid week. The recomp formula — and it's the only one: Walking + Lifting + Protein + Sleep. You ran it this week. The scale may not move much but look at your clothes and your strength. That's where recomp shows first.`
+          : `Solid week. The recomp formula: Walking + Lifting + Protein + Sleep. Run that consistently and body composition shifts — even when the scale stays flat.`
+        : isMuscleGain
         ? fn
           ? `${fn}, solid week. This week: push the weight on every lift — add a plate or squeeze one more rep. Progressive overload is the only way to build. No plateau, always progress.`
           : `Solid week. Push harder in every session — more weight or more reps. Progressive overload is how muscle gets built.`
