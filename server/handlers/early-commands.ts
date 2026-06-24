@@ -1,6 +1,6 @@
 import { db } from "../db";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
-import { eq, and, gte, desc, count } from "drizzle-orm";
+import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
 import { calculateTargets } from "../targets";
@@ -1741,11 +1741,67 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Must have an explicit return/excuse phrase — short messages like "done", "today",
   // "menu", "1" are action intent, not comebacks, and must fall through to their handlers.
   const isComeback = isReturning && !isProfileUpdateMsg &&
-    /\b(i.?m back|i am back|back now|returning|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|fresh start|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off)\b/i.test(m);
+    /\b(i.?m back|i am back|back now|returning|i.?ve been|been (busy|away|sick|off|struggling|stressed)|sorry (i|for|about)|haven.?t been|couldn.?t|wasn.?t able|let me start|can we start|starting again|picking up|back on track|back to it|resuming|fresh start|starting fresh|been (a|so) (long|while)|miss(ed)? (a|this|it)|been MIA|went quiet|disappeared|fell off|going through (a lot|it|stuff|things)|things (have been|been) (crazy|hectic|tough|hard|rough|mad)|life (got|gets?) (in the way|busy)|had a (rough|tough|hard) (week|month|time|period)|what did i miss|catch me up|where (was|did) i (leave off|stop)|been meaning to (come back|check in))\b/i.test(m);
 
   if (isComeback) {
-    const daysText = daysSilent === 2 ? "2 days" : daysSilent <= 7 ? `${daysSilent} days` : daysSilent <= 14 ? "a week" : "a while";
-    const comingBackReply = `${capName}, welcome back. ${daysText} away — everyone has those stretches.\n\nWe don't restart from zero. Your programme, targets, and logs are all still here. Today is just Day 1 of the next streak.\n\n*Here's what to do right now:*\n1. Tell me what you ate today (even if it wasn't perfect)\n2. Log your steps if you walked\n3. Reply *menu* for today's workout\n\nNo catching up. No guilt. Just today. Let's go.`;
+    const daysText = daysSilent <= 7 ? `${daysSilent} day${daysSilent === 1 ? "" : "s"}` : daysSilent <= 14 ? "about a week" : "a while";
+
+    // Pull their last-logged stats so the comeback feels informed, not generic.
+    const snapLines: string[] = [];
+    try {
+      const fourteenDaysAgo = new Date(Date.now() - 14 * 86_400_000);
+      const calorieTarget = user.calorieTarget || 1800;
+      const proteinTarget = user.proteinTarget || 120;
+      const stepsTarget = user.stepsTarget || 8500;
+
+      const [mealRows, stepRows, workoutCount] = await Promise.all([
+        db.select({
+          cals: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+          prot: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
+          day:  sql<string>`DATE(${mealLogs.loggedAt} + INTERVAL '2 hours')`,
+        })
+          .from(mealLogs)
+          .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, fourteenDaysAgo)))
+          .groupBy(sql`DATE(${mealLogs.loggedAt} + INTERVAL '2 hours')`),
+        db.select({ steps: stepLogs.steps })
+          .from(stepLogs)
+          .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, fourteenDaysAgo)))
+          .limit(14),
+        db.select({ n: count() })
+          .from(workoutLogs)
+          .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, fourteenDaysAgo))),
+      ]);
+
+      if (user.currentWeight) snapLines.push(`⚖️ Weight on file: *${user.currentWeight}kg*`);
+
+      const loggedDays = mealRows.filter(r => r.cals > 0);
+      if (loggedDays.length > 0) {
+        const avgCals = Math.round(loggedDays.reduce((s, r) => s + r.cals, 0) / loggedDays.length);
+        const avgProt = Math.round(loggedDays.reduce((s, r) => s + r.prot, 0) / loggedDays.length);
+        const calNote = avgCals < calorieTarget - 100
+          ? `avg *${avgCals} kcal/day* — ${calorieTarget - avgCals} below your ${calorieTarget} target`
+          : avgCals > calorieTarget + 100
+            ? `avg *${avgCals} kcal/day* — ${avgCals - calorieTarget} above your ${calorieTarget} target`
+            : `avg *${avgCals} kcal/day* — right on target ✅`;
+        snapLines.push(`🍽️ Food: ${calNote}`);
+        snapLines.push(`💪 Protein: avg *${avgProt}g/day* ${avgProt >= proteinTarget ? "✅" : `(target: ${proteinTarget}g)`}`);
+      }
+
+      if (stepRows.length > 0) {
+        const avgSteps = Math.round(stepRows.reduce((s, r) => s + (r.steps || 0), 0) / stepRows.length);
+        snapLines.push(`👟 Steps: avg *${avgSteps.toLocaleString()}/day* ${avgSteps >= stepsTarget ? "✅" : `(target: ${stepsTarget.toLocaleString()})`}`);
+      }
+
+      const sessions = workoutCount[0]?.n || 0;
+      snapLines.push(sessions > 0
+        ? `🏋️ Training: *${sessions}* session${sessions !== 1 ? "s" : ""} in the 14 days before you went quiet`
+        : `🏋️ Training: no sessions logged in the 14 days before your absence`);
+    } catch { /* briefing is non-critical — warm restart still happens */ }
+
+    const weekNote = user.programmeWeek ? ` You're on *Week ${user.programmeWeek}* of your programme.` : "";
+    const snapSection = snapLines.length > 0 ? `\n\n*Where you left off:*\n${snapLines.join("\n")}` : "";
+
+    const comingBackReply = `${capName}, welcome back.${snapSection}\n\n${daysText} away — everyone has those stretches.${weekNote} Targets, programme, and logs are exactly where you left them.\n\n*To get back into it:*\n1. Tell me what you've eaten today (even if it wasn't great)\n2. Send your steps if you walked\n3. Reply *menu* for your session\n\nNo guilt. No catching up. Just today. Let's go.`;
     await logChat(user.id, message, comingBackReply, "COMEBACK");
     return comingBackReply;
   }

@@ -525,6 +525,16 @@ export async function buildPatternSummary(user: any): Promise<string> {
       }
     }
 
+    // Silent return: when a user comes back after 3+ days without an explicit comeback
+    // phrase, the deterministic handler won't intercept them — they land here in GPT.
+    // Give GPT an explicit instruction so the response acknowledges the gap with data.
+    const actualDaysSilent = user.lastActiveAt
+      ? Math.floor((Date.now() - new Date(user.lastActiveAt).getTime()) / 86_400_000)
+      : 0;
+    if (actualDaysSilent >= 3) {
+      parts.push(`SILENT RETURN: Client has been away for ${actualDaysSilent} days. Before answering their message, open with a 1-sentence acknowledgment — use their name, reference ONE concrete number from above (weight, steps average, or protein avg). Do NOT say "welcome back" literally. Make it feel like you noticed and tracked what happened while they were gone. Then answer their actual message normally.`);
+    }
+
     const result = parts.join(" ");
     patternCache.set(cacheKey, result, PATTERN_CACHE_TTL_MS);
     return result;
