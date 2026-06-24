@@ -528,7 +528,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm, u.trainingExperience || "beginner"
   );
 
-  const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, u.trainingExperience || "beginner");
+  const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, u.trainingExperience || "beginner", u.goalType || "fat_loss");
 
   let referralCode: string | undefined;
   {
@@ -1262,7 +1262,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       u.gender || "male", u.age || 30, u.heightCm || 170, exp
     );
 
-    const stepsTarget = calculateStepsTarget(weight, u.age || 30, u.heightCm || 170, exp);
+    const stepsTarget = calculateStepsTarget(weight, u.age || 30, u.heightCm || 170, exp, goal);
     const startPhase = exp === "beginner" ? 1 : 2;
 
     await db.update(users).set({

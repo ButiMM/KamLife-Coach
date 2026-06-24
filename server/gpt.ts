@@ -446,7 +446,7 @@ export async function buildPatternSummary(user: any): Promise<string> {
 
     parts.push(weightTrend);
 
-    const stepsTarget = user.stepsTarget || 10000;
+    const stepsTarget = user.stepsTarget || 8500;
     if (recentSteps.length > 0) {
       const avgSteps = Math.round(recentSteps.reduce((sum, s) => sum + s.steps, 0) / recentSteps.length);
       const hitTarget = recentSteps.filter(s => s.steps >= stepsTarget).length;

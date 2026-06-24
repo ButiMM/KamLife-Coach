@@ -106,11 +106,11 @@ export function calculateTargets(
 }
 
 // ============================================================
-// STEP TARGET — eased-in STARTING goal, not a flat number for everyone.
-// A deconditioned, heavier, older, or never-trained body needs a lower
-// starting goal to avoid joint overload and week-one burnout. The programme
-// then applies a further week-1/2 ramp on top of this (70% → 85% → 100%),
-// so people build up gradually instead of being thrown straight into 10k.
+// STEP TARGET — goal-aware, lifestyle-aware starting goal.
+// Food creates the primary calorie deficit — steps are supplemental NEAT.
+// Muscle-gain clients run a calorie surplus; pushing high steps burns the
+// surplus they need to build. Fat-loss clients still need to eat right first;
+// steps add bonus burn on top, not replace dietary discipline.
 // Pure function — no DB, unit-tested in script/unit-tests.ts.
 // ============================================================
 export function calculateStepsTarget(
@@ -118,24 +118,67 @@ export function calculateStepsTarget(
   age: number,
   heightCm: number,
   trainingExperience: string = "beginner",
+  goalType: string = "fat_loss",
 ): number {
-  let stepsTarget = 10000;
+  // Goal-type base: set the ceiling based on what role steps play for this goal.
+  const goal = (goalType || "fat_loss").toLowerCase();
+  let stepsTarget: number;
+  if (goal === "muscle_gain") stepsTarget = 6000;       // health floor; preserve calorie surplus
+  else if (goal === "recomposition") stepsTarget = 8000; // food + steps share the work
+  else stepsTarget = 8500;                              // fat_loss: realistic + sustainable
 
   // BMI-based easing — heavier bodies start lower (knees, ankles, sustainability).
   const bmi = heightCm > 0 ? weightKg / Math.pow(heightCm / 100, 2) : 0;
-  if (bmi >= 40) stepsTarget = 6000;        // severe obesity
-  else if (bmi >= 35) stepsTarget = 7000;   // obesity class II
-  else if (bmi >= 30) stepsTarget = 8000;   // obesity class I
+  if (bmi >= 40) stepsTarget = Math.min(stepsTarget, 5500);
+  else if (bmi >= 35) stepsTarget = Math.min(stepsTarget, 6500);
+  else if (bmi >= 30) stepsTarget = Math.min(stepsTarget, 7500);
 
   // Age-based easing (independent of BMI) — take the gentler of the two.
-  if (age >= 70) stepsTarget = Math.min(stepsTarget, 6000);
-  else if (age >= 60) stepsTarget = Math.min(stepsTarget, 8000);
+  if (age >= 70) stepsTarget = Math.min(stepsTarget, 5500);
+  else if (age >= 60) stepsTarget = Math.min(stepsTarget, 7500);
 
-  // Never-trained beginners start a notch lower regardless, then ramp up.
-  if (trainingExperience === "beginner") stepsTarget = Math.min(stepsTarget, 8500);
+  // Never-trained beginners start lower regardless, then ramp up as the habit builds.
+  if (trainingExperience === "beginner") stepsTarget = Math.min(stepsTarget, 7500);
 
   // Floor — keep the goal meaningful even for the most deconditioned start.
-  if (stepsTarget < 5000) stepsTarget = 5000;
+  if (stepsTarget < 4000) stepsTarget = 4000;
 
   return stepsTarget;
+}
+
+// ============================================================
+// DAILY STEP CONTEXT — real-time adjustment for today's situation.
+// On workout days the gym session already burned 300-450 kcal; reduce step
+// demand so clients aren't double-taxed and can recover properly.
+// Returns the adjusted target + a floor range (hitting rangeMin is still a win).
+// Pure function — no DB, unit-tested in script/unit-tests.ts.
+// ============================================================
+export function getDailyStepContext(
+  baseTarget: number,
+  goalType: string,
+  alreadyWorkedOutToday: boolean,
+): { target: number; rangeMin: number; goalContext: "fat_loss" | "muscle_gain" | "recomp" } {
+  const goal = (goalType || "fat_loss").toLowerCase();
+  let target = baseTarget;
+
+  if (goal === "muscle_gain") {
+    // Protect the calorie surplus — on workout days the body needs fuel for recovery.
+    target = alreadyWorkedOutToday ? Math.max(4000, Math.round(baseTarget * 0.80)) : baseTarget;
+  } else if (goal === "fat_loss" || goal === "weight_loss") {
+    // Workout already burned — ease the step load; no need to double-tax.
+    target = alreadyWorkedOutToday ? Math.round(baseTarget * 0.78) : baseTarget;
+  } else {
+    // Recomposition
+    target = alreadyWorkedOutToday ? Math.round(baseTarget * 0.82) : baseTarget;
+  }
+
+  target = Math.max(4000, target);
+  const rangeMin = Math.round(target * 0.82);
+
+  const goalContext: "fat_loss" | "muscle_gain" | "recomp" =
+    goal === "muscle_gain" ? "muscle_gain"
+    : (goal === "fat_loss" || goal === "weight_loss") ? "fat_loss"
+    : "recomp";
+
+  return { target, rangeMin, goalContext };
 }

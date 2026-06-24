@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
@@ -1014,37 +1014,93 @@ test("feedback: unrelated message → null", () => {
 // Step target easing — BMI / age / experience aware starting goal
 // ============================================================
 
-test("steps: normal-BMI non-beginner gets full 10k", () => {
-  // 80kg / 180cm → BMI 24.7, age 30, intermediate
-  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate"), 10000);
+// Goal-aware base targets
+test("steps: fat_loss non-beginner normal BMI → 8500 (food does the deficit, steps supplement)", () => {
+  // 80kg / 180cm → BMI 24.7, age 30, intermediate, fat_loss
+  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate", "fat_loss"), 8500);
 });
-test("steps: obese (BMI>=30) starts eased at 8000", () => {
+test("steps: muscle_gain client gets 6000 base (protect calorie surplus)", () => {
+  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate", "muscle_gain"), 6000);
+});
+test("steps: recomposition client gets 8000 base", () => {
+  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate", "recomposition"), 8000);
+});
+// BMI easing with updated caps
+test("steps: fat_loss obese (BMI>=30) starts eased at 7500", () => {
   // 100kg / 175cm → BMI 32.7
-  assert.equal(calculateStepsTarget(100, 35, 175, "intermediate"), 8000);
+  assert.equal(calculateStepsTarget(100, 35, 175, "intermediate", "fat_loss"), 7500);
 });
-test("steps: obesity class II (BMI>=35) starts at 7000", () => {
+test("steps: fat_loss obesity class II (BMI>=35) eased to 6500", () => {
   // 115kg / 175cm → BMI 37.6
-  assert.equal(calculateStepsTarget(115, 35, 175, "intermediate"), 7000);
+  assert.equal(calculateStepsTarget(115, 35, 175, "intermediate", "fat_loss"), 6500);
 });
-test("steps: severe obesity (BMI>=40) starts at 6000", () => {
-  // 130kg / 175cm → BMI 42.4
-  assert.equal(calculateStepsTarget(130, 35, 175, "intermediate"), 6000);
+test("steps: fat_loss severe obesity (BMI>=40) eased to 5500", () => {
+  // 130kg / 175cm → BMI 42.5
+  assert.equal(calculateStepsTarget(130, 35, 175, "intermediate", "fat_loss"), 5500);
 });
-test("steps: never-trained beginner (normal BMI) eased to 8500", () => {
+test("steps: never-trained beginner (normal BMI, fat_loss) eased to 7500", () => {
   // 70kg / 175cm → BMI 22.9, beginner
-  assert.equal(calculateStepsTarget(70, 30, 175, "beginner"), 8500);
+  assert.equal(calculateStepsTarget(70, 30, 175, "beginner", "fat_loss"), 7500);
 });
-test("steps: takes the GENTLER of age and BMI easing", () => {
-  // elderly (age 72 → 6000) AND obese (BMI 32 → 8000): the lower 6000 wins
-  assert.equal(calculateStepsTarget(95, 72, 172, "intermediate"), 6000);
+test("steps: elderly + obese takes the gentler easing (5500 wins)", () => {
+  // 95kg / 172cm → BMI 32.1 (7500 cap), age 72 (5500 cap): 5500 wins
+  assert.equal(calculateStepsTarget(95, 72, 172, "intermediate", "fat_loss"), 5500);
 });
-test("steps: obese beginner still eased by BMI, not just experience", () => {
-  // 115kg / 175cm beginner → BMI 37.6 (7000) is gentler than beginner (8500)
-  assert.equal(calculateStepsTarget(115, 30, 175, "beginner"), 7000);
+test("steps: obese beginner — BMI is binding constraint (6500 < beginner 7500)", () => {
+  // 115kg / 175cm beginner → BMI 37.6 → 6500; beginner cap 7500: BMI wins
+  assert.equal(calculateStepsTarget(115, 30, 175, "beginner", "fat_loss"), 6500);
 });
-test("steps: never drops below the 5000 floor", () => {
-  // extreme: 160kg / 165cm → BMI 58.8, age 75 — both push low, floor holds at 5000+
-  assert.ok(calculateStepsTarget(160, 75, 165, "beginner") >= 5000);
+test("steps: extreme case never drops below 4000 floor", () => {
+  assert.ok(calculateStepsTarget(160, 75, 165, "beginner", "fat_loss") >= 4000);
+});
+test("steps: muscle_gain beginner — goal ceiling (6000) is dominant over beginner cap (7500)", () => {
+  assert.equal(calculateStepsTarget(80, 25, 175, "beginner", "muscle_gain"), 6000);
+});
+test("steps: default goalType arg (no arg) falls back to fat_loss behavior", () => {
+  assert.equal(calculateStepsTarget(80, 30, 180, "intermediate"), 8500);
+});
+
+// ============================================================
+// getDailyStepContext — workout-day and goal-aware daily adjustment
+// ============================================================
+
+test("getDailyStepContext: fat_loss rest day → full base target", () => {
+  const ctx = getDailyStepContext(8000, "fat_loss", false);
+  assert.equal(ctx.target, 8000);
+  assert.equal(ctx.goalContext, "fat_loss");
+});
+test("getDailyStepContext: fat_loss workout day → 78% of base (gym already burned)", () => {
+  const ctx = getDailyStepContext(8000, "fat_loss", true);
+  assert.equal(ctx.target, Math.round(8000 * 0.78));
+  assert.equal(ctx.goalContext, "fat_loss");
+});
+test("getDailyStepContext: muscle_gain rest day → full base", () => {
+  const ctx = getDailyStepContext(6000, "muscle_gain", false);
+  assert.equal(ctx.target, 6000);
+  assert.equal(ctx.goalContext, "muscle_gain");
+});
+test("getDailyStepContext: muscle_gain workout day → 80% (protect surplus + recovery)", () => {
+  const ctx = getDailyStepContext(6000, "muscle_gain", true);
+  assert.equal(ctx.target, Math.round(6000 * 0.80));
+  assert.equal(ctx.goalContext, "muscle_gain");
+});
+test("getDailyStepContext: recomposition workout day → 82% of base", () => {
+  const ctx = getDailyStepContext(8000, "recomposition", true);
+  assert.equal(ctx.target, Math.round(8000 * 0.82));
+  assert.equal(ctx.goalContext, "recomp");
+});
+test("getDailyStepContext: rangeMin is 82% of the adjusted target", () => {
+  const ctx = getDailyStepContext(8000, "fat_loss", false);
+  assert.equal(ctx.rangeMin, Math.round(8000 * 0.82));
+});
+test("getDailyStepContext: never drops below 4000 floor even after workout reduction", () => {
+  // 4000 * 0.80 = 3200 — floored at 4000
+  const ctx = getDailyStepContext(4000, "muscle_gain", true);
+  assert.ok(ctx.target >= 4000);
+});
+test("getDailyStepContext: weight_loss maps to fat_loss goalContext", () => {
+  const ctx = getDailyStepContext(8000, "weight_loss", false);
+  assert.equal(ctx.goalContext, "fat_loss");
 });
 
 // ============================================================

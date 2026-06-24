@@ -76,14 +76,19 @@ function _stepEquivalent(burnKcal: number): string {
   return "";
 }
 
-export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any): string {
-  if (!target || target <= 0) target = 10000;
+export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any, isWorkoutDay = false): string {
+  if (!target || target <= 0) target = 8500;
   const idx = Math.floor(Math.random() * 5);
   const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
-  // Any meaningful walk gets the food-equivalent credit — even below target,
-  // the burn was real, and that's the lesson worth landing.
   const equivalent = steps >= 4000 ? _stepEquivalent(burnEst) : "";
+
+  // Resolve goal context from user record — drives messaging tone
+  const goalRaw = ((user?.goalType as string) || "fat_loss").toLowerCase();
+  const goalContext: "fat_loss" | "muscle_gain" | "recomp" =
+    goalRaw === "muscle_gain" ? "muscle_gain"
+    : (goalRaw === "fat_loss" || goalRaw === "weight_loss") ? "fat_loss"
+    : "recomp";
 
   let base: string;
   if (steps >= target) {
@@ -101,12 +106,23 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
     ? base.slice(0, firstDot + 1) + burnNote + base.slice(firstDot + 1)
     : base + burnNote;
 
-  // Add equivalent note
   if (equivalent) response += ` ${equivalent}`;
 
-  // 7-day average context (only show when we have enough data and it's meaningful).
-  // Within ~3% of target is ON target for coaching purposes — someone averaging
-  // 10,778 against 11,000 is winning, not "222 below". Never guilt-trip consistency.
+  // Goal-contextual note: what these steps actually mean for this person's goal.
+  // Food creates the deficit — steps add to it. Muscle gain clients protect their surplus.
+  if (steps >= 2000) {
+    if (goalContext === "fat_loss") {
+      response += isWorkoutDay
+        ? `\n\n_Gym session already burned. These steps add to it — double-dipping on the deficit._`
+        : `\n\n_Your food choices + these steps = your calorie deficit is real today._`;
+    } else if (goalContext === "muscle_gain") {
+      response += isWorkoutDay
+        ? `\n\n_Session done. Light movement for recovery — that's all you need. Protect the surplus._`
+        : `\n\n_Movement for health, not to burn. Your food is doing the building work._`;
+    }
+  }
+
+  // 7-day average context — within ~3% of target is ON target for coaching purposes.
   if (weeklyAvg && weeklyAvg > 0) {
     const nearTargetBand = Math.max(300, Math.round(target * 0.03));
     const vsTarget = weeklyAvg >= target

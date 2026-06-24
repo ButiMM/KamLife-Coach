@@ -13,7 +13,7 @@ import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
 import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
-import { calculateTargets } from "./targets";
+import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
@@ -34,6 +34,7 @@ import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, r
 import { logChat, checkEscalation, logMediaFailure, logMediaSuccess, buildMediaTrace, withTimeout } from "./handlers/chat-log";
 import { handleWeightLog } from "./handlers/weight";
 import { handleWorkoutCommands } from "./handlers/workout";
+import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
@@ -623,7 +624,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
-      const target = user.stepsTarget || 8500;
+      const baseStepsTarget = user.stepsTarget || 8500;
+      // Detect whether client already worked out today so we can ease step demand.
+      let workedOutToday = false;
+      try { workedOutToday = (await getTodayWorkoutState(user)).alreadyDoneToday; } catch { /* non-critical */ }
+      const { target, goalContext: stepGoalCtx } = getDailyStepContext(
+        baseStepsTarget, user.goalType || "fat_loss", workedOutToday
+      );
       const stepIsRetro = isRetroactiveMeal(message);
       const stepLoggedAt = stepIsRetro ? parseMealDate(message) : new Date();
       const stepDayStart = sastDayStart(stepLoggedAt);
@@ -643,7 +650,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       invalidatePatternCache(user.id);
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
       const [perfectDay, streak, recentStepLogs] = await Promise.all([
-        checkPerfectDay(user.id, user.proteinTarget || 120, user.stepsTarget || 8500),
+        checkPerfectDay(user.id, user.proteinTarget || 120, target),
         getStepStreak(user.id),
         db.select({ steps: stepLogs.steps }).from(stepLogs)
           .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
@@ -653,7 +660,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       const weeklyAvg = recentStepLogs.length >= 3
         ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / 7)
         : undefined;
-      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user);
+      void stepGoalCtx; // used by getStepResponse via user.goalType
+      const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
       stepReplyPart = stepReply + stepRetroNote + (perfectDay || "");
 
