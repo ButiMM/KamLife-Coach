@@ -156,9 +156,12 @@ export async function runMorningCheckin(): Promise<void> {
       else if (progDays === 3 && (client.workoutStreak || 0) >= 1) identityLine = " Day 3. Soreness passing? That is your body adapting. That feeling goes away — the strength stays.";
       else if (progDays === 7)  identityLine = " One week. You showed up every day this week.";
       else if (progDays === 14) identityLine = " Two weeks consistent. You're building something real.";
-      else if (progDays === 21) identityLine = " Three weeks in. The habit is forming — your body knows the routine now.";
+      else if (progDays === 21) identityLine = ` Week 3. This is where most people quit — not because it got too hard, but because the mirror hasn't changed yet. The change is happening in your muscle tissue and metabolism. It is not visible yet but it is real. Do not stop now.`;
       else if (progDays === 30) identityLine = " A month. You are now the kind of person who trains for a month straight.";
+      else if (progDays === 42) identityLine = ` Week 6. This is when visible results start showing. Look closer — your clothes, your posture, your strength. The scale is the last thing to reflect it. The change is already there.`;
       else if (progDays === 60) identityLine = " 60 days. Two months of showing up. That's rare.";
+      else if (progDays === 63) identityLine = ` Week 9. The plateau phase. Most people misread this as failure — it is not. Your body is consolidating the changes from the first 8 weeks before the next wave of results. Hold the habits. The breakthrough comes at week 10-12 for those who do not stop here.`;
+      else if (progDays === 84) identityLine = ` Week 12. Three months in. Your body has rewritten its baseline — every habit that feels automatic now used to be a deliberate choice. You are in the top 10% of people who start a programme. This is who you are now.`;
       else if (progDays === 90) identityLine = " 90 days. You are not the same person who started this.";
 
       const wStreak = client.workoutStreak || 0;

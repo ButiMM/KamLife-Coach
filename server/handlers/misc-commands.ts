@@ -65,10 +65,22 @@ export async function handleMiscCommands(ctx: {
         programmeDayInWeek: 1,
       }).where(eq(users.phoneNumber, phone));
       const firstName = user.name?.split(" ")[0] || "";
+      const week9Goal = user.goalType || "fat_loss";
       const modeLabel = isMaintenance ? "Maintenance" : "Advanced";
-      const modeDesc = isMaintenance
-        ? "3 sessions/week. Built to sustain your gains without burning out."
-        : "5 sessions/week. Harder progressions, new exercises, next level.";
+      let modeDesc: string;
+      if (isMaintenance) {
+        modeDesc = week9Goal === "muscle_gain"
+          ? "3 sessions/week. Built to hold your muscle and strength without overloading your recovery."
+          : week9Goal === "recomposition"
+          ? "3 sessions/week. Sustainable structure to keep the recomp going without burnout."
+          : "3 sessions/week. Built to sustain your fat loss results without burning out.";
+      } else {
+        modeDesc = week9Goal === "muscle_gain"
+          ? "5 sessions/week. Higher volume, progressive overload, new movements — maximum muscle stimulus."
+          : week9Goal === "recomposition"
+          ? "5 sessions/week. Harder progressions, body composition focus — muscle up, fat down."
+          : "5 sessions/week. Harder progressions, new exercises — push your body composition further.";
+      }
       const reply = `${firstName}, *${modeLabel} Phase* locked in.\n\n${modeDesc}\n\nYour programme resets from Week 1 with the new structure. Reply *today* for your first session.`;
       await logChat(user.id, message, reply, "WEEK9_CHOICE");
       return reply;
