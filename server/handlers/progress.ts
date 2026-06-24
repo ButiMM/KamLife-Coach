@@ -69,6 +69,8 @@ export async function handleProgressCheck(ctx: {
     const protTarget = user.proteinTarget || 120;
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
     const fn = user.name || "Hey";
+    const goal = (user.goalType || "fat_loss").toLowerCase();
+    const isMuscleGain = goal === "muscle_gain";
     const stepsAboveTarget = avgSteps >= stepsTarget;
     const sessionSentence = completedSessions === plannedSessions
       ? `Training: ${completedSessions}/${plannedSessions} sessions — full week. ✅`
@@ -80,12 +82,19 @@ export async function handleProgressCheck(ctx: {
         ? `Steps: averaging ${avgSteps.toLocaleString()}/day ✅ — above your ${stepsTarget.toLocaleString()} target.`
         : `Steps: averaging ${avgSteps.toLocaleString()} per day against a ${stepsTarget.toLocaleString()} target.`
       : `Steps: no step logs this week — start logging daily.`;
-    const weightSentence = weightChange !== null
-      ? parseFloat(weightChange) < 0
-        ? `Weight: down ${Math.abs(parseFloat(weightChange))}kg this week — moving in the right direction.`
-        : parseFloat(weightChange) > 0
-          ? `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.`
-          : `Weight: holding steady this week.`
+    const weightChangeNum = weightChange !== null ? parseFloat(weightChange) : null;
+    const weightSentence = weightChangeNum !== null
+      ? weightChangeNum < 0
+        ? isMuscleGain
+          ? `Weight: down ${Math.abs(weightChangeNum)}kg this week — check your food. You should be in a surplus, not losing.`
+          : `Weight: down ${Math.abs(weightChangeNum)}kg this week — moving in the right direction.`
+        : weightChangeNum > 0
+          ? isMuscleGain
+            ? `Weight: up ${weightChange}kg this week — good. That's the direction you're building in.`
+            : `Weight: up ${weightChange}kg — could be water, sodium, or muscle. Stay on programme.`
+          : isMuscleGain
+            ? `Weight: holding steady — aim for a slow upward trend (0.2–0.4kg/week) to keep building.`
+            : `Weight: holding steady this week.`
       : latestWeight !== null
         ? `Weight: ${latestWeight}kg logged — keep weighing in daily to track your trend.`
         : `Weight: no weigh-ins this week — step on the scale and send me the number.`;
@@ -137,26 +146,36 @@ export async function handleProgressCheck(ctx: {
 
       // Priority: no training > no logging > protein gap > steps gap
       if (completedSessions === 0 && plannedSessions > 0) {
-        return `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Reply *1* right now and do today's workout. 20 minutes changes the week.`;
+        return isMuscleGain
+          ? `*Fix this week:* Zero sessions — no stimulus means zero growth regardless of what you eat. Calories without training = fat, not muscle. Reply *1* right now. Do today's session.`
+          : `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Reply *1* right now and do today's workout. 20 minutes changes the week.`;
       }
       if (weekFoodLogDays < 3) {
         return `*Fix this week:* Log your food — even just dinner each night gives me enough to actually help. Right now I've only got ${weekFoodLogDays}/7 days, so let's start tonight, even if the meal wasn't perfect.`;
       }
       if (avgDailyProt > 0 && proteinPct < 0.75) {
         const gap = protTarget - avgDailyProt;
-        return `*Fix this week:* Protein — you averaged ${avgDailyProt}g but need ${protTarget}g. That ${gap}g daily gap is muscle you're not protecting. Add protein at every meal: 3 eggs (+18g), tin of tuna (+25g), 150g chicken (+35g). Pick one per meal and close the gap.`;
+        return isMuscleGain
+          ? `*Fix this week:* Protein — you averaged ${avgDailyProt}g but need ${protTarget}g. That ${gap}g daily gap is muscle you're literally not building. No substitute for protein. Add it every meal: 3 eggs (+18g), tin of tuna (+25g), 150g chicken (+35g). No exceptions.`
+          : `*Fix this week:* Protein — you averaged ${avgDailyProt}g but need ${protTarget}g. That ${gap}g daily gap is muscle you're not protecting. Add protein at every meal: 3 eggs (+18g), tin of tuna (+25g), 150g chicken (+35g). Pick one per meal and close the gap.`;
       }
       if (trainingPct < 0.5) {
         const missed = plannedSessions - completedSessions;
-        return `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough training stimulus to drive results. Do the next session today. Not tomorrow. Today.`;
+        return `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough${isMuscleGain ? " training stimulus to build muscle" : " training to drive fat loss"}. Do the next session today. Not tomorrow. Today.`;
       }
       if (avgSteps > 0 && stepsPct < 0.7) {
         const stepGap = stepsTarget - avgSteps;
-        return `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Fix: 20-minute walk after dinner every day. That alone adds ~2,000 steps and accelerates fat loss more than most people realise.`;
+        return isMuscleGain
+          ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Not about burning — just stay active for recovery and health. 20-minute walk after dinner is enough.`
+          : `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Fix: 20-minute walk after dinner every day. That adds ~2,000 steps and closes the calorie gap your food started.`;
       }
-      return fn
-        ? `${fn}, solid week across all areas. This week's focus: push training intensity — more weight on the bar or more reps than last time. Results come from progressive overload, not just showing up.`
-        : `Solid week across all areas. This week: push the intensity — more weight or more reps than last session.`;
+      return isMuscleGain
+        ? fn
+          ? `${fn}, solid week. This week: push the weight on every lift — add a plate or squeeze one more rep. Progressive overload is the only way to build. No plateau, always progress.`
+          : `Solid week. Push harder in every session — more weight or more reps. Progressive overload is how muscle gets built.`
+        : fn
+          ? `${fn}, solid week across all areas. This week's focus: push training intensity — more weight on the bar or more reps than last time. Results come from progressive overload, not just showing up.`
+          : `Solid week across all areas. This week: push the intensity — more weight or more reps than last session.`;
     }
     const insight = coachingInsight();
     const fullProgressReply = `${progressReply}\n\n${insight}`;

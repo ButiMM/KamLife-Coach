@@ -94,7 +94,15 @@ export async function runEveningAccountability(): Promise<void> {
           dinnerSuggestion = `${name}, dinner time. Still need ${protGap > 0 ? `${protGap}g protein` : "a solid meal"}. Options: ${mealOption}. What are you working with tonight?`;
         } else {
           const opts = proteinOptions(client);
-          dinnerSuggestion = `${name}, dinner time soon. Keep it light: scrambled eggs + spinach, ${opts.split(",")[0].trim()} on 1 slice toast, or grilled chicken + veg. What do you have at home?`;
+          const protNote = protGap > 30
+            ? `${protGap}g protein still to go — `
+            : protGap > 0
+              ? `Almost on protein — `
+              : `On protein today — `;
+          const lightOpts = protGap > 30
+            ? `scrambled eggs + veg (highest protein-to-calorie), or ${opts.split(",")[0].trim()} and salad`
+            : `keep it light: something lean and small`;
+          dinnerSuggestion = `${name}, dinner time. ${protNote}${lightOpts}. What do you have at home?`;
         }
         await sendWhatsApp(phone, dinnerSuggestion);
         continue;
@@ -127,7 +135,10 @@ export async function runEveningAccountability(): Promise<void> {
           }
           continue;
         } else if (stepsDone) {
-          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : calorieCeilingHit ? "calories done for today." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
+          const restStepNote = goal === "muscle_gain"
+            ? `Good active recovery.`
+            : `Steps are your calorie burn today — no gym, so these matter.`;
+          msg = `${name}, ${stepCount.toLocaleString()} steps on a rest day. ${restStepNote} ${todayCal > 0 ? `${todayProt}g protein — ${protHit ? "target hit." : calorieCeilingHit ? "calories done for today." : `${protTarget - todayProt}g short of target.`}` : `Log tonight's food.`}`;
         } else if (todayCal > 0 || stepCount > 0) {
           const done = stepCount > 0 ? `${stepCount.toLocaleString()} steps` : `food logged`;
           const gap = stepCount < stepsTarget

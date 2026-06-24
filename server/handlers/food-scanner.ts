@@ -596,6 +596,7 @@ export function buildFoodLogReply(p: {
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+  const isMuscleGain = (user.goalType || "fat_loss").toLowerCase() === "muscle_gain";
 
   let dayAssessment = "";
   // Only assess the day when we trust the running total. When runningTotalSane is
@@ -608,7 +609,15 @@ export function buildFoodLogReply(p: {
     const calPace = runningCals / Math.max(expectedCals, 1);
     if (calRemaining <= 0 && effectiveRemaining <= -100) {
       const overBy = Math.abs(effectiveRemaining);
-      if (extraStepsBurned >= 80) {
+      if (isMuscleGain) {
+        // For muscle gain a surplus is the goal — don't guilt-trip; just flag if excessive
+        dayAssessment = overBy >= 600
+          ? `\n_Surplus of ~${overBy} kcal — running high. Tomorrow stay closer to target to keep the gain lean._`
+          : `\n_${pick([
+              `~${overBy} kcal surplus today. Train hard and your body puts it to work.`,
+              `Surplus of ~${overBy} kcal — that's the building fuel. Keep training consistent.`,
+            ])}_`;
+      } else if (extraStepsBurned >= 80) {
         dayAssessment = `\n_Over on calories, but your steps offset ~${extraStepsBurned} kcal. Net surplus: ~${overBy} kcal. Keep the next meal lean and you're fine._`;
       } else if (overBy >= 800) {
         dayAssessment = `\n_You're ~${overBy} kcal over today — it happens, no panic. If you eat again, keep it light: protein and veg. One day doesn't undo your progress._`;
@@ -623,12 +632,19 @@ export function buildFoodLogReply(p: {
         ])}_`;
       }
     } else if (calRemaining <= 0 && effectiveRemaining > -100) {
-      dayAssessment = `\n_${pick([
-        "Your steps covered the gap — net calories back on target. Keep last meal light.",
-        "Movement offset the surplus. You're clean. Light protein for dinner.",
-        "Walking got you back on track. Last meal: lean and light.",
-        "Steps cancelled the overage — effectively on target. Finish with something lean.",
-      ])}_`;
+      dayAssessment = `\n_${pick(isMuscleGain
+        ? [
+            "On target. Fuel is in — train hard and let it work.",
+            "Hit your calorie target. Session tomorrow converts this into muscle.",
+            "Calories done. Recover well tonight and push hard tomorrow.",
+          ]
+        : [
+            "Your steps covered the gap — net calories back on target. Keep last meal light.",
+            "Movement offset the surplus. You're clean. Light protein for dinner.",
+            "Walking got you back on track. Last meal: lean and light.",
+            "Steps cancelled the overage — effectively on target. Finish with something lean.",
+          ]
+      )}_`;
     } else if (!earlyInDay && calPace < 0.6 && effectiveRemaining < 600) {
       dayAssessment = `\n_${pick([
         "Solid pace. One high-protein meal closes the day.",
@@ -638,13 +654,19 @@ export function buildFoodLogReply(p: {
         "Running well. Lock it in with a solid final meal.",
       ])}_`;
     } else if (!earlyInDay && calPace > 1.3) {
-      dayAssessment = `\n_${pick([
-        "Running over — strip dinner down. Protein only, no starch.",
-        "Over pace. Last meal needs to be lean: protein and veg, nothing else.",
-        "Calorie creep — make dinner strict. Protein and greens only.",
-        "You're high for the pace. Final meal = lean protein and vegetables.",
-        "Over budget. End it clean: grilled chicken, eggs, or fish with veg.",
-      ])}_`;
+      dayAssessment = `\n_${pick(isMuscleGain
+        ? [
+            "Running high — if you're training hard, your body handles it. Close with lean protein.",
+            "Over pace — finish with protein, not starch. Chicken, eggs, or fish.",
+          ]
+        : [
+            "Running over — strip dinner down. Protein only, no starch.",
+            "Over pace. Last meal needs to be lean: protein and veg, nothing else.",
+            "Calorie creep — make dinner strict. Protein and greens only.",
+            "You're high for the pace. Final meal = lean protein and vegetables.",
+            "Over budget. End it clean: grilled chicken, eggs, or fish with veg.",
+          ]
+      )}_`;
     } else if (!earlyInDay && calPace >= 0.8 && calPace <= 1.2) {
       dayAssessment = `\n_${pick([
         "Clean day. One more solid meal and you close it out.",
@@ -658,15 +680,21 @@ export function buildFoodLogReply(p: {
   }
 
   // Zero-calorie drinks (Coke Zero, sparkling water, black coffee, rooibos, diet drinks)
-  // get a clean one-liner acknowledgment — no protein coaching, no goal connection.
+  // get a clean one-liner acknowledgment — goal-aware since muscle gain needs calories from food.
   // Threshold <= 5 kcal catches rounding artefacts (Coke Zero stored as 1 kcal).
   const isZeroCalDrink = totalMealCals <= 5 && totalMealProtein === 0;
   if (isZeroCalDrink) {
-    const zeroCalLines = [
-      "Zero calories — good choice. Keep the water and zero-cal drinks flowing.",
-      "Logged. Zero calories. That is exactly what you want from a drink.",
-      "Zero calories — sorted. Drink freely.",
-    ];
+    const zeroCalLines = isMuscleGain
+      ? [
+          "Zero cal — hydration sorted. Don't let drinks crowd out the food you need to hit your calorie target.",
+          "Logged. Zero cal. Keep the food coming — drinks don't build muscle.",
+          "Zero calories — fine. Just make sure your meals are hitting the surplus.",
+        ]
+      : [
+          "Zero calories — good choice. Keep the water and zero-cal drinks flowing.",
+          "Logged. Zero calories. That is exactly what you want from a drink.",
+          "Zero calories — sorted. Drink freely.",
+        ];
     return `${foodLines}\n\n${zeroCalLines[Math.floor(Math.random() * zeroCalLines.length)]}\n\n${runningLine}`;
   }
 
@@ -703,32 +731,52 @@ export function buildFoodLogReply(p: {
           ]);
       coachNote = `\n\n${protOpener}${protCloser ? " " + protCloser : ""}`;
     } else if (hasGoodProteins && totalMealProtein >= 10 && proteinRemaining > 0 && !calorieCeilingHit) {
-      coachNote = `\n\n${pick([
-        `${Math.round(totalMealProtein)}g protein this meal — close. Push for 20g+ next meal.`,
-        `${Math.round(totalMealProtein)}g protein — good start. 20g+ per meal is the target.`,
-        `Getting there — ${Math.round(totalMealProtein)}g this meal. Aim for 20g+ each time.`,
-        `${Math.round(totalMealProtein)}g in. Almost there — push for 20g+ at the next one.`,
-      ])}`;
+      coachNote = `\n\n${pick(isMuscleGain
+        ? [
+            `${Math.round(totalMealProtein)}g protein in — building. Hit 20g+ every meal for consistent growth.`,
+            `${Math.round(totalMealProtein)}g this meal. No missed meals on protein when you're building — every gram counts.`,
+            `Getting there — ${Math.round(totalMealProtein)}g. Aim for 20g+ each meal. That's how muscle gets built consistently.`,
+          ]
+        : [
+            `${Math.round(totalMealProtein)}g protein this meal — close. Push for 20g+ next meal.`,
+            `${Math.round(totalMealProtein)}g protein — good start. 20g+ per meal is the target.`,
+            `Getting there — ${Math.round(totalMealProtein)}g this meal. Aim for 20g+ each time.`,
+            `${Math.round(totalMealProtein)}g in. Almost there — push for 20g+ at the next one.`,
+          ]
+      )}`;
     } else if (!hasGoodProteins && hasCarbs && !isFruitSnack
         && !earlyInDay && !calorieCeilingHit
         && proteinRemaining > proteinTarget * 0.35) {
       // Only nag about protein if: it's past the first meal of the day AND they're
       // genuinely behind (>35% of daily target still outstanding). Stops constant
       // protein lectures on breakfast oats, lunch rice, etc.
-      coachNote = `\n\n${pick([
-        "Good fuel. When you can, add eggs, beans, or pilchards to round it out.",
-        "Nice and filling. If there's protein in the house, add it next meal — no rush.",
-        "Solid carbs. A protein source next meal keeps your total on track when you can manage it.",
-        "That'll keep you going. Eggs or tinned fish next meal would round it off nicely.",
-      ])}`;
+      coachNote = `\n\n${pick(isMuscleGain
+        ? [
+            "Good fuel. Now the building block: add protein to this or next meal. Carbs without protein doesn't build — eggs, chicken, or mince.",
+            "Carbs are in. Protein is next — no exceptions when building. Add it to your next meal.",
+            "Fuel stacked. Next meal needs protein alongside it. That's the formula — always.",
+          ]
+        : [
+            "Good fuel. When you can, add eggs, beans, or pilchards to round it out.",
+            "Nice and filling. If there's protein in the house, add it next meal — no rush.",
+            "Solid carbs. A protein source next meal keeps your total on track.",
+            "That'll keep you going. Eggs or tinned fish next meal would round it off nicely.",
+          ]
+      )}`;
     } else if (!hasGoodProteins && !hasCarbs && junkNoteText
         && !calorieCeilingHit
         && proteinRemaining > proteinTarget * 0.35) {
-      coachNote = `\n\n${pick([
-        "If you've got protein at home — eggs, beans, tinned fish — next meal's a good time for it.",
-        "A bit of protein next meal would help — eggs or pilchards are the cheap, easy options.",
-        "When you can, get some protein in next meal. Eggs and tinned fish go a long way.",
-      ])}`;
+      coachNote = `\n\n${pick(isMuscleGain
+        ? [
+            "Protein next meal — non-negotiable when building. Eggs, pilchards, beans, or mince. Pick one.",
+            "Get protein in next meal. You cannot build without it — eggs or pilchards are the quick fix.",
+          ]
+        : [
+            "If you've got protein at home — eggs, beans, tinned fish — next meal's a good time for it.",
+            "A bit of protein next meal would help — eggs or pilchards are the cheap, easy options.",
+            "When you can, get some protein in next meal. Eggs and tinned fish go a long way.",
+          ]
+      )}`;
     }
   }
 
