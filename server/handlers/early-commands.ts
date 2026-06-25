@@ -300,12 +300,10 @@ export async function handleEarlyCommands(ctx: {
     return `What did you eat? Just tell me — I'll get you the kcal and protein instantly.\n\n_Examples:_\n• "2 eggs and pap for breakfast"\n• "Chicken thigh, rice and spinach for lunch"\n• "Pap and mince for dinner"\n\nInclude the food, rough amount, and which meal.`;
   }
 
-  // Body-part workout requests ("upper body today", "chest day", "legs today", "push day", etc.)
-  // fall through to GPT without this guard, returning generic home exercises regardless of trainingMode.
-  // Required suffix (today/day/now/workout/session/training) prevents standalone "back" or "chest" from triggering.
-  const isBodyPartWorkoutRequest = !m.includes("?") && (
-    /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m)
-  );
+  // Body-part requests ("upper body today", "chest day", "legs today") otherwise fall through to GPT,
+  // which returns generic home exercises ignoring trainingMode. Suffix required so standalone "back" won't fire.
+  const isBodyPartWorkoutRequest = !m.includes("?")
+    && /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m);
 
   if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest) {
     // 5-minute cooldown: if we already delivered a full workout recently, return a short
@@ -342,6 +340,11 @@ export async function handleEarlyCommands(ctx: {
     const state = await getTodayWorkoutState(user);
 
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
+
+    // Walk-only clients never lift — "log bench 80kg 3x10" is noise. Give them a walk-fit closer.
+    const doneHint = (effectiveUser.trainingMode === "walk_only" || effectiveUser.trainingMode === "walk")
+      ? `Send *done* when you finish, or just tell me how it went (e.g. "25 min, felt strong").`
+      : `Send *done* when finished. Log lifts: "bench 80kg 3x10"`;
 
     // REST DAY
     if (state.type === "REST") {
@@ -389,7 +392,7 @@ export async function handleEarlyCommands(ctx: {
         : "";
       const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
       const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+      const missedReply = `${catchupIntro}\n\n*Week ${week} — Session ${sessionNum + 1}*\n\n${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
       await logChat(user.id, message, missedReply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_MISSED_CATCHUP");
       return missedReply;
     }
@@ -407,7 +410,7 @@ export async function handleEarlyCommands(ctx: {
       : "";
     const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
     const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
     await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }
