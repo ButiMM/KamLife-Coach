@@ -1825,7 +1825,19 @@ function buildDayWorkoutInner(user: any): string {
       phase === 1 ? "15 minutes" :
       phase === 2 ? "25 minutes" :
       phase === 3 ? "35 minutes" : "45 minutes";
-    return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.\n\nSend DONE when finished.`;
+    const walkBlock = `*Brisk Walk — ${duration}*\nWalk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall. Do not stop unless necessary.`;
+
+    // Lifestyle walkers (chose walking, no medical limit) get a ~2x/week bodyweight tone-up: the
+    // minimum resistance that + high protein keeps weight lost as fat. MEDICAL GATE: walk:medical/injury stays pure.
+    const walkerNotes = (user.profileNotes || "").toLowerCase();
+    const hasInjury = injuries.trim() !== "" && injuries.toLowerCase() !== "none";
+    const isLifestyleWalker = walkerNotes.includes("walk:lifestyle") && !hasInjury;
+    if (isLifestyleWalker && (day === 1 || day === 3)) {
+      const reps = phase === 1 ? "8-10" : phase === 2 ? "10-12" : "12-15";
+      const toneUp = `\n\n*Muscle insurance — 10 min, optional but worth it:*\n2 easy rounds, ${reps} reps each:\n• Bodyweight squats (sit to a chair and stand)\n• Push-ups — on your knees or against a wall is fine\n• Glute bridges\n• Plank — hold 20-30 sec\n\nThis is what keeps the weight you lose as *fat, not muscle*. Skip anything that hurts.`;
+      return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n${walkBlock}${toneUp}\n\nSend DONE when finished.`;
+    }
+    return `*Phase ${phase}: ${phaseName} — Week ${week}*\nToday: Day ${day}\n\n${walkBlock}\n\nSend DONE when finished.`;
   }
 
   const trainingDays = user.trainingDaysPerWeek || 3;

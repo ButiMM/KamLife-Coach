@@ -925,10 +925,20 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
   if (state === "ASK_EQUIPMENT") {
     const lower = msg.toLowerCase();
 
-    // Walk-only: genuine mobility/medical limitation
-    if (/\b(walk only|just walk|walking only|only walk|only walking|can only walk|doctor.*walk|injury.*walk|heart.*walk)\b/i.test(lower)) {
-      await db.update(users).set({ trainingMode: "walk_only", gymName: null, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
-      return `Noted — walking + light bodyweight work only.\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
+    // Walk-based plan — by choice (busy, no gym) or by medical limitation. Both are walk_only;
+    // we infer which from the medical/injury data captured earlier in onboarding, so lifestyle
+    // walkers get optional bodyweight tone-ups while medical walkers stay pure-walking-safe.
+    if (/\b(just\s+walk(ing)?|only\s+walk(ing)?|walk(ing)?\s+only|want\s+to\s+walk|prefer\s+to\s+walk|rather\s+walk|walk\s+and\s+eat|no\s+gym.*walk|walk.*no\s+gym|doctor.*walk|injury.*walk|heart.*walk)\b/i.test(lower) || lower.trim() === "walking" || lower.trim() === "walk") {
+      const hasInjury = !!(user.injuries && user.injuries.trim() && user.injuries.toLowerCase() !== "none");
+      const isMedicalWalk = user.doctorClearanceRequired === true || /\bheart\b/i.test(user.medicalConditions || "") || hasInjury
+        || /\b(doctor|injury|injured|medical|heart|prescribed|told\s+to)\b/i.test(lower);
+      const baseNotes = (user.profileNotes || "").replace(/\bwalk:\w+\b/g, "").trim();
+      const flag = isMedicalWalk ? "walk:medical" : "walk:lifestyle";
+      await db.update(users).set({ trainingMode: "walk_only", gymName: null, profileNotes: baseNotes ? `${baseNotes} ${flag}` : flag, onboardingState: "ASK_BUDGET" }).where(eq(users.phoneNumber, phone));
+      const walkMsg = isMedicalWalk
+        ? `Noted — walking only, kept gentle and safe. Your protein protects your muscle.`
+        : `Walking + eating right is a real plan — busy people lose fat exactly this way. I'll add two optional 10-min tone-ups a week so the weight you lose is fat, not muscle.`;
+      return `${walkMsg}\n\nWhat's your monthly grocery budget?\n\n1️⃣ Under R1,500\n2️⃣ R1,500 – R3,000\n3️⃣ R3,000 – R5,000\n4️⃣ R5,000+`;
     }
 
     // "No equipment" quick path — bodyweight only, skip sub-question
@@ -955,7 +965,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     }
 
     // Unrecognised — re-ask
-    return `Gym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+    return `How do you want to train?[BUTTONS:Gym|Home|No equipment|Just walking]`;
   }
 
   // ---- ASK_HOME_EQUIPMENT — capture home kit ----
@@ -1188,7 +1198,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       profileNotes: updatedNotes || null,
       onboardingState: "ASK_EQUIPMENT",
     }).where(eq(users.phoneNumber, phone));
-    return `Gym or home training?[BUTTONS:Gym|Home training|No equipment]`;
+    return `How do you want to train?[BUTTONS:Gym|Home|No equipment|Just walking]`;
   }
 
   if (state === "ASK_GYM_NAME") {
