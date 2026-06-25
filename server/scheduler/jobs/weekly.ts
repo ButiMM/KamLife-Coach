@@ -264,9 +264,10 @@ export async function runSundayEveningCheckin(): Promise<void> {
       const sundayGoal = client.goalType || "fat_loss";
       const isMuscleGainSunday = sundayGoal === "muscle_gain";
       const isRecompSunday = sundayGoal === "recomposition";
-      const distinctFoodDays = new Set(weekFoodLogs.map(l => {
+      const distinctFoodDays = new Set(weekFoodLogs.flatMap(l => {
+        if (!l.createdAt) return [];
         const d = new Date(l.createdAt.getTime() + 2 * 3_600_000);
-        return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+        return [`${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`];
       })).size;
       let question: string;
       if (completedSessions === 0 && distinctFoodDays === 0) {
