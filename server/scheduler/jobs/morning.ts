@@ -42,7 +42,7 @@ export async function runMorningCheckin(): Promise<void> {
     if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {
-      if (await claimDailySlot(client.id, "morning")) {
+      if (client.awaitingInputType !== "comeback" && await claimDailySlot(client.id, "morning")) {
         const name = client.name || "there";
         const reEngageBody = `${name}, ${daysSilent} days. Life happens — no lecture from me.\n\nTell me which one fits right now:`;
         const reEngageButtons = [
@@ -315,7 +315,7 @@ export async function runMorningCheckin(): Promise<void> {
       }
 
       if (stepsLogged > 0) {
-        const stepsTarget = client.stepsTarget || 10000;
+        const stepsTarget = client.stepsTarget || 8500;
         parts.push(stepsLogged >= stepsTarget
           ? `Steps: ${stepsLogged.toLocaleString()} — target hit.`
           : `Steps: ${stepsLogged.toLocaleString()} of ${stepsTarget.toLocaleString()} target.`
@@ -374,7 +374,7 @@ export async function runMorningCheckin(): Promise<void> {
         }
       } catch { /* non-critical */ }
 
-      const stepsTarget = client.stepsTarget || 10000;
+      const stepsTarget = client.stepsTarget || 8500;
 
       // Split into two messages: summary | today's action
       // \n\n---\n\n is the Twilio message splitter — two separate WhatsApps

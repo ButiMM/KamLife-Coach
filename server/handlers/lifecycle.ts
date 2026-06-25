@@ -320,7 +320,7 @@ export async function handleLifecycle(ctx: {
     const oldInjury = user.injuries;
     await db.update(users).set({ injuries: "none" }).where(eq(users.phoneNumber, phone));
     try { await storeMemory(phone, `Injury resolved: "${oldInjury}" — client reported recovery`, "medical"); } catch (e) { console.warn("[non-fatal]", e); }
-    const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Sharp pain during = non-negotiable stop.\n\nReply "today" for your session.`;
+    const injuryReply = `Noted — ${oldInjury} marked as recovered. Full programme is back.\n\n*Return protocol — do not skip this:*\n*Week 1:* 70% of your previous weights. Form only. Stop the set if anything pulls.\n*Week 2:* 85% weight. Add reps before adding load.\n*Week 3:* Back to full weight if zero pain.\n\nRule: sharp pain during a set = stop that exercise immediately. Dull ache after = acceptable. Non-negotiable: if it hurts, stop.\n\nReply "today" for your session.`;
     await logChat(user.id, message, injuryReply, "INJURY_UPDATE");
     return injuryReply;
   }

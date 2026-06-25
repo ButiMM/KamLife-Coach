@@ -300,7 +300,14 @@ export async function handleEarlyCommands(ctx: {
     return `What did you eat? Just tell me — I'll get you the kcal and protein instantly.\n\n_Examples:_\n• "2 eggs and pap for breakfast"\n• "Chicken thigh, rice and spinach for lunch"\n• "Pap and mince for dinner"\n\nInclude the food, rough amount, and which meal.`;
   }
 
-  if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m)) {
+  // Body-part workout requests ("upper body today", "chest day", "legs today", "push day", etc.)
+  // fall through to GPT without this guard, returning generic home exercises regardless of trainingMode.
+  // Required suffix (today/day/now/workout/session/training) prevents standalone "back" or "chest" from triggering.
+  const isBodyPartWorkoutRequest = !m.includes("?") && (
+    /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m)
+  );
+
+  if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest) {
     // 5-minute cooldown: if we already delivered a full workout recently, return a short
     // "it's above ↑" reply instead of re-sending the full text again.
     // The cooldown only triggers on re-requests AFTER the delivery fix (text now reliably

@@ -153,9 +153,11 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const clientGoalWeekly = client.goalType || "fat_loss";
       const isMuscleGainWeekly = clientGoalWeekly === "muscle_gain";
       const budgetTierWeekly = client.weeklyFoodBudget || "100_300";
-      const isBudgetTight = budgetTierWeekly === "under_100" || budgetTierWeekly === "100_300";
+      const isBudgetTight = budgetTierWeekly === "under_50" || budgetTierWeekly === "50_100" || budgetTierWeekly === "under_100" || budgetTierWeekly === "100_300";
       let warning = "";
-      if (junkCount >= 3) {
+      if (completedSessions === 0) {
+        warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
+      } else if (junkCount >= 3) {
         warning = isMuscleGainWeekly
           ? `Processed & fried food showed up ${junkCount}x this week. For muscle gain this hurts — your calories need to come from protein-dense sources, not fried food. Keep the calories, fix the source. Chicken, rice, eggs over KFC and chips.`
           : `Takeaways & cooldrinks showed up ${junkCount}x this week — no stress, enjoy them now and then. Just keep the other days protein-first.`;
@@ -166,12 +168,10 @@ export async function runSundayWeeklyReport(): Promise<void> {
         warning = isMuscleGainWeekly
           ? `⚠️ ${noProteinDays} days this week with no protein logged. Muscle cannot grow without it — this is the single biggest limiter right now. Tonight: ${proteinSources}. This is non-negotiable.`
           : `Protein: ${noProteinDays} days this week without protein logged. Even one egg or a tin of pilchards (R12, 25g protein) counts — start with one meal tonight.`;
-      } else if (completedSessions === 0) {
-        warning = `⚠️ Zero sessions this week — one session this week is all I need from you.`;
       }
 
       let focus = "";
-      if (completedSessions < plannedSessions) {
+      if (completedSessions > 0 && completedSessions < plannedSessions) {
         const sessionsShort = plannedSessions - completedSessions;
         focus = isMuscleGainWeekly
           ? `Train ${sessionsShort} more time${sessionsShort !== 1 ? "s" : ""} than last week — muscle growth requires the stimulus. No sessions = no signal to grow.`
@@ -216,13 +216,11 @@ export async function runSundayWeeklyReport(): Promise<void> {
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
 
       try {
-        const budgetTier = client.weeklyFoodBudget || "100_300";
-        const clientGoal = client.goalType || "fat_loss";
-        const list = getShoppingList(budgetTier, weekNum + 1, clientGoal);
-        const shoppingMsg = formatShoppingList(list, name, clientGoal, {
+        const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly);
+        const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
           calorieTarget: client.calorieTarget || undefined,
           proteinTarget: client.proteinTarget || undefined,
-          budgetTier,
+          budgetTier: budgetTierWeekly,
         });
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }
@@ -265,27 +263,40 @@ export async function runSundayEveningCheckin(): Promise<void> {
       const avgSteps = weekSteps.length > 0 ? Math.round(weekSteps.reduce((s, l) => s + (l.steps || 0), 0) / weekSteps.length) : 0;
       const sundayGoal = client.goalType || "fat_loss";
       const isMuscleGainSunday = sundayGoal === "muscle_gain";
+      const isRecompSunday = sundayGoal === "recomposition";
+      const distinctFoodDays = new Set(weekFoodLogs.map(l => {
+        const d = new Date(l.createdAt.getTime() + 2 * 3_600_000);
+        return `${d.getUTCFullYear()}-${d.getUTCMonth()}-${d.getUTCDate()}`;
+      })).size;
       let question: string;
-      if (completedSessions === 0 && weekFoodLogs.length === 0) {
+      if (completedSessions === 0 && distinctFoodDays === 0) {
         question = `${name}, this week was quiet. One question — what got in the way?`;
-      } else if (completedSessions >= plannedSessions && weekFoodLogs.length >= 5) {
+      } else if (completedSessions >= plannedSessions && distinctFoodDays >= 5) {
         question = isMuscleGainSunday
           ? `${name}, ${completedSessions} sessions done and food tracked all week. Solid. One question — what did you eat that gave you the most energy in the gym this week?`
+          : isRecompSunday
+          ? `${name}, ${completedSessions} sessions done and food tracked all week. Solid recomp week. One question — where did you feel the most change this week?`
           : `${name}, ${completedSessions} sessions done this week and food tracked. Solid week. What was the hardest part?`;
       } else if (completedSessions < Math.ceil(plannedSessions * 0.5)) {
         question = `${name}, ${completedSessions} of ${plannedSessions} sessions this week. What kept you from the other ${plannedSessions - completedSessions}?`;
-      } else if (weekFoodLogs.length < 3) {
+      } else if (distinctFoodDays < 3) {
         question = isMuscleGainSunday
           ? `${name}, ${completedSessions} sessions done — but food tracking was light. For muscle gain I need to see your intake. What makes it hard to log?`
+          : isRecompSunday
+          ? `${name}, ${completedSessions} sessions done — but food tracking was thin. Recomp requires seeing your intake to balance the cut and build. What makes it hard to log?`
           : `${name}, ${completedSessions} sessions done. Food tracking was thin this week. What makes it hard to log?`;
       } else if (avgSteps > 0 && avgSteps < (client.stepsTarget || 8500) * 0.6) {
         question = isMuscleGainSunday
           ? `${name}, average steps this week: ${avgSteps.toLocaleString()}. Light movement helps recovery on rest days — what's the real barrier to getting outside?`
+          : isRecompSunday
+          ? `${name}, average steps this week: ${avgSteps.toLocaleString()}. Daily walking is your recomp engine outside the gym — what's the real barrier to moving more?`
           : `${name}, average steps this week: ${avgSteps.toLocaleString()}. Steps are your daily fat-burning base. What is the real barrier to walking more?`;
       } else {
         question = isMuscleGainSunday
-          ? `${name}, week done. ${completedSessions} sessions, ${weekFoodLogs.length} meals logged. One sentence — what felt strongest this week in the gym?`
-          : `${name}, week done. ${completedSessions} sessions, ${weekFoodLogs.length} meals logged. One sentence — what do you want to be different next week?`;
+          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what felt strongest this week in the gym?`
+          : isRecompSunday
+          ? `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what did you notice changing this week?`
+          : `${name}, week done. ${completedSessions} sessions, ${distinctFoodDays} days logged. One sentence — what do you want to be different next week?`;
       }
       if (await claimDailySlot(client.id, "sunday_evening")) { await sendWhatsApp(client.phoneNumber, question); }
     } catch (err) { console.error(`[SCHEDULER] Sunday check-in error — ${client.phoneNumber}:`, err); }
