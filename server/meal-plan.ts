@@ -35,6 +35,16 @@ type Meal = {
 type DayPlan = {
   day: string;
   meals: Meal[];
+  cookNote?: string;
+};
+
+// Protein-day template: lunch and dinner share the same base protein.
+// Cook once, eat twice — realistic for busy SA clients.
+type ProteinDay = {
+  tags: string[];   // for dietary filtering
+  lunch: FoodItem;
+  dinner: FoodItem;
+  cookNote: string;
 };
 
 // ── FOOD POOLS ──
@@ -70,70 +80,83 @@ const BF_PREMIUM: FoodItem[] = [
   ["3 eggs scrambled + 1 slice whole wheat toast + 1 apple", 400, 26],
 ];
 
-// LUNCH OPTIONS
-const LUNCH_BUDGET: FoodItem[] = [
-  ["1 tin pilchards (tomato sauce) + ½ cup pap + spinach (wilted)", 420, 36],
-  ["1 tin pilchards + 1 slice brown bread + cabbage salad", 390, 34],
-  ["Sugar beans (½ cup cooked) + ½ cup pap + spinach", 370, 18],
-  ["2 boiled eggs + ½ cup pap + tomato + cabbage", 360, 18],
-  ["1 tin pilchards + ½ cup samp + spinach", 400, 34],
+// PROTEIN DAYS — lunch and dinner share the same base protein each day.
+// Cook once, eat twice. Realistic for busy SA clients who don't make four
+// different proteins in a day.
+
+const PROTEIN_DAYS_BUDGET: ProteinDay[] = [
+  {
+    tags: ["pilchards", "fish"],
+    lunch: ["Pilchards (1 tin, tomato sauce) + ½ cup pap + wilted spinach", 420, 34],
+    dinner: ["Pilchards (1 tin) + 1 slice brown bread + cabbage + tomato", 390, 34],
+    cookNote: "2 tins — no cooking at all. Open, eat. Both meals sorted in 2 minutes.",
+  },
+  {
+    tags: ["chicken"],
+    lunch: ["Chicken pieces (120g, batch stewed) + ½ cup pap + spinach", 430, 32],
+    dinner: ["Chicken (leftovers, 100g) + ½ cup pap + cabbage stir-fry", 400, 28],
+    cookNote: "Stew 400g chicken in one pot at lunch. Reheat the rest for dinner.",
+  },
+  {
+    tags: ["eggs", "beans"],
+    lunch: ["3 boiled eggs + 1 slice brown bread + cabbage + tomato", 390, 24],
+    dinner: ["Sugar beans (½ cup cooked) + ½ cup pap + onion + tomato", 390, 18],
+    cookNote: "Boil 6 eggs in bulk — 3 today, 3 tomorrow. Soak beans overnight.",
+  },
 ];
 
-const LUNCH_BUDGET_NO_FISH: FoodItem[] = [
-  ["2 boiled eggs + ½ cup pap + spinach + tomato", 360, 18],
-  ["Sugar beans (½ cup) + 1 slice brown bread + cabbage", 350, 14],
-  ["Chicken pieces (100g) + ½ cup pap + cabbage", 380, 28],
-  ["2 boiled eggs + ½ cup oats savoury + tomato + onion", 330, 16],
-  ["3 boiled eggs + cabbage stir-fry + tomato", 340, 21],
+const PROTEIN_DAYS_MID: ProteinDay[] = [
+  {
+    tags: ["chicken"],
+    lunch: ["Chicken thigh (150g, batch grilled) + ½ cup brown rice + mixed veg", 450, 36],
+    dinner: ["Chicken thigh (leftovers, 150g) + 1 medium sweet potato + broccoli", 480, 36],
+    cookNote: "Grill 400–500g chicken thighs at once. Both meals covered in one cook.",
+  },
+  {
+    tags: ["mince", "beef"],
+    lunch: ["Beef mince (120g, browned) + ½ cup sweet potato + spinach + tomato", 460, 32],
+    dinner: ["Same mince (leftovers, 120g) + ½ cup brown rice + broccoli", 480, 32],
+    cookNote: "Brown 400g mince in one pan. Season simply — sides change, protein doesn't.",
+  },
+  {
+    tags: ["eggs"],
+    lunch: ["2 eggs + baked beans (½ tin) + 1 slice brown bread + spinach", 420, 28],
+    dinner: ["3 boiled eggs + ½ cup sweet potato + mixed veg", 420, 24],
+    cookNote: "Boil 6 eggs in bulk — use them across lunch and dinner.",
+  },
+  {
+    tags: ["pilchards", "tuna", "fish"],
+    lunch: ["Pilchards (1 tin) + ½ cup sweet potato + broccoli", 440, 36],
+    dinner: ["Tuna (1 tin) + ½ cup brown rice + mixed veg + lemon", 430, 34],
+    cookNote: "Both are tinned — zero cooking. Pilchards at lunch, tuna at dinner.",
+  },
 ];
 
-const LUNCH_MID: FoodItem[] = [
-  ["Chicken thigh (150g, grilled) + ½ cup brown rice + mixed veg", 450, 36],
-  ["1 tin pilchards + ½ cup sweet potato + broccoli", 440, 36],
-  ["Chicken thigh (150g) + 1 slice brown bread + cabbage salad", 420, 34],
-  ["Beef mince (100g) + ½ cup sweet potato + spinach", 460, 32],
-  ["2 eggs + ½ cup sweet potato + baked beans (½ tin) + spinach", 430, 28],
-];
-
-const LUNCH_PREMIUM: FoodItem[] = [
-  ["Chicken breast (150g, grilled) + ½ cup brown rice + broccoli", 470, 42],
-  ["Tuna (1 tin) + ½ cup brown rice + mixed veg + lemon", 440, 38],
-  ["Lean mince (120g) + ½ cup sweet potato + spinach + tomato", 480, 36],
-  ["Chicken breast (150g) + ½ avo + mixed salad + olive oil", 500, 40],
-  ["Hake fillet (150g) + ½ cup brown rice + green beans", 430, 38],
-];
-
-// DINNER OPTIONS
-const DINNER_BUDGET: FoodItem[] = [
-  ["Chicken pieces (120g, stewed) + ½ cup pap + spinach", 430, 32],
-  ["1 tin pilchards + ½ cup pap + cabbage", 420, 34],
-  ["Sugar beans + ½ cup pap + onion + tomato", 390, 18],
-  ["2 eggs + ½ cup pap + spinach", 330, 18],
-  ["Chicken liver (100g) + ½ cup pap + cabbage", 400, 28],
-];
-
-const DINNER_BUDGET_NO_FISH: FoodItem[] = [
-  ["Chicken pieces (120g) + ½ cup pap + spinach", 430, 32],
-  ["Sugar beans (½ cup) + ½ cup pap + onion + tomato", 390, 18],
-  ["2 eggs + ½ cup pap + cabbage stir-fry", 330, 18],
-  ["Chicken liver (100g) + ½ cup pap + spinach", 400, 28],
-  ["3 boiled eggs + ½ cup samp + tomato + onion", 380, 21],
-];
-
-const DINNER_MID: FoodItem[] = [
-  ["Chicken breast (150g) + 1 medium sweet potato + broccoli", 490, 42],
-  ["Beef mince (120g) + ½ cup brown rice + spinach", 500, 36],
-  ["Chicken thigh (150g, baked) + ½ cup sweet potato + mixed veg", 480, 36],
-  ["2 eggs + baked beans (½ tin) + 1 slice brown bread + spinach", 420, 28],
-  ["1 tin pilchards + ½ cup sweet potato + spinach", 440, 36],
-];
-
-const DINNER_PREMIUM: FoodItem[] = [
-  ["Chicken breast (150g) + ½ cup sweet potato + broccoli + olive oil", 510, 44],
-  ["Rump steak (150g) + ½ cup sweet potato + spinach", 540, 48],
-  ["Lean mince bolognaise (120g) + ½ cup sweet potato + broccoli", 520, 38],
-  ["Hake fillet (200g) + ½ cup brown rice + green beans", 460, 44],
-  ["Chicken thigh (150g, baked) + ½ cup brown rice + spinach", 500, 38],
+const PROTEIN_DAYS_PREMIUM: ProteinDay[] = [
+  {
+    tags: ["chicken"],
+    lunch: ["Chicken breast (150g, batch grilled) + ½ cup brown rice + broccoli", 470, 42],
+    dinner: ["Chicken breast (leftovers, 150g) + ½ cup sweet potato + spinach + olive oil", 510, 44],
+    cookNote: "Grill 500g chicken breasts in one pan. Slice for lunch, reheat for dinner.",
+  },
+  {
+    tags: ["mince", "beef"],
+    lunch: ["Lean mince (120g) + ½ cup sweet potato + spinach + fresh tomato", 480, 36],
+    dinner: ["Same mince (leftovers, 120g) + ½ cup brown rice + broccoli", 500, 36],
+    cookNote: "Brown 500g lean mince once. Different veg each meal — one cook.",
+  },
+  {
+    tags: ["hake", "tuna", "fish"],
+    lunch: ["Tuna (1 tin) + ½ cup brown rice + mixed veg + lemon", 440, 38],
+    dinner: ["Hake fillet (200g, pan-fried) + ½ cup sweet potato + green beans", 460, 44],
+    cookNote: "Tuna at lunch (no cook). Pan-fry hake at dinner — 8 minutes on each side.",
+  },
+  {
+    tags: ["steak", "beef"],
+    lunch: ["Rump steak (150g, pan-seared) + mixed salad + ½ avo + cherry tomatoes", 520, 46],
+    dinner: ["Steak slices (cold leftovers) + ½ cup brown rice + spinach + olive oil", 490, 44],
+    cookNote: "Sear one 300g rump. Eat half hot at lunch — cold sliced for dinner.",
+  },
 ];
 
 // SNACK OPTIONS
@@ -155,7 +178,7 @@ const SNACK_MID: FoodItem[] = [
 
 const SNACK_PREMIUM: FoodItem[] = [
   ["30g biltong + 1 apple", 200, 22],
-  ["Greek yoghurt (150g) + 1 banana + 1 tsp honey", 240, 14],
+  ["Greek yoghurt (150g) + 1 banana", 220, 14],
   ["Cottage cheese (100g) + 1 apple", 190, 16],
   ["30g biltong + black coffee", 140, 22],
   ["Mixed nuts (30g) + 1 apple", 240, 6],
@@ -214,6 +237,7 @@ function formatMeal(meal: Meal): string {
 
 function formatDay(day: DayPlan): string {
   const lines: string[] = [`*${day.day}*`];
+  if (day.cookNote) lines.push(`_💡 ${day.cookNote}_`);
   let totalKcal = 0;
   let totalProt = 0;
   for (const m of day.meals) {
@@ -266,71 +290,56 @@ export function generateMealPlan(opts: MealPlanOptions): string {
 
   // Pick pools based on budget
   const budget = weeklyFoodBudget || "100_300";
-  const isBudget = budget === "under_100";
-  const isPremium = budget === "300_600" || budget === "over_600" || budget === "600_plus";
+  const isBudget = budget === "under_100" || budget === "under_50" || budget === "50_100";
+  const isPremium = budget === "300_600" || budget === "over_600" || budget === "600_plus" || budget === "500_plus";
 
   const bfPool = isBudget ? BF_BUDGET : isPremium ? BF_PREMIUM : BF_MID;
-  const lunchPool = isBudget
-    ? noFish
-      ? LUNCH_BUDGET_NO_FISH
-      : LUNCH_BUDGET
-    : isPremium
-    ? LUNCH_PREMIUM
-    : LUNCH_MID;
-  const dinnerPool = isBudget
-    ? noFish
-      ? DINNER_BUDGET_NO_FISH
-      : DINNER_BUDGET
-    : isPremium
-    ? DINNER_PREMIUM
-    : DINNER_MID;
-  const snackPool = isBudget
-    ? SNACK_BUDGET
-    : isPremium
-    ? SNACK_PREMIUM
-    : SNACK_MID;
+  const snackPool = isBudget ? SNACK_BUDGET : isPremium ? SNACK_PREMIUM : SNACK_MID;
 
-  // Meat keywords for vegetarian/vegan filtering
-  const MEAT_WORDS = ["chicken", "mince", "beef", "steak", "lamb", "pork", "biltong", "hake", "pilchard", "tuna", "fish", "salmon", "sardine", "polony", "vienna"];
-  const filterMeat = (pool: FoodItem[]) =>
-    pool.filter(([d]) => !MEAT_WORDS.some(w => d.toLowerCase().includes(w)));
+  // Breakfast: filter for dietary restrictions
+  const MEAT_WORDS = ["chicken", "mince", "beef", "steak", "lamb", "pork", "biltong", "hake", "pilchard", "tuna", "fish", "salmon"];
   const DAIRY_WORDS_VEGAN = ["yoghurt", "milk", "cheese", "cottage cheese", "whey"];
-  const filterVegan = (pool: FoodItem[]) =>
-    pool.filter(([d]) => !DAIRY_WORDS_VEGAN.some(w => d.toLowerCase().includes(w)) && !d.toLowerCase().includes("egg"));
-
+  const filterMeat = (pool: FoodItem[]) => pool.filter(([d]) => !MEAT_WORDS.some(w => d.toLowerCase().includes(w)));
+  const filterVegan = (pool: FoodItem[]) => pool.filter(([d]) => !DAIRY_WORDS_VEGAN.some(w => d.toLowerCase().includes(w)) && !d.toLowerCase().includes("egg"));
   const safeBfPool = isVegan ? filterVegan(filterMeat(bfPool)) : isVegetarian ? filterMeat(bfPool) : bfPool;
-  const safeLunchPool = isVegan ? filterVegan(filterMeat(lunchPool)) : isVegetarian ? filterMeat(lunchPool) : lunchPool;
-  const safeDinnerPool = isVegan ? filterVegan(filterMeat(dinnerPool)) : isVegetarian ? filterMeat(dinnerPool) : dinnerPool;
 
-  // Remove snacks with peanut butter if allergic
-  const safeSnackPool = noPeanuts
-    ? snackPool.filter(([d]) => !d.toLowerCase().includes("peanut"))
-    : snackPool;
-
-  // Remove dairy snacks if intolerant
+  // Snack: allergy filtering
+  const safeSnackPool = noPeanuts ? snackPool.filter(([d]) => !d.toLowerCase().includes("peanut")) : snackPool;
   const finalSnackPool = noDairy
     ? safeSnackPool.filter(([d]) => !d.toLowerCase().includes("yoghurt") && !d.toLowerCase().includes("milk"))
     : safeSnackPool;
 
-  // Build 3 days using different offsets so meals rotate
+  // Protein days: pick one per day — lunch + dinner share the same base protein
+  const proteinDayPool = isBudget ? PROTEIN_DAYS_BUDGET : isPremium ? PROTEIN_DAYS_PREMIUM : PROTEIN_DAYS_MID;
+  const FISH_TAGS = ["pilchards", "fish", "tuna", "hake", "salmon"];
+  const ANIMAL_TAGS = ["chicken", "mince", "beef", "steak", "hake", "tuna", "fish", "pilchards"];
+  const safeProteinDays = proteinDayPool.filter(pd => {
+    if (noFish && pd.tags.some(t => FISH_TAGS.includes(t))) return false;
+    if (isVegetarian && pd.tags.some(t => ANIMAL_TAGS.includes(t))) return false;
+    if (isVegan && pd.tags.some(t => [...ANIMAL_TAGS, "eggs"].includes(t))) return false;
+    return true;
+  });
+  const finalProteinDays = safeProteinDays.length > 0 ? safeProteinDays : proteinDayPool;
+
+  // Build 3 days — each day picks a different protein so the week rotates
   const days: DayPlan[] = [];
   for (let d = 0; d < 3; d++) {
+    const proteinDay = finalProteinDays[d % finalProteinDays.length];
     const bf = pickItem(safeBfPool.length > 0 ? safeBfPool : bfPool, d, isLowGI);
-    const ln = pickItem(safeLunchPool.length > 0 ? safeLunchPool : lunchPool, d, isLowGI);
-    const dn = pickItem(safeDinnerPool.length > 0 ? safeDinnerPool : dinnerPool, d, isLowGI);
     const sn = pickItem(finalSnackPool.length > 0 ? finalSnackPool : snackPool, d, isLowGI);
 
+    const lnRaw: FoodItem = isLowGI ? makeLowGI(proteinDay.lunch) : proteinDay.lunch;
+    const dnRaw: FoodItem = isLowGI ? makeLowGI(proteinDay.dinner) : proteinDay.dinner;
+
     let breakfast = buildMeal("🌅", "Breakfast", bf);
-    let lunch = buildMeal("🍱", "Lunch", ln);
-    let dinner = buildMeal("🌙", "Dinner", dn);
+    let lunch = buildMeal("🍱", "Lunch", lnRaw);
+    let dinner = buildMeal("🌙", "Dinner", dnRaw);
     const snack = buildMeal("🍎", "Snack", sn);
 
     if (goalType === "fat_loss") {
-      // Slightly reduce carb portions at lunch and dinner
       lunch = { ...lunch, kcal: Math.round(lunch.kcal * 0.92), items: lunch.items.replace("½ cup", "⅓ cup") };
       dinner = { ...dinner, kcal: Math.round(dinner.kcal * 0.92), items: dinner.items.replace("½ cup", "⅓ cup") };
     } else if (goalType === "muscle_gain") {
-      // Add extra protein note to lunch and dinner
       lunch = { ...lunch, kcal: lunch.kcal + 80, protein: lunch.protein + 10, items: `${lunch.items} + extra 50g chicken or 1 egg` };
       dinner = { ...dinner, kcal: dinner.kcal + 80, protein: dinner.protein + 10, items: `${dinner.items} + extra 50g protein` };
     }
@@ -338,6 +347,7 @@ export function generateMealPlan(opts: MealPlanOptions): string {
     days.push({
       day: `Day ${d + 1}`,
       meals: [breakfast, lunch, dinner, snack],
+      cookNote: proteinDay.cookNote,
     });
   }
 
@@ -365,11 +375,11 @@ export function generateMealPlan(opts: MealPlanOptions): string {
   // Footer tip
   const footerTips: Record<string, string> = {
     fat_loss:
-      "_Portion your carbs first — weigh or measure. Fill half your plate with veg before adding anything else. Protein every meal, no exceptions._",
+      "_Protein every meal — no exceptions. Carbs in smaller portions. Fill half the plate with veg before anything else.\n\nTo adjust: tell me what you don't eat, what you want to swap, or if any of these meals won't work for you._",
     muscle_gain:
-      "_Eat every 3–4 hours. Never skip a meal. If you feel full — eat anyway. Muscle needs a calorie surplus and consistent protein._",
+      "_Eat every 3–4 hours. Never skip a meal. If you feel full — eat anyway. Muscle needs a surplus and consistent protein.\n\nTo adjust: tell me what you don't eat, what you want to swap, or if portions feel off._",
     recomposition:
-      "_Carbs before training, protein after. Keep calories consistent day to day. Progress is slower but it lasts._",
+      "_Carbs before training, protein after. Keep calories consistent day to day. Progress is slower but it lasts.\n\nTo adjust: tell me what you don't eat, what you want to swap, or your budget this week._",
   };
   const footer = footerTips[goalType] || footerTips.fat_loss;
 
