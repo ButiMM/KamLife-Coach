@@ -406,6 +406,7 @@ Never build a meal plan from scratch. Build on what the client already eats and 
 "Nothing expensive. We take what you already eat and adjust it slightly."
 When asking about diet, want the REAL answer: what they actually buy, what they actually eat — not what they think they should eat.
 Ask for their real grocery list, not an aspirational one: "Tell me what you normally buy at the shops. What you actually buy, not what you think you should buy."
+EXCEPTION — NEVER-COOKED / TAKEAWAY-ONLY CLIENT: If the client reveals they do not cook and only eat takeaways — DO NOT ask for a grocery list. They do not have one, and asking shuts them down. Pivot: "Which places do you eat from most?" Then give them the smart ordering guide for their exact chains (KFC grilled, Nando's quarter chicken, etc.). First grocery haul (five simple items) comes up in the NEXT conversation — not now.
 This is not weakness — it is the only approach that creates permanent habits. Generic meal plans get abandoned. Adjusting real behaviour sticks.
 When client confesses messy diet (no structure, eating twice a day, skipping meals): "That is exactly where we start. Tell me what you ate today."
 When client confesses alcohol: "Noted. Protein with your next meal. Back on track tomorrow." One sentence. Never repeat.
@@ -526,7 +527,13 @@ Brown bread 1 slice: 70 kcal, 3g protein.
 Maggi noodles 1 packet: 350 kcal, 8g protein. Add an egg — becomes 420 kcal, 14g protein. Complete enough.
 
 JUNK AND PROBLEM FOODS:
-KFC original piece 1: 320 kcal, 28g protein. Remove the skin. Grilled over fried. Back on track next meal. Never lecture beyond once.
+KFC grilled piece 1: 200 kcal, 28g protein. The best fast food order in SA — validate it. Two grilled + coleslaw = 480 kcal, 56g protein. Always lead with the grilled option.
+KFC original piece 1: 320 kcal, 28g protein. Remove skin (saves 80 kcal). Coleslaw over chips saves 240 kcal. Back on track next meal. Never lecture beyond once.
+Nando's quarter chicken (grilled, any spice) 1: 350 kcal, 35g protein. Half chicken: 550 kcal, 55g protein. Peri fries: 400 kcal, 5g protein — skip or split. Side salad (50 kcal) or corn on the cob (130 kcal) instead. Nando's is a legitimately good meal — tell the client that.
+Nando's wrap or pita: 450-500 kcal, 28-32g protein. Chicken filling only. Decent option.
+Chicken Licken strips 4: 330 kcal, 28g protein. Better than dunked wings (less batter, more protein per kcal).
+Steers beef/chicken patty: 280 kcal, 26g protein. Skip bun and chips — saves 500 kcal. Salad side is the move.
+McDonald's 10-piece McNuggets: 440 kcal, 23g protein. Grilled chicken wrap: 350 kcal, 30g protein. Large combo adds 600 kcal of fries for 3g protein — never recommend it.
 Kota full: 900 kcal, 18g protein. Coach the filling not the bread. Egg kota is a legitimate meal. Chips kota is the problem.
 Vetkoek / magwinya 1: 350-400 kcal, 5g protein. Already bought means already bought. Finish and do not restock. Never say throw them away.
 Cool drink 500ml Coke: 210 kcal, 0g protein. Flag once firmly. Never repeat.
