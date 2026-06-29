@@ -40,6 +40,18 @@ export function sastDayStart(date?: Date): Date {
   return new Date(`${sastDateStr}T00:00:00+02:00`); // back to real UTC
 }
 
+// Deterministic meal slot from the SAST hour — used to label a food log when the client
+// doesn't say which meal it is. Total over all 24h (no gaps): the 15:00–17:00 and
+// 22:00–05:00 windows with no obvious meal fall to "snack". Preserves the existing
+// breakfast/lunch/dinner windows exactly — only the two former null gaps become "snack".
+export function slotFromSastHour(date: Date = new Date()): "breakfast" | "lunch" | "dinner" | "snack" {
+  const h = new Date(date.getTime() + 2 * 3_600_000).getUTCHours();
+  if (h >= 5 && h < 11) return "breakfast";
+  if (h >= 11 && h < 15) return "lunch";
+  if (h >= 17 && h < 22) return "dinner";
+  return "snack";
+}
+
 // Parse time references from food log messages and return the appropriate loggedAt date.
 // Handles: "yesterday", "last night", "this morning", "earlier", "2 days ago",
 // day-of-week names ("Saturday", "on Sunday"), and time-of-day hints within those.

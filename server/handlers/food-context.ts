@@ -19,7 +19,7 @@ import {
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 
@@ -37,13 +37,9 @@ export function extractMealLabel(msg: string): string | null {
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
-  // Time-of-day fallback — if no keyword, infer from current SAST hour
-  const sast = new Date(Date.now() + 2 * 3_600_000);
-  const h = sast.getUTCHours();
-  if (h >= 5 && h < 11) return "breakfast";
-  if (h >= 11 && h < 15) return "lunch";
-  if (h >= 17 && h < 22) return "dinner";
-  return null;
+  // Time-of-day fallback — no keyword, so infer the slot from the current SAST hour.
+  // slotFromSastHour is total (afternoon + late-night → "snack"), so this never returns null.
+  return slotFromSastHour();
 }
 
 /**
