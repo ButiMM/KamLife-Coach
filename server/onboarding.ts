@@ -747,7 +747,13 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const isMale = lower === "male" || lower === "m" || lower === "1" || lower === "guy" || lower === "man" || lower === "bro" || lower === "indoda";
     const isFemale = lower === "female" || lower === "f" || lower === "2" || lower === "woman" || lower === "lady" || lower === "girl" || lower === "sis" || lower === "intombi";
     if (!isMale && !isFemale) {
-      return `Male or female?`;
+      // No dead-end: decliners / non-binary / "why?" advance with a neutral default; anyone else gets a re-ask naming the escape — no infinite loop.
+      const declines = lower.includes("🤷") || /\b(prefer not|rather not|don.?t want|not say|none|neither|non.?binary|nonbinary|other|why|does it matter|doesn.?t matter|skip|pass)\b/i.test(lower);
+      if (declines) {
+        await db.update(users).set({ gender: "male", onboardingState: "ASK_AGE_NEW" }).where(eq(users.phoneNumber, phone));
+        return `No problem — I'll fine-tune your targets from your weight and your logs.\n\nHow old are you?`;
+      }
+      return `Just so I set your targets right — reply *male* or *female*. (Or say *skip* and I'll work it out from your logs.)`;
     }
     const gender = isMale ? "male" : "female";
     if (isFemale) {
