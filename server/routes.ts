@@ -619,14 +619,21 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)\b/i)
     : null;
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
-  // A question about steps is never a step log — "Doesn't going over 10,000 steps
-  // affect my goals?" must reach GPT (which has step context), not the logger.
-  const stepIsQuestion = m.includes("?")
-    || /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
+  // A step QUESTION ("Does going over 10,000 steps affect my goals?", "is 8000 enough?")
+  // must reach GPT, not the logger. But an explicit step LOG ("walked 8000 steps",
+  // "Fitbit 8500", "12k steps") is unambiguous even when the SAME message also ends in a
+  // SEPARATE question ("...and how's my protein?") — those used to be silently dropped by
+  // the bare "?" check, losing the step data. Split the two so explicit logs survive a
+  // trailing question while genuine step-questions still route to GPT.
+  const stepQuestionForm = /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
     || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(m);
+  const stepIsQuestion = m.includes("?") || stepQuestionForm;
+  const stepIsExplicitLog = !!(stepNumMatch || deviceStepMatch || hasKmWalk || wordThousandMatch);
+  // Explicit logs ignore a trailing "?"; duration-only walks keep the strict guard.
+  const stepIsLoggable = stepIsExplicitLog ? !stepQuestionForm : !stepIsQuestion;
   // Future-intent guard: "I'll walk 10k tomorrow" / "going to do 8000 steps later"
-  // starts with "i'll" so it slips past stepIsQuestion — must not log as done today.
-  if (!stepIsQuestion && !isFutureIntent(m) && !normalizedQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
+  // starts with "i'll" so it slips past the question check — must not log as done today.
+  if (stepIsLoggable && !isFutureIntent(m) && !normalizedQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
       const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);
