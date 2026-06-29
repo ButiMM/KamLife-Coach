@@ -245,6 +245,15 @@ export async function handleFoodContext(ctx: {
       return gptRef;
     } else {
       const todayStartCorr = sastDayStart();
+      // Label-only correction ("that was lunch not breakfast") names a meal slot but no food.
+      // RELABEL the meal instead of deleting it, so the logged calories survive. Strip "not X"
+      // first so "lunch not breakfast" affirms lunch, not breakfast.
+      const correctedHasFood = correctedMsgCandidate.length > 2 && scanForSAFoods(correctedMsgCandidate).length > 0;
+      const relabelMatch = !correctedHasFood
+        ? correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)
+        : null;
+      const relabelTo = relabelMatch ? relabelMatch[1].toLowerCase() : null;
+      let relabelDone = false;
       try {
         // Get the last FOOD_LOG chat entry — we need its timestamp to find the
         // RIGHT meal log to delete. Without this, correcting breakfast after logging
@@ -268,27 +277,39 @@ export async function handleFoodContext(ctx: {
           ))
           .orderBy(desc(mealLogs.loggedAt))
           .limit(1);
-        const lastFoodLogArr = lastFoodLog ? [lastFoodLog] : [];
-        // Wrap delete + recount + cache update in a transaction — all succeed or none do
+        // Wrap relabel/delete + recount + cache update in a transaction — all or nothing.
         await db.transaction(async (tx) => {
-          if (lastFoodLog) {
-            await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
-          }
-          if (lastMealLogCorr) {
-            await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr.id));
-          }
-          if (lastFoodLog || lastMealLogCorr) {
-            const recomputed = await recomputeTodayFoodTotals(user.id);
-            await tx.update(users).set({
-              todayCalories: recomputed.calories,
-              todayProteinG: recomputed.protein,
-              todayCaloriesDate: sastToday(),
-            }).where(eq(users.id, user.id));
+          if (relabelTo && lastMealLogCorr) {
+            // Relabel only — calories unchanged, so no recompute needed.
+            await tx.update(mealLogs).set({ mealLabel: relabelTo }).where(eq(mealLogs.id, lastMealLogCorr.id));
+            relabelDone = true;
+          } else {
+            if (lastFoodLog) {
+              await tx.update(chatHistory).set({ intent: "FOOD_LOG_CORRECTED" }).where(eq(chatHistory.id, lastFoodLog.id));
+            }
+            if (lastMealLogCorr) {
+              await tx.delete(mealLogs).where(eq(mealLogs.id, lastMealLogCorr.id));
+            }
+            if (lastFoodLog || lastMealLogCorr) {
+              const recomputed = await recomputeTodayFoodTotals(user.id);
+              await tx.update(users).set({
+                todayCalories: recomputed.calories,
+                todayProteinG: recomputed.protein,
+                todayCaloriesDate: sastToday(),
+              }).where(eq(users.id, user.id));
+            }
           }
         });
       } catch (e) { console.warn("[food-correction-tx]", e); }
+      if (relabelDone) {
+        await logChat(user.id, message, `Moved that to ${relabelTo}`, "FOOD_RELABEL");
+        return `Moved that to *${relabelTo}* ✅`;
+      }
       if (correctedMsgCandidate && correctedMsgCandidate.length > 2 && correctedMsgCandidate !== m) {
-        return await handleMessage(phone, correctedMsgCandidate);
+        // Strip "not <word>" so a corrected re-log doesn't re-add the negated item:
+        // "chicken not beef" logs chicken only, never chicken AND beef.
+        const cleaned = correctedMsgCandidate.replace(/\bnot\s+\w+/gi, " ").replace(/\s+/g, " ").trim();
+        return await handleMessage(phone, cleaned.length > 2 ? cleaned : correctedMsgCandidate);
       }
     }
   }
