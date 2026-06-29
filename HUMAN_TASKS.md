@@ -3,7 +3,18 @@
 Everything code-side is done or tracked. These are the tasks only YOU can do.
 Work top to bottom. Tick them off. Come back to Claude when you're stuck or done.
 
-Updated: 10 June 2026 — after Twilio upgrade + live sandbox testing.
+Updated: 29 June 2026 — after the conversation-quality pass (live on main).
+
+**Just shipped live (Claude, on `main`):** workouts now defer when you say
+"tomorrow" instead of dumping the session; long workouts arrive as several short
+WhatsApp bubbles instead of one "Read more" wall; the paid Day-1 workout that was
+being rejected for length now delivers; onboarding captures real names from
+"my name is… / I'm…". None of that is your task — just so you know what changed.
+
+**The interactivity you want is gated on YOUR tasks below:** real tappable buttons
+come with your approved WhatsApp number + templates (**#4–8**); real exercise demos
+instead of YouTube search links come with the GIFs (**#13**). Until those, the code
+is ready and waiting.
 
 ---
 
@@ -118,6 +129,15 @@ Two reusable infographics (same two for every client):
 ### 18. Housekeeping
 - [ ] Stale Railway branch `railway/code-change-5eCm_i` (April) must never merge — close any PR from it
 - [ ] Bookmark your admin dashboard: `kamlife-coach-production.up.railway.app/login`
+
+---
+
+## 🧠 NEXT DESIGN SESSION (ours — not your task)
+
+- **Intelligent food logging.** The bot should infer *when (which meal), what, and
+  how much* even when the client doesn't say it — and carry that same "infer, don't
+  interrogate" intelligence across workouts / steps / water. Captured in full for our
+  design discussion in `docs/intelligent-inference.md`. **Not yet built — we talk first.**
 
 ---
 
