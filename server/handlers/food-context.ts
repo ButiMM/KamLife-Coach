@@ -23,7 +23,7 @@ import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabe
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 
-export function extractMealLabel(msg: string): string | null {
+export function extractMealLabel(msg: string, atDate?: Date): string | null {
   const lo = msg.toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
@@ -37,9 +37,9 @@ export function extractMealLabel(msg: string): string | null {
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
-  // Time-of-day fallback — no keyword, so infer the slot from the current SAST hour.
-  // slotFromSastHour is total (afternoon + late-night → "snack"), so this never returns null.
-  return slotFromSastHour();
+  // Time-of-day fallback — no keyword, so infer from the meal's SAST hour: atDate for retro
+  // logs (multi-day catch-up), else now. slotFromSastHour is total, so this never returns null.
+  return slotFromSastHour(atDate);
 }
 
 /**
@@ -359,6 +359,7 @@ export async function handleFoodContext(ctx: {
             proteinInt: totalProt2,
             carbsInt: 0,
             fatInt: 0,
+            mealLabel: extractMealLabel(lastUnloggedFood.messageIn || ""),
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
@@ -630,6 +631,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: matchedMeal.carbsInt,
           fatInt: matchedMeal.fatInt,
           items: matchedMeal.items,
+          mealLabel: extractMealLabel(message),
         }).catch((e) => { console.error("[quick_relog mealLogs insert]", e); throw e; });
         invalidatePatternCache(user.id);
         invalidateFoodTotalsCache(user.id);
@@ -872,6 +874,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: 0,
           fatInt: 0,
           loggedAt: p.date,
+          mealLabel: extractMealLabel(p.raw, p.date),
         }).catch(e => console.warn("[multiday-log insert]", e))
       ));
       const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");

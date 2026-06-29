@@ -28,7 +28,7 @@ import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets } from "../targets";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
 import { getExerciseGifUrl } from "../exercise-media";
 import { getCurrentDayExercises } from "../programme";
@@ -1130,6 +1130,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           carbsInt: 0,
           fatInt: 0,
           loggedAt: photoLoggedAt,
+          mealLabel: slotFromSastHour(photoLoggedAt),
         }).catch(e => console.warn("[photo mealLogs write]", e));
         invalidateFoodTotalsCache(user.id);
       }
