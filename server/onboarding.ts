@@ -734,12 +734,22 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
   // ---- WELCOME — name ----
   if (state === "WELCOME") {
-    const raw = msg.trim();
-    const words = raw.split(/\s+/);
+    let raw = msg.trim();
+    // Pull the name out of natural phrasings so a beginner who answers in a sentence is
+    // captured correctly — "my name is Thabo" / "I'm Thabo" / "call me Sipho" → the NAME,
+    // not stored literally as "I'm Thabo" or bounced for being more than 3 words. The \b
+    // anchors and "i\s+am" (not "iam") keep real names like "Liam Smith" from mis-matching.
+    const intro = raw.match(/\b(?:my name'?s|my name is|i\s+am|i'?m|it'?s|this is|they call me|call me)\s+([a-zA-Z][a-zA-Z''-]{1,19})\b/i);
+    if (intro) raw = intro[1];
+    const words = raw.split(/\s+/).filter(Boolean);
     const hasBadPunctuation = /[^a-zA-Z\s''-]/.test(raw);
     const COMMANDS = new Set(["RESET", "START", "RESTART", "MENU", "HELP", "DONE", "YES", "NO", "OK", "OKAY", "HI", "HEY", "HELLO", "HOWZIT", "HOLA", "YO", "SUP", "EITA", "SAWUBONA", "YEBO", "STOP", "CANCEL"]);
-    if (!raw || raw.length < 2 || raw.length > 20 || words.length > 3 || hasBadPunctuation || COMMANDS.has(raw.toUpperCase())) {
-      return `Just your first name — what do people call you?`;
+    // Reject pure filler ("my name is" with no name, "I am") so it re-asks instead of
+    // saving "My Name Is" as the client's name.
+    const FILLER = new Set(["my", "name", "names", "is", "i", "im", "am", "it", "its", "this", "the", "a", "an", "call", "me", "they", "so", "well", "yeah", "just"]);
+    const allFiller = words.length > 0 && words.every((w: string) => FILLER.has(w.toLowerCase().replace(/['’.]/g, "")));
+    if (!raw || raw.length < 2 || raw.length > 20 || words.length > 3 || hasBadPunctuation || allFiller || COMMANDS.has(raw.toUpperCase())) {
+      return `Almost — just your first name. What do people call you? 🙂`;
     }
     const name = words.map((w: string) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(" ");
     await db.update(users).set({ name, onboardingState: "ASK_GENDER" }).where(eq(users.phoneNumber, phone));
