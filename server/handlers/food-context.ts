@@ -686,7 +686,10 @@ export async function handleFoodContext(ctx: {
   // is never enough evidence to write to the food log on its own.
   const exactFoodCount = scanForSAFoods(m, { exactOnly: true }).length;
   const directFoodScan = !isQuestion && !isFrustration && !hasLogTrigger && !isFuturePlanning && hasActualFood
-    && m.split(/\s+/).length <= 12
+    // Run-on / voice-note meals over 12 words used to be silently dropped. Allow up to 22 words
+    // when there's strong evidence (3+ distinct exact foods — an incidental mention rarely lists
+    // three), keeping the tight 12-word bound for the 2-food / 1-food+quantity case.
+    && (m.split(/\s+/).length <= 12 || (m.split(/\s+/).length <= 22 && exactFoodCount >= 3))
     && exactFoodCount >= 1
     && (exactFoodCount >= 2 || hasQuantityWord);
   // foodLogOverride: Only bypass the isQuestion guard when the message is a past-eating
@@ -1327,7 +1330,9 @@ export async function handleFoodContext(ctx: {
   // declarative, non-question/non-emotional message also gets one shot at the GPT food
   // extractor — which self-filters non-food via is_food, so we only LOG when GPT confirms food.
   const looksLikeBareFoodStatement = !isFuturePlanning && !isFrustration && !hasSubstantiveQuestion
-    && m.split(/\s+/).filter(Boolean).length <= 12;
+    // Up to 22 words is safe here: the GPT extractor self-filters non-food (only logs when it
+    // confirms is_food), so longer run-on voice-note meals get a shot without false logs.
+    && m.split(/\s+/).filter(Boolean).length <= 22;
   // isFuturePlanning ("going to have 2L water", "I'll have chicken later") must never hit the
   // GPT food extractor — the client hasn't eaten yet, so we'd generate a clarify-food reply
   // for a water-planning or meal-planning message. The water handler already skips these correctly;
