@@ -551,6 +551,32 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return listReply;
   }
 
+  // ---- FUTURE-INTENT WORKOUT GUARD — defer like a coach, don't dump the session ----
+  // "I'll do today's workout tomorrow", "gonna train later", "going to hit the gym tonight"
+  // are PLANS, not requests to see the session now. The Normalizer strips the tense
+  // ("tomorrow" → bare "today's workout"), so without this the sentence matches the view
+  // trigger in early-commands and dumps the full workout — ignoring what the user said.
+  // Test the ORIGINAL pre-normalization message, and require a first-person future verb +
+  // an explicit later-time word, so "tomorrow's session" / "next session" (legit future-view
+  // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter
+  // than isFutureIntent() on purpose — bare "tomorrow" must not swallow "tomorrow's session".
+  const _origWO = originalMBeforeNorm;
+  const _isWorkoutDeferral =
+    !_origWO.includes("?")
+    && /\b(i'?ll|i\s+will|i'?m\s+going\s+to|i\s+am\s+going\s+to|gonna|going\s+to|plann?ing\s+(?:to|on)|plan\s+to)\b/i.test(_origWO)
+    && /\b(workout|work\s*out|train(?:ing)?|session|gym|exercise|programme|program|leg\s+day|chest\s+day|upper\s+body|lower\s+body|push\s+day|pull\s+day)\b/i.test(_origWO)
+    && /\b(tomorrow|later|tonight|this\s+evening|after\s+work|in\s+the\s+morning|next\s+week|2moro|2morrow)\b/i.test(_origWO)
+    && !/\b(done|finished|completed|already\s+did|just\s+did|did\s+my|smashed|crushed)\b/i.test(_origWO);
+  if (_isWorkoutDeferral) {
+    const _woName = user.name?.split(" ")[0] || "";
+    const _laterToday = !/\b(tomorrow|next\s+week|2moro|2morrow)\b/i.test(_origWO);
+    const deferReply = _laterToday
+      ? `${_woName ? _woName + ", n" : "N"}o rush — it'll be right here when you're ready. Just send *workout* and I'll pull up today's session 💪`
+      : `${_woName ? _woName + ", n" : "N"}o stress — rest today, hit it fresh tomorrow 💪\n\nWhen you're ready, send *workout* and your session's ready. Today: protein in, keep moving.`;
+    await logChat(user.id, message, deferReply, "WORKOUT_DEFERRED");
+    return deferReply;
+  }
+
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
   const earlyResult = await handleEarlyCommands({ phone, message, m, user });
   if (earlyResult !== null) return earlyResult;
