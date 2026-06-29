@@ -259,7 +259,13 @@ export function registerPaymentRoutes(app: Express) {
               const { buildDay1Workout } = await import("../programme");
               const day1 = buildDay1Workout(targetUser);
               if (day1) {
-                await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: day1 });
+                // The Day-1 workout now ships as several \n\n---\n\n bubbles and can exceed
+                // Twilio's 1600-char body cap as one message (rejected outright, error 21617 —
+                // the new client's first workout silently never arrived). Send each bubble.
+                for (const part of day1.split(/\n\n---\n\n/)) {
+                  const p = part.trim();
+                  if (p) await twilioC.messages.create({ from: fromNum, to: normalisedPhone, body: p });
+                }
               }
             } catch (e) {
               console.error("[PAYFAST] Day 1 workout delivery error:", e);

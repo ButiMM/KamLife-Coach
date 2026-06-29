@@ -1409,44 +1409,52 @@ function formatGymDay(
 
   const { safeEx, skippedNames } = filterInjuredGymExercises(exercises, injuries);
 
-  let out = `💪 *Week ${week} — ${label}*\n`;
-  out += `_${phaseName} Phase${phase === 5 ? " — Recovery Week" : ""}_\n\n`;
-  out += `⚡ *Warm-up:* 5 min incline walk or light cardio. Then 1 warm-up set (half weight) on your first lift.\n\n`;
-  out += equipNote;
-  out += `📋 *Today's target:* ${wCtx.sets} sets × ${wCtx.reps} reps | Rest ${wCtx.rest} between sets.\n`;
-  out += `_${wCtx.rationale}_\n\n`;
+  // Build the workout as several \n\n---\n\n bubbles instead of one 2000-char block.
+  // WhatsApp collapses long messages behind "Read more", so a single dump reads as a
+  // wall to a beginner. Every send path splits on this separator (interactive via
+  // splitMessage; payment path splits explicitly), so a few human-sized messages land.
+  const SEP = "\n\n---\n\n";
 
+  // Bubble 1 — the brief: what today is, the warm-up, the target. Short on purpose.
+  let header = `💪 *Week ${week} — ${label}*\n`;
+  header += `_${phaseName} Phase${phase === 5 ? " — Recovery Week" : ""}_\n\n`;
+  header += `⚡ *Warm-up:* 5 min incline walk or light cardio. Then 1 warm-up set (half weight) on your first lift.\n\n`;
+  header += equipNote;
+  header += `📋 *Today's target:* ${wCtx.sets} sets × ${wCtx.reps} reps | Rest ${wCtx.rest} between sets.\n`;
+  header += `_${wCtx.rationale}_`;
+
+  // One block per exercise, then grouped ~3 per bubble so no single message is a wall.
+  const exBlocks: string[] = [];
   for (let i = 0; i < safeEx.length; i++) {
     const ex = safeEx[i];
-    const num = i + 1;
     const shortCue = ex.description.split(". ")[0];
     const setsDisplay = getExerciseSets(ex, wCtx.sets, wCtx.reps, phase);
-    out += `${num}. *${ex.name}* — ${setsDisplay}\n`;
-    out += `${shortCue}\n`;
-    if (ex.mistake) {
-      out += `⚠ ${ex.mistake.split(".")[0]}\n`;
-    }
-    if (ex.modification && (isDumbbell || isBeginner)) {
-      out += `_(Alt: ${ex.modification})_\n`;
-    }
+    let block = `${i + 1}. *${ex.name}* — ${setsDisplay}\n${shortCue}`;
+    if (ex.mistake) block += `\n⚠ ${ex.mistake.split(".")[0]}`;
+    if (ex.modification && (isDumbbell || isBeginner)) block += `\n_(Alt: ${ex.modification})_`;
     const ytLink = ex.youtube || getYoutubeLinkForExercise(ex.name);
-    if (ytLink) {
-      out += `📺 ${ytLink}\n`;
-    }
-    out += `\n`;
+    if (ytLink) block += `\n📺 ${ytLink}`;
+    exBlocks.push(block);
+  }
+  const GROUP = 3;
+  const exerciseBubbles: string[] = [];
+  for (let i = 0; i < exBlocks.length; i += GROUP) {
+    exerciseBubbles.push(exBlocks.slice(i, i + GROUP).join("\n\n"));
   }
 
+  // Final bubble — the wrap-up: injury skips, machine hint, DONE, finisher, after-walk.
+  let closer = "";
   if (skippedNames.length > 0) {
-    out += `⚠️ *Skipped (injury):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
+    closer += `⚠️ *Skipped (injury):* ${skippedNames.join(", ")}. These return when you report recovery.\n\n`;
   }
-
   if (showMachineHint) {
-    out += `📸 *Not sure which machine is which?* Snap a photo of any machine and send it to me — I'll tell you if it's the right one for today and exactly how to use it.\n\n`;
+    closer += `📸 *Not sure which machine is which?* Snap a photo of any machine and send it to me — I'll tell you if it's the right one for today and exactly how to use it.\n\n`;
   }
-  out += `Reply *DONE* when finished.\n\n`;
-  out += finisher;
-  out += `\n\n🚶 *After:* 15–20 min walk. No running — this is active recovery, not extra cardio.`;
-  return out;
+  closer += `Reply *DONE* when finished.\n\n`;
+  closer += finisher;
+  closer += `\n\n🚶 *After:* 15–20 min walk. No running — this is active recovery, not extra cardio.`;
+
+  return [header, ...exerciseBubbles, closer].filter(Boolean).join(SEP);
 }
 
 // ============================================================
