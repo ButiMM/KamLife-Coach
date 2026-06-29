@@ -663,7 +663,7 @@ export default function LandingPage() {
           </motion.div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {[
-              { n: "01", title: "WhatsApp Coach K",        body: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in 3 minutes." },
+              { n: "01", title: "WhatsApp Coach K",        body: "Send a message to start. Coach K asks about your goal, body, lifestyle, and budget. No forms. No downloads. Done in a few minutes." },
               { n: "02", title: "Get your programme",      body: "Personalised workout plan — gym, home, or dumbbells. SA meal plan at real SA prices. Everything drops on Day 1." },
               { n: "03", title: "Coach K keeps you going", body: "Daily morning check-ins. Evening nudges. Water reminders. Weekly progress reports. Automatic accountability every single day." },
             ].map(item => (
@@ -862,7 +862,7 @@ export default function LandingPage() {
               <span className="block" style={{ color: ACCENT }}>FOR ONE SESSION.</span>
             </h2>
             <p className="text-white/40 text-lg mb-10 max-w-lg mx-auto">
-              3 questions on WhatsApp. Programme on Day 1. Coaching every day after that.
+              A few quick questions on WhatsApp. Programme on Day 1. Coaching every day after that.
             </p>
             <WaBtn href={WA_LINK} large>Start Coaching on WhatsApp</WaBtn>
             <p className="text-white/18 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
