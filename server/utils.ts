@@ -128,6 +128,24 @@ export function parseMealDate(message: string): Date {
     return new Date(Date.now() - 3 * 3_600_000);
   }
 
+  // "forgot to log dinner" / "missed logging lunch" with no explicit day: decide today vs
+  // yesterday by whether the named meal's time has passed yet. Dinner asked in the morning =
+  // yesterday's dinner; breakfast asked in the afternoon = today's (forgotten earlier today).
+  if (/\b(forgot|missed|didn.?t|did\s*not|never)\b/.test(m)
+      && /\b(log|logs|logg(?:ed|ing)|add|added|adding|track|tracked|tracking|record|recorded|enter|entered|capture)\b/.test(m)
+      && !/\b(today|this\s+morning|this\s+afternoon|this\s+evening|tonight|just\s+now|now)\b/.test(m)) {
+    const mealHour = /\b(breakfast|brekkie|morning)\b/.test(m) ? 8
+      : /\b(lunch|midday|noon)\b/.test(m) ? 13
+      : /\b(dinner|supper|evening|night)\b/.test(m) ? 19
+      : null;
+    if (mealHour !== null) {
+      const base = sastHour < mealHour ? Date.now() - 86_400_000 : Date.now(); // not happened yet today → yesterday
+      const d = new Date(base);
+      d.setUTCHours(Math.max(0, mealHour - 2), 0, 0, 0); // mealHour SAST → UTC
+      return d;
+    }
+  }
+
   return new Date(); // default to now
 }
 
