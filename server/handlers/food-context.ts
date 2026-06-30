@@ -423,7 +423,7 @@ export async function handleFoodContext(ctx: {
 
   // Future / planning / shopping intent — describes intended eating or shopping, NOT food consumed today.
   // Blocks directFoodScan and the main food scanner from firing on these messages.
-  const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i.test(m);
+  const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having)|still\s+to\s+(?:have|eat|grab|get|make|cook)|yet\s+to\s+(?:have|eat|grab|get)|haven.?t\s+(?:had|eaten|eat)|about\s+to\s+(?:have|eat|grab|make|cook|order)|still\s+(?:need|got|have)\s+to\s+(?:eat|have|grab))\b/i.test(m);
 
   // ---- "ATE IT" — confirm a previously planned meal and log it ----
   // Closes the loop on FOOD_PLANNED: "gonna have X for lunch" → [eats] → "ate it" → logged.
@@ -828,7 +828,7 @@ export async function handleFoodContext(ctx: {
   // Without this, GPT chats about the meal and the client believes it was logged —
   // then "dinner same as lunch" copies a stale meal and the coach contradicts itself.
   // Eating-future only: shopping intents ("need to buy") fall through to other handlers.
-  const isFutureEating = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|planning\s+to\s+(?:eat|have|cook)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having))\b/i.test(m);
+  const isFutureEating = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|planning\s+to\s+(?:eat|have|cook)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having)|still\s+to\s+(?:have|eat|grab|get|make|cook)|yet\s+to\s+(?:have|eat|grab|get)|haven.?t\s+(?:had|eaten|eat)|about\s+to\s+(?:have|eat|grab|make|cook|order)|still\s+(?:need|got|have)\s+to\s+(?:eat|have|grab))\b/i.test(m);
   if (isFutureEating && !isQuestion && !isFrustration && hasActualFood) {
     const junkPlanned = foodsInMsg.filter(f => f.category === "junk");
     const plannedNames = foodsInMsg.map(f => f.name).join(", ");
