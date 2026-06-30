@@ -1358,8 +1358,12 @@ export async function handleFoodContext(ctx: {
   // GPT food extractor — the client hasn't eaten yet, so we'd generate a clarify-food reply
   // for a water-planning or meal-planning message. The water handler already skips these correctly;
   // without this guard the GPT path asks "I didn't catch what food that was."
+  // bareMealTimeReference: "had breakfast" / "lunch" / "just had my dinner" — a meal-TIME word
+  // with no actual food. The GPT extractor would FABRICATE a specific meal (e.g. "McDonald's Big
+  // Breakfast") from it. Don't call it — let the coach ask what they actually ate.
+  const bareMealTimeReference = /^(?:i\s+)?(?:just\s+)?(?:had|have|having|ate|eating|did|done|for|my)?\s*(?:my\s+|some\s+|a\s+|the\s+)?(?:big\s+|small\s+|nice\s+|quick\s+|light\s+|heavy\s+|huge\s+|large\s+|good\s+|proper\s+|full\s+|lekker\s+)?(?:breakfast|lunch|dinner|supper|brunch|meal|food|brekkie|brekkies)\b[.!?]*$/i.test(m.trim());
   const tryGptFood = !isQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
-    && !isFuturePlanning
+    && !isFuturePlanning && !bareMealTimeReference
     && (hasStrongFoodTrigger || looksLikeBareFoodStatement);
   if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);
