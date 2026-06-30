@@ -1259,7 +1259,7 @@ export async function handleFoodContext(ctx: {
         junkNoteText, hasGoodProteins: goodProteins.length > 0,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
         coachNoteOverride: denseFoodCoachNote,
-        user, todaySteps: todayStepCount,
+        user, todaySteps: todayStepCount, userMessage: message,
       });
 
       const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
@@ -1321,7 +1321,7 @@ export async function handleFoodContext(ctx: {
         const fallbackReply = buildFoodLogReply({
           foodLines, mealLabel: fbIsDessert ? "Dessert" : fbIsSnack ? "Snack" : "Meal total",
           totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
-          runningCals, runningProtein, calorieTarget, proteinTarget, prevCals: fbPrevCals,
+          runningCals, runningProtein, calorieTarget, proteinTarget, prevCals: fbPrevCals, userMessage: message,
           coachNoteOverride: gptFallbackResult.coachNote || undefined,
           hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
           hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),
@@ -1396,7 +1396,7 @@ export async function handleFoodContext(ctx: {
         foodLines, mealLabel: fb2IsDessert ? "Dessert" : fb2IsSnack ? "Snack" : "Meal total",
         totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
         runningCals, runningProtein, calorieTarget, proteinTarget: user.proteinTarget || 120,
-        prevCals: fb2PrevCals,
+        prevCals: fb2PrevCals, userMessage: message,
         coachNoteOverride: gptFallbackResult.coachNote || undefined,
         hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
         hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),

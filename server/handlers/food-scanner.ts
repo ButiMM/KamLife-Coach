@@ -552,6 +552,7 @@ export function buildFoodLogReply(p: {
   coachNoteOverride?: string;
   user: any;
   todaySteps?: number;
+  userMessage?: string;
 }): string {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
@@ -845,8 +846,15 @@ export function buildFoodLogReply(p: {
     overBy: effectiveRemaining < 0 ? Math.abs(effectiveRemaining) : 0,
   });
 
+  // Body-image distress ("i feel so fat", "i look gross") next to a macro printout and a chirpy
+  // "you're crushing it" note reads as cold. Detect it, suppress the reinforcement, and lead with
+  // one grounded line that acknowledges the feeling. ("so much fat" = dietary, not self — excluded.)
+  const bodyImageDistress = !!(p.userMessage && (
+    /\b(?:feel|feeling|look|looking|i'?m|i\s+am)\b[\sa-z]{0,15}\b(?:fat|gross|disgusting|ugly|horrible|bloated)\b/i.test(p.userMessage)
+    || /\bhate\s+(?:my body|how i look|myself)\b/i.test(p.userMessage)
+  ));
   let variableReinforcement = "";
-  if (!eduNote && Math.random() < 0.18) {
+  if (!bodyImageDistress && !eduNote && Math.random() < 0.18) {
     const fn = (user.name || "").split(" ")[0] || "Sharp";
     const daysSinceStart = user.programmeStartDate
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000)
@@ -868,6 +876,9 @@ export function buildFoodLogReply(p: {
     ];
     variableReinforcement = pick(NOTES);
   }
+  const gentlePrefix = bodyImageDistress
+    ? `💚 _${(user.name || "").split(" ")[0] || "Hey"} — one rough day with your reflection doesn't undo the work. You still logged a proper meal, and that's what actually moves things._\n\n`
+    : "";
 
   const sastNow = new Date(Date.now() + 2 * 3_600_000);
   const sastHour = sastNow.getUTCHours();
@@ -889,5 +900,5 @@ export function buildFoodLogReply(p: {
     _lowCalWarnedToday.set(warnKey, todayKey);
   }
 
-  return `*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
+  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
 }
