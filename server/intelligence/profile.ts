@@ -379,3 +379,31 @@ export async function getClientNarrative(userId: string): Promise<string | null>
     return null;
   }
 }
+
+// ── Client-facing "what I've learned about you" — the un-copyable personalisation,
+// surfaced TO the client (second person, warm) so they feel what a saved plan can never know.
+export async function getClientFacingInsight(userId: string, firstName: string): Promise<string | null> {
+  try {
+    const [p] = await db.select().from(clientIntelligenceProfiles)
+      .where(eq(clientIntelligenceProfiles.userId, userId)).limit(1);
+    if (!p) return null;
+    const you = firstName || "there";
+    const lines: string[] = [];
+    const kg = p.totalKgChanged != null ? parseFloat(String(p.totalKgChanged)) : null;
+    if (kg != null && kg < -0.5 && p.startWeightKg != null) {
+      lines.push(`📉 *${Math.abs(kg).toFixed(1)}kg down* from your starting ${parseFloat(String(p.startWeightKg))}kg.`);
+    }
+    if ((p.longestWorkoutStreak ?? 0) >= 3) lines.push(`🔥 Best training streak: *${p.longestWorkoutStreak} sessions* without missing.`);
+    if ((p.bestWeekAvgProteinG ?? 0) > 0) lines.push(`💪 Best protein week: *${p.bestWeekAvgProteinG}g/day* average.`);
+    if ((p.lifetimeFoodLogDays ?? 0) >= 14) lines.push(`📓 You've logged *${p.lifetimeFoodLogDays} days* of food — that consistency is the whole reason this works.`);
+    if (p.weakestDow != null) lines.push(`👀 *${DOW_NAMES[p.weakestDow]}s* are where you tend to slip — that's the day we protect.`);
+    if (p.peakEngagementHour != null) {
+      const h = p.peakEngagementHour;
+      const label = h < 12 ? `${h}am` : h === 12 ? "12pm" : `${h - 12}pm`;
+      lines.push(`⏰ You're most locked-in around *${label}* — so that's when I reach you.`);
+    }
+    if ((p.plateauCount ?? 0) >= 1) lines.push(`📊 We've pushed through *${p.plateauCount} plateau${p.plateauCount === 1 ? "" : "s"}* together — exactly where most people quit.`);
+    if (lines.length < 2) return null; // not enough learned yet — say nothing rather than something thin
+    return `🧠 *What I've learned about you, ${you}:*\n\n${lines.join("\n")}\n\n_None of this is in a meal plan. It's weeks of watching only *you* — and it's why a saved plan can't replace what we're building._`;
+  } catch { return null; }
+}

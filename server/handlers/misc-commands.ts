@@ -50,6 +50,14 @@ export async function handleMiscCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
+  // "What have you learned about me?" — surface the un-copyable personal intelligence so the
+  // client feels what a saved/stolen plan can never know about them (#3 retention).
+  if (/\bwhat (?:have you|did you|do you|d.?you) (?:learn(?:ed|t)?|notic\w*|figured?\s*out)(?:\s+about\s+me)?\b|\bwhat do you know about me\b|\b(?:my profile|tell me about myself)\b/i.test(m)) {
+    const { getClientFacingInsight } = await import("../intelligence/profile");
+    const insight = await getClientFacingInsight(user.id, (user.name || "").split(" ")[0] || "");
+    return insight || `Still learning you — a couple more weeks of logs and I'll show you exactly what I see. The more you log, the sharper I get on *you* specifically.`;
+  }
+
   // ---- WEEK 9 PATH CHOICE ----
   if (user.awaitingInputType === "week9_choice") {
     const isMaintenance = /^1$|^maintenance$/i.test(m.trim());
