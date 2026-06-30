@@ -634,7 +634,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   };
   const calExplainer = goalCalExplainer[defaultGoal] || goalCalExplainer.fat_loss;
 
-  const msg1 = `${name}, your programme is built.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
+  const msg1 = `${name}, your programme is built — and it stays *alive*. Your numbers adjust every week as your body changes; this isn't a plan you download once, it's a coach that keeps up with you.\n\n${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;

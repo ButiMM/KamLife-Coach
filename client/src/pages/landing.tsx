@@ -149,7 +149,7 @@ export default function LandingPage() {
 
             <p className="text-lg text-white/55 max-w-lg leading-relaxed mb-10">
               A whole month of daily coaching costs less than a single PT session.
-              Knows pap, pilchards, braai, and KFC by name. Programme on Day 1, calories adjusted every week.
+              Knows pap, pilchards, braai, and KFC by name. Not a plan you download — a coach that re-tunes your numbers every week as your body changes.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 mb-3">
