@@ -672,8 +672,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         .from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, stepDayStart), lt(stepLogs.loggedAt, stepDayEnd)))
         .limit(1);
+      // Allow a downward CORRECTION ("8000 steps not 50000", "wrong, 6k steps") to overwrite the
+      // day's count. Normally we keep only the HIGHER number (clients re-log a growing daily
+      // total), but an explicit correction must win in either direction. For "X not Y", X is the
+      // affirmed value — pull it out so the position of "steps" in the sentence doesn't matter.
+      const stepNotMatch = m.match(/\b([\d,]+)(\s*k)?\s*(?:steps?|staps?)?\s+not\s+[\d,]+/i);
+      if (stepNotMatch) {
+        const corrected = Math.round(parseFloat(stepNotMatch[1].replace(/,/g, "")) * (stepNotMatch[2] ? 1000 : 1));
+        if (corrected > 100 && corrected < 100000) steps = corrected;
+      }
+      const isStepCorrection = !!stepNotMatch
+        || /\b(wrong|actually|correction|i\s+meant|meant|should\s+be|mistake|typo|miscount|oops|my\s+bad)\b/i.test(m);
       if (existingStep.length > 0) {
-        if (steps > (existingStep[0].steps ?? 0)) {
+        if (steps > (existingStep[0].steps ?? 0) || isStepCorrection) {
           await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existingStep[0].id));
         }
       } else {
@@ -696,7 +707,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       void stepGoalCtx; // used by getStepResponse via user.goalType
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
-      stepReplyPart = stepReply + stepRetroNote + (perfectDay || "");
+      stepReplyPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
 
       // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too
       const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
