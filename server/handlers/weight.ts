@@ -399,7 +399,7 @@ export async function handleWeightLog(
   const calChanged = Math.abs(finalCals - prevCals) > 20 || Math.abs(finalProtein - prevProtein) > 2;
   const adjustNote = calAdjust !== 0 ? ` (${calAdjust > 0 ? "+" : ""}${calAdjust} kcal — ${trendStatus.replace(/[✅⚠️🚨]/g, "").trim()})` : "";
   const targetsLine = calChanged
-    ? `\n\n*Targets updated: ${finalCals} kcal/day | ${finalProtein}g protein.*${adjustNote}`
+    ? `\n\n*Targets updated: ${finalCals} kcal/day | ${finalProtein}g protein.*${adjustNote}\n\n_These replace your old numbers — your body changed, so the plan changed with it. A saved plan goes stale within a week; keeping it current is the actual work._`
     : `\n\nTargets: ${finalCals} kcal/day | ${finalProtein}g protein.`;
 
   // ── Trend line (only when we have recent data) ──
