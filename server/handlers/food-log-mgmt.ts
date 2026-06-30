@@ -11,6 +11,25 @@ import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scan
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 
+  // ---- CONFIRM-GATE for "reset today's food" — wiping the whole day now asks first ----
+  if (user.awaitingInputType === "food_reset_confirm") {
+    await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, user.id));
+    if (/^(yes|yep|yeah|confirm|wipe|do it|clear it|reset|yes wipe)\b/i.test(m.trim())) {
+      invalidateFoodTotalsCache(user.id);
+      const resetStart = sastDayStart();
+      await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+      await Promise.all([
+        db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, resetStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
+        db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, resetStart))).catch(e => console.warn("[non-fatal] clear chat food log:", e)),
+      ]);
+      return `Done — today's food log is wiped, counter back to 0. Tell me what you ate to start fresh.`;
+    }
+    if (/^(no|nope|cancel|keep|stop|don.?t|nvm|nevermind|never mind)\b/i.test(m.trim())) {
+      return `Kept your meals. 👍 Nothing was deleted.`;
+    }
+    return null; // not a confirm/cancel — reset cancelled (flag cleared), process the message normally
+  }
+
   // ---- INGREDIENT NEGATION — "toast has no butter", "there's no oil", "without mayo" ----
   // Catches negative corrections of assumed/hallucinated ingredients BEFORE the food scanner
   // can re-log them as new food entries. Must run before the hasMgmtKeyword quick-exit.
@@ -107,14 +126,16 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // All real food-clear intents are already covered by the food-specific patterns below.
   if (/\b(reset.*calori|clear.*food|clear.*log|clear.*calori|start.*fresh|reset.*food|reset.*log|wipe.*food|wipe.*log|remove.*meals?\s*today|delete.*meals?\s*today|remove.*today.*meals?|clear.*meals?\s*today)\b/i.test(m) &&
       !/\b(last|previous)\s+(meal|entry|one|log)\b/i.test(m)) {
-    invalidateFoodTotalsCache(user.id);
-    await db.update(users).set({ todayCalories: 0, todayProteinG: 0, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    // Confirm before wiping the whole day — this used to delete everything instantly on a
+    // phrase like "start fresh", with no undo. Ask first; the confirm-gate above does the wipe.
     const todayStart = sastDayStart();
-    await Promise.all([
-      db.delete(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart))).catch(e => console.warn("[non-fatal] clear meal_logs:", e)),
-      db.delete(chatHistory).where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "FOOD_LOG"), gte(chatHistory.createdAt, todayStart))).catch(e => console.warn("[non-fatal] clear chat food log:", e)),
-    ]);
-    return `Food log cleared for today. ✅\n\nAll entries wiped — counter is at 0. Start fresh: tell me what you ate.`;
+    const todayMeals = await db.select({ id: mealLogs.id }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)));
+    if (todayMeals.length === 0) {
+      return `Nothing logged today yet — nothing to clear. Just tell me what you ate.`;
+    }
+    await db.update(users).set({ awaitingInputType: "food_reset_confirm" }).where(eq(users.id, user.id));
+    return `That wipes *all ${todayMeals.length} of today's ${todayMeals.length === 1 ? "meal" : "meals"}* and resets your counter to 0 — it can't be undone. Reply *yes wipe* to confirm, or anything else to keep them.`;
   }
 
   // ---- REMOVE MEAL BY TIME LABEL — "remove breakfast meal", "delete my lunch" ----
