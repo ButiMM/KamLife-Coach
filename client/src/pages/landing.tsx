@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import {
@@ -73,80 +73,132 @@ function TypingDots() {
   );
 }
 
-// Animated hero chat — the phone "plays" a live conversation on a loop so prospects SEE it:
-// Coach K types → sends a lunch idea → the client replies with a VOICE NOTE (live waveform) →
-// Coach K types → logs it with macro bars that fill. Then it holds and loops.
+// Animated hero chat — the phone "plays" a full day of coaching on a loop so prospects SEE it:
+// Coach K messages → client logs food by VOICE (live waveform) → macros fill → logs a workout →
+// streak reply → logs steps → the plan auto-adjusts off the week's weight loss. The chat scrolls
+// as it plays (like real WhatsApp) so the whole conversation fits, then holds and loops.
 function HeroChat() {
   const [step, setStep] = useState(1);
+  const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const holds = [1000, 1500, 1900, 900, 2000, 3400]; // ms each step holds; step 6 = long hold, then loop
+    const holds = [900, 1400, 1700, 900, 1900, 1500, 900, 1800, 1500, 900, 4200]; // ms per step; step 11 holds, then loops
     let i = 1;
     let timer: ReturnType<typeof setTimeout>;
     const advance = () => {
-      i = i >= 6 ? 1 : i + 1;
+      i = i >= 11 ? 1 : i + 1;
       setStep(i);
       timer = setTimeout(advance, holds[i - 1]);
     };
     timer = setTimeout(advance, holds[0]);
     return () => clearTimeout(timer);
   }, []);
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+  }, [step]);
 
   const enter = {
     initial: { opacity: 0, y: 10, scale: 0.95 },
     animate: { opacity: 1, y: 0, scale: 1 },
-    exit: { opacity: 0, scale: 0.95, transition: { duration: 0.25 } },
+    exit: { opacity: 0, scale: 0.95, transition: { duration: 0.2 } },
     transition: { duration: 0.35, ease: "easeOut" },
   };
+  const IN = { background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" };
+  const OUT = { background: "#D9FDD3", borderRadius: "8px 8px 2px 8px" };
 
   return (
-    <div className="px-3 py-3 space-y-2" style={{ background: "#EFEAE2", minHeight: "292px" }}>
-      <div className="flex justify-center mb-1">
-        <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
+    <>
+      <style>{`.hero-chat-scroll::-webkit-scrollbar{display:none}`}</style>
+      <div ref={scrollRef} className="hero-chat-scroll px-3 py-3 space-y-2"
+        style={{ background: "#EFEAE2", height: "292px", overflowY: "auto", scrollbarWidth: "none" }}>
+        <div className="flex justify-center mb-1">
+          <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
+        </div>
+        <AnimatePresence>
+          {step === 1 && <motion.div key="t1" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 2 && (
+            <motion.div key="m1" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
+                <p className="text-[11.5px] font-semibold leading-relaxed mt-0.5" style={{ color: "#111B21" }}>Pap + spinach + 2 eggs = 420 cal</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>09:02</span>
+              </div>
+            </motion.div>
+          )}
+          {step >= 3 && (
+            <motion.div key="voice" {...enter} className="flex justify-end">
+              <div style={OUT} className="px-2.5 py-2 max-w-[82%] shadow-sm flex items-center gap-2">
+                <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
+                  <svg viewBox="0 0 24 24" className="w-3 h-3" fill="#fff"><path d="M8 5v14l11-7z" /></svg>
+                </div>
+                <div className="flex items-center gap-[2px]" style={{ height: "16px" }}>
+                  {[7, 11, 15, 9, 13, 7, 14, 10, 12, 6, 11, 8, 13].map((h, i) => (
+                    <motion.span key={i} animate={{ scaleY: [0.35, 1, 0.35] }}
+                      transition={{ duration: 0.85, repeat: Infinity, delay: i * 0.06, ease: "easeInOut" }}
+                      style={{ display: "block", width: "2px", height: `${h}px`, background: "#25D366", borderRadius: "1px", transformOrigin: "center" }} />
+                  ))}
+                </div>
+                <span className="text-[9px] shrink-0" style={{ color: "#667781" }}>0:04</span>
+              </div>
+            </motion.div>
+          )}
+          {step === 4 && <motion.div key="t2" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 5 && (
+            <motion.div key="m2" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-2 max-w-[88%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
+                <div className="mt-2 space-y-1">
+                  <MacroBar label="Protein" val={98} max={140} />
+                  <MacroBar label="Carbs" val={142} max={220} />
+                  <MacroBar label="Fat" val={41} max={70} />
+                </div>
+                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>09:15</span>
+              </div>
+            </motion.div>
+          )}
+          {step >= 6 && (
+            <motion.div key="m3" {...enter} className="flex justify-end">
+              <div style={OUT} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Just smashed legs 🦵</p>
+                <span className="flex items-center justify-end gap-1 mt-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>17:40</span>
+                  <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
+                </span>
+              </div>
+            </motion.div>
+          )}
+          {step === 7 && <motion.div key="t3" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 8 && (
+            <motion.div key="m4" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-1.5 max-w-[86%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Logged 💪 That's <span className="font-semibold">12 days straight</span> — most people quit before this. 🔥</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>17:41</span>
+              </div>
+            </motion.div>
+          )}
+          {step >= 9 && (
+            <motion.div key="m5" {...enter} className="flex justify-end">
+              <div style={OUT} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>8,500 steps done 👟</p>
+                <span className="flex items-center justify-end gap-1 mt-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>20:10</span>
+                  <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
+                </span>
+              </div>
+            </motion.div>
+          )}
+          {step === 10 && <motion.div key="t4" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 11 && (
+            <motion.div key="m6" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-2 max-w-[88%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>📉 You're down <span className="font-semibold">1.2kg this week</span>. I've bumped your target to 2,250 cal to keep it moving — your old numbers are already out of date.</p>
+                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>20:11</span>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      <AnimatePresence>
-        {step === 1 && <motion.div key="t1" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
-        {step >= 2 && (
-          <motion.div key="m1" {...enter} className="flex justify-start">
-            <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
-              <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
-              <p className="text-[11.5px] font-semibold leading-relaxed mt-0.5" style={{ color: "#111B21" }}>Pap + spinach + 2 eggs = 420 cal</p>
-              <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>09:02</span>
-            </div>
-          </motion.div>
-        )}
-        {step >= 3 && (
-          <motion.div key="voice" {...enter} className="flex justify-end">
-            <div style={{ background: "#D9FDD3", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-2 max-w-[82%] shadow-sm flex items-center gap-2">
-              <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
-                <svg viewBox="0 0 24 24" className="w-3 h-3" fill="#fff"><path d="M8 5v14l11-7z" /></svg>
-              </div>
-              <div className="flex items-center gap-[2px]" style={{ height: "16px" }}>
-                {[7, 11, 15, 9, 13, 7, 14, 10, 12, 6, 11, 8, 13].map((h, i) => (
-                  <motion.span key={i} animate={{ scaleY: [0.35, 1, 0.35] }}
-                    transition={{ duration: 0.85, repeat: Infinity, delay: i * 0.06, ease: "easeInOut" }}
-                    style={{ display: "block", width: "2px", height: `${h}px`, background: "#25D366", borderRadius: "1px", transformOrigin: "center" }} />
-                ))}
-              </div>
-              <span className="text-[9px] shrink-0" style={{ color: "#667781" }}>0:04</span>
-            </div>
-          </motion.div>
-        )}
-        {step === 4 && <motion.div key="t2" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
-        {step >= 5 && (
-          <motion.div key="m2" {...enter} className="flex justify-start">
-            <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
-              <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
-              <div className="mt-2 space-y-1">
-                <MacroBar label="Protein" val={98} max={140} />
-                <MacroBar label="Carbs" val={142} max={220} />
-                <MacroBar label="Fat" val={41} max={70} />
-              </div>
-              <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>09:15</span>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
+    </>
   );
 }
 
