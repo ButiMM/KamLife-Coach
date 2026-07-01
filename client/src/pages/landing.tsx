@@ -81,11 +81,11 @@ function HeroChat() {
   const [step, setStep] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const holds = [900, 1400, 1700, 900, 1900, 1500, 900, 1800, 1500, 900, 4200]; // ms per step; step 11 holds, then loops
+    const holds = [900, 1400, 1700, 900, 1900, 1400, 900, 1700, 1400, 900, 1700, 1400, 900, 4200]; // ms per step; step 14 holds, then loops
     let i = 1;
     let timer: ReturnType<typeof setTimeout>;
     const advance = () => {
-      i = i >= 11 ? 1 : i + 1;
+      i = i >= 14 ? 1 : i + 1;
       setStep(i);
       timer = setTimeout(advance, holds[i - 1]);
     };
@@ -110,7 +110,7 @@ function HeroChat() {
     <>
       <style>{`.hero-chat-scroll::-webkit-scrollbar{display:none}`}</style>
       <div ref={scrollRef} className="hero-chat-scroll px-3 py-3 space-y-2"
-        style={{ background: "#EFEAE2", height: "292px", overflowY: "auto", scrollbarWidth: "none" }}>
+        style={{ background: "#EFEAE2", height: "446px", overflowY: "auto", scrollbarWidth: "none" }}>
         <div className="flex justify-center mb-1">
           <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
         </div>
@@ -157,11 +157,13 @@ function HeroChat() {
             </motion.div>
           )}
           {step >= 6 && (
-            <motion.div key="m3" {...enter} className="flex justify-end">
-              <div style={OUT} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Just smashed legs 🦵</p>
-                <span className="flex items-center justify-end gap-1 mt-0.5">
-                  <span className="text-[9px]" style={{ color: "#667781" }}>17:40</span>
+            <motion.div key="p1" {...enter} className="flex justify-end">
+              <div style={OUT} className="p-1 shadow-sm">
+                <div style={{ width: "134px", height: "96px", borderRadius: "6px", background: "linear-gradient(135deg,#EBD9AC 0%,#C99A5B 55%,#7d4f26 100%)" }} className="flex items-center justify-center">
+                  <span style={{ fontSize: "40px" }}>🍛</span>
+                </div>
+                <span className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>19:20</span>
                   <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
                 </span>
               </div>
@@ -169,19 +171,21 @@ function HeroChat() {
           )}
           {step === 7 && <motion.div key="t3" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
           {step >= 8 && (
-            <motion.div key="m4" {...enter} className="flex justify-start">
+            <motion.div key="m3" {...enter} className="flex justify-start">
               <div style={IN} className="px-2.5 py-1.5 max-w-[86%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Logged 💪 That's <span className="font-semibold">12 days straight</span> — most people quit before this. 🔥</p>
-                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>17:41</span>
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>That's chicken curry &amp; rice — ~620 cal, 38g protein. Logged 🍛</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>19:20</span>
               </div>
             </motion.div>
           )}
           {step >= 9 && (
-            <motion.div key="m5" {...enter} className="flex justify-end">
-              <div style={OUT} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>8,500 steps done 👟</p>
-                <span className="flex items-center justify-end gap-1 mt-0.5">
-                  <span className="text-[9px]" style={{ color: "#667781" }}>20:10</span>
+            <motion.div key="p2" {...enter} className="flex justify-end">
+              <div style={OUT} className="p-1 shadow-sm">
+                <div style={{ width: "134px", height: "96px", borderRadius: "6px", background: "linear-gradient(135deg,#4b515b 0%,#2a2e35 60%,#181b20 100%)" }} className="flex items-center justify-center">
+                  <Dumbbell className="w-9 h-9" style={{ color: "rgba(255,255,255,0.9)" }} />
+                </div>
+                <span className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>17:32</span>
                   <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
                 </span>
               </div>
@@ -189,10 +193,30 @@ function HeroChat() {
           )}
           {step === 10 && <motion.div key="t4" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
           {step >= 11 && (
+            <motion.div key="m4" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-1.5 max-w-[88%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>That's the leg press 🦵 Right one for today — feet shoulder-width, don't lock your knees. 3 × 12.</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>17:33</span>
+              </div>
+            </motion.div>
+          )}
+          {step >= 12 && (
+            <motion.div key="m5" {...enter} className="flex justify-end">
+              <div style={OUT} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Done 💪</p>
+                <span className="flex items-center justify-end gap-1 mt-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>18:05</span>
+                  <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
+                </span>
+              </div>
+            </motion.div>
+          )}
+          {step === 13 && <motion.div key="t5" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 14 && (
             <motion.div key="m6" {...enter} className="flex justify-start">
               <div style={IN} className="px-2.5 py-2 max-w-[88%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>📉 You're down <span className="font-semibold">1.2kg this week</span>. I've bumped your target to 2,250 cal to keep it moving — your old numbers are already out of date.</p>
-                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>20:11</span>
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Logged 🔥 <span className="font-semibold">12 days straight</span> — and you're down <span className="font-semibold">1.2kg this week</span>. Bumping your target to 2,250 cal to keep it moving.</p>
+                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>18:06</span>
               </div>
             </motion.div>
           )}
@@ -328,9 +352,9 @@ export default function LandingPage() {
             <div className="absolute pointer-events-none" style={{ left: "50%", top: "50%", transform: "translate(-50%,-50%)", width: "520px", height: "740px", background: "radial-gradient(ellipse 55% 50% at 50% 45%, rgba(249,115,22,0.24) 0%, rgba(19,34,77,0.34) 46%, transparent 72%)", filter: "blur(44px)", zIndex: 0 }} />
 
             {/* ── Phone device — scaled up for a big, premium presence (Pelicart-style large device) ── */}
-            <div className="relative" style={{ width: "302px", zIndex: 10, transform: "scale(1.28)", transformOrigin: "center" }}>
+            <div className="relative" style={{ width: "302px", zIndex: 10, transform: "scale(1.1)", transformOrigin: "center" }}>
               {/* Floating stats card — top right (bigger numbers = proof, Pelicart insight #4) */}
-              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", top: "52px", right: "-42px", zIndex: 30 }}
+              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", top: "16px", right: "-64px", zIndex: 30 }}
                 className="px-3.5 py-2.5 shadow-2xl">
                 <div className="text-[9px] font-bold uppercase tracking-wider text-white/35 mb-0.5">Today's intake</div>
                 <div className="text-xl font-black text-white leading-none">1,267<span className="text-[11px] font-medium text-white/35"> / 2,200</span></div>
@@ -341,7 +365,7 @@ export default function LandingPage() {
               </div>
 
               {/* Floating progress card — shows the OUTPUT of coaching, not just the process (Pelicart insight #2) */}
-              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", bottom: "64px", left: "-46px", zIndex: 30 }}
+              <div style={{ background: CARD, border: `1px solid ${BORDER}`, borderRadius: "15px", position: "absolute", bottom: "20px", left: "-64px", zIndex: 30 }}
                 className="px-3.5 py-2.5 shadow-2xl">
                 <div className="text-[9px] font-bold uppercase tracking-wider text-white/35 mb-0.5">This week</div>
                 <div className="flex items-baseline gap-1">
