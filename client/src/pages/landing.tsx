@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { motion } from "framer-motion";
+import { useState, useEffect } from "react";
+import { motion, AnimatePresence } from "framer-motion";
 import { useQuery } from "@tanstack/react-query";
 import {
   Mic, Camera, Keyboard, Plus, Minus, CheckCircle,
@@ -53,9 +53,99 @@ function MacroBar({ label, val, max }: { label: string; val: number; max: number
     <div className="flex items-center gap-1.5">
       <span className="text-[8.5px] w-9 shrink-0" style={{ color: "#667781" }}>{label}</span>
       <div className="flex-1 h-1 rounded-full overflow-hidden" style={{ background: "#E9EDEF" }}>
-        <div className="h-1 rounded-full" style={{ width: `${Math.min(100, (val / max) * 100)}%`, background: ACCENT }} />
+        <motion.div className="h-1 rounded-full" initial={{ width: "0%" }} animate={{ width: `${Math.min(100, (val / max) * 100)}%` }} transition={{ duration: 0.8, ease: "easeOut", delay: 0.2 }} style={{ background: ACCENT }} />
       </div>
       <span className="text-[8.5px] w-7 text-right shrink-0" style={{ color: "#111B21" }}>{val}g</span>
+    </div>
+  );
+}
+
+// WhatsApp typing indicator (three bouncing dots)
+function TypingDots() {
+  return (
+    <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-3 py-2 shadow-sm flex items-center gap-1">
+      {[0, 1, 2].map((i) => (
+        <motion.span key={i} animate={{ opacity: [0.3, 1, 0.3], y: [0, -2, 0] }}
+          transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+          style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#8696A0", display: "block" }} />
+      ))}
+    </div>
+  );
+}
+
+// Animated hero chat — the phone "plays" a live conversation on a loop so prospects SEE it:
+// Coach K types → sends a lunch idea → the client replies with a VOICE NOTE (live waveform) →
+// Coach K types → logs it with macro bars that fill. Then it holds and loops.
+function HeroChat() {
+  const [step, setStep] = useState(1);
+  useEffect(() => {
+    const holds = [1000, 1500, 1900, 900, 2000, 3400]; // ms each step holds; step 6 = long hold, then loop
+    let i = 1;
+    let timer: ReturnType<typeof setTimeout>;
+    const advance = () => {
+      i = i >= 6 ? 1 : i + 1;
+      setStep(i);
+      timer = setTimeout(advance, holds[i - 1]);
+    };
+    timer = setTimeout(advance, holds[0]);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const enter = {
+    initial: { opacity: 0, y: 10, scale: 0.95 },
+    animate: { opacity: 1, y: 0, scale: 1 },
+    exit: { opacity: 0, scale: 0.95, transition: { duration: 0.25 } },
+    transition: { duration: 0.35, ease: "easeOut" },
+  };
+
+  return (
+    <div className="px-3 py-3 space-y-2" style={{ background: "#EFEAE2", minHeight: "292px" }}>
+      <div className="flex justify-center mb-1">
+        <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
+      </div>
+      <AnimatePresence>
+        {step === 1 && <motion.div key="t1" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+        {step >= 2 && (
+          <motion.div key="m1" {...enter} className="flex justify-start">
+            <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
+              <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
+              <p className="text-[11.5px] font-semibold leading-relaxed mt-0.5" style={{ color: "#111B21" }}>Pap + spinach + 2 eggs = 420 cal</p>
+              <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>09:02</span>
+            </div>
+          </motion.div>
+        )}
+        {step >= 3 && (
+          <motion.div key="voice" {...enter} className="flex justify-end">
+            <div style={{ background: "#D9FDD3", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-2 max-w-[82%] shadow-sm flex items-center gap-2">
+              <div className="w-6 h-6 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
+                <svg viewBox="0 0 24 24" className="w-3 h-3" fill="#fff"><path d="M8 5v14l11-7z" /></svg>
+              </div>
+              <div className="flex items-center gap-[2px]" style={{ height: "16px" }}>
+                {[7, 11, 15, 9, 13, 7, 14, 10, 12, 6, 11, 8, 13].map((h, i) => (
+                  <motion.span key={i} animate={{ scaleY: [0.35, 1, 0.35] }}
+                    transition={{ duration: 0.85, repeat: Infinity, delay: i * 0.06, ease: "easeInOut" }}
+                    style={{ display: "block", width: "2px", height: `${h}px`, background: "#25D366", borderRadius: "1px", transformOrigin: "center" }} />
+                ))}
+              </div>
+              <span className="text-[9px] shrink-0" style={{ color: "#667781" }}>0:04</span>
+            </div>
+          </motion.div>
+        )}
+        {step === 4 && <motion.div key="t2" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+        {step >= 5 && (
+          <motion.div key="m2" {...enter} className="flex justify-start">
+            <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
+              <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
+              <div className="mt-2 space-y-1">
+                <MacroBar label="Protein" val={98} max={140} />
+                <MacroBar label="Carbs" val={142} max={220} />
+                <MacroBar label="Fat" val={41} max={70} />
+              </div>
+              <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>09:15</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
@@ -256,43 +346,8 @@ export default function LandingPage() {
                     <Phone className="w-4 h-4 shrink-0" style={{ color: "#54656F" }} />
                   </div>
 
-                  {/* Chat body (light — WhatsApp beige wallpaper) */}
-                  <div className="px-3 py-3 space-y-2" style={{ background: "#EFEAE2", minHeight: "292px" }}>
-                    {/* date pill */}
-                    <div className="flex justify-center mb-1">
-                      <span className="text-[9px] px-2.5 py-0.5 rounded-md shadow-sm" style={{ background: "#FFFFFF", color: "#54656F" }}>TODAY</span>
-                    </div>
-                    {/* incoming */}
-                    <div className="flex justify-start">
-                      <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-1.5 max-w-[82%] shadow-sm">
-                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Morning Thabo! You're at 847 cal so far. Lunch idea:</p>
-                        <p className="text-[11.5px] font-semibold leading-relaxed mt-0.5" style={{ color: "#111B21" }}>Pap + spinach + 2 eggs = 420 cal</p>
-                        <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>09:02</span>
-                      </div>
-                    </div>
-                    {/* outgoing */}
-                    <div className="flex justify-end">
-                      <div style={{ background: "#D9FDD3", borderRadius: "8px 8px 2px 8px" }} className="px-2.5 py-1.5 max-w-[80%] shadow-sm">
-                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Had the pap, added pilchards instead</p>
-                        <span className="flex items-center justify-end gap-1 mt-0.5">
-                          <span className="text-[9px]" style={{ color: "#667781" }}>09:14</span>
-                          <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
-                        </span>
-                      </div>
-                    </div>
-                    {/* incoming — macro card: shows the OUTPUT with real numbers (Pelicart insight #4) */}
-                    <div className="flex justify-start">
-                      <div style={{ background: "#FFFFFF", borderRadius: "8px 8px 8px 2px" }} className="px-2.5 py-2 max-w-[88%] shadow-sm">
-                        <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Even better — pilchards = 35g protein 💪 Logged 420 cal.</p>
-                        <div className="mt-2 space-y-1">
-                          <MacroBar label="Protein" val={98} max={140} />
-                          <MacroBar label="Carbs" val={142} max={220} />
-                          <MacroBar label="Fat" val={41} max={70} />
-                        </div>
-                        <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>09:15</span>
-                      </div>
-                    </div>
-                  </div>
+                  {/* Chat body — animated, "plays" a live voice-logging conversation on a loop */}
+                  <HeroChat />
 
                   {/* Input bar (light) */}
                   <div className="flex items-center gap-2 px-2.5 py-2" style={{ background: "#F0F2F5" }}>
@@ -301,9 +356,10 @@ export default function LandingPage() {
                       <span className="text-[11px]" style={{ color: "#8696A0" }}>Message</span>
                       <Camera className="w-3.5 h-3.5 ml-auto shrink-0" style={{ color: "#54656F" }} />
                     </div>
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}>
+                    <motion.div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0" style={{ background: WA_GREEN }}
+                      animate={{ scale: [1, 1.12, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: "easeInOut" }}>
                       <Mic className="w-4 h-4 text-white" />
-                    </div>
+                    </motion.div>
                   </div>
 
                   {/* Home indicator */}
