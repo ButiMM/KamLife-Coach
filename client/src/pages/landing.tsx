@@ -81,11 +81,11 @@ function HeroChat() {
   const [step, setStep] = useState(1);
   const scrollRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    const holds = [900, 1400, 1700, 900, 1900, 1400, 900, 1700, 1400, 900, 1700, 1400, 900, 4200]; // ms per step; step 14 holds, then loops
+    const holds = [900, 1500, 1500, 850, 1900, 1500, 850, 1900, 1500, 850, 2100, 1100, 850, 1300, 1700, 900, 4000]; // ms per step; step 17 holds, then loops
     let i = 1;
     let timer: ReturnType<typeof setTimeout>;
     const advance = () => {
-      i = i >= 14 ? 1 : i + 1;
+      i = i >= 17 ? 1 : i + 1;
       setStep(i);
       timer = setTimeout(advance, holds[i - 1]);
     };
@@ -159,11 +159,9 @@ function HeroChat() {
           {step >= 6 && (
             <motion.div key="p1" {...enter} className="flex justify-end">
               <div style={OUT} className="p-1 shadow-sm">
-                <div style={{ width: "134px", height: "96px", borderRadius: "6px", background: "linear-gradient(135deg,#EBD9AC 0%,#C99A5B 55%,#7d4f26 100%)" }} className="flex items-center justify-center">
-                  <span style={{ fontSize: "40px" }}>🍛</span>
-                </div>
+                <img src="/demo/food.jpg" alt="Logged meal" loading="lazy" style={{ width: "150px", height: "112px", borderRadius: "6px", objectFit: "cover", display: "block" }} />
                 <span className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
-                  <span className="text-[9px]" style={{ color: "#667781" }}>19:20</span>
+                  <span className="text-[9px]" style={{ color: "#667781" }}>13:12</span>
                   <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
                 </span>
               </div>
@@ -172,18 +170,16 @@ function HeroChat() {
           {step === 7 && <motion.div key="t3" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
           {step >= 8 && (
             <motion.div key="m3" {...enter} className="flex justify-start">
-              <div style={IN} className="px-2.5 py-1.5 max-w-[86%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>That's chicken curry &amp; rice — ~620 cal, 38g protein. Logged 🍛</p>
-                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>19:20</span>
+              <div style={IN} className="px-2.5 py-1.5 max-w-[90%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Grilled pork chop, morogo &amp; a bulgur salad — ~610 cal, 48g protein. Proper balanced plate 💪 Logged.</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>13:12</span>
               </div>
             </motion.div>
           )}
           {step >= 9 && (
             <motion.div key="p2" {...enter} className="flex justify-end">
               <div style={OUT} className="p-1 shadow-sm">
-                <div style={{ width: "134px", height: "96px", borderRadius: "6px", background: "linear-gradient(135deg,#4b515b 0%,#2a2e35 60%,#181b20 100%)" }} className="flex items-center justify-center">
-                  <Dumbbell className="w-9 h-9" style={{ color: "rgba(255,255,255,0.9)" }} />
-                </div>
+                <img src="/demo/gym.jpg" alt="Gym machine" loading="lazy" style={{ width: "150px", height: "112px", borderRadius: "6px", objectFit: "cover", display: "block" }} />
                 <span className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
                   <span className="text-[9px]" style={{ color: "#667781" }}>17:32</span>
                   <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
@@ -194,8 +190,8 @@ function HeroChat() {
           {step === 10 && <motion.div key="t4" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
           {step >= 11 && (
             <motion.div key="m4" {...enter} className="flex justify-start">
-              <div style={IN} className="px-2.5 py-1.5 max-w-[88%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>That's the leg press 🦵 Right one for today — feet shoulder-width, don't lock your knees. 3 × 12.</p>
+              <div style={IN} className="px-2.5 py-1.5 max-w-[90%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>That's the shoulder press 💪 Grip level with your shoulders, press up smooth — don't lock out hard at the top. 3 × 10.</p>
                 <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>17:33</span>
               </div>
             </motion.div>
@@ -214,9 +210,29 @@ function HeroChat() {
           {step === 13 && <motion.div key="t5" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
           {step >= 14 && (
             <motion.div key="m6" {...enter} className="flex justify-start">
-              <div style={IN} className="px-2.5 py-2 max-w-[88%] shadow-sm">
-                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Logged 🔥 <span className="font-semibold">12 days straight</span> — and you're down <span className="font-semibold">1.2kg this week</span>. Bumping your target to 2,250 cal to keep it moving.</p>
-                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>18:06</span>
+              <div style={IN} className="px-2.5 py-1.5 max-w-[86%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Logged 🔥 that's <span className="font-semibold">4 sessions</span> this week. You're moving.</p>
+                <span className="text-[9px] block text-right mt-0.5" style={{ color: "#667781" }}>18:06</span>
+              </div>
+            </motion.div>
+          )}
+          {step >= 15 && (
+            <motion.div key="p3" {...enter} className="flex justify-end">
+              <div style={OUT} className="p-1 shadow-sm">
+                <img src="/demo/body.jpg" alt="Progress photo" loading="lazy" style={{ width: "118px", height: "158px", borderRadius: "6px", objectFit: "cover", display: "block" }} />
+                <span className="flex items-center justify-end gap-1 mt-0.5 pr-0.5">
+                  <span className="text-[9px]" style={{ color: "#667781" }}>18:07</span>
+                  <CheckCheck className="w-3 h-3" style={{ color: "#53BDEB" }} />
+                </span>
+              </div>
+            </motion.div>
+          )}
+          {step === 16 && <motion.div key="t6" {...enter} className="flex justify-start"><TypingDots /></motion.div>}
+          {step >= 17 && (
+            <motion.div key="m7" {...enter} className="flex justify-start">
+              <div style={IN} className="px-2.5 py-2 max-w-[90%] shadow-sm">
+                <p className="text-[11.5px] leading-relaxed" style={{ color: "#111B21" }}>Now <span className="font-semibold">that's</span> progress 🔥 Core's tightening up — abs starting to show. You're down <span className="font-semibold">1.2kg this week</span>, 12 days straight. Bumping your target to 2,250 cal to keep it moving.</p>
+                <span className="text-[9px] block text-right mt-1" style={{ color: "#667781" }}>18:07</span>
               </div>
             </motion.div>
           )}
