@@ -25,12 +25,17 @@ export interface CopyableMeal {
  * Priority when a hint (target meal name) is given:
  *   1. a meal whose raw text mentions the hint word ("...for lunch")
  *   2. a meal whose stored label equals the hint
- *   3. positional fallback: breakfast = oldest, lunch = 2nd-newest
- *   4. null — DO NOT substitute a different meal (the bug fix)
+ *   3. null — DO NOT substitute or positionally guess a different meal
  * With no hint: the most recent substantial meal.
  *
- * "Substantial" = >= 150 kcal. If nothing clears that bar, anything >= 50 kcal
- * is accepted as a last resort (covers a single light meal).
+ * "Substantial" = >= 150 kcal. With no hint, anything >= 50 kcal is accepted as
+ * a last resort (covers a single light meal). With a hint, never fall back to a
+ * light log — copying a snack as "breakfast" fabricates a meal.
+ *
+ * Second production bug (2026-07-01): "breakfast same as yesterday" with no
+ * text/label match hit the old positional rule (oldest meal = breakfast) and
+ * copied a 197-kcal apple+pear snack as breakfast. Positional guessing is gone:
+ * when the named meal can't be found, return null so the caller asks.
  *
  * @returns the chosen meal, or null when nothing appropriate exists.
  */
@@ -39,17 +44,15 @@ export function selectMealToCopy<T extends CopyableMeal>(meals: T[], hint: strin
     .filter(l => (l.kcalInt || 0) >= 150)
     .sort((a, b) => new Date(b.loggedAt!).getTime() - new Date(a.loggedAt!).getTime());
 
-  if (sub.length === 0) return meals.find(l => (l.kcalInt || 0) >= 50) || null;
+  if (sub.length === 0) {
+    return hint ? null : meals.find(l => (l.kcalInt || 0) >= 50) || null;
+  }
 
   if (hint) {
     const byRaw = sub.find(l => l.rawMessage && new RegExp(`\\b${hint}\\b`, "i").test(l.rawMessage));
     if (byRaw) return byRaw;
     const byLabel = sub.find(l => (l.mealLabel || "").toLowerCase() === hint);
     if (byLabel) return byLabel;
-    if (hint === "breakfast") return sub[sub.length - 1]; // oldest = breakfast
-    if (hint === "lunch" && sub.length >= 2) return sub[1]; // 2nd newest = lunch
-    // Hint given but no matching meal found — return null so the caller tells the
-    // user "no lunch found yesterday" instead of silently copying the wrong meal.
     return null;
   }
 

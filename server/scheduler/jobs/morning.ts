@@ -8,7 +8,6 @@ import {
 } from "../shared";
 import { proteinHint } from "../../utils";
 import { selectVariantMessage, recordDelivery } from "../../ab";
-import { buildDayWorkout } from "../../programme";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 
 export async function runMorningCheckin(): Promise<void> {
@@ -383,19 +382,13 @@ export async function runMorningCheckin(): Promise<void> {
       todaySection.push(`👟 ${stepsTarget.toLocaleString()} steps — send your count or a screenshot.`);
 
       if (isTodayTrainingDay) {
-        try {
-          const todayWorkout = buildDayWorkout(client);
-          const previewLines = todayWorkout.split("\n").slice(0, 4).join("\n");
-          todaySection.push(`💪 Training day — *reply 1* for your full workout.\n\n${previewLines}...`);
-        } catch {
-          todaySection.push(`💪 Training day. Reply *1* for your workout.`);
-        }
+        // No inline "preview" — slicing the first 4 lines of the workout only ever
+        // showed the header + warm-up cut off mid-sentence with "...". The full
+        // workout is one reply away and renders properly there.
+        todaySection.push(`💪 Training day. Reply *1* for your workout.`);
       } else {
         todaySection.push(`🛌 Rest day. No training — stay on food and steps.`);
       }
-
-      todaySection.push(`🍳 What's for breakfast?`);
-      if (repeatSuggestion) todaySection.push(repeatSuggestion);
 
       // Trajectory-aware closing line — replaces generic "send me your meals" with context-driven push
       const trajectoryClose: Record<Trajectory, string> = {
@@ -409,7 +402,9 @@ export async function runMorningCheckin(): Promise<void> {
       if (closingLine) todaySection.push(closingLine);
 
       if (await claimDailySlot(client.id, "morning")) {
-        const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n");
+        // Three bubbles: summary | today's targets | the one question we want answered.
+        const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
+        const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n") + "\n\n---\n\n" + breakfastAsk;
         await sendWhatsApp(phone, fullMessage);
       }
     } catch (err) {

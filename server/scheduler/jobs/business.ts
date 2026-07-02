@@ -349,8 +349,9 @@ export async function runSupplementReminder(): Promise<void> {
       else if (/omega|fish.?oil/.test(suppText)) suppName = "omega-3s";
       else if (/vitamin|vit\s*[cd]|multivit/.test(suppText)) suppName = "vitamins";
       else if (/magnesium/.test(suppText)) suppName = "magnesium";
-      const name = client.name?.split(" ")[0] || "there";
-      const msg = suppName ? `Morning ${name} — ${suppName} taken yet? Consistency is what makes it work.` : `Morning ${name} — supplements taken? One less thing to think about later.`;
+      // No "Morning {name}" greeting — the 6am morning brief already greeted them;
+      // a second greeting 2h later reads as two bots. This is a nudge, not a hello.
+      const msg = suppName ? `Quick one — ${suppName} taken yet? Consistency is what makes it work. 💊` : `Quick one — supplements taken? One less thing to think about later. 💊`;
       // Daily-slot claim (routine nudge) — DB-backed, restart-safe, respects the daily cap.
       if (!(await claimDailySlot(uid, "supplement_reminder"))) continue;
       await sendWhatsApp(client.phoneNumber, msg);

@@ -642,11 +642,8 @@ export async function handleEarlyCommands(ctx: {
         poolMeals = allMeals; // include today for cross-meal ("dinner same as lunch")
       }
 
-      // Find best match — no label required. Pure selection logic lives in
-      // server/meal-select.ts so the exact rules are unit-tested (the breakfast-
-      // copied-as-lunch production bug, 2026-06-24).
-      const findBestMeal = (meals: typeof allMeals, hint: string | null) =>
-        selectMealToCopy(meals as unknown as CopyableMeal[], hint) as unknown as (typeof allMeals)[number] | null;
+      // Selection rules live in server/meal-select.ts — unit-tested (2026-06-24 + 2026-07-01 bugs).
+      const findBestMeal = (meals: typeof allMeals, hint: string | null) => selectMealToCopy(meals as unknown as CopyableMeal[], hint) as unknown as (typeof allMeals)[number] | null;
 
       // For cross-meal, prefer today's meals as the source
       const todayMeals = poolMeals.filter(l => l.loggedAt && new Date(l.loggedAt) >= todayStart);
@@ -695,7 +692,7 @@ export async function handleEarlyCommands(ctx: {
         proteinInt: match.proteinInt,
         carbsInt: match.carbsInt || 0,
         fatInt: match.fatInt || 0,
-        mealLabel: targetLabel || null,
+        mealLabel: targetLabel || sourceHint || match.mealLabel || null,
         items: match.items,
       });
       invalidateFoodTotalsCache(user.id);
@@ -705,14 +702,17 @@ export async function handleEarlyCommands(ctx: {
         todayProteinG: recomputed.protein,
       }).where(eq(users.phoneNumber, phone));
 
-      const labelDisplay = (targetLabel || match.mealLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
+      const labelDisplay = (targetLabel || sourceHint || match.mealLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
       const mealWasToday = match.loggedAt && new Date(match.loggedAt) >= todayStart;
-      const fromNote = crossMealM ? `copied from ${sourceHint}`
+      // Never say "copied from breakfast" ON a breakfast log — use a time reference instead.
+      const fromNote = crossMealM && sourceHint && sourceHint !== targetLabel ? `copied from ${sourceHint}`
         : daysBack > 0 ? `from ${daysBack === 1 ? "yesterday" : `${daysBack} days ago`}`
         : mealWasToday ? "from earlier today" : "from yesterday";
       const remaining = (user.calorieTarget || 1800) - recomputed.calories;
       const protGap = (user.proteinTarget || 120) - recomputed.protein;
-      const rawLabel = match.rawMessage ? `_${match.rawMessage.slice(0, 80)}_\n` : "";
+      // Echo parsed food names ("Apple, Pear"), never the client's raw sentence verbatim.
+      const itemNames = Array.isArray(match.items) ? (match.items as Array<{ name?: string }>).map(i => i?.name).filter(Boolean).join(", ") : "";
+      const rawLabel = itemNames ? `_${itemNames}_\n` : match.rawMessage ? `_${match.rawMessage.slice(0, 80)}_\n` : "";
 
       const sameReply = `✅ *${labelDisplay} logged* (${fromNote})\n${rawLabel}\n*+${match.kcalInt} kcal · +${match.proteinInt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining.` : "Calorie target hit. ✅"} ${protGap > 0 ? `${protGap}g protein left.` : "Protein hit. ✅"}`;
       await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");

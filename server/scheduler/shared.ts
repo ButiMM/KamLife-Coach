@@ -4,7 +4,7 @@
  */
 
 import twilio from "twilio";
-import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart, buildContentVariables } from "../utils";
+import { isTwilioCircuitOpen, recordTwilioSuccess, recordTwilioFailure, sastDayStart, buildContentVariables, splitWhatsAppBody } from "../utils";
 import { db, pool } from "../db";
 import { users, chatHistory, stepLogs, workoutLogs, weightLogs, mealLogs, sentProactive, escalations, exerciseLogs, clientIntelligenceProfiles } from "../../shared/schema";
 import { eq, gte, and, lt, desc, or, sql, like } from "drizzle-orm";
@@ -428,6 +428,21 @@ async function logOutboundToHistory(to: string, body: string): Promise<void> {
 }
 
 export async function sendWhatsApp(to: string, body: string, mediaUrl?: string): Promise<void> {
+  // Honor the codebase-wide \n\n---\n\n bubble convention (the reactive path already
+  // does). Before this, scheduler messages rendered literal "---" lines in one crammed
+  // bubble, and bodies over Twilio's 1600-char cap were rejected outright (21617) —
+  // which silently killed the Sunday meal plan. Media rides on the last bubble.
+  const parts = splitWhatsAppBody(body);
+  for (let i = 0; i < parts.length; i++) {
+    const remainingText = parts.slice(i).join("\n\n");
+    const outcome = await sendOneWhatsApp(to, parts[i], i === parts.length - 1 ? mediaUrl : undefined, remainingText);
+    // "fallback" = SMS/template already carried remainingText; "dropped" = channel/gate
+    // is down for this recipient right now. Either way the rest must not double-send.
+    if (outcome !== "sent") return;
+  }
+}
+
+async function sendOneWhatsApp(to: string, body: string, mediaUrl: string | undefined, smsFallbackText: string): Promise<"sent" | "dropped" | "fallback"> {
   resetDeliveryStatsIfNeeded();
   // Sanity gate — block template-rendering leaks ("undefined kcal", "NaN", "${name}")
   // before they ever reach a client. A broken message is worse than a missed one.
@@ -435,7 +450,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   if (!outboundCheck.safe) {
     deliveryStats.failed++;
     console.error(`[OUTBOUND_GATE] BLOCKED send to ${to.slice(-8)} — ${outboundCheck.reason}. Body: ${String(body).slice(0, 120)}`);
-    return;
+    return "dropped";
   }
   // Rate limit: enforce minimum gap between sends
   const now = Date.now();
@@ -448,12 +463,12 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
   if (!FROM_NUMBER) {
     console.warn("[SCHEDULER] TWILIO_WHATSAPP_NUMBER not set — skipping send");
     deliveryStats.failed++;
-    return;
+    return "dropped";
   }
   if (isTwilioCircuitOpen()) {
     deliveryStats.failed++;
     console.warn(`[CIRCUIT] Twilio circuit open — dropping send to ${to.slice(-8)}`);
-    return;
+    return "dropped";
   }
   const params: Record<string, unknown> = { from: FROM_NUMBER, to, body };
   if (mediaUrl) params.mediaUrl = [mediaUrl];
@@ -466,10 +481,12 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
       deliveryStats.sent++;
       console.log(`[SCHEDULER] → ${to.slice(-8)}: ${body.slice(0, 80)}…`);
       void logOutboundToHistory(to, body); // best-effort, non-blocking
-      return;
+      return "sent";
     } catch (err: unknown) {
       const e = err as { status?: number; code?: number; message?: string };
-      // WhatsApp channel errors — don't retry, attempt SMS fallback for this recipient
+      // WhatsApp channel errors — don't retry, attempt SMS fallback for this recipient.
+      // The fallback carries smsFallbackText (this bubble + any not yet sent) so a
+      // multi-bubble message still reaches the client whole.
       if (e?.code && WA_CHANNEL_ERRORS.has(e.code)) {
         recordTwilioFailure();
         deliveryStats.failed++;
@@ -480,17 +497,17 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
         if (e.code === 63016 && REENGAGE_TEMPLATE_SID) {
           console.warn(`[WA:WINDOW] outside 24h window for ${to.slice(-8)} — sending re-engagement template`);
           try {
-            await sendWhatsAppTemplate(to, REENGAGE_TEMPLATE_SID, undefined, { fallbackText: body });
-            return; // template path logs history + handles its own SMS fallback
+            await sendWhatsAppTemplate(to, REENGAGE_TEMPLATE_SID, undefined, { fallbackText: smsFallbackText });
+            return "fallback"; // template path logs history + handles its own SMS fallback
           } catch {
             console.warn(`[WA:WINDOW] re-engagement template failed for ${to.slice(-8)} — falling back to SMS`);
           }
         } else {
           console.warn(`[WA:CHANNEL_ERROR] code=${e.code} for ${to.slice(-8)} — attempting SMS fallback`);
         }
-        await sendSMSFallback(to, body);
-        void logOutboundToHistory(to, body); // best-effort, non-blocking
-        return;
+        await sendSMSFallback(to, smsFallbackText);
+        void logOutboundToHistory(to, smsFallbackText); // best-effort, non-blocking
+        return "fallback";
       }
       const isTransient = !e?.status || e.status === 429 || e.status >= 500 || (e.code as any) === "ECONNRESET" || (e.code as any) === "ETIMEDOUT";
       if (!isTransient || i === delays.length - 1) {
@@ -502,6 +519,7 @@ export async function sendWhatsApp(to: string, body: string, mediaUrl?: string):
       console.warn(`[SCHEDULER] ⚠ Send attempt ${i + 1} failed (${e?.message}), retrying…`);
     }
   }
+  return "dropped"; // unreachable — loop either returns or throws; keeps TS exhaustive
 }
 
 // ── APPROVED TEMPLATE SEND (Twilio Content API) ────────────────────────────────

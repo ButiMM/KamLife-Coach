@@ -411,3 +411,37 @@ export function recordTwilioFailure(): void {
     console.error(`[CIRCUIT] Twilio circuit OPEN after ${twilioFailures} consecutive failures — suppressing sends for ${CIRCUIT_RESET_MS / 1000}s`);
   }
 }
+
+// ── WhatsApp bubble splitting (scheduler send path) ────────────────────────────
+// \n\n---\n\n is the codebase-wide "separate WhatsApp bubbles" convention. The
+// reactive webhook path honors it (routes/whatsapp.ts splitMessage); the scheduler
+// send path historically did NOT — proactive messages built with --- rendered as
+// one crammed bubble with literal "---" lines, and any body over Twilio's 1600-char
+// hard cap was rejected outright (error 21617), silently killing the Sunday meal
+// plan. Every scheduler send must go through this.
+export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
+  const bubbles = text.split(/\n\n---\n\n/).map(b => b.trim()).filter(Boolean);
+  const parts: string[] = [];
+  for (const bubble of bubbles) {
+    if (bubble.length <= maxLen) { parts.push(bubble); continue; }
+    let current = "";
+    for (const line of bubble.split("\n")) {
+      const candidate = current ? current + "\n" + line : line;
+      if (candidate.length > maxLen) {
+        if (current.trim()) parts.push(current.trim());
+        let remaining = line;
+        while (remaining.length > maxLen) {
+          const cutAt = remaining.lastIndexOf(" ", maxLen);
+          const breakAt = cutAt > 0 ? cutAt : maxLen;
+          parts.push(remaining.slice(0, breakAt).trim());
+          remaining = remaining.slice(breakAt).trim();
+        }
+        current = remaining;
+      } else {
+        current = candidate;
+      }
+    }
+    if (current.trim()) parts.push(current.trim());
+  }
+  return parts.length ? parts : [text.trim()].filter(Boolean);
+}

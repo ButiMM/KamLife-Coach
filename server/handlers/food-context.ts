@@ -23,7 +23,7 @@ import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabe
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 
-export function extractMealLabel(msg: string, atDate?: Date): string | null {
+export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }): string | null {
   const lo = msg.toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
@@ -37,6 +37,10 @@ export function extractMealLabel(msg: string, atDate?: Date): string | null {
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
+  // A light, low-protein log with no meal keyword (fruit, a drink, a biscuit) is a SNACK.
+  // Clock-slotting it as breakfast/lunch steals the meal slot, and a later "same breakfast
+  // as yesterday" then copies the snack as a meal (production bug, 2026-07-01).
+  if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";
   // Time-of-day fallback — no keyword, so infer from the meal's SAST hour: atDate for retro
   // logs (multi-day catch-up), else now. slotFromSastHour is total, so this never returns null.
   return slotFromSastHour(atDate);
@@ -380,7 +384,7 @@ export async function handleFoodContext(ctx: {
             proteinInt: totalProt2,
             carbsInt: 0,
             fatInt: 0,
-            mealLabel: extractMealLabel(lastUnloggedFood.messageIn || ""),
+            mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }),
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
@@ -652,7 +656,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: matchedMeal.carbsInt,
           fatInt: matchedMeal.fatInt,
           items: matchedMeal.items,
-          mealLabel: extractMealLabel(message),
+          mealLabel: extractMealLabel(message, undefined, { kcal: matchedMeal.kcalInt, protein: matchedMeal.proteinInt }),
         }).catch((e) => { console.error("[quick_relog mealLogs insert]", e); throw e; });
         invalidatePatternCache(user.id);
         invalidateFoodTotalsCache(user.id);
@@ -898,7 +902,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: 0,
           fatInt: 0,
           loggedAt: p.date,
-          mealLabel: extractMealLabel(p.raw, p.date),
+          mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }),
         }).catch(e => console.warn("[multiday-log insert]", e))
       ));
       const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");
@@ -1225,7 +1229,8 @@ export async function handleFoodContext(ctx: {
         const ratio = e > 0 ? (f.adjustedCalories || 0) * (9 * (f.fatPer100g || 0) / e) / 9 : dry;
         return s + Math.min(dry, ratio);
       }, 0));
-      const firstSegLabel = mealSegments.find(s => s.label)?.label || extractMealLabel(message);
+      const firstSegLabel = mealSegments.find(s => s.label)?.label
+        || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) });
       const scannerItems = allAdjustedFoods.map(f => ({
         name: f.name,
         grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
@@ -1314,7 +1319,7 @@ export async function handleFoodContext(ctx: {
           items: gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
           })),
-          mealLabel: extractMealLabel(message),
+          mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }),
           loggedAt: gptLoggedAt,
         });
         const { prevCals: fbPrevCals, runningCals, runningProtein } = committed;
@@ -1388,7 +1393,7 @@ export async function handleFoodContext(ctx: {
         items: gptFallbackResult.foods.map((f: any) => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
         })),
-        mealLabel: extractMealLabel(message),
+        mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }),
         loggedAt: fb2LoggedAt,
       });
       const { prevCals: fb2PrevCals, runningCals, runningProtein } = committed2;

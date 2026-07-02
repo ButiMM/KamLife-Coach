@@ -1326,11 +1326,16 @@ test("selectMealToCopy: skips trivial sub-150kcal logs (a black coffee is not 'l
   assert.equal(selectMealToCopy([coffee], "lunch"), null);
 });
 
-test("selectMealToCopy: breakfast hint returns the oldest substantial meal positionally", () => {
-  const b = meal({ rawMessage: "first meal", mealLabel: null, loggedAt: T(34), kcalInt: 400 });
-  const l = meal({ rawMessage: "second meal", mealLabel: null, loggedAt: T(28), kcalInt: 400 });
-  const d = meal({ rawMessage: "third meal", mealLabel: null, loggedAt: T(20), kcalInt: 400 });
-  assert.equal(selectMealToCopy([b, l, d], "breakfast"), b, "oldest = breakfast");
+test("selectMealToCopy: THE 2nd BUG (2026-07-01) — breakfast hint must NOT positionally grab the oldest meal (apple+pear snack was copied as breakfast)", () => {
+  const snack = meal({ rawMessage: "i had apple and pear for meal", mealLabel: null, kcalInt: 197, loggedAt: T(30) });
+  const lunch = meal({ rawMessage: "rice and chicken for lunch", mealLabel: "lunch", kcalInt: 620, loggedAt: T(24) });
+  assert.equal(selectMealToCopy([snack, lunch], "breakfast"), null, "no breakfast match → ask, never guess");
+});
+
+test("selectMealToCopy: light-meal (<150kcal) fallback only applies when NO meal was named", () => {
+  const lightSnack = meal({ rawMessage: "an apple", mealLabel: null, kcalInt: 80, loggedAt: T(26) });
+  assert.equal(selectMealToCopy([lightSnack], null), lightSnack, "no hint → light log is fine");
+  assert.equal(selectMealToCopy([lightSnack], "breakfast"), null, "named meal → never substitute a snack");
 });
 
 // ============================================================
