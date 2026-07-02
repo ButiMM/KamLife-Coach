@@ -1,7 +1,7 @@
 import { useUsers } from "@/hooks/use-users";
 import { DashboardLayout } from "@/components/layout";
 import { StatusBadge } from "@/components/status-badge";
-import { Link } from "wouter";
+import { Link, useLocation } from "wouter";
 import { Search, Filter, MoreHorizontal } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 
 export default function UsersList() {
   const { data: users, isLoading } = useUsers();
+  const [, navigate] = useLocation();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<string | null>(null);
 
@@ -111,7 +112,11 @@ export default function UsersList() {
                 </TableRow>
               ) : filteredUsers && filteredUsers.length > 0 ? (
                 filteredUsers.map((user) => (
-                  <TableRow key={user.id} className="hover:bg-muted/30 transition-colors">
+                  <TableRow
+                    key={user.id}
+                    className="hover:bg-muted/50 transition-colors cursor-pointer"
+                    onClick={() => navigate(`/users/${user.id}`)}
+                  >
                     <TableCell>
                       <div className="flex flex-col">
                         <span className="font-semibold text-foreground">{user.name || "Unknown"}</span>
@@ -136,7 +141,7 @@ export default function UsersList() {
                     <TableCell className="text-sm text-muted-foreground">
                       {user.createdAt ? new Date(user.createdAt).toLocaleDateString("en-ZA", { timeZone: "Africa/Johannesburg" }) : "-"}
                     </TableCell>
-                    <TableCell className="text-right">
+                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
                           <Button variant="ghost" size="icon" className="h-8 w-8">

@@ -15,8 +15,12 @@
   --primary: 24 95% 50%;
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 225 65% 24%;
-  --secondary-foreground: 0 0% 100%;
+  /* secondary is a SURFACE token in shadcn (subtle pill/row backgrounds), not a brand
+     color. It was set to brand navy, which painted every bg-secondary/50 pill dark
+     while labels stayed muted-grey — the "invisible text" dashboard bug. Brand navy
+     lives in component-level classes, not here. */
+  --secondary: 220 15% 94%;
+  --secondary-foreground: 220 40% 12%;
 
   --muted: 220 15% 95%;
   --muted-foreground: 220 10% 50%;

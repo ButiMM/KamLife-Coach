@@ -26,6 +26,112 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 
+// ── Daily Log — day-by-day view of everything the client logged ────────────────
+// Groups meals (14d) + timeline events (steps/workouts/weights/escalations) per
+// SAST day, with daily kcal/protein totals vs targets. Days with no logs still
+// render — a silent day is coaching signal, not missing UI.
+const SAST_TZ = "Africa/Johannesburg";
+function sastDayKey(d: Date | string): string {
+  return new Date(d).toLocaleDateString("en-ZA", { timeZone: SAST_TZ }); // yyyy/mm/dd
+}
+function DailyLogSection({ userData, timelineEvents }: {
+  userData: NonNullable<ReturnType<typeof useUser>["data"]>;
+  timelineEvents: Array<{ type: string; detail: string; date: string }>;
+}) {
+  const user = userData.user;
+  const calTarget = user.calorieTarget || 0;
+  const protTarget = user.proteinTarget || 0;
+
+  const mealsByDay = new Map<string, typeof userData.mealLogs>();
+  for (const log of userData.mealLogs || []) {
+    if (!log.loggedAt) continue;
+    const k = sastDayKey(log.loggedAt);
+    if (!mealsByDay.has(k)) mealsByDay.set(k, []);
+    mealsByDay.get(k)!.push(log);
+  }
+  const eventsByDay = new Map<string, typeof timelineEvents>();
+  for (const ev of timelineEvents) {
+    if (ev.type === "food") continue; // meals come from mealLogs with real macros
+    const k = sastDayKey(ev.date);
+    if (!eventsByDay.has(k)) eventsByDay.set(k, []);
+    eventsByDay.get(k)!.push(ev);
+  }
+
+  const days: Array<{ key: string; date: Date }> = [];
+  for (let i = 0; i < 14; i++) {
+    const d = new Date(Date.now() - i * 86_400_000);
+    days.push({ key: sastDayKey(d), date: d });
+  }
+
+  const evIcon = (type: string) =>
+    type === "weight" ? <Scale className="w-3.5 h-3.5 text-blue-600" /> :
+    type === "steps" ? <Footprints className="w-3.5 h-3.5 text-emerald-600" /> :
+    type === "workout" ? <Dumbbell className="w-3.5 h-3.5 text-violet-600" /> :
+    type === "escalation" ? <ShieldAlert className="w-3.5 h-3.5 text-red-600" /> :
+    <MessageSquare className="w-3.5 h-3.5 text-slate-500" />;
+
+  return (
+    <Card className="p-6 border-border/50">
+      <div className="flex items-center gap-3 mb-4">
+        <div className="p-2 bg-primary/10 text-primary rounded-xl">
+          <Calendar className="w-5 h-5" />
+        </div>
+        <div>
+          <h3 className="text-lg font-bold font-display">Daily Log</h3>
+          <p className="text-sm text-muted-foreground">Day by day, last 14 days — meals, steps, workouts, weigh-ins</p>
+        </div>
+      </div>
+      <div className="overflow-y-auto max-h-[560px] space-y-4 custom-scrollbar pr-1">
+        {days.map(({ key, date }) => {
+          const meals = (mealsByDay.get(key) || []).slice().sort((a, b) => new Date(a.loggedAt ?? 0).getTime() - new Date(b.loggedAt ?? 0).getTime());
+          const events = eventsByDay.get(key) || [];
+          const dayKcal = meals.reduce((s, m) => s + (m.kcalInt || 0), 0);
+          const dayProt = meals.reduce((s, m) => s + (m.proteinInt || 0), 0);
+          const isEmpty = meals.length === 0 && events.length === 0;
+          const calPct = calTarget > 0 ? dayKcal / calTarget : 0;
+          const calTone = dayKcal === 0 ? "text-muted-foreground" : calPct > 1.1 ? "text-rose-600" : calPct >= 0.7 ? "text-emerald-600" : "text-amber-600";
+          return (
+            <div key={key} className={`rounded-xl border ${isEmpty ? "border-border/30 bg-muted/20" : "border-border/50 bg-secondary/40"}`}>
+              <div className="flex items-center justify-between px-4 py-2.5 border-b border-border/40">
+                <span className="font-semibold text-sm">{format(date, "EEE d MMM")}</span>
+                {isEmpty ? (
+                  <span className="text-xs text-muted-foreground italic">No logs — silent day</span>
+                ) : (
+                  <div className="flex items-center gap-3 text-xs font-medium">
+                    <span className={calTone}>{dayKcal.toLocaleString()} kcal{calTarget ? ` / ${calTarget.toLocaleString()}` : ""}</span>
+                    <span className={dayProt >= protTarget && protTarget > 0 ? "text-emerald-600" : "text-muted-foreground"}>{dayProt}g{protTarget ? ` / ${protTarget}g` : ""} protein</span>
+                  </div>
+                )}
+              </div>
+              {!isEmpty && (
+                <div className="px-4 py-2 space-y-1.5">
+                  {meals.map((m) => (
+                    <div key={m.id} className="flex items-center justify-between gap-3 text-sm">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-xs text-muted-foreground w-10 shrink-0">{m.loggedAt ? format(new Date(m.loggedAt), "HH:mm") : ""}</span>
+                        <span className="truncate">{m.rawMessage && m.rawMessage !== "[Photo]" ? m.rawMessage.slice(0, 70) : (m.items?.map((i: any) => i.name).join(", ") || "Food logged")}</span>
+                        {m.mealLabel && <span className="text-[10px] uppercase tracking-wide bg-primary/10 text-primary px-1.5 py-0.5 rounded shrink-0">{m.mealLabel}</span>}
+                      </div>
+                      <span className="text-xs shrink-0 text-muted-foreground">{m.kcalInt || 0} kcal · {m.proteinInt || 0}g</span>
+                    </div>
+                  ))}
+                  {events.map((ev, i) => (
+                    <div key={`ev-${i}`} className="flex items-center gap-2 text-sm">
+                      <span className="text-xs text-muted-foreground w-10 shrink-0">{format(new Date(ev.date), "HH:mm")}</span>
+                      {evIcon(ev.type)}
+                      <span className="text-muted-foreground truncate">{ev.detail}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
 function PhotoThumbnail({ userId, photo }: { userId: string; photo: ProgressPhotoEntry }) {
   const { data: src } = useProgressPhotoUrl(userId, photo.id);
   if (!src) return <div className="w-24 h-24 rounded-lg bg-muted animate-pulse" />;
@@ -349,6 +455,9 @@ export default function UserDetail() {
             </div>
           </Card>
         </div>
+
+        {/* Daily Log — day-by-day view (the coach's actual working view) */}
+        <DailyLogSection userData={userData} timelineEvents={timelineData?.events || []} />
 
         {/* Coach Message Panel */}
         <Card className="p-6 border-border/50">
