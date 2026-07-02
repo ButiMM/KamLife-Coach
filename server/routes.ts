@@ -682,6 +682,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {
+      // Weekly AVERAGE reports ("my average this week is 6,400") are a summary, not
+      // today's count — logging them as today corrupts the day AND the 7-day trend.
+      // Coach on the week instead; clients may opt to report a weekly average only.
+      if (/\b(average|avg)\b/i.test(m) || (/\b(this|last|past)\s+week(?:ly)?\b/i.test(m) && !/\btoday\b/i.test(m))) {
+        const wkTarget = user.stepsTarget || 8500;
+        const wkDiff = steps - wkTarget;
+        const wkReply = `Weekly average noted: *${steps.toLocaleString()} steps/day* vs your ${wkTarget.toLocaleString()} target — ${wkDiff >= 0 ? "on target. Strong week 🔥" : `${Math.abs(wkDiff).toLocaleString()} short. One 15-minute walk a day closes that.`}\n\n_Daily counts or a weekly-average screenshot both work — whichever is easier for you._`;
+        await logChat(user.id, message, wkReply, "STEP_WEEKLY_REPORT");
+        return wkReply;
+      }
       const baseStepsTarget = user.stepsTarget || 8500;
       // Detect whether client already worked out today so we can ease step demand.
       let workedOutToday = false;

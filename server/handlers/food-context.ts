@@ -420,11 +420,34 @@ export async function handleFoodContext(ctx: {
 
   if (isLogCommand) {
     try {
-      const recentChats = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent })
+      const recentChats = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, intent: chatHistory.intent })
         .from(chatHistory)
         .where(eq(chatHistory.userId, user.id))
         .orderBy(desc(chatHistory.createdAt))
         .limit(3);
+      // "log it" after a photo VERDICT ("can I eat this?") — the photo was deliberately
+      // NOT logged (client was deciding). Recover the numbers from the verdict's TOTAL line.
+      const verdictRow = recentChats.find(c => c.intent === "FOOD_VERDICT" && c.messageOut);
+      if (verdictRow) {
+        const vt = (verdictRow.messageOut || "").match(/TOTAL:\s*(\d[\d,]*)\s*kcal\s*\|\s*(\d{1,3})\s*g\s*protein/i);
+        if (vt) {
+          const vKcal = parseInt(vt[1].replace(/,/g, ""), 10);
+          const vProt = parseInt(vt[2], 10);
+          await db.insert(mealLogs).values({
+            userId: user.id, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
+            kcalInt: vKcal, proteinInt: vProt, carbsInt: 0, fatInt: 0,
+            mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }),
+          }).catch(e => console.warn("[verdict log-it]", e));
+          invalidatePatternCache(user.id);
+          invalidateFoodTotalsCache(user.id);
+          const recV = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({ todayCalories: recV.calories, todayProteinG: recV.protein, todayCaloriesDate: sastToday() })
+            .where(eq(users.id, user.id)).catch(() => {});
+          const vReply = `Logged ✅ ~${vKcal} kcal | ${vProt}g protein.\n\n_Today: ${recV.calories} kcal | ${recV.protein}g protein_`;
+          await logChat(user.id, message, vReply, "FOOD_LOG");
+          return vReply;
+        }
+      }
       const lastUnloggedFood = recentChats.find(c => c.intent !== "FOOD_LOG" && c.messageIn);
       if (lastUnloggedFood) {
         const foodsInLastMsg = scanForSAFoods(lastUnloggedFood.messageIn || "");

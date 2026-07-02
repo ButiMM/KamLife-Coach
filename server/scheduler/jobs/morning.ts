@@ -379,7 +379,7 @@ export async function runMorningCheckin(): Promise<void> {
       // \n\n---\n\n is the Twilio message splitter — two separate WhatsApps
       const todaySection: string[] = [];
       todaySection.push(`*Today:*`);
-      todaySection.push(`👟 ${stepsTarget.toLocaleString()} steps — send your count or a screenshot.`);
+      todaySection.push(`👟 ${stepsTarget.toLocaleString()} steps — your phone counts them (health app). Send tonight's number or a screenshot; a weekly-average screenshot works too.`);
 
       if (isTodayTrainingDay) {
         // No inline "preview" — slicing the first 4 lines of the workout only ever

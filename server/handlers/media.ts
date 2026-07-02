@@ -438,7 +438,7 @@ export async function handleMediaMessage(ctx: {
             model: "gpt-4o-mini",
             max_tokens: 50,
             messages: [
-              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If no step count is clearly labelled, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
+              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is clearly labelled, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
               { role: "user", content: [
                 { type: "text", text: "Extract the labelled step count from this screenshot, or reply NOT_STEPS." },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -446,6 +446,18 @@ export async function handleMediaMessage(ctx: {
             ],
           }));
           const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
+          // Weekly-average screenshots are a valid check-in — coach on the week, but never
+          // write it as TODAY's count (it would corrupt the day and the 7-day trend).
+          const weeklyAvgOcr = stepText.match(/^WEEKLY_AVG:\s*([\d,]+)/i);
+          if (weeklyAvgOcr) {
+            const avgSteps = parseInt(weeklyAvgOcr[1].replace(/,/g, ""), 10);
+            if (Number.isFinite(avgSteps) && avgSteps >= 100 && avgSteps <= 50000) {
+              const wkT = user.stepsTarget || 8500;
+              const wkR = `Weekly average: *${avgSteps.toLocaleString()} steps/day* vs your ${wkT.toLocaleString()} target — ${avgSteps >= wkT ? "on target. Strong week 🔥" : `${(wkT - avgSteps).toLocaleString()} short. One 15-minute walk a day closes that.`}\n\n_Weekly screenshots work great — send one every Sunday, or daily counts as you go._`;
+              await logChat(user.id, `[Step Screenshot: weekly avg ${avgSteps}]`, wkR, "STEP_WEEKLY_REPORT");
+              return wkR;
+            }
+          }
           const visionRejected = /\b(NOT_STEPS|UNKNOWN)\b/i.test(stepText);
           const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
           const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
@@ -875,7 +887,7 @@ FOOD CHECK FIRST: Before anything else, verify this image actually shows food or
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
 
-BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. Identify starches by colour AND texture — do NOT default every pale starch to pap: a smooth white or cream mound = pap OR mashed potato (use context); an orange or yellow mound = sweet potato or butternut (NOT pap); loose yellow grains = savoury/yellow rice or corn; large white kernels = samp; plain white grains = rice; a bowl of plain white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message && !isApprovalCaption ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : isApprovalCaption ? `\n\nCLIENT IS ASKING: "Is this food okay for my goal?" — identify the food from the photo, estimate calories/protein, give a verdict (yes/no/how much), and log it.` : ""}`,
+BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. Identify starches by colour AND texture — do NOT default every pale starch to pap: a smooth white or cream mound = pap OR mashed potato (use context); an orange or yellow mound = sweet potato or butternut (NOT pap); loose yellow grains = savoury/yellow rice or corn; large white kernels = samp; plain white grains = rice; a bowl of plain white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message && !isApprovalCaption ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : isApprovalCaption ? `\n\nCLIENT IS ASKING: "Is this food okay for my goal?" — identify the food from the photo, estimate calories/protein, and give a straight verdict (yes/no/portion size) for their goal, with ONE better swap at a similar price if the verdict is no. Do NOT log it and do NOT say "logged" — they are DECIDING (often still in the shop), not reporting. Still end with the TOTAL: line.` : ""}`,
               },
               { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
             ],
@@ -993,7 +1005,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return reply;
       }
 
-      await logChat(user.id, "[Photo]", visionReply, "FOOD_LOG");
+      await logChat(user.id, "[Photo]", visionReply, isApprovalCaption ? "FOOD_VERDICT" : "FOOD_LOG");
 
       const extractKcal = (text: string) => {
         // Prefer explicit TOTAL: line added by the updated prompt
@@ -1039,6 +1051,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const notFoodReply = `I can see that's not a food photo. If you're logging a meal, send a photo of the food or just type what you ate — e.g. *chicken and rice*. For steps, send a screenshot of your step count.`;
         await logChat(user.id, "[Photo]", notFoodReply, "UNRECOGNISED_PHOTO");
         return notFoodReply;
+      }
+
+      // "Can I eat this?" — a PRE-PURCHASE/permission question, not a food report.
+      // Answer with the verdict and numbers but NEVER write a meal log: the client is
+      // deciding (often in the shop aisle). If they go ahead, "log it" counts it from
+      // the verdict's TOTAL line (food-context smart-log picks up FOOD_VERDICT rows).
+      if (isApprovalCaption) {
+        return `${visionDisplay}\n\n_Eating it? Reply *log it* and I'll count it._`;
       }
 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──
