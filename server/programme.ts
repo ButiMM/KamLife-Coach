@@ -1136,6 +1136,27 @@ function getNewDbDay(
   return { exercises: gender === "female" ? DB_3DAY_C_WOMEN : DB_3DAY_C_MEN, label: "Full Body C" };
 }
 
+function bmiOf(user: any): number {
+  const w = parseFloat(String(user?.currentWeight || "")) || 0;
+  const h = Number(user?.heightCm) || 0;
+  return w > 0 && h > 0 ? w / Math.pow(h / 100, 2) : 0;
+}
+
+// Heavy clients (BMI ≥ 33): jump landings load knees/ankles at 4-6× bodyweight —
+// on a 120kg+ frame that's an injury waiting to happen. Swap plyo moves for a
+// floor-planted power version up front instead of waiting for "knees are sore".
+// Same explosive stimulus, none of the landing forces.
+function swapImpactForHeavy(exercises: Exercise[], user: any): Exercise[] {
+  if (bmiOf(user) < 33) return exercises;
+  return exercises.map(ex => /\b(jump|hop|plyo|burpee|skip)\b/i.test(ex.name) ? {
+    ...ex,
+    name: "Power Squat (no jump)",
+    description: "Squat to parallel. Drive up FAST — but both feet stay planted. All the explosive intent, none of the landing impact.",
+    mistake: "Rushing the way down. Lower under control, explode up.",
+    modification: "Squat to a chair and stand up fast.",
+  } : ex);
+}
+
 function getNewHomeDay(
   trainingDays: number,
   dayNumber: number,
@@ -1408,7 +1429,9 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
     prefix = `*Warm-up first (5 min):* Light walk or march in place. Arm circles. Gentle leg swings. Ankle rotations.\n\n`;
   }
   if (isYouth && todayOnly) {
-    prefix = `*Quick warm-up:* 30 star jumps, 10 high knees each side, arm swings.\n\n`;
+    prefix = bmiOf(user) >= 33
+      ? `*Quick warm-up:* 2-min brisk march on the spot, arm circles, 10 slow sit-to-stands.\n\n`
+      : `*Quick warm-up:* 30 star jumps, 10 high knees each side, arm swings.\n\n`;
   }
 
   // Walking target footer for today's workout
@@ -1637,7 +1660,7 @@ function buildDayWorkoutInner(user: any): string {
   // Home / no-equipment users — full 2/3/4-day programme, gender-specific
   if (mode !== "gym") {
     const { exercises, label } = getNewHomeDay(trainingDays, day, gender);
-    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
+    return formatGymDay(swapImpactForHeavy(exercises, user), label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
   }
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
@@ -1664,6 +1687,7 @@ export function getCurrentDayExercises(user: any): { exercises: DayExercise[]; l
     raw = getNewDbDay(trainingDays, day, gender);
   } else if (mode !== "gym") {
     raw = getNewHomeDay(trainingDays, day, gender);
+    raw = { ...raw, exercises: swapImpactForHeavy(raw.exercises, user) };
   } else {
     raw = getNewGymDay(trainingDays, day, gender, user.primaryFocusArea === "glutes_legs");
   }

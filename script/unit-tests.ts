@@ -53,6 +53,19 @@ test("muscle gain male gets calorie surplus", () => {
   assert.ok(muscleGain.proteinTarget > fatLoss.proteinTarget, "muscle gain needs more protein");
 });
 
+test("very obese client (BMI ≥ 30) gets protein off ADJUSTED bodyweight, not total (2026-07-02: 140kg was prescribed 280g/day)", () => {
+  // 140kg / 170cm male fat loss: BMI 48.4. Ideal (BMI 22) = 63.6kg;
+  // adjusted = 63.6 + 0.4×(140−63.6) = 94.2kg → ×2.0 = ~188g. NOT 280g.
+  const { proteinTarget } = calculateTargets(140, "fat_loss", "office", 3, "male", 30, 170);
+  assert.ok(proteinTarget < 210, `obese protein must use adjusted bodyweight, got ${proteinTarget}g`);
+  assert.ok(proteinTarget >= 150, `obese protein still must protect muscle, got ${proteinTarget}g`);
+});
+
+test("protein target is hard-capped at 220g regardless of size", () => {
+  const { proteinTarget } = calculateTargets(200, "muscle_gain", "retail_physical", 5, "male", 25, 175);
+  assert.ok(proteinTarget <= 220, `protein ceiling breached: ${proteinTarget}g`);
+});
+
 test("female has smaller deficit than male for fat loss", () => {
   const male = calculateTargets(70, "fat_loss", "office", 3, "male", 30, 170);
   const female = calculateTargets(70, "fat_loss", "office", 3, "female", 30, 165);

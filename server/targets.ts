@@ -85,7 +85,16 @@ export function calculateTargets(
     general: isFemale ? 1.6 : 1.8,
     health_condition: isFemale ? 1.6 : 2.0,
   };
-  let proteinTarget = Math.round((Number.isFinite(weightKg) ? weightKg : 75) * (proteinMult[goalType] || 2.0));
+  // Protein need follows LEAN mass, not total mass. Scaling off total bodyweight
+  // prescribed a 140kg client 280g/day — physiologically pointless, unaffordable in
+  // this market (~R100+/day of protein), and demoralizing enough to churn. Clinical
+  // standard for BMI ≥ 30: adjusted bodyweight = ideal (BMI 22) + 40% of the excess.
+  const safeWeight = Number.isFinite(weightKg) ? weightKg : 75;
+  const bmiP = heightCm > 0 ? safeWeight / Math.pow(heightCm / 100, 2) : 0;
+  const idealKg = 22 * Math.pow(heightCm / 100, 2);
+  const proteinRefKg = bmiP >= 30 ? idealKg + 0.4 * (safeWeight - idealKg) : safeWeight;
+  let proteinTarget = Math.round(proteinRefKg * (proteinMult[goalType] || 2.0));
+  proteinTarget = Math.min(proteinTarget, 220); // absolute ceiling — matches the auto-adjust cap
 
   // Breastfeeding: minimum 70g protein — quality matters for breast milk composition
   if (isBreastfeeding) proteinTarget = Math.max(70, proteinTarget);
@@ -94,11 +103,11 @@ export function calculateTargets(
   // Youth: don't over-restrict
   if (age < 18) {
     calorieTarget = Math.max(calorieTarget, isFemale ? 1600 : 1800);
-    proteinTarget = Math.min(proteinTarget, Math.round(weightKg * 1.8)); // don't overload growing bodies
+    proteinTarget = Math.min(proteinTarget, Math.round(proteinRefKg * 1.8)); // don't overload growing bodies
   }
   // Elderly: preserve muscle, moderate calories
   if (age >= 60) {
-    proteinTarget = Math.max(proteinTarget, Math.round(weightKg * 1.6)); // elderly need MORE protein not less
+    proteinTarget = Math.max(proteinTarget, Math.round(proteinRefKg * 1.6)); // elderly need MORE protein not less
     calorieTarget = Math.max(calorieTarget, isFemale ? 1400 : 1600);
   }
 
