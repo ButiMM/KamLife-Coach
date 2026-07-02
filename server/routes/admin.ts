@@ -1,6 +1,7 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles, gptCosts } from "../../shared/schema";
+import { evaluateScaling } from "../scaling-milestones";
 import { eq, desc, asc, and, gte, isNull, or, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
 import twilio from "twilio";
@@ -1010,6 +1011,49 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     } catch (err: any) {
       console.error("[ADMIN] POPIA export error:", err);
       return res.status(500).json({ error: err.message || "Export failed" });
+    }
+  });
+
+  // ---- SCALING RADAR — milestone playbook + live counts for the founder dashboard ----
+  app.get("/api/admin/scaling", requireAdminKey, async (_req, res) => {
+    try {
+      const now = new Date();
+      const [clientRow] = await db.select({ n: sql<number>`count(*)::int` }).from(users).where(
+        and(
+          eq(users.onboardingState, "COMPLETE"),
+          or(
+            eq(users.subscriptionStatus, "active"),
+            and(eq(users.subscriptionStatus, "trial"), gte(users.betaBypassUntil, now)),
+          ),
+        ),
+      );
+      const activeClients = clientRow?.n ?? 0;
+
+      const dayAgo = new Date(Date.now() - 24 * 3600_000);
+      const [msgRow] = await db.select({ n: sql<number>`count(*)::int` }).from(chatHistory)
+        .where(gte(chatHistory.createdAt, dayAgo));
+
+      const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+      const [costRow] = await db.select({ usd: sql<string>`coalesce(sum(cost_usd), 0)` }).from(gptCosts)
+        .where(gte(gptCosts.createdAt, monthStart));
+      const gptMonthUsd = parseFloat(costRow?.usd || "0");
+      const gptMonthZar = Math.round(gptMonthUsd * 18.5 * 100) / 100; // same USD→ZAR rate the cost logger uses
+
+      return res.json({
+        activeClients,
+        messages24h: msgRow?.n ?? 0,
+        gptMonthZar,
+        gptPerClientZar: activeClients > 0 ? Math.round((gptMonthZar / activeClients) * 100) / 100 : 0,
+        config: {
+          dbPoolMax: Math.max(5, Number(process.env.DB_POOL_MAX) || 25),
+          sendRatePerSec: Math.max(1, Number(process.env.SCHEDULER_SEND_RATE_PER_SEC) || 10),
+          proactivePaused: String(process.env.PROACTIVE_PAUSED || "").toLowerCase() === "true",
+        },
+        milestones: evaluateScaling(activeClients),
+      });
+    } catch (err: any) {
+      console.error("[ADMIN] scaling radar error:", err);
+      return res.status(500).json({ error: err.message || "scaling radar failed" });
     }
   });
 }

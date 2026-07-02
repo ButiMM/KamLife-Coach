@@ -141,6 +141,9 @@ export default function Dashboard() {
           />
         </div>
 
+        {/* Scaling Radar — milestone playbook with approach alerts */}
+        <ScalingRadar />
+
         {/* Pinned Next Actions */}
         {nextActionsData && nextActionsData.actions.length > 0 && (
           <div>
@@ -348,4 +351,125 @@ function DashboardLoading() {
             </div>
         </DashboardLayout>
     )
+}
+
+// ── Scaling Radar ───────────────────────────────────────────────────────────────
+// Every client-count milestone that affects margins, infrastructure, compliance
+// or team gets a playbook — and an ALERT state from 80% of the threshold, so the
+// founder acts BEFORE the mark hits, never after. Data: /api/admin/scaling.
+interface ScalingPayload {
+  activeClients: number;
+  messages24h: number;
+  gptMonthZar: number;
+  gptPerClientZar: number;
+  config: { dbPoolMax: number; sendRatePerSec: number; proactivePaused: boolean };
+  milestones: Array<{
+    clients: number; title: string; mrrZar: number; why: string;
+    status: "passed" | "approaching" | "upcoming"; progressPct: number;
+    actions: Array<{ owner: "you" | "claude" | "together"; action: string }>;
+  }>;
+}
+
+const OWNER_CHIP: Record<string, string> = {
+  you: "bg-orange-100 text-orange-700 border-orange-200",
+  claude: "bg-blue-100 text-blue-700 border-blue-200",
+  together: "bg-violet-100 text-violet-700 border-violet-200",
+};
+
+function ScalingRadar() {
+  const [expanded, setExpanded] = useState<number | null>(null);
+  const { data } = useQuery({
+    queryKey: ["/api/admin/scaling"],
+    queryFn: async () => {
+      const res = await fetch("/api/admin/scaling", { headers: authHeaders() });
+      if (!res.ok) return null;
+      return res.json() as Promise<ScalingPayload>;
+    },
+    refetchInterval: 5 * 60_000,
+    retry: false,
+  });
+
+  if (!data) return null;
+  const next = data.milestones.find(mm => mm.status !== "passed");
+  const approaching = data.milestones.filter(mm => mm.status === "approaching");
+
+  return (
+    <Card className="p-6 border-border/50">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 mb-5">
+        <div>
+          <h3 className="text-xl font-bold font-display">📡 Scaling Radar</h3>
+          <p className="text-sm text-muted-foreground">What must change at every growth mark — before it hits</p>
+        </div>
+        <div className="flex flex-wrap gap-2 text-xs">
+          <span className="px-2.5 py-1 rounded-full bg-secondary border border-border/50">GPT this month: <b>R{data.gptMonthZar.toLocaleString()}</b>{data.activeClients > 0 && <> · R{data.gptPerClientZar}/client</>}</span>
+          <span className="px-2.5 py-1 rounded-full bg-secondary border border-border/50">Msgs 24h: <b>{data.messages24h.toLocaleString()}</b></span>
+          <span className="px-2.5 py-1 rounded-full bg-secondary border border-border/50">Pool {data.config.dbPoolMax} · Send {data.config.sendRatePerSec}/s</span>
+          <span className={`px-2.5 py-1 rounded-full border ${data.config.proactivePaused ? "bg-amber-50 text-amber-700 border-amber-200" : "bg-emerald-50 text-emerald-700 border-emerald-200"}`}>
+            Proactive {data.config.proactivePaused ? "PAUSED" : "ON"}
+          </span>
+        </div>
+      </div>
+
+      {/* Approach alerts — the whole point of this card */}
+      {approaching.map(mm => (
+        <div key={`alert-${mm.clients}`} className="mb-4 p-4 rounded-xl border-2 border-amber-400 bg-amber-50">
+          <p className="font-bold text-amber-800 text-sm mb-2">🚨 APPROACHING {mm.clients.toLocaleString()} CLIENTS ({mm.progressPct}%) — act now, not at the mark:</p>
+          <ul className="space-y-1.5">
+            {mm.actions.map((a, i) => (
+              <li key={i} className="flex items-start gap-2 text-sm text-amber-900">
+                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${OWNER_CHIP[a.owner]}`}>{a.owner}</span>
+                <span>{a.action}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ))}
+
+      {/* Progress to next mark */}
+      {next && (
+        <div className="mb-5">
+          <div className="flex justify-between text-sm mb-1.5">
+            <span className="font-semibold">{data.activeClients.toLocaleString()} active clients</span>
+            <span className="text-muted-foreground">next mark: <b className="text-foreground">{next.clients.toLocaleString()}</b> ({next.title} · R{next.mrrZar.toLocaleString()} MRR)</span>
+          </div>
+          <div className="h-2.5 rounded-full bg-muted overflow-hidden">
+            <div className={`h-full rounded-full transition-all ${next.status === "approaching" ? "bg-amber-500" : "bg-primary"}`} style={{ width: `${next.progressPct}%` }} />
+          </div>
+        </div>
+      )}
+
+      {/* Full milestone ladder */}
+      <div className="space-y-1.5">
+        {data.milestones.map(mm => (
+          <div key={mm.clients} className={`rounded-xl border ${mm.status === "approaching" ? "border-amber-300 bg-amber-50/50" : mm.status === "passed" ? "border-emerald-200 bg-emerald-50/40" : "border-border/50 bg-secondary/30"}`}>
+            <button className="w-full flex items-center justify-between px-4 py-2.5 text-left" onClick={() => setExpanded(expanded === mm.clients ? null : mm.clients)}>
+              <span className="flex items-center gap-3 text-sm">
+                <span className="font-bold tabular-nums w-20">{mm.clients.toLocaleString()}</span>
+                <span className="font-medium">{mm.title}</span>
+                <span className="text-xs text-muted-foreground hidden sm:inline">R{mm.mrrZar.toLocaleString()} MRR</span>
+              </span>
+              <span className="flex items-center gap-2 text-xs shrink-0">
+                {mm.status === "passed" ? <span className="text-emerald-600 font-semibold">✓ passed</span>
+                  : mm.status === "approaching" ? <span className="text-amber-600 font-bold">{mm.progressPct}% — approaching</span>
+                  : <span className="text-muted-foreground">{mm.progressPct}%</span>}
+              </span>
+            </button>
+            {expanded === mm.clients && (
+              <div className="px-4 pb-3">
+                <p className="text-xs text-muted-foreground italic mb-2">{mm.why}</p>
+                <ul className="space-y-1.5">
+                  {mm.actions.map((a, i) => (
+                    <li key={i} className="flex items-start gap-2 text-sm">
+                      <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 mt-0.5 ${OWNER_CHIP[a.owner]}`}>{a.owner}</span>
+                      <span>{a.action}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </Card>
+  );
 }
