@@ -3,6 +3,7 @@ import { users, weightLogs } from "../../shared/schema";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
+import { invalidatePatternCache } from "../cache";
 
 /**
  * Assess whether a weight-change rate is safe, concerning or dangerous for the given goal.
@@ -150,6 +151,9 @@ export async function handleWeightLog(
       await tx.insert(weightLogs).values({ userId: user.id, weight: newKg.toString() });
     }
   });
+  // The cached pattern summary feeds every GPT reply for up to an hour — without this,
+  // the coach can contradict the weigh-in the client JUST sent ("no weight data this week").
+  invalidatePatternCache(user.id);
 
   // True journey start = the FIRST weight ever logged (now includes today's row if it's the first).
   // Used by BOTH the milestone and goal-reached voice scripts so neither ever quotes last week's

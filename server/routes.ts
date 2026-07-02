@@ -336,10 +336,15 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // "I'm not paying for this nonsense" → payment link bug (only 1 signal counted, fell through to payment handler).
   // HAS_CLEAR_ACTION guard: when the client pairs frustration with an explicit request
   // ("Today's workout omg it's not working"), the action must win — frustration handler skips.
-  const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|doesn.?t work|nothing works|broken|scam|rip.?off)\b/i.test(m);
+  // NOTE: "broken" / "doesn't work" / "nothing works" are NOT single-signal triggers —
+  // they describe things ("my knee is broken", "nothing works for my belly fat", "the
+  // treadmill is broken") as often as the product. Alone they'd route an injury report
+  // to the frustration prompt. They count in the 2-signal list below instead; genuine
+  // product complaints ("it doesn't work") still land in gpt-block's frustration path.
+  const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
-    /\b(terrible|pathetic|garbage|rubbish|broken|nothing works)\b/i.test(m),
+    /\b(terrible|pathetic|garbage|rubbish|broken|nothing works|doesn.?t work)\b/i.test(m),
     /\b(i.?m done|i am done|giving up|shut down|shut it down|i.?m out)\b/i.test(m),
     /\b(not paying|won.?t pay|i won.?t pay|i.?m not paying|nobody.?s paying|not worth)\b/i.test(m),
     /\b(this is a bot|it.?s a bot|just a bot|generic bot|just generic|robotic|generic man)\b/i.test(m),
@@ -463,11 +468,26 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
         const canonLower = canon.toLowerCase();
         if (canonLower !== m) {
-          // Hallucination brake: every number in the canonical must exist in the original,
-          // unless the original spelled numbers as words ("ten thousand").
+          // Hallucination brake: every number in the canonical must exist in the original.
+          // Number-words whitelist ONLY their own values — the old blanket escape hatch
+          // ("any number-word present → skip the brake") let "a couple thousand steps"
+          // become an invented "2000 steps". Singles, pairs ("twenty five", "ten thousand")
+          // and word+thousand compounds ("twenty five thousand") are derived; anything
+          // else fails closed to the original message (normalizer skip, never data loss).
           const digitGroups = canonLower.match(/\d+/g) || [];
-          const originalHasNumberWords = /\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|hundred|thousand|half)\b/i.test(m);
-          const inventsNumbers = digitGroups.some(d => !m.includes(d) && !originalHasNumberWords);
+          const mStripped = m.replace(/[.,\s]/g, "");
+          const WORD_VALS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, thousand: 1000 };
+          const wordVals = (m.match(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety|hundred|thousand)\b/gi) || []).map(w => WORD_VALS[w.toLowerCase()]);
+          const allowedNums = new Set<string>();
+          wordVals.forEach((v, i) => {
+            allowedNums.add(String(v));
+            if (i + 1 < wordVals.length) {
+              allowedNums.add(String(v + wordVals[i + 1]));
+              allowedNums.add(String(v * wordVals[i + 1]));
+              if (i + 2 < wordVals.length) allowedNums.add(String((v + wordVals[i + 1]) * wordVals[i + 2]));
+            }
+          });
+          const inventsNumbers = digitGroups.some(d => !mStripped.includes(d) && !allowedNums.has(String(parseInt(d, 10))));
           // Retro-date brake: if the classifier adds "yesterday" to a WORKOUT_LOG canonical
           // but the original message has no temporal reference, the workout handler would
           // fire isRetroDone on a same-day lift note ("25kg squats, 6 reps") and reply
@@ -701,8 +721,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           .orderBy(desc(stepLogs.loggedAt))
           .limit(7),
       ]);
+      // Divide by days actually logged, not a flat 7 — a new client who logged 9k steps
+      // on each of their first 3 days was told "7-day average: 3,857, below target".
       const weeklyAvg = recentStepLogs.length >= 3
-        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / 7)
+        ? Math.round(recentStepLogs.reduce((s, r) => s + r.steps, 0) / recentStepLogs.length)
         : undefined;
       void stepGoalCtx; // used by getStepResponse via user.goalType
       const stepReply = getStepResponse(steps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, weeklyAvg, user, workedOutToday);

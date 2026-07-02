@@ -19,6 +19,7 @@ import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
 import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent } from "../utils";
+import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
 import { calculateTargets } from "../targets";
@@ -226,6 +227,7 @@ export async function handleWorkoutCommands(ctx: {
 
     // Log workout session
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+    invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     const trainingDays = user.trainingDaysPerWeek || 3;
@@ -331,6 +333,7 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true, loggedAt: retroDate });
+    invalidatePatternCache(user.id);
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     const trainingDays = user.trainingDaysPerWeek || 3;
@@ -379,6 +382,7 @@ export async function handleWorkoutCommands(ctx: {
     }
 
     await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+    invalidatePatternCache(user.id); // GPT's cached pattern summary must see this session immediately
 
     const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
     const trainingDays = user.trainingDaysPerWeek || 3;

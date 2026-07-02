@@ -565,14 +565,13 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
+  // gpt-4o is reserved for topics where a WRONG answer is unsafe: injuries/pain,
+  // diagnosed medical conditions, pregnancy, safety-of-use questions. Routine
+  // coaching topics (supplements, plateaus, recomp, programme tweaks) answer just
+  // as well on mini with the full prompt — at ~1/17th the input cost.
   const COMPLEX_SIGNALS = [
     "injury", "hurt my", "pain in", "hurts when", "sore knee", "sore shoulder", "sore back",
-    "recomposition", "body recomp", "recomp",
-    "creatine", "supplement", "pre-workout", "bcaa", "whey",
-    "change my programme", "switch my programme", "adjust my programme",
-    "not losing weight", "not seeing results", "why am i not",
-    "plateau", "weight plateau", "stuck at",
-    "should i take", "is it safe to",
+    "is it safe to",
     "diabetes", "hypertension", "blood pressure", "thyroid", "pcos",
     "doctor said", "medical", "chronic",
     "pregnant", "postpartum",
@@ -584,7 +583,9 @@ export function selectModel(instruction: string, userMessage: string): { model: 
   }
 
   console.log(`[MODEL] gpt-4o-mini | msg: "${userMessage.slice(0, 60)}"`);
-  return { model: "gpt-4o-mini", maxTokens: 280, reason: "coaching" };
+  // Conversational replies are hard-capped at ~60 words / 3 sentences by the voice
+  // rules (~90 tokens) — 160 leaves headroom without paying for runaway outputs.
+  return { model: "gpt-4o-mini", maxTokens: 160, reason: "coaching" };
 }
 
 export type VisionUseCase = "food_photo" | "progress_compare" | "exercise_classify" | "step_ocr";
@@ -1161,6 +1162,8 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
     const response = await withOpenAIRetry(() => openai.chat.completions.create({
       model,
       max_tokens: maxTokens,
+      // Voice rules are strict (word caps, banned phrases); temp 1.0 maximises rule-breaking.
+      temperature: 0.6,
       messages: [
         {
           role: "system",
@@ -1337,6 +1340,9 @@ const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
   [/^(hi|hey|hello|howzit|sawubona|dumelang|ekse|yo|sup|gm|good\s*morning|good\s*afternoon|good\s*evening|good\s*night)[\s!?.]*$/i, "GREETING"],
   [/^(menu|help|options|start|\*menu\*|\*help\*)[\s?]*$/i, "MENU_REQUEST"],
   [/^(\d{4,6})\s*(steps?|step|km|k|miles?)?\s*$/i, "STEPS"],
+  // k-shorthand steps + water volumes: deterministic handlers parse these fully — the classifier call was pure waste.
+  [/^([\d.,]+)\s*k\s*(steps?)?[\s!.]*$/i, "STEPS"],
+  [/^([\d.,]+)\s*(l|litres?|liters?|ml|glass(?:es)?|bottles?|cups?)\s*(of\s*)?(water)?[\s!.]*$/i, "OTHER"],
   [/^(\d{2,3}(?:\.\d+)?)\s*kg\s*$/i, "WEIGHT"],
   [/^(done|finished|completed|session done|workout done|trained today|went to gym|gym done|just finished|just trained)[\s!.]*$/i, "WORKOUT_LOG"],
   // Programme requests — asking TO SEE the plan, never a completion report.

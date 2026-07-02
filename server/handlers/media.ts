@@ -27,7 +27,8 @@ import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
-import { calculateTargets } from "../targets";
+import { calculateTargets, getDailyStepContext } from "../targets";
+import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
 import { getExerciseGifUrl } from "../exercise-media";
@@ -451,7 +452,12 @@ export async function handleMediaMessage(ctx: {
           const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 35000;
           const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
           if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
-            const target = user.stepsTarget || 10000;
+            // Match the text step logger exactly: same default target (8500, not 10000)
+            // and the same workout-day easing — a screenshot on a training day was being
+            // judged against the raw target while a typed count got the eased one.
+            let workedOutTodayM = false;
+            try { workedOutTodayM = (await getTodayWorkoutState(user)).alreadyDoneToday; } catch { /* non-critical */ }
+            const { target } = getDailyStepContext(user.stepsTarget || 8500, user.goalType || "fat_loss", workedOutTodayM);
             const todayStartSteps = sastDayStart();
             // Dedup: if the exact same step count was already logged within the last 5 minutes, skip
             const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
@@ -485,7 +491,7 @@ export async function handleMediaMessage(ctx: {
             }
             await db.update(users).set({ lastActiveAt: new Date(), awaitingInputType: null }).where(eq(users.phoneNumber, phone));
             const [perfectDay, streak] = await Promise.all([checkPerfectDay(user.id, user.proteinTarget || 120), getStepStreak(user.id)]);
-            const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, undefined, user);
+            const stepReply = getStepResponse(extractedSteps, target, parseFloat(user.currentWeight as string || "75") || 75, streak, undefined, user, workedOutTodayM);
             await logChat(user.id, `[Step Screenshot: ${extractedSteps}]`, stepReply, "STEP_LOG");
             console.log(`[MEDIA][${mediaTrace}] step_logged value=${extractedSteps}`);
 
@@ -1100,7 +1106,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
                   } else {
                     await db.insert(stepLogs).values({ userId: user.id, steps: extraSteps });
                   }
-                  const stepTarget = user.stepsTarget || 10000;
+                  const stepTarget = user.stepsTarget || 8500;
                   const stepStreak = await getStepStreak(user.id);
                   extraReplies.push(getStepResponse(extraSteps, stepTarget, parseFloat(user.currentWeight as string || "75") || 75, stepStreak, undefined, user));
                   await logChat(user.id, `[Step Screenshot: ${extraSteps}]`, `Steps logged: ${extraSteps}`, "STEP_LOG");
