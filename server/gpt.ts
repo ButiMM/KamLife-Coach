@@ -575,6 +575,7 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     "diabetes", "hypertension", "blood pressure", "thyroid", "pcos",
     "doctor said", "medical", "chronic",
     "pregnant", "postpartum",
+    "ozempic", "wegovy", "saxenda", "mounjaro", "glp-1", "glp1",
   ];
   const isComplex = COMPLEX_SIGNALS.some(s => msgLower.includes(s));
   if (isComplex) {
@@ -1029,7 +1030,13 @@ async function isUnderMonthlyCostCap(userId: string): Promise<boolean> {
   }
 }
 
-export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string): Promise<string> {
+// Fixed slice of the static brain kept on the hot path: voice + coaching framework +
+// the CLAUDE.md-protected goal-aware food logic (ends ~18.4k chars), excluding the
+// bulky reference tables (~33.8k+) the specialist agents own. FIXED boundary (never
+// tail-dependent) — that is what makes the prefix byte-identical and cacheable.
+const STATIC_HOT_BRAIN = COACH_K_SYSTEM.slice(0, 20_000);
+
+export async function askCoachK(userMessage: string, user: any, extraInstruction?: string, memoryContext?: string, staticGuide?: string): Promise<string> {
   const context = buildContext(user);
   const [patternSummary, cipNarrative] = await Promise.all([
     buildPatternSummary(user),
@@ -1112,30 +1119,20 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
 
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
 
-  // The client's own data (name, goal, today's food, lifts, memory) + the instruction are
-  // small, cheap, and the entire reason a reply feels personal — they must NEVER be
-  // truncated. COACH_K_SYSTEM is the large, cacheable static prefix. If we exceed budget,
-  // trim ONLY the static brain's tail (deep reference material the specialist agents already
-  // cover), never the client context or the instruction. Cap is deliberately modest to
-  // control token cost — the static prefix is identical across calls so it gets cached.
+  // Prompt layout for OpenAI prefix-caching: [STATIC_HOT_BRAIN + staticGuide] is
+  // byte-identical across calls (cached at ~50%); everything per-client/per-minute
+  // lives in the tail. The old layout put the 16.7k-char scenario guide in the tail —
+  // billed full-price on EVERY call — and its size forced the trim to cut the brain
+  // to ~5k chars, silently dropping the goal-aware food logic on the main coach path.
+  // Client data is never truncated (memory capped at 2k, journey narrative at 6k).
   const cipBlock = cipNarrative
-    ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative}`
+    ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative.slice(0, 6000)}`
     : "";
   const clientContext = `${getNowContextSA()}\n\n${context}\n\n${patternSummary}${cipBlock}${saFlags ? "\n\n" + saFlags : ""}${todayFoodContext}${liftContext}${cappedMemory}`;
   const tail = `\n\n${clientContext}\n\n${hardLimit}\n\nINSTRUCTION: ${instruction}`;
-  let systemContent = `${COACH_K_SYSTEM}${tail}`;
-  // Cap lands the cut AFTER the goal-aware food logic (CLAUDE.md: never drop it — it ends
-  // ~char 18.4k) and BEFORE the bulky programme/food-table reference (~char 33.8k) that the
-  // specialist agents already own. 27k (not 24k) leaves headroom so the goal-aware section
-  // survives even for memory-rich paying clients whose dynamic tail runs ~8k. So the hot path
-  // always carries voice + scenario framework + situation handling + goal-aware coaching, and
-  // the reference data stays out of the per-message token bill. Static prefix is identical
-  // across calls, so it caches at ~50%.
-  const MAX_SYSTEM_CHARS = 27_000;
-  if (systemContent.length > MAX_SYSTEM_CHARS) {
-    console.warn(`[GPT] System prompt ${systemContent.length} chars — trimming static brain to fit ${MAX_SYSTEM_CHARS} (client context preserved)`);
-    const room = Math.max(0, MAX_SYSTEM_CHARS - tail.length);
-    systemContent = COACH_K_SYSTEM.slice(0, room) + tail;
+  const systemContent = `${STATIC_HOT_BRAIN}${staticGuide ? `\n\n${staticGuide}` : ""}${tail}`;
+  if (systemContent.length > 48_000) {
+    console.warn(`[GPT] System prompt unusually large: ${systemContent.length} chars (tail ${tail.length}) — check for runaway context`);
   }
 
   let conversationHistory: { role: "user" | "assistant"; content: string }[] = [];

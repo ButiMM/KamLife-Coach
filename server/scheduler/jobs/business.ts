@@ -406,6 +406,17 @@ export async function runAutoCalAdjust(): Promise<void> {
         let msg:     string | null = null;
 
         if (goal === "fat_loss") {
+          // Losing TOO FAST (> ~1% of bodyweight/week across the 3-week window, min 1.8kg)
+          // costs muscle, not just fat — the classic failure mode for aggressive dieters and
+          // GLP-1 (Ozempic/Wegovy) clients whose appetite is medically suppressed. Raise the
+          // floor instead of letting them dig deeper. Mirrors the muscle_gain wrong-direction
+          // guard below; without this, only plateaus got corrected, never over-shooting.
+          const tooFastKg = Math.max(1.8, last * 0.03);
+          if (change <= -tooFastKg && currentCal < 3500) {
+            newCal  = currentCal + 150;
+            newProt = Math.min(currentProt + 10, 220);
+            msg = `${name}, you're down ${Math.abs(change).toFixed(1)}kg in 3 weeks — faster than the safe lane, and losing that quick starts costing you muscle, not just fat. Adjustments:\n\n📈 Calories: *${currentCal} → ${newCal} kcal/day*\n🥩 Protein: *${currentProt} → ${newProt}g/day* (muscle shield)\n\nThe scale slowing down slightly is the plan working, not stalling. Keep training.`;
+          } else
           // Plateau window: |change| < 0.5kg — neither losing meaningfully nor gaining.
           // The one-sided change >= -0.3 would fire on significant weight GAIN too ("held steady"
           // being factually wrong). Use abs so we only trigger for true no-movement.

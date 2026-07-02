@@ -14,115 +14,14 @@ import { getKamlifeProgramme } from "../programme";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
 
-export async function handleGptBlock(ctx: {
-  phone: string;
-  message: string;
-  m: string;
-  user: any;
-  intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }>;
-}): Promise<string> {
-  const { phone, message, m, user, intentPromise } = ctx;
-  // ---- LANGUAGE DETECTION — needed for GPT instruction and response prefix ----
-  const _detectedLang = detectLanguage(m);
-  const activeLang: string = _detectedLang !== "en" ? _detectedLang : (user.preferredLanguage || "en");
-  let langPrefix = "";
-  if (activeLang !== "en") {
-    const _langFirstName = user.name?.split(" ")[0] || "";
-    switch (activeLang) {
-      case "zu": langPrefix = `Sawubona ${_langFirstName}. `; break;
-      case "xh": langPrefix = `Molo ${_langFirstName}. `; break;
-      case "st": langPrefix = `Dumela ${_langFirstName}. `; break;
-      case "tn": langPrefix = `Dumela ${_langFirstName}. `; break;
-      case "ts": langPrefix = `Avuxeni ${_langFirstName}. `; break;
-      case "af": langPrefix = `Dag ${_langFirstName}. `; break;
-    }
-  }
-
-  // ---- EVERYTHING ELSE → GPT decides ----
-  const now = new Date();
-  const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
-  const hour = new Date(Date.now() + 2 * 3_600_000).getUTCHours(); // SAST hour — getHours() is UTC on Railway, telling the model the wrong time of day
-  const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const clientName = user.name || "there";
-  const trainingMode = user.trainingMode || "home";
-  const saContext = [getNowContextSA(), getSAContextFlags(user)].filter(Boolean).join("\n\n");
-
-  // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
-  let todayStatusBlock = "";
-  try {
-    const todayTotals = await recomputeTodayFoodTotals(user.id);
-    const calTarget = user.calorieTarget || 1800;
-    const protTarget = user.proteinTarget || 120;
-    const stepTarget = user.stepsTarget || 8500;
-    const todaySteps = user.todaySteps || 0;
-    const sastHour = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
-
-    const calEaten = todayTotals.calories;
-    const protEaten = todayTotals.protein;
-    const calDiff = calEaten - calTarget;
-    const calStatus = calEaten === 0
-      ? "nothing logged yet"
-      : calDiff > 0
-        ? `${calDiff} kcal OVER target — do not encourage more eating`
-        : `${Math.abs(calDiff)} kcal remaining`;
-    const protStatus = protEaten === 0
-      ? "no protein logged yet"
-      : protEaten >= protTarget
-        ? `protein target met (${protEaten}g)`
-        : `${protTarget - protEaten}g short of target`;
-    const stepStatus = todaySteps === 0
-      ? "no steps logged"
-      : todaySteps >= stepTarget
-        ? `step target hit (${todaySteps.toLocaleString()} steps)`
-        : `${(stepTarget - todaySteps).toLocaleString()} steps short (${todaySteps.toLocaleString()} done so far)`;
-
-    const progContext = user.programmePhase
-      ? `\n- Programme: Phase ${user.programmePhase}, Week ${user.programmeWeek || 1}, Day ${user.programmeDayInWeek || 1}`
-      : "";
-    const weightLine = user.currentWeight ? `\n- Current weight: ${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : "";
-    todayStatusBlock = `\n\nCLIENT STATUS RIGHT NOW (${sastHour}:00 SAST):
-- Calories: ${calEaten} kcal eaten / ${calTarget} target → ${calStatus}
-- Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
-- Steps today: ${stepStatus}${progContext}${weightLine}
-- Goal: ${user.goalType || "fat_loss"}
-THIS DATA IS BACKGROUND — use it to answer what the client actually asked, NOT as a reason to lecture. Only bring up calories or protein if the client raises it, asks what to eat, or asks how they are doing. When you do: state numbers matter-of-factly, no guilt trip, and frame any gap as the next opportunity, never a failure. Do not tack on unsolicited "add more protein" advice — most messages just need a warm, direct answer. NEVER ask the client for information shown above (weight, goal, targets, today's numbers) — you already have it; asking again destroys trust.`;
-  } catch (e) { /* non-fatal — context is best-effort */ }
-
-  // Fix 9 — Conversation context memory: last 10 exchanges, alternating Client/Coach K format
-  let recentConvBlock = "";
-  let recentChatText = "";
-  try {
-    const recentChats = await db.select().from(chatHistory)
-      .where(eq(chatHistory.userId, user.id))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(10);
-    if (recentChats.length > 0) {
-      const ordered = recentChats.reverse();
-      const thread = ordered.map(c => {
-        const clientLine = c.messageIn ? `Client: "${(c.messageIn).slice(0, 150)}"` : "";
-        const coachLine = c.messageOut ? `Coach K: "${(c.messageOut).slice(0, 150)}"` : "";
-        return [clientLine, coachLine].filter(Boolean).join("\n");
-      }).join("\n");
-      recentChatText = thread;
-      recentConvBlock = `\n\nRECENT CONVERSATION (last 10 exchanges — build on this, do not repeat):\n${thread}`;
-    }
-  } catch (e) { console.warn("[non-fatal]", e); }
-
-  // Fix 5 — Ramadan check against recent chat history (in addition to profile notes)
-  const RAMADAN_KW = ["ramadan", "ramadhan", "fasting", "iftar", "suhoor", "sehri", "muslim", "islam", "halaal", "halal"];
-  if (recentChatText && RAMADAN_KW.some(kw => recentChatText.toLowerCase().includes(kw))) {
-    const existingFlags = getSAContextFlags(user);
-    if (!existingFlags.includes("RAMADAN")) {
-      // User mentioned Ramadan in recent chat — inject flag into instruction
-      recentConvBlock += `\n\nRAMADAN / FASTING ACTIVE: Client has mentioned Ramadan or fasting in recent messages. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs. Adjust all meal timing advice to the eating window only.`;
-    }
-  }
-
-  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${todayStatusBlock}${recentConvBlock}
-
-RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K.
-
-SCENARIO GUIDE — read the message and decide which applies:
+// ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
+// Module-level and byte-identical on every call: askCoachK places it in the STATIC
+// system prefix so OpenAI prefix-caching halves its cost, instead of re-billing it
+// full-price per message as a dynamic instruction (which also crowded the goal-aware
+// food philosophy out of the prompt). Client specifics (name, targets, today's
+// numbers) are NOT interpolated here — they live in the CLIENT PROFILE / TODAY'S
+// STATUS blocks the model already receives.
+const SCENARIO_GUIDE = `SCENARIO GUIDE — read the message and decide which applies:
 
 FOOD LOG MANAGEMENT (client wants to remove, delete, undo, correct, or change something they logged — any natural phrasing like "remove breakfast", "I didn't eat that", "delete the lunch I logged", "take off the mince", "that was wrong", "scratch that", "undo it", "I made a mistake with my log"):
   Tell them: "To remove your last meal say 'remove last meal'. To remove a specific food say 'remove [food name]'. To remove a specific meal say 'remove breakfast' (or lunch/dinner/supper). To clear everything today say 'clear food log'." Keep it short — one sentence per option, max 3 options shown.
@@ -131,12 +30,12 @@ WORKOUT / PROGRAMME REQUEST ("give me a program", "3 day", "full body", "trainin
   Tell the client their programme is ready and to reply with the word "programme" to see the full plan. Do not list exercises here.
 
 STEPS LOGGED (number + "steps" / "walked" / "km"):
-  Respond based on their step target of ${user.stepsTarget || 8500}. If below — push them. If at or above — celebrate and give next action.
+  Respond based on their step target from TODAY'S STATUS. If below — push them. If at or above — celebrate and give next action.
 
 FOOD / MEAL LOGGED (any food item or meal described):
   Coach specifically on THAT exact food. For a proper meal, include estimated calories (kcal) and protein (g): "That is roughly X kcal and Xg protein." Use a range if needed.
   SNACKS, TREATS, DRINKS (chips, chocolate, sweets, biscuits, cooldrink, ice cream, a single bar, a packet of anything): just acknowledge it like a friend would, give the calories, and log it. Do NOT give advice. Do NOT mention protein. Do NOT suggest adding eggs/beans/chicken/anything. No numbers are needed if the item is trivial.
-  If a proper meal is junk or high calorie — be honest but never shame. One sentence on what it costs them, one adjustment for the NEXT meal. Never overhaul their entire diet from one meal. The philosophy: refine what they already eat, don't replace it — people don't stick to complete diet changes. "That's a heavy one — go lighter on dinner and push the steps" is the right energy. If good — celebrate and connect to their ${user.goalType || "fat loss"} goal. Never end with a protein warning. Never give generic advice.
+  If a proper meal is junk or high calorie — be honest but never shame. One sentence on what it costs them, one adjustment for the NEXT meal. Never overhaul their entire diet from one meal. The philosophy: refine what they already eat, don't replace it — people don't stick to complete diet changes. "That's a heavy one — go lighter on dinner and push the steps" is the right energy. If good — celebrate and connect to their goal. Never end with a protein warning. Never give generic advice.
   CRITICAL — If the meal contains ANY of: chicken, beef, mince, fish, tuna, hake, salmon, eggs, pilchards, beans, lentils, pork, lamb, cottage cheese, Greek yoghurt, biltong — DO NOT suggest adding protein or swapping to pilchards. The client is ALREADY eating protein. Celebrate the choice. Budget suggestions (pilchards, eggs, sugar beans) ONLY fire when the client explicitly says they have no money or their stored budget tier is "under_100". Never suggest budget swaps after a quality meal unprompted.
 
 BROKE / BUDGET / MONTH-END / NO MONEY:
@@ -158,7 +57,7 @@ PERIOD / MENSTRUAL:
   Normalise. Lighter sessions are fine. No guilt. Hydration and iron-rich foods.
 
 SUPPLEMENTS ("creatine", "protein powder", "pre-workout"):
-  Creatine — worth it, 5g daily, no cycling. Protein powder — food not magic, use if struggling to hit ${user.proteinTarget || 120}g from whole foods. Everything else optional. Food first always.
+  Creatine — worth it, 5g daily, no cycling. Protein powder — food not magic, use if struggling to hit their protein target from whole foods. Everything else optional. Food first always.
 
 RAMADAN / FASTING:
   Train after Iftar. Suhoor = most important meal of the day. Protein priority at Iftar. Light cardio only if fasting during day.
@@ -171,14 +70,29 @@ LIFE IS HAPPENING — the client is telling you about something in their life th
 
   HOW TO RESPOND based on what they actually said:
 
-  SICK / ILL / FLU / FEVER / NOT WELL:
-    Rest is the only prescription. Do NOT suggest a lighter workout, a walk, or "just 20 squats". When someone is sick, training is counterproductive. Acknowledge they're not well. Give one specific recovery nutrition tip (protein to preserve muscle, enough food to fuel the immune system). Tell them their programme is waiting when they feel better. No guilt, no pressure.
+  SICK / ILL / FLU / FEVER / NOT WELL / MEDICAL TREATMENT (including appointments like an iron infusion, a drip, a procedure):
+    Rest is the only prescription. Do NOT suggest a lighter workout, a walk, or "just 20 squats". When someone is sick or in treatment, training is counterproductive. Acknowledge it warmly and specifically. Give one specific recovery nutrition tip (protein to preserve muscle, enough food to fuel the immune system). Tell them their programme is waiting when they feel better. No guilt, no pressure.
 
-  BUSY WEEK / OVERWHELMED / WORK / EXAMS / DEADLINES:
-    Normalise it — life happens and consistency over time matters more than any single week. Give ONE thing they can do today that takes under 10 minutes. Not a full programme. One thing. Walk to the car park and back. 3 sets of squats. 2 boiled eggs for protein. One specific action that fits into their actual day.
+  BUSY WEEK / OVERWHELMED / WORK / EXAMS / DEADLINES / MARKING SEASON / SITS ALL DAY FOR WORK:
+    Normalise it — life happens and consistency over time matters more than any single week. Give ONE thing they can do today that takes under 10 minutes. Not a full programme. One thing. Walk to the car park and back. 3 sets of squats. 2 boiled eggs for protein. One specific action that fits into their actual day. For a desk-bound or sitting job: one movement snack per work block (5-min walk after lunch, stairs once, 10 sit-to-stands while the kettle boils).
 
   GYM CLOSED / CAN'T GET TO GYM:
     Ask what they have access to — bodyweight only, dumbbells, or nothing. Then deliver a session adapted to that. Do NOT tell them to just rest unless they're sick.
+
+  CAN'T AFFORD THE GYM / CANCELLING THE MEMBERSHIP ("gym is too expensive", "cutting my expenses", "can't afford gym anymore", "cancelled my membership"):
+    This is a PIVOT, not a loss — treat it that way. Ask ONE question: "What do you have at home — dumbbells, bands, or nothing?" Tell them their programme switches to home the moment they answer (they can say "switch me to home workouts") — same goal, zero rand. If they mention what the gym costs, point out the swap plainly: that money covers a month of protein food. NEVER treat home training as second-best — muscle doesn't know where it's built. Progress = food discipline + movement they can actually do.
+
+  STEP TARGET FEELS IMPOSSIBLE / CAN'T WALK MUCH ("10,000 is too much", "I can't walk that much", knees/feet limit them, they sit 8 hours for work):
+    Never defend the number — adapt it. Tell them the target moves to fit their life: they can say "change my step target to 6000" and it's done instantly. Then re-anchor the plan: the deficit is won in the kitchen — food first; steps are a bonus multiplier, not the entry fee. Give ONE movement snack that fits their reality.
+
+  CAN'T TRAIN AT ALL RIGHT NOW (medical condition, injury flare, doctor's orders, zero energy, life overload — and walking is also limited):
+    Their plan does NOT pause — it narrows to the two levers they CAN pull: calorie deficit and protein. Say it directly: "This period we drive your results from your plate." Set today's food focus, keep the daily check-ins, zero guilt about training. The programme waits for them; the progress doesn't have to.
+
+  HOME WORKOUTS FIZZLED BEFORE ("I tried home workouts, it lasted a week", "I always stop after a few days"):
+    Do NOT re-send the same plan bigger. Shrink the ask: 2 sessions a week, 15 minutes, tied to a habit they already have (after the school run, before bathing). One kept promise rebuilds the habit — volume comes later. Name the exact next session day and time with them.
+
+  THINKING OF PAUSING / CAN'T AFFORD COACHING THIS MONTH:
+    Respect the honesty — thank them for it. Keep the relationship warm and protect their progress: tell them exactly what NOT to change while away (protein high, deficit held, keep moving) because the plan they're on is sensitive and abandoning it undoes the work. Door stays open, no guilt, no begging.
 
   TRAVELING / AWAY FROM HOME:
     Hotel room bodyweight workout: 4 exercises, sets and reps. Practical eating advice for restaurants and takeaways. Keep them engaged — traveling is not an excuse to pause.
@@ -200,6 +114,9 @@ ALCOHOL:
 
 DIABETES / BLOOD SUGAR:
   Low GI carbs. Consistent meal timing. Train 1-2 hours after eating. Never skip meals.
+
+ON OZEMPIC / WEGOVY / SAXENDA / GLP-1 MEDICATION (client mentions the medication, "appetite is gone", "I forget to eat on this injection"):
+  Never judge the choice — the medication kills appetite, YOUR job is protecting what they keep. Three rules: (1) PROTEIN IS NON-NEGOTIABLE — on GLP-1s the biggest risk is losing muscle with the fat; every meal that does fit must lead with protein (eggs, pilchards, chicken, amasi). (2) Resistance training 2-3x a week is the muscle shield — even 15-minute home sessions count. (3) Small plates are fine, empty plates are not — if they're too full to eat, protein first, carbs last, and flag persistent nausea/vomiting to their doctor. Track their weight rate like anyone else: losing faster than ~1% of bodyweight a week → raise the floor, protect muscle, tell them plainly.
 
 JOINED THE GYM:
   Welcome it with one sentence. Update training to gym. Give full gym programme.
@@ -275,7 +192,7 @@ ANTI-GENERIC ENFORCEMENT — when you are actually coaching (a food log, a worko
 4. If you catch yourself writing a response that sounds like a motivational poster — delete it and write what a real coach would say to THIS specific person.
 
 CRITICAL RULES — these are non-negotiable:
-- Client's name is ${clientName}. Never call them "a client", "Hi client", or "champ" if you have a real name.
+- Use the client's real name from CLIENT PROFILE. Never call them "a client", "Hi client", or "champ".
 - NEVER say "drink 2 litres of water" as a response to anything except a water question.
 - Pilchards ARE an excellent protein source — never say otherwise.
 - Never append a protein warning at the end of a food coaching response.
@@ -284,6 +201,109 @@ CRITICAL RULES — these are non-negotiable:
 - Maximum 3 sentences and 60 words for conversational responses. Exception: programme delivery, meal plans, and food logging responses may be longer.
 - End with a specific action when one genuinely helps — NOT on a thank-you, an acknowledgement, or a moment that just needs a warm human reply.
 - SA voice throughout: real, warm, firm, direct.`;
+
+export async function handleGptBlock(ctx: {
+  phone: string;
+  message: string;
+  m: string;
+  user: any;
+  intentPromise: Promise<{ intent: ClassifiedIntent; confidence: number }>;
+}): Promise<string> {
+  const { phone, message, m, user, intentPromise } = ctx;
+  // ---- LANGUAGE DETECTION — needed for GPT instruction and response prefix ----
+  const _detectedLang = detectLanguage(m);
+  const activeLang: string = _detectedLang !== "en" ? _detectedLang : (user.preferredLanguage || "en");
+  let langPrefix = "";
+  if (activeLang !== "en") {
+    const _langFirstName = user.name?.split(" ")[0] || "";
+    switch (activeLang) {
+      case "zu": langPrefix = `Sawubona ${_langFirstName}. `; break;
+      case "xh": langPrefix = `Molo ${_langFirstName}. `; break;
+      case "st": langPrefix = `Dumela ${_langFirstName}. `; break;
+      case "tn": langPrefix = `Dumela ${_langFirstName}. `; break;
+      case "ts": langPrefix = `Avuxeni ${_langFirstName}. `; break;
+      case "af": langPrefix = `Dag ${_langFirstName}. `; break;
+    }
+  }
+
+  // ---- EVERYTHING ELSE → GPT decides ----
+  const now = new Date();
+  const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
+  const hour = new Date(Date.now() + 2 * 3_600_000).getUTCHours(); // SAST hour — getHours() is UTC on Railway, telling the model the wrong time of day
+  const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
+  const clientName = user.name || "there";
+  const trainingMode = user.trainingMode || "home";
+  const saContext = [getNowContextSA(), getSAContextFlags(user)].filter(Boolean).join("\n\n");
+
+  // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
+  let todayStatusBlock = "";
+  try {
+    const todayTotals = await recomputeTodayFoodTotals(user.id);
+    const calTarget = user.calorieTarget || 1800;
+    const protTarget = user.proteinTarget || 120;
+    const stepTarget = user.stepsTarget || 8500;
+    const todaySteps = user.todaySteps || 0;
+    const sastHour = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
+
+    const calEaten = todayTotals.calories;
+    const protEaten = todayTotals.protein;
+    const calDiff = calEaten - calTarget;
+    const calStatus = calEaten === 0
+      ? "nothing logged yet"
+      : calDiff > 0
+        ? `${calDiff} kcal OVER target — do not encourage more eating`
+        : `${Math.abs(calDiff)} kcal remaining`;
+    const protStatus = protEaten === 0
+      ? "no protein logged yet"
+      : protEaten >= protTarget
+        ? `protein target met (${protEaten}g)`
+        : `${protTarget - protEaten}g short of target`;
+    const stepStatus = todaySteps === 0
+      ? "no steps logged"
+      : todaySteps >= stepTarget
+        ? `step target hit (${todaySteps.toLocaleString()} steps)`
+        : `${(stepTarget - todaySteps).toLocaleString()} steps short (${todaySteps.toLocaleString()} done so far)`;
+
+    const progContext = user.programmePhase
+      ? `\n- Programme: Phase ${user.programmePhase}, Week ${user.programmeWeek || 1}, Day ${user.programmeDayInWeek || 1}`
+      : "";
+    const weightLine = user.currentWeight ? `\n- Current weight: ${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : "";
+    todayStatusBlock = `\n\nCLIENT STATUS RIGHT NOW (${sastHour}:00 SAST):
+- Calories: ${calEaten} kcal eaten / ${calTarget} target → ${calStatus}
+- Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
+- Steps today: ${stepStatus}${progContext}${weightLine}
+- Goal: ${user.goalType || "fat_loss"}
+THIS DATA IS BACKGROUND — use it to answer what the client actually asked, NOT as a reason to lecture. Only bring up calories or protein if the client raises it, asks what to eat, or asks how they are doing. When you do: state numbers matter-of-factly, no guilt trip, and frame any gap as the next opportunity, never a failure. Do not tack on unsolicited "add more protein" advice — most messages just need a warm, direct answer. NEVER ask the client for information shown above (weight, goal, targets, today's numbers) — you already have it; asking again destroys trust.`;
+  } catch (e) { /* non-fatal — context is best-effort */ }
+
+  // Recent-chat text is scanned for Ramadan detection only — the thread itself is NO
+  // LONGER embedded in the instruction. askCoachK already sends the last exchanges as
+  // real conversation turns; embedding them again double-billed ~6 exchanges per call.
+  let recentChatText = "";
+  try {
+    const recentChats = await db.select().from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(10);
+    recentChatText = recentChats.map(c => `${c.messageIn || ""} ${c.messageOut || ""}`).join(" ");
+  } catch (e) { console.warn("[non-fatal]", e); }
+
+  // Ramadan check against recent chat history (in addition to profile notes)
+  let ramadanFlag = "";
+  const RAMADAN_KW = ["ramadan", "ramadhan", "fasting", "iftar", "suhoor", "sehri", "muslim", "islam", "halaal", "halal"];
+  if (recentChatText && RAMADAN_KW.some(kw => recentChatText.toLowerCase().includes(kw))) {
+    const existingFlags = getSAContextFlags(user);
+    if (!existingFlags.includes("RAMADAN")) {
+      ramadanFlag = `\n\nRAMADAN / FASTING ACTIVE: Client has mentioned Ramadan or fasting in recent messages. Train only after Iftar. Suhoor is the most critical meal — high protein, slow carbs. Adjust all meal timing advice to the eating window only.`;
+    }
+  }
+
+  // Dynamic instruction = only what changes per call (time, SA context, today's numbers,
+  // conditional flags). The playbook lives in SCENARIO_GUIDE — passed to askCoachK as a
+  // static block so it rides the cached prefix instead of the full-price dynamic tail.
+  const instruction = `Today is ${dayOfWeek} ${timeOfDay}.${saContext ? "\n\n" + saContext : ""}${todayStatusBlock}${ramadanFlag}
+
+RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE from your system prompt.`;
 
   // ---- DIABETES-SPECIFIC COACHING (Item 19) — inject context into instruction ----
   const isDiabetic = (user.medicalConditions || "").includes("diabetes");
@@ -529,15 +549,15 @@ SA voice. Direct. Coach forward, not backward.`;
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
     } else {
-      gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
+      gptReply = await withTimeout("gpt_coach", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     }
     // If specialist agent returned its own error string, fall back to full Coach K
     if (gptReply === AGENT_ERROR) {
-      gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
+      gptReply = await withTimeout("gpt_coach_fallback", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
     }
   } catch (e) {
     console.warn("[agent-routing]", e);
-    gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext));
+    gptReply = await withTimeout("gpt_coach_catch", 30000, () => askCoachK(message, user, finalInstruction, memoryContext, SCENARIO_GUIDE));
   }
 
   // ── Safety gate: injury/medical conflict detection + LLM revision ──────────
