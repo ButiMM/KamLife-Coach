@@ -193,6 +193,67 @@ async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLog
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
+// Quantity/portion scaling — shared by the main scanner path, smart-log, and
+// multi-day logging so "3 eggs" and "big plate of pap" scale identically everywhere.
+function normaliseWordNumbers(text: string): string {
+  const map: Record<string, string> = {
+    "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
+    "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
+    "half": "0.5", "a": "1", "an": "1",
+  };
+  return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
+}
+
+function adjustFoodsForSegment(foods: SAFood[], segText: string) {
+  const normText = normaliseWordNumbers(segText);
+
+  // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
+  // Applied globally across all foods in the segment (whole meal was described as big/small)
+  let sizeMultiplier = 1;
+  if (/(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b)/i.test(normText)
+    || /\b(double|extra\s+helping|extra\s+large\b)/i.test(normText)) {
+    sizeMultiplier = 1.5;
+  } else if (/(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving)/i.test(normText)
+    || /\ba\s+(?:small|tiny|little)\s+bit\s+of\b/i.test(normText)
+    || /\bsmall\s+amount\s+of\b/i.test(normText)) {
+    sizeMultiplier = 0.7;
+  } else if (/\b(?:half|halved)\s+(?:a\s+)?(?:plate|bowl|portion|serving|of\b)/i.test(normText)
+    || /\b(?:half\s+(?:the\s+)?(?:pap|rice|pasta|meal|food)\b)/i.test(normText)) {
+    sizeMultiplier = 0.5;
+  }
+
+  return foods.map(f => {
+    const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
+    let quantity = 1;
+    for (const alias of allAliases) {
+      const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
+      const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
+      // Fallback: "3 stashes of bread", "2 chunks of pap" — voice mishearings produce non-standard unit
+      // words. "N <word> of <food>" almost always means N portions, so apply the quantity.
+      const qtyWithAnyFiller = !qtyDirect && !qtyWithFiller
+        ? normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+\\w+s?\\s+of\\s+(?:${escapeRegex(alias)})`, "i"))
+        : null;
+      const qtyBefore = qtyDirect || qtyWithFiller || qtyWithAnyFiller;
+      if (qtyBefore) {
+        const userQty = parseFloat(qtyBefore[1]);
+        const defaultQty = portionDefaultCount(f.typicalPortionDescription);
+        if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
+          quantity = userQty / defaultQty;
+        }
+        break;
+      }
+    }
+    quantity = quantity * sizeMultiplier;
+    return {
+      ...f,
+      adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
+      adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
+      adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
+      quantity,
+    };
+  });
+}
+
 export async function handleFoodContext(ctx: {
   phone: string;
   message: string;
@@ -368,12 +429,15 @@ export async function handleFoodContext(ctx: {
       if (lastUnloggedFood) {
         const foodsInLastMsg = scanForSAFoods(lastUnloggedFood.messageIn || "");
         if (foodsInLastMsg.length > 0) {
+          // Quantity-aware ("3 eggs" = 3 eggs, "big plate" = 1.5×) — the main scanner
+          // path always scaled portions; this smart-log path summed raw typicals.
+          const adjSmart = adjustFoodsForSegment(foodsInLastMsg, lastUnloggedFood.messageIn || "");
           let totalCals = 0; let totalProt2 = 0;
           const parts: string[] = [];
-          for (const food of foodsInLastMsg) {
-            totalCals += food.typicalPortionCalories || 0;
-            totalProt2 += food.typicalPortionProtein || 0;
-            parts.push(`${food.name} — ${food.typicalPortionCalories} kcal | ${food.typicalPortionProtein}g protein`);
+          for (const food of adjSmart) {
+            totalCals += food.adjustedCalories || 0;
+            totalProt2 += food.adjustedProtein || 0;
+            parts.push(`${food.name} — ${food.adjustedCalories} kcal | ${food.adjustedProtein}g protein`);
           }
           await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
           await db.insert(mealLogs).values({
@@ -528,7 +592,7 @@ export async function handleFoodContext(ctx: {
     }
   }
 
-  // ---- QUICK RE-LOG — "same as yesterday", "same as lunch", "had the same for dinner" ----
+  // ---- RETRO-LOG GUIDANCE — repeat/same-as intent is owned by handlers/meal-repeat.ts (runs earlier in the pipeline) ----
   // GUARD: "log/record yesterday's food" is a RETROACTIVE-LOGGING request — the user wants
   // to tell me what they ate YESTERDAY, not copy a past meal into today. Without this, a
   // voice note "I want to log yesterday's food" was being relogged as today's pasta.
@@ -538,10 +602,6 @@ export async function handleFoodContext(ctx: {
   const isRetroLogRequest = !wantsRepeat
     && /\b(log|logging|record|add|enter|capture|track|update|forgot|missed|didn.?t)\b/i.test(m)
     && /\byesterday\b/i.test(m);
-  // Negation guard: "I don't want the same as yesterday" / "not the same meal" must NOT relog.
-  const wantsNotRepeat = /\b(don.?t|not|no|never|won.?t|wouldn.?t|avoid|skip)\b.{0,20}\b(same|repeat|again)\b/i.test(m)
-    || /\b(same|repeat)\b.{0,20}\b(don.?t|not|no|never|won.?t|wouldn.?t)\b/i.test(m);
-  const isRepeatMeal = !isRetroLogRequest && !wantsNotRepeat && /\b(same as (yesterday|my\s*lunch|my\s*dinner|my\s*breakfast|lunch|dinner|breakfast|last|before)|same meal|repeat meal|same again|same food|had the same|the same (meal|food|thing) (for|as)|same (breakfast|lunch|dinner)|repeat (breakfast|lunch|dinner)|yesterday.?s (meal|food) again)\b/i.test(m);
 
   // Bare retroactive-log request with no food named yet — guide them to send yesterday's
   // meals with a "yesterday" prefix so the meal parser dates them to yesterday, not today.
@@ -550,145 +610,6 @@ export async function handleFoodContext(ctx: {
     return `${nm}sure — what did you eat yesterday? Send it starting with *yesterday*, e.g. *"yesterday I had 2 eggs and pap for breakfast, chicken and rice for lunch"* — and I'll log it to yesterday, not today.`;
   }
 
-  if (isRepeatMeal) {
-    try {
-      // Determine WHICH meal to copy FROM — look for the reference meal (after "as", not the target meal)
-      const refLunch = /\b(same as (my )?lunch|same (meal|food).*for dinner|had the same.*lunch|lunch again|same lunch|as (my )?lunch)\b/i.test(m);
-      const refBreakfast = /\b(same as (my )?breakfast|breakfast again|same breakfast|as (my )?breakfast)\b/i.test(m);
-      // refDinner only fires when message isn't "same X as lunch/breakfast" — i.e. not copying from another meal
-      const refDinner = !refLunch && !refBreakfast && /\b(same as (my )?dinner|same (meal|food).*for lunch|had the same.*dinner|dinner again|same dinner|as (my )?dinner)\b/i.test(m);
-      const refYesterday = /yesterday/i.test(m);
-
-      const todayStart = sastDayStart();
-      const windowStart = refYesterday
-        ? new Date(Date.now() - 48 * 3600_000)
-        : todayStart;
-
-      const recentFoodLogs = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
-        .from(chatHistory)
-        .where(and(
-          eq(chatHistory.userId, user.id),
-          eq(chatHistory.intent, "FOOD_LOG"),
-          gte(chatHistory.createdAt, windowStart),
-        ))
-        .orderBy(desc(chatHistory.createdAt))
-        .limit(10);
-
-      const LOG_CMD_RE2 = /^(log\s*(the\s*)?(meal|this|it|food)|save|record|done|that.?s|yes|ok|sure)/i;
-      const validLogs = recentFoodLogs.filter(l =>
-        l.messageIn &&
-        !LOG_CMD_RE2.test(l.messageIn.trim()) &&
-        l.messageIn.length > 5 &&
-        scanForSAFoods(l.messageIn).length > 0
-      );
-
-      if (validLogs.length === 0) {
-        return `No recent meals found to repeat. Tell me what you had — for example: "2 eggs and toast".`;
-      }
-
-      let toRepeat = validLogs[0].messageIn!;
-
-      if (refLunch) {
-        const lunchLog = validLogs.find(l => /lunch|afternoon/i.test(l.messageIn || ""));
-        if (lunchLog) toRepeat = lunchLog.messageIn!;
-        else toRepeat = validLogs[0].messageIn!;
-      } else if (refDinner) {
-        const dinnerLog = validLogs.find(l => /dinner|supper|evening/i.test(l.messageIn || ""));
-        if (dinnerLog) toRepeat = dinnerLog.messageIn!;
-      } else if (refBreakfast) {
-        const breakfastLog = validLogs.find(l => /breakfast|morning/i.test(l.messageIn || ""));
-        if (breakfastLog) toRepeat = breakfastLog.messageIn!;
-      }
-
-      // For today references, prefer today's meals; only widen to 48h for "yesterday"
-      const mealLookbackMs = refYesterday ? 48 * 3600_000 : 24 * 3600_000;
-      const yesterdayMealRows = await db.select({
-        kcalInt: mealLogs.kcalInt,
-        proteinInt: mealLogs.proteinInt,
-        carbsInt: mealLogs.carbsInt,
-        fatInt: mealLogs.fatInt,
-        rawMessage: mealLogs.rawMessage,
-        source: mealLogs.source,
-        items: mealLogs.items,
-        loggedAt: mealLogs.loggedAt,
-      }).from(mealLogs).where(and(
-        eq(mealLogs.userId, user.id),
-        gte(mealLogs.loggedAt, new Date(Date.now() - mealLookbackMs)),
-        lt(mealLogs.loggedAt, new Date()),
-      )).orderBy(desc(mealLogs.loggedAt)).limit(10);
-
-      const usableMeals = yesterdayMealRows.filter(r => r.kcalInt > 0);
-      if (usableMeals.length > 0) {
-        // Always try to match by the chat-message text we identified as the reference meal
-        const textMatch = toRepeat ? usableMeals.find(r =>
-          r.rawMessage && (
-            r.rawMessage.toLowerCase().includes(toRepeat.slice(0, 20).toLowerCase()) ||
-            toRepeat.toLowerCase().includes((r.rawMessage || "").slice(0, 20).toLowerCase())
-          )
-        ) : null;
-
-        let matchedMeal = textMatch || usableMeals[0];
-        if (!textMatch) {
-          if (refBreakfast) {
-            // Breakfast = oldest substantial meal
-            matchedMeal = usableMeals[usableMeals.length - 1];
-          } else if (refDinner) {
-            // Dinner = most recent substantial meal
-            matchedMeal = usableMeals[0];
-          } else if (refLunch) {
-            // Lunch = highest-calorie meal above 150 kcal (excludes drinks/snacks)
-            const candidates = usableMeals.filter(r => (r.kcalInt || 0) > 150);
-            matchedMeal = candidates.length > 0
-              ? candidates.reduce((a, b) => ((a.kcalInt || 0) >= (b.kcalInt || 0) ? a : b))
-              : usableMeals[0];
-          }
-        }
-
-        const totalCals = matchedMeal.kcalInt || 0;
-        const totalProt = matchedMeal.proteinInt || 0;
-        const labels: string[] = matchedMeal.rawMessage ? [matchedMeal.rawMessage.slice(0, 50)] : [];
-        await db.insert(mealLogs).values({
-          userId: user.id,
-          rawMessage: matchedMeal.rawMessage || toRepeat,
-          source: "quick_relog",
-          kcalInt: matchedMeal.kcalInt,
-          proteinInt: matchedMeal.proteinInt,
-          carbsInt: matchedMeal.carbsInt,
-          fatInt: matchedMeal.fatInt,
-          items: matchedMeal.items,
-          mealLabel: extractMealLabel(message, undefined, { kcal: matchedMeal.kcalInt, protein: matchedMeal.proteinInt }),
-        }).catch((e) => { console.error("[quick_relog mealLogs insert]", e); throw e; });
-        invalidatePatternCache(user.id);
-        invalidateFoodTotalsCache(user.id);
-        const calorieTarget = user.calorieTarget || 1800;
-        const proteinTarget = user.proteinTarget || 120;
-        const relogged = await recomputeTodayFoodTotals(user.id);
-        await db.update(users).set({
-          todayCalories: relogged.calories,
-          todayProteinG: relogged.protein,
-          todayCaloriesDate: sastToday(),
-        }).where(eq(users.phoneNumber, phone));
-        const updTodayCals = relogged.calories;
-        const updTodayProt = relogged.protein;
-        const remaining = calorieTarget - updTodayCals;
-        const protGap = proteinTarget - updTodayProt;
-        const mealWasToday = matchedMeal.loggedAt ? matchedMeal.loggedAt >= sastDayStart() : false;
-        const copyLabel = mealWasToday ? "Copied from earlier today" : "Copied from yesterday";
-        await logChat(user.id, message, `Quick relog: ${labels.join(", ")} (+${totalCals} kcal · +${totalProt}g protein)`, "FOOD_LOG");
-        const calorieDone = remaining <= 0;
-        const protNote = protGap > 0
-          ? (calorieDone ? `${protGap}g protein short — carry to tomorrow.` : `${protGap}g protein left.`)
-          : "Protein target hit ✅";
-        return `♻️ ${copyLabel}:\n${labels.map(l => `• ${l}`).join("\n") || `• ${toRepeat.slice(0, 60)}`}\n\n*+${totalCals} kcal · +${totalProt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining today.` : "Calorie target hit. ✅"} ${protNote}`;
-      }
-
-      const repeatReply = await handleMessage(phone, toRepeat);
-      return `♻️ Same meal logged: "${toRepeat.slice(0, 80)}"\n\n${repeatReply}`;
-    } catch (err) {
-      console.error("[REPEAT MEAL]", err);
-      return `Something went wrong logging that meal. Please type what you ate (e.g. "pap and chicken") and I will log it directly.`;
-    }
-  }
 
   // ---- GUILT / SHAME SIGNAL — client is embarrassed about what they ate ----
   // 🙈 (see-no-evil) is the most common "I know, I know" emoji in SA WhatsApp food logs.
@@ -886,9 +807,12 @@ export async function handleFoodContext(ctx: {
       const segFoods = scanForSAFoods(seg.text);
       if (segFoods.length === 0) continue;
       const segDate = parseMealDate(seg.day + " " + seg.text);
+      // Quantity-aware, same as the main scanner path — "3 eggs and pap on Wednesday"
+      // logged a single egg portion before this.
+      const adjMulti = adjustFoodsForSegment(segFoods, seg.text);
       let segKcal = 0, segProt = 0;
-      for (const f of segFoods) { segKcal += f.typicalPortionCalories || 0; segProt += f.typicalPortionProtein || 0; }
-      multiPlan.push({ label: mealDateLabel(segDate), foods: segFoods, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text });
+      for (const f of adjMulti) { segKcal += f.adjustedCalories || 0; segProt += f.adjustedProtein || 0; }
+      multiPlan.push({ label: mealDateLabel(segDate), foods: adjMulti, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text });
     }
 
     if (multiPlan.length >= 2) {
@@ -975,64 +899,6 @@ export async function handleFoodContext(ctx: {
       mealSegments.push({ label: "", text: m });
     }
 
-    function normaliseWordNumbers(text: string): string {
-      const map: Record<string, string> = {
-        "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
-        "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
-        "half": "0.5", "a": "1", "an": "1",
-      };
-      return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
-    }
-
-    function adjustFoodsForSegment(foods: SAFood[], segText: string) {
-      const normText = normaliseWordNumbers(segText);
-
-      // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
-      // Applied globally across all foods in the segment (whole meal was described as big/small)
-      let sizeMultiplier = 1;
-      if (/(big|large|huge|heaped|extra\s*large|xl|full\s*plate|loaded)\s+(?:plate|bowl|portion|serving|of\b)/i.test(normText)
-        || /\b(double|extra\s+helping|extra\s+large\b)/i.test(normText)) {
-        sizeMultiplier = 1.5;
-      } else if (/(small|tiny|little|mini|quarter)\s+(?:plate|bowl|portion|serving)/i.test(normText)
-        || /\ba\s+(?:small|tiny|little)\s+bit\s+of\b/i.test(normText)
-        || /\bsmall\s+amount\s+of\b/i.test(normText)) {
-        sizeMultiplier = 0.7;
-      } else if (/\b(?:half|halved)\s+(?:a\s+)?(?:plate|bowl|portion|serving|of\b)/i.test(normText)
-        || /\b(?:half\s+(?:the\s+)?(?:pap|rice|pasta|meal|food)\b)/i.test(normText)) {
-        sizeMultiplier = 0.5;
-      }
-
-      return foods.map(f => {
-        const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
-        let quantity = 1;
-        for (const alias of allAliases) {
-          const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
-          const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
-          // Fallback: "3 stashes of bread", "2 chunks of pap" — voice mishearings produce non-standard unit
-          // words. "N <word> of <food>" almost always means N portions, so apply the quantity.
-          const qtyWithAnyFiller = !qtyDirect && !qtyWithFiller
-            ? normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+\\w+s?\\s+of\\s+(?:${escapeRegex(alias)})`, "i"))
-            : null;
-          const qtyBefore = qtyDirect || qtyWithFiller || qtyWithAnyFiller;
-          if (qtyBefore) {
-            const userQty = parseFloat(qtyBefore[1]);
-            const defaultQty = portionDefaultCount(f.typicalPortionDescription);
-            if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
-              quantity = userQty / defaultQty;
-            }
-            break;
-          }
-        }
-        quantity = quantity * sizeMultiplier;
-        return {
-          ...f,
-          adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
-          adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
-          adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
-          quantity,
-        };
-      });
-    }
 
     type AdjFood = SAFood & { adjustedCalories: number; adjustedProtein: number; adjustedDescription: string; quantity: number };
     const allAdjustedFoods: AdjFood[] = [];

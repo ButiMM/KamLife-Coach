@@ -16,7 +16,7 @@ import OpenAI from "openai";
 import { assertAiOnline } from "./ai-offline";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
-import { isProactivePaused } from "./scheduler/shared";
+import { isProactivePaused, claimProactive } from "./scheduler/shared";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 
 const openai = new OpenAI({
@@ -316,6 +316,12 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
         [id, weekStart]
       );
       if (existing.length) { skipped++; continue; }
+
+      // Respect the unified daily proactive budget. Sunday already stacks the report
+      // card + shopping list + meal plan/audit — the voice recap was the only client
+      // message that bypassed the cap entirely, pushing busy Sundays to 5+ messages
+      // (the classic "WhatsApp block" churn trigger).
+      if (!(await claimProactive(id, "weekly_recap", weekStart))) { skipped++; continue; }
 
       const data = await getClientWeekData(id);
       if (!data) { failed++; continue; }

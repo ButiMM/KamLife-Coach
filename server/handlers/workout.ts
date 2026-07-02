@@ -10,7 +10,7 @@ import { users, workoutLogs, exerciseLogs, stepLogs, chatHistory } from "../../s
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
 import {
-  buildDayWorkout, buildDay2Workout, buildDay3Workout,
+  buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
 } from "../programme";
 import { checkPerfectDay, getProgressiveOverloadContext } from "./checks";

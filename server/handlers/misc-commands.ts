@@ -14,7 +14,7 @@ import { SUPPLEMENT_GUIDE } from "../constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExerciseDemoFormCue } from "../exercise-media";
 import { matchVariantGuideRequest, formatVariantGuide } from "../exercise-variants";
 import {
-  buildDayWorkout, buildDayWorkoutForType, buildFullProgramme,
+  buildDayWorkout, buildFullProgramme,
   getKamlifeProgramme, getDayType,
 } from "../programme";
 import { getOnboardingMealPlan } from "../onboarding";
@@ -418,14 +418,6 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- QUICK STAT LOOKUPS — never touch GPT ----
-  // (calorie and steps handlers already fire at top of function — these are safety fallbacks for exact matches)
-  if (["calories", "calorie", "my calories", "calorie target", "my calorie target"].includes(m)) {
-    const cal = user.calorieTarget || 1800;
-    const prot = user.proteinTarget || 120;
-    const name2 = user.name ? `${user.name} — ` : "";
-    return `${name2}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.`;
-  }
   // ---- STEPS QUERY (bare "steps", "my steps", or explicit today query) ----
   const isStepWeekQuery = /\b(steps?\s*(?:this\s+)?week|my\s+step\s*(?:history|stats?|average|trend)|step\s*(?:history|stats?|average|trend|report)|weekly\s*steps?|7[\s-]day\s*steps?)\b/i.test(m);
   if (["steps", "my steps", "step target", "steps target", "daily steps"].includes(m) ||

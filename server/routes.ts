@@ -11,7 +11,7 @@ import { SA_FOODS_SEED, type SAFood } from "./foods";
 import { COACH_K_SYSTEM } from "./coach-prompt";
 import { EQUIPMENT_ALTERNATIVES, FOOD_SUBSTITUTIONS, PORTION_GUIDE, STORE_ADVICE, INJURY_MODIFICATIONS, SUPPLEMENT_GUIDE, detectLanguage, type SALanguage } from "./constants";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide } from "./exercise-media";
-import { buildDayWorkout, buildDayWorkoutForType, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
+import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } from "./programme";
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
@@ -673,7 +673,12 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       if (unit.startsWith("h")) minutes *= 60;
       steps = Math.round(minutes * 100);
     }
-    if (!isNaN(steps) && steps > 0 && steps <= 100) {
+    // "Give me 5 steps to lose belly fat" — a small bare "N steps" with no movement
+    // signal is the NOUN steps, not a pedometer count. Only nag about a low count when
+    // something says they actually moved; otherwise fall through to the coaching brain.
+    const stepHasMovementSignal = !!(deviceStepMatch || wordThousandMatch || hasKmWalk || hasDurationWalk || stepIsKShorthand
+      || /\b(walk(?:ed|ing)?|did|done|logged|hit|managed|got|reached|clocked)\b/i.test(m));
+    if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
       return `That step count looks low — did the message cut off? Send your actual count, e.g. "8500 steps" or "walked 5km".`;
     }
     if (!isNaN(steps) && steps > 100 && steps < 100000) {

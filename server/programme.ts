@@ -1026,76 +1026,6 @@ _Form videos:_
 6. Plank: https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial`;
 
 // ============================================================
-// EXERCISE LIBRARY — kept for backward compat (buildDayWorkoutForType)
-// ============================================================
-
-export const WORKOUTS: Record<string, Record<string, Exercise[]>> = {
-  gym: {
-    push: [
-      { name: "Bench Press", sets: "3x10", description: "Lie on bench. Bar or dumbbells at chest. Press up until arms extended. Lower slowly. Feet flat.", mistake: "Bouncing bar off chest.", modification: "Dumbbell press with neutral grip if shoulder pain." },
-      { name: "Overhead Press", sets: "3x10", description: "Bar or dumbbells at shoulder height. Press straight overhead. Core tight throughout. Lower slowly.", mistake: "Excessive lower back arch.", modification: "Seated press if lower back pain." },
-      { name: "Incline Dumbbell Press", sets: "3x10", description: "Bench at 30 to 45 degrees. Dumbbells at chest. Press up and slightly in. Lower slowly.", mistake: "Elbows flaring too wide.", modification: "Flat bench if incline not available." },
-      { name: "Lateral Raise", sets: "3x15", description: "Light dumbbells. Arms slightly bent. Raise to shoulder height only. Lower slowly. Do not shrug.", mistake: "Using momentum or raising above shoulder height.", modification: "One arm at a time holding a support." },
-      { name: "Tricep Pushdown", sets: "3x12", description: "Cable machine. Rope or bar. Elbows pinned to sides. Push down fully. Squeeze at bottom. Return slowly.", mistake: "Elbows moving or leaning forward.", modification: "Overhead tricep extension with one dumbbell." },
-    ],
-    pull: [
-      { name: "Barbell Row", sets: "3x10", description: "Hinge forward back flat. Pull bar to lower chest. Squeeze shoulder blades hard at top. Lower slowly.", mistake: "Rounding back or using momentum.", modification: "Single dumbbell row with knee on bench if lower back pain." },
-      { name: "Lat Pulldown", sets: "3x10", description: "Sit at machine. Pull bar to upper chest. Lean back slightly. Squeeze back. Return slowly.", mistake: "Pulling with arms not back.", modification: "Use lighter weight and focus on feeling the back." },
-      { name: "Seated Cable Row", sets: "3x10", description: "Feet on platform. Slight lean back. Pull handle to lower chest. Squeeze. Return slowly.", mistake: "Leaning too far back or forward.", modification: "Resistance band row seated on floor." },
-      { name: "Face Pull", sets: "3x15", description: "Cable at face height. Pull rope to face. Elbows high and wide. Squeeze rear delts.", mistake: "Pulling too low or using too much weight.", modification: "Rear delt dumbbell fly lying face down on bench." },
-      { name: "Bicep Curl", sets: "3x12", description: "Dumbbells or bar. Elbows pinned at sides. Curl fully. Lower slowly. Do not swing.", mistake: "Swinging torso or elbows drifting forward.", modification: "Seated dumbbell curl to remove momentum." },
-    ],
-    legs: [
-      { name: "Barbell Back Squat", sets: "3x10", description: "Bar on upper back. Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.", mistake: "Heels rising or chest collapsing forward.", modification: "Goblet squat with dumbbell if back pain." },
-      { name: "Romanian Deadlift", sets: "3x10", description: "Hold dumbbells. Hinge at hips pushing bum back. Lower until hamstring stretch. Drive hips forward to stand.", mistake: "Rounding lower back.", modification: "Reduce range of motion if back pain." },
-      { name: "Leg Press", sets: "3x12", description: "Sit in machine. Feet shoulder width on platform. Lower until 90 degrees. Push through heels.", mistake: "Knees caving inward.", modification: "Wider foot position if knee pain." },
-      { name: "Leg Curl", sets: "3x12", description: "Lie face down on machine. Curl heels toward bum. Squeeze at top. Lower slowly.", mistake: "Hips rising off pad.", modification: "Standing single-leg band curl." },
-      { name: "Hip Thrust", sets: "3x12", description: "Upper back on bench. Bar or weight on hips. Push hips up. Squeeze glutes hard at top. Lower slowly.", mistake: "Using lower back instead of glutes.", modification: "Glute bridge on floor if no bench." },
-    ],
-    core: [
-      { name: "Plank", sets: "3x45 seconds", description: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Hold and breathe.", mistake: "Hips sagging or rising too high.", modification: "Drop knees to floor." },
-      { name: "Cable Crunch", sets: "3x15", description: "Kneel at cable. Rope at head. Crunch stomach toward floor. Hold briefly. Return slowly.", mistake: "Pulling with arms or neck.", modification: "Crunch on floor with hands behind head." },
-      { name: "Hanging Knee Raise", sets: "3x12", description: "Hang from bar. Bring knees to chest. Lower slowly. Do not swing.", mistake: "Swinging hips for momentum.", modification: "Lying knee raise on bench or floor." },
-      { name: "Russian Twist", sets: "3x20", description: "Sit at 45 degrees. Feet lifted. Rotate side to side. Touch floor each side.", mistake: "Twisting shoulders only instead of core.", modification: "Feet on floor to reduce difficulty." },
-      { name: "Incline Treadmill Walk", sets: "15 minutes", description: "Incline 8 to 12 percent. Brisk walking pace. Do not hold the rails. Burns fat without destroying recovery.", mistake: "Holding rails which reduces effectiveness.", modification: "Reduce incline if joint pain." },
-    ],
-  },
-  home: {
-    push: [
-      { name: "Push Up", sets: "3x12", description: "Hands slightly wider than shoulders. Body straight. Lower chest to floor. Push back up explosively.", mistake: "Hips rising or elbows flaring 90 degrees.", modification: "Knees on floor if too hard." },
-      { name: "Pike Push Up", sets: "3x10", description: "Hips high like a triangle. Lower head toward floor between hands. Push back up.", mistake: "Bending the knees or not going low enough.", modification: "Regular push up if too hard." },
-      { name: "Diamond Push Up", sets: "3x10", description: "Hands together forming a diamond under chest. Lower chest to hands. Push back up.", mistake: "Elbows flaring out.", modification: "Knees on floor if too hard." },
-      { name: "Chair Tricep Dip", sets: "3x12", description: "Hands on edge of sturdy chair behind you. Feet out. Bend elbows to lower body. Push back up.", mistake: "Elbows flaring wide — keep them back.", modification: "Bend knees to reduce difficulty." },
-    ],
-    pull: [
-      { name: "Table Row", sets: "3x12", description: "Lie under sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.", mistake: "Hips dropping or only pulling with arms.", modification: "Bend knees to make easier." },
-      { name: "Superman Hold", sets: "3x30 seconds", description: "Lie face down. Lift arms, chest, and legs off floor simultaneously. Hold. Squeeze back and glutes.", mistake: "Only lifting arms and not engaging the full back.", modification: "Lift arms only or legs only if too hard." },
-      { name: "Resistance Band Row", sets: "3x12", description: "Anchor band at waist height. Step back. Pull band to lower chest. Squeeze shoulder blades.", mistake: "Pulling with arms not back.", modification: "Table row if no bands." },
-      { name: "Doorframe Curl", sets: "3x12", description: "Stand in doorframe. Grip with underhand. Lean back slightly. Pull yourself toward the frame.", mistake: "Elbows drifting too wide.", modification: "Table row if doorframe not available." },
-    ],
-    legs: [
-      { name: "Bodyweight Squat", sets: "3x20", description: "Feet shoulder width. Arms forward for balance. Lower like sitting on chair. Push through heels.", mistake: "Knees caving inward.", modification: "Hold chair for balance. Only lower halfway if knee pain." },
-      { name: "Glute Bridge", sets: "3x20", description: "Lie on back. Knees bent feet flat. Push hips up. Squeeze glutes hard at top. Lower slowly.", mistake: "Pushing through toes instead of heels.", modification: "Single leg version when this becomes easy." },
-      { name: "Reverse Lunge", sets: "3x12 each", description: "Step backward. Lower back knee toward floor. Push through front heel to return.", mistake: "Front knee caving inward.", modification: "Hold chair for balance. Reduce range if knee pain." },
-      { name: "Bulgarian Split Squat", sets: "3x10 each", description: "Back foot elevated on chair. Front foot far forward. Lower back knee toward floor. Drive up through front heel.", mistake: "Front knee tracking inward.", modification: "Regular split squat without elevation if balance is a problem." },
-      { name: "Wall Sit", sets: "3x45 seconds", description: "Back flat on wall. Thighs parallel to floor. Hold. Breathe. Do not let knees cave.", mistake: "Knees going past toes or not reaching parallel.", modification: "Reduce time or raise the seat angle." },
-    ],
-    core: [
-      { name: "Plank", sets: "3x30 seconds", description: "Forearms on floor. Body straight. Squeeze stomach. Hold and breathe.", mistake: "Hips sagging.", modification: "Knees on floor." },
-      { name: "Mountain Climbers", sets: "3x30 seconds", description: "Push up position. Drive knees to chest alternating quickly. Hips level.", mistake: "Hips bouncing up with each drive.", modification: "Slow the pace. Elevate hands on chair if wrists hurt." },
-      { name: "Bicycle Crunch", sets: "3x20", description: "Lie on back. Hands behind head. Bring opposite elbow to knee alternating. Do not pull neck.", mistake: "Rushing and losing control of the movement.", modification: "Regular crunch if neck pain." },
-      { name: "Dead Bug", sets: "3x10 each side", description: "Lie on back. Arms up. Knees at 90 degrees. Extend opposite arm and leg toward floor. Return. Alternate.", mistake: "Lower back arching off the floor.", modification: "Only extend the legs if arms-and-legs is too hard." },
-      { name: "Hollow Body Hold", sets: "3x20 seconds", description: "Lie on back. Arms overhead. Lift legs and shoulders off floor. Press lower back into ground. Hold.", mistake: "Arching the lower back off the floor.", modification: "Bend knees or only raise legs." },
-    ],
-  },
-  walk: {
-    session: [
-      { name: "Brisk Walk", sets: "Phase 1: 15min | Phase 2: 25min | Phase 3: 35min | Phase 4: 45min", description: "Walk fast enough to feel slightly breathless but still able to talk. Arms swinging. Posture tall.", mistake: "Walking too slowly. Comfortable pace does not burn fat.", modification: "Reduce pace if breathless to discomfort. Start shorter if needed." },
-    ],
-  },
-};
-
-// ============================================================
 // HELPER FUNCTIONS
 // ============================================================
 
@@ -1443,143 +1373,6 @@ function formatGymDay(
 // HOME WORKOUT DAYS (3-day rotating full body)
 // ============================================================
 
-type HomeEx = { name: string; setsReps: string; cue: string; mistake: string; yt: string };
-
-const HOME_DAYS: Record<number, HomeEx[]> = {
-  1: [
-    {
-      name: "Bodyweight Squat",
-      setsReps: "3 sets of 15 reps",
-      cue: "Feet shoulder width. Lower until thighs parallel. Drive through heels. Chest up.",
-      mistake: "Knees caving inward. Push knees out over toes throughout.",
-      yt: "https://www.youtube.com/watch?v=aclHkVaku9U",
-    },
-    {
-      name: "Push Up",
-      setsReps: "3 sets of 10 reps",
-      cue: "Hands shoulder width. Body straight from head to heels. Lower chest to floor. Push up explosively.",
-      mistake: "Hips sagging or rising. Keep body in one straight line.",
-      yt: "https://www.youtube.com/watch?v=IODxDxX7oi4",
-    },
-    {
-      name: "Glute Bridge",
-      setsReps: "3 sets of 15 reps",
-      cue: "Lie on back. Feet flat hip width. Drive hips to ceiling. Squeeze glutes hard at top. Lower slowly.",
-      mistake: "Pushing through the lower back instead of the glutes. Drive hips, do not arch back.",
-      yt: "https://www.youtube.com/watch?v=OUgsJ8-Vi0E",
-    },
-    {
-      name: "Reverse Lunge",
-      setsReps: "3 sets of 12 each leg",
-      cue: "Stand tall. Step one foot back. Lower back knee toward floor. Push through front heel to return. Torso upright.",
-      mistake: "Front knee travelling past toes. Keep shin vertical.",
-      yt: "https://www.youtube.com/watch?v=xrPteyQLGAo",
-    },
-    {
-      name: "Table Row",
-      setsReps: "3 sets of 12 reps",
-      cue: "Sit under a sturdy table. Grip edge. Body straight. Pull chest up to table. Lower slowly.",
-      mistake: "Hips dropping. Keep body rigid like a plank throughout.",
-      yt: "https://www.youtube.com/watch?v=PGRiMK_2jLI",
-    },
-    {
-      name: "Plank",
-      setsReps: "3 sets of 30 seconds",
-      cue: "Forearms on floor. Body straight from head to heels. Squeeze stomach hard. Breathe steadily.",
-      mistake: "Hips rising or sagging. Keep everything in one line.",
-      yt: "https://www.youtube.com/watch?v=ASdvN_XEl_c",
-    },
-  ],
-  2: [
-    {
-      name: "Jump Squat",
-      setsReps: "3 sets of 12 reps",
-      cue: "Feet shoulder width. Squat to parallel. Explode upward. Land softly with bent knees. Reset.",
-      mistake: "Landing stiff-legged. Absorb through hips and knees on every landing.",
-      yt: "https://www.youtube.com/watch?v=A-cFYGvaKfc",
-    },
-    {
-      name: "Decline Push Up",
-      setsReps: "3 sets of 10 reps",
-      cue: "Feet on chair or couch. Hands on floor. Lower chest toward floor. Press back up. Body straight.",
-      mistake: "Hips rising to compensate. Keep core tight so body stays in a straight line.",
-      yt: "https://www.youtube.com/watch?v=SKPab2YC9AY",
-    },
-    {
-      name: "Single Leg Glute Bridge",
-      setsReps: "3 sets of 10 reps each leg",
-      cue: "Lie on back. One knee bent foot flat. Extend opposite leg. Drive hips up through planted heel. Squeeze hard at top.",
-      mistake: "Hips dropping to one side. Keep hips level throughout the movement.",
-      yt: "https://www.youtube.com/results?search_query=single+leg+glute+bridge+tutorial",
-    },
-    {
-      name: "Walking Lunge",
-      setsReps: "3 sets of 12 each leg",
-      cue: "Step forward into a lunge. Back knee almost touches floor. Drive front foot into ground and step through. Keep torso upright.",
-      mistake: "Leaning forward. Keep chest up and shoulders back throughout.",
-      yt: "https://www.youtube.com/results?search_query=walking+lunge+tutorial+form",
-    },
-    {
-      name: "Door Frame Row",
-      setsReps: "3 sets of 12 reps",
-      cue: "Stand in door frame. Grip sides at chest height. Lean back. Pull chest to door frame. Squeeze shoulder blades.",
-      mistake: "Using momentum to swing forward. Control the movement in both directions.",
-      yt: "https://www.youtube.com/results?search_query=doorframe+row+exercise+bodyweight",
-    },
-    {
-      name: "Plank Shoulder Tap",
-      setsReps: "3 sets of 20 taps (10 each side)",
-      cue: "High plank position. Tap opposite shoulder with one hand. Replace hand. Repeat other side. Hips still.",
-      mistake: "Hips rocking side to side with each tap. Brace core hard to keep hips square.",
-      yt: "https://www.youtube.com/results?search_query=plank+shoulder+tap+tutorial",
-    },
-  ],
-  3: [
-    {
-      name: "Bulgarian Split Squat",
-      setsReps: "3 sets of 10 reps each leg",
-      cue: "Back foot on chair behind you. Front foot forward. Lower back knee toward floor. Drive through front heel to rise.",
-      mistake: "Front knee caving in. Keep it tracking over your middle toe throughout.",
-      yt: "https://www.youtube.com/results?search_query=bulgarian+split+squat+tutorial+form",
-    },
-    {
-      name: "Diamond Push Up",
-      setsReps: "3 sets of 8 reps",
-      cue: "Hands form a diamond shape under chest. Lower chest to hands. Press up. Elbows stay close to body.",
-      mistake: "Elbows flaring out. Keep them tucked tight to target triceps correctly.",
-      yt: "https://www.youtube.com/results?search_query=diamond+push+up+tutorial+form",
-    },
-    {
-      name: "Hip Thrust",
-      setsReps: "3 sets of 15 reps",
-      cue: "Upper back on couch or chair. Feet flat on floor. Drive hips to ceiling. Squeeze hard at top. Lower slowly.",
-      mistake: "Not getting full hip extension at the top. Push all the way up until body is flat.",
-      yt: "https://www.youtube.com/results?search_query=hip+thrust+bodyweight+tutorial+beginners",
-    },
-    {
-      name: "Deficit Lunge",
-      setsReps: "3 sets of 10 reps each leg",
-      cue: "Stand on a step or book stack. Step one foot forward to the floor. Lower into deep lunge. Rise and repeat.",
-      mistake: "Front knee collapsing inward. Keep knee tracking over toe at all times.",
-      yt: "https://www.youtube.com/results?search_query=deficit+lunge+tutorial+form",
-    },
-    {
-      name: "Resistance Band Row",
-      setsReps: "3 sets of 12 reps",
-      cue: "Anchor band at chest height. Hold handles. Step back. Pull elbows back past your sides. Squeeze shoulder blades together.",
-      mistake: "Shrugging shoulders up during the pull. Keep shoulders down and back.",
-      yt: "https://www.youtube.com/results?search_query=resistance+band+row+tutorial+form",
-    },
-    {
-      name: "Plank with Leg Raise",
-      setsReps: "3 sets of 10 reps each leg",
-      cue: "Forearm plank. Lift one leg 6 inches off floor. Hold 2 seconds. Lower. Switch legs. Core braced throughout.",
-      mistake: "Hips rotating with each leg raise. Keep hips perfectly level.",
-      yt: "https://www.youtube.com/results?search_query=plank+leg+raise+tutorial+form",
-    },
-  ],
-};
-
 // ============================================================
 // getKamlifeProgramme
 // Returns a formatted string overview of the user's programme.
@@ -1750,6 +1543,8 @@ const INJURY_EXERCISE_MAP: Record<string, string[]> = {
   ankle: ["squat", "lunge", "jump squat", "calf raise", "box jump", "step up", "split squat"],
 };
 
+type HomeEx = { name: string; setsReps: string; cue: string; mistake: string; yt: string };
+
 function filterInjuredExercises(exercises: HomeEx[], injuries: string): { safe: HomeEx[]; skipped: string[] } {
   if (!injuries || injuries === "none") return { safe: exercises, skipped: [] };
   const injuryLower = injuries.toLowerCase();
@@ -1890,28 +1685,20 @@ export function getCurrentDayExercises(user: any): { exercises: DayExercise[]; l
 }
 
 // ============================================================
-// buildDay1Workout / buildDay2Workout / buildDay3Workout
-// Progressive delivery: Day 1 sent at onboarding, Day 2 after Day 1 DONE,
-// Day 3 after Day 2 DONE.
+// buildDay1Workout
+// Day 1 delivery at onboarding/payment. Later days come from buildDayWorkout
+// with the calendar-derived day slot (workout-state.ts).
 // ============================================================
 
 export function buildDay1Workout(user: any): string {
   return buildDayWorkout({ ...user, programmeDayInWeek: 1 });
 }
 
-export function buildDay2Workout(user: any): string {
-  return buildDayWorkout({ ...user, programmeDayInWeek: 2 });
-}
-
-export function buildDay3Workout(user: any): string {
-  return buildDayWorkout({ ...user, programmeDayInWeek: 3 });
-}
-
 // ============================================================
 // buildFullProgramme
 // Returns only Day 1 for new users (initial delivery at onboarding).
-// Days 2 and 3 are sent progressively via buildDay2Workout / buildDay3Workout
-// when the user logs DONE.
+// Later days unlock via the normal workout flow
+// when the user logs DONE (see handlers/workout.ts).
 // ============================================================
 
 export function buildFullProgramme(user: any): string {
@@ -1944,59 +1731,6 @@ export function buildFullProgramme(user: any): string {
 
   // Gym + dumbbell: deliver Day 1 only — following days unlock after DONE is logged
   return buildDay1Workout(user);
-}
-
-// ============================================================
-// buildDayWorkoutForType
-// Backward-compatible function for forcing a specific day type.
-// For home users returns today's full-body home session.
-// For gym users returns the session for the specified type (legacy push/pull/legs).
-// ============================================================
-
-export function buildDayWorkoutForType(
-  user: any,
-  forcedType: "push" | "pull" | "legs" | "core"
-): string {
-  const mode = user.trainingMode || "home";
-  const phase = user.programmePhase || 1;
-  const phaseNames = getPhaseNames();
-  const phaseName = phaseNames[phase] || "Foundation";
-  const multiplier = getPhaseMultiplier(phase);
-  const week = user.programmeWeek || 1;
-  const isFemaleGluteFocus = user.primaryFocusArea === "glutes_legs";
-
-  if (mode !== "gym" && mode !== "gym_dumbbell") {
-    return buildDayWorkout(user);
-  }
-
-  const library = WORKOUTS.gym;
-  const dayLabel: Record<string, string> = {
-    push: "Push Day",
-    pull: "Pull Day",
-    legs: "Legs Day",
-    core: "Core Day",
-  };
-  const exercises = library[forcedType];
-  const sessionExercises =
-    forcedType === "legs" && isFemaleGluteFocus ? exercises : exercises.slice(0, 4);
-
-  // Use the clean short format — same as formatGymDay
-  let workout = `*Week ${week} — ${dayLabel[forcedType]}*\nRest ${multiplier.rest} between sets\n\n`;
-  const ytLinks: string[] = [];
-  for (let i = 0; i < sessionExercises.length; i++) {
-    const ex = sessionExercises[i];
-    const num = i + 1;
-    const setsDisplay =
-      ex.sets.includes("seconds") || ex.sets.includes("min")
-        ? `${multiplier.sets}x${ex.sets.split("x").pop() || ex.sets}`
-        : `${multiplier.sets}x${multiplier.reps}`;
-    const shortCue = ex.description.split(". ").slice(0, 1).join(". ");
-    workout += `${num}. *${ex.name}* — ${setsDisplay}\n${shortCue}\n\n`;
-    const yt = `https://www.youtube.com/results?search_query=${ex.name.replace(/\s+/g, "+")}+tutorial`;
-    ytLinks.push(`${num}. ${ex.name}: ${yt}`);
-  }
-  workout += `Reply *DONE* when finished.\n\n_Form videos:_\n${ytLinks.join("\n")}`;
-  return withSafetyNote(workout, user);
 }
 
 // ============================================================
