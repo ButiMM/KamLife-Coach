@@ -766,7 +766,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (waterResult !== null) return waterResult;
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
-  const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage });
+  const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage, classifierQuestion: normalizedQuestion });
   if (foodCtxResult !== null) return foodCtxResult;
 
   // ---- PROGRESS CHECK ----

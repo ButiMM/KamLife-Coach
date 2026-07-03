@@ -222,7 +222,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   }
 
   // ---- REMOVE LAST LOGGED MEAL — any natural expression for "that last entry" ----
-  const isRemoveLast = /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal|last entry|the last|the meal|the last one|the last entry|meal|that food|what i just logged|what i logged)$/i.test(m.trim())
+  // Allow a trailing reason clause: "remove last meal, it was a question" fell into the
+  // specific-food matcher and dead-ended on "I don't see 'last meal, it was a question'"
+  // (prod, 2026-07-03). Anchor on the removal target, tolerate ", <anything>" after.
+  const isRemoveLast = /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal|last entry|the last|the meal|the last one|the last entry|meal|that food|what i just logged|what i logged)\b(?:\s*[,\-—].*)?$/i.test(m.trim())
     || /^(remove|delete|undo|scratch)$/i.test(m.trim())
     || /\b(scratch that|undo that|take that off|remove that|delete that|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m);
   if (isRemoveLast) {

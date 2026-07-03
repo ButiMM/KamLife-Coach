@@ -272,6 +272,13 @@ const CASES: Case[] = [
     reject: [/portion|palm of your hand|plate rule/i] },
   { name: "weight: 'where should my weight be in 6 months' is a projection, never the ASCII history chart (prod bug 2026-07-03)", msg: "Where should my weight be in 6 months??",
     reject: [/```|weigh-ins over|weigh-ins total/i] },
+  { name: "voice-q: 'what do you think about rice and sweet potato on the same plate' must NOT log food (prod bug 2026-07-03)", msg: "What do you think about double starching, like having rice and sweet potato on the same plate. What do you think about that?",
+    reject: [/Food logged|Meal total|kcal \| ~?\d+g protein/i] },
+  { name: "voice-q: 'is it advisable to buy a walking pad' stays a question", msg: "Is it advisable for me to buy a walking pad?",
+    reject: [/Food logged|Meal total/i] },
+  { name: "mgmt: 'Remove last meal, it was a question' removes the last meal despite the trailing clause (prod bug 2026-07-03)", msg: "Remove last meal, it was a question",
+    expect: [/Removed your last meal|No meal logged yet today/i],
+    reject: [/don.?t see "last meal/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",

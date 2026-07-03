@@ -261,8 +261,14 @@ export async function handleFoodContext(ctx: {
   user: any;
   stepReplyPart: string;
   handleMessage: HandleMessageFn;
+  /** Classifier verdict (QUESTION, conf >= 0.8) — authoritative over keyword heuristics.
+   *  The food logger is the last + biggest side-effect handler; without this a voice
+   *  question mentioning food ("what do you think about rice and sweet potato?") gets
+   *  logged as a 588-kcal meal because "having" trips hasLogTrigger (prod, 2026-07-03). */
+  classifierQuestion?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
+  const classifierQuestion = !!ctx.classifierQuestion;
 
   // ---- BOT MISSED A MEAL — "you missed a meal", "you didn't log that", "you forgot my lunch" ----
   // Must be caught BEFORE the correction detector which would re-route "you missed a meal" as food
@@ -501,7 +507,7 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- Shared message-type flags used by food handlers below ----
-  const isQuestion = m.includes("?") ||
+  const isQuestion = classifierQuestion || m.includes("?") ||
     /^(what|should|can i|is |are |how|why|when|tell me about|which|do i|does |do |where|can )/.test(m) ||
     /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than|is that enough|enough protein|enough calories|is it enough|any good|any protein)\b/.test(m);
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
@@ -666,9 +672,12 @@ export async function handleFoodContext(ctx: {
   // the message contains a substantive nutritional question ("is that enough protein?",
   // "how many calories in that?"). Logging food in response to a genuine question
   // would silently discard the question and never answer it.
-  const hasSubstantiveQuestion = /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
-    || /^(is |does |do |will |can |should |are |have |has )\b/i.test(m);
-  const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion;
+  const hasSubstantiveQuestion = classifierQuestion
+    || /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
+    // Opinion / advice questions that MENTION food but aren't logging it.
+    || /\b(what do you think|what.?s your (take|opinion|view)|thoughts on|your opinion|opinion on|is it (advisable|worth|better|okay|fine)|do you (recommend|think|reckon)|would you (recommend|say)|what about (having|eating|adding)|better to (have|eat)|is it bad to)\b/i.test(m)
+    || /^(is |does |do |will |can |should |are |have |has |what |why |which )\b/i.test(m);
+  const foodLogOverride = hasLogTrigger && hasActualFood && !hasSubstantiveQuestion && !classifierQuestion;
 
   // Diagnostic: any message containing recognised foods logs its gate state — when a
   // meal silently fails to log in production, this line names the reason instantly.
