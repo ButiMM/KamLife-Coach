@@ -29,6 +29,7 @@ export async function handleEarlyCommands(ctx: {
   message: string;
   m: string;
   user: any;
+  hasMedia?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
@@ -597,8 +598,13 @@ export async function handleEarlyCommands(ctx: {
 
   // ---- SAME-AS QUICK LOG — extracted to meal-repeat.ts (single owner of repeat intent;
   // selection + negation + duplicate guards live there and in meal-select.ts tests) ----
-  const sameAsReply = await handleMealRepeat({ phone, message, m, user });
-  if (sameAsReply) return sameAsReply;
+  // NEVER on a photo caption: "Same dinner" under a meal photo means "log THIS photo
+  // as dinner" — the media pipeline owns it. Firing here copied yesterday's dinner
+  // instead and the photo was never analysed (production cascade, 2026-07-02).
+  if (!ctx.hasMedia) {
+    const sameAsReply = await handleMealRepeat({ phone, message, m, user });
+    if (sameAsReply) return sameAsReply;
+  }
 
   // ---- CLIENT SENDS THEIR OWN SHOPPING LIST — "adjust my list", "here's what I buy", "fix my groceries", or raw comma-separated items ----
   // Also catches plain lists like "chicken, eggs, rice, bread, spinach, oats" (≥4 items, mostly food words)

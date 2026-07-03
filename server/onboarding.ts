@@ -1,5 +1,7 @@
 import { db } from "./db";
-import { users, weightLogs, chatHistory, stepLogs } from "../shared/schema";
+import { users, weightLogs, chatHistory, stepLogs, escalations } from "../shared/schema";
+import { escalationSLA } from "./safety-detection";
+import { generateReferralCode } from "./onboarding-referral";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets, calculateStepsTarget } from "./targets";
@@ -515,13 +517,25 @@ export function getOnboardingMealPlan(user: any): string {
 // ============================================================
 
 async function completeOnboarding(phone: string, u: any, budget: string, budgetLevel: string, exp: string): Promise<string> {
-  const defaultGoal = u.goalType || "fat_loss";
   const actualWeight = parseFloat(u.currentWeight || "75");
   const age = u.age || 30;
   const gender = u.gender || "male";
   const heightCm = u.heightCm || 170;
   const isYouth = age < 18;
   const isElderly = age >= 60;
+
+  // UNDERWEIGHT GATE — duty of care: never build a calorie deficit for someone under
+  // the healthy range (BMI < 18.5, possible eating-disorder territory). Flip the plan
+  // to building UP, say it plainly in the welcome, and flag the coach to review.
+  const bmiGate = heightCm > 0 && actualWeight > 0 ? actualWeight / Math.pow(heightCm / 100, 2) : 0;
+  let underweightNote = "";
+  if ((u.goalType || "fat_loss") === "fat_loss" && bmiGate > 0 && bmiGate < 18.5) {
+    u.goalType = "muscle_gain";
+    underweightNote = `⚠️ One important change before we start: at ${actualWeight}kg your numbers sit *under* the healthy range, so I won't coach weight loss — it would cost you muscle and health. Your plan builds you UP instead: strength, fuel, protein. If a doctor or dietitian is part of your health picture, keep them in the loop.\n\n---\n\n`;
+    db.update(users).set({ goalType: "muscle_gain" }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    db.insert(escalations).values({ userId: u.id, reason: "underweight_fatloss_request", triggerMessage: `BMI ${bmiGate.toFixed(1)} (${actualWeight}kg/${heightCm}cm) requested fat loss — auto-flipped to muscle_gain at onboarding`, priority: "high", slaDeadline: escalationSLA("high") }).catch((e) => console.error("[UNDERWEIGHT_GATE]", e));
+  }
+  const defaultGoal = u.goalType || "fat_loss";
 
   const trainingDays = u.trainingDaysPerWeek || ((isYouth || isElderly) ? 3 : 4);
 
@@ -531,22 +545,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, u.trainingExperience || "beginner", u.goalType || "fat_loss");
 
-  let referralCode: string | undefined;
-  {
-    const namePrefix = (u.name || "KAM").replace(/[^a-zA-Z]/g, "").slice(0, 3).toUpperCase().padEnd(3, "K");
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const candidate = `${namePrefix}${Math.floor(1000 + Math.random() * 9000)}`;
-      try {
-        const existing = await db.select({ id: users.id }).from(users).where(eq(users.referralCode, candidate)).limit(1);
-        if (existing.length === 0) { referralCode = candidate; break; }
-      } catch (e) {
-        // A DB blip here must never abort onboarding completion — the referral code
-        // is a nice-to-have; just skip it and let the welcome go out.
-        console.warn("[ONBOARDING] referral code check failed, skipping:", e);
-        break;
-      }
-    }
-  }
+  const referralCode = await generateReferralCode(u.name);
 
   await db.update(users).set({
     trainingDaysPerWeek: trainingDays,
@@ -640,7 +639,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
   const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
   const msg4 = `*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths.\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
-  return `${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
+  return `${underweightNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
 }
 
 // ============================================================

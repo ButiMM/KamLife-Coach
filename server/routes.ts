@@ -598,7 +598,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user });
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl });
   if (earlyResult !== null) return earlyResult;
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----

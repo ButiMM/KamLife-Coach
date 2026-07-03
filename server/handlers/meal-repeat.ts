@@ -14,7 +14,7 @@
 import { db } from "../db";
 import { users, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
-import { sastDayStart } from "../utils";
+import { sastDayStart, slotFromSastHour } from "../utils";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
@@ -39,15 +39,28 @@ export async function handleMealRepeat(ctx: {
   const wantsNotRepeat = /\b(don.?t|not|no|never|won.?t|wouldn.?t|avoid|skip)\b.{0,20}\b(same|repeat|again)\b/i.test(m)
     || /\b(same|repeat)\b.{0,20}\b(don.?t|not|no|never|won.?t|wouldn.?t)\b/i.test(m);
 
-  if (!sameAsMatch || wantsNotRepeat) return null;
+  // Protest/meta-correction guard: "No no no dinner from yesterday!!!", "Omg what I
+  // mean is I had the same meal as lunch…", "remove the meals you mistakenly logged"
+  // are the client CORRECTING us — treating them as copy commands stacked three wrong
+  // meals in production (2026-07-02). Fall through to mgmt/coach instead.
+  const isProtest = /^(no+\b|no no|omg|wtf|eish|yoh|hau|haibo|what the|listen)/i.test(m.trim())
+    || /\b(what i mean|i meant|you must remove|you should remove|mistakenly|by mistake|wrongly logged|do better|that.?s (wrong|not what)|didn.?t ask|stop logging)\b/i.test(m);
+
+  if (!sameAsMatch || wantsNotRepeat || isProtest) return null;
 
   // Cross-meal: "dinner same as lunch" → copy FROM lunch, log AS dinner
   const crossMealM =
     m.match(/\b(breakfast|lunch|dinner|supper|snack)\b.{0,60}?\bsame\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i)
     || m.match(/\bsame\s+(breakfast|lunch|dinner|supper|snack)\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i);
-  const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner") : null;
-  const sourceHint = crossMealM
-    ? crossMealM[2].toLowerCase().replace("supper", "dinner")
+  // "I had the same (meal/food) as lunch" said at 20:38 = source lunch, target the
+  // CURRENT slot (dinner) — logging their dinner as a second "lunch" reads insane.
+  const sameAsMealM = !crossMealM && m.match(/\b(?:the\s+)?same\s+(?:meal|food|thing)?\s*as\s+(?:my\s+)?(breakfast|lunch|dinner|supper)\b/i);
+  const crossish = !!(crossMealM || sameAsMealM);
+  const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner")
+    : sameAsMealM ? slotFromSastHour()
+    : null;
+  const sourceHint = crossMealM ? crossMealM[2].toLowerCase().replace("supper", "dinner")
+    : sameAsMealM ? sameAsMealM[1].toLowerCase().replace("supper", "dinner")
     : (m.match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)?.[1]?.toLowerCase().replace("supper", "dinner") || null);
 
   // How many days back to look
@@ -88,7 +101,7 @@ export async function handleMealRepeat(ctx: {
     // substitute an older one. Copying a 3-day-old lunch as "today's lunch" makes the
     // coach contradict what the client just told it.
     let todayCrossMatch: (typeof allMeals)[number] | null = null;
-    if (crossMealM && daysBack === 0 && sourceHint) {
+    if (crossish && daysBack === 0 && sourceHint) {
       const todaySub = todayMeals.filter(l => (l.kcalInt || 0) >= 100);
       todayCrossMatch =
         todaySub.find(l => l.rawMessage && new RegExp(`\\b${sourceHint}\\b`, "i").test(l.rawMessage))
@@ -101,7 +114,7 @@ export async function handleMealRepeat(ctx: {
       }
     }
 
-    const searchPool = (crossMealM && todayMeals.filter(l => (l.kcalInt || 0) >= 150).length > 0)
+    const searchPool = (crossish && todayMeals.filter(l => (l.kcalInt || 0) >= 150).length > 0)
       ? todayMeals : poolMeals;
 
     const match = todayCrossMatch || findBestMeal(searchPool, sourceHint);
@@ -153,7 +166,7 @@ export async function handleMealRepeat(ctx: {
     const labelDisplay = (targetLabel || sourceHint || match.mealLabel || "Meal").replace(/\b\w/g, c => c.toUpperCase());
     const mealWasToday = match.loggedAt && new Date(match.loggedAt) >= todayStart;
     // Never say "copied from breakfast" ON a breakfast log — use a time reference instead.
-    const fromNote = crossMealM && sourceHint && sourceHint !== targetLabel ? `copied from ${sourceHint}`
+    const fromNote = crossish && sourceHint && sourceHint !== targetLabel ? `copied from ${sourceHint}`
       : daysBack > 0 ? `from ${daysBack === 1 ? "yesterday" : `${daysBack} days ago`}`
       : mealWasToday ? "from earlier today" : "from yesterday";
     const remaining = (user.calorieTarget || 1800) - recomputed.calories;

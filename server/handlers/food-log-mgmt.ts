@@ -138,6 +138,61 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     return `That wipes *all ${todayMeals.length} of today's ${todayMeals.length === 1 ? "meal" : "meals"}* and resets your counter to 0 — it can't be undone. Reply *yes wipe* to confirm, or anything else to keep them.`;
   }
 
+  // ---- MULTI-MEAL REMOVAL — "remove both meals", "the two previous meals", "last 3 meals" ----
+  // A wrong-log cascade leaves 2-3 bad entries; one-at-a-time removal is exactly when a
+  // frustrated client gives up (production cascade, 2026-07-02).
+  const multiRemove = m.match(/\b(?:remove|delete|undo|take\s+(?:off|out)|get\s+rid\s+of)\b[^.!?]*\b(both|two|three|last\s*(?:2|3|two|three)|2|3)\b[^.!?]*\bmeals?\b/i);
+  if (multiRemove) {
+    const n = /three|3/i.test(multiRemove[1]) ? 3 : 2;
+    const todayStartMR = sastDayStart();
+    const rowsMR = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartMR)))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(n);
+    if (rowsMR.length === 0) return `No meals logged today to remove.`;
+    for (const r of rowsMR) await db.delete(mealLogs).where(eq(mealLogs.id, r.id));
+    invalidateFoodTotalsCache(user.id);
+    const recMR = await recomputeTodayFoodTotals(user.id);
+    await db.update(users).set({ todayCalories: recMR.calories, todayProteinG: recMR.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    return `Removed the last ${rowsMR.length} meal${rowsMR.length > 1 ? "s" : ""} ✅\n${rowsMR.map(r => `• ${(r.rawMessage || "meal").slice(0, 45)}`).join("\n")}\n\nToday now: ~${recMR.calories} kcal | ~${recMR.protein}g protein.`;
+  }
+
+  // ---- REMOVE BY NUMBER — "remove 1 and 3" (pairs with the numbered list below) ----
+  const idxRemove = m.trim().match(/^(?:remove|delete)\s+(?:meals?\s+|numbers?\s+)?(\d)(?:\s*(?:,|and|&)\s*(\d))?(?:\s*(?:,|and|&)\s*(\d))?$/i);
+  if (idxRemove) {
+    const todayStartIR = sastDayStart();
+    const rowsIR = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartIR)))
+      .orderBy(asc(mealLogs.loggedAt))
+      .limit(15);
+    const picks = [idxRemove[1], idxRemove[2], idxRemove[3]].filter(Boolean).map(x => parseInt(x!, 10));
+    const chosen = picks.map(p => rowsIR[p - 1]).filter(Boolean);
+    if (chosen.length === 0) return `Those numbers don't match today's log — send *my meals* for the numbered list, then e.g. *remove 1 and 3*.`;
+    for (const r of chosen) await db.delete(mealLogs).where(eq(mealLogs.id, r.id));
+    invalidateFoodTotalsCache(user.id);
+    const recIR = await recomputeTodayFoodTotals(user.id);
+    await db.update(users).set({ todayCalories: recIR.calories, todayProteinG: recIR.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+    return `Removed ${chosen.length} meal${chosen.length > 1 ? "s" : ""} ✅\n${chosen.map(r => `• ${(r.rawMessage || "meal").slice(0, 45)}`).join("\n")}\n\nToday now: ~${recIR.calories} kcal | ~${recIR.protein}g protein.`;
+  }
+
+  // ---- FUZZY MULTI-REMOVE — "the other meals", "meals you mistakenly logged" ----
+  // Never guess which ones "the other meals" are: show today's numbered log and let
+  // the client point. One message each way beats deleting the wrong entry.
+  if (/\b(?:remove|delete|undo|fix)\b[^.!?]*\b(other|mistaken(?:ly)?|wrong(?:ly)?|extra)\b[^.!?]*\b(meals?|logs?|entries)\b/i.test(m)
+    || /\b(?:remove|delete)\b[^.!?]*\bmeals?\b[^.!?]*\bmistaken/i.test(m)) {
+    const todayStartFZ = sastDayStart();
+    const rowsFZ = await db.select({ rawMessage: mealLogs.rawMessage, kcalInt: mealLogs.kcalInt })
+      .from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartFZ)))
+      .orderBy(asc(mealLogs.loggedAt))
+      .limit(15);
+    if (rowsFZ.length === 0) return `Nothing logged today yet — we're starting clean.`;
+    const listFZ = rowsFZ.map((r, i) => `${i + 1}. ${(r.rawMessage || "meal").slice(0, 45)} (~${r.kcalInt || 0} kcal)`).join("\n");
+    return `Let's fix it properly. Today's log:\n${listFZ}\n\nTell me exactly which to remove — e.g. *remove 1 and 3* — and it's done.`;
+  }
+
   // ---- REMOVE MEAL BY TIME LABEL — "remove breakfast meal", "delete my lunch" ----
   const mealTimeRemoveMatch = m.trim().match(/^(?:remove|delete|undo)\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\s*(?:meal|log|entry)?$/i);
   if (mealTimeRemoveMatch) {
