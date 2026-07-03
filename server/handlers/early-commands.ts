@@ -30,6 +30,10 @@ export async function handleEarlyCommands(ctx: {
   m: string;
   user: any;
   hasMedia?: boolean;
+  /** SYSTEMIC GATE: classifier says this is a QUESTION (conf >= 0.8). Handlers with
+   *  SIDE EFFECTS (log, flip mode, dump content) must not fire — questions go to the
+   *  coach. This is the structural fix for the keyword-hijack failure class. */
+  isQuestion?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
@@ -239,7 +243,7 @@ export async function handleEarlyCommands(ctx: {
   // Mode changes need a DURABLE signal: joined / membership / switch me to.
   const isGymTripStatement = /\b(going|heading|off|about|gonna|on my way|about to go)\s+to\s+(?:the\s+)?gym\b/i.test(m)
     && !/\b(joined|member|membership|signed up|switch|change)\b/i.test(m);
-  const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && (
+  const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && !ctx.isQuestion && (
     /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
     /\b(joined|signed up|now (go to|at|train at)|started at|switch(?:ed)? (?:me )?to|got a(?: gym)? membership)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre|membership)\b/i.test(m) ||
     /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
@@ -312,7 +316,7 @@ export async function handleEarlyCommands(ctx: {
   const isBodyPartWorkoutRequest = !m.includes("?")
     && /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m);
 
-  if (m === "my programme" || m === "programme" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest) {
+  if (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest) {
     // 5-minute cooldown: if we already delivered a full workout recently, return a short
     // "it's above ↑" reply instead of re-sending the full text again.
     // The cooldown only triggers on re-requests AFTER the delivery fix (text now reliably
@@ -607,7 +611,7 @@ export async function handleEarlyCommands(ctx: {
   // NEVER on a photo caption: "Same dinner" under a meal photo means "log THIS photo
   // as dinner" — the media pipeline owns it. Firing here copied yesterday's dinner
   // instead and the photo was never analysed (production cascade, 2026-07-02).
-  if (!ctx.hasMedia) {
+  if (!ctx.hasMedia && !ctx.isQuestion) {
     const sameAsReply = await handleMealRepeat({ phone, message, m, user });
     if (sameAsReply) return sameAsReply;
   }

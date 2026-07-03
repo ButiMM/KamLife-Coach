@@ -181,7 +181,6 @@ export async function runBuddyAccountability(): Promise<void> {
         const claimed = await claimProactive(worker.buddyId, `buddy_workout_${worker.id}`, todaySAST());
         if (!claimed) continue;
         await sendWhatsApp(buddy.phoneNumber, `🏋️ *${workerFirst} just logged a session.* Don't let them get ahead.${streakAdd}\n\nReply *done* when you finish yours.`);
-        recordProactiveSend(worker.buddyId);
       } catch { /* skip pair */ }
     }
 
@@ -203,7 +202,6 @@ export async function runBuddyAccountability(): Promise<void> {
         const claimed = await claimProactive(partner.id, `buddy_silence_${silentBuddy.id}`, todaySAST());
         if (!claimed) continue;
         await sendWhatsApp(partner.phoneNumber, `👀 *${silentFirst} hasn't logged in ${daysSilent} days.*\n\nYou're pulling ahead — but having an active buddy keeps you both sharper. If you know them, give them a nudge.`);
-        recordProactiveSend(partner.id);
       } catch { /* skip */ }
     }
   } catch (err) {

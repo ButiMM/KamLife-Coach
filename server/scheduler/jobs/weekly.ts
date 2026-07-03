@@ -67,7 +67,6 @@ export async function runFridayWeekendStrategy(): Promise<void> {
       ].filter(Boolean);
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
-      recordProactiveSend(client.id);
       sent++;
     } catch (err) { console.error(`[SCHEDULER] Friday strategy error — ${client.phoneNumber}:`, err); }
   }
@@ -382,7 +381,6 @@ export async function runSundayMealPlan(): Promise<void> {
       const goalLabel = client.goalType === "muscle_gain" ? "muscle gain" : client.goalType === "recomposition" ? "recomposition" : "fat loss";
       const intro = `*${name} — your 3-day plan for the week ahead:*\n\nBuilt for your ${goalLabel} goal. Screenshot it, save it, use it. Prep protein on Sunday and your whole week is easier.\n\n---\n\n`;
       await sendWhatsApp(client.phoneNumber, intro + plan);
-      recordProactiveSend(client.id);
       sent++;
     } catch (err) { console.error(`[SCHEDULER] Sunday meal plan error — ${client.phoneNumber}:`, err); }
   }

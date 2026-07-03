@@ -20,6 +20,9 @@
 
 ## GIF setup (pending human task)
 Set `MEDIA_BASE_URL` in Railway, then upload files to `MEDIA_BASE_URL/ex/<slug>.gif`.
+IMPORTANT final step: gifs only serve once each uploaded slug is added to
+`UPLOADED_GIF_SLUGS` in `server/exercise-media.ts` (tell Claude — 1-line change).
+Without it the code keeps using the safe fallback and uploads do nothing.
 Slugs: `squat`, `hip-thrust`, `leg-press`, `leg-curl`, `leg-extension`, `calf-raise`,
 `rdl`, `bulgarian-split-squat`, `chest-press`, `chest-fly`, `lat-pulldown`,
 `seated-row`, `face-pull`, `lateral-raise`, `shoulder-press`, `bicep-curl`,

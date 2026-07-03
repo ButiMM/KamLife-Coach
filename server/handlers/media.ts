@@ -1451,7 +1451,9 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] voice_ok words=${wordCount} coach_reply_ms=${coachReplyMs} total_ms=${voiceTotalMs}`);
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
-      return `🎤 I heard: "${transcribedText}"\n\n${voiceReply}`;
+      // Echo confirms transcription — but never parrot a 60s rant or its profanity back.
+      const echoClean = (transcribedText.length > 160 ? transcribedText.slice(0, 157) + "…" : transcribedText).replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
+      return `🎤 I heard: "${echoClean}"\n\n${voiceReply}`;
 
     } catch (err) {
       if (_tmpAudioCleanup) _tmpAudioCleanup();

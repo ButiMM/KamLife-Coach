@@ -127,35 +127,6 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
       : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
 
-  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
-  // Prevent vague GPT responses after a media upload by resolving against recent media events.
-  const asksAboutSentMedia = /\b(i sent|i have sent|did you get|you got|check|look at).{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
-  if (asksAboutSentMedia && !mediaUrl) {
-    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
-      .from(chatHistory)
-      .where(eq(chatHistory.userId, user.id))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(12);
-    const lastMediaEvent = recentMedia.find(row =>
-      (row.messageIn || "").includes("[Photo]") ||
-      (row.messageIn || "").includes("[Step Screenshot") ||
-      (row.intent || "").includes("PROGRESS_PHOTO")
-    );
-    if (lastMediaEvent) {
-      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
-        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
-      }
-      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
-        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
-      }
-      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
-    }
-    if (/\b(voice|audio|note)\b/i.test(m)) {
-      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
-    }
-    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
-  }
-
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];
   if (user.onboardingState && !ONBOARDING_DONE.includes(user.onboardingState)) {
@@ -278,6 +249,39 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       return gateReply;
     }
   }
+
+  // ---- POST-MEDIA FOLLOW-UP: "I sent screenshot/voice" ----
+  // Prevent vague GPT responses after a media upload by resolving against recent media events.
+  // Runs AFTER onboarding/POPIA/subscription gates (it used to run before them, letting
+  // mid-onboarding and unsubscribed users bypass the gates with one phrase) and only on
+  // explicit delivery-check verbs — bare "check/look at" hijacked "check my progress photo".
+  const asksAboutSentMedia = /\b(i (?:have )?sent|did you (?:get|receive)|you got|did (?:it|that) (?:go through|arrive))\b.{0,40}\b(screenshot|photo|image|pic|voice|audio|note)\b/i.test(m);
+  if (asksAboutSentMedia && !mediaUrl) {
+    const recentMedia = await db.select({ messageIn: chatHistory.messageIn, intent: chatHistory.intent, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(eq(chatHistory.userId, user.id))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(12);
+    const lastMediaEvent = recentMedia.find(row =>
+      (row.messageIn || "").includes("[Photo]") ||
+      (row.messageIn || "").includes("[Step Screenshot") ||
+      (row.intent || "").includes("PROGRESS_PHOTO")
+    );
+    if (lastMediaEvent) {
+      if ((lastMediaEvent.messageIn || "").includes("[Step Screenshot")) {
+        return "Yes, I got your step screenshot and logged it. Send your next one tonight so we keep your daily average accurate.";
+      }
+      if ((lastMediaEvent.messageIn || "").includes("[Photo]")) {
+        return "Yes, I got your photo. If that was a meal photo, send one short caption like \"chicken and rice\" so I can tighten calories and protein.";
+      }
+      return "Yes, I received it. Send one line on what you want checked so I can give a precise answer.";
+    }
+    if (/\b(voice|audio|note)\b/i.test(m)) {
+      return "I do not see a processed voice note yet. Please resend it, or type your message now and I will respond immediately.";
+    }
+    return "I do not see a processed screenshot yet. Please resend it with the caption \"steps screenshot\" or \"food photo\".";
+  }
+
 
   // ---- HEART CONDITION CLEARANCE GATE ----
   // Users with heart_condition must confirm doctor clearance before receiving workouts
@@ -598,7 +602,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl });
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) return earlyResult;
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
@@ -769,11 +773,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const progressResult = await handleProgressCheck({ phone, message, m, user });
   if (progressResult !== null) return progressResult;
 
-  const miscResult = await handleMiscCommands({ phone, message, m, user });
+  const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (miscResult !== null) return miscResult;
 
 
-  const lifecycleResult = await handleLifecycle({ phone, message, m, user });
+  const lifecycleResult = await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (lifecycleResult !== null) return lifecycleResult;
 
 

@@ -1,5 +1,6 @@
 import { db } from "../db";
-import { users, weightLogs } from "../../shared/schema";
+import { users, weightLogs, escalations } from "../../shared/schema";
+import { escalationSLA } from "../safety-detection";
 import { eq, and, gte, lt, asc, desc } from "drizzle-orm";
 import { calculateTargets } from "../targets";
 import { storeMemory } from "../memory";
@@ -115,6 +116,17 @@ export async function handleWeightLog(
     return `That weight reads as *${newKg}kg* — that doesn't look right. Send your weight again as just a number followed by kg, like "82kg" or "76.5kg".`;
   }
 
+  // UNDERWEIGHT GATE (weigh-in side): if the scale drops under BMI 18.5 while the
+  // goal is fat loss, flip to building — mirrors the onboarding gate (duty of care;
+  // the auto-adjust engine must never keep deepening a deficit under the healthy range).
+  let underweightFlipNote = "";
+  const bmiNow = (user.heightCm || 0) > 0 ? newKg / Math.pow((user.heightCm || 170) / 100, 2) : 0;
+  if ((user.goalType || "fat_loss") === "fat_loss" && bmiNow > 0 && bmiNow < 18.5) {
+    user.goalType = "muscle_gain";
+    underweightFlipNote = `\n\n⚠️ At ${newKg}kg you're under the healthy weight range — I've switched your plan to *building* (strength + fuel + protein). I won't coach further weight loss from here. If a doctor or dietitian is part of your picture, loop them in.`;
+    db.insert(escalations).values({ userId: user.id, reason: "underweight_fatloss_weighin", triggerMessage: `BMI ${bmiNow.toFixed(1)} (${newKg}kg) on fat_loss at weigh-in — auto-flipped to muscle_gain`, priority: "high", slaDeadline: escalationSLA("high") }).catch((e) => console.error("[UNDERWEIGHT_GATE:weighin]", e));
+  }
+
   const { calorieTarget: newCals, proteinTarget: newProtein } = calculateTargets(
     newKg, user.goalType || "fat_loss", user.lifeSituation || "office",
     user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner",
@@ -139,7 +151,7 @@ export async function handleWeightLog(
   // downstream comparison and the auto-calorie-adjust job. Wrap both writes in one transaction.
   await db.transaction(async (tx) => {
     await tx.update(users)
-      .set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein })
+      .set({ currentWeight: newKg.toString(), calorieTarget: newCals, proteinTarget: newProtein, goalType: user.goalType })
       .where(eq(users.phoneNumber, phone));
 
     const existingToday = await tx.select({ id: weightLogs.id }).from(weightLogs)
@@ -409,5 +421,5 @@ export async function handleWeightLog(
   // ── Trend line (only when we have recent data) ──
   const trendLine = trendLabel ? `\n\n${trendLabel} — ${trendStatus}` : (milestoneCelebration ? "" : journeyNote);
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${predictionNote}${streakNote}${plateauNote}`;
+  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${underweightFlipNote}${predictionNote}${streakNote}${plateauNote}`;
 }

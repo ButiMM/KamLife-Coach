@@ -47,6 +47,7 @@ export async function handleMiscCommands(ctx: {
   message: string;
   m: string;
   user: any;
+  isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
@@ -529,7 +530,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- NEW: CUMULATIVE STATS ----
-  if (["stats", "my stats", "all time", "my journey", "total", "overall", "my results", "how far"].includes(m)) {
+  if (["all time", "my journey", "total", "overall", "my results", "how far"].includes(m)) { // "stats"/"my stats" owned by early-commands (Targets card)
     try {
       const [stepsTotal, firstWeight, lastWeight] = await Promise.all([
         db.select({ total: sql<string>`COALESCE(SUM(steps), 0)` }).from(stepLogs).where(eq(stepLogs.userId, user.id)),
@@ -931,7 +932,7 @@ export async function handleMiscCommands(ctx: {
     && /\b(workout|session|programme?|program|training)\b/i.test(nextStripped)
     && !/\b(done|did|finished|complete[d]?|logged|change|switch|swap|cancel|skip|move|reschedule|rest|hate|boring|harder|easier)\b/i.test(nextStripped)
     && nextStripped.split(/\s+/).length <= 7;
-  if (NEXT_WORKOUT_EXACT.includes(nextStripped) || isNextWorkoutByShape) {
+  if (!ctx.isQuestion && (NEXT_WORKOUT_EXACT.includes(nextStripped) || isNextWorkoutByShape)) {
     // programmeDayInWeek is already set to the NEXT session after each "done" log —
     // just use it directly instead of advancing by one more step.
     const nextDay = user.programmeDayInWeek || 1;
@@ -1680,7 +1681,7 @@ export async function handleMiscCommands(ctx: {
   // ASCII history chart instead of an answer (2026-07-03). Future/target questions
   // are projections — handled below; bare "my weight" now shows the clean summary.
   const asksWeightProjection = /\b(should|target|goal|aim)\b.{0,40}\bweight\b|\bweight\b.{0,40}\b(in|by)\s+(\d+\s*(?:weeks?|months?)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|next year)\b/i.test(m);
-  if (!asksWeightProjection && (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend)\b/i.test(m))) {
+  if (!asksWeightProjection && !ctx.isQuestion && (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend)\b/i.test(m))) {
     try {
       const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
         .from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));

@@ -36,6 +36,7 @@ export async function handleLifecycle(ctx: {
   message: string;
   m: string;
   user: any;
+  isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
@@ -812,7 +813,7 @@ export async function handleLifecycle(ctx: {
   // Cancellation is the OPPOSITE of purchase intent — "cancelling my subscription"
   // contains "subscription" and was answered with a payment link (2026-07-03).
   const isCancellationIntent = /\b(cancel(?:l?ing)?|unsubscribe|stop(?:ping)?\s+(?:my\s+)?(?:subscription|coaching|payments?))\b/i.test(m);
-  if (!isNegativePayment && !isCancellationIntent && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
+  if (!isNegativePayment && !isCancellationIntent && !ctx.isQuestion && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const clientName = user.name ? `, ${user.name}` : "";
