@@ -997,7 +997,9 @@ export async function isUnderGPTCallLimit(userId: string): Promise<boolean> {
         sql`message_in IS NOT NULL AND message_in != ''`
       ));
     const count = parseInt(String(result[0]?.count || 0));
-    if (count >= 40) return false;
+    // 40 locked out a stress-testing (voice-heavy) client mid-conversation. 80 mini
+    // replies ≈ $0.09/day worst case — the monthly $ cap below is the real margin guard.
+    if (count >= 80) return false;
     // Monthly AI spend cap — env var AI_SPEND_CAP_USD_PER_USER_PER_MONTH (default $5)
     // Prevents a single power user from consuming more than the revenue they generate.
     return isUnderMonthlyCostCap(userId);

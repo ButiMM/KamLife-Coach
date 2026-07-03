@@ -80,7 +80,7 @@ export function calculateTargets(
   // Female: slightly lower per-kg need
   const proteinMult: Record<string, number> = {
     fat_loss: isFemale ? 1.8 : 2.0,
-    muscle_gain: isFemale ? 2.0 : 2.4,
+    muscle_gain: isFemale ? 1.9 : 2.2, // evidence tops out ~2.2g/kg; 2.4 created daily "50g short" failure-nagging
     recomposition: isFemale ? 1.8 : 2.2,
     general: isFemale ? 1.6 : 1.8,
     health_condition: isFemale ? 1.6 : 2.0,

@@ -233,9 +233,15 @@ export async function handleEarlyCommands(ctx: {
   const negatedEquipment =
     /\b(no|don'?t|do not|won'?t|can'?t|cannot|without|lost|left|quit|cancelled?|stopped)\b[\w\s]{0,18}\b(gym|equipment|dumbbells?|weights|bands?|access)\b/i.test(m) ||
     /\bno\s+(gym\s+)?access\b/i.test(m);
-  const isEquipmentUpdate = !negatedEquipment && (
+  // Trip guard: "Going to the gym first/now/later" is a statement of TODAY'S PLANS
+  // (usually an answer to "what's for breakfast?"), not a membership declaration —
+  // it flipped a home client's whole programme to full gym (production, 2026-07-03).
+  // Mode changes need a DURABLE signal: joined / membership / switch me to.
+  const isGymTripStatement = /\b(going|heading|off|about|gonna|on my way|about to go)\s+to\s+(?:the\s+)?gym\b/i.test(m)
+    && !/\b(joined|member|membership|signed up|switch|change)\b/i.test(m);
+  const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && (
     /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
-    /\b(joined|signed up|now (go to|at|train at)|started at|going to)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre)\b/i.test(m) ||
+    /\b(joined|signed up|now (go to|at|train at)|started at|switch(?:ed)? (?:me )?to|got a(?: gym)? membership)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre|membership)\b/i.test(m) ||
     /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
     /\bupdate my (equipment|training mode|setup)\b/i.test(m));
 
@@ -257,7 +263,7 @@ export async function handleEarlyCommands(ctx: {
 
     if (modeLabel) {
       await db.update(users).set({ trainingMode: newMode, homeEquipment: newHomeEquipment }).where(eq(users.phoneNumber, phone));
-      const reply = `Got it — programme updated to *${modeLabel}*. Your next session will reflect that.\n\nReply *workout* to see today's updated session.`;
+      const reply = `Got it — programme updated to *${modeLabel}*. Your next session will reflect that.\n\nReply *workout* to see today's updated session.\n\n_Wrong change? Say *switch me to home workouts* (or *dumbbells only*) and it's reversed._`;
       await logChat(user.id, message, reply, "EQUIPMENT_UPDATE");
       return reply;
     }

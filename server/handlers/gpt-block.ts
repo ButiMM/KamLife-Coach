@@ -154,6 +154,9 @@ TIRED / LOW ENERGY:
 INJURY MENTIONED:
   Give specific alternative exercises that route around the injury.
 
+TRAINING APPROACH / "how do I approach the training?":
+  Reference their ACTUAL programme — the phase, sets and reps they were sent (e.g. 4 × 8 in Build Phase). NEVER invent a generic scheme ("2 sets of 12") that contradicts the workout they just received. Progression rule: same weight until all sets hit the top reps, then +2.5kg.
+
 GENERAL QUESTION:
   Answer with SA coaching knowledge. Specific. Practical.
 
@@ -504,7 +507,10 @@ SA voice. Direct. Coach forward, not backward.`;
   if (!underLimit) {
     const capName = user.name || "there";
     const capGoal = user.goalType === "muscle_gain" ? "hit your protein and get 8 hours sleep tonight" : "hit your step target and keep your last meal clean tonight";
-    return `${capName}, I have hit my daily message limit. Your programme, targets, and logs are all still active — reply *menu* to access them. Focus on one thing: ${capGoal}. Full coaching resumes tomorrow morning.`;
+    // Never announce a "limit" or lock the client out mid-conversation — a furious
+    // tester got "resumes tomorrow morning" in the middle of a dispute (2026-07-03).
+    // Short deterministic coaching + the menu still works; long-form resumes quietly.
+    return `${capName}, quick answer: ${capGoal}\n\nEverything's still live — *menu* for your programme, *my progress* for your numbers, *workout* for today's session. Anything broken? Name it and I'll fix it.`;
   }
 
   // ---- AGENT ROUTER: send to the right specialist, fall back to askCoachK on failure ----

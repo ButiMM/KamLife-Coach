@@ -921,7 +921,11 @@ export async function handleMiscCommands(ctx: {
   // handler above, so without this these requests fall through to GPT — which
   // fabricates a generic workout with no sets, weights, or logging path.
   const nextStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
-  const NEXT_WORKOUT_EXACT = ["next", "next workout", "tomorrow", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow", "what's tomorrow"];
+  // Bare "tomorrow"/"what's tomorrow" removed: "Tomorrow???" is usually the client
+  // QUESTIONING something the coach just said ("Tomorrow: lead breakfast with 3
+  // eggs…") — answering it with a full workout dump was pure confusion (production,
+  // 2026-07-03). Workout intent needs a workout word; bare questions go to the coach.
+  const NEXT_WORKOUT_EXACT = ["next", "next workout", "tomorrow workout", "tomorrows workout", "what's next", "whats next", "next session", "next day", "tomorrow's session", "tomorrows session", "tomorrow's workout", "show me tomorrow"];
   const isNextWorkoutByShape =
     /\b(tomorrow|tomorrows|next)\b/i.test(nextStripped)
     && /\b(workout|session|programme?|program|training)\b/i.test(nextStripped)
@@ -1646,7 +1650,8 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- PORTION SIZE GUIDE — "portions", "how much should I eat", "serving size" ----
-  if (m === "portions" || m === "portion guide" || m === "serving size" || m === "how much" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m)) {
+  if ((m === "portions" || m === "portion guide" || m === "serving size" || /\b(portion\s*(?:size|guide|control)|serving\s*size|how\s*much\s*(?:should|must|do)\s*i\s*eat|plate\s*size|hand\s*portion)\b/i.test(m))
+    && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg)\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";
     const portionGuide = `*✋ Portion Size Guide${name ? ` — ${name}` : ""}*\n_Use your hand — works everywhere, no scale needed_\n\n` +
@@ -1671,7 +1676,11 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- WEIGHT TREND CHART — "weight chart", "weight graph", "weight trend" ----
-  if (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend|my\s*weight)\b/i.test(m)) {
+  // "Where SHOULD my weight be in 6 months??" matched bare "my weight" and got an
+  // ASCII history chart instead of an answer (2026-07-03). Future/target questions
+  // are projections — handled below; bare "my weight" now shows the clean summary.
+  const asksWeightProjection = /\b(should|target|goal|aim)\b.{0,40}\bweight\b|\bweight\b.{0,40}\b(in|by)\s+(\d+\s*(?:weeks?|months?)|(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*|next year)\b/i.test(m);
+  if (!asksWeightProjection && (m === "weight chart" || m === "weight graph" || m === "weight trend" || m === "my weight" || /\b(weight\s*(?:chart|graph|trend|history|journey)|scale\s*trend)\b/i.test(m))) {
     try {
       const weights = await db.select({ weight: weightLogs.weight, date: weightLogs.loggedAt })
         .from(weightLogs).where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
@@ -1682,44 +1691,21 @@ export async function handleMiscCommands(ctx: {
 
       const name = user.name?.split(" ")[0] || "there";
       const vals = weights.map(w => parseFloat(String(w.weight)));
-      const dates = weights.map(w => w.date ? new Date(w.date).toLocaleDateString("en-ZA", { day: "numeric", month: "short" }) : "");
-      const minW = Math.floor(Math.min(...vals) - 1);
-      const maxW = Math.ceil(Math.max(...vals) + 1);
-      const range = maxW - minW || 1;
 
-      // Build ASCII chart — last 12 entries
-      const recent = vals.slice(-12);
-      const recentDates = dates.slice(-12);
-      const chartHeight = 8;
-      let chart = "";
-
-      for (let row = chartHeight; row >= 0; row--) {
-        const threshold = minW + (range * row / chartHeight);
-        const label = threshold.toFixed(0).padStart(3) + "│";
-        let line = label;
-        for (let col = 0; col < recent.length; col++) {
-          if (Math.abs(recent[col] - threshold) <= range / (chartHeight * 2)) {
-            line += " ● ";
-          } else if (recent[col] > threshold && row < chartHeight && (minW + range * (row + 1) / chartHeight) > recent[col]) {
-            line += " ● ";
-          } else {
-            line += "   ";
-          }
-        }
-        chart += line + "\n";
-      }
-      chart += "   └" + "───".repeat(recent.length) + "\n";
-      chart += "    " + recentDates.map(d => d.slice(0, 3).padEnd(3)).join("");
-
+      // WhatsApp is not a terminal — the old ASCII dot-chart rendered as broken
+      // monospace soup on phones ("nobody's paying R199 for this", 2026-07-03).
+      // A clean start→now line + pace tells the same story properly.
+      const spanDays = weights.length >= 2 && weights[0].date && weights[weights.length - 1].date
+        ? Math.max(1, Math.round((new Date(weights[weights.length - 1].date as any).getTime() - new Date(weights[0].date as any).getTime()) / 86_400_000))
+        : 0;
       const first = vals[0];
       const last = vals[vals.length - 1];
       const diff = last - first;
       const trend = diff < -0.5 ? `⬇️ Down ${Math.abs(diff).toFixed(1)}kg` : diff > 0.5 ? `⬆️ Up ${diff.toFixed(1)}kg` : `➡️ Stable`;
-
-      const reply = `*⚖️ Weight Trend — ${name}*\n\n` +
-        `\`\`\`\n${chart}\`\`\`\n\n` +
-        `Start: ${first.toFixed(1)}kg → Now: ${last.toFixed(1)}kg (${trend})\n` +
-        `${weights.length} weigh-ins total\n\n` +
+      const paceWk = spanDays >= 7 ? ` · pace ${(diff / (spanDays / 7)) >= 0 ? "+" : ""}${(diff / (spanDays / 7)).toFixed(2)}kg/week` : "";
+      const reply = `*⚖️ Weight — ${name}*\n\n` +
+        `Start: *${first.toFixed(1)}kg* → Now: *${last.toFixed(1)}kg* (${trend})\n` +
+        `${weights.length} weigh-ins over ${spanDays >= 7 ? Math.round(spanDays / 7) + " weeks" : spanDays + " days"}${paceWk}\n\n` +
         (diff < -2 ? `Consistent progress. The deficit is working — stay patient and stay on plan.` :
          diff > 2 && user.goalType === "muscle_gain" ? `Gaining as planned. If lifts are going up, this is muscle. Keep training hard.` :
          Math.abs(diff) < 1 ? `Weight holding. Check measurements — you could be recomping (losing fat, gaining muscle). The tape does not lie.` :

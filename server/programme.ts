@@ -1377,8 +1377,9 @@ function formatGymDay(
     let block = `${i + 1}. *${ex.name}* — ${getExerciseSets(ex, wCtx.sets, wCtx.reps, phase)}\n${ex.description.split(". ")[0]}`;
     if (ex.mistake) block += `\n⚠ ${ex.mistake.split(".")[0]}`;
     if (ex.modification && (isDumbbell || isBeginner)) block += `\n_(Alt: ${ex.modification})_`;
-    const ytLink = ex.youtube || getYoutubeLinkForExercise(ex.name);
-    if (ytLink) block += `\n📺 ${ytLink}`;
+    // No YouTube search links: they doubled the message length, WhatsApp auto-expands
+    // one into a preview card mid-workout, and a *search results* page is not form
+    // coaching. Real form help = snap the machine (photo coach) — pointer in the closer.
     exBlocks.push(block);
   }
   const exerciseBubbles: string[] = [];

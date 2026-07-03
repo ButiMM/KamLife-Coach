@@ -142,7 +142,7 @@ export async function runMorningCheckin(): Promise<void> {
         2: `Day 2. Consistency beats intensity.`,
         3: `Halfway through the week.`,
         4: `Body is adapting. Do not stop.`,
-        5: `Friday. The weekend does not mean the plan stops.`,
+        5: `Friday. Finish the week strong — the weekend plan starts tonight.`,
         // Saturday: only mention training if today is actually a training day
         6: isTodayTrainingDay ? `Saturday. One session before tonight.` : `Saturday. Rest day — food and steps.`,
       };

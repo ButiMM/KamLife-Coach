@@ -459,7 +459,12 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- PORTION SIZE GUIDE (Item 7) — no GPT ----
-  if (/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m) || (/\bhow much\b/i.test(m) && !/water/i.test(m))) {
+  // "how much should I be GAINING per week" is a rate question, not a portion one —
+  // the blanket "how much" clause sent the portion guide twice to a furious tester
+  // (2026-07-03). Portions need food context; weight/rate words always exclude.
+  if ((/\b(portion|how many grams|serving size|how big|how large|right amount|right portion|portion size|right size|how do i measure)\b/i.test(m)
+      || (/\bhow much\b.{0,30}\b(eat|food|rice|pap|meat|chicken|fish|protein|carbs?|per meal|on my plate)\b/i.test(m)))
+    && !/\b(weight|gain(?:ing)?|los(?:e|ing)|per week|kg|steps?)\b/i.test(m)) {
     await logChat(user.id, message, PORTION_GUIDE, "PORTION_GUIDE");
     return PORTION_GUIDE;
   }
@@ -769,7 +774,13 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- CANCEL SUBSCRIPTION ----
-  if (m === "cancel" || m === "cancel subscription" || m === "unsubscribe" || m === "stop coaching" || m === "stop subscription") {
+  // Natural phrasings must land here — "I'm cancelling my subscription. This is a
+  // whole bunch of shit." fell through to the PAYMENT block (it matched the word
+  // "subscription") and got a PAYMENT LINK back (production, 2026-07-03).
+  const wantsCancel = /^cancel$/.test(m.trim())
+    || /\b(cancel(?:l?ing)?|unsubscribe|stop(?:ping)?)\b.{0,30}\b(subscription|coaching|service|membership|payments?)\b/i.test(m)
+    || /\bunsubscribe\b/i.test(m);
+  if (wantsCancel) {
     const alreadyInactive = user.subscriptionStatus === "inactive";
     if (alreadyInactive) {
       const payLink2 = process.env.APP_URL ? `${process.env.APP_URL}/api/payfast/link?phone=${encodeURIComponent(phone.replace(/^whatsapp:/, ""))}` : process.env.APP_URL || "https://kamlifecoach.co.za";
@@ -797,8 +808,11 @@ export async function handleLifecycle(ctx: {
   // ---- PAYMENT / REJOIN — inactive users asking to pay or rejoin ----
   // IMPORTANT: exclude negative-payment phrases — "I'm not paying", "not worth paying", "won't pay"
   // must NEVER trigger the payment link. They are frustration, not purchase intent.
-  const isNegativePayment = /\b(not paying|won.?t pay|i.?m not paying|not worth|nonsense|rubbish|garbage|terrible|useless)\b/i.test(m);
-  if (!isNegativePayment && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
+  const isNegativePayment = /\b(not paying|won.?t pay|i.?m not paying|not worth|nonsense|rubbish|garbage|terrible|useless|shit|crap)\b/i.test(m);
+  // Cancellation is the OPPOSITE of purchase intent — "cancelling my subscription"
+  // contains "subscription" and was answered with a payment link (2026-07-03).
+  const isCancellationIntent = /\b(cancel(?:l?ing)?|unsubscribe|stop(?:ping)?\s+(?:my\s+)?(?:subscription|coaching|payments?))\b/i.test(m);
+  if (!isNegativePayment && !isCancellationIntent && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
     const clientName = user.name ? `, ${user.name}` : "";
