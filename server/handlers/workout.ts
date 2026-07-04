@@ -18,7 +18,7 @@ import { storeMemory } from "../memory";
 import { generateVoiceNote } from "../tts";
 import { generateMilestoneVoiceScript } from "../gpt";
 import { logChat } from "./chat-log";
-import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent } from "../utils";
+import { sastDayStart, parseMealDate, mealDateLabel, isFutureIntent, looksLikeQuestion, mentionsNotDone } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { handleWeightLog } from "./weight";
@@ -127,7 +127,11 @@ export async function handleWorkoutCommands(ctx: {
   // are HISTORICAL — they must not overwrite today's weight or recalc targets off a past number.
   const isRetrospectiveWeight = /\b(last\s+(?:week|month|year|time)|used\s+to|back\s+(?:then|in|when)|previously|a\s+(?:week|month|year)\s+ago|(?:weeks?|months?|years?)\s+ago|started\s+(?:at|on|out|off)|when\s+i\s+(?:started|began))\b/i.test(m);
 
-  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !EXERCISE_PATTERN.test(m)) {
+  // Question brake: "I weighed 84kg, is that too much?" / "84kg today?" is asking —
+  // logging it silently recalculates calorie & protein targets and can flip the goal,
+  // all off a message the user framed as a question. Let it reach GPT; a clean "84kg"
+  // still logs.
+  if ((isStandaloneWeight || isWeightCheckIn) && !isRetrospectiveWeight && !looksLikeQuestion(m) && !EXERCISE_PATTERN.test(m)) {
     const kgMatch = m.match(/(\d{2,3}(?:\.\d+)?)\s*kg/i);
     if (kgMatch) {
       const kg = parseFloat(kgMatch[1]);
@@ -142,9 +146,10 @@ export async function handleWorkoutCommands(ctx: {
   // Catches these and logs a workout session + converts km distance to step count where applicable.
   // Question/future guard: "Should I do 30 min yoga?" / "is 5km good?" / "going to run 5km
   // tomorrow" must NOT auto-log a completed session — those reach GPT for coaching instead.
-  const cardioIsQuestion = m.includes("?")
-    || /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim());
-  const isCardioLog = !cardioIsQuestion && !isFutureIntent(m) && (
+  // Negation guard: "I couldn't run 5km", "missed my 5km", "skipped my run" report a
+  // MISS — the bare-distance branch below would otherwise log a full session and
+  // advance the programme off a run that never happened.
+  const isCardioLog = !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m) && (
     // "went for a {activity}"
     /\b(?:went\s+for\s+(?:a\s+)?(?:run|jog|walk|swim|cycle|hike))\b/i.test(m)
     // "I ran / jogged / cycled / swam" (exercise-specific verbs — no context required)
@@ -311,7 +316,10 @@ export async function handleWorkoutCommands(ctx: {
     || /\b(?:workout|session|training|gym|legs?|upper|lower|chest|back|push|pull|cardio)\b.{0,40}\b(?:done|finished|complete[d]?)\b/i.test(m);
   const hasMissWord = /\b(missed?|couldn.?t|skipped?|didn.?t|won.?t|rest\s+day|sick|injur|cancel)\b/i.test(m);
 
-  const isRetroDone = !m.includes("?") && hasRetroDayRef && hasCompletionWord && !hasMissWord;
+  // Question guard uses the shared looksLikeQuestion (not a bare "?" check): a voice
+  // transcript that drops the mark — "is yesterday's session logged", "should that
+  // have counted" — must not retro-log a session it's only asking about.
+  const isRetroDone = !looksLikeQuestion(m) && hasRetroDayRef && hasCompletionWord && !hasMissWord;
 
   if (isRetroDone) {
     const retroDate = parseMealDate(m);
@@ -367,7 +375,8 @@ export async function handleWorkoutCommands(ctx: {
     || /^(?:workout|session|training|gym)\s+(?:done|complete|finished)[.!?]?$/i.test(m)
     || /^(?:just\s+)?(?:done|finished)\s+(?:my\s+)?(?:workout|session|training|gym)[.!?]?$/i.test(m)
     || m === "done today" || m === "finished today"
-  ) && !/\b(?:steps?|km|walked|walk)\b/i.test(m)
+  ) && !looksLikeQuestion(m)  // "done?" / "workout done?" is asking, not reporting — the [.!?]? anchors otherwise allow a trailing ?
+    && !/\b(?:steps?|km|walked|walk)\b/i.test(m)
     && !/\b(?:ate|had|food|meal|eaten|eating|calories)\b/i.test(m);
 
   if (isDone) {
@@ -493,7 +502,9 @@ export async function handleWorkoutCommands(ctx: {
 
   // ---- LIFT LOG — parse and store exercise data ----
   const lifts = parseLiftLog(m);
-  if (lifts.length > 0) {
+  // "should I bench 80kg?" / "can I squat 100kg" parse as lifts but are questions —
+  // don't store a phantom "should i bench" exercise row.
+  if (lifts.length > 0 && !looksLikeQuestion(m)) {
     const inserts = lifts.map(lift =>
       db.insert(exerciseLogs).values({
         userId: user.id,
@@ -516,7 +527,12 @@ export async function handleWorkoutCommands(ctx: {
 
   // ---- GOAL CHANGE ----
   const goalChangeMatch = m.match(/\b(?:change|switch|update|new)\s+(?:my\s+)?goal\s+to\s+(fat[\s_]?loss|lose\s+weight|cut|muscle[\s_]?gain|muscle|build|bulk|maintenance|maintain|recomp(?:osition)?)\b/i);
-  if (goalChangeMatch) {
+  // "should I change my goal to muscle gain?" is asking; "I don't want to change my
+  // goal to fat loss" is refusing. Neither may overwrite the goal + recalc targets.
+  // The negation is scoped to appear BEFORE the change verb, so "change my goal to
+  // muscle gain, not fat loss" (a clarification, not a refusal) still applies.
+  const goalChangeNegated = /\b(don.?t|do\s+not|dont|never|no\s+longer|won.?t|would\s+not|wouldn.?t|not)\b[^.?!]*\b(change|switch|update|move)\b/i.test(m);
+  if (goalChangeMatch && !looksLikeQuestion(m) && !goalChangeNegated) {
     const raw = goalChangeMatch[1].toLowerCase();
     const goalType = /fat|lose|cut/.test(raw) ? "fat_loss"
       : /muscle|build|bulk/.test(raw) ? "muscle_gain"

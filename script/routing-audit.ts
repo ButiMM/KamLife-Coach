@@ -435,6 +435,11 @@ const CASES: Case[] = [
       /Here is your payment link|payfast\/link/i,
       /Next Session \(Day|Reply \*DONE\* when finished/i,
       /weigh-ins (over|total)/i,
+      /Session \d+ (?:logged|—|in)\b|\d+ sessions? (?:in|done)\b|First workout done|WEEK \d COMPLETE|got it, logged to/i, // workout session logged / programme advanced ("N sessions logged" is the read-only cancel-retention stat, deliberately excluded)
+      /Weight logged:/i,        // body weight recorded + targets recalculated
+      /Goal updated to/i,       // goalType overwritten
+      /\d[\d,]* steps (?:logged|today|—|done)|target (?:hit|crushed)|step streak/i, // step count logged
+      /water target (?:hit|done|reached|for today)|\bL logged\b|L in — target/i,    // water logged
     ];
     const q = (name: string, msg: string): Case => ({ name: `qsafety: ${name}`, msg, reject: NS });
     return [
@@ -480,6 +485,59 @@ const CASES: Case[] = [
       q("how much water should I drink", "How much water should I drink on training days?"),
       // portion/rate confusion that already bit us
       q("how much rice per meal", "How much rice should I have per meal?"),
+      // session-DONE asked, not reported — the [.!?]? anchors used to allow a trailing ?
+      q("workout done question", "workout done?"),
+      q("am I done question", "am I done for today?"),
+      q("is the session finished", "is the session finished?"),
+      // goal change ASKED — must not overwrite goalType + recalc targets
+      q("should I change goal to muscle", "Should I change my goal to muscle gain?"),
+      q("can I switch goal to fat loss", "Can I switch my goal to fat loss?"),
+      // weight check-in framed as a question — must not log + recalc + maybe flip goal
+      q("weighed 84 is that too much", "I weighed 84kg this morning, is that too much?"),
+      q("84kg today question", "84kg today, is that normal for my height?"),
+      // lift asked, not logged — must not store a phantom exercise row
+      q("should I bench 80", "Should I bench 80kg today?"),
+      q("can I squat 100", "Can I squat 100kg for my working set?"),
+      // cardio asked — must not log a session + advance
+      q("should I do 5km", "Should I do a 5km run today?"),
+    ];
+  })(),
+
+  // ── NEGATION-SAFETY BATTERY ──────────────────────────────────────────────────
+  // The disease's most damaging form: a message reporting that the activity did NOT
+  // happen ("couldn't run 5km", "missed my 5km", "didn't hit 8000 steps") gets logged
+  // as a COMPLETED session/step/weight and — worst of all — ADVANCES the programme.
+  // A stated MISS must never take a completion side effect. Also runs AI-offline, so
+  // it pins the keyword-level negation guard (mentionsNotDone) at every logger.
+  ...(() => {
+    const NS = [
+      /Session \d+ (?:logged|—|in)\b|\d+ sessions? (?:in|done)\b|First workout done|WEEK \d COMPLETE|got it, logged to/i,
+      /\d[\d,]* steps (?:logged|today|—|done)|target (?:hit|crushed)|step streak/i,
+      /Weight logged:/i,
+      /Goal updated to/i,
+      /water target (?:hit|done|reached|for today)|\bL logged\b|L in — target/i,
+    ];
+    const n = (name: string, msg: string): Case => ({ name: `negsafety: ${name}`, msg, reject: NS });
+    return [
+      // cardio miss — must not log a session or advance the programme
+      n("couldn't run 5km", "I couldn't run my 5km today"),
+      n("missed my 5km", "missed my 5km run this morning"),
+      n("skipped my run", "skipped my run today, too tired"),
+      n("didn't manage the 5km", "didn't manage my 5km today"),
+      n("couldn't get to the gym", "couldn't get to the gym today"),
+      // session-done negation — must not mark complete / advance
+      n("didn't train today", "I didn't train today"),
+      n("couldn't do my workout", "couldn't do my workout today, work was mad"),
+      // steps miss — must not log the number they FELL SHORT of
+      n("didn't hit 8000 steps", "I didn't hit 8000 steps today"),
+      n("couldn't get to 10k steps", "couldn't get to 10k steps"),
+      n("missed my step target", "missed my 8000 step target today"),
+      // water miss — must not log water never drunk
+      n("couldn't finish 2 litres", "couldn't finish my 2 litres of water today"),
+      n("didn't drink 2l", "didn't drink my 2L of water today"),
+      // goal-change refusal — must not overwrite the goal
+      n("don't want to change goal", "I don't want to change my goal to fat loss"),
+      n("not changing goal to muscle", "I'm not changing my goal to muscle gain"),
     ];
   })(),
 ];

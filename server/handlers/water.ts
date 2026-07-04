@@ -7,7 +7,7 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { logChat } from "./chat-log";
-import { sastToday } from "../utils";
+import { sastToday, mentionsNotDone } from "../utils";
 
 /**
  * Log water from a message that contains an amount + a water keyword. Returns the
@@ -34,7 +34,8 @@ export async function tryLogWater(ctx: {
   // the water-question handler below or GPT. Negation/intent ("haven't had my 2L of water
   // yet", "need to drink 2 litres") must NOT log water that was never consumed.
   const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
-  const waterNotConsumed = /\b(haven.?t|hasn.?t|didn.?t|did\s+not|forgot|need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
+  const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
+    || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
   if (waterMatch && hasWaterKeyword && !isNonWaterDrink && !waterIsQuestion && !waterNotConsumed) {
     const amount = parseFloat(waterMatch[1]);
     const unit = waterMatch[2].toLowerCase();
@@ -136,7 +137,8 @@ export async function handleWater(ctx: {
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
   const hasWaterKeyword = /\b(water|drank|drank water|drank some|had water|drank my water|water intake|drinking water|water today|glass|glasses|bottle|bottles)\b/i.test(m);
   const waterIsQuestion = m.includes("?") || /\b(how much|how many|should i|do i need|is\s+\d|enough|too much|target|recommend)\b/i.test(m);
-  const waterNotConsumed = /\b(haven.?t|hasn.?t|didn.?t|did\s+not|forgot|need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
+  const waterNotConsumed = mentionsNotDone(m)  // couldn't/skipped/didn't finish my water — never consumed
+    || /\b(need\s+to|should\s+(?:i|drink)|must\s+drink|gonna|going\s+to|will\s+drink|plan\s+to|trying\s+to|still\s+need)\b/i.test(m);
 
   // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
   // e.g. "I drank water", "drank some water", "had water"

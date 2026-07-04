@@ -39,7 +39,7 @@ import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -657,7 +657,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const stepIsLoggable = stepIsExplicitLog ? !stepQuestionForm : !stepIsQuestion;
   // Future-intent guard: "I'll walk 10k tomorrow" / "going to do 8000 steps later"
   // starts with "i'll" so it slips past the question check — must not log as done today.
-  if (stepIsLoggable && !isFutureIntent(m) && !normalizedQuestion && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
+  if (stepIsLoggable && !isFutureIntent(m) && !normalizedQuestion && !mentionsNotDone(m) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
       const base = WORD_THOUSANDS[wordThousandMatch[1].toLowerCase()] ?? parseInt(wordThousandMatch[1]);

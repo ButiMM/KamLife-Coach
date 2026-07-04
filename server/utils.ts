@@ -182,6 +182,35 @@ export function isFutureIntent(message: string): boolean {
   return /\bi'll\b|\bi\s+will\b|\b(?:wanna|gonna)\b|\bgoing\s+to\b|\bplann?ing\s+to\b|\bplan\s+to\b|\babout\s+to\b|\bhoping\s+to\b|\bwant\s+to\b|\btomorrow\b|\bnext\s+week\b|\blater\s+today\b/i.test(m);
 }
 
+// Canonical "is this phrased as a QUESTION?" check — the single source of truth a
+// side-effect handler consults before it logs, flips training mode, removes a meal,
+// charges, or dumps a workout/chart. Reinventing this per-handler is exactly how the
+// guard drifts and a question slips through into an irreversible action, so new gates
+// should call this rather than hand-rolling another regex.
+// Deliberately CONSERVATIVE on leading words: it matches interrogatives and modals
+// (what/why/how/where/which/who + should/can/is/are/do/does/will/would) but NOT
+// past-tense statement leads (did/done/had/was/were/trained) — because "did legs
+// yesterday", "was on the treadmill 30 min", "had chicken and rice" are LOGS, not
+// questions. A trailing "?" anywhere always counts.
+export function looksLikeQuestion(message: string): boolean {
+  const t = (message || "").trim();
+  if (t.includes("?")) return true;
+  return /^(what|what.?s|whats|why|how|when|where|which|who|whose|can|could|should|shall|would|will|do|does|don.?t|doesn.?t|is|isn.?t|are|aren.?t|shouldn.?t)\b/i.test(t);
+}
+
+// Canonical "the activity was NOT actually done" check — the negation sibling of
+// looksLikeQuestion, and the second guard every activity logger needs. A user saying
+// "I couldn't run 5km", "missed my 5km", "didn't hit 8000 steps", "skipped today" is
+// reporting a MISS; logging it as a completed session/step count and advancing the
+// programme is the single most damaging form of the intent-blind-routing bug.
+// Kept to UNAMBIGUOUS miss words: it must not swallow real logs like "I only ran 5km"
+// (humble-brag — genuinely ran) or "5km instead of my usual 3km" (genuinely 5km), so
+// "only" and "instead of" are deliberately excluded.
+export function mentionsNotDone(message: string): boolean {
+  const m = (message || "").toLowerCase();
+  return /\b(didn.?t|did\s+not|couldn.?t|could\s+not|can.?t|cannot|won.?t|will\s+not|haven.?t|hasn.?t|wasn.?t|weren.?t|missed?|skip(?:ped|ping)?|forgot|failed\s+to|unable\s+to|never\s+got\s+to|couldn.?t\s+manage|didn.?t\s+manage)\b/i.test(m);
+}
+
 // Deterministic backstop against the GPT food estimator FABRICATING a composite
 // item. Demonstrated production failures:
 //   - Client lists "rice / chicken livers / mixed veggies" → model logs phantom
