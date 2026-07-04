@@ -1336,6 +1336,32 @@ function getYoutubeLinkForExercise(name: string): string | undefined {
   return undefined;
 }
 
+// ── Exercise-content sanity guards ───────────────────────────────────────────
+// The workout output was echoing numbers and names the system never sanity-checked:
+// a mis-logged "chest fly: 116kg" (voice transcription swaps "leg press"→"chest fly")
+// came back as a proud "→ aim 118.5kg", and a garbled log name "my chest fly is" was
+// shown verbatim. These normalise names and refuse physically implausible loads.
+
+// Strip conversational filler a lift-log parser scoops up ("my chest fly is 116kg" →
+// "chest fly"), so the stored/echoed exercise name is the movement, not a sentence.
+export function cleanExerciseName(raw: string): string {
+  return (raw || "").toLowerCase().replace(/\s+/g, " ").trim()
+    .replace(/^(?:(?:my|the|a|on|for|i|just|today'?s?|did|do|done|log|logged)\s+)+/g, "")
+    .replace(/\s+(?:is|was|are|were|at|for|to|today|now|please|done)$/g, "")
+    .trim();
+}
+
+// Upper-body ISOLATION movements loaded past a sane ceiling are not real lifts — they
+// are mis-logs (almost always a voice-transcription swap, e.g. "leg press 116kg" heard
+// as "chest fly 116kg"). We refuse to store or echo the absurd number rather than
+// recommend a 118.5kg chest fly. Compound/leg-machine lifts (squat, press, deadlift,
+// leg curl/extension, calf) are deliberately NOT capped — they really do go heavy.
+export function isImplausibleLift(name: string, weightKg: number): boolean {
+  const n = (name || "").toLowerCase();
+  const upperIsolation = /\b(chest fly|pec fly|pec deck|cable fly|chest fly machine|lateral raise|lat raise|side raise|front raise|rear delt|reverse fly|face pull|bicep curl|biceps curl|hammer curl|concentration curl|preacher curl|tricep|triceps|pushdown|kickback|wrist curl)\b/.test(n);
+  return upperIsolation && weightKg > 60;
+}
+
 function formatGymDay(
   exercises: Exercise[],
   label: string,
@@ -1370,13 +1396,29 @@ function formatGymDay(
   header += equipNote;
   header += `📋 *Today's target:* ${wCtx.sets} sets × ${wCtx.reps} reps | Rest ${wCtx.rest} between sets.\n`;
   header += `_${wCtx.rationale}_`;
+  // Reduce an exercise/alt string to its core movement so we can spot a redundant
+  // alternative: "Dumbbell RDL" and "Romanian Deadlift" both collapse to the same key.
+  // Only equipment words + qualifier phrases are stripped — movement differentiators
+  // (goblet, smith, incline, floor-press…) are kept so real alternatives survive.
+  const normMove = (s: string) => (s || "").toLowerCase()
+    .replace(/\brdls?\b/g, "romanian deadlift").replace(/\bdb\b/g, "dumbbell").replace(/\bohp\b/g, "overhead press")
+    .replace(/\bif no (?:machine|bench|cable|gym)\b|\bif needed\b|\bas (?:an? |your )?alternative\b|\bwith knee on bench\b|\b(?:lying|flat) on (?:the )?floor\b/g, " ")
+    .replace(/\b(dumbbell|barbell|machine|cable|assisted)\b/g, " ")
+    .replace(/[^\w\s]/g, " ").replace(/\s+/g, " ").trim();
+  // Core of each exercise = its first "/" alias, normalised (RDL / Dumbbell RDL → "romanian deadlift").
+  const dayCores = safeEx.map(e => normMove((e.name || "").split("/")[0]));
+
   // One block per exercise, grouped ~3 per bubble so no single message is a wall.
   const exBlocks: string[] = [];
   for (let i = 0; i < safeEx.length; i++) {
     const ex = safeEx[i];
     let block = `${i + 1}. *${ex.name}* — ${getExerciseSets(ex, wCtx.sets, wCtx.reps, phase)}\n${ex.description.split(". ")[0]}`;
     if (ex.mistake) block += `\n⚠ ${ex.mistake.split(".")[0]}`;
-    if (ex.modification && (isDumbbell || isBeginner)) block += `\n_(Alt: ${ex.modification})_`;
+    // Show the alt only if it isn't just restating this exercise or duplicating another
+    // one already in today's list — no more "RDL (Alt: Dumbbell RDL)".
+    const altCore = normMove(ex.modification || "");
+    const altRedundant = altCore.length < 3 || dayCores.some(c => c.length >= 3 && c === altCore);
+    if (ex.modification && (isDumbbell || isBeginner) && !altRedundant) block += `\n_(Alt: ${ex.modification})_`;
     // No YouTube search links: they doubled the message length, WhatsApp auto-expands
     // one into a preview card mid-workout, and a *search results* page is not form
     // coaching. Real form help = snap the machine (photo coach) — pointer in the closer.

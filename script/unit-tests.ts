@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext } from "../server/targets";
-import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext } from "../server/programme";
+import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, isImplausibleLift } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -137,6 +137,30 @@ test("getDayType day 6 wraps to full_c", () => {
 
 test("getDayType day 9 wraps to full_c", () => {
   assert.equal(getDayType(9), "full_c");
+});
+
+// ============================================================
+// Exercise-content sanity guards (screenshot bugs 2026-07-04)
+// ============================================================
+
+test("cleanExerciseName strips leading/trailing filler", () => {
+  assert.equal(cleanExerciseName("my chest fly is"), "chest fly");
+  assert.equal(cleanExerciseName("i did leg press"), "leg press");
+  assert.equal(cleanExerciseName("today's bench press"), "bench press");
+  assert.equal(cleanExerciseName("bench"), "bench");
+});
+
+test("isImplausibleLift flags absurd upper-body isolation loads", () => {
+  assert.equal(isImplausibleLift("chest fly", 116), true);
+  assert.equal(isImplausibleLift("lateral raise", 90), true);
+  assert.equal(isImplausibleLift("bicep curl", 80), true);
+});
+
+test("isImplausibleLift leaves real lifts alone", () => {
+  assert.equal(isImplausibleLift("chest fly", 25), false);   // plausible isolation
+  assert.equal(isImplausibleLift("leg press", 180), false);  // heavy compound — fine
+  assert.equal(isImplausibleLift("squat", 140), false);
+  assert.equal(isImplausibleLift("leg curl", 90), false);    // machine stack — not upper-body isolation
 });
 
 // ============================================================

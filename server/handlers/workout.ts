@@ -12,6 +12,7 @@ import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedba
 import {
   buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
+  cleanExerciseName, isImplausibleLift,
 } from "../programme";
 import { checkPerfectDay, getProgressiveOverloadContext } from "./checks";
 import { storeMemory } from "../memory";
@@ -41,7 +42,8 @@ export function parseLiftLog(m: string): Array<{ name: string; weight: number; s
     );
     if (!match) continue;
 
-    const name = match[1].trim().toLowerCase().replace(/\s+/g, " ");
+    const rawName = match[1].trim().toLowerCase().replace(/\s+/g, " ");
+    const name = cleanExerciseName(rawName) || rawName;  // "my chest fly is" → "chest fly"
     const weight = parseFloat(match[2]);
     const sets = match[3] ? parseInt(match[3]) : undefined;
     const reps = match[4] ? parseInt(match[4]) : undefined;
@@ -53,6 +55,7 @@ export function parseLiftLog(m: string): Array<{ name: string; weight: number; s
       || weight > 500
       || /\b(?:water|steps?|sleep|slept|ate|had|food|weigh|today|morning|kg\s*body|i(?:'m| am)|body)\b/i.test(name)
       || !EXERCISE_PATTERN.test(name + " " + trimmed)
+      || isImplausibleLift(name, weight)  // e.g. "chest fly 116kg" — a mis-log, don't store it
     ) continue;
 
     results.push({ name, weight, sets, reps });

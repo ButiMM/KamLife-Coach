@@ -2,6 +2,7 @@ import { db } from "../db";
 import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs } from "../../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
+import { cleanExerciseName, isImplausibleLift } from "../programme";
 
 export const JUNK_WORDS = [
   "kfc", "niknaks", "cool drink", "fanta",
@@ -110,19 +111,25 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
     for (const lift of recentLifts) {
       if (!seen.has(lift.exerciseName)) seen.set(lift.exerciseName, lift);
     }
-    const entries = [...seen.values()].slice(0, 6);
 
-    const lines = entries.map(lift => {
-      const w = parseFloat(String(lift.weightKg || 0));
-      const repsStr = lift.sets && lift.reps
-        ? ` ${lift.sets}×${lift.reps} reps`
-        : lift.reps ? ` ×${lift.reps} reps` : "";
-      const nextW = (w + 2.5).toFixed(1).replace(".0", "");
-      const daysAgo = Math.floor((Date.now() - new Date(lift.loggedAt || "").getTime()) / 86_400_000);
-      const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
-      return `• ${lift.exerciseName}: ${w}kg${repsStr} (${when}) → aim ${nextW}kg or add 1–2 reps`;
-    });
+    const lines = [...seen.values()]
+      // Defend against already-stored mis-logs (e.g. a 116kg "chest fly"): never echo an
+      // implausible isolation load back as a target. cleanExerciseName also tidies names
+      // like "my chest fly is" that older parser versions stored verbatim.
+      .map(lift => ({ lift, name: cleanExerciseName(lift.exerciseName) || lift.exerciseName, w: parseFloat(String(lift.weightKg || 0)) }))
+      .filter(({ name, w }) => !isImplausibleLift(name, w))
+      .slice(0, 6)
+      .map(({ lift, name, w }) => {
+        const repsStr = lift.sets && lift.reps
+          ? ` ${lift.sets}×${lift.reps} reps`
+          : lift.reps ? ` ×${lift.reps} reps` : "";
+        const nextW = (w + 2.5).toFixed(1).replace(".0", "");
+        const daysAgo = Math.floor((Date.now() - new Date(lift.loggedAt || "").getTime()) / 86_400_000);
+        const when = daysAgo === 0 ? "today" : daysAgo === 1 ? "yesterday" : `${daysAgo}d ago`;
+        return `• ${name}: ${w}kg${repsStr} (${when}) → aim ${nextW}kg or add 1–2 reps`;
+      });
 
+    if (lines.length === 0) return "";
     return `*Your Targets — Based on Last Session:*\n${lines.join("\n")}\n\n`;
   } catch (e) {
     console.warn("[non-fatal]", e);

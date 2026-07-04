@@ -181,6 +181,34 @@ test("parseLiftLog: food message rejected — no lifts parsed", () => {
   assert.equal(r.length, 0);
 });
 
+// Screenshot bug: "my chest fly is 116kg" was stored verbatim (garbled name) with an
+// absurd load, then echoed as "→ aim 118.5kg". Name must be cleaned; a 116kg isolation
+// lift is a mis-log and must not be stored at all.
+test("parseLiftLog: implausible isolation weight rejected (116kg chest fly)", () => {
+  const r = parseLiftLog("my chest fly is 116kg");
+  assert.equal(r.length, 0);
+});
+
+test("parseLiftLog: filler words stripped from exercise name", () => {
+  const r = parseLiftLog("my bench press is 80kg 4x8");
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, "bench press");
+  assert.equal(r[0].weight, 80);
+});
+
+test("parseLiftLog: plausible isolation weight still logs (chest fly 25kg)", () => {
+  const r = parseLiftLog("chest fly 25kg 3x12");
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, "chest fly");
+  assert.equal(r[0].weight, 25);
+});
+
+test("parseLiftLog: heavy compound NOT capped (leg press 180kg)", () => {
+  const r = parseLiftLog("leg press 180kg 4x8");
+  assert.equal(r.length, 1);
+  assert.equal(r[0].weight, 180);
+});
+
 test("parseLiftLog: step count message rejected", () => {
   const r = parseLiftLog("walked 8000 steps today");
   assert.equal(r.length, 0);
