@@ -181,12 +181,14 @@ test("parseLiftLog: food message rejected — no lifts parsed", () => {
   assert.equal(r.length, 0);
 });
 
-// Screenshot bug: "my chest fly is 116kg" was stored verbatim (garbled name) with an
-// absurd load, then echoed as "→ aim 118.5kg". Name must be cleaned; a 116kg isolation
-// lift is a mis-log and must not be stored at all.
-test("parseLiftLog: implausible isolation weight rejected (116kg chest fly)", () => {
+// Screenshot: "my chest fly is: 116kg → aim 118.5kg". The bug was the garbled NAME
+// ("my chest fly is"), stored verbatim. The WEIGHT is real — a machine/pec-deck fly
+// legitimately runs past 100kg on the stack — so it must be stored, not thrown away.
+test("parseLiftLog: filler stripped from name, heavy machine fly weight kept (116kg)", () => {
   const r = parseLiftLog("my chest fly is 116kg");
-  assert.equal(r.length, 0);
+  assert.equal(r.length, 1);
+  assert.equal(r[0].name, "chest fly");
+  assert.equal(r[0].weight, 116);
 });
 
 test("parseLiftLog: filler words stripped from exercise name", () => {
@@ -196,17 +198,15 @@ test("parseLiftLog: filler words stripped from exercise name", () => {
   assert.equal(r[0].weight, 80);
 });
 
-test("parseLiftLog: plausible isolation weight still logs (chest fly 25kg)", () => {
-  const r = parseLiftLog("chest fly 25kg 3x12");
-  assert.equal(r.length, 1);
-  assert.equal(r[0].name, "chest fly");
-  assert.equal(r[0].weight, 25);
-});
-
-test("parseLiftLog: heavy compound NOT capped (leg press 180kg)", () => {
+test("parseLiftLog: heavy compound stored as logged (leg press 180kg)", () => {
   const r = parseLiftLog("leg press 180kg 4x8");
   assert.equal(r.length, 1);
   assert.equal(r[0].weight, 180);
+});
+
+test("parseLiftLog: obvious fat-finger still rejected (>500kg)", () => {
+  const r = parseLiftLog("bench press 1160kg");
+  assert.equal(r.length, 0);
 });
 
 test("parseLiftLog: step count message rejected", () => {

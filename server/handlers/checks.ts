@@ -2,7 +2,7 @@ import { db } from "../db";
 import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs } from "../../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
-import { cleanExerciseName, isImplausibleLift } from "../programme";
+import { cleanExerciseName } from "../programme";
 
 export const JUNK_WORDS = [
   "kfc", "niknaks", "cool drink", "fanta",
@@ -113,11 +113,10 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
     }
 
     const lines = [...seen.values()]
-      // Defend against already-stored mis-logs (e.g. a 116kg "chest fly"): never echo an
-      // implausible isolation load back as a target. cleanExerciseName also tidies names
-      // like "my chest fly is" that older parser versions stored verbatim.
+      // cleanExerciseName tidies names like "my chest fly is" that older parser versions
+      // stored verbatim. The WEIGHT is echoed exactly as logged — a heavy machine fly is
+      // real, and this is the client's own progressive-overload record.
       .map(lift => ({ lift, name: cleanExerciseName(lift.exerciseName) || lift.exerciseName, w: parseFloat(String(lift.weightKg || 0)) }))
-      .filter(({ name, w }) => !isImplausibleLift(name, w))
       .slice(0, 6)
       .map(({ lift, name, w }) => {
         const repsStr = lift.sets && lift.reps

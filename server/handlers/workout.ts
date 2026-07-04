@@ -12,7 +12,7 @@ import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedba
 import {
   buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
-  cleanExerciseName, isImplausibleLift,
+  cleanExerciseName,
 } from "../programme";
 import { checkPerfectDay, getProgressiveOverloadContext } from "./checks";
 import { storeMemory } from "../memory";
@@ -55,8 +55,7 @@ export function parseLiftLog(m: string): Array<{ name: string; weight: number; s
       || weight > 500
       || /\b(?:water|steps?|sleep|slept|ate|had|food|weigh|today|morning|kg\s*body|i(?:'m| am)|body)\b/i.test(name)
       || !EXERCISE_PATTERN.test(name + " " + trimmed)
-      || isImplausibleLift(name, weight)  // e.g. "chest fly 116kg" — a mis-log, don't store it
-    ) continue;
+    ) continue;  // weight >500 (fat-finger) already handled above; a heavy machine fly is REAL and kept
 
     results.push({ name, weight, sets, reps });
   }

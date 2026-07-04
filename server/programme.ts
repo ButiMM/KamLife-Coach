@@ -1336,30 +1336,22 @@ function getYoutubeLinkForExercise(name: string): string | undefined {
   return undefined;
 }
 
-// ── Exercise-content sanity guards ───────────────────────────────────────────
-// The workout output was echoing numbers and names the system never sanity-checked:
-// a mis-logged "chest fly: 116kg" (voice transcription swaps "leg press"→"chest fly")
-// came back as a proud "→ aim 118.5kg", and a garbled log name "my chest fly is" was
-// shown verbatim. These normalise names and refuse physically implausible loads.
-
-// Strip conversational filler a lift-log parser scoops up ("my chest fly is 116kg" →
-// "chest fly"), so the stored/echoed exercise name is the movement, not a sentence.
+// ── Exercise-name normalisation ──────────────────────────────────────────────
+// A lift-log parser scoops up conversational filler — "my chest fly is 116kg" was
+// stored and echoed verbatim as the exercise NAME ("my chest fly is: 116kg → aim…").
+// Strip the filler so the stored/displayed name is the movement itself, which also
+// keeps the same movement tracking consistently for progressive overload.
+//
+// We deliberately do NOT second-guess the WEIGHT. A machine / pec-deck chest fly
+// genuinely runs past 100kg on the stack (it's a plate selection, not a free-weight
+// load), so the client's logged number is stored exactly as given — throwing away a
+// real lift would break the very progressive overload this feeds. Only an obvious
+// fat-finger (>500kg) is rejected, and that check already lives in parseLiftLog.
 export function cleanExerciseName(raw: string): string {
   return (raw || "").toLowerCase().replace(/\s+/g, " ").trim()
     .replace(/^(?:(?:my|the|a|on|for|i|just|today'?s?|did|do|done|log|logged)\s+)+/g, "")
     .replace(/\s+(?:is|was|are|were|at|for|to|today|now|please|done)$/g, "")
     .trim();
-}
-
-// Upper-body ISOLATION movements loaded past a sane ceiling are not real lifts — they
-// are mis-logs (almost always a voice-transcription swap, e.g. "leg press 116kg" heard
-// as "chest fly 116kg"). We refuse to store or echo the absurd number rather than
-// recommend a 118.5kg chest fly. Compound/leg-machine lifts (squat, press, deadlift,
-// leg curl/extension, calf) are deliberately NOT capped — they really do go heavy.
-export function isImplausibleLift(name: string, weightKg: number): boolean {
-  const n = (name || "").toLowerCase();
-  const upperIsolation = /\b(chest fly|pec fly|pec deck|cable fly|chest fly machine|lateral raise|lat raise|side raise|front raise|rear delt|reverse fly|face pull|bicep curl|biceps curl|hammer curl|concentration curl|preacher curl|tricep|triceps|pushdown|kickback|wrist curl)\b/.test(n);
-  return upperIsolation && weightKg > 60;
 }
 
 function formatGymDay(

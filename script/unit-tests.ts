@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext } from "../server/targets";
-import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, isImplausibleLift } from "../server/programme";
+import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -150,17 +150,9 @@ test("cleanExerciseName strips leading/trailing filler", () => {
   assert.equal(cleanExerciseName("bench"), "bench");
 });
 
-test("isImplausibleLift flags absurd upper-body isolation loads", () => {
-  assert.equal(isImplausibleLift("chest fly", 116), true);
-  assert.equal(isImplausibleLift("lateral raise", 90), true);
-  assert.equal(isImplausibleLift("bicep curl", 80), true);
-});
-
-test("isImplausibleLift leaves real lifts alone", () => {
-  assert.equal(isImplausibleLift("chest fly", 25), false);   // plausible isolation
-  assert.equal(isImplausibleLift("leg press", 180), false);  // heavy compound — fine
-  assert.equal(isImplausibleLift("squat", 140), false);
-  assert.equal(isImplausibleLift("leg curl", 90), false);    // machine stack — not upper-body isolation
+test("cleanExerciseName leaves a clean movement name untouched", () => {
+  assert.equal(cleanExerciseName("chest fly"), "chest fly");
+  assert.equal(cleanExerciseName("incline dumbbell press"), "incline dumbbell press");
 });
 
 // ============================================================
