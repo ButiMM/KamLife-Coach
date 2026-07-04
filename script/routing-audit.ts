@@ -419,6 +419,69 @@ const CASES: Case[] = [
   { name: "water+supplement: 'drank 500ml water and took magnesium' logs both (regression guard)",
     msg: "drank 500ml of water and took my magnesium",
     expect: [/logged.*0\.5|500ml|0\.5l|water|so far today/i, /taken\s*✅|taken/i] },
+
+  // ── QUESTION-SAFETY BATTERY ──────────────────────────────────────────────────
+  // The systemic disease: keyword handlers taking IRREVERSIBLE/VISIBLE actions
+  // (log, flip, remove, charge, dump) on messages that are actually QUESTIONS.
+  // These run with the AI classifier OFFLINE, so they test the KEYWORD-level
+  // defense — the exact layer every stress-test failure came from. A QUESTION
+  // must NEVER produce a side effect. If any of these fail, the disease is still
+  // present at that site. (NS = the shared "no side effect" reject set.)
+  ...(() => {
+    const NS = [
+      /\*Food logged|Food logged ✅|logged\*\s*\(from|Running total today|Meal total:/i,
+      /Removed your last meal|Removed the last \d|Removed \d+ meal/i,
+      /programme updated to/i,
+      /Here is your payment link|payfast\/link/i,
+      /Next Session \(Day|Reply \*DONE\* when finished/i,
+      /weigh-ins (over|total)/i,
+    ];
+    const q = (name: string, msg: string): Case => ({ name: `qsafety: ${name}`, msg, reject: NS });
+    return [
+      // food discussion — must not log
+      q("what do you think about rice and sweet potato", "What do you think about rice and sweet potato on the same plate?"),
+      q("is pap bad for me", "Is pap bad for me at night?"),
+      q("how many calories in 2 eggs", "How many calories in 2 eggs and toast?"),
+      q("should I eat chicken or fish", "Should I eat chicken or fish for dinner?"),
+      q("is peanut butter good for muscle", "Is peanut butter good for muscle gain?"),
+      q("brown rice vs white rice", "What's better, brown rice or white rice?"),
+      q("does chicken have enough protein", "Does 200g chicken have enough protein for me?"),
+      q("thoughts on eating late", "What are your thoughts on eating pap late at night?"),
+      q("is it okay to have samp", "Is it okay to have samp and beans every day?"),
+      q("double starch opinion", "Double starching, like having rice and potato together, what do you reckon?"),
+      // takeaway discussion — planning is fine but no LOG on a question
+      q("is KFC bad", "Is KFC really that bad for muscle gain?"),
+      q("thoughts on nandos", "What do you think about Nando's for a cutting phase?"),
+      // workout — must not dump the next session or flip mode
+      q("should I switch to full gym", "Should I switch to full gym?"),
+      q("is home as good as gym", "Is a home workout as good as the gym for building muscle?"),
+      q("do I need a gym", "Do I really need a gym to gain muscle?"),
+      q("how many sets should I do", "How many sets should I do per exercise?"),
+      q("is my programme too hard", "Is my programme too hard for a beginner?"),
+      q("should I train tomorrow", "Should I train tomorrow or rest?"),
+      q("how do I approach training", "How do I approach the training this week?"),
+      // steps — must not log/nag
+      q("why am I on 11000 steps", "Why am I on 11,000 steps a day? Make it make sense."),
+      q("how many steps should I do", "How many steps should I be doing for fat loss?"),
+      q("give me 5 steps belly fat", "Give me 5 steps to lose belly fat"),
+      // weight — must not draw the history chart
+      q("where should my weight be", "Where should my weight be in 6 months?"),
+      q("how much should I lose per week", "How much weight should I lose per week?"),
+      q("how much should I gain per week", "How much should I be gaining per week??"),
+      q("is my weight normal", "Is my weight normal for my height?"),
+      // money — must not send a payment link on a question/cancellation
+      q("is it worth paying 199", "Is it really worth paying R199 for this?"),
+      q("why should I pay", "Why should I pay for this service?"),
+      q("what happens if I cancel", "What happens to my data if I cancel my subscription?"),
+      q("how much does it cost", "How much does the subscription cost per month?"),
+      // supplements / general — must not misfire into a log
+      q("should I take creatine", "Should I take creatine on rest days?"),
+      q("thoughts on protein powder", "What do you think about protein powder vs real food?"),
+      q("how much water should I drink", "How much water should I drink on training days?"),
+      // portion/rate confusion that already bit us
+      q("how much rice per meal", "How much rice should I have per meal?"),
+    ];
+  })(),
 ];
 
 async function main() {

@@ -243,7 +243,12 @@ export async function handleEarlyCommands(ctx: {
   // Mode changes need a DURABLE signal: joined / membership / switch me to.
   const isGymTripStatement = /\b(going|heading|off|about|gonna|on my way|about to go)\s+to\s+(?:the\s+)?gym\b/i.test(m)
     && !/\b(joined|member|membership|signed up|switch|change)\b/i.test(m);
-  const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && !ctx.isQuestion && (
+  // Keyword-level question backstop (works when the AI classifier is offline): a
+  // question about switching ("Should I switch to full gym?", "Is home as good?")
+  // must never flip the programme — only a command/declaration does.
+  const modeChangeIsQuestion = m.includes("?")
+    || /^(should|is|are|do|does|can|could|would|will|which|what|why|how)\b/i.test(m.trim());
+  const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && !ctx.isQuestion && !modeChangeIsQuestion && (
     /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
     /\b(joined|signed up|now (go to|at|train at)|started at|switch(?:ed)? (?:me )?to|got a(?: gym)? membership)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre|membership)\b/i.test(m) ||
     /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
