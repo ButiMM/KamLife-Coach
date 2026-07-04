@@ -279,6 +279,13 @@ const CASES: Case[] = [
   { name: "mgmt: 'Remove last meal, it was a question' removes the last meal despite the trailing clause (prod bug 2026-07-03)", msg: "Remove last meal, it was a question",
     expect: [/Removed your last meal|No meal logged yet today/i],
     reject: [/don.?t see "last meal/i] },
+  { name: "takeaway: 'I had 4 pieces of KFC with pap' LOGS the meal, never ordering advice (prod bug 2026-07-03)", msg: "I had 4 pieces of KFC with pap",
+    expect: [/Food logged|kcal/i],
+    reject: [/Coach K Pick|if you.?re going KFC|Streetwise 2 \(original/i] },
+  { name: "takeaway: 'Yes but I had 4 pieces with pap' logs both, not just pap (prod bug 2026-07-03)", msg: "I had 4 pieces of kfc and pap",
+    expect: [/kfc|chicken/i, /pap/i] },
+  { name: "takeaway: planning 'what should I order at KFC' STILL gets the guide", msg: "Going to KFC for lunch, what should I order?",
+    expect: [/Coach K Pick|Streetwise|2 pieces original/i] },
 
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",

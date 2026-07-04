@@ -600,7 +600,13 @@ export async function handleFoodContext(ctx: {
     /\b(going to|went to|was at|ate at|ordered from|getting from|pick up from|buying from|takeaway from|eat(ing)? at|lunch at|dinner at|breakfast at|stop(ped)? at|from (nandos|kfc|steers|wimpy|debonairs|mcdonalds|mcdonald|chicken licken|ocean basket)|ate (some|their|the)|had (some|their|the))\b/i.test(m)
     || (/\b(nandos|kfc|steers|wimpy|debonairs|mcdonalds|chicken licken|ocean basket)\b/i.test(m)
         && /\b(today|for lunch|for dinner|for supper|for breakfast|just|tonight|this morning|yesterday|after work|on the way)\b/i.test(m));
-  if (eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration) {
+  // PAST-TENSE consumption = LOG IT, don't lecture. "I had 4 pieces of KFC with pap"
+  // wants the meal counted (KFC + pap are both in foods.ts, quantity-scaled) — giving
+  // ordering advice silently dropped ~800 kcal of chicken and infuriated the tester
+  // (prod, 2026-07-03). The guide is for PLANNING/asking ("going to KFC", "what to
+  // order"), never for a meal already eaten.
+  const atePastTakeaway = /\b(i had|i ate|i.?ve had|i just (had|ate)|just had|just ate|had \d+|ate \d+|my (lunch|dinner|breakfast|supper|meal) (is|was)|for (lunch|dinner|breakfast|supper) i had|ordered and ate|already (had|ate))\b/i.test(m);
+  if (eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration && !atePastTakeaway) {
     const goal = user.goalType || "fat_loss";
     const guides: Record<string, string> = {
       nandos: `*Nando's — Coach K Pick*\n\n✅ Best: Quarter chicken (skin off) + peri-peri chips + coleslaw = ~650 kcal, 35g protein\n✅ Good: Grilled chicken wrap (no sauce, extra coleslaw)\n⚠️ Watch: Double chicken = fine if that's your big meal\n❌ Avoid: Chips as main + roll + dessert = 1,200 kcal\n\nFlame-grilled is always better than fried. Skin off saves 80-100 kcal.`,
