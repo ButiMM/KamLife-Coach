@@ -15,7 +15,7 @@ import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExercis
 import { matchVariantGuideRequest, formatVariantGuide } from "../exercise-variants";
 import {
   buildDayWorkout, buildFullProgramme,
-  getKamlifeProgramme, getDayType,
+  getKamlifeProgramme, getDayType, getPhaseNames,
 } from "../programme";
 import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
@@ -910,9 +910,12 @@ export async function handleMiscCommands(ctx: {
     const week = user.programmeWeek || 1;
     const totalSessions = user.totalWorkoutsCompleted || 0;
     const poCtx = await getProgressiveOverloadContext(user.id);
-    const sessionNote = totalSessions > 0 ? ` | Session ${totalSessions + 1}` : "";
+    // programmeWeek is phase-relative (resets to 1 each new phase), so "Week 1 | Session 19"
+    // read as broken. Anchor the week to its phase so the two numbers make sense together.
+    const phaseName = getPhaseNames()[user.programmePhase || 1] || "Foundation";
+    const sessionNote = totalSessions > 0 ? ` · Session ${totalSessions + 1}` : "";
     const gif2 = getPrimaryWorkoutGifUrl(workout);
-    return `*Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
+    return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
 
   // ---- NEW: NEXT WORKOUT ----

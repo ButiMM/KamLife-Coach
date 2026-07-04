@@ -236,7 +236,10 @@ export async function runMorningCheckin(): Promise<void> {
       } else if (stepStreakCount >= 2) {
         streakParts.push(`🚶 ${stepStreakCount}-day step streak`);
       }
-      if (foodLogStreakCount >= 3) streakParts.push(`🍽️ ${foodLogStreakCount}-day food streak`);
+      // Only claim a food streak when yesterday actually had food — otherwise the
+      // "No food logged yesterday" line below contradicts it ("5-day food streak" +
+      // "No food logged yesterday" was a real screenshot).
+      if (foodLogStreakCount >= 3 && foodLogs.length > 0) streakParts.push(`🍽️ ${foodLogStreakCount}-day food streak`);
       const streakLine = streakParts.length ? ` ${streakParts.join(" · ")}.` : "";
 
       // ── Trajectory-aware DOW opener override ───────────────────────────────
