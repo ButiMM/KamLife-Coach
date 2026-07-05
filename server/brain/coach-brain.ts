@@ -20,13 +20,18 @@
  */
 
 import { db } from "../db";
-import { exerciseLogs } from "../../shared/schema";
+import { exerciseLogs, mealLogs } from "../../shared/schema";
+import { eq, and, gte, desc } from "drizzle-orm";
 import { buildDayWorkout } from "../programme";
 import { parseLiftLog } from "../handlers/workout";
 import { looksLikeQuestion } from "../utils";
 import { logChat } from "../handlers/chat-log";
 import { invalidatePatternCache } from "../cache";
+import { selectMealToCopy, type CopyableMeal } from "../meal-select";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "../handlers/food-scanner";
 import { buildClientSnapshot } from "./client-snapshot";
+
+const DAY = 86_400_000;
 
 const BRAIN_SYSTEM = `You are Coach K — a South African fitness and nutrition coach with 20 years' real experience. Firm, warm, direct, plain SA voice. Never corporate, never American, never robotic. You talk to a real person, one thing at a time, WhatsApp length.
 
@@ -35,9 +40,10 @@ WHAT YOU DO
 - For anything about how they're doing, their weight, sessions, progress, or "am I on track" — ALWAYS call get_client_snapshot first and answer ONLY from those real numbers. When you mention weight, state the total change AND the recent trend together (e.g. "up 0.8kg overall, but flat the last 3 weeks — that's the plateau"). Never split them into a contradiction.
 - Use get_todays_workout when they want today's session or you need the exercises to answer.
 - If they REPORT lifts they did (e.g. "bench 80kg 3x10"), call log_lifts.
+- If they say a meal is the SAME as one already logged ("same thing for dinner", "same dinner as lunch today", "same as yesterday"), call log_repeat_meal — this is the fuzzy case the old system got wrong.
 
 WHAT YOU DEFER (call defer — the reliable system handles these; deferring is safe and correct)
-- Logging food, steps, water, or body weight; reporting a completed session ("done"/"finished").
+- Logging BRAND-NEW food (let the scanner estimate it), steps, water, or body weight; reporting a completed session ("done"/"finished").
 - Money, billing, cancellation, subscription, onboarding, data deletion.
 - Anything you're not sure is a coaching reply.
 
@@ -80,8 +86,23 @@ const TOOLS = [
   {
     type: "function" as const,
     function: {
+      name: "log_repeat_meal",
+      description: "Log a meal the client says is the SAME as one they ALREADY logged — 'same thing for dinner', 'same dinner as lunch today', 'same as yesterday'. ONLY copies an existing logged meal; for brand-new foods, defer instead (the food scanner estimates those). source = which logged meal to copy (e.g. 'lunch', 'breakfast', 'dinner', 'yesterday'); target = the slot to log it as (e.g. 'dinner').",
+      parameters: {
+        type: "object",
+        properties: {
+          source: { type: "string", description: "which already-logged meal to copy, e.g. 'lunch', 'breakfast', 'dinner', 'yesterday'" },
+          target: { type: "string", description: "the meal slot to log the copy as, e.g. 'dinner'" },
+        },
+        required: ["source", "target"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
       name: "defer",
-      description: "Hand the message back to the deterministic system. Use for logging (food/steps/water/weight), a completed-session report, money/billing/cancellation/onboarding, or anything that is not a coaching reply.",
+      description: "Hand the message back to the deterministic system. Use for logging BRAND-NEW food/steps/water/weight, a completed-session report, money/billing/cancellation/onboarding, or anything that is not a coaching reply.",
       parameters: { type: "object", properties: { reason: { type: "string" } } },
     },
   },
@@ -111,6 +132,39 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
     invalidatePatternCache(user.id);
     const summary = lifts.map(l => `${l.name} ${l.weight}kg${l.sets && l.reps ? ` ${l.sets}×${l.reps}` : ""}`).join(", ");
     return `Logged: ${summary}. Confirm it's recorded and give one short progressive-overload cue (aim +2.5kg or +1–2 reps next time).`;
+  }
+
+  if (name === "log_repeat_meal") {
+    const target = String(args?.target || "").toLowerCase().trim();
+    const hint = String(args?.source || "").toLowerCase()
+      .replace(/'s\b/g, "").replace(/\b(today|yesterday|the|my|as|same|thing|meal)\b/g, "").trim() || null;
+    // Candidate meals: today + yesterday, newest first.
+    const meals = await db.select().from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, new Date(Date.now() - 2 * DAY))))
+      .orderBy(desc(mealLogs.loggedAt)).catch(() => [] as any[]);
+    if (meals.length === 0) return null; // nothing to copy → defer so the brain asks
+    const match = selectMealToCopy(meals as unknown as CopyableMeal[], hint) as any;
+    if (!match) return null; // can't confidently pick the named meal → defer (never fabricate)
+    // 4-minute duplicate guard (mirrors the maze) so a resend can't double-count.
+    const [dup] = await db.select({ id: mealLogs.id }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, new Date(Date.now() - 4 * 60_000)), eq(mealLogs.kcalInt, match.kcalInt || 0)))
+      .limit(1).catch(() => []);
+    if (dup) return `That exact meal is already in today's total — no need to log it twice.`;
+    await db.insert(mealLogs).values({
+      userId: user.id,
+      rawMessage: match.rawMessage || "[Repeat meal]",
+      source: "retro",
+      kcalInt: match.kcalInt,
+      proteinInt: match.proteinInt,
+      carbsInt: match.carbsInt || 0,
+      fatInt: match.fatInt || 0,
+      mealLabel: target || match.mealLabel || null,
+      items: match.items,
+    });
+    invalidateFoodTotalsCache(user.id);
+    const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
+    const remaining = (totals?.calories != null && user.calorieTarget) ? Math.max(0, user.calorieTarget - totals.calories) : null;
+    return `Logged ${target || match.mealLabel || "that meal"} = ${match.rawMessage || "the same meal"} (~${match.kcalInt} kcal, ${match.proteinInt}g protein).${remaining != null ? ` ~${remaining} kcal left today.` : ""} Confirm briefly, coach voice.`;
   }
 
   return null;
