@@ -22,7 +22,7 @@
 import { db } from "../db";
 import { exerciseLogs, mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
-import { buildDayWorkout } from "../programme";
+import { buildDayWorkout, buildFullProgramme } from "../programme";
 import { parseLiftLog } from "../handlers/workout";
 import { looksLikeQuestion } from "../utils";
 import { logChat } from "../handlers/chat-log";
@@ -64,6 +64,19 @@ HARD RULES (these are the failures we are fixing)
 - If you don't have a number from get_client_snapshot, don't make one up — say you'll check or ask them to log it.
 - You can see the recent conversation. Do NOT repeat stats or facts you already gave a moment ago — build on them, reference what was just said, sound like you remember. Only re-pull the snapshot if the topic actually needs fresh numbers.
 - If their weight is moving the WRONG way for their goal (losing on muscle gain, or gaining on fat loss), say it plainly and fix the plan — never soften the wrong direction.
+- You CANNOT send a message later — there is no follow-up. NEVER say "I'll get back to you", "give me a moment", "let me check and come back", or promise a future reply. Answer NOW from your tools, or tell them exactly how to get it (for the full multi-week programme use get_full_programme). Never claim you logged or saved something unless a tool just did it — if it's a log you don't handle, defer.
+
+COACHING THE REAL SA CLIENT — the hard cases (coach the principle, don't recite it):
+- BROKE / month-end: never make them feel poor. Cheap real protein — oats (~R15/wk), eggs (~R25/12), pilchards (~R12/tin = 24g protein), sugar beans, peanut butter, brown bread; a week under ~R110. Only raise budget food if THEY raised money.
+- CAN'T AFFORD / QUIT THE GYM: a PIVOT, not a loss. Ask what they've got at home (dumbbells / bands / nothing), switch to home — same goal, muscle doesn't know where it's built. Never treat home as second-best.
+- CAN'T WALK MUCH / step target too high: adapt the number, don't defend it. The deficit is won in the kitchen — food first; steps are a bonus, not the entry fee.
+- SICK / ILL / in treatment: rest is the only prescription — no "lighter workout", no "just a walk". Protein to hold muscle, programme waits, no guilt.
+- BUSY / overwhelmed / desk job: normalise it, give ONE thing under 10 minutes today — not a programme.
+- ON OZEMPIC / GLP-1: appetite is suppressed, so the danger is UNDER-eating and losing muscle. Hit protein even without hunger, keep lifting, don't cheer fast scale drops — protect the muscle.
+- UNDERWEIGHT (BMI under ~18.5): do NOT coach more weight loss — switch to building (fuel + protein + strength). If they seem very underweight, gently suggest a doctor/dietitian.
+- STEPS aren't "eaten back": their target already assumes their activity — big-step days in a deficit are the plan working, not a debt to refund.
+- RAMADAN: train after Iftar, Suhoor is the key meal. PERIOD: normalise, lighter sessions fine. WEIGHT up a little: water/sodium/hormones — don't panic them, hold the course.
+- GREETING + real info ("Hi coach, I'm sick this week"): ignore the greeting, answer the real thing — the greeting is noise, the life situation is the signal.
 Keep replies short and human. No markdown headings, no bullet dumps.`;
 
 const TOOLS = [
@@ -79,7 +92,15 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "get_todays_workout",
-      description: "The client's real workout for today. Use when they ask what to train, want to see the session, or you need the exercises to answer.",
+      description: "The client's real workout for TODAY (one session). Use when they ask what to train today, want to see today's session, or you need the exercises to answer.",
+      parameters: { type: "object", properties: {} },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "get_full_programme",
+      description: "The client's ENTIRE multi-week programme (all training days for the phase). Use when they ask for 'the full plan', 'the whole programme', 'this week's plan', 'everything', not just today. This sends the plan straight to them.",
       parameters: { type: "object", properties: {} },
     },
   },
@@ -245,6 +266,16 @@ export async function runCoachBrain(ctx: {
       }
 
       if (toolCall.function?.name === "defer") return null;
+
+      // Terminal tool: the full programme is long + already formatted, so send it
+      // straight to the client rather than let the model paraphrase and truncate it.
+      if (toolCall.function?.name === "get_full_programme") {
+        let prog = "";
+        try { prog = (buildFullProgramme(user) || "").trim(); } catch { return null; }
+        if (!prog) return null;
+        await logChat(user.id, message, prog, "BRAIN_PROGRAMME").catch(() => {});
+        return prog;
+      }
 
       let parsedArgs: any = {};
       try { parsedArgs = JSON.parse(toolCall.function?.arguments || "{}"); } catch { /* {} */ }
