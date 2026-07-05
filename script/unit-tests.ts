@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext } from "../server/targets";
-import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName } from "../server/programme";
+import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -153,6 +153,24 @@ test("cleanExerciseName strips leading/trailing filler", () => {
 test("cleanExerciseName leaves a clean movement name untouched", () => {
   assert.equal(cleanExerciseName("chest fly"), "chest fly");
   assert.equal(cleanExerciseName("incline dumbbell press"), "incline dumbbell press");
+});
+
+test("canonicalLiftKey groups synonyms of the same movement (progressive overload)", () => {
+  // All the ways a client logs a chest fly must land on ONE tracking key.
+  const fly = canonicalLiftKey("chest fly");
+  assert.equal(canonicalLiftKey("pec deck"), fly);
+  assert.equal(canonicalLiftKey("cable fly"), fly);
+  assert.equal(canonicalLiftKey("my chest fly is"), fly);   // filler-stripped then canonicalised
+  assert.equal(canonicalLiftKey("Chest Fly"), fly);         // case-insensitive
+  // And distinct movements stay distinct.
+  assert.notEqual(canonicalLiftKey("leg press"), fly);
+  assert.notEqual(canonicalLiftKey("leg press"), canonicalLiftKey("leg curl"));
+});
+
+test("canonicalLiftKey falls back to the cleaned name for unknown lifts", () => {
+  // An exercise not in the alias map still gets a stable, consistent key.
+  assert.equal(canonicalLiftKey("zercher squat"), "zercher squat");
+  assert.equal(canonicalLiftKey("my zercher squat is"), "zercher squat");
 });
 
 // ============================================================

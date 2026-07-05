@@ -1354,6 +1354,16 @@ export function cleanExerciseName(raw: string): string {
     .trim();
 }
 
+// Canonical key for grouping the SAME movement logged under different names, so
+// progressive overload actually tracks. "chest fly", "pec deck" and "cable fly" all
+// resolve to the chest-fly slug and share one weight history; an unknown movement
+// falls back to its cleaned name (still consistent for that client). This is what
+// stops a lift fragmenting into several one-off entries that never progress.
+export function canonicalLiftKey(rawName: string): string {
+  const cleaned = cleanExerciseName(rawName);
+  return resolveExerciseSlug(cleaned) || cleaned;
+}
+
 function formatGymDay(
   exercises: Exercise[],
   label: string,

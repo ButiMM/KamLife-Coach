@@ -2,7 +2,7 @@ import { db } from "../db";
 import { chatHistory, mealLogs, workoutLogs, stepLogs, exerciseLogs } from "../../shared/schema";
 import { eq, desc, and, gte, sql } from "drizzle-orm";
 import { sastDayStart } from "../utils";
-import { cleanExerciseName } from "../programme";
+import { cleanExerciseName, canonicalLiftKey } from "../programme";
 
 export const JUNK_WORDS = [
   "kfc", "niknaks", "cool drink", "fanta",
@@ -107,9 +107,13 @@ export async function getProgressiveOverloadContext(userId: string): Promise<str
       .limit(20);
     if (recentLifts.length === 0) return "";
 
+    // Group by canonical movement (recentLifts is newest-first, so the first entry per
+    // key is the most recent). "chest fly" logged today + "pec deck" last week collapse
+    // into one tracked lift instead of two dead ones — the point of progressive overload.
     const seen = new Map<string, typeof recentLifts[0]>();
     for (const lift of recentLifts) {
-      if (!seen.has(lift.exerciseName)) seen.set(lift.exerciseName, lift);
+      const key = canonicalLiftKey(lift.exerciseName);
+      if (!seen.has(key)) seen.set(key, lift);
     }
 
     const lines = [...seen.values()]
