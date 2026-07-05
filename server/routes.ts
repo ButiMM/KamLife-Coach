@@ -38,7 +38,7 @@ import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
-import { runWorkoutBrain } from "./brain/workout-brain";
+import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone } from "./utils";
 import { invalidatePatternCache } from "./cache";
@@ -602,12 +602,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     return deferReply;
   }
 
-  // ---- MODEL BRAIN (pilot — workout domain, flag-gated) ----
-  // Inert unless MODEL_BRAIN=on. When on, a tool-calling model handles training Q&A
-  // and defers everything else (and any error) back to the handlers below — it can
-  // only add a reply, never remove the deterministic fallback. See docs/architecture-bet.md.
+  // ---- MODEL BRAIN (coaching conversation, flag-gated) ----
+  // Inert unless MODEL_BRAIN=on. When on, a tool-calling model handles the CONVERSATION
+  // (progress, questions, motivation, workout/nutrition Q&A) reading one clean stats
+  // snapshot, and defers TRANSACTIONS (logging, billing) and any error back to the
+  // handlers below — it can only add a reply, never remove the deterministic fallback.
+  // See docs/architecture-bet.md.
   if (process.env.MODEL_BRAIN === "on" && !mediaUrl) {
-    const brainReply = await runWorkoutBrain({ phone, message, m, user, openai });
+    const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }
 
