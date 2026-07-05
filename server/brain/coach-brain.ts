@@ -61,7 +61,7 @@ const TOOLS = [
     type: "function" as const,
     function: {
       name: "get_client_snapshot",
-      description: "The client's real, consistent stats — goal, targets, programme position, session counts, weight (start/now/total change/recent trend), protein adherence. Call this for ANY progress / 'how am I doing' / weight / 'on track' question before answering.",
+      description: "The client's real, consistent stats — goal, targets, programme position, session counts, weight (start/now/total change/recent trend), protein adherence, steps (7-day average), water today. Call this for ANY progress / 'how am I doing' / weight / steps / water / 'on track' question before answering.",
       parameters: { type: "object", properties: {} },
     },
   },

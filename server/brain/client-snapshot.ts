@@ -12,10 +12,11 @@
  */
 
 import { db } from "../db";
-import { weightLogs, workoutLogs, mealLogs } from "../../shared/schema";
+import { weightLogs, workoutLogs, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, gte, desc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
+import { sastToday } from "../utils";
 
 const DAY = 86_400_000;
 
@@ -80,6 +81,23 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     } else {
       lines.push(`Protein: nothing logged in the last 7 days — encourage logging, don't guess numbers.`);
     }
+
+    // ── Steps, last 7 days ──
+    const stepRows = await db.select({ steps: stepLogs.steps, loggedAt: stepLogs.loggedAt })
+      .from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since(7))))
+      .catch(() => [] as { steps: number; loggedAt: Date | null }[]);
+    const stepTarget = user.stepsTarget || 8500;
+    if (stepRows.length > 0) {
+      const avg = Math.round(stepRows.reduce((s, r) => s + (r.steps || 0), 0) / stepRows.length);
+      lines.push(`Steps: averaging ${avg.toLocaleString()}/day across ${stepRows.length} logged day${stepRows.length !== 1 ? "s" : ""} vs ${stepTarget.toLocaleString()} target.`);
+    } else {
+      lines.push(`Steps: none logged in the last 7 days.`);
+    }
+
+    // ── Water today ──
+    const waterTarget = Math.max(2.0, Math.round((parseFloat(String(user.currentWeight || "75")) || 75) * 0.033 * 10) / 10);
+    const todayWater = user.waterLastResetDate === sastToday() ? (Number(user.todayWater) || 0) : 0;
+    lines.push(`Water today: ${todayWater}L of ${waterTarget}L target.`);
   } catch (e) {
     console.error("[CLIENT_SNAPSHOT] partial:", (e as any)?.message || e);
   }
