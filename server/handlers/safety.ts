@@ -146,6 +146,29 @@ export async function runSafetyGuards(
     return `That looks like a terminal command — I'm your fitness coach, not a shell! Send me what you ate, your workout, or ask about your goals. 💪`;
   }
 
+  // ---- PROMPT-INJECTION / JAILBREAK GUARD ----
+  // Untrusted WhatsApp text reaches GPT, so neutralise the obvious attempts to reprogram
+  // the coach, extract the system prompt, or force a clinical role BEFORE any model call.
+  // Patterns are deliberately TIGHT and high-signal: benign self-correction ("ignore my
+  // last message"), real questions ("what's my workout"), and normal nutrition talk must
+  // fall through. Subtler attempts are caught by the in-character hardening in
+  // coach-prompt.ts — two layers, same as the rest of the system.
+  const injectionAttempt =
+    /\b(ignore|disregard|forget|override)\b[^.?!]{0,32}\b(previous|prior|above|earlier|all|your|these|those|the|initial|original|system)\b[^.?!]{0,24}\b(instructions?|rules?|prompts?|guidelines?|constraints?|programming)\b/i.test(m)
+    || /\byou are (now|no longer)\s+(a\s+|an\s+|the\s+)?(doctor|physician|nurse|dietician|dietitian|pharmacist|psychologist|therapist|lawyer|dan|unrestricted|uncensored|free from|not bound|not a coach|able to)\b/i.test(m)
+    || /\b(developer|dev|god|admin|sudo|debug|dan|jailbreak|unrestricted|uncensored)\s+mode\b/i.test(m)
+    || /\bsystem prompt\b/i.test(m)
+    || /\b(reveal|repeat|print|show me|output|tell me|what.?s|what is)\b[^.?!]{0,24}\byour\b[^.?!]{0,16}\b(prompt|programming|source code)\b/i.test(m)
+    || /\b(pretend|act as|behave as|roleplay as|role-play as|imagine you.?re|imagine that you.?re)\b[^.?!]{0,24}\b(a\s+|an\s+|the\s+)?(doctor|physician|nurse|dietician|dietitian|pharmacist|psychologist|therapist|lawyer|different ai|another ai|dan)\b/i.test(m)
+    || /\b(ignore|bypass|disable|turn off|switch off|remove)\b[^.?!]{0,20}\b(safety|guard|guardrails?|filters?|restrictions?)\b/i.test(m);
+  if (injectionAttempt) {
+    const injUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const injName = injUser[0]?.name?.split(" ")[0] || "";
+    const injReply = `Ha${injName ? ", " + injName : ""} — nice try. 😄 I'm Coach K: I coach food and training, that's the whole job, and I can't be talked into being anything else.\n\nWhat do you actually need — a workout, a meal sorted, or your steps?`;
+    try { await logChat(injUser[0]?.id || "unknown", message, injReply, "INJECTION_BLOCKED"); } catch (e) { console.warn("[non-fatal]", e); }
+    return injReply;
+  }
+
   // ---- DELETE MY DATA (POPIA) ----
   if (/delete my data|forget me|remove my account|popia delete|delete me|erase my data/i.test(m)) {
     const existing = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
