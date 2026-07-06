@@ -275,9 +275,14 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // Allow a trailing reason clause: "remove last meal, it was a question" fell into the
   // specific-food matcher and dead-ended on "I don't see 'last meal, it was a question'"
   // (prod, 2026-07-03). Anchor on the removal target, tolerate ", <anything>" after.
-  const isRemoveLast = /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal|last entry|the last|the meal|the last one|the last entry|meal|that food|what i just logged|what i logged)\b(?:\s*[,\-—].*)?$/i.test(m.trim())
+  // Voice phrasings tolerated: "remove the last meal's logged" ('s + trailing
+  // "logged") and "…one meal, remove it" dead-ended as fake food lookups
+  // ("I don't see 'last meal's' / 'it.'") on 2026-07-06. Question-guarded so
+  // "should I remove it?" never deletes.
+  const isRemoveLast = !looksLikeQuestion(m) && (
+    /^(no\s+)?(remove|delete|undo|scratch|take off|take out|get rid of)\s+(it|that|that one|that meal|that entry|last|last one|last meal'?s?|last entry|the last|the meal|the last one|the last entry|the last meal'?s?|meal|that food|what i just logged|what i logged)\b(?:\s+(logged|entry|log))?(?:\s*[,\-—.].*)?$/i.test(m.trim())
     || /^(remove|delete|undo|scratch)$/i.test(m.trim())
-    || /\b(scratch that|undo that|take that off|remove that|delete that|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m);
+    || /\b(scratch that|undo that|take that off|remove (that|it)|delete (that|it)|take it (off|out)|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m));
   if (isRemoveLast) {
     // Cutoff spans midnight: a meal logged 23:50 must still be removable at 00:10 —
     // "today only" made the coach refuse the undo right after the day rolled over.
@@ -311,8 +316,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   const removeSpecificMatch = m.match(/\b(?:remove|delete|take out|take off|scratch|get rid of|didn.?t have|did not have|i didn.?t eat|i did not eat|never ate|i never had|i didn.?t log|no )\s+(the\s+)?(.{2,40}?)(?:\s+from|\s+in\s+my|\s+log|$)/i);
   // Reject generic "that/last/meal" captures — those belong to the remove-last path above
   // Allow meal-time words only when followed by a food word (e.g. "remove breakfast pasta")
-  const capturedFood = (removeSpecificMatch?.[2] || "").trim().toLowerCase().replace(/\s+(from|in|my|log|today|this).*$/, "");
-  const endsWithGeneric = /(^|\s)(last|that|it|this|log)$/.test(capturedFood);
+  const capturedFood = (removeSpecificMatch?.[2] || "").trim().toLowerCase()
+    .replace(/\s+(from|in|my|log|today|this).*$/, "")
+    .replace(/[.,!?'"]+$/, "").trim(); // "remove it." captured "it." and dodged the generic filter (2026-07-06)
+  const endsWithGeneric = /(^|\s)(last|that|it|this|log|meal'?s?|entry)$/.test(capturedFood);
   const isRemoveSpecific = !!removeSpecificMatch && capturedFood.length >= 2 && !endsWithGeneric;
   if (isRemoveSpecific && removeSpecificMatch) {
     const foodToRemove = capturedFood;
@@ -399,8 +406,12 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   }
 
   // ---- SHOW TODAY'S MEAL LOG ----
-  if (/^(show|see|view)\s+(my\s+)?(meal|food)\s+log$|^(meal|food)\s+log$|^what\s+did\s+i\s+log(\s+today)?$/i.test(m.trim()) ||
-      /^my\s+meals?$/i.test(m.trim())) {
+  // Loose on purpose: "Sow me the meals" (typo), "show me today's meals" fell through
+  // to the model, which hallucinated "I can't show you the meals directly" and recited
+  // a wrong list from memory (2026-07-06 audit). The real numbered list must own this.
+  if (/^(show|sow|see|view|check)\s+(me\s+)?(my\s+|the\s+|today'?s?\s+)*(meal|food)s?(\s+log)?$/i.test(m.trim()) ||
+      /^(meal|food)\s+log$|^what\s+did\s+i\s+(log|eat)(\s+today)?\??$/i.test(m.trim()) ||
+      /^(my|today'?s?)\s+meals?$/i.test(m.trim())) {
     const todayStart = sastDayStart();
     const logs = await db.select({
       kcalInt: mealLogs.kcalInt,
