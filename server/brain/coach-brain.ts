@@ -31,7 +31,12 @@ import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "../handlers/food-scanner";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { retrieveMemories } from "../memory";
+import { SCENARIO_GUIDE } from "../handlers/gpt-block";
 import { buildClientSnapshot } from "./client-snapshot";
+
+// Hard-case topics that warrant injecting the full scenario playbook. Routine chat
+// skips it — knowledge depth exactly when needed, tokens saved when not (margins).
+const SCENARIO_TOPIC_RE = /\b(sick|ill|flu|fever|injur\w*|pain|hurt|period|menstrua\w*|pregnan\w*|postpartum|ramadan|fasting|broke|no money|can'?t afford|month.?end|travel\w*|hotel|holiday|vacation|no gym|gym.{0,12}(closed|far|expensive)|home workout|ozempic|wegovy|saxenda|mounjaro|glp.?1|quit|give up|not working|no results|plateau|stuck|night shift|shift work|funeral|died|passed away|stress\w*|overwhelm\w*|depress\w*|anxious|anxiety|beer|wine|alcohol|braai|party|wedding|december|festive|diabet\w*|hypertension|blood pressure)\b/i;
 
 const DAY = 86_400_000;
 
@@ -53,6 +58,7 @@ WHAT YOU DO
 - Handle the client's questions, progress talk, motivation, and coaching — training AND nutrition. Answer what they ACTUALLY said.
 - For anything about how they're doing, their weight, sessions, progress, "am I on track" — AND any improvement/advice question ("how can I improve?", "what should I change?", "give me feedback") — ALWAYS call get_client_snapshot first and coach THEIR actual gaps from those real numbers (e.g. protein 127g vs 199g target → that's the improvement). NEVER answer with a generic checklist (balanced meals / hydration / sleep / consistency) — that pamphlet is what a bot says; a coach names the client's specific gap. When you mention weight, state the total change AND the recent trend together (e.g. "up 0.8kg overall, but flat the last 3 weeks — that's the plateau"). Never split them into a contradiction.
 - Use get_todays_workout when they want today's session or you need the exercises to answer.
+- PROACTIVE OBSERVATION: when the snapshot shows something the client did NOT ask about but a real coach would flag (protein short several days running, steps sliding, weight drifting the wrong way for the goal), add ONE short observation with the next action ("Protein's been under 150 four days now — add eggs to breakfast and it's fixed"). Maximum one per reply, only when genuinely useful, never the same flag twice in a row — a coach who notices beats a coach who waits to be asked.
 - If they REPORT lifts they did (e.g. "bench 80kg 3x10"), call log_lifts.
 - If they say a meal is the SAME as one already logged ("same thing for dinner", "same dinner as lunch today", "same as yesterday"), call log_repeat_meal — this is the fuzzy case the old system got wrong.
 - If they want logged food REMOVED or corrected — any phrasing: "remove the last meal", "delete the rice", "that dinner is wrong", "get rid of the duplicates" — call remove_meal. Never claim something was removed unless the tool just confirmed it.
@@ -379,6 +385,9 @@ export async function runCoachBrain(ctx: {
     ]);
     const messages: any[] = [
       { role: "system", content: BRAIN_SYSTEM },
+      // Knowledge depth on demand: the full scenario playbook (sick/broke/travel/
+      // GLP-1/period/plateau…) rides along ONLY when the message touches one.
+      ...(SCENARIO_TOPIC_RE.test(m) ? [{ role: "system", content: SCENARIO_GUIDE }] : []),
       ...(memories.length > 0 ? [{
         role: "system",
         content: `LONG-TERM CLIENT MEMORY — facts this client told you in past weeks. Use them naturally when relevant (never say "according to my notes"):\n${memories.slice(0, 5).map(x => `- ${x}`).join("\n")}`,

@@ -616,7 +616,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // also saves the call.
   const isStepsReport = !normalizedQuestion
     && (/\b[\d,]+\s*k?\s*steps?\b/i.test(m) || /\bsteps?\s*(?:are|is|was|were|:)\s*[\d,]+/i.test(m));
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isStepsReport) {
+  // Water and body-weight reports get the same bypass — same swallowing risk as
+  // steps (tight, anchored patterns so ordinary chat never matches).
+  const isWaterReport = !normalizedQuestion
+    && (/\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
+      || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m));
+  const isWeightReport = !normalizedQuestion
+    && /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
+  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isStepsReport && !isWaterReport && !isWeightReport) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }

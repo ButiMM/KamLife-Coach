@@ -97,25 +97,24 @@ export function parseMealDate(message: string): Date {
     const currentDow = nowSASTDate.getUTCDay();
     let daysBack = (currentDow - targetDow + 7) % 7;
     if (daysBack === 0) daysBack = 7; // same day name = last week's occurrence
-    const mealDate = new Date(Date.now() - daysBack * 86_400_000);
-
-    // Try to extract an explicit HH:MM time from the message
+    // SAST midnight of the target day + SAST wall-clock time. Anchoring the DATE
+    // to UTC-now put day-name meals one day off between 00:00–02:00 SAST (same
+    // midnight-window family as the "yesterday" bug, 2026-07-07).
+    const dayStartMs = todayStartSAST.getTime() - daysBack * 86_400_000;
     const timeMatch = m.match(/\b(\d{1,2})[:.h](\d{2})\b/);
+    let sastClockMs: number;
     if (timeMatch) {
-      const hour = parseInt(timeMatch[1]);
-      const min = parseInt(timeMatch[2]);
-      // Convert SAST (UTC+2) to UTC for storage
-      mealDate.setUTCHours(Math.max(0, hour - 2), min, 0, 0);
+      sastClockMs = (parseInt(timeMatch[1]) * 60 + parseInt(timeMatch[2])) * 60_000;
     } else if (/\b(morning|breakfast|after gym)\b/.test(m)) {
-      mealDate.setUTCHours(6, 0, 0, 0); // 8am SAST
+      sastClockMs = 8 * 3_600_000;   // 8am SAST
     } else if (/\b(lunch|midday|afternoon|around noon)\b/.test(m)) {
-      mealDate.setUTCHours(10, 0, 0, 0); // noon SAST
+      sastClockMs = 12 * 3_600_000;  // noon SAST
     } else if (/\b(night|dinner|supper|evening)\b/.test(m)) {
-      mealDate.setUTCHours(18, 0, 0, 0); // 8pm SAST
+      sastClockMs = 20 * 3_600_000;  // 8pm SAST
     } else {
-      mealDate.setUTCHours(10, 0, 0, 0); // default noon SAST
+      sastClockMs = 12 * 3_600_000;  // default noon SAST
     }
-    return mealDate;
+    return new Date(dayStartMs + sastClockMs);
   }
 
   // "this morning" / "for breakfast" early in message → today at 8am SAST (only if current SAST time is past 11am)

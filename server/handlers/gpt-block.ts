@@ -22,7 +22,9 @@ import { safetyGate } from "../verifiers/response-gate";
 // food philosophy out of the prompt). Client specifics (name, targets, today's
 // numbers) are NOT interpolated here — they live in the CLIENT PROFILE / TODAY'S
 // STATUS blocks the model already receives.
-const SCENARIO_GUIDE = `SCENARIO GUIDE — read the message and decide which applies:
+// Exported: the brain injects this conditionally on hard-case topics (sick/broke/
+// travel/GLP-1/period/plateau…) so both mouths coach the scenarios identically.
+export const SCENARIO_GUIDE = `SCENARIO GUIDE — read the message and decide which applies:
 
 FOOD LOG MANAGEMENT (client wants to remove, delete, undo, correct, or change something they logged — any natural phrasing like "remove breakfast", "I didn't eat that", "delete the lunch I logged", "take off the mince", "that was wrong", "scratch that", "undo it", "I made a mistake with my log"):
   Tell them: "To remove your last meal say 'remove last meal'. To remove a specific food say 'remove [food name]'. To remove a specific meal say 'remove breakfast' (or lunch/dinner/supper). To clear everything today say 'clear food log'." Keep it short — one sentence per option, max 3 options shown.
