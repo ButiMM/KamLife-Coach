@@ -49,3 +49,46 @@ a free month, not rands.
 None of this fires until drill sessions come back clean. A shame-free coach
 that misremembers dinner is a broken promise in a screenshot — and screenshots
 are the whole newspaper.
+
+---
+
+# The deep layer (added same night)
+
+## Psychology stack
+- **What-the-hell effect** = the real churn mechanism (bad meal → "ruined" →
+  binge → silence → cancel). The anti-shame coding interrupts this spiral —
+  it is the RETENTION ENGINE, not tone. Tracking apps can't copy it because
+  tracking apps ARE the shame.
+- **Identity migration**: "trying to lose weight" → "a KamLife member who
+  trains Mondays". Coach should name identity milestones; artifacts are
+  identity badges, not stat dumps.
+- **Streak repair**: broken streaks are churn events. Consistency-percentage
+  ("29 of 31 days") beats binary streaks after month 1. → product queue.
+
+## Unit economics choose the channel
+R199/mo vs SA paid-social CAC (R300-800) = paid is mathematically dead until
+retention is proven. Word-of-mouth is the ONLY live channel, so the artifact
+engine is the entire growth model. K-factor = 52 week-cards/yr × ~40 status
+viewers × conversion-per-exposure. Screenshot-worthiness IS growth.
+Later: annual prepay (R1,999) as commitment device — prepaid clients finish.
+
+## Contrarian move: publish the drilling
+"My tester said the bot would get people killed. Here's the bug, the 4-hour
+fix, and the test that makes it impossible now." Radical transparency =
+receipts culture; the whole fitness industry lies, we show our scars.
+Also dissolves the marketing gate: market the JOURNEY to reliability now,
+the product when it's clean.
+
+## Month-2 cliff → progress-evidence engine
+People quit when they can't SEE change. The coach that remembers everything
+manufactures legitimate evidence weekly: strength PRs vs day one, consistency
+records, NSVs — surfaced unprompted (proactivity lever feeds this).
+Month-2 marketing = helping the client sell progress to THEMSELVES.
+
+## The only five numbers before 1,000 users
+1. Magic-moment rate: first meal logged <10 min after onboarding
+2. 7-day food-log rate (habit-formed signal)
+3. Month-1 → Month-2 retention (the cliff)
+4. Referral share: % of new users naming an existing client
+5. Artifact share rate: week cards hitting a status per week
+Everything else is theatre.
