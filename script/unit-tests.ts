@@ -13,7 +13,7 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
@@ -1417,6 +1417,66 @@ test("stripInventedRetroDate: strips invented 'N days ago'", () => {
 
 test("stripInventedRetroDate: no retro date → returns canonical unchanged (trimmed)", () => {
   assert.equal(stripInventedRetroDate("workout done", "just finished my session"), "workout done");
+});
+
+// ============================================================
+// Transaction-report detectors — gate the model brain; a report must reach
+// the deterministic logger, ordinary chat must reach the brain
+// ============================================================
+
+test("steps reports detected; steps chat is not", () => {
+  assert.ok(looksLikeStepsReport("Steps are 10000"));
+  assert.ok(looksLikeStepsReport("walked 3000 steps not hungry"));
+  assert.ok(looksLikeStepsReport("10k steps today"));
+  assert.ok(!looksLikeStepsReport("how are my steps looking"), "no digits = chat");
+  assert.ok(!looksLikeStepsReport("I want to start walking more"));
+});
+
+test("water reports detected; beers and chat are not", () => {
+  assert.ok(looksLikeWaterReport("drank 500ml"));
+  assert.ok(looksLikeWaterReport("1 litre"));
+  assert.ok(looksLikeWaterReport("had 2 glasses of water"));
+  assert.ok(!looksLikeWaterReport("had 2 beers with the boys"), "beers are not water");
+  assert.ok(!looksLikeWaterReport("should I drink more water?"));
+});
+
+test("weight reports detected; lift logs are not", () => {
+  assert.ok(looksLikeWeightReport("83kg"));
+  assert.ok(looksLikeWeightReport("my weight is 83.4kg"));
+  assert.ok(looksLikeWeightReport("weighed in at 82.9kg this morning"));
+  assert.ok(!looksLikeWeightReport("bench 80kg 3x10"), "a lift log is not a weigh-in");
+  assert.ok(!looksLikeWeightReport("I want to reach 75kg by December"));
+});
+
+// ============================================================
+// parseMealDate — SAST anchoring must hold at ANY wall-clock hour
+// (the 00:00-02:00 SAST window shipped 'yesterday' two days back for months)
+// ============================================================
+
+test("'yesterday' lands on the SAST day before today, noon SAST, at any hour", () => {
+  const d = parseMealDate("Yesterday I had 2 eggs and pap for dinner");
+  const expected = new Date(sastDayStart().getTime() - 86_400_000 + 12 * 3_600_000);
+  assert.equal(d.getTime(), expected.getTime(), `got ${d.toISOString()}, expected ${expected.toISOString()}`);
+});
+
+test("'last night' lands on yesterday 20:00 SAST, at any hour", () => {
+  const d = parseMealDate("had braai last night");
+  const expected = new Date(sastDayStart().getTime() - 86_400_000 + 20 * 3_600_000);
+  assert.equal(d.getTime(), expected.getTime());
+});
+
+test("'2 days ago' lands exactly two SAST days back at noon", () => {
+  const d = parseMealDate("had KFC 2 days ago");
+  const expected = new Date(sastDayStart().getTime() - 2 * 86_400_000 + 12 * 3_600_000);
+  assert.equal(d.getTime(), expected.getTime());
+});
+
+test("day-name meal lands on a past SAST day with the right wall-clock slot", () => {
+  const d = parseMealDate("had chicken and rice on saturday evening");
+  const diffFromToday = (sastDayStart().getTime() - sastDayStart(d).getTime()) / 86_400_000;
+  assert.ok(diffFromToday >= 1 && diffFromToday <= 7, `days back: ${diffFromToday}`);
+  const sastHour = new Date(d.getTime() + 2 * 3_600_000).getUTCHours();
+  assert.equal(sastHour, 20, `evening should be 20:00 SAST, got ${sastHour}:00`);
 });
 
 // ============================================================

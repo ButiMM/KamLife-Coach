@@ -501,3 +501,23 @@ export function parseQuantityCorrection(m: string): { count: number; food: strin
   if (NON_FOOD_UNIT_RE.test(food)) return null;
   return { count, food, oldCount };
 }
+
+// ============================================================
+// TRANSACTION REPORT DETECTORS — pure, unit-tested. These gate the model brain
+// in routes.ts: a plain steps/water/weight report must reach the deterministic
+// logger and never be swallowed by the model (2026-07-06: the brain answered
+// "Steps are 10000" convincingly and logged nothing). Question-guarding happens
+// at the call site (normalizer QUESTION classification) — these match form only.
+// ============================================================
+export function looksLikeStepsReport(m: string): boolean {
+  return /\b[\d,]+\s*k?\s*steps?\b/i.test(m) || /\bsteps?\s*(?:are|is|was|were|:)\s*[\d,]+/i.test(m);
+}
+
+export function looksLikeWaterReport(m: string): boolean {
+  return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
+    || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m);
+}
+
+export function looksLikeWeightReport(m: string): boolean {
+  return /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?\s*|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
+}

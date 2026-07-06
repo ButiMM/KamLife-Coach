@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -614,16 +614,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // NOTHING — five minutes later the coach claimed "your steps today aren't logged
   // yet". Code, not prompt, decides now; skipping the model on a pure transaction
   // also saves the call.
-  const isStepsReport = !normalizedQuestion
-    && (/\b[\d,]+\s*k?\s*steps?\b/i.test(m) || /\bsteps?\s*(?:are|is|was|were|:)\s*[\d,]+/i.test(m));
-  // Water and body-weight reports get the same bypass — same swallowing risk as
-  // steps (tight, anchored patterns so ordinary chat never matches).
-  const isWaterReport = !normalizedQuestion
-    && (/\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
-      || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m));
-  const isWeightReport = !normalizedQuestion
-    && /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isStepsReport && !isWaterReport && !isWeightReport) {
+  // Detectors are pure + unit-tested in utils.ts ("had 2 beers" must never match
+  // water; "bench 80kg 3x10" must never match weight). Question-guard stays here.
+  const isTransactionReport = !normalizedQuestion
+    && (looksLikeStepsReport(m) || looksLikeWaterReport(m) || looksLikeWeightReport(m));
+  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }

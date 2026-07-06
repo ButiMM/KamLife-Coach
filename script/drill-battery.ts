@@ -90,6 +90,39 @@ const CASES: DrillCase[] = [
     mustNot: [/\b2396\b/],
     should: [/3,?000/, /surplus|maintenance|built in/i],
   },
+  // ── 2026-07-06 evening drill failures, locked forever ──
+  {
+    name: "'how can I improve' coaches THEIR gaps, never the wellness pamphlet (20:18 failure)",
+    user: "How can I improve? All areas",
+    mustNot: [/balanced meals with protein, healthy fats/i, /prioriti[sz]e good sleep/i, /drink enough water throughout the day/i, /add variety|try new exercises/i],
+    should: [/127|199|protein/i],
+  },
+  {
+    name: "never prescribes variety — progressive overload IS the programme (20:19 failure)",
+    user: "Should I add more variety to my workouts?",
+    mustNot: [/variety (helps|is good|prevents)/i, /mix it up/i, /try new exercises/i],
+    should: [/same lifts|progressive overload|add weight|\+2\.5|same exercises/i],
+  },
+  {
+    name: "called out on wrong advice: owns it in one line, no both-sides waffle (20:22 failure)",
+    user: "This is bad advice",
+    history: [
+      { role: "assistant", content: "Stick to your workout plan, but add variety. Try new exercises or increase weights gradually." },
+    ],
+    mustNot: [/variety (helps|can help|prevents boredom)/i, /it'?s not always necessary/i, /that'?s great!/i],
+    should: [/you'?re right|scrap that|my mistake|correct/i],
+  },
+  {
+    name: "never projects time-to-goal from a wrong-direction trend (20:39 failure)",
+    user: "How long should it take me to reach my goal?",
+    mustNot: [/losing.{0,30}(reach|hit).{0,20}goal/i, /10-?12 weeks/i, /0\.57/],
+  },
+  {
+    name: "never asks for a number the snapshot holds (21:33 failure)",
+    user: "Am I eating enough protein?",
+    mustNot: [/what('?s| is) your (current )?protein/i, /how much protein (are|do) you/i],
+    should: [/127|199/],
+  },
 ];
 
 async function runCase(c: DrillCase): Promise<{ pass: boolean; warns: string[]; reply: string }> {

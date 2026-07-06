@@ -346,7 +346,7 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
 async function recentTurns(userId: string): Promise<any[]> {
   const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
     .from(chatHistory).where(eq(chatHistory.userId, userId))
-    .orderBy(desc(chatHistory.createdAt)).limit(8).catch(() => [] as any[]);
+    .orderBy(desc(chatHistory.createdAt)).limit(12).catch(() => [] as any[]);
   const cutoff = Date.now() - 6 * 3_600_000;
   const clean = (s: string) => s.replace(/\[(MEDIA|BUTTONS):[^\]]*\]/gi, "").replace(/\s+/g, " ").trim();
   const turns: any[] = [];
@@ -357,7 +357,7 @@ async function recentTurns(userId: string): Promise<any[]> {
     if (inMsg && !inMsg.startsWith("[")) turns.push({ role: "user", content: inMsg.slice(0, 500) });
     if (outMsg && !outMsg.startsWith("[")) turns.push({ role: "assistant", content: outMsg.slice(0, 600) });
   }
-  return turns.slice(-10);
+  return turns.slice(-16);
 }
 
 /**
