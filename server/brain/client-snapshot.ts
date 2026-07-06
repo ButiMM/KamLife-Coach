@@ -92,7 +92,7 @@ export async function buildClientSnapshot(user: any): Promise<string> {
         : `${slope > 0 ? "rising" : "falling"} about ${Math.abs(slope).toFixed(2)}kg/week recently`;
       const dir = totalChange > 0 ? "+" : "";
       // Both facts in ONE line so a reply can never split them into a contradiction.
-      lines.push(`Weight: started ${start}kg, now ${cur}kg — ${dir}${totalChange}kg over ${weeks} week${weeks !== 1 ? "s" : ""} total, and ${recentTrend}. When you talk about weight, state BOTH together (e.g. "up 0.8kg overall but flat the last 3 weeks — that's the plateau").`);
+      lines.push(`Weight: started ${start}kg, now ${cur}kg — ${dir}${totalChange}kg over ${weeks} week${weeks !== 1 ? "s" : ""} total, and ${recentTrend}. When you talk about weight, state BOTH together (e.g. "up 0.8kg overall but flat the last 3 weeks — that's the plateau"). Quote these figures EXACTLY as written — never restate the rate as a different number (a client was told 0.21kg/week and 0.57kg/week within minutes; that destroys trust).`);
     }
 
     // ── Protein adherence, last 7 days (per-day average) ──

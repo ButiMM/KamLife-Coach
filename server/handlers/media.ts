@@ -1147,9 +1147,16 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // same-sender bursts, and album webhooks) are already dropped upstream in
         // routes/whatsapp.ts by URL / MessageSid / phone dedup. Any photo that reaches here
         // is a distinct meal and must be logged.
+        // Store a READABLE description — "[Photo]" rendered as "details not logged"
+        // in every meal list and made "remove the eggs" / "same as my breakfast"
+        // matching impossible for photo meals (2026-07-06 audit). Caption wins;
+        // otherwise the vision identification's first real line.
+        const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
+          || (visionDisplay.split("\n").find(l => l.trim().length > 5) || "").replace(/[*_•]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110)
+          || "[Photo]";
         await db.insert(mealLogs).values({
           userId: user.id,
-          rawMessage: message || "[Photo]",
+          rawMessage: photoDesc,
           source: "photo",
           kcalInt: totalPhotoKcal,
           proteinInt: totalPhotoProt,
