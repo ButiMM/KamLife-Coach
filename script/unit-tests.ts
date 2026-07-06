@@ -13,7 +13,7 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
@@ -1417,6 +1417,39 @@ test("stripInventedRetroDate: strips invented 'N days ago'", () => {
 
 test("stripInventedRetroDate: no retro date → returns canonical unchanged (trimmed)", () => {
   assert.equal(stripInventedRetroDate("workout done", "just finished my session"), "workout done");
+});
+
+// ============================================================
+// parseQuantityCorrection — "2 eggs not 3" must never double-log
+// ============================================================
+
+test("qty correction: '2 eggs not 3' parses new/old counts and food", () => {
+  assert.deepEqual(parseQuantityCorrection("2 eggs not 3"), { count: 2, food: "eggs", oldCount: 3 });
+});
+
+test("qty correction: sentence forms parse — 'it was 2 slices of bread not 4'", () => {
+  const r = parseQuantityCorrection("it was 2 slices of bread not 4");
+  assert.ok(r, "should parse");
+  assert.equal(r!.count, 2);
+  assert.equal(r!.oldCount, 4);
+  assert.ok(r!.food.includes("slice"), `food: ${r!.food}`);
+});
+
+test("qty correction: units and non-food counts never match", () => {
+  assert.equal(parseQuantityCorrection("80 kg not 85"), null);
+  assert.equal(parseQuantityCorrection("walked 3000 steps not 4000"), null);
+  assert.equal(parseQuantityCorrection("did 3 sets not 4"), null);
+  assert.equal(parseQuantityCorrection("20 minutes not 30"), null);
+});
+
+test("qty correction: same count or insane counts reject", () => {
+  assert.equal(parseQuantityCorrection("3 eggs not 3"), null);
+  assert.equal(parseQuantityCorrection("100 eggs not 3"), null);
+});
+
+test("qty correction: plain food log never matches", () => {
+  assert.equal(parseQuantityCorrection("I had 2 eggs and toast for breakfast"), null);
+  assert.equal(parseQuantityCorrection("2 eggs and 3 viennas"), null);
 });
 
 // ============================================================

@@ -6,7 +6,7 @@
 import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
-import { sastDayStart, sastToday } from "../utils";
+import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
@@ -92,6 +92,56 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       } catch (err) {
         console.error("[FOOD_NEGATION]", err);
       }
+    }
+  }
+
+  // ---- QUANTITY CORRECTION — "2 eggs not 3", "it was 2 slices not 4" ----
+  // Must run BEFORE the quick-exit: these carry no mgmt keyword, so they fell
+  // through to the food scanner which logged the corrected text as a brand-NEW
+  // meal — the correction became a double-count (2026-07-06 audit).
+  const qc = !looksLikeQuestion(m) ? parseQuantityCorrection(m) : null;
+  if (qc) {
+    try {
+      const todayStartQC = sastDayStart();
+      const foodSingular = qc.food.replace(/e?s$/, "");
+      const rowsQC = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
+        .from(mealLogs)
+        .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartQC)))
+        .orderBy(desc(mealLogs.loggedAt))
+        .limit(10);
+      const targetQC = rowsQC.find(r => {
+        if ((r.rawMessage || "").toLowerCase().includes(foodSingular)) return true;
+        const its = r.items as Array<{ name?: string; foodName?: string }> | null;
+        return Array.isArray(its) && its.some(i => (i.name || i.foodName || "").toLowerCase().includes(foodSingular));
+      });
+      if (targetQC) {
+        const itemsQC = (targetQC.items as Array<{ name?: string; foodName?: string; kcal?: number; protein?: number }> | null) || [];
+        const itemQC = itemsQC.find(i => (i.name || i.foodName || "").toLowerCase().includes(foodSingular));
+        if (itemQC && typeof itemQC.kcal === "number" && itemQC.kcal > 0) {
+          // Exact item-level maths: scale the corrected item by newCount/oldCount.
+          const ratio = qc.count / qc.oldCount;
+          const newItemKcal = Math.round(itemQC.kcal * ratio);
+          const newItemProt = Math.round((itemQC.protein || 0) * ratio);
+          const newKcalQC = Math.max(0, (targetQC.kcalInt || 0) - itemQC.kcal + newItemKcal);
+          const newProtQC = Math.max(0, (targetQC.proteinInt || 0) - (itemQC.protein || 0) + newItemProt);
+          const newItemsQC = itemsQC.map(i => i === itemQC ? { ...i, kcal: newItemKcal, protein: newItemProt } : i);
+          await db.update(mealLogs).set({ kcalInt: newKcalQC, proteinInt: newProtQC, items: newItemsQC }).where(eq(mealLogs.id, targetQC.id));
+          invalidateFoodTotalsCache(user.id);
+          const recQC = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({ todayCalories: recQC.calories, todayProteinG: recQC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+          return `Fixed — ${qc.food} corrected to ${qc.count}. ✅\n\nUpdated total today: ~${recQC.calories} kcal | ~${recQC.protein}g protein.`;
+        }
+        // No per-item numbers to scale — honest remove-and-relog beats silent bad maths
+        // or a double-logged "correction".
+        await db.delete(mealLogs).where(eq(mealLogs.id, targetQC.id));
+        invalidateFoodTotalsCache(user.id);
+        const recQC2 = await recomputeTodayFoodTotals(user.id);
+        await db.update(users).set({ todayCalories: recQC2.calories, todayProteinG: recQC2.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+        return `That entry had the wrong count, so I removed it. ✅ Send the corrected meal — e.g. "${qc.count} ${qc.food}" plus whatever else was in it — and I'll log it right.\n\nToday now: ~${recQC2.calories} kcal | ~${recQC2.protein}g protein.`;
+      }
+      return `I don't see ${qc.food} in today's log to correct. Send *my meals* to check what's logged.`;
+    } catch (err) {
+      console.error("[QTY_CORRECTION]", err);
     }
   }
 
@@ -229,7 +279,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     || /^(remove|delete|undo|scratch)$/i.test(m.trim())
     || /\b(scratch that|undo that|take that off|remove that|delete that|that was wrong|wrong entry|wrong meal|logged.*wrong|that.?s a mistake|mistake.*log)\b/i.test(m);
   if (isRemoveLast) {
-    const todayStart = sastDayStart();
+    // Cutoff spans midnight: a meal logged 23:50 must still be removable at 00:10 —
+    // "today only" made the coach refuse the undo right after the day rolled over.
+    // During the day this is identical to sastDayStart().
+    const todayStart = new Date(Math.min(sastDayStart().getTime(), Date.now() - 2 * 3_600_000));
     const lastMealLog = await db.select({ id: mealLogs.id })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
@@ -279,7 +332,20 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
         });
 
         if (targetMealLog) {
-          await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
+          // ITEM-LEVEL first: "remove the rice" from a "chicken and rice" meal must
+          // not delete the chicken too. Deleting the whole row when other items
+          // exist silently corrupted the day's totals while claiming success
+          // (2026-07-06 audit). Only delete the row when the food IS the meal.
+          const rsItems = (targetMealLog.items as Array<{ name?: string; foodName?: string; kcal?: number; protein?: number }> | null) || [];
+          const rsItem = rsItems.find(i => (i.name || i.foodName || "").toLowerCase().includes(foodToRemove));
+          if (rsItem && rsItems.length > 1 && typeof rsItem.kcal === "number") {
+            const rsRow = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt }).from(mealLogs).where(eq(mealLogs.id, targetMealLog.id)).limit(1);
+            const newKcalRS = Math.max(0, (rsRow[0]?.kcalInt || 0) - (rsItem.kcal || 0));
+            const newProtRS = Math.max(0, (rsRow[0]?.proteinInt || 0) - (rsItem.protein || 0));
+            await db.update(mealLogs).set({ kcalInt: newKcalRS, proteinInt: newProtRS, items: rsItems.filter(i => i !== rsItem) }).where(eq(mealLogs.id, targetMealLog.id));
+          } else {
+            await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
+          }
           invalidateFoodTotalsCache(user.id);
           const recomputed = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({ todayCalories: recomputed.calories, todayProteinG: recomputed.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));

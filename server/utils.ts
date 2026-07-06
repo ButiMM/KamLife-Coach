@@ -474,3 +474,28 @@ export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
   }
   return parts.length ? parts : [text.trim()].filter(Boolean);
 }
+
+// ============================================================
+// QUANTITY CORRECTION PARSER — "2 eggs not 3", "it was 2 slices not 4".
+// Without this, a count correction fell through the mgmt handler and the food
+// scanner logged the corrected text as a brand-NEW meal — the correction became
+// a double-count (2026-07-06 audit). Pure — unit-tested in script/unit-tests.ts.
+// Returns null unless the message contains an unambiguous "N <food> … not M"
+// contrast with sane counts; unit-like words (kg, steps, ml…) never match.
+// ============================================================
+const NON_FOOD_UNIT_RE = /^(kgs?|kilograms?|grams?|ml|mls|litres?|liters?|kms?|kilometers?|kilometres?|steps?|reps?|sets?|kcal|cals?|calories|min|mins|minutes?|hrs?|hours?|days?|weeks?|percent|%)\b/i;
+
+export function parseQuantityCorrection(m: string): { count: number; food: string; oldCount: number } | null {
+  const match = m.match(/\b(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\s*[,.!]?\s+not\s+(\d+(?:\.\d+)?)\b/i)
+    || m.match(/\bnot\s+(\d+(?:\.\d+)?)\s*[,.]?\s*(?:it was|i had|just)\s+(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\b/i);
+  if (!match) return null;
+  // First pattern: [new, food, old]; second: [old, new, food]
+  const firstForm = /^\d/.test(match[1]) && !/^\d/.test(match[2]);
+  const count = parseFloat(firstForm ? match[1] : match[2]);
+  const oldCount = parseFloat(firstForm ? match[3] : match[1]);
+  const food = (firstForm ? match[2] : match[3]).trim().toLowerCase();
+  if (!Number.isFinite(count) || !Number.isFinite(oldCount)) return null;
+  if (count <= 0 || count > 50 || oldCount <= 0 || oldCount > 50 || count === oldCount) return null;
+  if (NON_FOOD_UNIT_RE.test(food)) return null;
+  return { count, food, oldCount };
+}
