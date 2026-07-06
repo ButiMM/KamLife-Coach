@@ -3,18 +3,77 @@
 Everything code-side is done or tracked. These are the tasks only YOU can do.
 Work top to bottom. Tick them off. Come back to Claude when you're stuck or done.
 
-Updated: 29 June 2026 — after the conversation-quality pass (live on main).
+Updated: 6 July 2026 — after the trust-engine pass (4 commits live on main).
 
-**Just shipped live (Claude, on `main`):** workouts now defer when you say
-"tomorrow" instead of dumping the session; long workouts arrive as several short
-WhatsApp bubbles instead of one "Read more" wall; the paid Day-1 workout that was
-being rejected for length now delivers; onboarding captures real names from
-"my name is… / I'm…". None of that is your task — just so you know what changed.
+**Just shipped live (Claude, on `main`, 5–6 July):** the coach brain now has a
+clock + today-so-far intake (no more morning "deficit" panic), knows what
+maintenance/surplus mean, logs "same thing for dinner" correctly instead of
+swallowing it, sees the scheduler's proactive messages (no more contradicting
+itself), passes every reply through the banned-phrase guardrail (the
+"It's understandable…" therapist-speak is now stripped by code and locked in CI),
+remembers 6 hours of conversation instead of 45 minutes, and sends a shareable
+**Week Card** after the Sunday voice recap. None of that is your task — deploy
+and drill it (see #0c).
 
 **The interactivity you want is gated on YOUR tasks below:** real tappable buttons
 come with your approved WhatsApp number + templates (**#4–8**); real exercise demos
 instead of YouTube search links come with the GIFs (**#13**). Until those, the code
 is ready and waiting.
+
+---
+
+## 🚨 BEFORE ANYTHING ELSE — the two bombs + the drill (from the 6 July audit)
+
+### 0a. DATABASE BACKUP (30 min) — outranks marketing, features, everything
+Your entire moat is months of client data on one Railway Postgres. One bad
+migration or one Railway incident = the business is gone. The dashboard checklist
+has flagged this for weeks.
+- [ ] Follow `docs/backup-restore.md` — add the 5 GitHub secrets
+      (`BACKUP_DATABASE_URL`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`,
+      `R2_BUCKET`, `R2_ENDPOINT`)
+- [ ] Confirm the first backup actually ran (green run in GitHub Actions)
+- [ ] Do this BEFORE your next testing session
+
+### 0b. TWILIO_SMS_NUMBER (10 min)
+Payment-failure SMS fallback is silently OFF without it — failed payers churn
+without ever knowing their card bounced.
+- [ ] Buy an SMS-capable number in Twilio Console
+- [ ] Railway → Variables → `TWILIO_SMS_NUMBER=+27XXXXXXXXX`
+
+### 0c. Redeploy + drill the trust engine (your next testing session)
+Railway auto-deploys `main` — confirm the latest deploy includes the 6 July
+commits, then drill exactly these five (they were the worst failures):
+- [ ] Morning, after logging one breakfast: "Am I in a deficit?" → must NOT panic;
+      must say the day is in progress
+- [ ] "What should my daily surplus be?" → ~300–500 above maintenance, built into
+      the target — answered FIRST try
+- [ ] Log lunch, then "Same thing for dinner" → dinner must appear; day summary
+      must show one more meal
+- [ ] "Walked 4000 steps" then "how are my steps?" → must say TODAY, 4,000,
+      separate from the average
+- [ ] "Going to have a Zap-Grow shake" (made-up brand) → must ASK what it is,
+      never describe it
+- [ ] Screenshot every failure — each one becomes a same-day fix + CI case
+
+---
+
+## 📣 MARKETING PARALLEL TRACK (no traffic risk — do while the product hardens)
+
+The strategy is locked: **the screenshots ARE the ads. Marketing is a consequence
+of product use, not an activity.** These cost nothing and remove the launch-day
+bottleneck:
+
+- [ ] **Positioning line, locked:** "You don't track. It remembers." Every caption,
+      status and page is a variation of it. No feature talk. Never lead with "AI".
+- [ ] **Get off the sandbox** = tasks #4–8 below. You cannot distribute on a
+      sandbox where users must type a join code. Meta approval has weeks of lead
+      time — start NOW even though launch is later.
+- [ ] **Build the artifact inventory:** save every clean drill conversation,
+      Week Card, and real before/after into one folder. Launch with a war chest
+      of real material instead of starting cold.
+- [ ] **Story format for every future post:** tension → coach catches it → outcome.
+      ("I thought this meal was healthy" → grease called out kindly → 1.5kg down.)
+      Demos of features die after the third post; stories spread.
 
 ---
 
