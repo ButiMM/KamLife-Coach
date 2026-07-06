@@ -17,6 +17,7 @@ import { assertAiOnline } from "./ai-offline";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused, claimProactive } from "./scheduler/shared";
+import { buildWeekCard } from "./week-card";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 
 const openai = new OpenAI({
@@ -353,6 +354,16 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
         `UPDATE voice_recap_logs SET sent_at = NOW() WHERE id = $1`,
         [recapId]
       );
+
+      // The week card follows as its OWN message so a screenshot of it is clean
+      // (no voice-note transcript in frame). sendWhatsApp already logs it to
+      // chat_history as PROACTIVE. Card failure never fails the recap.
+      try {
+        const card = buildWeekCard(data);
+        if (card) await sendWhatsApp(data.phoneNumber, card);
+      } catch (cardErr: any) {
+        console.warn(`[RECAP] week card send failed for ${data.name ?? id.slice(-6)}:`, cardErr.message);
+      }
 
       sent++;
       console.log(`[RECAP] ✓ ${data.name ?? id.slice(-6)} — ${script.slice(0, 60)}…`);

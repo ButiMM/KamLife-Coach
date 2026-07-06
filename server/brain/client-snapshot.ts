@@ -12,7 +12,7 @@
  */
 
 import { db } from "../db";
-import { weightLogs, workoutLogs, mealLogs, stepLogs } from "../../shared/schema";
+import { weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory } from "../../shared/schema";
 import { eq, gte, desc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
@@ -142,6 +142,21 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const waterTarget = Math.max(2.0, Math.round((parseFloat(String(user.currentWeight || "75")) || 75) * 0.033 * 10) / 10);
     const todayWater = user.waterLastResetDate === sastToday() ? (Number(user.todayWater) || 0) : 0;
     lines.push(`Water today: ${todayWater}L of ${waterTarget}L target.`);
+
+    // ── Last automated (proactive) message — the scheduler talks to the client too.
+    // Without this the brain argues with its own system: client says "but you told me
+    // my calories were bumped / I gained 0.8kg" hours later and the brain has no idea
+    // what was sent (2026-07-05 audit, "you are gonna get people killed").
+    const [lastProactive] = await db.select({ messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), eq(chatHistory.intent, "PROACTIVE"), gte(chatHistory.createdAt, since(2))))
+      .orderBy(desc(chatHistory.createdAt)).limit(1)
+      .catch(() => [] as { messageOut: string | null; createdAt: Date | null }[]);
+    if (lastProactive?.messageOut) {
+      const ageH = Math.max(0, Math.round((now - new Date(lastProactive.createdAt || now).getTime()) / 3_600_000));
+      const excerpt = lastProactive.messageOut.replace(/\s+/g, " ").trim().slice(0, 260);
+      lines.push(`Last automated coach message (sent ~${ageH}h ago — the client may reference it as something "you said"): "${excerpt}". If it quoted numbers, they were true when sent; reconcile with the stats above (e.g. total change vs recent trend are DIFFERENT facts) instead of contradicting or apologising.`);
+    }
   } catch (e) {
     console.error("[CLIENT_SNAPSHOT] partial:", (e as any)?.message || e);
   }

@@ -16,6 +16,7 @@ import { classifyWorkoutFeedback } from "../server/workout-feedback";
 import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
+import { buildWeekCard, type WeekCardData } from "../server/week-card";
 
 let passed = 0;
 let failed = 0;
@@ -1416,6 +1417,59 @@ test("stripInventedRetroDate: strips invented 'N days ago'", () => {
 
 test("stripInventedRetroDate: no retro date → returns canonical unchanged (trimmed)", () => {
   assert.equal(stripInventedRetroDate("workout done", "just finished my session"), "workout done");
+});
+
+// ============================================================
+// buildWeekCard — the shareable week artifact (pure, no DB)
+// ============================================================
+
+const fullWeek: WeekCardData = {
+  name: "Kam Mokgokolo", currentWeight: 82.6, stepsTarget: 11000,
+  workoutsThisWeek: 3, trainingDaysPerWeek: 3, avgStepsThisWeek: 11500,
+  weightChange: -0.4, mealsLoggedDays: 7, workoutStreak: 8, lifeContext: null,
+};
+
+test("week card: full week shows all lines, first name only, brand footer", () => {
+  const card = buildWeekCard(fullWeek);
+  assert.ok(card, "card should build");
+  assert.ok(card!.includes("YOUR WEEK — Kam"), "first name only");
+  assert.ok(!card!.includes("Mokgokolo"), "surname must not appear");
+  assert.ok(card!.includes("Sessions: 3/3 ✅"), "sessions with tick");
+  assert.ok(card!.includes("11,500/day average ✅"), "steps with tick when target met");
+  assert.ok(card!.includes("7 of 7 days 🔥"), "full food week gets fire");
+  assert.ok(card!.includes("down 0.4kg in 2 weeks"), "weight change stated with window");
+  assert.ok(card!.includes("Session streak: 8"), "streak shown at >=3");
+  assert.ok(card!.includes("KamLife Coach"), "brand footer present");
+});
+
+test("week card: empty week returns null — never send a shame card", () => {
+  assert.equal(buildWeekCard({ ...fullWeek, workoutsThisWeek: 0, mealsLoggedDays: 2 }), null);
+});
+
+test("week card: life event week returns null — never celebrate over a bereavement", () => {
+  assert.equal(buildWeekCard({ ...fullWeek, lifeContext: "This client experienced a bereavement or loss this week." }), null);
+});
+
+test("week card: tiny weight change reads as holding steady, not noise", () => {
+  const card = buildWeekCard({ ...fullWeek, weightChange: 0.1 });
+  assert.ok(card!.includes("82.6kg — holding steady"), `got: ${card}`);
+  assert.ok(!card!.includes("up 0.1"), "must not narrate scale noise");
+});
+
+test("week card: missing weight/steps/streak lines are omitted, not zeroed", () => {
+  const card = buildWeekCard({ ...fullWeek, currentWeight: null, avgStepsThisWeek: 0, workoutStreak: 2 });
+  assert.ok(card, "card still builds from sessions+food");
+  assert.ok(!card!.includes("⚖️"), "no weight line without a weigh-in");
+  assert.ok(!card!.includes("👟"), "no steps line without steps");
+  assert.ok(!card!.includes("streak"), "no streak line under 3");
+});
+
+test("week card: below-target week still builds but without ticks", () => {
+  const card = buildWeekCard({ ...fullWeek, workoutsThisWeek: 2, avgStepsThisWeek: 9000, mealsLoggedDays: 5 });
+  assert.ok(card!.includes("Sessions: 2/3"), "honest session count");
+  assert.ok(!card!.includes("Sessions: 2/3 ✅"), "no tick when target missed");
+  assert.ok(card!.includes("5 of 7 days"), "honest food days");
+  assert.ok(!card!.includes("🔥 *"), "no false celebration markers on partial week");
 });
 
 // ============================================================
