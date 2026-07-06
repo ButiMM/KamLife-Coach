@@ -30,6 +30,7 @@ import { invalidatePatternCache } from "../cache";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "../handlers/food-scanner";
 import { enforceCoachGuardrails } from "../coach-guardrails";
+import { retrieveMemories } from "../memory";
 import { buildClientSnapshot } from "./client-snapshot";
 
 const DAY = 86_400_000;
@@ -70,6 +71,9 @@ HARD RULES (these are the failures we are fixing)
 - NEVER do calorie/protein arithmetic yourself. Running totals, remaining kcal, and averages come ONLY from tool results or the snapshot — quote them as given. Your own maths WILL be wrong and the client checks (2026-07-06: "155 kcal left" was invented and false).
 - You can see the recent conversation. Do NOT repeat stats or facts you already gave a moment ago — build on them, reference what was just said, sound like you remember. Only re-pull the snapshot if the topic actually needs fresh numbers.
 - If their weight is moving the WRONG way for their goal (losing on muscle gain, or gaining on fat loss), say it plainly and fix the plan — never soften the wrong direction.
+- GOAL DIRECTION: read the goal BEFORE talking trajectory. For muscle gain a falling weight trend is a PROBLEM to fix, never a pace to project — NEVER estimate "time to goal" from a trend pointing the WRONG way for the goal (a gaining client was told "losing 0.57kg/week, you'll reach your goal in 10–12 weeks"). Never invent a target weight or an ETA the snapshot doesn't support.
+- SNAPSHOT BEATS HISTORY: if a number in the recent conversation (even one YOU said earlier) conflicts with the snapshot, the snapshot is right — use its number and correct the record in half a sentence. Never repeat an earlier wrong number for the sake of consistency.
+- NEVER ask the client for a number the snapshot already shows (protein, steps, weight, calories eaten). Asking "what's your protein looking like?" while holding their 143g average reads as amnesia and destroys trust — quote the number and coach it.
 - TIME & TODAY: the snapshot gives the current SA time and today-so-far food/steps. Respect the clock — a low total early in the day is NORMAL (the day isn't done); coach the next meal. NEVER call today's remaining kcal a "deficit" and never panic about under-eating before the day is over. Anything the client reports with no day word ("walked 3000 steps", "had eggs") happened TODAY — yesterday only if they SAY yesterday.
 - SURPLUS/DEFICIT: these compare a FULL day's intake to MAINTENANCE (see the snapshot's Energy frame). Their calorie target already includes the goal adjustment — "what should my surplus be?" asks about target vs maintenance, never about today's remaining kcal. Get this wrong and the client loses all trust.
 - UNKNOWN FOOD/BRAND: if you don't recognise a food, shake or brand they named, ask what's in it — one short question. Never invent what a product is or bluff its nutrition.
@@ -362,19 +366,39 @@ export async function runCoachBrain(ctx: {
   openai: any;
 }): Promise<string | null> {
   if (process.env.MODEL_BRAIN !== "on") return null; // flag gate — inert by default
-  const { message, m, user, openai } = ctx;
+  const { phone, message, m, user, openai } = ctx;
 
   try {
-    const history = await recentTurns(user.id).catch(() => []);
+    // Long-term memory + short-term thread in parallel. The memory store (injuries,
+    // preferences, life events, milestones) fed the OLD fallback but never the brain —
+    // "the coach that remembers everything" was reading only 6 hours of chat
+    // (2026-07-06 refinement). Best-effort: an empty list never blocks a reply.
+    const [history, memories] = await Promise.all([
+      recentTurns(user.id).catch(() => []),
+      retrieveMemories(phone, message).catch(() => [] as string[]),
+    ]);
     const messages: any[] = [
       { role: "system", content: BRAIN_SYSTEM },
+      ...(memories.length > 0 ? [{
+        role: "system",
+        content: `LONG-TERM CLIENT MEMORY — facts this client told you in past weeks. Use them naturally when relevant (never say "according to my notes"):\n${memories.slice(0, 5).map(x => `- ${x}`).join("\n")}`,
+      }] : []),
       ...history,
       { role: "user", content: message },
     ];
 
+    // MODEL ESCALATION: pushback, "you're wrong", frustration and long multi-part
+    // messages are the exact moments that decide whether a client stays — worth the
+    // big model. Routine traffic stays on mini (margin discipline: ~5-10% of
+    // messages escalate).
+    const hardMoment = /\b(wrong|bad advice|not accurate|inaccurate|hallucinat|confused|don'?t you know|what the hell|wtf|nonsense|makes no sense|come on\b|are you (serious|kidding)|but you (said|told)|you just (said|asked)|listen to me)\b/i.test(m)
+      || message.length > 240;
+    const brainModel = hardMoment ? "gpt-4o" : "gpt-4o-mini";
+    if (hardMoment) console.log(`[BRAIN_COACH] escalated to ${brainModel} (hard moment)`);
+
     for (let round = 0; round < 4; round++) {
       const resp = await openai.chat.completions.create({
-        model: "gpt-4o-mini",
+        model: brainModel,
         messages,
         tools: TOOLS,
         tool_choice: "auto",

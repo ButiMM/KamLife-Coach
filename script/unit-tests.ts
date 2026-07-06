@@ -437,15 +437,15 @@ test("streak: late-night SAST log (11pm) counts as correct date", () => {
     const s = new Date(d.getTime() + SAST_OFFSET);
     return `${s.getUTCFullYear()}-${s.getUTCMonth()}-${s.getUTCDate()}`;
   }
-  // 11pm UTC = 1am SAST next day. With SAST offset applied, it's the next day.
-  const elevenPmUTC = new Date();
-  elevenPmUTC.setUTCHours(23, 0, 0, 0);
-  const elevenPmSAST = new Date();
-  elevenPmSAST.setUTCHours(21, 0, 0, 0); // 11pm SAST = 9pm UTC
-  // 11pm SAST key should be TODAY in SAST
-  const sastKey = dateKey(elevenPmSAST);
+  // Anchor BOTH to the same SAST day. The old version built "11pm SAST" on the
+  // current UTC date but compared against today-in-SAST — between 22:00 and 24:00
+  // UTC those are different calendar days, so the suite failed only when run in
+  // the two hours after SAST midnight (caught live, 2026-07-06 23:14 UTC).
   const todaySAST = new Date(Date.now() + SAST_OFFSET);
   const todayKey = `${todaySAST.getUTCFullYear()}-${todaySAST.getUTCMonth()}-${todaySAST.getUTCDate()}`;
+  // 23:00 SAST on today's SAST date = 21:00 UTC on that same calendar date
+  const elevenPmSAST = new Date(Date.UTC(todaySAST.getUTCFullYear(), todaySAST.getUTCMonth(), todaySAST.getUTCDate(), 21, 0, 0));
+  const sastKey = dateKey(elevenPmSAST);
   assert.equal(sastKey, todayKey, "11pm SAST log should map to today's SAST date");
 });
 
