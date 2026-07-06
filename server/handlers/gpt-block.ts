@@ -11,6 +11,7 @@ import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./chec
 import { detectLanguage } from "../constants";
 import { checkGptRateLimit, sastDayStart, sastToday } from "../utils";
 import { getKamlifeProgramme } from "../programme";
+import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
 
@@ -284,11 +285,12 @@ export async function handleGptBlock(ctx: {
       ? `\n- Programme: Phase ${user.programmePhase}, Week ${user.programmeWeek || 1}, Day ${user.programmeDayInWeek || 1}`
       : "";
     const weightLine = user.currentWeight ? `\n- Current weight: ${parseFloat(String(user.currentWeight)).toFixed(1)}kg` : "";
+    const energyFrame = energyFrameLine(user.goalType, calTarget);
     todayStatusBlock = `\n\nCLIENT STATUS RIGHT NOW (${sastHour}:00 SAST):
 - Calories: ${calEaten} kcal eaten / ${calTarget} target → ${calStatus}
 - Protein: ${protEaten}g eaten / ${protTarget}g target → ${protStatus}
 - Steps today: ${stepStatus}${progContext}${weightLine}
-- Goal: ${user.goalType || "fat_loss"}
+- Goal: ${user.goalType || "fat_loss"}${energyFrame ? `\n- ${energyFrame}` : ""}
 THIS DATA IS BACKGROUND — use it to answer what the client actually asked, NOT as a reason to lecture. Only bring up calories or protein if the client raises it, asks what to eat, or asks how they are doing. When you do: state numbers matter-of-factly, no guilt trip, and frame any gap as the next opportunity, never a failure. Do not tack on unsolicited "add more protein" advice — most messages just need a warm, direct answer. NEVER ask the client for information shown above (weight, goal, targets, today's numbers) — you already have it; asking again destroys trust.`;
   } catch (e) { /* non-fatal — context is best-effort */ }
 

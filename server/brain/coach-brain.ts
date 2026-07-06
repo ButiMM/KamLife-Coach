@@ -29,6 +29,7 @@ import { logChat } from "../handlers/chat-log";
 import { invalidatePatternCache } from "../cache";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "../handlers/food-scanner";
+import { enforceCoachGuardrails } from "../coach-guardrails";
 import { buildClientSnapshot } from "./client-snapshot";
 
 const DAY = 86_400_000;
@@ -216,12 +217,15 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
 }
 
 // Recent real turns of THIS conversation, so the brain has memory and stops repeating
-// itself. Last ~45 min only; system/proactive rows and inline markers stripped.
+// itself. 6-hour window (45 min lost the thread on real WhatsApp rhythms: a client
+// replying "?" to a mid-morning message after lunch got "What's on your mind?" —
+// total amnesia, 2026-07-05 audit); still capped at the last 8 rows so a heavy day
+// can't flood the context. Inline markers stripped.
 async function recentTurns(userId: string): Promise<any[]> {
   const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut, createdAt: chatHistory.createdAt })
     .from(chatHistory).where(eq(chatHistory.userId, userId))
     .orderBy(desc(chatHistory.createdAt)).limit(8).catch(() => [] as any[]);
-  const cutoff = Date.now() - 45 * 60_000;
+  const cutoff = Date.now() - 6 * 3_600_000;
   const clean = (s: string) => s.replace(/\[(MEDIA|BUTTONS):[^\]]*\]/gi, "").replace(/\s+/g, " ").trim();
   const turns: any[] = [];
   for (const r of rows.reverse()) {
@@ -273,8 +277,18 @@ export async function runCoachBrain(ctx: {
       if (!toolCall) {
         const text = (msg.content || "").trim();
         if (!text) return null;
-        await logChat(user.id, message, text, "BRAIN_COACH").catch(() => {});
-        return text;
+        // Code-as-guardrail on the model's mouth: the fallback pipeline runs
+        // sanitizeCoachReply/enforceCoachGuardrails but the brain returned RAW model
+        // output — the one unguarded path (2026-07-06 audit). Strips banned
+        // therapist-speak, fixes budget-mismatched food, adds the injury safety line.
+        const guarded = enforceCoachGuardrails(text, {
+          userMessage: message,
+          budgetTier: user.weeklyFoodBudget,
+          injuries: user.injuries,
+        });
+        if (guarded.violations.length > 0) console.log(`[BRAIN_COACH] guardrails: ${guarded.violations.join(",")}`);
+        await logChat(user.id, message, guarded.reply, "BRAIN_COACH").catch(() => {});
+        return guarded.reply;
       }
 
       if (toolCall.function?.name === "defer") return null;

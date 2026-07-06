@@ -40,6 +40,14 @@ const BANNED_PHRASES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\bAccording to your logs,?\s*/gi, replacement: "" },
   { pattern: /\bI can see that\s*/gi, replacement: "" },
   { pattern: /\bI notice that\s*/gi, replacement: "" },
+  // Therapist-speak observed leaking in production (2026-07-05 screenshots) —
+  // sentence-level strips: the phrase drags the whole hollow sentence with it.
+  { pattern: /\bIt'?s understandable[^.!?]*[.!?]\s*/gi, replacement: "" },
+  { pattern: /\bWeight fluctuations are normal[^.!?]*[.!?]\s*/gi, replacement: "" },
+  { pattern: /\btrust the process[.!]?\s*/gi, replacement: "" },
+  { pattern: /\bkick-?start\b/gi, replacement: "start" },
+  { pattern: /\bStay positive[.!]?\s*/gi, replacement: "" },
+  { pattern: /\bI hear you[,.!]?\s*/gi, replacement: "" },
 ];
 
 export function enforceCoachGuardrails(input: string, context: GuardrailContext): GuardrailResult {

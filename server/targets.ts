@@ -191,3 +191,23 @@ export function getDailyStepContext(
 
   return { target, rangeMin, goalContext };
 }
+
+// ============================================================
+// ENERGY FRAME — one sentence that anchors maintenance/surplus/deficit semantics
+// for every model prompt. The calorie target ALREADY includes the goal adjustment;
+// without this line the model invents a maintenance number and answers "what should
+// my surplus be?" with today's remaining kcal (2026-07-06 audit). Shared by the
+// brain snapshot AND the GPT fallback so both mouths state the same energy truth.
+// Pure — unit-tested in script/unit-tests.ts.
+// ============================================================
+export function energyFrameLine(goalType: string | null | undefined, calorieTarget: number | null | undefined): string | null {
+  const target = Number(calorieTarget) || 0;
+  if (target <= 0) return null;
+  if (goalType === "muscle_gain") {
+    return `Energy frame: maintenance ≈ ${target - 400} kcal (estimate). The ${target} kcal target ALREADY includes the muscle-gain surplus (~300–500 above maintenance) — if asked what their surplus should be: it is built into the target; eating to ${target} IS the surplus. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`;
+  }
+  if (goalType === "fat_loss") {
+    return `Energy frame: maintenance ≈ ${target + 450} kcal (estimate). The ${target} kcal target ALREADY includes the fat-loss deficit — eating to ${target} IS the plan. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`;
+  }
+  return `Energy frame: the ${target} kcal target is the daily plan for this goal. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`;
+}

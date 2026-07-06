@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
@@ -1417,6 +1417,29 @@ test("stripInventedRetroDate: strips invented 'N days ago'", () => {
 
 test("stripInventedRetroDate: no retro date → returns canonical unchanged (trimmed)", () => {
   assert.equal(stripInventedRetroDate("workout done", "just finished my session"), "workout done");
+});
+
+// ============================================================
+// energyFrameLine — one energy truth for every model prompt
+// ============================================================
+
+test("energy frame: muscle gain states maintenance below target and surplus-is-built-in", () => {
+  const line = energyFrameLine("muscle_gain", 2996);
+  assert.ok(line, "line should build");
+  assert.ok(line!.includes("2596"), `maintenance should be target-400: ${line}`);
+  assert.ok(line!.includes("ALREADY includes the muscle-gain surplus"), "must state surplus is built in");
+  assert.ok(line!.includes("never the gap left mid-day"), "must ban mid-day deficit talk");
+});
+
+test("energy frame: fat loss states maintenance above target", () => {
+  const line = energyFrameLine("fat_loss", 1900);
+  assert.ok(line!.includes("2350"), `maintenance should be target+450: ${line}`);
+  assert.ok(line!.includes("fat-loss deficit"), "must state deficit is built in");
+});
+
+test("energy frame: no target → null (never invent numbers)", () => {
+  assert.equal(energyFrameLine("muscle_gain", null), null);
+  assert.equal(energyFrameLine("muscle_gain", 0), null);
 });
 
 // ============================================================

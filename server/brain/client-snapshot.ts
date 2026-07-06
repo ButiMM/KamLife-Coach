@@ -16,6 +16,7 @@ import { weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory } from "../../
 import { eq, gte, desc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
+import { energyFrameLine } from "../targets";
 import { sastToday, sastDayStart } from "../utils";
 
 const DAY = 86_400_000;
@@ -36,18 +37,11 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const goal = String(user.goalType || "fat_loss").replace(/_/g, " ");
     lines.push(`Goal: ${goal}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`);
 
-    // ── Energy frame — maintenance is not stored anywhere, so without this line the
-    // model invents one ("your maintenance is 2496") and answers "what should my
-    // surplus be?" with today's remaining kcal (2026-07-06 audit).
+    // ── Energy frame — shared with the GPT fallback (targets.ts) so both mouths
+    // state the same maintenance/surplus truth (2026-07-06 audit).
     const calTarget = Number(user.calorieTarget) || 0;
-    if (calTarget > 0) {
-      const goalKey = String(user.goalType || "");
-      if (goalKey === "muscle_gain") {
-        lines.push(`Energy frame: maintenance ≈ ${calTarget - 400} kcal (estimate). The ${calTarget} kcal target ALREADY includes the muscle-gain surplus (~300–500 above maintenance) — if asked what their surplus should be: it is built into the target; eating to ${calTarget} IS the surplus. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`);
-      } else if (goalKey === "fat_loss") {
-        lines.push(`Energy frame: maintenance ≈ ${calTarget + 450} kcal (estimate). The ${calTarget} kcal target ALREADY includes the fat-loss deficit — eating to ${calTarget} IS the plan. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`);
-      }
-    }
+    const frame = energyFrameLine(user.goalType, user.calorieTarget);
+    if (frame) lines.push(frame);
 
     // ── Food TODAY so far — running count, labelled meals, space left. "Remaining"
     // is food still to eat, never a "deficit".
