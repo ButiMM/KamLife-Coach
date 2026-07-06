@@ -250,6 +250,12 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
     });
     invalidateFoodTotalsCache(user.id);
     const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
+    if (totals) {
+      // Sync the users-row mirror — misc-commands/lifecycle read it; leaving it stale
+      // here was another two-sources-of-truth leak (2026-07-06 sweep).
+      await db.update(users).set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() })
+        .where(eq(users.id, user.id)).catch(() => {});
+    }
     const remaining = (totals?.calories != null && user.calorieTarget) ? Math.max(0, user.calorieTarget - totals.calories) : null;
     return `Logged ${target || match.mealLabel || "that meal"} = ${match.rawMessage || "the same meal"} (~${match.kcalInt} kcal, ${match.proteinInt}g protein).${remaining != null ? ` ~${remaining} kcal left today.` : ""} Confirm briefly, coach voice.`;
   }

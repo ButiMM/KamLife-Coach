@@ -590,10 +590,14 @@ export function buildFoodLogReply(p: {
     1.5
   );
   const runningTotalSane = runningCals <= maxReasonableCals;
+  // When the running total is implausible for the time of day, SAY SO — the old
+  // silent "Remaining today: ~0 kcal" hid a duplicate-inflated day from the client
+  // instead of helping them fix it (2026-07-06: four copies of one dinner sailed
+  // past this guard unremarked).
   const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
-    ? `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`
+    ? `Today's total (~${runningCals} kcal) looks high for this time of day — if something was logged twice, send *my meals* to check, then *remove the duplicates*.`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
 
   const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];

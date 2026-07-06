@@ -1090,8 +1090,12 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const isMealPlanRequest =
     ["meal plan", "my meal plan", "mealplan", "eating plan", "diet plan", "weekly meals",
       "what should i eat", "give me a meal plan", "i need a meal plan", "i want a meal plan",
-      "food plan", "my food plan", "weekly meal plan"].includes(m)
-    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals)\b/i.test(m);
+      "food plan", "my food plan", "weekly meal plan",
+      // "Nutrition side?" asked right after a workout got the WORKOUT re-sent
+      // (2026-07-05 audit) — the eating half of the plan had no aliases here.
+      "nutrition side", "nutrition side?", "nutrition plan", "my nutrition plan",
+      "food side", "food side?", "eating side", "eating side?", "nutrition?"].includes(m)
+    || /\b(give me a meal plan|my meal plan|send.*meal plan|meal plan please|eating plan|what should i eat|i need a meal plan|diet plan|weekly meals|nutrition (side|plan))\b/i.test(m);
   if (isMealPlanRequest) {
     // Fetch last 7 days of meal logs to surface recently eaten foods
     let recentFoods: string[] = [];
