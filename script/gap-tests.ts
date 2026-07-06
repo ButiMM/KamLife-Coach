@@ -404,9 +404,12 @@ test("parseMealDate: 'two days ago' (word number) → ~2 days ago", () => {
 
 test("parseMealDate: 'last night' → yesterday evening", () => {
   const d = parseMealDate("had braai last night");
-  // Should be ~18-30 hours ago
+  // "Last night" = 20:00 SAST on the previous SAST day. Said just after midnight
+  // that's only ~4-6 hours ago; said at 21:00 it's ~25h — so the honest band is
+  // 3-30h. The old 6-30h band assumed a daytime test run and actually passed on
+  // a WRONG answer (two nights back) when run at 01:47 SAST (2026-07-07).
   const hoursAgo = (Date.now() - d.getTime()) / 3_600_000;
-  assert.ok(hoursAgo >= 6 && hoursAgo <= 30, `hours ago: ${hoursAgo}`);
+  assert.ok(hoursAgo >= 3 && hoursAgo <= 30, `hours ago: ${hoursAgo}`);
 });
 
 test("parseMealDate: 'earlier today' → ~3 hours ago", () => {

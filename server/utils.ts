@@ -60,25 +60,28 @@ export function parseMealDate(message: string): Date {
   const m = message.toLowerCase();
   const nowSAST = Date.now() + 2 * 3_600_000; // ms in SAST equivalent
 
-  // "2 days ago", "two days ago"
+  // Relative days are anchored to the SAST calendar day, not UTC-now. The old
+  // "now minus 24h" versions were wrong in the 00:00–02:00 SAST window: at 01:25
+  // SAST, "yesterday" resolved to TWO SAST days back, logging the meal to the
+  // wrong day and corrupting totals/streaks (caught live by routing-audit,
+  // 2026-07-06 23:25 UTC). sastDayStart() is the UTC instant of SAST midnight.
+  const todayStartSAST = sastDayStart();
+
+  // "2 days ago", "two days ago" → noon SAST on that day
   const daysAgoMatch = m.match(/\b(\d+|one|two|three)\s+days?\s+ago\b/);
   if (daysAgoMatch) {
     const n = { one: 1, two: 2, three: 3 }[daysAgoMatch[1] as string] || parseInt(daysAgoMatch[1]);
-    return new Date(Date.now() - n * 86_400_000);
+    return new Date(todayStartSAST.getTime() - n * 86_400_000 + 12 * 3_600_000);
   }
 
   // "last night" → yesterday at 8pm SAST
   if (/\b(last night|tonight|yesterday.?night|previous night)\b/.test(m)) {
-    const d = new Date(Date.now() - 86_400_000);
-    d.setUTCHours(18, 0, 0, 0); // 8pm SAST = 6pm UTC
-    return d;
+    return new Date(todayStartSAST.getTime() - 86_400_000 + 20 * 3_600_000);
   }
 
   // "yesterday" → yesterday at noon SAST
   if (/\byesterday\b/.test(m)) {
-    const d = new Date(Date.now() - 86_400_000);
-    d.setUTCHours(10, 0, 0, 0); // noon SAST = 10am UTC
-    return d;
+    return new Date(todayStartSAST.getTime() - 86_400_000 + 12 * 3_600_000);
   }
 
   // Day-of-week references: "on Saturday", "had this Saturday", "Sunday morning", etc.
