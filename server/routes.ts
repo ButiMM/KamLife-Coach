@@ -608,7 +608,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // snapshot, and defers TRANSACTIONS (logging, billing) and any error back to the
   // handlers below — it can only add a reply, never remove the deterministic fallback.
   // See docs/architecture-bet.md.
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl) {
+  // TRANSACTION PREFLIGHT: a plain steps report must reach the deterministic logger
+  // below. The prompt tells the brain to defer these, but on 2026-07-06 it answered
+  // "Steps are 10000" from the snapshot (sounding perfectly right) and logged
+  // NOTHING — five minutes later the coach claimed "your steps today aren't logged
+  // yet". Code, not prompt, decides now; skipping the model on a pure transaction
+  // also saves the call.
+  const isStepsReport = !normalizedQuestion
+    && (/\b[\d,]+\s*k?\s*steps?\b/i.test(m) || /\bsteps?\s*(?:are|is|was|were|:)\s*[\d,]+/i.test(m));
+  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isStepsReport) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }
