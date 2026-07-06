@@ -20,11 +20,11 @@
  */
 
 import { db } from "../db";
-import { exerciseLogs, mealLogs, chatHistory } from "../../shared/schema";
+import { exerciseLogs, mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
 import { parseLiftLog } from "../handlers/workout";
-import { looksLikeQuestion, sastDayStart } from "../utils";
+import { looksLikeQuestion, sastDayStart, sastToday } from "../utils";
 import { logChat } from "../handlers/chat-log";
 import { invalidatePatternCache } from "../cache";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
@@ -54,6 +54,7 @@ WHAT YOU DO
 - Use get_todays_workout when they want today's session or you need the exercises to answer.
 - If they REPORT lifts they did (e.g. "bench 80kg 3x10"), call log_lifts.
 - If they say a meal is the SAME as one already logged ("same thing for dinner", "same dinner as lunch today", "same as yesterday"), call log_repeat_meal — this is the fuzzy case the old system got wrong.
+- If they want logged food REMOVED or corrected — any phrasing: "remove the last meal", "delete the rice", "that dinner is wrong", "get rid of the duplicates" — call remove_meal. Never claim something was removed unless the tool just confirmed it.
 
 WHAT YOU DEFER (call defer — the reliable system handles these; deferring is safe and correct)
 - Logging BRAND-NEW food (let the scanner estimate it), steps, water, or body weight; reporting a completed session ("done"/"finished").
@@ -139,6 +140,18 @@ export const TOOLS = [
           target: { type: "string", description: "the meal slot to log the copy as, e.g. 'dinner'" },
         },
         required: ["source", "target"],
+      },
+    },
+  },
+  {
+    type: "function" as const,
+    function: {
+      name: "remove_meal",
+      description: "Remove wrongly-logged food from TODAY's log — any phrasing: 'remove the last meal', 'delete the rice', 'get rid of the duplicates', 'that dinner is wrong, take it out'. target: 'last' (most recent entry), 'duplicates' (collapse repeated identical meals to one), or the food/slot the client named (e.g. 'rice', 'dinner'). Never for questions or hypotheticals.",
+      parameters: {
+        type: "object",
+        properties: { target: { type: "string", description: "'last', 'duplicates', or the named food/meal-slot to remove" } },
+        required: ["target"],
       },
     },
   },
@@ -239,6 +252,67 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
     const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
     const remaining = (totals?.calories != null && user.calorieTarget) ? Math.max(0, user.calorieTarget - totals.calories) : null;
     return `Logged ${target || match.mealLabel || "that meal"} = ${match.rawMessage || "the same meal"} (~${match.kcalInt} kcal, ${match.proteinInt}g protein).${remaining != null ? ` ~${remaining} kcal left today.` : ""} Confirm briefly, coach voice.`;
+  }
+
+  if (name === "remove_meal") {
+    // The model understands ANY removal phrasing; this code does a SAFE delete.
+    // Months of regex whack-a-mole ("remove the last meal's logged", "one meal,
+    // remove it") ended here (2026-07-06). Guards: today only (+2h midnight
+    // grace), questions never delete, ambiguity returns the numbered list
+    // instead of guessing, totals always recomputed from the DB.
+    if (looksLikeQuestion(m)) return null;
+    const target = String(args?.target || "last").toLowerCase().trim();
+    const cutoff = new Date(Math.min(sastDayStart().getTime(), Date.now() - 2 * 3_600_000));
+    const rows = await db.select().from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, cutoff)))
+      .orderBy(desc(mealLogs.loggedAt)).limit(20).catch(() => [] as any[]);
+    if (rows.length === 0) return `Nothing is logged today, so there's nothing to remove. Tell the client that plainly.`;
+
+    const finish = async (removed: any[]) => {
+      for (const r of removed) await db.delete(mealLogs).where(eq(mealLogs.id, r.id));
+      invalidateFoodTotalsCache(user.id);
+      const totals = await recomputeTodayFoodTotals(user.id).catch(() => null);
+      if (totals) {
+        await db.update(users).set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() })
+          .where(eq(users.id, user.id)).catch(() => {});
+      }
+      const names = removed.map(r => (r.rawMessage || r.mealLabel || "meal").slice(0, 45)).join("; ");
+      return `Removed ${removed.length} entr${removed.length === 1 ? "y" : "ies"}: ${names}. Today now: ~${totals?.calories ?? "?"} kcal | ~${totals?.protein ?? "?"}g protein. Confirm this to the client briefly, coach voice — quote ONLY these numbers.`;
+    };
+
+    if (/duplicate|copies|repeated|extra cop/.test(target)) {
+      const seen = new Map<string, any>();
+      const dupes: any[] = [];
+      for (const r of [...rows].reverse()) { // oldest first — keep the original
+        const k = `${r.kcalInt || 0}|${(r.rawMessage || "").slice(0, 80)}`;
+        if (seen.has(k)) dupes.push(r); else seen.set(k, r);
+      }
+      if (dupes.length === 0) return `No duplicate meals in today's log — every entry is distinct. Tell the client that.`;
+      return finish(dupes);
+    }
+
+    if (/^(last|latest|recent|it|that|previous)$/.test(target) || target === "") {
+      return finish([rows[0]]);
+    }
+
+    // Named food or slot: match today's rows by label, raw text, or items.
+    const matches = rows.filter((r: any) => {
+      if (String(r.mealLabel || "").toLowerCase().includes(target)) return true;
+      if (String(r.rawMessage || "").toLowerCase().includes(target)) return true;
+      const its = r.items as Array<{ name?: string; foodName?: string }> | null;
+      return Array.isArray(its) && its.some(i => String(i.name || i.foodName || "").toLowerCase().includes(target));
+    });
+    if (matches.length === 1) return finish([matches[0]]);
+    if (matches.length === 0) {
+      const list = [...rows].reverse().map((r: any, i: number) => `${i + 1}. ${(r.rawMessage || r.mealLabel || "meal").slice(0, 45)} (~${r.kcalInt || 0} kcal)`).join("\n");
+      return `"${target}" is not in today's log. Show the client this real list and ask which number to remove:\n${list}`;
+    }
+    // Multiple matches — if they're identical rows (the cascade case), remove the
+    // extras and keep one; otherwise never guess, show the numbered list.
+    const allSame = matches.every((r: any) => (r.kcalInt || 0) === (matches[0].kcalInt || 0) && (r.rawMessage || "") === (matches[0].rawMessage || ""));
+    if (allSame && matches.length > 1) return finish(matches.slice(0, -1)); // keep the oldest
+    const list = [...rows].reverse().map((r: any, i: number) => `${i + 1}. ${(r.rawMessage || r.mealLabel || "meal").slice(0, 45)} (~${r.kcalInt || 0} kcal)`).join("\n");
+    return `Several different entries match "${target}". Show the client this real list and ask which number to remove:\n${list}`;
   }
 
   return null;
