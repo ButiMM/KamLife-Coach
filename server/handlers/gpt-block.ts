@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { users, chatHistory } from "../../shared/schema";
+import { users, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
@@ -259,7 +259,16 @@ export async function handleGptBlock(ctx: {
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
     const stepTarget = user.stepsTarget || 8500;
-    const todaySteps = user.todaySteps || 0;
+    // stepLogs is the single source of truth for today's steps. user.todaySteps is a
+    // stale column the text-steps path never writes — reading it made this fallback
+    // tell a client "your steps today aren't logged yet" five minutes after they
+    // logged 10,000 (2026-07-06 audit). Same table the brain snapshot reads.
+    let todaySteps = 0;
+    try {
+      const todayStepRows = await db.select({ steps: stepLogs.steps }).from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart())));
+      todaySteps = todayStepRows.length > 0 ? Math.max(...todayStepRows.map(r => r.steps || 0)) : 0;
+    } catch { /* best-effort — 0 keeps the old behaviour */ }
     const sastHour = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
 
     const calEaten = todayTotals.calories;
