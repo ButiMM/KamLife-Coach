@@ -16,7 +16,7 @@ import { weightLogs, workoutLogs, mealLogs, stepLogs } from "../../shared/schema
 import { eq, gte, desc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
-import { sastToday } from "../utils";
+import { sastToday, sastDayStart } from "../utils";
 
 const DAY = 86_400_000;
 
@@ -26,8 +26,44 @@ export async function buildClientSnapshot(user: any): Promise<string> {
   const lines: string[] = [];
 
   try {
+    // ── The clock — without it the model treats a 600-kcal breakfast as the whole
+    // day and declares a "2396 kcal deficit" at 08:37 (2026-07-06 audit).
+    const saNow = new Date(now).toLocaleString("en-ZA", {
+      timeZone: "Africa/Johannesburg", weekday: "long", hour: "2-digit", minute: "2-digit", hour12: false,
+    });
+    lines.push(`Time now: ${saNow} (SA). The day is IN PROGRESS — today's numbers below are a running count so far, not a finished day.`);
+
     const goal = String(user.goalType || "fat_loss").replace(/_/g, " ");
     lines.push(`Goal: ${goal}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`);
+
+    // ── Energy frame — maintenance is not stored anywhere, so without this line the
+    // model invents one ("your maintenance is 2496") and answers "what should my
+    // surplus be?" with today's remaining kcal (2026-07-06 audit).
+    const calTarget = Number(user.calorieTarget) || 0;
+    if (calTarget > 0) {
+      const goalKey = String(user.goalType || "");
+      if (goalKey === "muscle_gain") {
+        lines.push(`Energy frame: maintenance ≈ ${calTarget - 400} kcal (estimate). The ${calTarget} kcal target ALREADY includes the muscle-gain surplus (~300–500 above maintenance) — if asked what their surplus should be: it is built into the target; eating to ${calTarget} IS the surplus. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`);
+      } else if (goalKey === "fat_loss") {
+        lines.push(`Energy frame: maintenance ≈ ${calTarget + 450} kcal (estimate). The ${calTarget} kcal target ALREADY includes the fat-loss deficit — eating to ${calTarget} IS the plan. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`);
+      }
+    }
+
+    // ── Food TODAY so far — running count, labelled meals, space left. "Remaining"
+    // is food still to eat, never a "deficit".
+    const todayStart = sastDayStart();
+    const todayMeals = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel })
+      .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
+      .catch(() => [] as { kcalInt: number | null; proteinInt: number | null; mealLabel: string | null }[]);
+    if (todayMeals.length > 0) {
+      const kcal = todayMeals.reduce((s, r) => s + (r.kcalInt || 0), 0);
+      const prot = todayMeals.reduce((s, r) => s + (r.proteinInt || 0), 0);
+      const labels = todayMeals.map(r => r.mealLabel).filter(Boolean).join(", ");
+      const remaining = calTarget > 0 ? Math.max(0, calTarget - kcal) : null;
+      lines.push(`Food TODAY so far: ~${kcal} kcal | ${prot}g protein across ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""}${labels ? ` (${labels})` : ""}.${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
+    } else {
+      lines.push(`Food TODAY: nothing logged yet — check the time above; early in the day this is normal. Don't scold, don't invent intake.`);
+    }
 
     const phase = getPhaseNames()[user.programmePhase || 1] || "Foundation";
     lines.push(`Programme: ${phase} phase, week ${user.programmeWeek || 1}, day ${user.programmeDayInWeek || 1} (week is phase-relative — it resets each phase; sessions below are the lifetime count).`);
@@ -87,11 +123,19 @@ export async function buildClientSnapshot(user: any): Promise<string> {
       .from(stepLogs).where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, since(7))))
       .catch(() => [] as { steps: number; loggedAt: Date | null }[]);
     const stepTarget = user.stepsTarget || 8500;
-    if (stepRows.length > 0) {
-      const avg = Math.round(stepRows.reduce((s, r) => s + (r.steps || 0), 0) / stepRows.length);
-      lines.push(`Steps: averaging ${avg.toLocaleString()}/day across ${stepRows.length} logged day${stepRows.length !== 1 ? "s" : ""} vs ${stepTarget.toLocaleString()} target.`);
+    // Today vs history stated separately — the model kept attributing a "walked 3000
+    // steps" report to YESTERDAY and quoting only the average (2026-07-05 audit).
+    const todayStepRows = stepRows.filter(r => r.loggedAt && new Date(r.loggedAt) >= todayStart);
+    const todaySteps = todayStepRows.length > 0 ? Math.max(...todayStepRows.map(r => r.steps || 0)) : null;
+    const pastRows = stepRows.filter(r => r.loggedAt && new Date(r.loggedAt) < todayStart);
+    const stepsTodayLine = todaySteps !== null
+      ? `Steps TODAY so far: ${todaySteps.toLocaleString()} (day still in progress).`
+      : `Steps TODAY: none logged yet.`;
+    if (pastRows.length > 0) {
+      const avg = Math.round(pastRows.reduce((s, r) => s + (r.steps || 0), 0) / pastRows.length);
+      lines.push(`${stepsTodayLine} Before today: averaging ${avg.toLocaleString()}/day across ${pastRows.length} logged day${pastRows.length !== 1 ? "s" : ""} vs ${stepTarget.toLocaleString()} target. Keep TODAY and the average separate — never present the average as today's count or vice versa.`);
     } else {
-      lines.push(`Steps: none logged in the last 7 days.`);
+      lines.push(`${stepsTodayLine} No other step logs in the last 7 days vs ${stepTarget.toLocaleString()} target.`);
     }
 
     // ── Water today ──

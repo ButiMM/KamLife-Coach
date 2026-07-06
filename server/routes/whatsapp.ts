@@ -384,7 +384,9 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
       // Twilio hard-kills after 15s. Whisper takes 20-38s. We can never finish in time synchronously.
       if (audioMedia && mediaUrl) {
         res.type("text/xml").send(`<?xml version="1.0" encoding="UTF-8"?><Response></Response>`);
-        sendParts(rawPhone, ["🎤 Coach K is listening... I'll reply in a moment."], null).catch(() => {});
+        // No "I'll reply in a moment" — the coach must never sound like it might go
+        // quiet or promise a future message (a real reply IS seconds away).
+        sendParts(rawPhone, ["🎤 Coach K is listening…"], null).catch(() => {});
         processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage).catch(() => {});
         return;
       }

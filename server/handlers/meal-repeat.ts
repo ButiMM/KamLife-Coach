@@ -55,12 +55,20 @@ export async function handleMealRepeat(ctx: {
   // "I had the same (meal/food) as lunch" said at 20:38 = source lunch, target the
   // CURRENT slot (dinner) — logging their dinner as a second "lunch" reads insane.
   const sameAsMealM = !crossMealM && m.match(/\b(?:the\s+)?same\s+(?:meal|food|thing)?\s*as\s+(?:my\s+)?(breakfast|lunch|dinner|supper)\b/i);
-  const crossish = !!(crossMealM || sameAsMealM);
+  // "Same thing FOR dinner" (said after logging lunch) = copy the most recent meal
+  // logged TODAY, log it AS dinner. Without this it fell through with sourceHint
+  // "dinner", found no dinner anywhere, and answered "No Dinner logged yesterday"
+  // (2026-07-05 audit).
+  const sameForM = !crossMealM && !sameAsMealM
+    && m.match(/\bsame\s+(?:meal|food|thing|one)?\s*(?:for|at)\s+(breakfast|lunch|dinner|supper|snack)\b/i);
+  const crossish = !!(crossMealM || sameAsMealM || sameForM);
   const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner")
     : sameAsMealM ? slotFromSastHour()
+    : sameForM ? sameForM[1].toLowerCase().replace("supper", "dinner")
     : null;
   const sourceHint = crossMealM ? crossMealM[2].toLowerCase().replace("supper", "dinner")
     : sameAsMealM ? sameAsMealM[1].toLowerCase().replace("supper", "dinner")
+    : sameForM ? null // the slot word is the TARGET here, not the source — source = newest meal today
     : (m.match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)?.[1]?.toLowerCase().replace("supper", "dinner") || null);
 
   // How many days back to look
@@ -134,12 +142,15 @@ export async function handleMealRepeat(ctx: {
     }
 
     // 4-minute duplicate guard (mirrors commitFoodLog) — a double-sent "same as
-    // yesterday" or a webhook retry must not log the meal twice.
+    // yesterday" or a webhook retry must not log the meal twice. SLOT-AWARE: kcal
+    // alone blocked "same thing for dinner" one minute after lunch was logged (same
+    // kcal, different slot), then told the client dinner was "already counted" while
+    // it was never written (2026-07-05 audit). A dup = same kcal AND same slot.
     const dupWindow = new Date(Date.now() - 4 * 60_000);
-    const [dupRecent] = await db.select({ id: mealLogs.id }).from(mealLogs)
-      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, dupWindow), eq(mealLogs.kcalInt, match.kcalInt || 0)))
-      .limit(1);
-    if (dupRecent) {
+    const newLabel = String(targetLabel || sourceHint || match.mealLabel || "").toLowerCase();
+    const recentRows = await db.select({ kcalInt: mealLogs.kcalInt, mealLabel: mealLogs.mealLabel }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, dupWindow)));
+    if (recentRows.some(r => (r.kcalInt || 0) === (match.kcalInt || 0) && String(r.mealLabel || "").toLowerCase() === newLabel)) {
       const dupReply = `Already logged ✅ — that meal is counted in today's total.`;
       await logChat(user.id, message, dupReply, "SAME_AS_DUP");
       return dupReply;

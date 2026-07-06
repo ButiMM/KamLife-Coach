@@ -64,6 +64,11 @@ HARD RULES (these are the failures we are fixing)
 - If you don't have a number from get_client_snapshot, don't make one up — say you'll check or ask them to log it.
 - You can see the recent conversation. Do NOT repeat stats or facts you already gave a moment ago — build on them, reference what was just said, sound like you remember. Only re-pull the snapshot if the topic actually needs fresh numbers.
 - If their weight is moving the WRONG way for their goal (losing on muscle gain, or gaining on fat loss), say it plainly and fix the plan — never soften the wrong direction.
+- TIME & TODAY: the snapshot gives the current SA time and today-so-far food/steps. Respect the clock — a low total early in the day is NORMAL (the day isn't done); coach the next meal. NEVER call today's remaining kcal a "deficit" and never panic about under-eating before the day is over. Anything the client reports with no day word ("walked 3000 steps", "had eggs") happened TODAY — yesterday only if they SAY yesterday.
+- SURPLUS/DEFICIT: these compare a FULL day's intake to MAINTENANCE (see the snapshot's Energy frame). Their calorie target already includes the goal adjustment — "what should my surplus be?" asks about target vs maintenance, never about today's remaining kcal. Get this wrong and the client loses all trust.
+- UNKNOWN FOOD/BRAND: if you don't recognise a food, shake or brand they named, ask what's in it — one short question. Never invent what a product is or bluff its nutrition.
+- MONEY: never attach a rand figure to a plan or claim what it costs unless the client gave you a budget number. If they say "my budget" without a number, ask the number. The cheap-protein basket is ONLY for when they say money is tight.
+- QUESTIONS: most replies end with a statement or instruction, not a question. Ask only when the answer changes your next coaching move, and never end two replies in a row with a question. Never re-quote a stat (like the protein target) you already gave in a recent turn — advance, don't loop.
 - You CANNOT send a message later — there is no follow-up. NEVER say "I'll get back to you", "give me a moment", "let me check and come back", or promise a future reply. Answer NOW from your tools, or tell them exactly how to get it (for the full multi-week programme use get_full_programme). Never claim you logged or saved something unless a tool just did it — if it's a log you don't handle, defer.
 
 COACHING THE REAL SA CLIENT — the hard cases (coach the principle, don't recite it):
@@ -180,10 +185,16 @@ async function execTool(name: string, args: any, ctx: { user: any; m: string }):
     const match = selectMealToCopy(meals as unknown as CopyableMeal[], hint) as any;
     if (!match) return null; // can't confidently pick the named meal → defer (never fabricate)
     // 4-minute duplicate guard (mirrors the maze) so a resend can't double-count.
-    const [dup] = await db.select({ id: mealLogs.id }).from(mealLogs)
-      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, new Date(Date.now() - 4 * 60_000)), eq(mealLogs.kcalInt, match.kcalInt || 0)))
-      .limit(1).catch(() => []);
-    if (dup) return `That exact meal is already in today's total — no need to log it twice.`;
+    // SLOT-AWARE: kcal alone blocked "same dinner as lunch" minutes after lunch was
+    // logged, then falsely told the client dinner was counted (2026-07-05 audit —
+    // the coach must NEVER claim a log that didn't happen).
+    const newLabel = String(target || match.mealLabel || "").toLowerCase();
+    const recentRows = await db.select({ kcalInt: mealLogs.kcalInt, mealLabel: mealLogs.mealLabel }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, new Date(Date.now() - 4 * 60_000))))
+      .catch(() => [] as { kcalInt: number | null; mealLabel: string | null }[]);
+    if (recentRows.some(r => (r.kcalInt || 0) === (match.kcalInt || 0) && String(r.mealLabel || "").toLowerCase() === newLabel)) {
+      return `That exact ${newLabel || "meal"} is already in today's total — no need to log it twice.`;
+    }
     await db.insert(mealLogs).values({
       userId: user.id,
       rawMessage: match.rawMessage || "[Repeat meal]",
