@@ -23,6 +23,7 @@ const {
   hasGoalChangeVocabulary, looksLikeStepsReport, looksLikeWaterReport,
   looksLikeWeightReport, parseQuantityCorrection, parseMealDate, sastDayStart,
 } = await import("../server/utils");
+const { energyFrameLine } = await import("../server/targets");
 const { verifyBrainReply } = await import("../server/brain/reply-verifier");
 const { buildWeekCard } = await import("../server/week-card");
 
@@ -77,7 +78,33 @@ const artifacts: Category = { name: "Artifact engine (shareable, never shameful)
   ok("bereavement week → no stats card", "guard", buildWeekCard({ name: "Kam", currentWeight: 82, stepsTarget: 11000, workoutsThisWeek: 3, trainingDaysPerWeek: 3, avgStepsThisWeek: 9000, weightChange: 0, mealsLoggedDays: 5, workoutStreak: 3, lifeContext: "bereavement this week" }) === null),
 ]};
 
-const categories = [goalIntegrity, frameTruth, txRouting, clock, artifacts];
+// ── Category 6: Energy semantics — surplus/deficit, the core coaching truth ──
+const mgFrame = energyFrameLine("muscle_gain", 2996) || "";
+const flFrame = energyFrameLine("fat_loss", 1900) || "";
+const energy: Category = { name: "Energy semantics (surplus/deficit)", checks: [
+  ok("muscle gain: maintenance = target − 400", "07-06 surplus Q", mgFrame.includes("2596")),
+  ok("muscle gain: states surplus is built into target", "07-06", /already include/i.test(mgFrame)),
+  ok("muscle gain: bans mid-day 'deficit' framing", "07-06 08:37 panic", /never the gap left mid-day/i.test(mgFrame)),
+  ok("fat loss: maintenance = target + 450", "regression", flFrame.includes("2350")),
+  ok("no target → no invented maintenance", "hallucination brake", energyFrameLine("muscle_gain", null) === null),
+]};
+
+// ── Category 7: Quantity corrections — no double-logging, sane bounds ──
+const qc = parseQuantityCorrection("it was 2 slices of bread not 4");
+const qtyCorrections: Category = { name: "Quantity corrections (no double-log)", checks: [
+  ok("'2 slices not 4' parses new+old count", "07-06", !!qc && qc.count === 2 && qc.oldCount === 4),
+  ok("'3 sets not 4' is NOT a food correction", "regression", !parseQuantityCorrection("did 3 sets not 4")),
+  ok("'100 eggs not 3' rejected (insane count)", "guard", !parseQuantityCorrection("100 eggs not 3")),
+  ok("plain food log never triggers a correction", "regression", !parseQuantityCorrection("I had 2 eggs and toast for breakfast")),
+]};
+
+// NOTE — flows this scoreboard does NOT yet measure (need DB or live model),
+// tracked honestly so the number is never mistaken for "the whole product":
+//   • food-scanner kcal/protein accuracy (needs the scanner + real photos)
+//   • remove_meal end-to-end against a real day (needs DB)
+//   • conversational tone / "does it feel smart" (needs live model — drill-battery.ts)
+
+const categories = [goalIntegrity, frameTruth, txRouting, clock, energy, qtyCorrections, artifacts];
 
 console.log("\n=== KAMLIFE GUARDRAIL SCOREBOARD (measured, not guessed) ===\n");
 let totalPass = 0, total = 0;
