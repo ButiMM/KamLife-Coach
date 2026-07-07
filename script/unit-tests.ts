@@ -13,7 +13,7 @@ import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
@@ -1446,6 +1446,35 @@ test("weight reports detected; lift logs are not", () => {
   assert.ok(looksLikeWeightReport("weighed in at 82.9kg this morning"));
   assert.ok(!looksLikeWeightReport("bench 80kg 3x10"), "a lift log is not a weigh-in");
   assert.ok(!looksLikeWeightReport("I want to reach 75kg by December"));
+});
+
+// ============================================================
+// hasGoalChangeVocabulary — the normalizer's GOAL_CHANGE brake. A goal flip is
+// the most destructive rewrite; only honour it when the client actually asked.
+// ============================================================
+
+test("goal-change vocabulary: real goal-change phrasings pass", () => {
+  for (const s of [
+    "I want to go into a building phase",
+    "let's start cutting",
+    "change my goal to fat loss",
+    "I want to bulk now",
+    "time to lean out",
+    "focus on losing weight",
+    "I want to gain muscle",
+    "switch my goal to recomp",
+  ]) assert.ok(hasGoalChangeVocabulary(s), `should detect goal change: "${s}"`);
+});
+
+test("goal-change vocabulary: the 2026-07-07 false positive and other non-goals are rejected", () => {
+  for (const s of [
+    "I really only want to be doing 10,000 steps now, nothing more", // the production failure
+    "I only want to do 10000 steps now nothing more",
+    "how was the workout",
+    "I had eggs and pap for breakfast",
+    "can I have a cheat meal today",
+    "my knee is sore",
+  ]) assert.ok(!hasGoalChangeVocabulary(s), `must NOT detect goal change: "${s}"`);
 });
 
 // ============================================================

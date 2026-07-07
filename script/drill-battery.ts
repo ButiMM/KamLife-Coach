@@ -123,6 +123,12 @@ const CASES: DrillCase[] = [
     mustNot: [/what('?s| is) your (current )?protein/i, /how much protein (are|do) you/i],
     should: [/127|199/],
   },
+  {
+    name: "steps preference is NOT a goal change; never claim to adjust targets (2026-07-07 08:03 failure)",
+    user: "I really only want to be doing 10,000 steps now, nothing more",
+    mustNot: [/shift(ing)? (you )?to fat loss/i, /adjust your targets/i, /calorie deficit/i, /chang\w+ your goal/i],
+    should: [/10,?000|steps/i],
+  },
 ];
 
 async function runCase(c: DrillCase): Promise<{ pass: boolean; warns: string[]; reply: string }> {

@@ -940,8 +940,23 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- AWAITING GOAL CHANGE REASON — ask why first before applying goal change ----
-  if (user.awaitingInputType?.startsWith("goal_reason:")) {
+  if (user.awaitingInputType?.startsWith("goal_confirm:") || user.awaitingInputType?.startsWith("goal_reason:")) {
     const pendingGoal = user.awaitingInputType.split(":")[1] as string;
+    const goalLabelsC: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
+    const currentLabel = goalLabelsC[user.goalType || "muscle_gain"] || (user.goalType || "your current goal");
+    // EXPLICIT CONSENT: a goal flip rewrites the whole programme + targets. It happens
+    // ONLY on a clear yes — never on "any reply" (2026-07-07: a muscle-gain client was
+    // asked "what changed?" and would have flipped to fat loss on any answer).
+    const saidYes = /^(yes|yep|yeah|yup|ya|confirm|correct|do it|switch|change it|sure|ok(ay)?|please|100|✅|👍)\b/i.test(message.trim())
+      || /\b(yes\s+(switch|change|confirm)|switch me|change my goal|confirm)\b/i.test(m);
+    const saidNo = /^(no|nope|nah|cancel|keep|stop|don.?t|leave it|nevermind|never mind|wrong)\b/i.test(message.trim())
+      || /\b(keep\s+(me\s+)?(on\s+)?(muscle|gain|building|fat|current)|not?\s+change|stay|don.?t\s+change)\b/i.test(m);
+    if (!saidYes || saidNo) {
+      await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
+      const keepReply = `No change — you're staying on *${currentLabel}*. Nothing was touched. If you did want to switch, just say "change my goal to fat loss" (or muscle gain) and I'll confirm it with you first.`;
+      await logChat(user.id, message, keepReply, "GOAL_CHANGE_CANCELLED");
+      return keepReply;
+    }
     await db.update(users)
       .set({ awaitingInputType: null, goalType: pendingGoal })
       .where(eq(users.phoneNumber, phone));
@@ -1002,10 +1017,16 @@ export async function handleLifecycle(ctx: {
 
     if (pendingGoal && pendingGoal !== user.goalType) {
       const clientName = user.name ? `, ${user.name}` : "";
-      await db.update(users).set({ awaitingInputType: `goal_reason:${pendingGoal}` }).where(eq(users.phoneNumber, phone));
-      const whyReply = `Sharp${clientName}. What changed?`;
-      await logChat(user.id, message, whyReply, "PROFILE_UPDATE");
-      return whyReply;
+      const goalLabelsT: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
+      const fromLabel = goalLabelsT[user.goalType || "muscle_gain"] || (user.goalType || "your current goal");
+      const toLabel = goalLabelsT[pendingGoal] || pendingGoal;
+      await db.update(users).set({ awaitingInputType: `goal_confirm:${pendingGoal}` }).where(eq(users.phoneNumber, phone));
+      // Name the CURRENT goal so the client sees exactly what's changing — and require
+      // an explicit yes. This is the guard against a misheard message silently flipping
+      // someone's whole programme.
+      const confirmReply = `Just so we're clear${clientName} — you're on *${fromLabel}* right now. Switch you to *${toLabel}*? That changes your calorie and protein targets.\n\nReply *YES* to switch, or anything else to stay on ${fromLabel}.`;
+      await logChat(user.id, message, confirmReply, "GOAL_CHANGE_CONFIRM");
+      return confirmReply;
     }
 
     // Budget change

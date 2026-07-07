@@ -521,3 +521,11 @@ export function looksLikeWaterReport(m: string): boolean {
 export function looksLikeWeightReport(m: string): boolean {
   return /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?\s*|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
 }
+
+// Goal-change vocabulary gate for the normalizer. A GOAL_CHANGE canonical rewrites
+// the client's whole programme, so it is only honoured when the ORIGINAL message
+// actually asks for it — otherwise a steps/food sentence can be hallucinated into
+// "change my goal to fat loss" (2026-07-07). Pure — unit-tested.
+export function hasGoalChangeVocabulary(message: string): boolean {
+  return /\b(bulk|bulking|cut|cutting|lean|leaning|shred|building\s+phase|build\s+muscle|muscle\s+(?:gain|mass|composition|building)|gain(?:ing)?\s+(?:muscle|weight|mass|size)|add\s+(?:size|mass|muscle)|put\s+on\s+(?:size|mass|muscle|weight)|fat\s+loss|lose\s+(?:weight|fat|belly)|losing\s+(?:weight|fat)|slim|tone|toning|recomp\w*|maintenance|maintain|change\s+(?:my\s+)?goal|switch\s+(?:my\s+)?goal|new\s+goal|different\s+goal)\b/i.test(message || "");
+}

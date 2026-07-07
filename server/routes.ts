@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -469,6 +469,18 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         if (!FUTURE_RE.test(originalMBeforeNorm)) {
           canon = canon.replace(/\b(i.?m\s+)?(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|will\s+be\s+(?:eating|having))\b/gi, "i had");
         }
+      }
+      // GOAL_CHANGE keyword brake: rewriting a message into "change my goal to X"
+      // flips the client's ENTIRE programme + targets — the single most destructive
+      // normalizer output, and the number-only brake below can't catch it (no digits).
+      // On 2026-07-07 "I really only want to be doing 10,000 steps now, nothing more"
+      // (a STEPS preference) was rewritten to "change my goal to fat loss" and the
+      // coach flipped the goal + claimed "I'll adjust your targets now". Only honour a
+      // GOAL_CHANGE canonical when the ORIGINAL actually contains goal vocabulary;
+      // otherwise drop it → a conversational reply that can ASK, never a silent flip.
+      if (pre.intent === "GOAL_CHANGE" && !hasGoalChangeVocabulary(originalMBeforeNorm)) {
+        console.log(`[NORMALIZER] GOAL_CHANGE brake — no goal vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
+        canon = "";
       }
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
         const canonLower = canon.toLowerCase();
