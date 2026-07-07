@@ -40,3 +40,28 @@ at `5335125`. Verify with `npm test` and CHECK THE EXIT CODE — do not pipe it.
   same session it's found.
 - Kam's human tasks live in HUMAN_TASKS.md (backup is 0a and still the single
   biggest risk in the company).
+
+## STANDING ARCHITECTURAL LAW (added 2026-07-07 after the goal-flip disaster)
+
+THE DISEASE (root of most failures this week): the model layer was allowed to
+OVERWRITE known stored truth with a fresh guess, with nothing cross-checking the
+guess against what the system already knew about the client.
+
+THE LAW — no model output (normalizer canonical OR brain reply OR fallback) may
+mutate a FOUNDATIONAL client fact without BOTH:
+  (a) explicit client vocabulary for that change in the ORIGINAL message, and
+  (b) an explicit confirmation that NAMES the current value before changing it.
+Foundational facts: goalType, calorie/protein targets, programme phase,
+currentWeight, subscription state.
+
+Enforcement so far:
+  - Goal: hasGoalChangeVocabulary brake (normalizer) + goal_confirm explicit-yes
+    gate (lifecycle) + brain defers goal/target changes.
+  - Weight: retrospective-weight brake (normalizer) already drops "used to weigh".
+TODO to complete the law (audit each):
+  - Targets: only the goal-change flow and the Sunday auto-adjust may write them;
+    confirm no brain/fallback path claims to.
+  - Phase advance: confirm it needs completion, never a chat inference.
+  - A CONTRADICTION CHECK: when a model intent contradicts the stored goal
+    direction (fat-loss talk to a muscle-gain client), flag/soften rather than obey.
+    This is the general form of the fix and the highest-value next guardrail.
