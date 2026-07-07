@@ -30,7 +30,8 @@ import { invalidatePatternCache } from "../cache";
 import { selectMealToCopy, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "../handlers/food-scanner";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { retrieveMemories } from "../memory";
+import { retrieveMemories, scanAndStoreClientFacts } from "../memory";
+import { verifyBrainReply } from "./reply-verifier";
 import { SCENARIO_GUIDE } from "../handlers/gpt-block";
 import { buildClientSnapshot } from "./client-snapshot";
 
@@ -406,6 +407,7 @@ export async function runCoachBrain(ctx: {
     const brainModel = hardMoment ? "gpt-4o" : "gpt-4o-mini";
     if (hardMoment) console.log(`[BRAIN_COACH] escalated to ${brainModel} (hard moment)`);
 
+    let selfCorrected = false; // one verifier-driven rewrite max, then fail open
     for (let round = 0; round < 4; round++) {
       const resp = await openai.chat.completions.create({
         model: brainModel,
@@ -423,6 +425,24 @@ export async function runCoachBrain(ctx: {
       if (!toolCall) {
         const text = (msg.content || "").trim();
         if (!text) return null;
+        // SELF-CORRECTING LOOP (the systemic fix, 2026-07-07): every draft is
+        // verified against the client's STORED truth before it can be sent. On a
+        // violation the model gets ONE rewrite pass with the violation named; a
+        // second violation defers to the deterministic pipeline. This is what
+        // caught nothing when the coach flipped a goal, praised wrong-direction
+        // loss, and claimed "I'll adjust your targets".
+        const verdict = verifyBrainReply(text, { goalType: user.goalType });
+        if (!verdict.ok) {
+          if (!selfCorrected) {
+            selfCorrected = true;
+            console.log(`[BRAIN_COACH] verifier violation — self-correcting: ${(verdict.violation || "").slice(0, 90)}`);
+            messages.push({ role: "assistant", content: text });
+            messages.push({ role: "system", content: `Your draft reply broke a hard rule — ${verdict.violation} Rewrite the reply now without the violation. Short, coach voice, no apology tour.` });
+            continue; // regenerate within the same round budget
+          }
+          console.warn("[BRAIN_COACH] verifier failed twice — deferring (fail open)");
+          return null;
+        }
         // Code-as-guardrail on the model's mouth: the fallback pipeline runs
         // sanitizeCoachReply/enforceCoachGuardrails but the brain returned RAW model
         // output — the one unguarded path (2026-07-06 audit). Strips banned
@@ -433,6 +453,10 @@ export async function runCoachBrain(ctx: {
           injuries: user.injuries,
         });
         if (guarded.violations.length > 0) console.log(`[BRAIN_COACH] guardrails: ${guarded.violations.join(",")}`);
+        // Fact scanner runs on the BRAIN path too — it only ran on the old fallback,
+        // so anything a client told the brain was never remembered ("What supplements
+        // am I on?" → "none" → "You're lying, I'm on creatine" — 2026-07-07).
+        scanAndStoreClientFacts(phone, message).catch(() => {});
         await logChat(user.id, message, guarded.reply, "BRAIN_COACH").catch(() => {});
         return guarded.reply;
       }

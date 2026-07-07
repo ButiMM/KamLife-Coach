@@ -17,6 +17,7 @@ import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQu
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
+import { verifyBrainReply } from "../server/brain/reply-verifier";
 
 let passed = 0;
 let failed = 0;
@@ -1446,6 +1447,33 @@ test("weight reports detected; lift logs are not", () => {
   assert.ok(looksLikeWeightReport("weighed in at 82.9kg this morning"));
   assert.ok(!looksLikeWeightReport("bench 80kg 3x10"), "a lift log is not a weigh-in");
   assert.ok(!looksLikeWeightReport("I want to reach 75kg by December"));
+});
+
+// ============================================================
+// verifyBrainReply — the self-correcting loop's checks (pure)
+// ============================================================
+
+test("verifier blocks claimed target/goal adjustments (the 08:03 goal-flip reply)", () => {
+  assert.ok(!verifyBrainReply("Understood. We'll shift to fat loss. I'll adjust your targets now.", { goalType: "muscle_gain" }).ok);
+  assert.ok(!verifyBrainReply("I will update your calorie target tonight.", { goalType: "fat_loss" }).ok);
+  assert.ok(!verifyBrainReply("Your goal is now fat loss.", { goalType: "muscle_gain" }).ok);
+});
+
+test("verifier blocks wrong-direction pushes per goal", () => {
+  assert.ok(!verifyBrainReply("Let's focus on a calorie deficit while keeping protein high.", { goalType: "muscle_gain" }).ok);
+  assert.ok(!verifyBrainReply("Let's bulk and aim to gain weight this month.", { goalType: "fat_loss" }).ok);
+});
+
+test("verifier blocks frame-mirroring ('your deficit' to a gaining client)", () => {
+  assert.ok(!verifyBrainReply("Your calorie deficit doesn't matter as much right now — just eat protein.", { goalType: "muscle_gain" }).ok);
+  assert.ok(!verifyBrainReply("Your surplus is on track, keep eating big.", { goalType: "fat_loss" }).ok);
+});
+
+test("verifier passes normal coaching, corrections, and same-direction talk", () => {
+  assert.ok(verifyBrainReply("Solid week — 3 sessions and protein at 172g. Add weight on the chest press next session.", { goalType: "muscle_gain" }).ok);
+  assert.ok(verifyBrainReply("Quick correction: you're not on a deficit — you're on a surplus for muscle gain. Eat to 2996.", { goalType: "muscle_gain" }).ok);
+  assert.ok(verifyBrainReply("Stay in your deficit today: protein first, starch last.", { goalType: "fat_loss" }).ok);
+  assert.ok(verifyBrainReply("If you want the goal changed, say 'change my goal to fat loss' and I'll get it confirmed properly.", { goalType: "muscle_gain" }).ok);
 });
 
 // ============================================================
