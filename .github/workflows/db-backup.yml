@@ -65,7 +65,13 @@ jobs:
           curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/pgdg.gpg
           sudo apt-get update -qq
           sudo apt-get install -y -qq postgresql-client-18
-          pg_dump --version
+          # ubuntu-latest ships an OLDER pg_dump on PATH already (16.x) — installing v18
+          # does not override it (2026-07-08: apt install succeeded, but `pg_dump
+          # --version` still printed 16.14 and the dump step failed on the same version
+          # mismatch). Prepend the versioned bin dir to PATH for every later step so the
+          # v18 binary is the one actually invoked, not just installed.
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          /usr/lib/postgresql/18/bin/pg_dump --version
 
       - name: Dump + compress
         if: steps.guard.outputs.skip != 'true'
