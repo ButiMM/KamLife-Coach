@@ -925,6 +925,26 @@ test("early-commands: 'my protein target' → returns protein target", async () 
   assert.ok(r!.includes("145") || r!.toLowerCase().includes("protein"), `should mention protein: ${r?.slice(0, 100)}`);
 });
 
+// BEREAVEMENT — "passed on" / "passed" are as common as "passed away" in SA English.
+// A real client (2026-07-08 screenshot) wrote "my grandfather passed on in the wee
+// hours of the morning". Before this fix the live regex only matched "passed away",
+// so this heartbreaking message fell through to generic handling. These lock it.
+test("early-commands: 'grandfather passed on' → bereavement compassion, not generic (2026-07-08 real client)", async () => {
+  const r = await handleEarlyCommands(ec("Hi Koki. I woke up to terrible news, my grandfather passed on in the wee hours of the morning"));
+  assert.ok(r !== null, "'passed on' must reach the bereavement path");
+  assert.ok(/sorry for your loss/i.test(r!), `should be the bereavement reply: ${r?.slice(0, 120)}`);
+});
+
+test("early-commands: 'my gran passed' → bereavement (passed without on/away)", async () => {
+  const r = await handleEarlyCommands(ec("my gran passed this morning"));
+  assert.ok(r !== null && /sorry for your loss/i.test(r!), `'gran passed' should reach bereavement: ${r?.slice(0, 120)}`);
+});
+
+test("early-commands: 'I passed my exam' → NOT bereavement (no false positive)", async () => {
+  const r = await handleEarlyCommands(ec("I passed my exam today"));
+  assert.ok(r === null || !/sorry for your loss/i.test(r!), `benign 'passed' must not trigger bereavement: ${r?.slice(0, 120)}`);
+});
+
 // ============================================================
 // MISC-COMMANDS.TS CHARACTERISATION TESTS
 // ============================================================

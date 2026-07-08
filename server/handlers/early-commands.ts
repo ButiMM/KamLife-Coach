@@ -1451,7 +1451,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   }
 
   // ---- FUNERAL / BEREAVEMENT ----
-  const isBereaved = /\b(funeral|passed away|someone.*died|died.*someone|lost.*loved one|loved one.*lost|in mourning|family.*death|death.*family|my (mom|dad|mother|father|brother|sister|uncle|aunt|gogo|ouma|oupa|gran|grandma|grandfather|grandmother|friend).*died|died.*(mom|dad|mother|father|brother|sister|uncle|aunt|gran)|umngcwabo|ukufa|silahlekelwe)\b/i.test(m);
+  // "passed on" / "passed" (with a relative) are as common as "passed away" in SA
+  // English — a real client wrote "my grandfather passed on in the wee hours" and it
+  // must reach this compassion path, never generic handling (2026-07-08 screenshot).
+  const isBereaved = /\b(funeral|passed away|passed on|someone.*died|died.*someone|lost.*loved one|loved one.*lost|in mourning|family.*death|death.*family|my (mom|dad|mother|father|brother|sister|uncle|aunt|gogo|ouma|oupa|gran|grandma|grandfather|grandmother|friend).*(died|passed)|died.*(mom|dad|mother|father|brother|sister|uncle|aunt|gran)|umngcwabo|ukufa|silahlekelwe)\b/i.test(m);
   if (isBereaved) {
     const bereavReply = `${capName}, I'm sorry for your loss. Take all the time you need — the programme will wait.\n\nFunerals mean long days, different food, no routine. That's okay. Eat what's there, stay hydrated, walk if you can. Don't stress about the plan right now.\n\nWhen you're ready to come back — even if it's weeks from now — just message me and I'll reset your programme from that day. There's no guilt here. Rest, mourn, be with your family.`;
     await logChat(user.id, message, bereavReply, "BEREAVEMENT");

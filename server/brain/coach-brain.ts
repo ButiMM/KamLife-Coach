@@ -37,7 +37,7 @@ import { buildClientSnapshot } from "./client-snapshot";
 
 // Hard-case topics that warrant injecting the full scenario playbook. Routine chat
 // skips it — knowledge depth exactly when needed, tokens saved when not (margins).
-const SCENARIO_TOPIC_RE = /\b(sick|ill|flu|fever|injur\w*|pain|hurt|period|menstrua\w*|pregnan\w*|postpartum|ramadan|fasting|broke|no money|can'?t afford|month.?end|travel\w*|hotel|holiday|vacation|no gym|gym.{0,12}(closed|far|expensive)|home workout|ozempic|wegovy|saxenda|mounjaro|glp.?1|quit|give up|not working|no results|plateau|stuck|night shift|shift work|funeral|died|passed away|stress\w*|overwhelm\w*|depress\w*|anxious|anxiety|beer|wine|alcohol|braai|party|wedding|december|festive|diabet\w*|hypertension|blood pressure)\b/i;
+const SCENARIO_TOPIC_RE = /\b(sick|ill|flu|fever|injur\w*|pain|hurt|period|menstrua\w*|pregnan\w*|postpartum|ramadan|fasting|broke|no money|can'?t afford|month.?end|travel\w*|hotel|holiday|vacation|no gym|gym.{0,12}(closed|far|expensive)|home workout|ozempic|wegovy|saxenda|mounjaro|glp.?1|quit|give up|not working|no results|plateau|stuck|night shift|shift work|funeral|died|passed away|passed on|stress\w*|overwhelm\w*|depress\w*|anxious|anxiety|beer|wine|alcohol|braai|party|wedding|december|festive|diabet\w*|hypertension|blood pressure)\b/i;
 
 const DAY = 86_400_000;
 
