@@ -65,3 +65,28 @@ TODO to complete the law (audit each):
   - A CONTRADICTION CHECK: when a model intent contradicts the stored goal
     direction (fat-loss talk to a muscle-gain client), flag/soften rather than obey.
     This is the general form of the fix and the highest-value next guardrail.
+
+## 2026-07-08 update
+
+- **DATABASE BACKUP IS LIVE.** Run #73 green on Cloudflare R2, auto every 6h.
+  Fixed two real bugs found from the actual failure logs (not guesses):
+  Railway silently upgraded Postgres to v18 (bumped postgresql-client 17→18),
+  then the runner's stock pg_dump 16 was still first on PATH even after
+  installing v18 (prepended /usr/lib/postgresql/18/bin to GITHUB_PATH). This
+  was the single biggest open risk in the company — now closed.
+- **Drink-photo label bug fixed + regression-locked.** Soda cans/bottles were
+  never in the vision prompt's "read the label" category (only shake/bar/
+  snack/cereal/tin/sachet/tub were) — so photographing a drink always
+  free-guessed, and turning the bottle to show the nutrition label got a
+  DIFFERENT guess instead of the label's real value. Fixed, AND the prompt is
+  now extracted to server/handlers/food-vision-prompt.ts (pure, exported) with
+  5 unit tests asserting the fix's exact wording survives future edits.
+  **NOT verified against the live model** — no API key was available this
+  session. First priority next session with a key: run it against a real
+  drink photo + a turned-around label photo, confirm the numbers match.
+- **Live-model testing harness still not running.** script/drill-battery.ts
+  exists and is current but has never executed — needs
+  `OPENAI_API_KEY=... npx tsx script/drill-battery.ts` run at least once to
+  become a real, trusted number instead of an unused file. This is the
+  single highest-leverage next step: it's the only thing that turns "I hope
+  this prompt fix works" into "I know it does."
