@@ -83,9 +83,10 @@ whatever role the target DB uses.
 ---
 
 ## Notes & gotchas
-- **Version**: the workflow installs `postgresql-client-17`. `pg_dump` must be **≥**
-  the server major version. If Railway upgrades Postgres past 17, bump the
-  `postgresql-client-NN` line in the workflow.
+- **Version**: the workflow installs `postgresql-client-18` (bumped 2026-07-08 —
+  Railway silently upgraded Postgres to v18, `pg_dump` must be **≥** the server
+  major version or it aborts on a version mismatch). If Railway upgrades again,
+  bump the `postgresql-client-NN` line in the workflow the same way.
 - **Recovery point**: backups are every 6h, so worst-case data loss is ~6 hours.
   Payment state is additionally reconstructable from PayFast ITN history + the
   `payment_events` table.
