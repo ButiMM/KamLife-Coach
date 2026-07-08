@@ -18,6 +18,7 @@ import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
+import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
 
 let passed = 0;
 let failed = 0;
@@ -1643,6 +1644,44 @@ test("week card: below-target week still builds but without ticks", () => {
   assert.ok(!card!.includes("Sessions: 2/3 ✅"), "no tick when target missed");
   assert.ok(card!.includes("5 of 7 days"), "honest food days");
   assert.ok(!card!.includes("🔥 *"), "no false celebration markers on partial week");
+});
+
+// ============================================================
+// buildFoodVisionUserPrompt — locks the 2026-07-08 drink-label fix so a future
+// prompt edit can never silently drop it again (real tester bug: photographing
+// a drink got a guess, turning the bottle to show the label got a DIFFERENT
+// guess instead of the label's printed value — sodas were never in the
+// "read the label" category at all).
+// ============================================================
+
+const drinkPrompt = buildFoodVisionUserPrompt({ message: "", isApprovalCaption: false, liveCal: 2000, liveProt: 150 });
+
+test("vision prompt: soda cans/bottles are in the label-reading category, not just shakes/bars", () => {
+  assert.ok(/cooldrink\/soft drink\/energy drink can or bottle/i.test(drinkPrompt), "soda containers must trigger label-reading");
+  assert.ok(/Coke, Pepsi, Fanta, Sprite, Stoney, Red Bull, Monster, Score/i.test(drinkPrompt), "named SA drink brands must be present");
+});
+
+test("vision prompt: a legible label overrides a guess, even on a repeat photo", () => {
+  assert.ok(/legible label always overrides a guess/i.test(drinkPrompt));
+  assert.ok(/even if the client already turned the bottle.*second time/i.test(drinkPrompt), "must handle the turn-the-bottle-around case explicitly");
+  assert.ok(/never repeat a different generic guess/i.test(drinkPrompt));
+});
+
+test("vision prompt: Zero/Diet/Max variants are distinguished from regular (huge calorie gap)", () => {
+  assert.ok(/Zero\/Zero Sugar\/Diet\/Light\/Max/i.test(drinkPrompt));
+  assert.ok(/Coca-Cola Zero\/Zero Sugar\/Diet Coke ≈0 kcal/i.test(drinkPrompt), "Coke Zero must be distinct from Coke Original in the prompt");
+  assert.ok(/Pepsi Max\/Zero Sugar ≈0 kcal/i.test(drinkPrompt));
+});
+
+test("vision prompt: known SA drink fallback values are present for common brands", () => {
+  for (const needle of ["Coca-Cola Original", "Pepsi Original", "Fanta Orange", "Sprite", "Stoney Ginger Beer", "Red Bull", "Monster Energy", "Score Energy"]) {
+    assert.ok(drinkPrompt.includes(needle), `missing known drink value for: ${needle}`);
+  }
+});
+
+test("vision prompt: still contains the greasy-food and TOTAL-format instructions (no accidental deletion)", () => {
+  assert.ok(/TOTAL: X kcal \| Xg protein/.test(drinkPrompt));
+  assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
 });
 
 // ============================================================
