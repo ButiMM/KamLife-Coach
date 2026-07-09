@@ -18,6 +18,8 @@ import {
   getKamlifeProgramme, getDayType, getPhaseNames,
 } from "../programme";
 import { buildWorkoutViewerUrl } from "../workout-viewer";
+import { buildDailyDirection } from "../daily-direction";
+import { getTodayWorkoutState } from "../workout-state";
 import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
@@ -51,6 +53,20 @@ export async function handleMiscCommands(ctx: {
   isQuestion?: boolean; // systemic QUESTION gate — see early-commands.ts
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
+
+  // ---- DIRECTION / OVERALL PLAN ----
+  // "Give me direction", "what do I do today and this week", "what's my overall plan" —
+  // the client wants the WHOLE plan across every pillar (train/rest, food, steps, water),
+  // not a bare workout dump (2026-07-09: a client asked exactly this and got an exercise
+  // list). Deterministic + plain, pulls their real targets and today's training state.
+  const dirStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
+  const isDirectionReq =
+    /\b(give me (a )?direction|direction for (the|this|today|my)|what (do|should) i (do|be doing|need to do)( today| this week| for the week| now| next)|what.?s my (plan|week|day)|my (overall |whole )?plan\b|overall plan|plan for (the|this) (week|day|month)|where do i (start|begin))\b/i.test(dirStripped)
+    && !/\b(workout|exercise|meal plan|recipe|shopping|supplement|pay|cancel|refund|price|cost)\b/i.test(dirStripped);
+  if (isDirectionReq) {
+    const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
+    return buildDailyDirection(user, ws as any);
+  }
 
   // "What have you learned about me?" — surface the un-copyable personal intelligence so the
   // client feels what a saved/stolen plan can never know about them (#3 retention).

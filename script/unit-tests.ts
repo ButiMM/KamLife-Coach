@@ -20,6 +20,7 @@ import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors } from "../server/physique-analysis";
+import { buildDailyDirection } from "../server/daily-direction";
 
 let passed = 0;
 let failed = 0;
@@ -1720,6 +1721,26 @@ test("physique: empty lagging falls back to gender priors, never double-counts a
 test("physique: gender priors differ for male vs female", () => {
   assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
   assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+// DAILY DIRECTION (2026-07-09) — "give me my overall plan" must return the WHOLE plan
+// across every pillar, plain, not a bare workout dump.
+test("daily direction: covers today across all pillars + the weekly through-line", () => {
+  const d = buildDailyDirection(
+    { name: "Kam Test", calorieTarget: 1800, proteinTarget: 140, stepsTarget: 9000, trainingMode: "gym", trainingDaysPerWeek: 3 },
+    { type: "NORMAL" },
+  );
+  assert.ok(/\*Today:\*/.test(d) && /\*This week:\*/.test(d), "has a today and a week section");
+  assert.ok(/workout/i.test(d), "training day tells them to get their session");
+  assert.ok(/1,?800/.test(d) && /140g/.test(d) && /9,?000 steps/.test(d) && /water/i.test(d), "food + steps + water all present");
+  assert.ok(!/surplus|deficit|macros|hypertrophy/i.test(d), "stays plain — no jargon");
+});
+
+test("daily direction: rest day and walk-only are honoured, never insists on the gym", () => {
+  const rest = buildDailyDirection({ name: "A", calorieTarget: 1700, proteinTarget: 120, stepsTarget: 8000, trainingMode: "gym", trainingDaysPerWeek: 4 }, { type: "REST", nextTrainingName: "Tuesday" });
+  assert.ok(/rest day/i.test(rest) && !/reply \*workout\*/i.test(rest), "rest day never pushes a session");
+  const walk = buildDailyDirection({ name: "B", calorieTarget: 1600, proteinTarget: 100, stepsTarget: 10000, trainingMode: "walk_only", trainingDaysPerWeek: 3 }, { type: "NORMAL" });
+  assert.ok(/walk your 10,?000 steps/i.test(walk), "walk-only user gets a steps-first plan");
 });
 
 test("physique: prompt is gender + goal aware, focus line names lagging and a strong point", () => {
