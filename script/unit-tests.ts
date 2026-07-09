@@ -1703,6 +1703,16 @@ test("vision prompt: still contains the greasy-food and TOTAL-format instruction
   assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
 });
 
+// PHOTO "can I eat this?" → real SA shelf/menu swaps (2026-07-09). The approval verdict
+// must offer a swap they can actually get where they are — shop or takeaway.
+test("vision prompt: approval verdict offers real SA shelf + takeaway swaps", () => {
+  const approve = buildFoodVisionUserPrompt({ message: "can I eat this?", isApprovalCaption: true, liveCal: 1800, liveProt: 140 });
+  assert.ok(/ZERO SUGAR/i.test(approve), "sugary → zero sugar heuristic present");
+  assert.ok(/Nando'?s|KFC|Steers/i.test(approve), "takeaway swaps present");
+  assert.ok(/Checkers|Shoprite|Pick n Pay/i.test(approve), "shop swaps present");
+  assert.ok(/grilled not fried/i.test(approve), "fried→grilled swap present");
+});
+
 // PHYSIQUE ANALYSIS (2026-07-09) — read baseline photos → lagging vs dominant muscles,
 // gender-aware, to drive targeted-volume programming. The parser must validate the
 // model's free-form answer, never trust it raw.
