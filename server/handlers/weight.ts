@@ -50,7 +50,7 @@ export function assessWeightRate(
     } else if (pace <= maxWarn) {
       return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — ⚠️ *faster than ideal.* At this pace you're likely losing muscle alongside fat. Hit ${proteinTarget}g protein every single day — that's what protects your muscle while you lose fat.`;
     } else if (pace <= dangerBand) {
-      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — 🚨 *this is too fast.* Losing this quickly causes muscle loss, metabolic slowdown and rebound weight gain. Add 200 kcal/day and hit ${proteinTarget}g protein. Your target is ${calorieTarget} kcal — are you reaching it?`;
+      return `📉 Total lost: *${Math.abs(totalChangeKg).toFixed(1)}kg*. Pace: ${pace.toFixed(2)}kg/week — 🚨 *this is too fast.* Losing this quickly burns muscle, slows down how much your body burns, and the weight usually piles back on. Add 200 kcal/day and hit ${proteinTarget}g protein. Your target is ${calorieTarget} kcal — are you reaching it?`;
     } else {
       return `⚠️ *${nm}you're losing very fast — ${pace.toFixed(2)}kg a week.* Dropping this quickly can burn muscle and slow your metabolism, and it usually means you're not eating enough. Can you tell me what a normal day's food looks like for you? Let's make sure you're eating enough to do this safely.`;
     }
@@ -58,8 +58,8 @@ export function assessWeightRate(
 
   if (totalChangeKg < 0 && goal === "muscle_gain") {
     return pace > 0.3
-      ? `🚨 *${nm}you're losing weight on a muscle-building programme.* Down ${Math.abs(totalChangeKg).toFixed(1)}kg — you cannot build muscle in this deficit. You need to eat MORE: push to ${calorieTarget} kcal and ${proteinTarget}g protein every day. What's your typical day of eating look like?`
-      : `⚠️ Down *${Math.abs(totalChangeKg).toFixed(1)}kg* on a muscle gain programme. You need a calorie surplus — are you hitting ${calorieTarget} kcal daily?`;
+      ? `🚨 *${nm}you're losing weight on a muscle-building programme.* Down ${Math.abs(totalChangeKg).toFixed(1)}kg — you can't build muscle while eating less than your body burns. You need to eat MORE: push to ${calorieTarget} kcal and ${proteinTarget}g protein every day. What's your typical day of eating look like?`
+      : `⚠️ Down *${Math.abs(totalChangeKg).toFixed(1)}kg* on a muscle gain programme. You need to eat a bit more than your body burns — are you hitting ${calorieTarget} kcal daily?`;
   }
 
   if (totalChangeKg > 0 && goal === "muscle_gain") {
@@ -338,11 +338,11 @@ export async function handleWeightLog(
       } else if (rate > -0.1) {
         calAdjust = 100;
         trendLabel = `➡️ *${rateStr} over 2 weeks*`;
-        trendStatus = `scale isn't moving — muscle growth needs a surplus. Adding 100 kcal.`;
+        trendStatus = `scale isn't moving — to grow you need to eat a bit more than your body burns. Adding 100 kcal.`;
       } else {
         calAdjust = 150;
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
-        trendStatus = `losing weight on a muscle gain programme. Adding 150 kcal — you need a surplus to build.`;
+        trendStatus = `losing weight on a muscle gain programme. Adding 150 kcal — you need to eat a bit more than you burn to build.`;
       }
     } else if (goal === "recomposition") {
       trendLabel = `➡️ *${rateStr} over 2 weeks*`;
@@ -385,7 +385,7 @@ export async function handleWeightLog(
     const avg7     = last7Logs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / last7Logs.length;
     const avgOlder = olderLogs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / olderLogs.length;
     if (Math.abs(avg7 - avgOlder) < 0.4 && !trendStatus.includes("✅")) {
-      plateauNote = `\n\n_3-week average hasn't moved. Your body has adapted. Options: tighten portions slightly, add a 20-minute daily walk, or take a 1–2 week diet break at maintenance calories. Pick one and commit for a week._`;
+      plateauNote = `\n\n_3-week average hasn't moved. Your body has settled. Options: eat slightly smaller portions, add a 20-minute daily walk, or take a 1–2 week break eating at the level where your weight holds steady. Pick one and commit for a week._`;
     }
   }
 

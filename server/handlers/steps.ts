@@ -113,11 +113,11 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
   if (steps >= 2000) {
     if (goalContext === "fat_loss") {
       response += isWorkoutDay
-        ? `\n\n_Gym session already burned. These steps add to it — double-dipping on the deficit._`
-        : `\n\n_Your food choices + these steps = your calorie deficit is real today._`;
+        ? `\n\n_Gym session already burned. These steps add to it — you're burning even more than your food already saves._`
+        : `\n\n_Your food + these steps mean you're burning more than you eat today. That's the weight coming off._`;
     } else if (goalContext === "muscle_gain") {
       response += isWorkoutDay
-        ? `\n\n_Session done. Light movement for recovery — that's all you need. Protect the surplus._`
+        ? `\n\n_Session done. Light movement for recovery — that's all you need. Keep eating enough to build._`
         : `\n\n_Movement for health, not to burn. Your food is doing the building work._`;
     }
   }

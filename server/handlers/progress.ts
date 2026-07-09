@@ -87,7 +87,7 @@ export async function handleProgressCheck(ctx: {
     const weightSentence = weightChangeNum !== null
       ? weightChangeNum < 0
         ? isMuscleGain
-          ? `Weight: down ${Math.abs(weightChangeNum)}kg this week — check your food. You should be in a surplus, not losing.`
+          ? `Weight: down ${Math.abs(weightChangeNum)}kg this week — check your food. You should be eating a bit more than you burn, not losing.`
           : isRecomp
           ? `Weight: down ${Math.abs(weightChangeNum)}kg — fat is dropping. Keep the training going to protect the muscle.`
           : `Weight: down ${Math.abs(weightChangeNum)}kg this week — moving in the right direction.`
@@ -169,12 +169,12 @@ export async function handleProgressCheck(ctx: {
       if (trainingPct < 0.5) {
         const missed = plannedSessions - completedSessions;
         return isRecomp
-          ? `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — for recomp, training IS the muscle retention signal. Without it, any deficit just strips muscle alongside fat. That is the opposite of recomp. Do the next session today.`
-          : `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough${isMuscleGain ? " training stimulus to build muscle" : " training to drive fat loss"}. Do the next session today. Not tomorrow. Today.`;
+          ? `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — the training is what holds onto your muscle. Without it, eating less than you burn just strips muscle along with the fat, and you lose the whole point. Do the next session today.`
+          : `*Fix this week:* Training. ${missed} session${missed > 1 ? "s" : ""} missed — that's not enough${isMuscleGain ? " training to build muscle" : " training to drive fat loss"}. Do the next session today. Not tomorrow. Today.`;
       }
       if (avgSteps > 0 && stepsPct < 0.7) {
         return isRecomp
-          ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. For recomp, walking keeps the NEAT burn going while training builds the muscle. Both are needed. 20-minute walk after dinner adds ~2,000 steps.`
+          ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Walking keeps you burning through the day while training builds the muscle. Both are needed. 20-minute walk after dinner adds ~2,000 steps.`
           : isMuscleGain
           ? `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Not about burning — just stay active for recovery and health. 20-minute walk after dinner is enough.`
           : `*Fix this week:* Steps — ${avgSteps.toLocaleString()} avg vs ${stepsTarget.toLocaleString()} target. Fix: 20-minute walk after dinner every day. That adds ~2,000 steps and closes the calorie gap your food started.`;
@@ -185,10 +185,10 @@ export async function handleProgressCheck(ctx: {
           : `Solid week. The recomp formula: Walking + Lifting + Protein + Sleep. Run that consistently and body composition shifts — even when the scale stays flat.`
         : isMuscleGain
         ? fn
-          ? `${fn}, solid week. This week: push the weight on every lift — add a plate or squeeze one more rep. Progressive overload is the only way to build. No plateau, always progress.`
-          : `Solid week. Push harder in every session — more weight or more reps. Progressive overload is how muscle gets built.`
+          ? `${fn}, solid week. This week: push the weight on every lift — add a plate or squeeze one more rep. Adding a bit more each time is the only way muscle grows. No plateau, always progress.`
+          : `Solid week. Push harder in every session — more weight or more reps. Adding a little more each time is how muscle gets built.`
         : fn
-          ? `${fn}, solid week across all areas. This week's focus: push training intensity — more weight on the bar or more reps than last time. Results come from progressive overload, not just showing up.`
+          ? `${fn}, solid week across all areas. This week's focus: push training intensity — more weight on the bar or more reps than last time. Results come from adding a bit more each time, not just showing up.`
           : `Solid week across all areas. This week: push the intensity — more weight or more reps than last session.`;
     }
     const insight = coachingInsight();
