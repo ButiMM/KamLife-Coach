@@ -617,13 +617,13 @@ export function buildFoodLogReply(p: {
       if (isMuscleGain) {
         // For muscle gain a surplus is the goal — don't guilt-trip; just flag if excessive
         dayAssessment = overBy >= 600
-          ? `\n_Surplus of ~${overBy} kcal — running high. Tomorrow stay closer to target to keep the gain lean._`
+          ? `\n_You've eaten ~${overBy} kcal more than your body burns today — a bit much. Tomorrow eat a little closer to your target so the muscle you build stays lean._`
           : `\n_${pick([
-              `~${overBy} kcal surplus today. Train hard and your body puts it to work.`,
-              `Surplus of ~${overBy} kcal — that's the building fuel. Keep training consistent.`,
+              `~${overBy} kcal more than your body burns today — for building muscle that's good. Train hard and it gets used.`,
+              `You're ~${overBy} kcal above what you burn — that's your building fuel. Keep training._`,
             ])}_`;
       } else if (extraStepsBurned >= 80) {
-        dayAssessment = `\n_Over on calories, but your steps offset ~${extraStepsBurned} kcal. Net surplus: ~${overBy} kcal. Keep the next meal lean and you're fine._`;
+        dayAssessment = `\n_A bit over on food, but your walking burned ~${extraStepsBurned} kcal of it off. You're only ~${overBy} above what you burned — keep the next meal light and you're fine._`;
       } else if (overBy >= 800) {
         dayAssessment = `\n_You're ~${overBy} kcal over today — it happens, no panic. If you eat again, keep it light: protein and veg. One day doesn't undo your progress._`;
       } else if (overBy >= 400) {
@@ -645,7 +645,7 @@ export function buildFoodLogReply(p: {
           ]
         : [
             "Your steps covered the gap — net calories back on target. Keep last meal light.",
-            "Movement offset the surplus. You're clean. Light protein for dinner.",
+            "Your walking cancelled out the extra food. You're clean. Light protein for dinner.",
             "Walking got you back on track. Last meal: lean and light.",
             "Steps cancelled the overage — effectively on target. Finish with something lean.",
           ]
@@ -693,7 +693,7 @@ export function buildFoodLogReply(p: {
       ? [
           "Zero cal — hydration sorted. Don't let drinks crowd out the food you need to hit your calorie target.",
           "Logged. Zero cal. Keep the food coming — drinks don't build muscle.",
-          "Zero calories — fine. Just make sure your meals are hitting the surplus.",
+          "Zero calories — fine. Just make sure your meals give you enough to build on.",
         ]
       : [
           "Zero calories — good choice. Keep the water and zero-cal drinks flowing.",
@@ -874,7 +874,7 @@ export function buildFoodLogReply(p: {
       `\n\n🧠 _${fn}, nobody is doing this for you. That's exactly what makes it count._`,
       isMuscleBuild
         ? `\n\n💪 _Protein tracking is your edge, ${fn}. Most people guess. You know._`
-        : `\n\n🔥 _${fn}, you're creating the calorie deficit meal by meal. This is how it works._`,
+        : `\n\n🔥 _${fn}, meal by meal you're eating a bit less than your body burns. That's how the weight comes off._`,
       `\n\n⏱ _${fn}, the gap between who you are and who you want to be closes one logged meal at a time._`,
       `\n\n✅ _Every time you log instead of guessing, you're making a decision that adds up._`,
     ];
