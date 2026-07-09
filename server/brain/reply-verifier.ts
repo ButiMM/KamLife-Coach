@@ -40,8 +40,26 @@ const SURPLUS_PUSH_RE =
   /\b(?:let'?s (?:focus on|aim for) (?:a )?(?:calorie )?surplus|eat (?:in a|at a) surplus|focus on bulking|let'?s bulk|aim to gain weight|we(?:'?ll| will)? (?:focus|work) on gaining (?:weight|mass|size))\b/i
 ;
 
+// Fitness MYTHS the model absorbed from the broscience-soaked internet and will reach
+// for unprompted (2026-07-09: told a client an 8th chest exercise would "confuse that
+// focus" — echoing muscle-confusion, a myth — instead of the correct answer, targeted
+// volume). Caught in CODE, not left to the prompt, because a prompt line the model can
+// ignore is exactly what let this through. Goal-independent — it's just false.
+const FITNESS_MYTH_RE =
+  /\b(muscle confusion|confus\w+ (?:the |your |that )?(?:muscle|muscles|focus|plan)|shock(?:ing)? (?:the |your )?muscles?|spot[- ]?reduc\w+|muscles? turn\w* (?:in)?to fat|fat turn\w* (?:in)?to muscle)\b/i
+;
+// …but ALLOW the bot to correctly DEBUNK a myth ("muscle confusion is a myth",
+// "you can't spot reduce") — only flag when the myth is being endorsed, not refuted.
+const MYTH_DEBUNK_RE =
+  /\b(myth|no such thing|not (?:a )?real|isn'?t real|not (?:a )?thing|can'?t|cannot|doesn'?t work|false|nonsense|ignore that)\b/i
+;
+
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
   const r = reply || "";
+
+  if (FITNESS_MYTH_RE.test(r) && !MYTH_DEBUNK_RE.test(r)) {
+    return { ok: false, violation: "Your reply invokes a fitness MYTH (muscle confusion / shocking the muscle / spot reduction / muscle-turns-to-fat). None of these are real — never tell a client to 'confuse' or 'shock' a muscle. Rewrite with the correct principle: progressive overload on the core lifts, and for a lagging body part, TARGETED VOLUME (a couple more sets, or one focused accessory) on that muscle." };
+  }
 
   if (FORBIDDEN_ACTION_RE.test(r)) {
     return { ok: false, violation: "You claimed you will adjust targets/goal/programme — you have NO tool for that. Remove the claim; if they want it changed, tell them to say 'change my goal to …' so the system can confirm it properly." };

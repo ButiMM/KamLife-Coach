@@ -1477,6 +1477,22 @@ test("verifier passes normal coaching, corrections, and same-direction talk", ()
   assert.ok(verifyBrainReply("If you want the goal changed, say 'change my goal to fat loss' and I'll get it confirmed properly.", { goalType: "muscle_gain" }).ok);
 });
 
+// FITNESS MYTH CATCHER (2026-07-09) — the bot must NEVER ship broscience. Caught in
+// code so a prompt line the model ignores can't let "confuse that focus" through again.
+test("verifier blocks fitness myths (muscle confusion, shock, spot reduction)", () => {
+  assert.ok(!verifyBrainReply("Adding an 8th exercise can confuse that focus — stick to the plan.", {}).ok);
+  assert.ok(!verifyBrainReply("Muscle confusion keeps your body guessing so it doesn't adapt.", {}).ok);
+  assert.ok(!verifyBrainReply("We'll shock the muscle with new movements every week.", {}).ok);
+  assert.ok(!verifyBrainReply("Do more crunches to spot reduce your belly fat.", {}).ok);
+  assert.ok(!verifyBrainReply("Skip a week and your muscle turns to fat.", {}).ok);
+});
+
+test("verifier ALLOWS correctly debunking a myth (not blocked for naming it)", () => {
+  assert.ok(verifyBrainReply("Muscle confusion is a myth — adaptation is the goal. We add targeted volume to your chest.", {}).ok);
+  assert.ok(verifyBrainReply("You can't spot reduce — fat comes off everywhere as you stay in a deficit.", {}).ok);
+  assert.ok(verifyBrainReply("Your chest is lagging? Add 2-3 sets to your press. That's how you bring it up.", {}).ok);
+});
+
 // ============================================================
 // hasGoalChangeVocabulary — the normalizer's GOAL_CHANGE brake. A goal flip is
 // the most destructive rewrite; only honour it when the client actually asked.
