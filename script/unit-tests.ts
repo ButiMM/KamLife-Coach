@@ -1684,6 +1684,19 @@ test("vision prompt: still contains the greasy-food and TOTAL-format instruction
   assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
 });
 
+// HIDDEN ADDED FATS (2026-07-09) — the fat the camera can't see (oil cooked in, avo,
+// mayo, dressing) is the #1 reason a consistent logger stalls. This coaching must
+// survive future prompt edits, so assert the exact levers are present.
+test("vision prompt: coaches hidden added fats the photo can't measure", () => {
+  assert.ok(/HIDDEN ADDED FATS/i.test(drinkPrompt), "must name the hidden-added-fats case");
+  for (const needle of ["avocado", "mayonnaise", "oil", "low-fat milk", "for next time", "spray"]) {
+    assert.ok(new RegExp(needle, "i").test(drinkPrompt), `missing hidden-fat lever: ${needle}`);
+  }
+  // must stay a FULL-MEAL-only, kind, next-time nudge — never shame, never for snacks
+  assert.ok(/FULL COOKED MEAL only/i.test(drinkPrompt), "hidden-fat advice is full-meal only");
+  assert.ok(/never .?shame|never "your log is wrong"/i.test(drinkPrompt), "must stay kind, not shaming");
+});
+
 // ============================================================
 // Results
 // ============================================================
