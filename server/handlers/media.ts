@@ -30,6 +30,7 @@ import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt } from "./food-v
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext } from "../targets";
 import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
+import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt";
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -256,8 +257,28 @@ export async function handleMediaMessage(ctx: {
           if (uncaptionedType === "exercise") {
             const isFormCheckCaption = /\b(form|check|correct|right|wrong|how does|how do i look|am i doing|my form|check my|is this right|watch me|look at me)\b/i.test(message || "");
             if (isFormCheckCaption) {
-              const exReply = `${user.name || "Sharp"} — I can see that's a gym / exercise photo, but I cannot give form feedback from a still shot taken mid-set.\n\nFor form coaching: send a clear photo from the side showing the bottom of the movement (e.g. deepest point of squat, bar touching chest on bench). Or tell me the exercise and what feels off.\n\nIf you were trying to log a workout, reply *done* — I will log today's session.`;
-              await logChat(user.id, "[Exercise Photo]", exReply, "EXERCISE_PHOTO");
+              // FORM CHECK from a photo — analyse the movement and give 1-2 plain fixes
+              // (2026-07-09: used to refuse; the whole point of remote coaching is to
+              // direct form without touching people). If the model can't judge the angle
+              // it says so and asks for a side-on shot — that instruction is in the prompt.
+              const { system: fSys, user: fUser } = buildFormCheckPrompt({ clientName: user.name || "", exerciseName: extractFormExercise(message || "") });
+              const fDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
+              const formReply = await withTimeout("form_check_photo", 15000, () => openai.chat.completions.create({
+                model: fDecision.model,
+                max_tokens: fDecision.maxTokens,
+                messages: [
+                  { role: "system", content: fSys },
+                  { role: "user", content: [
+                    { type: "text", text: fUser },
+                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: fDecision.detail } },
+                  ] },
+                ],
+              }))
+                .then(r => r.choices[0]?.message?.content?.trim() || "")
+                .catch((e) => { console.warn("[form_check_photo]", (e as Error)?.message); return ""; });
+              const exReply = formReply
+                || `${user.name || "Sharp"} — I can see it's a gym photo but couldn't read your form clearly. Send one clear shot from the SIDE at the bottom of the movement (deepest point of the squat, bar on chest for bench) and I'll tell you exactly what to fix.`;
+              await logChat(user.id, "[Form Check Photo]", exReply, "FORM_CHECK");
               return exReply;
             }
             // Reference screenshot — a TikTok/IG workout the client saved. Identify the moves.
@@ -1431,28 +1452,46 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       return ack;
     }
 
-    const exerciseHint = /\b(squat|deadlift|rdl|bench|row|press|curl|hip thrust|lunge|pull.?up)\b/i.exec(message);
-    const exerciseName = exerciseHint ? exerciseHint[1] : null;
-    const clientNameVid = user.name || "there";
-    const formCheckKeyPoints: Record<string, string> = {
-      squat: "bottom position (thighs parallel or below)",
-      deadlift: "mid-shin position as the bar passes your knee",
-      rdl: "bottom of the hinge where you feel the hamstring stretch",
-      bench: "bar at the chest — lowest point of the press",
-      "hip thrust": "top of the movement — full hip extension",
-      row: "peak contraction — elbow fully back",
-      press: "starting position — bar or dumbbell at shoulder height",
-      curl: "peak contraction — arm fully shortened",
-      lunge: "bottom of the lunge — back knee near the floor",
-      "pull-up": "chin at bar level",
-    };
-    const keyPoint = exerciseName ? formCheckKeyPoints[exerciseName.toLowerCase()] : null;
-    const specificAsk = keyPoint
-      ? `For the *${exerciseName}*, send me a clear photo of the *${keyPoint}*. That is the moment I need to see to give you accurate feedback.`
-      : `Send me a clear still photo at the most important moment of the movement — usually the bottom of a squat or deadlift, or the peak contraction for upper body. Good lighting, full body in frame.`;
-    const videoReply = `Got the video${clientNameVid !== "there" ? `, ${clientNameVid}` : ""}. I cannot analyse video directly — WhatsApp compresses it too much for accurate form coaching.\n\n${specificAsk}\n\nOnce I see the photo I will tell you exactly what to fix.`;
-    await logChat(user.id, "[Video]", videoReply, "FORM_CHECK");
-    return videoReply;
+    // FORM CHECK video — extract frames and actually analyse the movement, then reply
+    // with 1-2 plain fixes (2026-07-09: used to refuse video outright). Async so the
+    // webhook stays fast; the breakdown lands as a follow-up, same pattern as the others.
+    const exerciseName = extractFormExercise(message);
+    const clientNameVid = user.name || "";
+    (async () => {
+      const fallback = `Got your form video but couldn't read it clearly${clientNameVid ? `, ${clientNameVid}` : ""}. Send a short clip (5–10s) or a clear photo from the SIDE, showing the bottom of the movement, full body in frame — then I'll tell you exactly what to fix.`;
+      try {
+        const sid = process.env.TWILIO_ACCOUNT_SID || "";
+        const token = process.env.TWILIO_AUTH_TOKEN || "";
+        const auth = "Basic " + Buffer.from(`${sid}:${token}`).toString("base64");
+        const vr = await fetch(mediaUrl, { headers: { Authorization: auth } });
+        if (!vr.ok) { await sendWhatsApp(phone, fallback); return; }
+        const vlen = parseInt(vr.headers.get("content-length") || "0", 10);
+        if (vlen > 20 * 1024 * 1024) { await sendWhatsApp(phone, `That clip's a bit big for me to read${clientNameVid ? `, ${clientNameVid}` : ""}. Send a shorter one (5–10s) from the side, or a clear photo at the bottom of the movement.`); return; }
+        const vbuf = await vr.arrayBuffer();
+        const vct = (vr.headers.get("content-type") || ctype || "video/mp4").split(";")[0].trim();
+        const vext = (vct.split("/")[1] || "mp4").replace("quicktime", "mov");
+        const frames = await extractVideoFrames(vbuf, vext, 6);
+        if (frames.length === 0) { await sendWhatsApp(phone, fallback); return; }
+        const { system: fSys, user: fUser } = buildFormCheckPrompt({ clientName: clientNameVid, exerciseName, fromVideo: true });
+        const resp = await openai.chat.completions.create({
+          model: "gpt-4o",
+          max_tokens: 400,
+          messages: [
+            { role: "system", content: fSys },
+            { role: "user", content: [{ type: "text", text: fUser }, ...frames.map(b => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b}` } }))] as ChatCompletionContentPart[] },
+          ],
+        });
+        const formReply = resp.choices[0]?.message?.content?.trim() || fallback;
+        await logChat(user.id, "[Form Check Video]", formReply, "FORM_CHECK");
+        await sendWhatsApp(phone, formReply);
+      } catch (e) {
+        console.error("[FORM_CHECK_VIDEO]", e);
+        await sendWhatsApp(phone, fallback);
+      }
+    })();
+    const vack = `Got your form video 💪 Give me a few seconds — checking your form...`;
+    await logChat(user.id, "[Form Check Video]", vack, "FORM_CHECK_ACK");
+    return vack;
   }
 
   console.log(`[MEDIA] Unhandled content type: ${ctype} — ignoring`);

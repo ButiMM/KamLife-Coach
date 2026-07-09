@@ -22,6 +22,7 @@ import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
+import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
 
 let passed = 0;
 let failed = 0;
@@ -1732,6 +1733,27 @@ test("physique: empty lagging falls back to gender priors, never double-counts a
 test("physique: gender priors differ for male vs female", () => {
   assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
   assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+// FORM CHECK (2026-07-09) — remote form coaching must analyse and direct with AT MOST
+// two plain fixes, never a lecture, and ask for a side angle when it genuinely can't tell.
+test("form check: prompt caps at two fixes, stays plain, asks for a better angle when unsure", () => {
+  const p = buildFormCheckPrompt({ clientName: "Kam", exerciseName: "squat", fromVideo: false });
+  assert.ok(/at most two|MOST TWO|never more than TWO|two fixes/i.test(p.user), "must cap at two fixes");
+  assert.ok(/no jargon|plain words|beginner/i.test(p.system + p.user), "must stay plain");
+  assert.ok(/SIDE|side/.test(p.user) && /can'?t (judge|tell)|genuinely can'?t/i.test(p.user), "asks for a side angle when unsure");
+  assert.ok(/squat/i.test(p.user), "names the exercise the client gave");
+});
+
+test("form check: video variant frames the input as video frames", () => {
+  const v = buildFormCheckPrompt({ clientName: "A", exerciseName: "deadlift", fromVideo: true });
+  assert.ok(/frames from a short video/i.test(v.user), "video framing present");
+});
+
+test("form check: extractFormExercise pulls the lift, null when none named", () => {
+  assert.equal(extractFormExercise("check my squat form"), "squat");
+  assert.equal(extractFormExercise("how's my deadlift looking"), "deadlift");
+  assert.equal(extractFormExercise("watch this and tell me"), null);
 });
 
 // SA SHELF SWAPS (2026-07-09) — the bot must give the correct, consistent shelf swap
