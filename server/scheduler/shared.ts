@@ -360,6 +360,23 @@ export async function sendCriticalAlert(to: string, body: string): Promise<void>
   }
 }
 
+// Reads the Twilio account balance so the scheduler can warn the founder BEFORE the
+// account runs dry and the whole WhatsApp channel goes silent with no error (the
+// 2026-07-09 scare: balance at $11.85 and nothing watching it). Kept here with the
+// other Twilio API access; returns null on any failure — a balance check must never
+// throw into the cron loop or block on Twilio being reachable.
+export async function fetchTwilioBalance(): Promise<{ balance: number; currency: string } | null> {
+  try {
+    const b = await twilioClient.balance.fetch();
+    const balance = Number(b.balance);
+    if (!Number.isFinite(balance)) return null;
+    return { balance, currency: b.currency || "USD" };
+  } catch (e: any) {
+    console.warn(`[BALANCE] Twilio balance fetch failed (non-fatal): ${e?.message || e}`);
+    return null;
+  }
+}
+
 export const deliveryStats = { sent: 0, failed: 0, lastReset: new Date().toISOString().slice(0, 10) };
 
 // ── JOB RUN REGISTRY ──────────────────────────────────────────────────────────

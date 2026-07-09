@@ -57,6 +57,7 @@ import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runComebackProtocol } from "./scheduler/jobs/comeback";
 import { runQualityAudit } from "./scheduler/jobs/quality-audit";
 import { runTrialCountdown } from "./scheduler/jobs/trial";
+import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, sendWhatsAppTemplate, deliveryStats };
@@ -215,6 +216,7 @@ export async function initScheduler(): Promise<void> {
   safe("runStepSyncCatchup", runStepSyncCatchup);
 
   // ── Daily jobs ────────────────────────────────────────────────────────────
+  cron.schedule("0 3 * * *",    () => safe("runBalanceCheck",           runBalanceCheck),             { timezone: "UTC" }); // 5am SAST — warn on low Twilio balance BEFORE the 6am fan-out drains it
   cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin, { critical: true }), { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability),    { timezone: "UTC" }); // 7pm SAST
   cron.schedule("2 4 * * *",    () => safe("runWeek3Intervention",      runWeek3Intervention),        { timezone: "UTC" }); // 6am SAST

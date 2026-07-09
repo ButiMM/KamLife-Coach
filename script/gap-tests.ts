@@ -945,6 +945,32 @@ test("early-commands: 'I passed my exam' → NOT bereavement (no false positive)
   assert.ok(r === null || !/sorry for your loss/i.test(r!), `benign 'passed' must not trigger bereavement: ${r?.slice(0, 120)}`);
 });
 
+// TWILIO BALANCE ALARM — pure threshold/format logic (2026-07-09). The bot goes
+// silent with NO error when Twilio runs dry; this alert is the safety net. The
+// runtime fetch/send is thin; the threshold + wording is what must never drift.
+const { buildLowBalanceAlert } = await import("../server/scheduler/jobs/balance-check");
+
+test("balance alarm: below threshold → alert names the amount and currency", () => {
+  const a = buildLowBalanceAlert(11.85, "USD", 15);
+  assert.ok(a !== null, "11.85 < 15 must alert");
+  assert.ok(a!.includes("11.85") && /USD/i.test(a!), `should name amount + currency: ${a}`);
+  assert.ok(/top up/i.test(a!), "should tell the founder to top up");
+});
+
+test("balance alarm: at or above threshold → no alert (no nagging when healthy)", () => {
+  assert.equal(buildLowBalanceAlert(15, "USD", 15), null, "exactly at threshold is fine");
+  assert.equal(buildLowBalanceAlert(42.5, "USD", 15), null, "well above threshold is fine");
+});
+
+test("balance alarm: unreadable balance → null, never cry wolf", () => {
+  assert.equal(buildLowBalanceAlert(NaN, "USD", 15), null);
+});
+
+test("balance alarm: custom threshold is respected", () => {
+  assert.ok(buildLowBalanceAlert(20, "USD", 25) !== null, "20 < 25 must alert");
+  assert.equal(buildLowBalanceAlert(30, "USD", 25), null, "30 > 25 must not alert");
+});
+
 // ============================================================
 // MISC-COMMANDS.TS CHARACTERISATION TESTS
 // ============================================================
