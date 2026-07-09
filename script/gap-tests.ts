@@ -1011,6 +1011,31 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
   assert.equal(buildViewerCards({ trainingMode: "walk_only" }), null);
 });
 
+// CONCERN-FIRST ON HEALTH EVENTS (2026-07-09) — a real client wrote "had an incident
+// at work and my GP recommended rest, spent the day in bed". Health events rarely use
+// the word "sick"; the brain must still catch them and lead with concern, not coach past.
+const { SCENARIO_TOPIC_RE, BRAIN_SYSTEM: BRAIN_SYS } = await import("../server/brain/coach-brain");
+
+test("brain: oblique health events trigger the scenario playbook (not only the word 'sick')", () => {
+  for (const msg of [
+    "had an incident at work and my GP recommended rest, spent the day in bed",
+    "I'm in hospital",
+    "on a drip today",
+    "going for an iron infusion",
+    "the doctor admitted me",
+  ]) assert.ok(SCENARIO_TOPIC_RE.test(msg), `should trigger concern handling: ${msg}`);
+});
+
+test("brain: everyday chatter does NOT trip the health playbook", () => {
+  for (const msg of ["what's my protein target", "logged my lunch", "gym was great today", "show me the exercises"])
+    assert.ok(!SCENARIO_TOPIC_RE.test(msg), `should NOT trigger: ${msg}`);
+});
+
+test("brain: playbook leads with concern on a health event (asks if serious)", () => {
+  assert.ok(/health event/i.test(BRAIN_SYS), "must name 'any health event'");
+  assert.ok(/concern/i.test(BRAIN_SYS) && /serious/i.test(BRAIN_SYS), "must instruct concern-first + ask if serious");
+});
+
 test("workout viewer: rendered page slides and escapes exercise names", () => {
   const html = renderWorkoutViewerHtml(
     { label: "Upper A", week: 2, cards: [{ name: "Chest <Fly>", sets: "4 × 8", gifUrl: null, videoUrl: "https://youtube.com/x", alt: "Dumbbell press" }] },

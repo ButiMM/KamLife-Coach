@@ -37,7 +37,12 @@ import { buildClientSnapshot } from "./client-snapshot";
 
 // Hard-case topics that warrant injecting the full scenario playbook. Routine chat
 // skips it — knowledge depth exactly when needed, tokens saved when not (margins).
-const SCENARIO_TOPIC_RE = /\b(sick|ill|flu|fever|injur\w*|pain|hurt|period|menstrua\w*|pregnan\w*|postpartum|ramadan|fasting|broke|no money|can'?t afford|month.?end|travel\w*|hotel|holiday|vacation|no gym|gym.{0,12}(closed|far|expensive)|home workout|ozempic|wegovy|saxenda|mounjaro|glp.?1|quit|give up|not working|no results|plateau|stuck|night shift|shift work|funeral|died|passed away|passed on|stress\w*|overwhelm\w*|depress\w*|anxious|anxiety|beer|wine|alcohol|braai|party|wedding|december|festive|diabet\w*|hypertension|blood pressure)\b/i;
+// A real client wrote "had an incident at work and my GP recommended rest, spent the
+// day in bed" (2026-07-09) — a genuine health event that the sick/ill/injury words
+// alone MISSED, so the brain would coach straight past it instead of leading with
+// concern. Health events rarely use the word "sick": add the oblique ways people
+// actually describe them (hospital, GP, incident, bed rest, a drip/infusion).
+export const SCENARIO_TOPIC_RE = /\b(sick|ill|unwell|flu|fever|injur\w*|pain|hurt|hospital|clinic|gp|doctor|admitted|emergency|ambulance|accident|incident|collapse|faint\w*|dizz\w*|bed ?rest|recommended rest|in bed|drip|infusion|anaemi\w*|anemi\w*|period|menstrua\w*|pregnan\w*|postpartum|ramadan|fasting|broke|no money|can'?t afford|month.?end|travel\w*|hotel|holiday|vacation|no gym|gym.{0,12}(closed|far|expensive)|home workout|ozempic|wegovy|saxenda|mounjaro|glp.?1|quit|give up|not working|no results|plateau|stuck|night shift|shift work|funeral|died|passed away|passed on|stress\w*|overwhelm\w*|depress\w*|anxious|anxiety|beer|wine|alcohol|braai|party|wedding|december|festive|diabet\w*|hypertension|blood pressure)\b/i;
 
 const DAY = 86_400_000;
 
@@ -97,7 +102,7 @@ COACHING THE REAL SA CLIENT — the hard cases (coach the principle, don't recit
 - BROKE / month-end: never make them feel poor. Cheap real protein — oats (~R15/wk), eggs (~R25/12), pilchards (~R12/tin = 24g protein), sugar beans, peanut butter, brown bread; a week under ~R110. Only raise budget food if THEY raised money.
 - CAN'T AFFORD / QUIT THE GYM: a PIVOT, not a loss. Ask what they've got at home (dumbbells / bands / nothing), switch to home — same goal, muscle doesn't know where it's built. Never treat home as second-best.
 - CAN'T WALK MUCH / step target too high: adapt the number, don't defend it. The deficit is won in the kitchen — food first; steps are a bonus, not the entry fee.
-- SICK / ILL / in treatment: rest is the only prescription — no "lighter workout", no "just a walk". Protein to hold muscle, programme waits, no guilt.
+- SICK / ILL / HURT / ANY HEALTH EVENT (a GP visit, hospital, an incident, bed rest, a drip or infusion — not only the word "sick"): FIRST show genuine concern and ask if they're okay or how serious it is — the person comes before the programme, always. THEN: rest is the only prescription — no "lighter workout", no "just a walk". Protein to hold muscle, programme waits, no guilt.
 - BUSY / overwhelmed / desk job: normalise it, give ONE thing under 10 minutes today — not a programme.
 - ON OZEMPIC / GLP-1: appetite is suppressed, so the danger is UNDER-eating and losing muscle. Hit protein even without hunger, keep lifting, don't cheer fast scale drops — protect the muscle.
 - UNDERWEIGHT (BMI under ~18.5): do NOT coach more weight loss — switch to building (fuel + protein + strength). If they seem very underweight, gently suggest a doctor/dietitian.
