@@ -1,4 +1,5 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
+import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote } from "../education";
 import { db } from "../db";
@@ -904,5 +905,18 @@ export function buildFoodLogReply(p: {
     _lowCalWarnedToday.set(warnKey, todayKey);
   }
 
-  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
+  // SA shelf swap — ONE plain "next time" line when a logged food has a real better
+  // shelf option for their goal (Coke → Zero, full-cream milk → low-fat for fat loss,
+  // polony → tinned pilchards). Gated: only when nothing else is already nudging (no
+  // junk/grease note), so we never stack two corrections on one meal.
+  let swapNote = "";
+  if (!junkNote && !coachNoteOverride) {
+    const lines = Array.isArray(foodLines) ? foodLines : String(foodLines).split("\n");
+    for (const line of lines) {
+      const n = swapNudge(line, user.goalType);
+      if (n) { swapNote = `\n\n${n}`; break; }
+    }
+  }
+
+  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${swapNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
 }

@@ -21,6 +21,7 @@ import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
+import { suggestSwap, swapNudge } from "../server/food-swaps";
 
 let passed = 0;
 let failed = 0;
@@ -1721,6 +1722,31 @@ test("physique: empty lagging falls back to gender priors, never double-counts a
 test("physique: gender priors differ for male vs female", () => {
   assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
   assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+// SA SHELF SWAPS (2026-07-09) — the bot must give the correct, consistent shelf swap
+// for a food based on goal, and never tell an already-good choice to swap.
+test("food swaps: sugary drinks → zero sugar, already-zero is left alone", () => {
+  assert.match(suggestSwap("Coke", "fat_loss")!.swap, /ZERO SUGAR/i);
+  assert.match(suggestSwap("Safari juice", "fat_loss")!.swap, /zero-sugar squash|water/i);
+  assert.equal(suggestSwap("Coke Zero", "fat_loss"), null, "already zero — no swap");
+  assert.equal(suggestSwap("sugar free red bull", "fat_loss"), null);
+});
+
+test("food swaps: goal-gated — full-cream milk swaps for fat loss, kept for muscle gain", () => {
+  assert.match(suggestSwap("full cream milk", "fat_loss")!.swap, /low-fat milk/i);
+  assert.equal(suggestSwap("full cream milk", "muscle_gain"), null, "full cream is fine for building");
+});
+
+test("food swaps: processed meat → real protein; good foods get nothing", () => {
+  assert.match(suggestSwap("polony", "fat_loss")!.swap, /pilchards|tuna|eggs/i);
+  assert.equal(suggestSwap("grilled chicken and veg", "fat_loss"), null, "clean food needs no swap");
+  assert.equal(suggestSwap("", "fat_loss"), null);
+});
+
+test("food swaps: swapNudge is a kind forward one-liner, empty when no swap", () => {
+  assert.match(swapNudge("Coke", "fat_loss"), /Next time: swap it for .*ZERO SUGAR/i);
+  assert.equal(swapNudge("grilled fish", "fat_loss"), "");
 });
 
 // DAILY DIRECTION (2026-07-09) — "give me my overall plan" must return the WHOLE plan
