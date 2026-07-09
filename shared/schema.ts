@@ -65,6 +65,12 @@ export const users = pgTable(
     jobType: text("job_type"),
     activityLevel: text("activity_level"),
     primaryFocusArea: text("primary_focus_area"),
+    // Physique read from the baseline progress photos (server/physique-analysis.ts):
+    // comma-separated canonical muscle groups. laggingAreas drives targeted-volume
+    // programming; both feed the brain snapshot so the coach references the real read.
+    laggingAreas: text("lagging_areas"),
+    dominantAreas: text("dominant_areas"),
+    physiqueAnalysedAt: timestamp("physique_analysed_at"),
     baselineWeekActive: boolean("baseline_week_active").default(false),
     baselineWeekComplete: boolean("baseline_week_complete").default(false),
     profileNotes: text("profile_notes"),

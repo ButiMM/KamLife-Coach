@@ -29,6 +29,7 @@ import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } f
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext } from "../targets";
+import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -641,6 +642,44 @@ export async function handleMediaMessage(ctx: {
           })();
 
           return ackMsg;
+        } else if (!user.physiqueAnalysedAt) {
+          // ── BASELINE PHYSIQUE READ ──────────────────────────────────────────────
+          // First photo(s) and this client has never been assessed. Read the physique
+          // ONCE to name lagging vs dominant muscle groups, store it on the profile
+          // (drives targeted-volume programming + feeds the brain snapshot), and reply
+          // with the focus. Async so the webhook stays fast; the analysedAt stamp gates
+          // it to run a single time. The model suggests; parsePhysiqueAnalysis validates.
+          (async () => {
+            try {
+              const decision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
+              const { system, user: userPrompt } = buildPhysiqueAnalysisPrompt({ gender: user.gender, goal, name: clientName });
+              const resp = await openai.chat.completions.create({
+                model: decision.model,
+                max_tokens: decision.maxTokens,
+                messages: [
+                  { role: "system", content: system },
+                  { role: "user", content: [
+                    { type: "text", text: userPrompt },
+                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: decision.detail } },
+                  ] },
+                ],
+              });
+              const analysis = parsePhysiqueAnalysis(resp.choices[0]?.message?.content?.trim() || "", user.gender);
+              await db.update(users).set({
+                laggingAreas: analysis.lagging.join(","),
+                dominantAreas: analysis.dominant.join(","),
+                physiqueAnalysedAt: new Date(),
+              }).where(eq(users.id, user.id));
+              const focus = formatPhysiqueFocusLine(analysis);
+              const noteLine = analysis.note ? `\n\n${analysis.note}` : "";
+              const followUp = `${focus}${noteLine}\n\n_Send front, side and back next time and I'll track how each area changes._`;
+              await logChat(user.id, "[Physique Analysis]", followUp, "PHYSIQUE_ANALYSIS");
+              await sendWhatsApp(phone, followUp);
+            } catch (e) {
+              console.error(`[MEDIA][${mediaTrace}] physique_analysis_error:`, e);
+            }
+          })();
+          return `${progressCountLabel}, ${clientName}. Baseline saved. Give me a moment to read where you're at — I'll send your focus areas right now.`;
         } else {
           return `${progressCountLabel}, ${clientName}. Baseline saved.\n\nSend your next one in 30 days — same lighting, same pose if you can. I'll compare them side by side and show you exactly what shifted. Keep training.`;
         }

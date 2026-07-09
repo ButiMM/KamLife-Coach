@@ -393,6 +393,10 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS nutrition_protocol TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS meal_timing_strict BOOLEAN DEFAULT false`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS doctor_clearance_required BOOLEAN DEFAULT false`,
+    // Physique read from baseline progress photos (server/physique-analysis.ts)
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS lagging_areas TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS dominant_areas TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS physique_analysed_at TIMESTAMP`,
     // Profile extras
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS training_location TEXT`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS gym_name TEXT`,

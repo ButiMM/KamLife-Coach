@@ -19,6 +19,7 @@ import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
+import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors } from "../server/physique-analysis";
 
 let passed = 0;
 let failed = 0;
@@ -1698,6 +1699,35 @@ test("vision prompt: known SA drink fallback values are present for common brand
 test("vision prompt: still contains the greasy-food and TOTAL-format instructions (no accidental deletion)", () => {
   assert.ok(/TOTAL: X kcal \| Xg protein/.test(drinkPrompt));
   assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
+});
+
+// PHYSIQUE ANALYSIS (2026-07-09) — read baseline photos → lagging vs dominant muscles,
+// gender-aware, to drive targeted-volume programming. The parser must validate the
+// model's free-form answer, never trust it raw.
+test("physique: parses dominant/lagging/note, maps synonyms, drops hallucinated parts", () => {
+  const a = parsePhysiqueAnalysis("DOMINANT: quads, glutes\nLAGGING: rear delts, upper back, unicorn horn\nNOTE: Good base — let's build the top half.", "male");
+  assert.deepEqual(a.dominant, ["quads", "glutes"]);
+  assert.deepEqual(a.lagging, ["shoulders", "back"], "rear delts→shoulders, upper back→back, unicorn dropped");
+  assert.ok(/build the top half/i.test(a.note));
+});
+
+test("physique: empty lagging falls back to gender priors, never double-counts a dominant muscle", () => {
+  const f = parsePhysiqueAnalysis("DOMINANT: glutes\nLAGGING:\nNOTE:", "female");
+  assert.ok(!f.lagging.includes("glutes"), "a dominant muscle is never also flagged lagging");
+  assert.deepEqual(f.lagging, ["hamstrings", "shoulders"], "female priors minus the dominant glutes");
+});
+
+test("physique: gender priors differ for male vs female", () => {
+  assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
+  assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+test("physique: prompt is gender + goal aware, focus line names lagging and a strong point", () => {
+  const p = buildPhysiqueAnalysisPrompt({ gender: "female", goal: "muscle_gain" });
+  assert.ok(/female/i.test(p.system) && /muscle gain/i.test(p.system));
+  assert.ok(/DOMINANT:|LAGGING:/.test(p.user), "must specify the strict output contract");
+  const line = formatPhysiqueFocusLine({ dominant: ["back"], lagging: ["chest", "shoulders"], note: "" });
+  assert.ok(/chest, shoulders/i.test(line) && /strong point/i.test(line));
 });
 
 // HIDDEN ADDED FATS (2026-07-09) — the fat the camera can't see (oil cooked in, avo,

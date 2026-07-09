@@ -43,6 +43,14 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const frame = energyFrameLine(user.goalType, user.calorieTarget);
     if (frame) lines.push(frame);
 
+    // ── Physique read from the baseline progress photos (physique-analysis.ts) — so
+    // the coach can prioritise the muscles a client is behind on, which they often
+    // can't judge on themselves. Drives targeted volume, never "variety".
+    if (user.laggingAreas) {
+      const dom = user.dominantAreas ? ` Already strong: ${String(user.dominantAreas).replace(/,/g, ", ")}.` : "";
+      lines.push(`Physique read (from progress photos): LAGGING muscles to prioritise with extra targeted volume — ${String(user.laggingAreas).replace(/,/g, ", ")}.${dom}`);
+    }
+
     // ── Food TODAY so far — running count, labelled meals, space left. "Remaining"
     // is food still to eat, never a "deficit".
     const todayStart = sastDayStart();
