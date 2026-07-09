@@ -468,6 +468,13 @@ export async function handleWorkoutCommands(ctx: {
       ? `\n\n_${wState.todayName} is your rest day — but you trained anyway. Extra credit._`
       : "";
 
+    // Proactive form check — once, early (2nd session, when they're settled but form
+    // habits are still forming). One clip is the closest thing to hands-on coaching we
+    // have. Kept to the 2nd session so it doesn't clash with the 1st-session referral nudge.
+    const formVideoPrompt = newTotal === 2
+      ? `\n\n📹 _Next session, film ONE set from the side and send it — I'll check your form and give you the one or two things to fix. Better form = faster results and no niggles._`
+      : "";
+
     // Show last session's targets so user knows what to log (only if they have exercise history)
     const liftPrompt = poCtxDone
       ? `${poCtxDone.trim()}\n\nLog today's actual weights: "bench 80kg 3x10" (or skip if cardio/bodyweight)`
@@ -499,7 +506,7 @@ export async function handleWorkoutCommands(ctx: {
       }, 60_000);
     }
 
-    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}${formVideoPrompt}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----
