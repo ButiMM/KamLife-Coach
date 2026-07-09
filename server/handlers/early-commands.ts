@@ -555,7 +555,7 @@ export async function handleEarlyCommands(ctx: {
     setTimeout(async () => {
       try {
         await sendWhatsApp(phone,
-          `One more thing — *send me a before photo right now.*\n\nFront-facing, in fitted clothes or underwear. Good lighting. This is your Day 0 progress shot.\n\nIn 4 weeks I will compare it to your new photo and show you the exact difference. Without today's photo, we have nothing to compare later.\n\n*Send it now before you forget.*`
+          `One more thing — *send me your baseline photos right now.*\n\nThree shots: *front, side and back.* Fitted clothes or underwear, good lighting. This is your Day 0.\n\nFrom these I read where you're strong and which muscles to bring up — then every month we compare and I show you the exact difference. Without today's photos, we have nothing to compare later.\n\n*Send all three now before you forget.*`
         );
         await logChat(user.id, "[auto]", "[Day 0 photo challenge sent]", "PHOTO_CHALLENGE_PROMPT");
       } catch { /* non-fatal */ }
