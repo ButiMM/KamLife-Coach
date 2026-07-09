@@ -1328,7 +1328,7 @@ const EXERCISE_YOUTUBE: Record<string, string> = {
   "dead bug": "https://www.youtube.com/results?search_query=dead+bug+exercise+tutorial+form",
 };
 
-function getYoutubeLinkForExercise(name: string): string | undefined {
+export function getYoutubeLinkForExercise(name: string): string | undefined {
   const key = name.toLowerCase();
   for (const [k, url] of Object.entries(EXERCISE_YOUTUBE)) {
     if (key.includes(k)) return url;

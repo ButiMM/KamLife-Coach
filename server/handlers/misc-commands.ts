@@ -17,6 +17,7 @@ import {
   buildDayWorkout, buildFullProgramme,
   getKamlifeProgramme, getDayType, getPhaseNames,
 } from "../programme";
+import { buildWorkoutViewerUrl } from "../workout-viewer";
 import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
 import { withTimeout, logChat } from "./chat-log";
@@ -888,14 +889,23 @@ export async function handleMiscCommands(ctx: {
   const WORKOUT_REQ_EXACT = ["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
     "show me", "show", "send it", "send workout", "show session", "today's session", "todays session",
     "show it", "show it to me", "show me it", "send it to me", "send me it", "let me see", "let me see it",
+    // "show me the exercises" — the exact phrase that used to fall through to the model,
+    // which then hallucinated a DIFFERENT workout (2026-07-09). Route it to the real plan.
+    "exercises", "the exercises", "show me the exercises", "show exercises", "show me exercises",
+    "see the exercises", "show me the moves", "the moves", "exercise demos", "show me the exercise",
     "1", "day 1", "day 2", "day 3", "day 4", "day 5", "day 6"];
-  const wReqNoun = /\b(workout|session|programme?|program|training)\b/i.test(wReqStripped);
+  const wReqNoun = /\b(workout|session|programme?|program|training|exercises?|moves?)\b/i.test(wReqStripped);
   // Completions, schedule moves, and complaints are NOT plan requests — other handlers own those.
   const wReqExcluded = /\b(done|did|finished|complete[d]?|smashed|crushed|killed|logged|next|tomorrow|yesterday|change|switch|swap|cancel|stop|pause|skip|move|reschedule|hate|boring|harder|easier|rest)\b/i.test(wReqStripped);
   const wReqShape = /\b(today.?s?|my|the|me|what.?s|what|give|show|send|see|meet|get|need|want|whats)\b/i.test(wReqStripped);
   const isWorkoutRequest = WORKOUT_REQ_EXACT.includes(wReqStripped)
     || (wReqNoun && !wReqExcluded && wReqShape && wReqStripped.split(/\s+/).length <= 6);
   if (isWorkoutRequest) {
+    // Frictionless swipe-through of every move — one link, opens a full-screen page you
+    // slide through (demo per exercise + the alternative). Server-rendered from the SAME
+    // workout, so it can never disagree with the plan below. Only added for a real client.
+    const viewerUrl = buildWorkoutViewerUrl(user.id);
+    const viewerLine = viewerUrl ? `\n\n▶️ *See every move* — swipe through: ${viewerUrl}` : "";
     const dayMatch = wReqStripped.match(/^day\s*([1-6])$/);
     if (dayMatch) {
       const requestedDay = parseInt(dayMatch[1]);
@@ -903,7 +913,7 @@ export async function handleMiscCommands(ctx: {
       const workout = buildDayWorkout(dayUser);
       const poCtx = await getProgressiveOverloadContext(user.id);
       const gif1 = getPrimaryWorkoutGifUrl(workout);
-      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif1 ? `\n[MEDIA:${gif1}]` : ""}`;
+      return `${poCtx}*Day ${requestedDay} Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${viewerLine}${gif1 ? `\n[MEDIA:${gif1}]` : ""}`;
     }
     const workout = buildDayWorkout(user);
     const dayNum = user.programmeDayInWeek || 1;
@@ -915,7 +925,7 @@ export async function handleMiscCommands(ctx: {
     const phaseName = getPhaseNames()[user.programmePhase || 1] || "Foundation";
     const sessionNote = totalSessions > 0 ? ` · Session ${totalSessions + 1}` : "";
     const gif2 = getPrimaryWorkoutGifUrl(workout);
-    return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
+    return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${viewerLine}${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
 
   // ---- NEW: NEXT WORKOUT ----

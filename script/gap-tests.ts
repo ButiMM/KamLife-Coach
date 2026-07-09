@@ -971,6 +971,56 @@ test("balance alarm: custom threshold is respected", () => {
   assert.equal(buildLowBalanceAlert(30, "USD", 25), null, "30 > 25 must not alert");
 });
 
+// FRICTIONLESS WORKOUT VIEWER (2026-07-09) — the swipe page that replaces the model's
+// hallucinated exercise dumps. The token must be unforgeable (it references a client)
+// and the cards must mirror the REAL current-day workout, never a made-up one.
+process.env.COACH_DASHBOARD_KEY = process.env.COACH_DASHBOARD_KEY || "test-secret-key";
+const { signWorkoutToken, verifyWorkoutToken, buildViewerCards, renderWorkoutViewerHtml } =
+  await import("../server/workout-viewer");
+
+test("workout viewer: token round-trips to the same user id", () => {
+  const t = signWorkoutToken("user-abc-123");
+  assert.ok(t, "should sign a token");
+  assert.equal(verifyWorkoutToken(t!), "user-abc-123");
+});
+
+test("workout viewer: tampered / garbage tokens are rejected", () => {
+  const t = signWorkoutToken("user-abc-123")!;
+  const tampered = t.slice(0, -1) + (t.endsWith("a") ? "b" : "a");
+  assert.equal(verifyWorkoutToken(tampered), null, "flipped sig char must fail");
+  assert.equal(verifyWorkoutToken("garbage"), null);
+  assert.equal(verifyWorkoutToken(""), null);
+});
+
+test("workout viewer: a forged token for another user id fails the signature", () => {
+  const forged = Buffer.from("victim-user-id").toString("base64url") + ".deadbeefdeadbeefdeadbeef";
+  assert.equal(verifyWorkoutToken(forged), null, "no attacker can mint a link for another client");
+});
+
+test("workout viewer: cards mirror the real current-day exercises (gym user)", () => {
+  const user = { trainingMode: "gym", trainingDaysPerWeek: 3, programmeDayInWeek: 1, programmeWeek: 1, gender: "male", trainingExperience: "beginner" };
+  const data = buildViewerCards(user);
+  assert.ok(data && data.cards.length > 0, "gym user should have exercise cards");
+  for (const c of data!.cards) {
+    assert.ok(c.name && c.sets, "each card carries a name and sets");
+    assert.ok("videoUrl" in c && "gifUrl" in c && "alt" in c, "card has the full media shape");
+  }
+});
+
+test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
+  assert.equal(buildViewerCards({ trainingMode: "walk_only" }), null);
+});
+
+test("workout viewer: rendered page slides and escapes exercise names", () => {
+  const html = renderWorkoutViewerHtml(
+    { label: "Upper A", week: 2, cards: [{ name: "Chest <Fly>", sets: "4 × 8", gifUrl: null, videoUrl: "https://youtube.com/x", alt: "Dumbbell press" }] },
+    "Kam",
+  );
+  assert.ok(/scroll-snap-type:\s*x/i.test(html), "must be a horizontal slider");
+  assert.ok(html.includes("Chest &lt;Fly&gt;"), "must HTML-escape exercise names");
+  assert.ok(html.includes("Watch the move"), "video card shows a watch action");
+});
+
 // ============================================================
 // MISC-COMMANDS.TS CHARACTERISATION TESTS
 // ============================================================
