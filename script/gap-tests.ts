@@ -1036,6 +1036,16 @@ test("brain: playbook leads with concern on a health event (asks if serious)", (
   assert.ok(/concern/i.test(BRAIN_SYS) && /serious/i.test(BRAIN_SYS), "must instruct concern-first + ask if serious");
 });
 
+// LAGGING BODY PART (2026-07-09) — a real test: "my chest is lagging, add an 8th
+// exercise?" The bot wrongly called it "muscle confusion" and refused. Bringing up a
+// weak point is legitimate targeted volume, and the bot must never echo the myth.
+test("brain: lagging body part → targeted volume, never 'muscle confusion'", () => {
+  assert.ok(/LAGGING BODY PART/i.test(BRAIN_SYS), "must handle lagging body parts explicitly");
+  assert.ok(/muscle confusion is a MYTH/i.test(BRAIN_SYS), "must call muscle confusion a myth, not prescribe it");
+  assert.ok(/NEVER refuse it/i.test(BRAIN_SYS), "must not refuse a legitimate lagging-part request");
+  assert.ok(/glutes\/hamstrings|glutes/i.test(BRAIN_SYS) && /chest\/back|chest/i.test(BRAIN_SYS), "gender-aware body-part priorities present");
+});
+
 test("workout viewer: rendered page slides and escapes exercise names", () => {
   const html = renderWorkoutViewerHtml(
     { label: "Upper A", week: 2, cards: [{ name: "Chest <Fly>", sets: "4 × 8", gifUrl: null, videoUrl: "https://youtube.com/x", alt: "Dumbbell press" }] },
