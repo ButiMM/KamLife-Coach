@@ -33,6 +33,22 @@ Two problems this solves, both raised from real bot tests:
 - **Gender-aware but not presumptuous.** Coach the body part shown/named; use the
   gender prior only to break ties, never to override what the client says.
 
+## STATUS (2026-07-09)
+Most of this shipped. What existed already: capture (incl. front/side/back album),
+base64 storage, deletion (POPIA cascade), a Day-0 prompt, and a baseline-vs-new
+COMPARISON analysis. Added this session:
+- ✅ **Baseline physique read → lagging vs dominant muscles** (`server/physique-analysis.ts`,
+  hooked in `media.ts`, stored on the profile, fed to the brain snapshot). The crown jewel.
+- ✅ **Monthly re-shoot job** (`jobs/progress-photo.ts`, 10:30am SAST, self-gates on 30d).
+- ✅ **Day-0 prompt now asks for all three angles.**
+- ✅ **The coaching advice is wired**: the brain snapshot carries the lagging read and the
+  training rule prescribes targeted volume for it — so the coach already tells a client
+  exactly which muscle to add volume to, from the real photo read. This IS the programme
+  responding to how they look, via the coach's mouth (which is how Kam does it manually).
+
+REMAINING — **Phase 3 below only**: the *deterministic printed programme* auto-adding sets
+to the lagging muscle's lifts. Deliberately NOT rushed — see the note under Phase 3.
+
 ## Phasing (build in this order — each ships independently)
 **Phase 1 — Capture + store + monthly prompt** (no analysis yet)
 - Onboarding asks for front/side/back (with consent copy). Store to our own bucket.
@@ -47,11 +63,18 @@ Two problems this solves, both raised from real bot tests:
 - Feeds the brain snapshot so the coach can reference it ("your back's coming along,
   chest is still the lagging one — here's the volume tweak").
 
-**Phase 3 — Programme adjustment**
+**Phase 3 — Programme adjustment** (NOT built — build carefully, not fast)
 - The programme engine gains a "bias" input: add N targeted sets to the basics that hit
-  the lagging muscle, within the basics-only philosophy. This is the capability the bot
-  currently lacks. Deterministic — the model recommends, code adjusts, per the standing
-  law (no model output mutates the programme without an explicit confirmation).
+  the lagging muscle, within the basics-only philosophy. Deterministic — code adjusts off
+  the stored `laggingAreas`, the model never mutates the programme (standing law).
+- Why it's deferred: `buildDayWorkout` / `getCurrentDayExercises` render EVERY client's
+  workout. A bug here breaks training for everyone at once. It needs: (1) a pure, tested
+  slug→muscle-group map, (2) a set-bump that respects phase/week set schemes and basics-
+  only, (3) a cap so a client with 3 lagging areas isn't handed a 90-minute session, (4)
+  golden tests that the core programme output is unchanged for clients with no lagging read.
+  That's a focused build with the programme engine fully in view — worth doing right.
+- Interim value already delivered: the coach prescribes the lagging-muscle volume verbally
+  from the snapshot, so the client gets the correct guidance today without the engine change.
 
 ## Open questions for Kam
 - Onboarding: hard-block until all 3 photos are in, or allow "skip for now" with a nudge?
