@@ -19,7 +19,7 @@ import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
-import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors } from "../server/physique-analysis";
+import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
@@ -1837,6 +1837,18 @@ test("daily direction: rest day and walk-only are honoured, never insists on the
   assert.ok(/rest day/i.test(rest) && !/reply \*workout\*/i.test(rest), "rest day never pushes a session");
   const walk = buildDailyDirection({ name: "B", calorieTarget: 1600, proteinTarget: 100, stepsTarget: 10000, trainingMode: "walk_only", trainingDaysPerWeek: 3 }, { type: "NORMAL" });
   assert.ok(/walk your 10,?000 steps/i.test(walk), "walk-only user gets a steps-first plan");
+});
+
+// PROGRESS SET COMPARISON (2026-07-10) — 3 photos used to produce 3 essays, one
+// comparing front-vs-back, one a general-advice non-answer, one recommending
+// deadlifts off the machine-based programme. The prompt now forbids all three.
+test("progress comparison prompt: one set, like-for-like angles, honest, on-programme", () => {
+  const p = buildProgressComparisonPrompt({ clientName: "Kam", goalLabel: "muscle gain", weeksLabel: "7 weeks", baselineCount: 3, todayCount: 3 });
+  assert.ok(/never a front against a back/i.test(p.user), "must forbid cross-angle comparison");
+  assert.ok(/NEVER recommend new or different exercises/i.test(p.user), "must stay on-programme (no deadlifts/squats advice)");
+  assert.ok(/do NOT write a general-advice essay/i.test(p.user), "must forbid the 'general approach' non-answer");
+  assert.ok(/never invent progress/i.test(p.user), "must stay honest when nothing changed");
+  assert.ok(/never a greeting/i.test(p.system), "no 'Hello Kam! Let's take a look' openers");
 });
 
 test("physique: prompt is gender + goal aware, focus line names lagging and a strong point", () => {

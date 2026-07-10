@@ -31,6 +31,14 @@ import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext } from "../targets";
 import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
 import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt";
+import { buildProgressComparisonPrompt } from "../physique-analysis";
+
+// PROGRESS-SET DEBOUNCE — WhatsApp delivers a 3-photo set as separate webhooks, and
+// each used to fire its own baseline comparison: three "give me a moment" acks and
+// THREE essays, one comparing a FRONT baseline against a BACK photo (2026-07-10).
+// Now every photo saves immediately, the timer resets, and 15s after the LAST photo
+// ONE job processes the whole set with all angles in a single call and a single reply.
+const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
@@ -606,104 +614,85 @@ export async function handleMediaMessage(ctx: {
         const totalProgressSaved = 1 + albumSavedCount;
         const progressCountLabel = totalProgressSaved > 1 ? `${totalProgressSaved} photos saved` : "Photo saved";
 
-        // ── PROGRESS PHOTO COMPARISON (follow-up via WhatsApp) ──────────────────
-        // Trigger if: user has at least 1 earlier photo AND the earliest is 14+ days old.
-        const earliestPhoto = existingPhotos.length > 0 ? existingPhotos[0] : null;
-        const earliestAgeMs = earliestPhoto ? Date.now() - new Date(earliestPhoto.loggedAt || "").getTime() : 0;
-        const earliestAgeDays = Math.round(earliestAgeMs / 86_400_000);
-        const comparisonEligible = earliestPhoto !== null && earliestAgeDays >= 14;
-
-        if (comparisonEligible) {
-          // Return an immediate acknowledgment, then fire comparison async.
-          const ackMsg = `${progressCountLabel}, ${clientName}. Give me a moment to compare it to your baseline — I will send the breakdown right away.`;
-          // Fire async — do not await so the webhook reply is fast.
+        // Debounce the whole set: save now, process ONCE 15s after the last photo lands.
+        const burstExisting = _progressBurst.get(user.id);
+        if (burstExisting) clearTimeout(burstExisting);
+        _progressBurst.set(user.id, setTimeout(() => {
+          _progressBurst.delete(user.id);
           (async () => {
             try {
-              const progressDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
-              console.log(`[VISION][${mediaTrace}] progress_compare model=${progressDecision.model} tier=${user.subscriptionStatus} photos=${photoNumber} earliestAgeDays=${earliestAgeDays}`);
+              const all = await db.select().from(progressPhotos)
+                .where(eq(progressPhotos.userId, user.id))
+                .orderBy(asc(progressPhotos.loggedAt)).limit(30);
+              if (all.length === 0) return;
+              const todayStartP = sastDayStart();
+              const todaySet = all.filter(p2 => new Date(p2.loggedAt || 0) >= todayStartP).slice(-3);
+              const firstDayStart = new Date(new Date(all[0].loggedAt || 0).toDateString());
+              const baselineSet = all.filter(p2 => {
+                const d = new Date(p2.loggedAt || 0);
+                return d < todayStartP && new Date(d.toDateString()).getTime() === firstDayStart.getTime();
+              }).slice(0, 3);
+              const goalLabel2 = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
 
-              const goalLabel = goal === "fat_loss" ? "fat loss" : goal === "muscle_gain" ? "muscle gain" : "body recomposition";
-              const weeksLabel = Math.round(earliestAgeDays / 7);
-              const weekStr = weeksLabel === 1 ? "1 week" : `${weeksLabel} weeks`;
+              if (baselineSet.length === 0) {
+                // First-ever set: run the one-time physique read (lagging/dominant), else confirm.
+                if (!user.physiqueAnalysedAt && todaySet.length > 0) {
+                  const decision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
+                  const { system, user: userPrompt } = buildPhysiqueAnalysisPrompt({ gender: user.gender, goal, name: clientName });
+                  const resp = await openai.chat.completions.create({
+                    model: decision.model, max_tokens: decision.maxTokens,
+                    messages: [
+                      { role: "system", content: system },
+                      { role: "user", content: [
+                        { type: "text", text: userPrompt },
+                        ...todaySet.map(p2 => ({ type: "image_url" as const, image_url: { url: `data:${p2.contentType};base64,${p2.photoBase64}`, detail: decision.detail } })),
+                      ] },
+                    ],
+                  });
+                  const analysis = parsePhysiqueAnalysis(resp.choices[0]?.message?.content?.trim() || "", user.gender);
+                  await db.update(users).set({
+                    laggingAreas: analysis.lagging.join(","), dominantAreas: analysis.dominant.join(","), physiqueAnalysedAt: new Date(),
+                  }).where(eq(users.id, user.id));
+                  const focus = formatPhysiqueFocusLine(analysis);
+                  const msg = `Baseline set saved ✅${focus ? `\n\n${focus}` : ""}${analysis.note ? `\n\n${analysis.note}` : ""}\n\n_Next photos in 30 days — same pose, same lighting, and I'll show you exactly what shifted._`;
+                  await logChat(user.id, "[Physique Analysis]", msg, "PHYSIQUE_ANALYSIS");
+                  await sendWhatsApp(phone, msg);
+                } else {
+                  await sendWhatsApp(phone, `Baseline set saved ✅ ${todaySet.length} photo${todaySet.length > 1 ? "s" : ""} locked in. Next set in 30 days — same pose, same lighting — and I'll show you exactly what shifted.`);
+                }
+                return;
+              }
 
-              const imageContent: ChatCompletionContentPart[] = [
-                {
-                  type: "text",
-                  text: `Compare these two progress photos for a client whose goal is ${goalLabel}.\n\nPhoto 1 (baseline) was taken ${earliestAgeDays} days ago (${weekStr}). Photo 2 is today's check-in (Photo ${photoNumber}).\n\nAnalyse:\n- Visible changes in body composition: fat loss, muscle definition, posture\n- Be specific about what is visibly different — shoulders, waist, arms, stomach\n- Reference their goal (${goalLabel})\n- 4–5 sentences, South African coaching voice\n- Never say "I can see significant changes" if there are none — be honest about what you do or do not see, and explain why (lighting, angle, clothing) if comparison is limited\n- End with ONE specific next action they should focus on in the next 30 days`,
-                },
-                { type: "image_url", image_url: { url: `data:${earliestPhoto.contentType};base64,${earliestPhoto.photoBase64}`, detail: progressDecision.detail } },
-                { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: progressDecision.detail } },
-              ];
-
-              const comparisonResponse = await openai.chat.completions.create({
-                model: progressDecision.model,
-                max_tokens: progressDecision.maxTokens,
-                messages: [
-                  {
-                    role: "system",
-                    content: `You are Coach K, a South African fitness and nutrition coach with 20 years experience. The client's name is ${clientName}. Their goal is ${goalLabel}. Direct, warm, specific — SA voice. Focus on visible physical changes only. Never discuss weight unless you can see a scale. Never say "great progress" as a standalone — describe what you actually see.`,
-                  },
-                  { role: "user", content: imageContent },
-                ],
-              });
-
-              const progressTokens = comparisonResponse.usage?.completion_tokens || 0;
-              console.log(`[COST][${mediaTrace}] progress_compare ~$${estimateVisionCostUSD(progressDecision, progressTokens).toFixed(5)} (${progressDecision.reason})`);
-
-              const comparisonText = comparisonResponse.choices[0]?.message?.content?.trim()
-                || "I can see both photos but could not compare them clearly. Send in good lighting, same pose if possible.";
-
-              const followUpMsg = `*${weekStr} comparison — Photo 1 vs Photo ${photoNumber}*\n\n${comparisonText}\n\n_Next check-in: 30 days. Same pose, same lighting — it makes the comparison sharper._`;
-
-              await logChat(user.id, `[Progress Comparison Photo ${photoNumber}]`, followUpMsg, "PROGRESS_COMPARISON");
-              await sendWhatsApp(phone, followUpMsg);
-            } catch (compErr) {
-              console.error(`[MEDIA][${mediaTrace}] progress_compare_error:`, compErr);
-            }
-          })();
-
-          return ackMsg;
-        } else if (!user.physiqueAnalysedAt) {
-          // ── BASELINE PHYSIQUE READ ──────────────────────────────────────────────
-          // First photo(s) and this client has never been assessed. Read the physique
-          // ONCE to name lagging vs dominant muscle groups, store it on the profile
-          // (drives targeted-volume programming + feeds the brain snapshot), and reply
-          // with the focus. Async so the webhook stays fast; the analysedAt stamp gates
-          // it to run a single time. The model suggests; parsePhysiqueAnalysis validates.
-          (async () => {
-            try {
+              // Comparison: baseline SET vs today's SET, all angles in ONE call, ONE reply.
+              const ageDays = Math.max(1, Math.round((Date.now() - new Date(baselineSet[0].loggedAt || 0).getTime()) / 86_400_000));
+              const weeksLabel2 = Math.round(ageDays / 7) <= 1 ? "1 week" : `${Math.round(ageDays / 7)} weeks`;
               const decision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
-              const { system, user: userPrompt } = buildPhysiqueAnalysisPrompt({ gender: user.gender, goal, name: clientName });
+              const { system, user: cmpPrompt } = buildProgressComparisonPrompt({
+                clientName, goalLabel: goalLabel2, weeksLabel: weeksLabel2,
+                baselineCount: baselineSet.length, todayCount: todaySet.length,
+              });
               const resp = await openai.chat.completions.create({
-                model: decision.model,
-                max_tokens: decision.maxTokens,
+                model: decision.model, max_tokens: decision.maxTokens,
                 messages: [
                   { role: "system", content: system },
                   { role: "user", content: [
-                    { type: "text", text: userPrompt },
-                    { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: decision.detail } },
+                    { type: "text", text: cmpPrompt },
+                    ...[...baselineSet, ...todaySet].map(p2 => ({ type: "image_url" as const, image_url: { url: `data:${p2.contentType};base64,${p2.photoBase64}`, detail: decision.detail } })),
                   ] },
                 ],
               });
-              const analysis = parsePhysiqueAnalysis(resp.choices[0]?.message?.content?.trim() || "", user.gender);
-              await db.update(users).set({
-                laggingAreas: analysis.lagging.join(","),
-                dominantAreas: analysis.dominant.join(","),
-                physiqueAnalysedAt: new Date(),
-              }).where(eq(users.id, user.id));
-              const focus = formatPhysiqueFocusLine(analysis);
-              const noteLine = analysis.note ? `\n\n${analysis.note}` : "";
-              const followUp = `${focus}${noteLine}\n\n_Send front, side and back next time and I'll track how each area changes._`;
-              await logChat(user.id, "[Physique Analysis]", followUp, "PHYSIQUE_ANALYSIS");
-              await sendWhatsApp(phone, followUp);
+              const cmpText = resp.choices[0]?.message?.content?.trim()
+                || "I have both sets but couldn't compare them clearly — next time, same pose and lighting and I'll give you the full breakdown.";
+              const cmpMsg = `*${weeksLabel2} comparison — baseline vs today*\n\n${cmpText}\n\n_Next check-in: 30 days. Same pose, same lighting._`;
+              await logChat(user.id, "[Progress Comparison Set]", cmpMsg, "PROGRESS_COMPARISON");
+              await sendWhatsApp(phone, cmpMsg);
             } catch (e) {
-              console.error(`[MEDIA][${mediaTrace}] physique_analysis_error:`, e);
+              console.error("[PROGRESS_SET] processing failed:", (e as Error)?.message || e);
             }
           })();
-          return `${progressCountLabel}, ${clientName}. Baseline saved. Give me a moment to read where you're at — I'll send your focus areas right now.`;
-        } else {
-          return `${progressCountLabel}, ${clientName}. Baseline saved.\n\nSend your next one in 30 days — same lighting, same pose if you can. I'll compare them side by side and show you exactly what shifted. Keep training.`;
-        }
+        }, 15_000));
+
+        return `${progressCountLabel} ✅ — send the rest of the set if there's more. Breakdown coming in a moment 📸`;
       }
 
       // ---- EQUIPMENT DECLARATION WITH CAPTION ----

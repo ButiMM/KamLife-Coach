@@ -97,3 +97,26 @@ export function formatPhysiqueFocusLine(a: PhysiqueAnalysis): string {
   const strong = a.dominant.length > 0 ? ` Your ${a.dominant.slice(0, 2).join(" and ")} ${a.dominant.length > 1 ? "are" : "is"} already a strong point.` : "";
   return `From your photos, the priority to bring up is your *${lag}* — we'll put the extra volume there.${strong}`;
 }
+
+/**
+ * PROGRESS COMPARISON PROMPT — one call for the WHOLE photo set (2026-07-10: three
+ * photos produced THREE separate essays, one comparing a FRONT baseline against a BACK
+ * photo, another literally answering "I can't compare these directly, but here's a
+ * general approach" — an essay of nothing — and recommending deadlifts/squats OFF the
+ * machine-based basics-only programme). Pure and unit-tested so the constraints hold.
+ */
+export function buildProgressComparisonPrompt(opts: {
+  clientName: string; goalLabel: string; weeksLabel: string; baselineCount: number; todayCount: number;
+}): { system: string; user: string } {
+  const { clientName, goalLabel, weeksLabel, baselineCount, todayCount } = opts;
+  return {
+    system: `You are Coach K, a South African fitness coach with 20 years of experience reading physiques. Client: ${clientName}. Goal: ${goalLabel}. Plain, warm, honest, specific — never a greeting like "Hello!" or "Let's take a look", never filler. You compare progress photos and tell the truth about what you see.`,
+    user: `The FIRST ${baselineCount} image${baselineCount > 1 ? "s are" : " is"} the client's BASELINE set (taken ${weeksLabel} ago). The LAST ${todayCount} image${todayCount > 1 ? "s are" : " is"} TODAY'S set. The sets may include front, side and back angles — compare like angle with like angle, never a front against a back.
+
+Write ONE short comparison (4-6 sentences, plain words):
+- Name the specific visible changes honestly (shoulders, back, waist, arms, posture). If you see little or no change, SAY so kindly — never invent progress.
+- If the angles/lighting genuinely don't allow a fair comparison, say that in ONE sentence and give one tip for next time (same pose, same light) — do NOT write a general-advice essay instead.
+- NEVER recommend new or different exercises (no "add deadlifts/squats/bench") — their programme is fixed and progress comes from adding weight to the SAME lifts. The next action you give must be about food, protein, steps, water, or pushing the weight up on their current lifts.
+- No greetings, no "keep it up!" spam — one strong closing line maximum.`,
+  };
+}
