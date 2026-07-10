@@ -421,5 +421,11 @@ export async function handleWeightLog(
   // ── Trend line (only when we have recent data) ──
   const trendLine = trendLabel ? `\n\n${trendLabel} — ${trendStatus}` : (milestoneCelebration ? "" : journeyNote);
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${underweightFlipNote}${predictionNote}${streakNote}${plateauNote}[BUTTONS:My progress|Today's workout]`;
+  // ONE add-on per reply (2026-07-10 friction audit). DATA always stays: the change,
+  // the trend, a target adjustment (transaction record), the underweight safety note.
+  // Then ONE extra rides along: milestone > plateau (actionable) > prediction > streak.
+  const weightAddOn = [milestoneCelebration, plateauNote, predictionNote, streakNote]
+    .find(s => s && s.trim()) || "";
+
+  return `Weight logged: *${newKg}kg.*${changeNote}${trendLine}${targetsLine}${underweightFlipNote}${weightAddOn}[BUTTONS:My progress|Today's workout]`;
 }

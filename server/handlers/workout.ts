@@ -506,7 +506,13 @@ export async function handleWorkoutCommands(ctx: {
       }, 60_000);
     }
 
-    return `${doneResponse}${milestoneMsg}${week1Badge}${perfectDay || ""}${bonusNote}${formVideoPrompt}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
+    // ONE add-on per reply (2026-07-10 friction audit): done-confirmation used to stack
+    // milestone + week-1 badge + perfect day + rest-day bonus + form-video prompt. ONE
+    // rides along: week-1 badge (once ever) > milestone > form prompt (once, session 2)
+    // > perfect day > bonus. The feel question + lift prompt stay — they're the loop.
+    const doneAddOn = [week1Badge, milestoneMsg, formVideoPrompt, perfectDay || "", bonusNote]
+      .find(s => s && s.trim()) || "";
+    return `${doneResponse}${doneAddOn}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
 
   // ---- LIFT LOG — parse and store exercise data ----
