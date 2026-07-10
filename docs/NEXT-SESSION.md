@@ -90,3 +90,27 @@ TODO to complete the law (audit each):
   become a real, trusted number instead of an unused file. This is the
   single highest-leverage next step: it's the only thing that turns "I hope
   this prompt fix works" into "I know it does."
+
+## 2026-07-10 update — THE NEXT BATTLE IS FRICTION, NOT BUGS
+
+This session killed six live bugs (hello-menu, complaint-logged-as-pasta,
+cancellation swallow, steps-target gaslight, voice truncation ×2, photo-set
+triple-essay, machine caption ignored + overconfident machine IDs) — all
+locked behind tests (288 unit / 143 gap). docs/live-test-script.md is the
+manual QA gate: run it after every deploy; GREEN before widening testers.
+
+Kam's verdict after a full day of live testing, and he is RIGHT: the product
+is now mostly *correct* but it is not *frictionless*. It reads as wordy,
+busy, effortful — "friction, friction, friction". That is the next battle.
+
+NEXT SESSION = FRICTION AUDIT of the core loop. Discipline, not features:
+- Measure every core reply (food log, steps, water, weight, workout, greeting)
+  in LINES and TAPS. Target: confirmations ≤ 3 short lines unless the client
+  asked a question. One idea per message. Numbers first, words second.
+- Kill stacked add-ons: a food log must not carry coach-note + junk-note +
+  swap + protein tip + edu note + reinforcement in one bubble. Pick ONE.
+- Emoji/bold/dividers: prune to a consistent minimal style. It looks "ugly"
+  because every handler has its own texture — unify.
+- Buttons everywhere a next step exists; never a typed keyword when a tap works.
+- Test with the gogo rule: if reading a reply takes >5 seconds, it fails.
+DO NOT add features during the friction audit. Cut, merge, shorten.
