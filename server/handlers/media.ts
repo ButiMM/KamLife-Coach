@@ -318,7 +318,7 @@ export async function handleMediaMessage(ctx: {
             //   other      → "here's how to use it; it's not on today's plan"
             // Prescription (sets/how/mistake) comes from the user's real programme, so the
             // photo reply never contradicts their workout text.
-            const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType))
+            const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType, message))
               || `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
             return equipReply;

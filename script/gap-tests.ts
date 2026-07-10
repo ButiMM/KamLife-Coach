@@ -1011,6 +1011,25 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
   assert.equal(buildViewerCards({ trainingMode: "walk_only" }), null);
 });
 
+// MACHINE PHOTO + CAPTION (2026-07-10) — "Shoulder press" captioned on a weight-stack
+// photo was a lift being logged; the caption was ignored and vision guessed generic
+// tips. The caption must beat vision and prime the lift log — with NO vision call.
+const { coachGymMachineFromPhoto } = await import("../server/handlers/equipment-vision");
+
+test("machine photo: caption naming the exercise beats vision and primes a lift log", async () => {
+  // dummy openai that would crash if vision were called — proves the caption short-circuits
+  const dummy = { chat: { completions: { create: async () => { throw new Error("vision must not run"); } } } } as any;
+  const r = await coachGymMachineFromPhoto(dummy, LC_USER, "", "image/jpeg", "Shoulder press");
+  assert.ok(r !== null && /shoulder press/i.test(r!), `caption exercise must be recognised: ${r}`);
+  assert.ok(/weight and reps/i.test(r!), `must prime the lift log: ${r}`);
+});
+
+test("machine photo: non-machine caption falls through to vision (null when vision fails)", async () => {
+  const dummy = { chat: { completions: { create: async () => { throw new Error("offline"); } } } } as any;
+  const r = await coachGymMachineFromPhoto(dummy, LC_USER, "", "image/jpeg", "was late this morning");
+  assert.equal(r, null, "no machine words in caption → vision path → fails offline → null, never a crash");
+});
+
 // MEAL-REPEAT META-COMPLAINT GUARD (2026-07-10) — a voice complaint "I already told
 // you what's the plan for lunch. Have you forgotten? We are repeating the same things"
 // matched repeat+lunch and LOGGED YESTERDAY'S PASTA. Complaints must never log food.

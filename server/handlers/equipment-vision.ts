@@ -51,8 +51,18 @@ function getMachineSlug(machineId: string): string | null {
  * machines that the first classifier missed) — a machine photo must never get a food error.
  */
 export async function coachGymMachineFromPhoto(
-  openai: OpenAI, user: any, base64: string, contentType: string,
+  openai: OpenAI, user: any, base64: string, contentType: string, caption?: string,
 ): Promise<string | null> {
+  // CAPTION RULES — the client who captions a machine photo has TOLD us what it is.
+  // 2026-07-10: "Shoulder press" on a weight-stack photo was a lift being LOGGED; the
+  // caption was never read, vision failed on the close-up, and the client got a generic
+  // "reply workout" while mid-set. The caption always beats vision: treat it as the
+  // exercise and prime the lift log. Vision only runs when there is no usable caption.
+  const captionSlug = caption ? getMachineSlug(caption) : null;
+  if (captionSlug) {
+    const exName = captionSlug.replace(/-/g, " ").replace(/\b\w/g, (c: string) => c.toUpperCase());
+    return `*${exName}* — got it 💪 What weight and reps? Reply like *"65kg 3x8"* and I'll log it.\n\n_Want the how-to instead? Type *show me ${exName.toLowerCase()}*._`;
+  }
   try {
     const machineIdRes = await withTimeout("equipment_id", 9000, () =>
       openai.chat.completions.create({
@@ -87,28 +97,33 @@ export async function coachGymMachineFromPhoto(
     const setup = machineSetup(slug);
     const setupLine = setup ? `⚙️ *Setup:* ${setup}\n` : "";
 
+    // HEDGED, always — 2026-07-10: a plate-loaded ROW machine was asserted as a "Hack
+    // Squat Machine" with full setup instructions for the wrong machine. Machine vision
+    // is genuinely fallible, so every ID reads as "looks like" and every reply carries a
+    // one-line correction path. Confident + wrong is worse than unsure + honest.
     let reply: string;
     if (match.kind === "exact" && match.prescribed) {
       const p = match.prescribed;
-      reply = `✅ *That's the ${displayName} — exactly what your plan calls for today.*\n\n`
+      reply = `✅ *That looks like the ${displayName} — exactly what your plan calls for today.*\n\n`
         + `📋 *Your sets:* ${p.setsDisplay}\n`
         + setupLine
         + `✅ *How:* ${p.description}\n`
         + `⚠️ *Don't:* ${p.mistake}`;
     } else if (match.kind === "substitute" && match.prescribed) {
       const p = match.prescribed;
-      reply = `*That's a ${displayName}* — not the exact machine your plan names, but it trains the same muscles the same way. Use it today, no problem.\n\n`
+      reply = `*That looks like a ${displayName}* — not the exact machine your plan names, but it trains the same muscles the same way. Use it today, no problem.\n\n`
         + `📋 *Swap it in for your ${primaryExerciseName(p.name)} — same sets:* ${p.setsDisplay}\n`
         + setupLine
         + `✅ *How:* ${machineHowTo(slug)}`;
     } else {
-      reply = `*${displayName}*\n\n`
+      reply = `*Looks like a ${displayName}*\n\n`
         + setupLine
         + `✅ *How:* ${machineHowTo(slug)}`;
       reply += day
         ? `\n\nThis isn't on today's session — reply *workout* to see what you're doing today.`
         : `\n\nReply *workout* to get your programme.`;
     }
+    reply += `\n\n_Got the machine wrong? Reply its name (e.g. "seated row") and I'll coach that one._`;
     const hint = variantGuideHint(slug);
     if (hint) reply += `\n\n${hint}`;
     if (imageUrl) reply += `\n[MEDIA:${imageUrl}]`;
