@@ -531,6 +531,24 @@ export function isBareGreeting(m: string): boolean {
   return s.length > 0 && GREETING_WORDS.has(s);
 }
 
+// A request to CHANGE the steps target — must reach the deterministic updater in
+// early-commands, never the brain. 2026-07-10: a client "had a discussion" with the
+// brain about moving to 10,000 steps; the brain agreed in words, persisted nothing,
+// and the morning brief kept saying 11,000 — the exact gaslighting the law forbids.
+export function looksLikeStepsTargetChange(m: string): boolean {
+  return /\b(?:set(?:ting)?|chang(?:e|ing|ed)|updat(?:e|ing|ed)|bump(?:ing|ed)?|rais(?:e|ing|ed)|lower(?:ing|ed)?|increas(?:e|ing|ed)|decreas(?:e|ing|ed)|mak(?:e|ing)|mov(?:e|ing|ed)|adjust(?:ing|ed)?)\b[^.!?]{0,30}\bsteps?\b[^.!?]{0,20}\b(?:to\s+)?\d[\d,]{2,}\b/i.test(m)
+    || /\bsteps?\s+(?:target|goal)\s+(?:to\s+)?\d[\d,]{2,}\b/i.test(m)
+    || /\bsteps?\b[^.!?]{0,15}\b\d[\d,]{2,}\b[^.!?]{0,25}\b(?:from now|going forward|as (?:the|my) (?:standard|target|goal))\b/i.test(m);
+}
+
+// Cancellation / billing intent — must reach the deterministic subscription flow
+// (which stops billing and alerts the founder), never the brain. 2026-07-10: "I'm
+// cancelling my subscription" got a limp model reply and NO cancellation action.
+export function looksLikeBillingOrCancel(m: string): boolean {
+  return /\b(cancel(?:ling|led)?|unsubscribe|stop (?:my )?(?:subscription|billing|payments?|coaching)|refund|charged? (?:me|twice|wrong)|billing (?:problem|issue|query)|payment (?:failed|problem|issue)|don'?t bill me|stop charging)\b/i.test(m)
+    && !/\bcancel (?:the |my )?(?:workout|session|order|meal|plan for)\b/i.test(m);
+}
+
 export function looksLikeWaterReport(m: string): boolean {
   return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
     || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m);

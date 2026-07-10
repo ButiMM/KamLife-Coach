@@ -44,7 +44,12 @@ export async function handleMealRepeat(ctx: {
   // are the client CORRECTING us — treating them as copy commands stacked three wrong
   // meals in production (2026-07-02). Fall through to mgmt/coach instead.
   const isProtest = /^(no+\b|no no|omg|wtf|eish|yoh|hau|haibo|what the|listen)/i.test(m.trim())
-    || /\b(what i mean|i meant|you must remove|you should remove|mistakenly|by mistake|wrongly logged|do better|that.?s (wrong|not what)|didn.?t ask|stop logging)\b/i.test(m);
+    || /\b(what i mean|i meant|you must remove|you should remove|mistakenly|by mistake|wrongly logged|do better|that.?s (wrong|not what)|didn.?t ask|stop logging)\b/i.test(m)
+    // META-COMPLAINT about the conversation itself — "I already told you what's the plan
+    // for lunch. Have you forgotten? We are repeating the same things" contains
+    // 'repeating'+'lunch' and LOGGED YESTERDAY'S PASTA in reply to a complaint
+    // (2026-07-10 voice note). Talking ABOUT repetition is never a request to repeat.
+    || /\b(have you forgot(?:ten)?|i (?:already|just) told you|come on,? man|you and i|we (?:had|have) a discussion|we discussed|why (?:are|do|did) you|you keep|you'?re not listening|repeating the same)\b/i.test(m);
 
   if (!sameAsMatch || wantsNotRepeat || isProtest) return null;
 

@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -628,8 +628,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // also saves the call.
   // Detectors are pure + unit-tested in utils.ts ("had 2 beers" must never match
   // water; "bench 80kg 3x10" must never match weight). Question-guard stays here.
-  const isTransactionReport = !normalizedQuestion
-    && (looksLikeStepsReport(m) || looksLikeWaterReport(m) || looksLikeWeightReport(m));
+  const isTransactionReport = (!normalizedQuestion
+    && (looksLikeStepsReport(m) || looksLikeWaterReport(m) || looksLikeWeightReport(m)))
+    // MUTATIONS + MONEY skip the brain unconditionally (2026-07-10 audit): a steps-target
+    // change must hit the deterministic updater (the brain "agreed" to 10k in chat,
+    // saved nothing, and briefings kept saying 11k), and cancellation/billing must hit
+    // the real subscription flow (the brain gave a limp condolence and cancelled nothing).
+    || looksLikeStepsTargetChange(m)
+    || looksLikeBillingOrCancel(m);
   // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings

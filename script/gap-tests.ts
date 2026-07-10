@@ -1011,6 +1011,28 @@ test("workout viewer: walk-only user has no cards (null, not a crash)", () => {
   assert.equal(buildViewerCards({ trainingMode: "walk_only" }), null);
 });
 
+// MEAL-REPEAT META-COMPLAINT GUARD (2026-07-10) — a voice complaint "I already told
+// you what's the plan for lunch. Have you forgotten? We are repeating the same things"
+// matched repeat+lunch and LOGGED YESTERDAY'S PASTA. Complaints must never log food.
+const { handleMealRepeat } = await import("../server/handlers/meal-repeat");
+
+test("meal-repeat: a complaint about repetition NEVER logs a meal", async () => {
+  for (const msg of [
+    "But I already told you what's the plan for lunch. Have you forgotten? Come on man, come on. We are repeating the same things.",
+    "why do you keep logging the same lunch",
+    "you and I had a discussion about my lunch yesterday",
+  ]) {
+    const r = await handleMealRepeat({ phone: LC_USER.phoneNumber, message: msg, m: msg.toLowerCase(), user: LC_USER });
+    assert.equal(r, null, `complaint must fall through, not log: ${msg}`);
+  }
+});
+
+test("meal-repeat: a genuine repeat request still works through the guard", async () => {
+  const msg = "dinner is the same as lunch";
+  const r = await handleMealRepeat({ phone: LC_USER.phoneNumber, message: msg, m: msg, user: LC_USER });
+  assert.ok(r === null || !/have you forgot/i.test(r), "genuine repeat is not blocked by the guard (null only if no meal to copy in stub)");
+});
+
 // CONCERN-FIRST ON HEALTH EVENTS (2026-07-09) — a real client wrote "had an incident
 // at work and my GP recommended rest, spent the day in bed". Health events rarely use
 // the word "sick"; the brain must still catch them and lead with concern, not coach past.

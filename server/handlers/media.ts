@@ -1384,7 +1384,14 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
       // Echo confirms transcription — but never parrot a 60s rant or its profanity back.
-      const echoClean = (transcribedText.length > 160 ? transcribedText.slice(0, 157) + "…" : transcribedText).replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
+      // Trim at a WORD boundary — cutting mid-word ("You and I had a discussion abou…")
+      // reads as the bot mangling their words (2026-07-10 screenshot).
+      let echoTrimmed = transcribedText;
+      if (transcribedText.length > 220) {
+        const cut = transcribedText.slice(0, 217);
+        echoTrimmed = cut.slice(0, Math.max(cut.lastIndexOf(" "), 150)) + " …";
+      }
+      const echoClean = echoTrimmed.replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
       return `🎤 I heard: "${echoClean}"\n\n${voiceReply}`;
 
     } catch (err) {

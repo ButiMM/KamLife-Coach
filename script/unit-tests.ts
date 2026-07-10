@@ -23,7 +23,8 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel } from "../server/utils";
+import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
 let failed = 0;
@@ -1734,6 +1735,29 @@ test("physique: empty lagging falls back to gender priors, never double-counts a
 test("physique: gender priors differ for male vs female", () => {
   assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
   assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+// 2026-07-10 VOICE-NOTE AUDIT — five real failures, each locked here.
+test("brain gate: steps-target changes skip the brain (deterministic updater must run)", () => {
+  for (const msg of ["change my steps to 10000", "we're changing my steps to 10,000", "set my step target to 8000", "steps goal 12000", "lower my steps to 9000"])
+    assert.ok(looksLikeStepsTargetChange(msg), `must skip brain: ${msg}`);
+  for (const msg of ["I walked 10000 steps", "how many steps today", "steps are hard"])
+    assert.ok(!looksLikeStepsTargetChange(msg), `must NOT match: ${msg}`);
+});
+
+test("brain gate: cancellation/billing skips the brain (real flow must run)", () => {
+  for (const msg of ["I'm cancelling my subscription", "cancel my subscription", "unsubscribe", "you charged me twice", "I want a refund", "stop billing me"])
+    assert.ok(looksLikeBillingOrCancel(msg), `must skip brain: ${msg}`);
+  for (const msg of ["cancel the workout today", "cancel my session tomorrow"])
+    assert.ok(!looksLikeBillingOrCancel(msg), `must NOT match: ${msg}`);
+});
+
+test("guardrails: 'I hear you' scrub never bites into 'your' (the 'r frustration' bug)", () => {
+  const ctx = { userMessage: "", budgetTier: "", injuries: "" } as any;
+  const r = enforceCoachGuardrails("I hear your frustration, and I'm sorry for the mix-up.", ctx);
+  assert.ok(r.reply.includes("your frustration"), `must keep 'your frustration' intact: ${r.reply}`);
+  const r2 = enforceCoachGuardrails("I hear you. Let's fix the plan.", ctx);
+  assert.ok(!/I hear you\b/.test(r2.reply) && /Let'?s fix the plan/.test(r2.reply), `standalone filler still stripped: ${r2.reply}`);
 });
 
 // BARE GREETING (2026-07-10) — "hello"/"menu" must reach the warm deterministic menu

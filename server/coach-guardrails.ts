@@ -47,7 +47,10 @@ const BANNED_PHRASES: Array<{ pattern: RegExp; replacement: string }> = [
   { pattern: /\btrust the process[.!]?\s*/gi, replacement: "" },
   { pattern: /\bkick-?start\b/gi, replacement: "start" },
   { pattern: /\bStay positive[.!]?\s*/gi, replacement: "" },
-  { pattern: /\bI hear you[,.!]?\s*/gi, replacement: "" },
+  // \b after "you" is CRITICAL: without it this matched inside "I hear youR
+  // frustration" and stripped mid-word, sending a client "r frustration, and I'm
+  // sorry…" (2026-07-10 screenshot). Only the standalone filler phrase is removed.
+  { pattern: /\bI hear you\b[,.!]?\s*/gi, replacement: "" },
 ];
 
 export function enforceCoachGuardrails(input: string, context: GuardrailContext): GuardrailResult {
