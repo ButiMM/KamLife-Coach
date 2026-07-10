@@ -918,5 +918,5 @@ export function buildFoodLogReply(p: {
     }
   }
 
-  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${swapNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}`;
+  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${swapNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}[BUTTONS:My progress|Today's workout]`;
 }

@@ -513,6 +513,24 @@ export function looksLikeStepsReport(m: string): boolean {
   return /\b[\d,]+\s*k?\s*steps?\b/i.test(m) || /\bsteps?\s*(?:are|is|was|were|:)\s*[\d,]+/i.test(m);
 }
 
+// A BARE greeting or menu request — must reach the warm deterministic menu (getMenuText,
+// with tap buttons + today's context), NOT the model. 2026-07-10: with MODEL_BRAIN=on the
+// brain ran before the greeting handler and answered "hello" with a generic, button-less
+// "what's on your mind" — different every time. Only matches a message that IS just a
+// greeting/menu word (so "hello, I ate eggs" still flows to the handlers).
+const GREETING_WORDS = new Set([
+  "hello", "hi", "hey", "heya", "hiya", "yo", "sup", "hello there", "hi there", "hey there",
+  "howzit", "howsit", "hola", "good morning", "morning", "good afternoon", "good evening", "good day",
+  "hi coach", "hey coach", "hello coach", "hi coach k", "hey coach k",
+  "sawubona", "sanibonani", "unjani", "kunjani", "molo", "molweni", "dumela", "dumelang",
+  "lumela", "thobela", "hallo", "goeie more", "goeie middag", "avuxeni", "ndaa", "aweh", "sharp",
+  "menu", "help", "start", "hey kam", "hi kam",
+]);
+export function isBareGreeting(m: string): boolean {
+  const s = (m || "").toLowerCase().replace(/[^a-z\s]/g, "").replace(/\s+/g, " ").trim();
+  return s.length > 0 && GREETING_WORDS.has(s);
+}
+
 export function looksLikeWaterReport(m: string): boolean {
   return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
     || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m);

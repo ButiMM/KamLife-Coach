@@ -421,5 +421,5 @@ export async function handleWeightLog(
   // ── Trend line (only when we have recent data) ──
   const trendLine = trendLabel ? `\n\n${trendLabel} — ${trendStatus}` : (milestoneCelebration ? "" : journeyNote);
 
-  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${underweightFlipNote}${predictionNote}${streakNote}${plateauNote}`;
+  return `Weight logged: *${newKg}kg.*${changeNote}${milestoneCelebration}${trendLine}${targetsLine}${underweightFlipNote}${predictionNote}${streakNote}${plateauNote}[BUTTONS:My progress|Today's workout]`;
 }

@@ -23,6 +23,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
+import { isBareGreeting } from "../server/utils";
 
 let passed = 0;
 let failed = 0;
@@ -1733,6 +1734,19 @@ test("physique: empty lagging falls back to gender priors, never double-counts a
 test("physique: gender priors differ for male vs female", () => {
   assert.deepEqual(genderLaggingPriors("female"), ["glutes", "hamstrings", "shoulders"]);
   assert.deepEqual(genderLaggingPriors("male"), ["chest", "back", "shoulders"]);
+});
+
+// BARE GREETING (2026-07-10) — "hello"/"menu" must reach the warm deterministic menu
+// (buttons + context), never the model's generic "what's on your mind". Content-carrying
+// greetings must NOT match, so they still flow to the handlers.
+test("greeting: bare greetings and menu words match (route to the warm menu)", () => {
+  for (const g of ["hello", "Hi", "hey 👋", "Howzit", "menu", "help", "sawubona", "good morning", "hi coach", "Morning"])
+    assert.ok(isBareGreeting(g), `should be a bare greeting: ${g}`);
+});
+
+test("greeting: content-carrying messages are NOT bare greetings (flow to handlers)", () => {
+  for (const m of ["hello I ate eggs", "hi what's my protein target", "hey I did my workout", "menu for the week", "morning walk 3000 steps"])
+    assert.ok(!isBareGreeting(m), `should NOT be a bare greeting: ${m}`);
 });
 
 // FORM CHECK (2026-07-09) — remote form coaching must analyse and direct with AT MOST

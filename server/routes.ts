@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -630,7 +630,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // water; "bench 80kg 3x10" must never match weight). Question-guard stays here.
   const isTransactionReport = !normalizedQuestion
     && (looksLikeStepsReport(m) || looksLikeWaterReport(m) || looksLikeWeightReport(m));
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport) {
+  // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
+  // buttons + today's context) below — NOT the model, which answers it generically and
+  // button-less, differently every time (2026-07-10 audit). Content-carrying greetings
+  // ("hi, I ate eggs") are not bare, so they still flow to the brain/handlers normally.
+  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }

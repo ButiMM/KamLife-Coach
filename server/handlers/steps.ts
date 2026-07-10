@@ -144,5 +144,5 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
     response += educationNote(user, { event: "steps", burnKcal: burnEst });
   }
 
-  return response;
+  return `${response}[BUTTONS:Log food|Today's workout]`;
 }
