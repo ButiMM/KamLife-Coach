@@ -108,15 +108,18 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
 
   if (equivalent) response += ` ${equivalent}`;
 
-  // Goal-contextual note: what these steps actually mean for this person's goal.
-  // Food creates the deficit — steps add to it. Muscle gain clients protect their surplus.
+  // ONE add-on per reply (2026-07-10 friction audit): this used to stack goal note +
+  // 7-day average + streak + education in one bubble. The count and the 7-day average
+  // are DATA and stay; then ONE note rides along — celebration beats coaching beats
+  // teaching (streak > goal note > education).
+  let goalNote = "";
   if (steps >= 2000) {
     if (goalContext === "fat_loss") {
-      response += isWorkoutDay
+      goalNote = isWorkoutDay
         ? `\n\n_Gym session already burned. These steps add to it — you're burning even more than your food already saves._`
         : `\n\n_Your food + these steps mean you're burning more than you eat today. That's the weight coming off._`;
     } else if (goalContext === "muscle_gain") {
-      response += isWorkoutDay
+      goalNote = isWorkoutDay
         ? `\n\n_Session done. Light movement for recovery — that's all you need. Keep eating enough to build._`
         : `\n\n_Movement for health, not to burn. Your food is doing the building work._`;
     }
@@ -133,16 +136,15 @@ export function getStepResponse(steps: number, target: number, weightKg = 75, st
     response += `\n\n_7-day average: ${weeklyAvg.toLocaleString()} steps — ${vsTarget}_`;
   }
 
-  // Step streak celebration
+  let streakNote = "";
   if (streak >= 7) {
-    response += `\n\n🔥 *${streak}-day step streak.* ${streak >= 14 ? "Two weeks of movement. This is a habit now." : "A full week of steps. Don't break it."}`;
+    streakNote = `\n\n🔥 *${streak}-day step streak.* ${streak >= 14 ? "Two weeks of movement. This is a habit now." : "A full week of steps. Don't break it."}`;
   } else if (streak >= 3 && steps >= target) {
-    response += `\n\n🔥 ${streak} days in a row hitting target. Keep the streak alive.`;
+    streakNote = `\n\n🔥 ${streak} days in a row hitting target. Keep the streak alive.`;
   }
 
-  if (user) {
-    response += educationNote(user, { event: "steps", burnKcal: burnEst });
-  }
+  const eduNoteSteps = user ? educationNote(user, { event: "steps", burnKcal: burnEst }) : "";
+  const stepsAddOn = [streakNote, goalNote, eduNoteSteps].find(s => s && s.trim()) || "";
 
-  return `${response}[BUTTONS:Log food|Today's workout]`;
+  return `${response}${stepsAddOn}[BUTTONS:Log food|Today's workout]`;
 }

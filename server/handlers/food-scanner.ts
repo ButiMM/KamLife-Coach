@@ -918,5 +918,15 @@ export function buildFoodLogReply(p: {
     }
   }
 
-  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${coachNote}${junkNote}${swapNote}${proteinTip}${eduNote}${variableReinforcement}${calorieFloorNote}[BUTTONS:My progress|Today's workout]`;
+  // ONE add-on per reply (2026-07-10 friction audit): this bubble used to stack coach
+  // note + junk note + swap + protein tip + edu note + reinforcement + floor warning —
+  // all correct, together heavy. The numbers are the product; ONE note rides along,
+  // picked by priority: health warning > junk > coach remark > shelf swap > protein
+  // gap > education > reinforcement. Everything else waits for its own moment.
+  // proteinTip outranks the generic coach remark because it owns the "target hit ✅"
+  // verdict (a milestone, i.e. data) — but a photo-path override remark stays on top.
+  const addOn = [calorieFloorNote, junkNote, coachNoteOverride ? coachNote : "", proteinTip, coachNote, swapNote, eduNote, variableReinforcement]
+    .find(s => s && s.trim()) || "";
+
+  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${addOn}[BUTTONS:My progress|Today's workout]`;
 }
