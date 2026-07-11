@@ -18,7 +18,7 @@ import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
-import { buildFoodVisionUserPrompt } from "../server/handlers/food-vision-prompt";
+import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
@@ -1876,6 +1876,22 @@ test("physique: prompt is gender + goal aware, focus line names lagging and a st
   assert.ok(/DOMINANT:|LAGGING:/.test(p.user), "must specify the strict output contract");
   const line = formatPhysiqueFocusLine({ dominant: ["back"], lagging: ["chest", "shoulders"], note: "" });
   assert.ok(/chest, shoulders/i.test(line) && /strong point/i.test(line));
+});
+
+// RESTAURANT MENU OPTION (2026-07-11) — a photographed menu must route to menu-pick
+// (MENU_PHOTO sentinel), and the pick prompt must stay decisive, short, on-goal.
+test("vision prompt: restaurant menus get the MENU_PHOTO sentinel (no more dead-end)", () => {
+  assert.ok(/RESTAURANT or takeaway MENU/i.test(drinkPrompt) && /MENU_PHOTO/.test(drinkPrompt), "menu sentinel present in the vision prompt");
+});
+
+test("menu pick: decisive, short, goal-aware — picks, one trap, zero-sugar drink", () => {
+  const p = buildMenuPickPrompt({ clientName: "Kam", goal: "fat_loss" });
+  assert.ok(/Best pick/.test(p.user) && /Skip:/.test(p.user), "best-pick and skip lines required");
+  assert.ok(/ZERO SUGAR/.test(p.user) && /skip the alcohol/i.test(p.user), "drink guidance incl. alcohol for fat loss");
+  assert.ok(/only name dishes actually on the menu/i.test(p.user), "no invented dishes");
+  assert.ok(/under 8 short lines/i.test(p.user) && /never lecture/i.test(p.system), "stays short and human");
+  const mg = buildMenuPickPrompt({ clientName: "K", goal: "muscle_gain" });
+  assert.ok(!/skip the alcohol/i.test(mg.user), "alcohol line is goal-gated to fat loss");
 });
 
 // HIDDEN ADDED FATS (2026-07-09) — the fat the camera can't see (oil cooked in, avo,

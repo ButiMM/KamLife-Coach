@@ -29,6 +29,28 @@ HOW TO REPLY — READ CAREFULLY: The client is LOGGING food they already have. T
 Keep it human and brief — usually one sentence, two at most. SA voice. Never say "Reply MENU". Never say "I hope this helps".${isApprovalCaption ? ` EXCEPTION — THE CLIENT IS ASKING FOR ADVICE (caption shows they want a verdict, e.g. "is this okay?"): give a direct, kind yes/no for their ${goal} goal in one sentence plus one practical tip. This is the one time advice is welcome.` : ""}`;
 }
 
+/**
+ * MENU PICK — client photographs a restaurant menu; Coach K orders FOR them (2026-07-11,
+ * Kam: "we should add a restaurant menu option" — his manual pattern: "Go, but make
+ * better choices — LEAN meat, veggies, no alcohol"; market proof: MenuFit does exactly
+ * this). Short, decisive, goal-aware — a friend who knows food, not a nutrition lecture.
+ */
+export function buildMenuPickPrompt(opts: { clientName: string; goal: string }): { system: string; user: string } {
+  const goalLabel = opts.goal === "fat_loss" ? "fat loss" : opts.goal === "muscle_gain" ? "muscle gain" : "body recomposition";
+  return {
+    system: `You are Coach K, a South African fitness and nutrition coach. Client: ${opts.clientName}. Goal: ${goalLabel}. They just photographed a restaurant menu and want to know what to order. Be decisive and brief — pick FOR them like a mate who knows food, never lecture.`,
+    user: `Read this menu and pick the best orders for their ${goalLabel} goal.
+
+Reply in EXACTLY this shape, under 8 short lines, plain words:
+🥇 Best pick: [dish name from the menu] — [max 8 words why]
+🥈 Also good: [1-2 more dishes, names only]
+⚠️ Skip: [the one worst trap on this menu, name it]
+🥤 Drink: water or anything ZERO SUGAR${goalLabel === "fat loss" ? "; skip the alcohol tonight" : ""}
+
+Rules: only name dishes actually on the menu. Grilled beats fried; lean protein + veggies is the priority. No calorie numbers needed, no lecture. If the menu is too blurry to read, say so in ONE line and ask for a closer photo of the mains section.`,
+  };
+}
+
 export function buildFoodVisionUserPrompt(opts: {
   message: string; isApprovalCaption: boolean; liveCal: number; liveProt: number;
 }): string {
@@ -48,6 +70,7 @@ COACHING: Mostly say nothing beyond the log. For snacks, treats, drinks, or sing
 FOOD CHECK FIRST: Before anything else, verify this image actually shows food or a drink the client is consuming. If the image is clearly NOT food — check these specific cases first:
 - If it shows plain water only — a glass of water, a water bottle, a tap running, or a refillable bottle (no branded label, no calories to track) — estimate: (1) the bottle's total capacity in ml by looking for printed size markings or estimating from shape/label (common SA sizes: 500ml, 750ml, 1L, 1.5L, 2L), and (2) approximately what fraction of the bottle has already been consumed based on the current fill level visible. Then respond with EXACTLY: WATER:Xml where X is the millilitres already consumed (capacity × depletion fraction), e.g. a 2L bottle that is 3/4 empty = WATER:1500ml, a 500ml bottle that is half empty = WATER:250ml. If the bottle looks completely full and nothing has been drunk yet, respond WATER:0ml.
 - If it shows a handwritten or typed grocery/shopping list, a receipt from a grocery store, or a list of items to BUY (not to eat right now) — respond with EXACTLY: GROCERY_LIST: [list the items you can read, comma-separated, in plain English]
+- If it shows a RESTAURANT or takeaway MENU (printed menu, menu board, drinks list — dishes with names/prices, not food on a plate) — respond with EXACTLY: MENU_PHOTO
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
 

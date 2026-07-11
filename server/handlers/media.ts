@@ -26,7 +26,7 @@ import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
-import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt } from "./food-vision-prompt";
+import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext } from "../targets";
 import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
@@ -874,6 +874,31 @@ export async function handleMediaMessage(ctx: {
           }
         }
         return mealLabelMatch ? mealAsk : "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
+      }
+      if (/^MENU_PHOTO\b/i.test(visionReply)) {
+        // RESTAURANT MENU (2026-07-11, Kam's ask + his manual pattern: "Go, but make
+        // better choices — LEAN meat, veggies, no alcohol"): read the menu and order FOR
+        // them. Decisive picks, one trap to skip, zero-sugar drink line. Never logged.
+        console.log(`[FOOD_VISION] menu photo detected user=${user.id.slice(-6)}`);
+        const menuDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
+        const { system: mSys, user: mUser } = buildMenuPickPrompt({ clientName, goal: user.goalType || "fat_loss" });
+        const menuReply = await withTimeout("menu_pick", 20000, () => openai.chat.completions.create({
+          model: menuDecision.model, max_tokens: 350,
+          messages: [
+            { role: "system", content: mSys },
+            { role: "user", content: [
+              { type: "text", text: mUser },
+              { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: menuDecision.detail } },
+            ] },
+          ],
+        }))
+          .then(r => r.choices[0]?.message?.content?.trim() || "")
+          .catch((e) => { console.warn("[menu_pick]", (e as Error)?.message); return ""; });
+        const menuOut = menuReply
+          ? `${menuReply}\n\n_Photo your plate when it lands and I'll log it._`
+          : `I can see it's a menu but can't read it clearly — send a closer photo of the mains section and I'll pick for you.`;
+        await logChat(user.id, "[Menu Photo]", menuOut, "MENU_PICK");
+        return menuOut;
       }
       if (/^GROCERY_LIST:/i.test(visionReply)) {
         const itemsRaw = visionReply.replace(/^GROCERY_LIST:\s*/i, "").trim();
