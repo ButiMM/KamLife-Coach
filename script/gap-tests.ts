@@ -1072,6 +1072,12 @@ test("brain: everyday chatter does NOT trip the health playbook", () => {
     assert.ok(!SCENARIO_TOPIC_RE.test(msg), `should NOT trigger: ${msg}`);
 });
 
+test("brain: eating-out playbook — permission + strategy, never guilt (Kam's manual pattern)", () => {
+  assert.ok(/EATING OUT/i.test(BRAIN_SYS), "must handle going-out announcements");
+  assert.ok(/lean protein/i.test(BRAIN_SYS) && /skip the alcohol/i.test(BRAIN_SYS), "3-part strategy present");
+  assert.ok(/photo your plate/i.test(BRAIN_SYS), "must ask for the plate photo to log");
+});
+
 test("brain: playbook leads with concern on a health event (asks if serious)", () => {
   assert.ok(/health event/i.test(BRAIN_SYS), "must name 'any health event'");
   assert.ok(/concern/i.test(BRAIN_SYS) && /serious/i.test(BRAIN_SYS), "must instruct concern-first + ask if serious");
