@@ -1847,11 +1847,13 @@ test("daily direction: covers today across all pillars + the weekly through-line
   assert.ok(/workout/i.test(d), "training day tells them to get their session");
   assert.ok(/1,?800/.test(d) && /140g/.test(d) && /9,?000 steps/.test(d) && /water/i.test(d), "food + steps + water all present");
   assert.ok(!/surplus|deficit|macros|hypertrophy/i.test(d), "stays plain — no jargon");
+  assert.ok(/\[BUTTONS:Today's workout/.test(d), "training day ends in taps (2026-07-11: shipped button-less)");
 });
 
 test("daily direction: rest day and walk-only are honoured, never insists on the gym", () => {
   const rest = buildDailyDirection({ name: "A", calorieTarget: 1700, proteinTarget: 120, stepsTarget: 8000, trainingMode: "gym", trainingDaysPerWeek: 4 }, { type: "REST", nextTrainingName: "Tuesday" });
   assert.ok(/rest day/i.test(rest) && !/reply \*workout\*/i.test(rest), "rest day never pushes a session");
+  assert.ok(/\[BUTTONS:Log food/.test(rest) && !/BUTTONS:Today's workout/.test(rest), "rest-day buttons skip Today's workout");
   const walk = buildDailyDirection({ name: "B", calorieTarget: 1600, proteinTarget: 100, stepsTarget: 10000, trainingMode: "walk_only", trainingDaysPerWeek: 3 }, { type: "NORMAL" });
   assert.ok(/walk your 10,?000 steps/i.test(walk), "walk-only user gets a steps-first plan");
 });

@@ -40,6 +40,12 @@ export function buildDailyDirection(
 
   const stepsLine = (mode === "walk_only" || mode === "walk") ? "" : `\n👟 ${steps} steps`;
 
+  // Buttons match the day: no "Today's workout" tap on a rest day (2026-07-11 — the
+  // reply shipped button-less and read robotic; every reply must end in taps).
+  const buttons = (mode === "walk_only" || mode === "walk" || workoutState.type === "REST" || workoutState.type === "ALREADY_DONE")
+    ? "[BUTTONS:Log food|My progress|Tomorrow's session]"
+    : "[BUTTONS:Today's workout|Log food|My progress]";
+
   return `${hi}
 
 *Today:*
@@ -48,5 +54,5 @@ ${foodLine}${stepsLine}
 💧 Water through the day
 
 *This week:*
-Train ${trainingDays} days, log your food every day, hit your steps, drink your water. Do those and the results come — nothing fancy. That's the whole plan.`;
+Train ${trainingDays} days, log your food every day, hit your steps, drink your water. Do those and the results come — nothing fancy. That's the whole plan.${buttons}`;
 }
