@@ -370,8 +370,18 @@ export async function runMorningCheckin(): Promise<void> {
         );
         if (breakfastLog?.messageIn) {
           const meal = breakfastLog.messageIn.replace(/\b(for breakfast|breakfast was|this morning|had|ate|eating|having|i |my )\b/gi, "").trim();
-          if (meal.length > 3 && meal.length < 60) {
-            repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${meal.slice(0, 50)}"* to log it instantly.`;
+          // The client is told to send this string BACK to log it — it must never be cut
+          // mid-word (2026-07-11 live: '…3 slices of bread and coff' — a broken food list
+          // the client was asked to type verbatim). Fit whole items or trim at the last
+          // comma so items survive; skip the suggestion entirely if it can't fit cleanly.
+          let mealShort = meal.length <= 90 ? meal : "";
+          if (!mealShort && meal.length > 90) {
+            const cut = meal.slice(0, 90);
+            const lastComma = cut.lastIndexOf(",");
+            if (lastComma > 20) mealShort = cut.slice(0, lastComma).trim();
+          }
+          if (mealShort.length > 3) {
+            repeatSuggestion = `\n\n💡 Same breakfast as last time? Reply *"${mealShort}"* to log it instantly.`;
           }
         }
       } catch { /* non-critical */ }
@@ -405,9 +415,12 @@ export async function runMorningCheckin(): Promise<void> {
       if (closingLine) todaySection.push(closingLine);
 
       if (await claimDailySlot(client.id, "morning")) {
-        // Three bubbles: summary | today's targets | the one question we want answered.
+        // ONE bubble (2026-07-11 friction audit): this used to split into THREE messages
+        // via the --- markers — a wall of three bot bubbles before the client is even
+        // awake, and 3× the Twilio cost on the biggest daily fan-out. Same content,
+        // one message, breakfast question last so it reads as the ask.
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
-        const fullMessage = parts.join(" ") + "\n\n---\n\n" + todaySection.join("\n") + "\n\n---\n\n" + breakfastAsk;
+        const fullMessage = parts.join(" ") + "\n\n" + todaySection.join("\n") + "\n\n" + breakfastAsk;
         await sendWhatsApp(phone, fullMessage);
       }
     } catch (err) {

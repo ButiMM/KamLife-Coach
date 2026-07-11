@@ -367,12 +367,12 @@ export async function initScheduler(): Promise<void> {
 
     const items: string[] = [];
 
-    // 1. DB backup — most critical; data loss is unrecoverable
-    if (!process.env.R2_BUCKET) {
-      items.push(
-        "🔴 *DB Backup* — no backup running. Add 5 GitHub secrets (BACKUP_DATABASE_URL, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_BUCKET, R2_ENDPOINT). Guide: docs/backup-restore.md"
-      );
-    }
+    // DB-backup check REMOVED (2026-07-11): the backup's 5 secrets live in GITHUB
+    // (the backup runs in GitHub Actions — see .github/workflows/db-backup.yml), so
+    // the app's env can never see them. This check nagged "no backup running" every
+    // morning DESPITE the backup being live and verified (run #73, 2026-07-08) — a
+    // permanent false alarm that erodes trust in every real alert. Backup health is
+    // visible in the Actions tab; the app cannot verify it and must not claim to.
 
     // 2. Schema migration — gptCosts table + cascade deletes + indexes
     try {
