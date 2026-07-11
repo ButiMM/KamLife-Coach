@@ -23,7 +23,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1758,6 +1758,23 @@ test("guardrails: 'I hear you' scrub never bites into 'your' (the 'r frustration
   assert.ok(r.reply.includes("your frustration"), `must keep 'your frustration' intact: ${r.reply}`);
   const r2 = enforceCoachGuardrails("I hear you. Let's fix the plan.", ctx);
   assert.ok(!/I hear you\b/.test(r2.reply) && /Let'?s fix the plan/.test(r2.reply), `standalone filler still stripped: ${r2.reply}`);
+});
+
+// DIRECTION REQUEST GATE (2026-07-11) — "give me direction" / voice "what should I be
+// doing today" hit the brain and got CONTRADICTING workout dumps (Upper Body A, then B)
+// minutes after the menu correctly said REST DAY. These must skip the brain and reach
+// the deterministic, rest-day-aware buildDailyDirection. One source of truth: code.
+test("brain gate: direction requests skip the brain (incl. both live-failure phrasings)", () => {
+  for (const msg of [
+    "Give me direction — what do I do today and this week?",
+    "Hello coach, what should I be doing today?",
+    "what's my plan", "where do I start", "my overall plan",
+  ]) assert.ok(looksLikeDirectionRequest(msg), `must skip brain: ${msg}`);
+});
+
+test("brain gate: specific asks are NOT direction requests (route to their own handlers)", () => {
+  for (const msg of ["today's workout", "what's my meal plan", "shopping list", "how much does it cost", "cancel my plan for today"])
+    assert.ok(!looksLikeDirectionRequest(msg), `must NOT match: ${msg}`);
 });
 
 // BARE GREETING (2026-07-10) — "hello"/"menu" must reach the warm deterministic menu

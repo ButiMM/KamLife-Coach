@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -635,7 +635,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     // saved nothing, and briefings kept saying 11k), and cancellation/billing must hit
     // the real subscription flow (the brain gave a limp condolence and cancelled nothing).
     || looksLikeStepsTargetChange(m)
-    || looksLikeBillingOrCancel(m);
+    || looksLikeBillingOrCancel(m)
+    // "Give me direction / what should I be doing today" → the deterministic, rest-day-
+    // aware daily direction (2026-07-11: the brain answered these with contradicting
+    // workout dumps — Upper Body A then B — minutes after the menu correctly said REST).
+    || looksLikeDirectionRequest(m);
   // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings

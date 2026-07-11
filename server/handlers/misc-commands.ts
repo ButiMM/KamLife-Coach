@@ -29,7 +29,7 @@ import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday, sastDayStart } from "../utils";
+import { sastToday, sastDayStart, looksLikeDirectionRequest } from "../utils";
 import { SA_FOODS_SEED } from "../foods";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -59,11 +59,10 @@ export async function handleMiscCommands(ctx: {
   // the client wants the WHOLE plan across every pillar (train/rest, food, steps, water),
   // not a bare workout dump (2026-07-09: a client asked exactly this and got an exercise
   // list). Deterministic + plain, pulls their real targets and today's training state.
-  const dirStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
-  const isDirectionReq =
-    /\b(give me (a )?direction|direction for (the|this|today|my)|what (do|should) i (do|be doing|need to do)( today| this week| for the week| now| next)|what.?s my (plan|week|day)|my (overall |whole )?plan\b|overall plan|plan for (the|this) (week|day|month)|where do i (start|begin))\b/i.test(dirStripped)
-    && !/\b(workout|exercise|meal plan|recipe|shopping|supplement|pay|cancel|refund|price|cost)\b/i.test(dirStripped);
-  if (isDirectionReq) {
+  // Single shared detector (utils.looksLikeDirectionRequest) — the SAME check gates the
+  // brain in routes.ts, so a direction ask can never be swallowed by the model again
+  // (2026-07-11: brain answered it with contradicting workout dumps on a rest day).
+  if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
     return buildDailyDirection(user, ws as any);
   }
