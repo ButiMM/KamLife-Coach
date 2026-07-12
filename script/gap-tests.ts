@@ -25,7 +25,7 @@ process.env.TWILIO_AUTH_TOKEN = process.env.TWILIO_AUTH_TOKEN || "test";
 process.env.TWILIO_WHATSAPP_NUMBER = process.env.TWILIO_WHATSAPP_NUMBER || "+27000000000";
 
 // Dynamic imports — execute after env vars above, unlike static imports which are hoisted.
-const { scalePortionDescription, extractMealLabel } = await import("../server/handlers/food-context");
+const { scalePortionDescription, extractMealLabel, adjustFoodsForSegment } = await import("../server/handlers/food-context");
 const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
@@ -1284,6 +1284,27 @@ test("food scan: a specific sandwich suppresses the generic 'Sandwich' (no doubl
   // but a bare/filling sandwich with no specific match keeps 'Sandwich' for the bread
   assert.ok(scanNames("cheese and tomato sandwich").includes("Sandwich"), "generic sandwich kept for bread");
   assert.deepEqual(scanNames("sandwich"), ["Sandwich"], "bare sandwich still logs");
+});
+
+// QUANTITY PRECISION — the calories a text log produces must scale with the count.
+// "6 eggs" is 3× "2 eggs", not the same. This is where the deficit actually lives.
+function eggKcal(msg: string): number {
+  const adj = adjustFoodsForSegment(scanForSAFoods(msg), msg) as any[];
+  const egg = adj.find(f => f.name === "Eggs");
+  return egg ? egg.adjustedCalories : -1;
+}
+test("food quantity: egg calories scale with the count (default portion is 2 eggs)", () => {
+  const two = eggKcal("2 eggs");
+  assert.ok(two > 150 && two < 220, `2 eggs ~186 kcal, got ${two}`);
+  assert.equal(eggKcal("6 eggs"), two * 3, "6 eggs = 3× the 2-egg portion");
+  assert.equal(eggKcal("3 eggs"), Math.round(two * 1.5), "3 eggs = 1.5×");
+  assert.equal(eggKcal("1 egg"), Math.round(two * 0.5), "1 egg = 0.5×");
+});
+test("food quantity: size words scale the whole portion", () => {
+  const adjBig = adjustFoodsForSegment(scanForSAFoods("big plate of pap"), "big plate of pap") as any[];
+  const adjNorm = adjustFoodsForSegment(scanForSAFoods("pap"), "pap") as any[];
+  const big = adjBig.find(f => /pap/i.test(f.name)), norm = adjNorm.find(f => /pap/i.test(f.name));
+  assert.ok(big && norm && big.adjustedCalories > norm.adjustedCalories, "big plate > normal plate");
 });
 
 // ============================================================

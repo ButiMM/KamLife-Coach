@@ -204,7 +204,7 @@ function normaliseWordNumbers(text: string): string {
   return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
 }
 
-function adjustFoodsForSegment(foods: SAFood[], segText: string) {
+export function adjustFoodsForSegment(foods: SAFood[], segText: string) {
   const normText = normaliseWordNumbers(segText);
 
   // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
