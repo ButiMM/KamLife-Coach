@@ -16,7 +16,7 @@ import { weightLogs, workoutLogs, mealLogs, stepLogs, chatHistory } from "../../
 import { eq, gte, desc, and } from "drizzle-orm";
 import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
-import { energyFrameLine } from "../targets";
+import { energyFrameLine, waterTargetLitres } from "../targets";
 import { sastToday, sastDayStart } from "../utils";
 
 const DAY = 86_400_000;
@@ -141,7 +141,7 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     }
 
     // ── Water today ──
-    const waterTarget = Math.max(2.0, Math.round((parseFloat(String(user.currentWeight || "75")) || 75) * 0.033 * 10) / 10);
+    const waterTarget = waterTargetLitres(String(user.currentWeight || "75"));
     const todayWater = user.waterLastResetDate === sastToday() ? (Number(user.todayWater) || 0) : 0;
     lines.push(`Water today: ${todayWater}L of ${waterTarget}L target.`);
 

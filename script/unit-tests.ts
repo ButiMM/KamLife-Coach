@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
@@ -1222,6 +1222,25 @@ test("step burn: junk/missing weight defaults to average; extremes clamped; no n
   assert.equal(stepBurnKcal(10000, 5000), stepBurnKcal(10000, 250), "implausible weight clamped to 250");
   assert.equal(stepBurnKcal(-500, 70), 0);            // negative steps → 0
   assert.equal(stepBurnKcal(0, 70), 0);
+});
+
+// WATER TARGET (2026-07-12, "same precision everywhere"). One canonical 33ml/kg formula
+// with a 2.0L floor — was six copies, one drifted (no floor) so a light client saw two
+// different targets. Number and string weights, junk/missing all resolve consistently.
+test("water target: 33ml/kg, one-decimal, floored at 2.0L", () => {
+  assert.equal(waterTargetLitres(75), 2.5);
+  assert.equal(waterTargetLitres(100), 3.3);
+  assert.equal(waterTargetLitres(120), 4.0);
+  assert.equal(waterTargetLitres("80"), 2.6);        // string weight parses
+  // the drift fix: a light client is floored to 2.0, not 1.7 — same on every screen now
+  assert.equal(waterTargetLitres(50), 2.0);
+});
+
+test("water target: junk/missing weight defaults to an average adult (2.5L)", () => {
+  assert.equal(waterTargetLitres(undefined), 2.5);
+  assert.equal(waterTargetLitres(null), 2.5);
+  assert.equal(waterTargetLitres("0"), 2.5);
+  assert.equal(waterTargetLitres("not a number"), 2.5);
 });
 
 // ============================================================

@@ -8,6 +8,7 @@ import { users } from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { sastToday, mentionsNotDone } from "../utils";
+import { waterTargetLitres } from "../targets";
 
 /**
  * Log water from a message that contains an amount + a water keyword. Returns the
@@ -47,8 +48,7 @@ export async function tryLogWater(ctx: {
 
     const today = sastToday();
     const lastReset = user.waterLastResetDate;
-    const weightKgForWater = parseFloat(user.currentWeight as string || "0") || 75;
-    const waterTarget = Math.max(2.0, Math.round(weightKgForWater * 0.033 * 10) / 10);
+    const waterTarget = waterTargetLitres(user.currentWeight as string);
 
     const waterUpdated = await db.update(users).set({
       todayWater: sql`CASE WHEN water_last_reset_date = ${today} THEN COALESCE(today_water::numeric, 0) + ${litres} ELSE ${litres} END`,
@@ -143,8 +143,7 @@ export async function handleWater(ctx: {
   // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
   // e.g. "I drank water", "drank some water", "had water"
   if (!waterMatch && hasWaterKeyword && !waterIsQuestion && !waterNotConsumed && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
-    const wKg = parseFloat(user.currentWeight as string || "0") || 75;
-    const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
+    const wTarget = waterTargetLitres(user.currentWeight as string);
     const todayW = Math.round((parseFloat(user.todayWater as string || "0")) * 10) / 10;
     const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);
     const noAmtReply = `How much? Tell me the amount and I will log it.\n\nExamples: "drank 500ml", "had 2 glasses", "1 litre"\n\n_Today so far: ${todayW}L / ${wTarget}L target${remaining > 0 ? ` — ${remaining}L to go` : " — target hit ✅"}_`;
@@ -161,8 +160,7 @@ export async function handleWater(ctx: {
   const isWaterStatusCmd = /^(water|water\s*log|log\s*water|my\s*water|water\s*status|water\s*total|water\s*today|water\s*summary|water\s*count|water\s*tracker|water\s*tracking|show\s*(my\s*)?water|check\s*(my\s*)?water)\s*\??$/i.test(m.trim());
   if (isWaterQuestion || isWaterStatusCmd) {
     const todayW = parseFloat(user.todayWater as string || "0");
-    const wKg = parseFloat(user.currentWeight as string || "0") || 75;
-    const wTarget = Math.max(2.0, Math.round(wKg * 0.033 * 10) / 10);
+    const wTarget = waterTargetLitres(user.currentWeight as string);
     const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);
     const waterQReply = `Daily water target: *${wTarget}L* (based on your body weight).\n\nYou have logged ${todayW}L today — ${remaining > 0 ? `${remaining}L still to go.` : `target hit.`}\n\nTo log water, send the amount: "drank 500ml", "had 1L", "2 glasses of water".`;
     await logChat(user.id, message, waterQReply, "WATER_QUESTION");

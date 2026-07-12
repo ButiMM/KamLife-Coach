@@ -28,7 +28,7 @@ import { handleWater } from "./water";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
-import { calculateTargets, getDailyStepContext } from "../targets";
+import { calculateTargets, getDailyStepContext, waterTargetLitres } from "../targets";
 import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocusLine } from "../physique-analysis";
 import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt";
 import { buildProgressComparisonPrompt } from "../physique-analysis";
@@ -745,7 +745,7 @@ export async function handleMediaMessage(ctx: {
             // Estimate remaining based on fill
             const sizeLabel = sizeMl >= 900 ? `${(sizeMl / 1000).toFixed(1)}L` : `${sizeMl}ml`;
             const fillLabel = fillPct >= 90 ? "full" : fillPct >= 60 ? "about two-thirds full" : fillPct >= 35 ? "about half full" : fillPct >= 10 ? "nearly empty" : "empty";
-            const waterTarget = Math.max(2.0, Math.round((parseFloat(user.currentWeight || "75")) * 0.033 * 10) / 10);
+            const waterTarget = waterTargetLitres(user.currentWeight);
             const todayStr = sastToday();
             const waterUpdated = await db.update(users).set({
               todayWater: sql`CASE WHEN water_last_reset_date = ${todayStr} THEN COALESCE(today_water::numeric, 0) + ${litres} ELSE ${litres} END`,

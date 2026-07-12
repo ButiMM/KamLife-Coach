@@ -20,7 +20,7 @@ import {
   buildDayWorkout, buildFullProgramme, getKamlifeProgramme,
 } from "../programme";
 import { withTimeout, logChat } from "./chat-log";
-import { calculateTargets } from "../targets";
+import { calculateTargets, waterTargetLitres } from "../targets";
 import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
@@ -1657,8 +1657,7 @@ export async function handleLifecycle(ctx: {
 
   if (isWaterTargetMsg) {
     const name = user.name ? ` ${user.name}` : "";
-    const weight = parseFloat(user.currentWeight || "75");
-    const waterLitres = (weight * 0.033).toFixed(1);
+    const waterLitres = waterTargetLitres(user.currentWeight).toFixed(1);
     const waterReply = `${name ? name.trimStart() + " — " : ""}your water target is *${waterLitres}L per day* (based on your body weight × 0.033).\n\nSimplest way to hit it: 500ml when you wake up, 500ml mid-morning, 500ml before lunch, 500ml mid-afternoon, 500ml before dinner. That is 2.5L without thinking about it.\n\nThirst and hunger feel identical — most cravings at 3pm are actually dehydration. Drink first, eat after. Log your water by sending "2L water" or "drank 1.5 litres".`;
     await logChat(user.id, message, waterReply, "WATER_TARGET");
     return waterReply;

@@ -207,6 +207,20 @@ export function suggestStepTargetAdjustment(
 }
 
 // ============================================================
+// WATER TARGET — the ONE canonical daily hydration goal (2026-07-12, Kam: "apply the
+// same precision to all the other core areas"). 33 ml per kg of body weight, floored at
+// a sensible 2.0 L and rounded to one decimal. This exact expression was copy-pasted in
+// SIX places and one had already drifted (lifecycle.ts: no floor, different rounding),
+// so a 50 kg client saw 1.7 L on one screen and 2.0 L on another — the same core number
+// contradicting itself. One source of truth now. Pure — no DB, unit-tested.
+// ============================================================
+export function waterTargetLitres(weightKg?: number | string | null): number {
+  const w = typeof weightKg === "string" ? parseFloat(weightKg) : weightKg;
+  const kg = Number.isFinite(w as number) && (w as number) > 0 ? (w as number) : 75;
+  return Math.max(2.0, Math.round(kg * 0.033 * 10) / 10);
+}
+
+// ============================================================
 // STEP BURN — the ONE canonical walking-energy formula (2026-07-12, Kam: "we need to
 // be exactly precise… steps incorporated into [the deficit]"). Three call sites used to
 // disagree: the step logger and the "how much did I burn" answer scaled by body weight
