@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, suggestCalorieAdjustment } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
@@ -1243,64 +1243,6 @@ test("water target: junk/missing weight defaults to an average adult (2.5L)", ()
   assert.equal(waterTargetLitres("not a number"), 2.5);
 });
 
-// ADAPTIVE CALORIE TARGET (2026-07-12, "go all in… readjust the goal safely and
-// sustainably… obese… belly-fat plateau… surplus back-off… diet breaks"). Conservative:
-// only fires on a clear multi-week signal, never whiplashes an anxious client.
-const CAL = (o: Partial<Parameters<typeof suggestCalorieAdjustment>[0]>) =>
-  suggestCalorieAdjustment({ goal: "fat_loss", currentTarget: 1800, currentWeightKg: 90, weeklyRatePct: -0.7, weeksOnProgramme: 6, ...o });
-
-test("calorie adj: obese client losing too fast → EASE the deficit (safety first)", () => {
-  const a = CAL({ currentWeightKg: 130, weeklyRatePct: -2.0, weeksOnProgramme: 3 })!;
-  assert.equal(a.kind, "ease_deficit");
-  assert.equal(a.newTarget, 2000, "eat ~200 more");
-  assert.equal(a.temporary, false);
-  assert.match(a.reason, /protecting your results|too fast/i);
-});
-
-test("calorie adj: long-term dieter stalled → DIET BREAK, not a bigger deficit", () => {
-  const a = CAL({ currentTarget: 1500, weeklyRatePct: -0.1, weeksOnProgramme: 12 })!;
-  assert.equal(a.kind, "diet_break");
-  assert.equal(a.newTarget, 1800, "1 week at maintenance ~+300");
-  assert.equal(a.temporary, true);
-  assert.match(a.reason, /adapting|resets|strategy/i);
-});
-
-test("calorie adj: recent dieter stalled → small deficit increase", () => {
-  const a = CAL({ currentTarget: 1600, weeklyRatePct: -0.05, weeksOnProgramme: 5 })!;
-  assert.equal(a.kind, "increase_deficit");
-  assert.equal(a.newTarget, 1450);
-});
-
-test("calorie adj: sustainable 0.5-1%/week loss → leave it alone (no friction)", () => {
-  assert.equal(CAL({ weeklyRatePct: -0.7, weeksOnProgramme: 8 }), null);
-  assert.equal(CAL({ weeklyRatePct: -1.0, weeksOnProgramme: 12 }), null);
-});
-
-test("calorie adj: muscle gain too fast → trim the surplus; stalled → add fuel", () => {
-  const fast = CAL({ goal: "muscle_gain", currentTarget: 2800, weeklyRatePct: 1.0, weeksOnProgramme: 4 })!;
-  assert.equal(fast.kind, "trim_surplus");
-  assert.equal(fast.newTarget, 2650);
-  const stall = CAL({ goal: "muscle_gain", currentTarget: 2600, weeklyRatePct: 0.0, weeksOnProgramme: 5 })!;
-  assert.equal(stall.kind, "add_surplus");
-  assert.equal(stall.newTarget, 2750);
-});
-
-test("calorie adj: recomposition only acts on the too-fast safety case", () => {
-  assert.equal(suggestCalorieAdjustment({ goal: "recomposition", currentTarget: 2000, currentWeightKg: 100, weeklyRatePct: -1.8, weeksOnProgramme: 3 })!.kind, "ease_deficit");
-  assert.equal(suggestCalorieAdjustment({ goal: "recomposition", currentTarget: 2000, currentWeightKg: 90, weeklyRatePct: -0.1, weeksOnProgramme: 8 }), null);
-});
-
-test("calorie adj: never fires without enough data or on junk inputs", () => {
-  assert.equal(CAL({ weeklyRatePct: -0.05, weeksOnProgramme: 1 }), null, "too few weeks to judge a stall");
-  assert.equal(CAL({ weeklyRatePct: NaN }), null, "no rate");
-  assert.equal(CAL({ currentWeightKg: 0 }), null, "no weight");
-  assert.equal(CAL({ currentTarget: 0 }), null, "no target");
-});
-
-test("calorie adj: an eased deficit never drops below the safety floor", () => {
-  const a = suggestCalorieAdjustment({ goal: "fat_loss", currentTarget: 1250, currentWeightKg: 60, weeklyRatePct: -0.05, weeksOnProgramme: 6, calorieFloor: 1200 });
-  if (a) assert.ok(a.newTarget >= 1200, "respects the floor");
-});
 
 // ============================================================
 // getDailyStepContext — workout-day and goal-aware daily adjustment

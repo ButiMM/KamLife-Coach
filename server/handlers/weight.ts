@@ -301,22 +301,28 @@ export async function handleWeightLog(
   if (recentRateKgPerWeek !== null) {
     const rate = recentRateKgPerWeek;
     const rateStr = `${rate >= 0 ? "+" : ""}${rate.toFixed(2)}kg/week`;
+    // Judge the pace by % of BODY WEIGHT per week, not raw kg (2026-07-12, Kam: be
+    // precise for obese clients). 0.85kg/week is "too fast" for a 70kg person (1.2%) but
+    // a perfectly safe pace for a 130kg client (0.65%) — the same kg threshold wrongly
+    // told the heavy client to eat more and the light client they were fine. The kg
+    // figure is still SHOWN (clients think in kg); only the decision scales with weight.
+    const ratePct = (rate / (newKg > 0 ? newKg : 85)) * 100;
 
     if (goal === "fat_loss") {
-      // Ideal: -0.25 to -0.75kg/week
-      if (rate < -0.85) {
+      // Ideal: ~0.25–0.85% of bodyweight per week.
+      if (ratePct < -1.0) {
         calAdjust = 150;
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
-        trendStatus = `⚠️ too fast — losing muscle alongside fat. Adding 150 kcal to protect your muscle.`;
-      } else if (rate < -0.75) {
+        trendStatus = `⚠️ too fast for your body weight — you'll lose muscle alongside fat. Adding 150 kcal to protect your muscle.`;
+      } else if (ratePct < -0.88) {
         calAdjust = 100;
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `at the aggressive end. Adding 100 kcal — sustainable pace matters more than speed.`;
-      } else if (rate <= -0.2) {
+      } else if (ratePct <= -0.24) {
         calAdjust = 0;
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `✅ right on target. Keep going.`;
-      } else if (rate < 0) {
+      } else if (ratePct < 0) {
         calAdjust = -100;
         trendLabel = `📉 *${rateStr} over 2 weeks*`;
         trendStatus = `slower than ideal. Removing 100 kcal to get progress moving.`;
@@ -326,16 +332,16 @@ export async function handleWeightLog(
         trendStatus = `weight is going up on a fat loss programme. Removing 150 kcal and review your food log.`;
       }
     } else if (goal === "muscle_gain") {
-      // Ideal: +0.1 to +0.35kg/week
-      if (rate > 0.45) {
+      // Ideal: ~0.1–0.45% of bodyweight per week (any faster is mostly fat).
+      if (ratePct > 0.55) {
         calAdjust = -100;
         trendLabel = `📈 *${rateStr} over 2 weeks*`;
-        trendStatus = `gaining fast — some of that will be fat. Pulling back 100 kcal to keep it lean.`;
-      } else if (rate >= 0.08) {
+        trendStatus = `gaining fast for your body weight — some of that will be fat. Pulling back 100 kcal to keep it lean.`;
+      } else if (ratePct >= 0.1) {
         calAdjust = 0;
         trendLabel = `📈 *${rateStr} over 2 weeks*`;
         trendStatus = `✅ ideal lean gain pace. Stay exactly here.`;
-      } else if (rate > -0.1) {
+      } else if (ratePct > -0.12) {
         calAdjust = 100;
         trendLabel = `➡️ *${rateStr} over 2 weeks*`;
         trendStatus = `scale isn't moving — to grow you need to eat a bit more than your body burns. Adding 100 kcal.`;
@@ -346,9 +352,9 @@ export async function handleWeightLog(
       }
     } else if (goal === "recomposition") {
       trendLabel = `➡️ *${rateStr} over 2 weeks*`;
-      if (Math.abs(rate) <= 0.3) {
+      if (Math.abs(ratePct) <= 0.35) {
         trendStatus = `✅ scale is stable while body composition is shifting. Exactly right.`;
-      } else if (rate < -0.3) {
+      } else if (ratePct < -0.35) {
         trendStatus = `dropping a bit fast for recomp. Make sure you're hitting your calorie target each day.`;
       } else {
         trendStatus = `slight upward drift. Tighten carbs on rest days.`;
@@ -385,7 +391,7 @@ export async function handleWeightLog(
     const avg7     = last7Logs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / last7Logs.length;
     const avgOlder = olderLogs.reduce((s, r) => s + parseFloat(String(r.weight)), 0) / olderLogs.length;
     if (Math.abs(avg7 - avgOlder) < 0.4 && !trendStatus.includes("✅")) {
-      plateauNote = `\n\n_3-week average hasn't moved. Your body has settled. Options: eat slightly smaller portions, add a 20-minute daily walk, or take a 1–2 week break eating at the level where your weight holds steady. Pick one and commit for a week._`;
+      plateauNote = `\n\n_Your 3-week average hasn't moved — that's your body adapting, not you failing. Totally normal, especially once you've already lost a good amount. Best move: a *diet break* — eat at the level where your weight holds steady for 1 week. It feels backwards, but it resets your metabolism and hormones and the loss restarts after. It's a strategy, not a slip. (Or: slightly smaller portions, or a 20-min daily walk — pick one, commit for a week.)_`;
     }
   }
 
