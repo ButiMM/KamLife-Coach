@@ -29,6 +29,7 @@ const { scalePortionDescription, extractMealLabel } = await import("../server/ha
 const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
+const { getMachineSlug, buildMachineIdPrompt } = await import("../server/handlers/equipment-vision");
 
 let passed = 0;
 let failed = 0;
@@ -1193,6 +1194,39 @@ test("media: sticker (image/webp, no caption) → sticker detection message, no 
     handleMessage: async () => "",
   });
   assert.ok(r.includes("sticker"), `should mention sticker: ${r.slice(0, 100)}`);
+});
+
+// ============================================================
+// MACHINE VISION (2026-07-12, Kam: "the vision doesn't recognize any machines, it
+// makes mistakes"). Lock the slug mapping's key distinctions and the discriminating
+// prompt, so the plate-loaded-row-called-a-hack-squat failure can't silently return.
+// ============================================================
+test("machine slug: the commonly-confused machines map distinctly", () => {
+  assert.equal(getMachineSlug("leg press machine"), "leg-press");
+  assert.equal(getMachineSlug("hack squat machine"), "hack-squat");
+  assert.equal(getMachineSlug("seated row machine"), "seated-row");
+  assert.equal(getMachineSlug("seated cable row"), "seated-row");
+  assert.equal(getMachineSlug("lat pulldown"), "lat-pulldown");
+  assert.equal(getMachineSlug("leg extension machine"), "leg-extension");
+  assert.equal(getMachineSlug("leg curl machine"), "leg-curl");
+});
+
+test("machine slug: a bare '… row' still lands on a row, not a fallback guess", () => {
+  assert.equal(getMachineSlug("chest supported row"), "seated-row");
+  assert.equal(getMachineSlug("t-bar row"), "seated-row");
+  assert.equal(getMachineSlug("unknown thing"), null);
+});
+
+test("machine id prompt: teaches the tells for the machines that get confused", () => {
+  const p = buildMachineIdPrompt().toLowerCase();
+  // The three that get mixed up must each carry a distinguishing feature.
+  assert.ok(p.includes("hack squat") && p.includes("shoulder pad"), "hack squat tell present");
+  assert.ok(p.includes("leg press") && p.includes("foot platform"), "leg press tell present");
+  assert.ok(p.includes("row") && p.includes("pull"), "row = pulling motion present");
+  // Never judge by the plates (the exact cause of the row/hack-squat mixup).
+  assert.ok(/never by the weight plates|not by the plates|never.*plates/i.test(p), "must warn against judging by plates");
+  // Must ask for a confidence so a shaky guess can be de-escalated.
+  assert.ok(p.includes("confidence") && p.includes("low"), "asks for a confidence signal");
 });
 
 // ============================================================

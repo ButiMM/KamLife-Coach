@@ -15,8 +15,8 @@ import { getCurrentDayExercises } from "../programme";
 import { matchMachineToDay, machineSetup, machineHowTo, primaryExerciseName } from "../machine-coach";
 import { variantGuideHint } from "../exercise-variants";
 
-/** Maps a vision-identified machine description to an exercise slug. */
-function getMachineSlug(machineId: string): string | null {
+/** Maps a vision-identified machine description to an exercise slug. Exported for tests. */
+export function getMachineSlug(machineId: string): string | null {
   const m = machineId.toLowerCase();
   if (m.includes("leg press"))                                   return "leg-press";
   if (m.includes("hack squat"))                                  return "hack-squat";
@@ -36,12 +36,46 @@ function getMachineSlug(machineId: string): string | null {
   if (m.includes("tricep") || m.includes("pushdown"))           return "tricep-pushdown";
   if (m.includes("cable") && m.includes("bicep"))               return "cable-bicep-curl";
   if (m.includes("cable") && m.includes("lateral"))             return "lateral-raise";
+  if (m.includes("row"))                                         return "seated-row"; // any remaining "… row" machine
   if (m.includes("cable"))                                       return "lat-pulldown"; // generic cable → lat pulldown default
   if (m.includes("rdl") || m.includes("romanian deadlift"))     return "rdl";
   if (m.includes("barbell"))                                     return "barbell-back-squat";
   if (m.includes("pull-up") || m.includes("pull up") || m.includes("assisted pull")) return "lat-pulldown";
   if (m.includes("resistance band"))                             return "resistance-band-row";
   return null;
+}
+
+/**
+ * The machine-identification system prompt. Extracted + exported so a unit test can
+ * assert the discriminating features survive future edits (2026-07-12, Kam: "the vision
+ * doesn't recognize any machines, it makes mistakes"). The old prompt just listed names
+ * with no way to tell them apart, so a plate-loaded ROW got called a HACK SQUAT. This
+ * one teaches the visual tells (seat, pads, handles, direction of movement) and asks for
+ * a confidence so a shaky guess never gets asserted as fact with the wrong setup.
+ */
+export function buildMachineIdPrompt(): string {
+  return `You identify a gym machine from a photo for a coaching app. A WRONG id gives the client the wrong coaching, so precision matters more than speed.
+
+Reply in EXACTLY this format, nothing else:
+<machine name> | <confidence>
+ • <machine name>: 2-5 words, or "unknown" if you truly cannot tell
+ • <confidence>: "high" if you are sure, "low" if the angle, clutter or crop makes it a guess
+
+Tell the machines apart by the SEAT, PADS, HANDLES and DIRECTION of movement — NEVER by the weight plates (plate-loaded and weight-stack versions look different but are the same machine):
+ • LEG PRESS — you sit low and reclined, feet on a big angled FOOT PLATFORM, push it away with your legs.
+ • HACK SQUAT — you stand and lean back on angled SHOULDER PADS on a diagonal sled, feet on a platform below; your body travels, not your arms.
+ • SEATED / CABLE ROW — sit upright facing a chest pad or footplate and PULL handles horizontally toward your stomach.
+ • LAT PULLDOWN — sit under a high overhead bar with THIGH PADS pinning your legs; pull the bar DOWN from above.
+ • CHEST PRESS — sit upright, push handles FORWARD away from your chest (horizontal).
+ • SHOULDER PRESS — sit upright, push handles UP overhead (vertical).
+ • PEC DECK / CHEST FLY — sit with arms out wide on pads, squeeze them together in front.
+ • LEG EXTENSION — sit with an ankle pad on the FRONT of your shins, straighten your legs forward.
+ • LEG CURL — sit or lie with an ankle pad on the BACK of your ankles, curl your heels toward your glutes.
+ • HIP THRUST machine — back on a pad, a PAD ACROSS THE HIPS, drive the hips up.
+ • SMITH MACHINE — a barbell fixed on two vertical rails. SQUAT/POWER RACK — a tall open cage with J-hooks for a free barbell.
+ • CABLE MACHINE — an adjustable pulley on a tall column with a weight stack. CALF RAISE — shoulder or knee pads, you rise onto your toes.
+
+If two machines are both plausible, or the photo is cluttered or too close to be sure, pick the most likely and mark it "low" — do not pretend to be certain.`;
 }
 
 /**
@@ -66,18 +100,19 @@ export async function coachGymMachineFromPhoto(
   try {
     const machineIdRes = await withTimeout("equipment_id", 9000, () =>
       openai.chat.completions.create({
-        model: "gpt-4o-mini", max_tokens: 15, temperature: 0,
+        model: "gpt-4o-mini", max_tokens: 24, temperature: 0,
         messages: [
-          {
-            role: "system",
-            content: `Identify the gym machine or equipment in this photo. Reply with ONLY the equipment name, 2-5 words. Use these terms: leg press, smith machine, lat pulldown, cable machine, chest press machine, shoulder press machine, leg extension machine, leg curl machine, hip thrust machine, seated row machine, hack squat machine, pec deck, squat rack, dumbbells, barbell, resistance bands, pull-up bar, calf raise machine, cable bicep curl, cable lateral raise, face pull. The machine may be plate-loaded (big weight plates on pegs) or have a weight stack — judge by its shape and the seat/pad/handle layout, not the plates. If you genuinely cannot tell, reply: unknown.`,
-          },
+          { role: "system", content: buildMachineIdPrompt() },
           { role: "user", content: [{ type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
         ],
       })
     );
-    const machineRaw = machineIdRes.choices[0]?.message?.content?.trim().toLowerCase() || "unknown";
-    console.log(`[EQUIPMENT_ID] identified="${machineRaw}" user=${user.id}`);
+    const rawReply = machineIdRes.choices[0]?.message?.content?.trim().toLowerCase() || "unknown";
+    // Format is "<machine name> | <confidence>" — split them; tolerate a missing confidence.
+    const [namePart, confPart] = rawReply.split("|").map(s => s.trim());
+    const machineRaw = (namePart || "unknown").replace(/[.!]+$/, "").trim();
+    const lowConfidence = /\blow\b/.test(confPart || "");
+    console.log(`[EQUIPMENT_ID] identified="${machineRaw}" confidence="${lowConfidence ? "low" : "high"}" user=${user.id}`);
     if (machineRaw === "unknown" || machineRaw.length <= 2) return null;
 
     const slug = getMachineSlug(machineRaw);
@@ -101,8 +136,16 @@ export async function coachGymMachineFromPhoto(
     // Squat Machine" with full setup instructions for the wrong machine. Machine vision
     // is genuinely fallible, so every ID reads as "looks like" and every reply carries a
     // one-line correction path. Confident + wrong is worse than unsure + honest.
+    //
+    // 2026-07-12: when the model itself flags LOW confidence, we NEVER claim "exactly
+    // your plan" or give machine-specific setup (the riskiest wrong info) — we lead with
+    // an honest "not sure from this angle" and put the correction path up front instead.
     let reply: string;
-    if (match.kind === "exact" && match.prescribed) {
+    if (lowConfidence) {
+      reply = `🤔 *I'm not 100% sure from this angle — looks like it could be a ${displayName}.*\n\n`
+        + `If that's right, here's how to use it:\n✅ *How:* ${machineHowTo(slug) || "sit square, control the weight down, full range, no jerking."}\n\n`
+        + `*If I've got it wrong, just reply the machine's name* (like *seated row* or *leg press*) and I'll coach the right one.`;
+    } else if (match.kind === "exact" && match.prescribed) {
       const p = match.prescribed;
       reply = `✅ *That looks like the ${displayName} — exactly what your plan calls for today.*\n\n`
         + `📋 *Your sets:* ${p.setsDisplay}\n`
@@ -123,7 +166,7 @@ export async function coachGymMachineFromPhoto(
         ? `\n\nThis isn't on today's session — reply *workout* to see what you're doing today.`
         : `\n\nReply *workout* to get your programme.`;
     }
-    reply += `\n\n_Got the machine wrong? Reply its name (e.g. "seated row") and I'll coach that one._`;
+    if (!lowConfidence) reply += `\n\n_Got the machine wrong? Reply its name (e.g. "seated row") and I'll coach that one._`;
     const hint = variantGuideHint(slug);
     if (hint) reply += `\n\n${hint}`;
     if (imageUrl) reply += `\n[MEDIA:${imageUrl}]`;
