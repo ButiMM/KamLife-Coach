@@ -252,8 +252,8 @@ const COMBO_OVERRIDES: Record<string, string[]> = {
   "Pasta bolognaise": ["Pasta (spaghetti)", "Beef mince"],
   "Chicken stir-fry with rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
   "Chicken and rice": ["Chicken breast", "Chicken thigh", "Brown rice", "White rice"],
-  "Eggs on toast": ["Eggs", "Brown bread", "White bread"],
-  "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef"],
+  "Eggs on toast": ["Eggs", "Brown bread", "White bread", "Toast"],
+  "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef", "Beef stew"],
   "Pap and wors": ["Pap (stiff maize porridge)", "Boerewors"],
   "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Curry (chicken)", "Brown rice", "White rice"],
   "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
@@ -263,7 +263,7 @@ const COMBO_OVERRIDES: Record<string, string[]> = {
   "Fish and chips": ["Hake (frozen, battered)", "Chips (slap chips)"],
   "Pap and pilchards": ["Pap (stiff maize porridge)", "Pilchards in tomato sauce"],
   "Pap and spinach": ["Pap (stiff maize porridge)", "Spinach", "Morogo (wild spinach)"],
-  "Pilchards on toast": ["Pilchards in tomato sauce", "Brown bread", "White bread"],
+  "Pilchards on toast": ["Pilchards in tomato sauce", "Brown bread", "White bread", "Toast"],
   "Rice and beans": ["Brown rice", "White rice", "Sugar beans"],
   "Oats with milk": ["Oats (Jungle Oats)", "Full cream milk"],
   "Vetkoek with mince": ["Vetkoek", "Beef mince"],
@@ -331,6 +331,17 @@ function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
     if (hasSpecificChickenDish) {
       cleaned = cleaned.filter(f => !GENERIC_CHICKEN.includes(f.name));
     }
+  }
+
+  // A generic "Sandwich" (bare bread) is redundant when a SPECIFIC sandwich/spread combo
+  // also matched — "peanut butter sandwich" lit up both "Peanut butter on bread" AND the
+  // bare "Sandwich", double-counting the bread (2026-07-12 probe). Drop the generic only
+  // when a specific one exists; "cheese and tomato sandwich" (bread + fillings, no specific
+  // sandwich food) keeps its "Sandwich" so the bread is still counted.
+  if (cleaned.some(f => f.name === "Sandwich")) {
+    const hasSpecificSandwich = cleaned.some(f =>
+      f.name !== "Sandwich" && (/sandwich/i.test(f.name) || f.name === "Peanut butter on bread"));
+    if (hasSpecificSandwich) cleaned = cleaned.filter(f => f.name !== "Sandwich");
   }
 
   const names = new Set(cleaned.map(f => f.name));

@@ -1267,6 +1267,25 @@ test("food scan: curry combo doesn't double-count the standalone curry", () => {
   assert.deepEqual(scanNames("chicken curry"), ["Curry (chicken)"], "standalone curry still works alone");
 });
 
+test("food scan: toast/stew combos don't double-count their bread/stew alternates", () => {
+  // "Toast" alongside an "...on toast" combo was double-counting the bread.
+  assert.deepEqual(scanNames("two boiled eggs and toast"), ["Eggs on toast"], "no extra Toast on top of the combo");
+  assert.deepEqual(scanNames("pilchards on toast"), ["Pilchards on toast"], "no extra Toast");
+  assert.ok(scanNames("toast with jam").includes("Toast"), "standalone Toast still logs");
+  // "Beef stew" alongside "Pap and stew" was double-counting the stew.
+  const stew = scanNames("beef stew and pap");
+  assert.ok(stew.includes("Beef stew") && stew.some(n => /pap/i.test(n)), "beef stew + pap, both kept");
+  assert.ok(!stew.includes("Pap and stew"), "no phantom combo double-counting the stew");
+  assert.deepEqual(scanNames("big plate of pap and stew"), ["Pap and stew"], "vague 'stew' keeps the combo");
+});
+
+test("food scan: a specific sandwich suppresses the generic 'Sandwich' (no double bread)", () => {
+  assert.deepEqual(scanNames("peanut butter sandwich"), ["Peanut butter on bread"], "PB sandwich = one item");
+  // but a bare/filling sandwich with no specific match keeps 'Sandwich' for the bread
+  assert.ok(scanNames("cheese and tomato sandwich").includes("Sandwich"), "generic sandwich kept for bread");
+  assert.deepEqual(scanNames("sandwich"), ["Sandwich"], "bare sandwich still logs");
+});
+
 // ============================================================
 // Results
 // ============================================================
