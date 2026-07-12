@@ -24,48 +24,51 @@ export type ShoppingList = {
 const TIER_1_WEEK_A: ShoppingList = {
   tier: "under_100",
   budgetLabel: "Under R1,500/month",
-  estimatedTotal: "~R320",
+  estimatedTotal: "~R360",
   coversDays: 7,
   items: [
     { item: "Eggs (1 dozen)", qty: "12", price: "R30", category: "protein" },
     { item: "Pilchards in tomato (4 tins)", qty: "4", price: "R48", category: "protein" },
     { item: "Chicken pieces (1kg)", qty: "1kg", price: "R45", category: "protein" },
+    { item: "Chicken livers (500g)", qty: "500g", price: "R25", category: "protein" }, // iron + protein, cheapest quality offal
     { item: "Sugar beans (500g dry)", qty: "500g", price: "R18", category: "protein" },
+    { item: "Maas / amasi (2L)", qty: "2L", price: "R30", category: "dairy" }, // protein + probiotic, real SA staple
     { item: "Brown bread (2 loaves)", qty: "2", price: "R30", category: "carb" },
     { item: "Rice (2kg)", qty: "2kg", price: "R30", category: "carb" },
     { item: "Oats (500g)", qty: "500g", price: "R25", category: "carb" },
     { item: "Pap / maize meal (2.5kg)", qty: "2.5kg", price: "R22", category: "carb" },
+    { item: "Morogo / spinach (2 bunches)", qty: "2", price: "R16", category: "veg" }, // iron-dense green, authentic
     { item: "Cabbage (1 head)", qty: "1", price: "R12", category: "veg" },
     { item: "Frozen mixed veg (1kg)", qty: "1kg", price: "R25", category: "veg" },
     { item: "Tomatoes (6)", qty: "6", price: "R15", category: "veg" },
     { item: "Onions (1kg)", qty: "1kg", price: "R12", category: "veg" },
     { item: "Bananas (6)", qty: "6", price: "R12", category: "fruit" },
     { item: "Peanut butter (400g)", qty: "400g", price: "R30", category: "pantry" },
-    { item: "Cooking oil (750ml)", qty: "750ml", price: "R25", category: "pantry" },
   ],
   mealIdeas: [
-    "Breakfast: 2 boiled eggs + toast — R8",
-    "Lunch: Pilchards on brown bread — R12",
-    "Dinner: Chicken pieces + pap + cabbage — R25",
-    "Snack: Peanut butter on bread — R5",
+    "Breakfast: 2 eggs + morogo + pap — R10",
+    "Lunch: Pilchards on brown bread + tomato — R14",
+    "Dinner: Chicken livers + pap + cabbage — R22",
+    "Snack: Maas + banana — R8",
   ],
 };
 
 const TIER_1_WEEK_B: ShoppingList = {
   tier: "under_100",
   budgetLabel: "Under R1,500/month",
-  estimatedTotal: "~R310",
+  estimatedTotal: "~R340",
   coversDays: 7,
   items: [
     { item: "Eggs (18 pack)", qty: "18", price: "R40", category: "protein" },
     { item: "Pilchards in tomato (4 tins)", qty: "4", price: "R48", category: "protein" },
-    { item: "Chicken livers (500g)", qty: "500g", price: "R25", category: "protein" },
+    { item: "Soya mince (400g)", qty: "400g", price: "R25", category: "protein" }, // quality protein per rand, meat-free stretch
     { item: "Sugar beans (500g dry)", qty: "500g", price: "R18", category: "protein" },
+    { item: "Lentils (500g dry)", qty: "500g", price: "R20", category: "protein" }, // protein + fibre, cheap and clean
     { item: "Brown bread (2 loaves)", qty: "2", price: "R30", category: "carb" },
     { item: "Samp (1kg)", qty: "1kg", price: "R15", category: "carb" },
     { item: "Oats (500g)", qty: "500g", price: "R25", category: "carb" },
     { item: "Pap / maize meal (2.5kg)", qty: "2.5kg", price: "R22", category: "carb" },
-    { item: "Spinach (1 bunch)", qty: "1", price: "R10", category: "veg" },
+    { item: "Spinach / morogo (2 bunches)", qty: "2", price: "R18", category: "veg" },
     { item: "Carrots (500g)", qty: "500g", price: "R8", category: "veg" },
     { item: "Butternut (1)", qty: "1", price: "R15", category: "veg" },
     { item: "Onions (1kg)", qty: "1kg", price: "R12", category: "veg" },
@@ -73,9 +76,9 @@ const TIER_1_WEEK_B: ShoppingList = {
     { item: "Peanut butter (400g)", qty: "400g", price: "R30", category: "pantry" },
   ],
   mealIdeas: [
-    "Breakfast: Oats + banana — R6",
-    "Lunch: Umngqusho (samp & beans) — R10",
-    "Dinner: Chicken livers + pap + spinach — R22",
+    "Breakfast: Oats + peanut butter + banana — R8",
+    "Lunch: Umngqusho (samp & beans) + morogo — R12",
+    "Dinner: Soya mince stew + pap + carrots — R18",
     "Snack: 2 boiled eggs — R5",
   ],
 };
@@ -421,8 +424,8 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
   // Store advice by budget tier
   const budgetTier = targets?.budgetTier || "100_300";
   const storeAdvice: Record<string, string> = {
-    under_100:  `*Where to shop:* Shoprite or Boxer. Eggs, pilchards, oats — always cheapest there. Buy in bulk when you can.`,
-    "50_100":   `*Where to shop:* Shoprite or Boxer. Eggs, pilchards, oats — always cheapest there. Buy in bulk when you can.`,
+    under_100:  `*Quality on any budget.* Eggs, pilchards, chicken livers, morogo, maas, beans — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
+    "50_100":   `*Quality on any budget.* Eggs, pilchards, chicken livers, morogo, maas, beans — this is real, nutrient-dense food, not settling. Shoprite or Boxer are cheapest; buy the dry beans/lentils/samp in bulk and they last weeks.`,
     "100_300":  `*Where to shop:* Pick n Pay or Checkers for the weekly run. Boxer/Shoprite for bulk items (oats, rice, eggs). Saves R80-150/week.`,
     "300_600":  `*Where to shop:* Checkers or Spar for convenience. Pick n Pay for bulk proteins. Woolworths for fresh veg if budget allows.`,
     over_600:   `*Where to shop:* Woolworths for quality cuts and fresh produce. Checkers for staples. Order online for bulk pantry items.`,

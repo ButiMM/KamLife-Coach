@@ -25,9 +25,21 @@ export type FoodProfileItem = { name: string; count: number };
 export type FoodProfile = { topFoods: FoodProfileItem[]; distinctCount: number };
 
 // Below this many distinct logged foods, a client is too new to personalise for —
-// the prescriptive template leads alone. Keeps cold-start users out of a thin,
-// half-informed "we know you" message that would ring false.
+// we don't claim to "know" them (that would ring false). Instead they get a calm,
+// reassuring base-camp message. At/above it, the list adapts to what they log.
 export const MIN_DISTINCT_FOR_PERSONALIZATION = 3;
+
+// How much we actually know a client, from their logging. Drives the TONE of the
+// grocery message so we never overwhelm a beginner nor patronise a rich logger.
+// (2026-07-12, Kam: "we need to know if they are a rich logger… calm down, we've
+// got you covered… make it frictionless, don't overwhelm them.")
+export type LoggerType = "new" | "learning" | "established";
+
+export function loggerType(distinctCount: number): LoggerType {
+  if (distinctCount < MIN_DISTINCT_FOR_PERSONALIZATION) return "new";
+  if (distinctCount < 7) return "learning";
+  return "established";
+}
 
 // Plain keyword classes — a gogo's logged foods, not a nutrition database. SA names
 // included (morogo, pap, samp, mielie, naartjie). First match wins, protein first.
@@ -60,16 +72,29 @@ function prettyList(names: string[]): string {
   return `${p.slice(0, -1).join(", ")} and ${p[p.length - 1]}`;
 }
 
-/**
- * The personalization block prepended to the shopping list — or null when the client
- * is too new (cold start) or has nothing worth saying. Pure and unit-tested. Max 3
- * short lines: what we kept (their real staples), one swap, one gap to fill.
- */
-export function buildGroceryPersonalization(profile: FoodProfile, goalType?: string | null): string | null {
-  if (!profile || profile.distinctCount < MIN_DISTINCT_FOR_PERSONALIZATION) return null;
-  const foods = profile.topFoods.slice(0, 8);
-  if (foods.length === 0) return null;
+// The calm awareness line every not-yet-established client sees — it tells them, with
+// zero prompting, that they can send their OWN list or use what's already at home. This
+// is the discoverability Kam wants ("they're not gonna prompt… make them aware") kept to
+// ONE line so it never overwhelms.
+const OWN_LIST_AWARENESS = `📸 _Already have a list, or food in the fridge? Send me a photo — I'll build around what you've got. You don't start from scratch._`;
 
+/**
+ * The block prepended to the shopping list. NEVER null now — every client gets a calm,
+ * reassuring message tuned to how much they log (loggerType):
+ *   • new         → "you're covered, and I learn you as you log" + how to send their own list
+ *   • learning    → adapts to their logs + a gentle "keep logging, this gets sharper"
+ *   • established  → confident "I know your kitchen now" + full adaptation
+ * Pure and unit-tested. Kept short on purpose — calm, not a wall of text.
+ */
+export function buildGroceryPersonalization(profile: FoodProfile, goalType?: string | null): string {
+  const type = loggerType(profile?.distinctCount ?? 0);
+
+  // NEW / cold start — no real data yet. Reassure, don't fake knowing them.
+  if (type === "new") {
+    return `*You're covered — no stress.* 🌱\nThis is a solid, quality base for your goal. As you log what you eat, I learn your tastes and shape it around you.\n${OWN_LIST_AWARENESS}`;
+  }
+
+  const foods = profile.topFoods.slice(0, 8);
   const classOf = (f: FoodProfileItem) => classifyLoggedFood(f.name);
   const classesSeen = new Set(foods.map(classOf));
   const lines: string[] = [];
@@ -101,8 +126,15 @@ export function buildGroceryPersonalization(profile: FoodProfile, goalType?: str
     lines.push(`🥩 *Add protein* — your meals are light on it. Eggs and a tin of pilchards are the cheapest fix in SA.`);
   }
 
-  if (lines.length === 0) return null;
-  return `*I've been watching what you actually eat — this list is built for you:*\n${lines.join("\n")}`;
+  // Header + footer tuned to how well we know them. Established loggers get quiet
+  // confidence; learning loggers get a nudge that logging sharpens it. No overwhelm.
+  if (type === "established") {
+    const body = lines.length ? `\n${lines.join("\n")}` : "";
+    return `*I know your kitchen now — this list is built for you:*${body}`;
+  }
+  // learning
+  const body = lines.length ? `\n${lines.join("\n")}` : "";
+  return `*Getting to know your eating — this is shaping up around you:*${body}\n_Keep logging your meals and this only gets sharper. I've got the basics covered either way._\n${OWN_LIST_AWARENESS}`;
 }
 
 /**

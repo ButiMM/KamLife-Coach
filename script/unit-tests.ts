@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
-import { classifyLoggedFood, buildGroceryPersonalization, type FoodProfile } from "../server/grocery-personalize";
+import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
@@ -350,13 +350,24 @@ test("grocery: classifier buckets SA foods into protein/veg/wholecarb/fruit", ()
   assert.equal(classifyLoggedFood("coke"), "other");
 });
 
-test("grocery: cold-start client (< 3 distinct foods) gets NO personalization block", () => {
-  const thin: FoodProfile = { topFoods: [{ name: "eggs", count: 2 }, { name: "pap", count: 1 }], distinctCount: 2 };
-  assert.equal(buildGroceryPersonalization(thin, "fat_loss"), null);
-  assert.equal(buildGroceryPersonalization({ topFoods: [], distinctCount: 0 }, "fat_loss"), null);
+test("grocery: loggerType segments new / learning / established by distinct foods", () => {
+  assert.equal(loggerType(0), "new");
+  assert.equal(loggerType(2), "new");
+  assert.equal(loggerType(3), "learning");
+  assert.equal(loggerType(6), "learning");
+  assert.equal(loggerType(7), "established");
+  assert.equal(loggerType(15), "established");
 });
 
-test("grocery: an established logger's list names their staples, swaps junk, fills the gap", () => {
+test("grocery: cold-start client gets a CALM 'you're covered' block + how to send their own list", () => {
+  const thin: FoodProfile = { topFoods: [{ name: "eggs", count: 2 }, { name: "pap", count: 1 }], distinctCount: 2 };
+  const block = buildGroceryPersonalization(thin, "fat_loss");
+  assert.ok(/covered/i.test(block), "reassures the anxious beginner they're covered");
+  assert.ok(/send me a photo|send.*photo/i.test(block), "tells them they can send their own list/food");
+  assert.ok(!/Kept in/i.test(block), "must NOT fake knowing a brand-new client's foods");
+});
+
+test("grocery: a learning logger's list names staples, swaps junk, fills the gap, nudges logging", () => {
   const profile: FoodProfile = {
     topFoods: [
       { name: "eggs", count: 6 }, { name: "chicken", count: 5 },
@@ -364,23 +375,22 @@ test("grocery: an established logger's list names their staples, swaps junk, fil
     ],
     distinctCount: 4,
   };
-  const block = buildGroceryPersonalization(profile, "fat_loss")!;
-  assert.ok(block, "should personalize for an established logger");
+  const block = buildGroceryPersonalization(profile, "fat_loss");
   assert.ok(/Kept in/i.test(block), "names the staples they already eat");
   assert.ok(/eggs/i.test(block) && /chicken/i.test(block), "lists their real foods");
   assert.ok(/Coke Zero|zero sugar/i.test(block), "swaps the Coke they keep logging");
   assert.ok(/Add veg/i.test(block), "flags the missing veg (they logged none)");
+  assert.ok(/keep logging/i.test(block), "nudges them that logging sharpens it");
 });
 
-test("grocery: a clean logger (protein+veg, no junk) still gets a warm 'kept in' block", () => {
-  const profile: FoodProfile = {
-    topFoods: [{ name: "eggs", count: 5 }, { name: "spinach", count: 4 }, { name: "brown rice", count: 3 }],
-    distinctCount: 3,
-  };
-  const block = buildGroceryPersonalization(profile, "muscle_gain")!;
-  assert.ok(/Kept in/i.test(block), "acknowledges their good staples");
-  assert.ok(!/One swap/i.test(block), "no junk to swap → no swap line");
-  assert.ok(!/Add veg|Add protein/i.test(block), "veg and protein both present → no gap line");
+test("grocery: an established logger gets quiet-confidence framing, no beginner nudges", () => {
+  const foods = ["eggs", "chicken", "spinach", "brown rice", "pilchards", "morogo", "butternut", "oats"]
+    .map((name, i) => ({ name, count: 8 - i }));
+  const block = buildGroceryPersonalization({ topFoods: foods, distinctCount: foods.length }, "muscle_gain");
+  assert.ok(/know your kitchen/i.test(block), "confident framing for a rich logger");
+  assert.ok(!/keep logging/i.test(block), "no 'keep logging' nudge for someone who already does");
+  assert.ok(!/send me a photo/i.test(block), "established loggers don't need the discoverability line every week");
+  assert.ok(/Kept in/i.test(block), "still names their real staples");
 });
 
 // ============================================================
@@ -1917,6 +1927,21 @@ test("food swaps: processed meat → real protein; good foods get nothing", () =
 test("food swaps: swapNudge is a kind forward one-liner, empty when no swap", () => {
   assert.match(swapNudge("Coke", "fat_loss"), /Next time: swap it for .*ZERO SUGAR/i);
   assert.equal(swapNudge("grilled fish", "fat_loss"), "");
+});
+
+// 2026-07-12 swap DB expansion (Kam: "expand our database… in terms of swapping foods").
+// New high-frequency SA items — but treats (chocolate/sweets) stay UN-swapped: snacks
+// are allowed in the coaching philosophy; we only fix liquid sugar and processed savoury.
+test("food swaps: expanded SA junk (sports drinks, noodles, crisps, atchar)", () => {
+  assert.match(suggestSwap("Energade", "fat_loss")!.swap, /water/i);
+  assert.match(suggestSwap("Powerade", "muscle_gain")!.swap, /water/i);
+  assert.match(suggestSwap("2 minute noodles", "fat_loss")!.swap, /egg|veg/i);
+  assert.match(suggestSwap("packet of Simba chips", "fat_loss")!.swap, /popcorn|nuts/i);
+  assert.match(suggestSwap("atchar", "fat_loss")!.swap, /spoon|relish/i);
+  assert.equal(suggestSwap("atchar", "muscle_gain"), null, "atchar oil is fine when building");
+  // treats are ALLOWED — never nag someone for a chocolate or sweets
+  assert.equal(suggestSwap("chocolate", "fat_loss"), null, "treats stay un-swapped by philosophy");
+  assert.equal(suggestSwap("sweets", "fat_loss"), null);
 });
 
 // DAILY DIRECTION (2026-07-09) — "give me my overall plan" must return the WHOLE plan

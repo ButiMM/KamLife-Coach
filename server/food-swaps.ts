@@ -39,6 +39,31 @@ const SWAP_RULES: SwapRule[] = [
     swap: "the sugar-free version (Monster Ultra, Red Bull Sugarfree)",
     reason: "the regular ones are loaded with sugar",
   },
+  // Sports drinks → water (for everyday use; they're for endurance athletes mid-session).
+  {
+    match: /\b(energade|powerade|gatorade|game (?:energy )?drink|isotonic|sports? drink|vitamin water|glaceau)\b/i,
+    swap: "water — or a pinch of salt + squeeze of lemon in water if you've trained hard",
+    reason: "these are sugar water unless you're doing 90+ min of hard exercise",
+  },
+  // Instant / 2-minute noodles → bulk them with real protein & veg instead of removing.
+  {
+    match: /\b(2.?minute noodles|two.?minute noodles|instant noodles|indomie|maggi noodles|mama noodles|ramen)\b/i,
+    swap: "the same noodles but crack an egg in and throw a handful of veg — skip half the flavour sachet (it's mostly salt)",
+    reason: "on their own they're empty carbs and salt; egg + veg makes it a real meal",
+  },
+  // Potato crisps / corn snacks → popcorn or nuts (a real portion, less grease/salt).
+  {
+    match: /\b(simba|lay'?s|doritos|nik ?naks|cheese ?curls|fritos|messaris|potato ?crisps|crisps|chip ?packet|packet of chips)\b/i,
+    swap: "air-popped popcorn or a small handful of nuts",
+    reason: "same crunch, far less grease and salt, and it actually fills you",
+  },
+  // Atchar / oily pickle → a spoon, not a scoop (it's mostly oil).
+  {
+    match: /\b(atchar|achar|mango pickle)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "just a small spoon of it, or fresh tomato-and-onion relish instead",
+    reason: "atchar is delicious but it's swimming in oil — the calories add up fast",
+  },
   // Processed meat → real protein for the same money.
   {
     match: /\b(polony|russian|vienna|frankfurter|cocktail sausage|smoked sausage|bacon|ham(?!burger)|luncheon|spam|viennas)\b/i,
