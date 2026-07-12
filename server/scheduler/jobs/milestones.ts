@@ -12,7 +12,7 @@ export function buildDayMilestoneMessage(name: string, days: number, workouts: n
   if (days === 14) return `${name}, two weeks. ${workouts > 0 ? `${workouts} sessions logged.` : "The habit is forming."} Two weeks is when the body starts adapting — not just to training, but to the routine itself.\n\n🔓 *Consistency badge:* You have shown up for 14 days. That puts you ahead of 80% of people who start. Keep this momentum into week 3.`;
   if (days === 30) {
     const weightLine = weightKg ? `You started at ${weightKg}kg. ` : "";
-    return `${name}, 30 days. ${weightLine}${workouts} workouts completed. The people who last 30 days are the ones who get results — and you are one of them. Measurements today — waist, hips, chest. Send them to me.`;
+    return `${name}, 30 days. ${weightLine}${workouts} workouts completed. The people who last 30 days are the ones who get results — and you are one of them. Progress photo today — front on, same spot, relaxed. Send it, and tell me how your energy's been.`;
   }
   if (days === 60) return `${name}, 60 days. ${workouts} sessions logged. That kind of consistency is genuinely rare — most people have been and gone twice already. Send your weight today. I want to see the 60-day number.`;
   if (days === 90) return `${name}, 90 days and ${workouts} workouts. You have built a real habit now. This is where things compound — the next 90 will look different because your body is different. Progress photo today. Send it to me.`;

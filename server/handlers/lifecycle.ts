@@ -58,7 +58,7 @@ export async function handleLifecycle(ctx: {
     return `Send me your weight and I will log it.\n\nExamples:\n• "84.5kg"\n• "I weigh 91kg"\n• "weighed in at 78kg this morning"\n\nWeigh in first thing in the morning, after toilet, before food. Same conditions every time.`;
   }
   if (m === "measurements" || m === "check in" || m === "measurement check in" || m === "measurements check in") {
-    return `*Measurements Check-In*\n\nSend me your current measurements in this format:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\nArm: Xcm\n\nMeasure first thing in morning, relaxed (not flexed). Same spot every time. The tape does not lie even when the scale does.`;
+    return `*Monthly Check-In* 📸\n\nWe don't do the tape measure — the numbers bounce around day to day and just add stress. We track what actually shows the change:\n\n1️⃣ *A photo* — front on, good light, same spot each month, relaxed (not flexed). Send it right here.\n2️⃣ *How you feel* — your energy, your sleep, and how your clothes are fitting. Just tell me in your own words.\n\nYour shape changing and your energy climbing is the real progress — the scale and the tape both miss it. Snap your photo whenever you're ready.`;
   }
 
   // ---- WEEKLY STEP LEADERBOARD — anonymous competition ----
@@ -533,69 +533,20 @@ export async function handleLifecycle(ctx: {
     }
   }
 
-  // ---- MEASUREMENTS LOGGING (Item 23) — parse and store ----
-  // Multi-measurement block first — handles "Waist: 82cm\nHips: 95cm\nChest: 100cm" in one shot.
-  const fwdPat = /\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b[:\s]+(\d+(?:\.\d+)?)\s*cm/gi;
-  const revPat = /(\d+(?:\.\d+)?)\s*cm\s*(?:[a-z\s]{0,10})?\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b/gi;
-  const parsedMeasures: { type: string; value: number }[] = [];
-  const seenTypes = new Set<string>();
-  for (const pat of [fwdPat, revPat]) {
-    pat.lastIndex = 0;
-    let hit: RegExpExecArray | null;
-    while ((hit = pat.exec(message)) !== null) {
-      const [rawType, rawVal] = pat === fwdPat ? [hit[1], hit[2]] : [hit[2], hit[1]];
-      const mType = rawType.toLowerCase().replace("hips", "hip").replace("biceps", "bicep");
-      const mVal = parseFloat(rawVal);
-      if (!seenTypes.has(mType) && mVal > 20 && mVal < 300) {
-        parsedMeasures.push({ type: mType, value: mVal });
-        seenTypes.add(mType);
-      }
-    }
-  }
-  if (parsedMeasures.length >= 2) {
-    await Promise.all(parsedMeasures.map(pm =>
-      db.insert(bodyMeasurements).values({ userId: user.id, measurementType: pm.type, value: pm.value.toString() }).catch((e) => console.error("[MEASUREMENTS] insert failed:", e))
-    ));
-    const lines = parsedMeasures.map(pm => `• ${pm.type.charAt(0).toUpperCase() + pm.type.slice(1)}: ${pm.value}cm`);
-    const multiReply = `*Measurements logged:*\n${lines.join("\n")}\n\nTracked. Check them monthly — the tape tells the truth when the scale doesn't.`;
-    await logChat(user.id, message, multiReply, "MEASUREMENT_LOG");
-    return multiReply;
-  }
-  // Single measurement fallback
-  const measPattern = /(\d+(?:\.\d+)?)\s*cm\s*(?:.*?)?\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b/i;
-  const measPatternReverse = /\b(waist|hip|hips|chest|thigh|arm|neck|calf|bicep|biceps)\b\s*(?:is|:|\s)\s*(\d+(?:\.\d+)?)\s*cm/i;
-  const measMatch = m.match(measPattern) || m.match(measPatternReverse);
-  if (measMatch) {
-    let measValue: number;
-    let measType: string;
-    if (m.match(measPattern)) {
-      measValue = parseFloat(measMatch[1]);
-      measType = measMatch[2].toLowerCase().replace("hips", "hip").replace("biceps", "bicep");
-    } else {
-      measType = measMatch[1].toLowerCase().replace("hips", "hip").replace("biceps", "bicep");
-      measValue = parseFloat(measMatch[2]);
-    }
-    if (measValue > 20 && measValue < 300) {
-      let compareNote = "";
-      try {
-        const lastMeas = await db.select().from(bodyMeasurements)
-          .where(and(eq(bodyMeasurements.userId, user.id), eq(bodyMeasurements.measurementType, measType)))
-          .orderBy(desc(bodyMeasurements.loggedAt))
-          .limit(1);
-        if (lastMeas.length > 0) {
-          const prev = parseFloat(lastMeas[0].value);
-          const diff = measValue - prev;
-          const daysAgo = Math.floor((Date.now() - new Date(lastMeas[0].loggedAt || "").getTime()) / 86400000);
-          if (Math.abs(diff) < 0.1) compareNote = ` Same as your last measurement ${daysAgo} days ago.`;
-          else if (diff < 0) compareNote = ` Down ${Math.abs(diff).toFixed(1)}cm from ${prev}cm (${daysAgo} days ago). Moving in the right direction.`;
-          else compareNote = ` Up ${diff.toFixed(1)}cm from ${prev}cm (${daysAgo} days ago) — measurements can shift day to day. Keep logging and we'll track the trend.`;
-        }
-      } catch (e) { console.warn("[non-fatal]", e); }
-      await db.insert(bodyMeasurements).values({ userId: user.id, measurementType: measType, value: measValue.toString() });
-      const measReply = `Logged ${measValue}cm ${measType}.${compareNote}`;
-      await logChat(user.id, message, measReply, "MEASUREMENT_LOG");
-      return measReply;
-    }
+  // ---- TAPE MEASUREMENTS — RETIRED (2026-07-12, Kam: "remove the whole tape
+  // measurement method — we go on how they look and how they feel"). We no longer store
+  // waist/hip/chest numbers; a client who still sends them is warmly pivoted to the
+  // method we DO use: a monthly photo (vision) plus energy/sleep/clothes feedback. We
+  // still DETECT that they sent measurements so we can redirect instead of misrouting it.
+  const sentMeasurements =
+    /\b(waist|hip|hips|chest|thigh|neck|calf)\b[:\s]+\d+(?:\.\d+)?\s*cm/i.test(message)
+    || /\d+(?:\.\d+)?\s*cm\s*(?:[a-z\s]{0,10})?\b(waist|hip|hips|chest|thigh|neck|calf)\b/i.test(message)
+    || /\b(waist|hip|hips|chest|thigh|neck|calf)\b\s*(?:is|:|\s)\s*\d+(?:\.\d+)?\s*cm/i.test(message);
+  if (sentMeasurements) {
+    const fn = user.name ? ` ${user.name.split(" ")[0]}` : "";
+    const pivot = `Appreciate you tracking${fn}! But we've moved off the tape measure — the numbers bounce around day to day and just add stress. We track what actually shows the change:\n\n📸 *A monthly photo* — front on, good light, same spot, relaxed. Send it right here.\n💬 *How you feel* — your energy, your sleep, and how your clothes are fitting.\n\nThat's the real progress. Snap your photo whenever you're ready — I'll compare it to last month's.`;
+    await logChat(user.id, message, pivot, "MEASUREMENT_RETIRED");
+    return pivot;
   }
 
   // ---- RESCUE / RESET — for stuck users ----

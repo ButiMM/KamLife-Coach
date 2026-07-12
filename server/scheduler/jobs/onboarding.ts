@@ -118,8 +118,8 @@ export async function runMonthlyMeasurements(): Promise<void> {
         contextLine = `\n\nScale says you're ${direction} since we started. ${onTrack ? "That's the right direction." : "Let's look at what needs to change."}`;
       }
       const msg = latestWeight
-        ? `${name}, it's the 1st — measurement day.\n\nWeigh in this morning (before food, after bathroom) and send me the number. Also grab a tape measure and send:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm${contextLine}`
-        : `${name}, it's the 1st — measurement day.\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nAlso grab a tape measure:\n\nWaist: Xcm\nHips: Xcm\nChest: Xcm\n\nThe tape doesn't lie when the scale does.`;
+        ? `${name}, it's the 1st — *photo day* 📸\n\nWeigh in this morning (before food, after bathroom) and send me the number.\n\nThen send a *progress photo* — front on, good light, same spot as last month, relaxed. And tell me how your *energy and clothes* are feeling.${contextLine}`
+        : `${name}, it's the 1st — *photo day* 📸\n\nStep on the scale this morning, before food, after bathroom. Send me the number.\n\nThen send a *progress photo* — front on, good light, relaxed — and tell me how your *energy* is and how your *clothes* are fitting.\n\nYour shape and your energy show the change long before the scale does. No tape measure — we go on how you look and feel.`;
       await sendWhatsApp(client.phoneNumber, msg);
     } catch (err) { console.error(`[SCHEDULER] Monthly measurements error — ${client.phoneNumber}:`, err); }
   }
