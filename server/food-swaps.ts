@@ -64,6 +64,67 @@ const SWAP_RULES: SwapRule[] = [
     swap: "just a small spoon of it, or fresh tomato-and-onion relish instead",
     reason: "atchar is delicious but it's swimming in oil — the calories add up fast",
   },
+  // Fried/takeaway chicken → grilled. Plain "chicken" is never touched — only fried.
+  {
+    match: /\b(kfc|chicken licken|fried chicken|crispy chicken|hot ?wings|zinger|deep.?fried chicken)\b/i,
+    swap: "grilled or flame-grilled chicken (Nando's, or braai it at home)",
+    reason: "same chicken, but grilling drops a huge amount of hidden oil",
+  },
+  // Wors roll / boerewors → a leaner cut (fat loss only; wors is a fatty cut).
+  {
+    match: /\b(wors roll|boerewors|boere?wors|wors)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "grilled chicken, a lean steak, or lean mince",
+    reason: "boerewors is one of the fattier meats — lean protein fills you for fewer calories",
+  },
+  // Pies (steak/chicken/pepper) → lean protein + starch (fat loss).
+  {
+    match: /\b(steak pies?|chicken pies?|pepper ?steak pies?|cornish pies?|meat pies?|pies?(?! chart))\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "the same filling on brown bread or with rice — skip the pastry",
+    reason: "the pastry is where most of a pie's fat and calories hide",
+  },
+  // Samoosas / spring rolls (deep-fried) → baked, or fewer (fat loss).
+  {
+    match: /\b(samoosa|samosa|spring roll|deep.?fried snack)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "baked samoosas, or just have two instead of a plate",
+    reason: "deep-frying soaks them in oil you can't see",
+  },
+  // Kota / bunny chow / gatsby → downsize + add protein (fat loss).
+  {
+    match: /\b(kota|spatlo|bunny chow|gatsby)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "the small size, load it with egg or chicken for protein, and go easy on the chips inside",
+    reason: "it's mostly white bread + chips — real protein makes it a meal, not just carbs",
+  },
+  // Mageu / sweet sorghum drink → maas or low-fat milk (it's high sugar).
+  {
+    match: /\b(mageu|magou|maheu|amahewu|sweet sorghum drink)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "maas (amasi) or low-fat milk",
+    reason: "mageu is filling but sugary — maas gives you the protein without the sugar hit",
+  },
+  // Sugar in tea/coffee → cut it down or use a sweetener.
+  {
+    match: /\b(sugar in (?:my )?(?:tea|coffee)|\d+\s*(?:spoons?|sugars?)\s+(?:of sugar\s+)?in|teaspoons? of sugar|tsp sugar)\b/i,
+    swap: "half the sugar (drop one spoon a week) or a zero-calorie sweetener",
+    reason: "two sugars in three teas a day is its own little pile of calories every week",
+  },
+  // Condensed / evaporated milk → low-fat milk.
+  {
+    match: /\b(condensed milk|evaporated milk|ideal milk|nestle cream)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "low-fat milk (or a little maas)",
+    reason: "condensed milk is basically milk plus a load of sugar",
+  },
+  // Brick margarine / heavy spread → a scrape, or use less (fat loss).
+  {
+    match: /\b(margarine|rama|stork|flora|brick margarine|blue ?band)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "a thin scrape, or mashed avo / low-fat spread",
+    reason: "spreads are almost pure fat — a thick layer adds calories fast",
+  },
   // Processed meat → real protein for the same money.
   {
     match: /\b(polony|russian|vienna|frankfurter|cocktail sausage|smoked sausage|bacon|ham(?!burger)|luncheon|spam|viennas)\b/i,

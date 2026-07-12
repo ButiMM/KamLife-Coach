@@ -7,6 +7,7 @@ import {
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { getGroceryPersonalization } from "../../grocery-personalize";
+import { suggestStepTargetAdjustment } from "../../targets";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 
@@ -127,14 +128,19 @@ export async function runSundayWeeklyReport(): Promise<void> {
       }
 
       let stepsLine = "", stepsEmoji = "👟";
+      const avgSteps = stepEntries.length > 0
+        ? Math.round(stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length)
+        : 0;
       if (stepEntries.length > 0) {
-        const avgSteps = Math.round(stepEntries.reduce((s, l) => s + (l.steps || 0), 0) / stepEntries.length);
         const pct = Math.round((avgSteps / stepsTarget) * 100);
         stepsEmoji = pct >= 100 ? "✅" : pct >= 75 ? "👟" : "⚠️";
         stepsLine = `${avgSteps.toLocaleString()} avg (${pct}% of ${stepsTarget.toLocaleString()} target)`;
       } else {
         stepsLine = "not logged this week"; stepsEmoji = "⚠️";
       }
+      // Right-size the step goal to reality — the "50% can't walk 10k" plan. Only a
+      // SUGGESTION with a one-tap button; the client stays in control (targets.ts).
+      const stepAdj = suggestStepTargetAdjustment(stepsTarget, avgSteps, stepEntries.length);
 
       const PROTEIN_RICH = ["chicken", "eggs", "pilchards", "tuna", "beef", "fish", "beans", "greek yogurt", "cottage cheese", "whey", "steak", "pork", "turkey", "mince", "biltong", "sardines", "lentils"];
       const JUNK = ["kfc", "mcdonalds", "nandos", "pizza", "chips", "cool drink", "alcohol", "beer", "wine", "spur", "steers", "wimpy", "debonairs", "red bull", "monster energy", "energy drink", "fanta", "coke", "sprite", "fizzy drink", "oros"];
@@ -208,10 +214,15 @@ export async function runSundayWeeklyReport(): Promise<void> {
 
       if (milestoneLine) lines.push(milestoneLine, ``);
       if (warning) lines.push(warning, ``);
-      lines.push(`*This week:* ${focus}`);
+      // Adaptive step goal takes the "This week" slot when warranted — it's the most
+      // useful, most personal instruction we can give (meet them where they are).
+      if (stepAdj) lines.push(`👟 *Your steps:* ${stepAdj.reason}`);
+      else lines.push(`*This week:* ${focus}`);
       if (totalScore >= 85) lines.push(``, `${name}, this is what results look like. Same energy next week.`);
       else if (totalScore >= 60) lines.push(``, `Solid week, ${name}. One more push and you are in the top tier. Go.`);
       else lines.push(``, `${name}, below your best but you are still here. That matters. Reset Sunday night and go again Monday.`);
+      // One-tap acceptance — routes to the deterministic step-target updater. Client's call.
+      if (stepAdj) lines.push(``, `[BUTTONS:Set steps to ${stepAdj.newTarget}]`);
 
       await sendWhatsApp(client.phoneNumber, lines.join("\n"));
 

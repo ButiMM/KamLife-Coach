@@ -156,6 +156,57 @@ export function calculateStepsTarget(
 }
 
 // ============================================================
+// ADAPTIVE STEP TARGET — right-size the goal to what the client actually walks.
+// 2026-07-12, Kam: "I usually tell people 10,000 and it works, but 50% of my clients
+// can't walk 10,000 — we need to make a plan about that." The onboarding target is
+// smart, but it's set once and never learns. After a week of real data this suggests a
+// change: DOWN when they're consistently well under (so nobody stares at a number they
+// never hit — meet them where they are, then build), UP when they're smashing it. It
+// only SUGGESTS — the client taps to accept, we never override their choice silently.
+// Pure — no DB, unit-tested.
+// ============================================================
+export interface StepTargetAdjustment {
+  newTarget: number;
+  direction: "down" | "up";
+  reason: string; // short, kind, client-facing
+}
+
+export function suggestStepTargetAdjustment(
+  currentTarget: number,
+  avgSteps: number,
+  daysLogged: number,
+): StepTargetAdjustment | null {
+  if (!currentTarget || currentTarget < 2000) return null;
+  if (daysLogged < 4 || avgSteps <= 0) return null; // not enough real data to judge fairly
+  const roundTo500 = (n: number) => Math.max(3000, Math.round(n / 500) * 500);
+  const pct = avgSteps / currentTarget;
+
+  // Consistently well under → lower to a target they'll actually hit, plus a small stretch.
+  if (pct < 0.7) {
+    const newTarget = roundTo500(avgSteps + 750);
+    if (newTarget >= currentTarget) return null; // rounding didn't move it meaningfully
+    return {
+      newTarget,
+      direction: "down",
+      reason: `You averaged ${Math.round(avgSteps).toLocaleString()} this week. No stress — let's make *${newTarget.toLocaleString()}* your goal so you WIN every day, then build up from there.`,
+    };
+  }
+
+  // Consistently at/over → nudge up so the goal keeps pulling them forward.
+  if (pct >= 1.0 && currentTarget < 12000) {
+    const newTarget = Math.min(12000, roundTo500(currentTarget + 1000));
+    if (newTarget <= currentTarget) return null;
+    return {
+      newTarget,
+      direction: "up",
+      reason: `You're smashing ${currentTarget.toLocaleString()} every day 👏 — ready to climb to *${newTarget.toLocaleString()}*?`,
+    };
+  }
+
+  return null; // 70–100%: appropriately challenged — leave it alone.
+}
+
+// ============================================================
 // DAILY STEP CONTEXT — real-time adjustment for today's situation.
 // On workout days the gym session already burned 300-450 kcal; reduce step
 // demand so clients aren't double-taxed and can recover properly.

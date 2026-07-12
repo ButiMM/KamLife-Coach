@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
@@ -1173,6 +1173,38 @@ test("steps: default goalType arg (no arg) falls back to fat_loss behavior", () 
   assert.equal(calculateStepsTarget(80, 30, 180, "intermediate"), 8500);
 });
 
+// ADAPTIVE STEP TARGET (2026-07-12, Kam: "50% of my clients can't walk 10,000 — make
+// a plan"). Right-size the goal to what they actually walk: down when they're way under,
+// up when they smash it, nothing in the sustainable middle, nothing without real data.
+test("adaptive steps: consistently well under → lower to a winnable goal (with a stretch)", () => {
+  const adj = suggestStepTargetAdjustment(8500, 5200, 6)!;
+  assert.equal(adj.direction, "down");
+  assert.equal(adj.newTarget, 6000);            // round(5200+750 → 5950) to 6000, above their avg
+  assert.ok(adj.newTarget < 8500 && adj.newTarget > 5200, "winnable but still a stretch");
+  assert.match(adj.reason, /WIN every day/i);
+});
+
+test("adaptive steps: consistently at/over target → suggest a climb", () => {
+  const adj = suggestStepTargetAdjustment(7500, 8100, 6)!;
+  assert.equal(adj.direction, "up");
+  assert.equal(adj.newTarget, 8500);
+});
+
+test("adaptive steps: sustainable middle (70-100%) → leave the goal alone", () => {
+  assert.equal(suggestStepTargetAdjustment(8000, 6800, 6), null); // 85%
+  assert.equal(suggestStepTargetAdjustment(8000, 7900, 7), null); // 99%
+});
+
+test("adaptive steps: never adjusts without enough real data, or on a broken target", () => {
+  assert.equal(suggestStepTargetAdjustment(8500, 3000, 2), null, "only 2 days logged");
+  assert.equal(suggestStepTargetAdjustment(8500, 0, 6), null, "no steps");
+  assert.equal(suggestStepTargetAdjustment(0, 5000, 6), null, "no valid current target");
+});
+
+test("adaptive steps: an established high target is never pushed past 12,000", () => {
+  assert.equal(suggestStepTargetAdjustment(12000, 13000, 7), null, "already at the ceiling");
+});
+
 // ============================================================
 // getDailyStepContext — workout-day and goal-aware daily adjustment
 // ============================================================
@@ -1959,6 +1991,33 @@ test("food swaps: expanded SA junk (sports drinks, noodles, crisps, atchar)", ()
   // treats are ALLOWED — never nag someone for a chocolate or sweets
   assert.equal(suggestSwap("chocolate", "fat_loss"), null, "treats stay un-swapped by philosophy");
   assert.equal(suggestSwap("sweets", "fat_loss"), null);
+});
+
+// 2026-07-12 comprehensive SA swap expansion — takeaways, street food, common extras.
+test("food swaps: takeaways & street food (fried chicken, wors, pie, samoosa, kota)", () => {
+  assert.match(suggestSwap("KFC", "fat_loss")!.swap, /grilled/i);
+  assert.match(suggestSwap("fried chicken", "muscle_gain")!.swap, /grilled/i); // grilling helps every goal
+  assert.match(suggestSwap("boerewors", "fat_loss")!.swap, /lean|chicken|steak/i);
+  assert.match(suggestSwap("steak pie", "fat_loss")!.swap, /pastry|bread|rice/i);
+  assert.match(suggestSwap("samoosa", "fat_loss")!.swap, /baked|two instead/i);
+  assert.match(suggestSwap("kota", "fat_loss")!.swap, /small|protein|egg|chicken/i);
+});
+
+test("food swaps: SA extras (mageu, sugar in tea, condensed milk, margarine)", () => {
+  assert.match(suggestSwap("mageu", "fat_loss")!.swap, /maas|milk/i);
+  assert.match(suggestSwap("2 sugars in my tea", "fat_loss")!.swap, /half|sweetener/i);
+  assert.match(suggestSwap("condensed milk", "fat_loss")!.swap, /low-fat|maas/i);
+  assert.match(suggestSwap("margarine", "fat_loss")!.swap, /scrape|avo|low-fat/i);
+});
+
+test("food swaps: expansion must NOT false-fire on clean foods", () => {
+  // "chicken pieces" must never be read as a "pie" — it's a lean protein, no swap.
+  assert.equal(suggestSwap("chicken pieces", "fat_loss"), null, "pieces != pie");
+  assert.equal(suggestSwap("grilled chicken", "fat_loss"), null);
+  assert.equal(suggestSwap("plain rice", "fat_loss"), null);
+  // wors/pie/margarine are fat-loss swaps only — muscle gain keeps the calories
+  assert.equal(suggestSwap("boerewors", "muscle_gain"), null);
+  assert.equal(suggestSwap("steak pie", "muscle_gain"), null);
 });
 
 // DAILY DIRECTION (2026-07-09) — "give me my overall plan" must return the WHOLE plan
