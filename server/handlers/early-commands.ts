@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1515,6 +1515,16 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const lowMobReply = `${capName}, I hear you — and this changes nothing about your results. 💛\n\nYour ${goalWord} comes from your *eating* — that's the engine, and we've got it dialled. Walking is a bonus on top, never the main thing. Plenty of people get real results barely walking.\n\n*Movement that counts for you:* chair marches, seated leg lifts, gentle arm circles, or a short flat stroll — even 5 minutes matters, and anything is a win.\n\nLet's set a step goal that fits *your* body, no pressure — pick one and I'll track against that:\n\n[BUTTONS:Set steps to 3000|Set steps to 5000|Log my food]`;
     await logChat(user.id, message, lowMobReply, "LOW_MOBILITY");
     return lowMobReply;
+  }
+
+  // ---- DEFEATED / "IT'S MY GENETICS" — the client who's tried for years, blames their
+  // genes, or was sold generic social-media advice. 2026-07-12, Kam's live masterclass
+  // ("It's not your genetics, you just need the right help… you're here now, you can
+  // relax"). Deterministic so this high-stakes moment lands in his exact voice every time.
+  if (looksLikeDefeatedNoResults(m)) {
+    const defeatReply = `${capName}, I completely understand how you feel. 💛\n\nGym, lifting, running, eating clean — that's what social media (TikTok, Instagram) sells everyone. What they *don't* tell you is you have to do the RIGHT things for *your* body and *your* goal — not some generic routine.\n\n*It's not your genetics.* You just haven't had the right help yet — and that's exactly what I'm here for.\n\nYou're here now. You can relax. 🧘 We keep it simple, I hold you accountable, and we do the right things for *you*. One step at a time.\n\n[BUTTONS:What do I do today?]`;
+    await logChat(user.id, message, defeatReply, "DEFEATED_REFRAME");
+    return defeatReply;
   }
 
   // ---- WALKING CALORIE BURN — "how many calories did I burn walking/steps?" ----

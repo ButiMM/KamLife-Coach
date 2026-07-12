@@ -24,7 +24,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1909,6 +1909,28 @@ test("brain gate: low-mobility messages skip the brain (accommodation must run)"
     "I didn't walk today", "I don't want to walk today", "my back is sore from deadlifts",
     "I walked 10000 steps", "how many steps today", "walking is my favourite thing",
   ]) assert.ok(!looksLikeLowMobility(msg), `must NOT trigger: ${msg}`);
+});
+
+// DEFEATED / "IT'S MY GENETICS" (2026-07-12, Kam's live masterclass). Must reach his
+// exact reframe deterministically — fires on a genetics/hopeless-veteran signal, NOT on
+// a plain "no results this week" check-in (that's the generic struggle handler's job).
+test("brain gate: 'it's my genetics / tried for years' reaches Kam's reframe", () => {
+  for (const msg of [
+    "I think genes are working against me",
+    "starting to think my genes are working against me at this point",
+    "it's my genetics honestly",
+    "I have bad genetics",
+    "my metabolism is the problem",
+    "I've been working out since covid but I'm still not seeing the results",
+    "been training for years and nothing is changing, I want to give up",
+  ]) assert.ok(looksLikeDefeatedNoResults(msg), `must reframe: ${msg}`);
+
+  for (const msg of [
+    "I'm not seeing results this week",
+    "no results today",
+    "how do I build muscle",
+    "I did genetics at school",
+  ]) assert.ok(!looksLikeDefeatedNoResults(msg), `must NOT trigger: ${msg}`);
 });
 
 test("brain gate: cancellation/billing skips the brain (real flow must run)", () => {

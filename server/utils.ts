@@ -617,6 +617,25 @@ export function looksLikeLowMobility(m: string): boolean {
   return false;
 }
 
+// DEFEATED / "IT'S MY GENETICS" — the client who's tried for years and blames their genes
+// or the "social media said do X" generic advice. 2026-07-12, Kam's live masterclass:
+// she said "genes are working against me 😭", he replied "It's not your genetics, you
+// just need the right help… you're here now, you can relax." This is the most valuable
+// moment in coaching (it's why people pay), so it gets Kam's EXACT reframe deterministically
+// — not a model paraphrase, not the generic struggle handler. Precise: it fires on a
+// genetics/hopeless-veteran signal, not on a plain "no results this week" check-in.
+export function looksLikeDefeatedNoResults(m: string): boolean {
+  const s = m || "";
+  // Blaming genetics / body / metabolism.
+  if (/\b(genetics?|genes?|metabolism|my body)\b[^.!?]{0,40}\b(against me|the problem|to blame|won'?t|refuse|hate|working against|not made|holding me back|bad|slow)\b/i.test(s)) return true;
+  if (/\b(against me|working against me|the problem|to blame|holding me back)\b[^.!?]{0,25}\b(genetics?|genes?|my body|metabolism)\b/i.test(s)) return true;
+  if (/\b(bad genetics|slow metabolism|born this way|just (?:my )?genes|it'?s (?:my |the )?genetics|blame my genes|cursed genes)\b/i.test(s)) return true;
+  // The hopeless veteran: long effort + still no results.
+  if (/\b(?:been|since)\b[^.!?]{0,40}\b(covid|years?|\d+\s*(?:years?|months?)|forever|ages)\b/i.test(s)
+      && /\b(no results?|not seeing|nothing.{0,10}(?:working|changing|happening)|no (?:change|progress)|still (?:the same|nothing|stuck)|give up|giving up)\b/i.test(s)) return true;
+  return false;
+}
+
 // "Can I eat this?" is a DECIDING question — nothing is logged. The vision model
 // sometimes ignores the prompt and writes "Logged. 🍇" into the verdict anyway,
 // which then collides with the code's own "Reply *log it* and I'll count it." line

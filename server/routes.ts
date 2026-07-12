@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -643,7 +643,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     // "I can't walk much / bad knees / wheelchair" → the deterministic low-mobility
     // accommodation (2026-07-12): a warm, consistent reassurance that results come from
     // the food deficit, plus a realistic step goal — not the brain improvising.
-    || looksLikeLowMobility(m);
+    || looksLikeLowMobility(m)
+    // "It's my genetics / tried for years, no results" → Kam's exact defeated-client
+    // reframe (2026-07-12), deterministic so this high-stakes emotional moment lands the
+    // same way every time instead of a model paraphrase.
+    || looksLikeDefeatedNoResults(m);
   // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings
