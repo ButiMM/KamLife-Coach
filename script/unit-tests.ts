@@ -23,7 +23,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1788,6 +1788,21 @@ test("greeting: bare greetings and menu words match (route to the warm menu)", (
 test("greeting: content-carrying messages are NOT bare greetings (flow to handlers)", () => {
   for (const m of ["hello I ate eggs", "hi what's my protein target", "hey I did my workout", "menu for the week", "morning walk 3000 steps"])
     assert.ok(!isBareGreeting(m), `should NOT be a bare greeting: ${m}`);
+});
+
+// "CAN I EAT THIS?" verdict must never claim it logged (2026-07-12, grapes screenshot):
+// the model wrote "Roughly 100 kcal for a handful. Logged. 🍇" into a DECIDING question,
+// which collided with the code's "Reply *log it* and I'll count it." line. The scrubber
+// removes any logged-claim so the two can never contradict.
+test("approval verdict: strips any 'Logged' claim so it can't contradict 'reply log it'", () => {
+  assert.equal(
+    stripFoodLoggedClaim("These grapes look refreshing! Roughly 100 kcal for a handful. Logged. 🍇"),
+    "These grapes look refreshing! Roughly 100 kcal for a handful. 🍇",
+  );
+  for (const claim of ["I've logged it.", "Logging it now.", "Already logged.", "I logged it for you."])
+    assert.ok(!/log(ged|ging)/i.test(stripFoodLoggedClaim(`Nice pick. ${claim}`)), `must scrub: ${claim}`);
+  // must NOT touch a clean verdict
+  assert.equal(stripFoodLoggedClaim("Solid choice for muscle gain — eat up."), "Solid choice for muscle gain — eat up.");
 });
 
 // FORM CHECK (2026-07-09) — remote form coaching must analyse and direct with AT MOST

@@ -83,8 +83,16 @@ cron.schedule("0 22 * * *", async () => {
     await db.delete(processedWebhooks).where(lt(processedWebhooks.processedAt, oneDayAgo));
   } catch { /* non-fatal */ }
   console.log("[SCHEDULER] dedupe purged — daily budget entries:", dailyProactiveCount.size);
+}, { timezone: "UTC" });
 
-  // Daily SLA digest — all priorities past deadline
+// ============================================================
+// DAILY SLA DIGEST — backlog nudge at 07:00 SAST (05:00 UTC)
+// ============================================================
+// Moved OFF midnight (2026-07-12, Kam: a "Urgent: 0 | High: 1" alert woke him at
+// 00:00). Urgent items already page every 30 min via the URGENT SLA MONITOR, so
+// this digest is just a morning backlog nudge — and it stays silent unless there
+// is genuinely something to chase, never over a single already-known item.
+cron.schedule("0 5 * * *", async () => {
   try {
     const now = new Date();
     const overdueEscalations = await db.select({
@@ -103,11 +111,15 @@ cron.schedule("0 22 * * *", async () => {
         const urgentCount = overdueEscalations.filter(e => e.priority === "urgent").length;
         const highCount = overdueEscalations.filter(e => e.priority === "high").length;
         const urgentDetails = overdueEscalations.filter(e => e.priority === "urgent").map(e => `• ${e.reason} (${e.userId.slice(0, 8)})`).join("\n");
-        const msg = `🚨 KamLife SLA BREACH — ${overdueEscalations.length} open escalation${overdueEscalations.length > 1 ? "s" : ""} past deadline\n\nUrgent: ${urgentCount} | High: ${highCount}\n${urgentDetails}\n\nOpen your dashboard inbox now.`;
+        const header = urgentCount > 0
+          ? `🚨 KamLife SLA BREACH — ${overdueEscalations.length} open escalation${overdueEscalations.length > 1 ? "s" : ""} past deadline`
+          : `📋 KamLife morning inbox — ${overdueEscalations.length} escalation${overdueEscalations.length > 1 ? "s" : ""} to clear`;
+        const body = urgentDetails ? `\n${urgentDetails}` : "";
+        const msg = `${header}\n\nUrgent: ${urgentCount} | High: ${highCount}${body}\n\nOpen your dashboard inbox when you're up.`;
         await sendWhatsApp(`whatsapp:${coachPhone}`, msg).catch(e => console.error("[SLA ALERT]", e));
       }
     }
-  } catch (slaErr) { console.error("[SCHEDULER] SLA check failed:", slaErr); }
+  } catch (slaErr) { console.error("[SCHEDULER] SLA digest failed:", slaErr); }
 }, { timezone: "UTC" });
 
 // ============================================================

@@ -40,7 +40,7 @@ import { buildProgressComparisonPrompt } from "../physique-analysis";
 // ONE job processes the whole set with all angles in a single call and a single reply.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
@@ -997,7 +997,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // deciding (often in the shop aisle). If they go ahead, "log it" counts it from
       // the verdict's TOTAL line (food-context smart-log picks up FOOD_VERDICT rows).
       if (isApprovalCaption) {
-        return `${visionDisplay}\n\n_Eating it? Reply *log it* and I'll count it._`;
+        // Nothing was logged — this is a deciding question. Scrub any stray "Logged"
+        // claim the model wrote so it can't contradict the "reply log it" line below.
+        const verdict = stripFoodLoggedClaim(visionDisplay);
+        return `${verdict}\n\n_Eating it? Reply *log it* and I'll count it._`;
       }
 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──

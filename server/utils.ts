@@ -553,6 +553,22 @@ export function looksLikeDirectionRequest(m: string): boolean {
     && !/\b(workout|exercise|meal plan|recipe|shopping|supplement|pay|cancel|refund|price|cost)\b/i.test(s);
 }
 
+// "Can I eat this?" is a DECIDING question — nothing is logged. The vision model
+// sometimes ignores the prompt and writes "Logged. 🍇" into the verdict anyway,
+// which then collides with the code's own "Reply *log it* and I'll count it." line
+// — the bot claims it logged AND asks you to log (2026-07-12, grapes screenshot).
+// Strip any "logged"-type claim from a verdict so the two never contradict. Pure.
+export function stripFoodLoggedClaim(text: string): string {
+  return (text || "")
+    // "Logged." / "Logged 🍇" / "I've logged it" / "logging it" anywhere in the verdict
+    .replace(/\b(?:i['’]?ve\s+|i\s+|already\s+|now\s+)?log(?:ged|ging)\b(?:\s+it)?[.!,]*\s*/gi, "")
+    // clean up any orphaned emoji/whitespace the removal left behind
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\s+([.!,?])/g, "$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // Cancellation / billing intent — must reach the deterministic subscription flow
 // (which stops billing and alerts the founder), never the brain. 2026-07-10: "I'm
 // cancelling my subscription" got a limp model reply and NO cancellation action.

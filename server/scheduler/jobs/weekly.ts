@@ -6,7 +6,6 @@ import {
   todaySAST, thisWeekUTC,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
-import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 
 export async function runFridayWeekendStrategy(): Promise<void> {
@@ -235,12 +234,12 @@ export async function runSundayWeeklyReport(): Promise<void> {
     }
   }
 
-  // Send personalized ElevenLabs voice recap in coach's cloned voice — after all text cards
-  try {
-    await runWeeklyRecaps();
-  } catch (recapErr) {
-    console.error("[SCHEDULER] Weekly recap voice error:", recapErr);
-  }
+  // Weekly voice recap REMOVED (2026-07-12, Kam: "the voice note sounds generic").
+  // It duplicated the Week Report Card text card in a flat, generic ElevenLabs read
+  // and added a 5th Sunday-morning bubble to an already-cluttered stack. The report
+  // card carries the numbers; the voice added noise and cost, not intelligence.
+  // Re-enable only when the recap is genuinely personalised (this week's real wins),
+  // not a read-back of the card.
 }
 
 export async function runSundayEveningCheckin(): Promise<void> {
