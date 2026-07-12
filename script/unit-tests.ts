@@ -24,7 +24,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1821,6 +1821,23 @@ test("steps target: parses every SA number format, and only for a CHANGE (not a 
   // plain step LOGS must NOT be read as a target change (they go to the step logger)
   for (const msg of ["I walked 10 000 steps", "did 8000 steps today", "walked 10k steps", "hit 12,000 steps"])
     assert.equal(extractStepTargetChange(msg), null, `log must not change target: ${msg}`);
+});
+
+// LOW MOBILITY (2026-07-12, Kam ×2: "some people can't walk a lot — accommodate that").
+// Must reach the warm deterministic accommodation, never the brain or the step logger.
+// Precision matters: a lazy day or training soreness must NOT trigger it.
+test("brain gate: low-mobility messages skip the brain (accommodation must run)", () => {
+  for (const msg of [
+    "I can't walk much", "I can't walk far because of my knees", "I'm in a wheelchair",
+    "I have arthritis and struggle to walk", "bad knees, walking is really hard for me",
+    "I can't do 10000 steps", "I struggle to hit that many steps", "I have difficulty walking",
+    "I'm on crutches right now", "I have a heart condition, can't walk far",
+  ]) assert.ok(looksLikeLowMobility(msg), `must accommodate: ${msg}`);
+
+  for (const msg of [
+    "I didn't walk today", "I don't want to walk today", "my back is sore from deadlifts",
+    "I walked 10000 steps", "how many steps today", "walking is my favourite thing",
+  ]) assert.ok(!looksLikeLowMobility(msg), `must NOT trigger: ${msg}`);
 });
 
 test("brain gate: cancellation/billing skips the brain (real flow must run)", () => {

@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1502,6 +1502,19 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const inflatedReply = `${capName}, car and machine vibration inflating step counts is a real issue — the phone accelerometer can't tell the difference between walking and road bumps.\n\n*Quick fix:* Phone in your *pocket* (not on the seat or console) filters out most vehicle vibration.\n\nOr just tell me your actual walking: "walked 2,000 steps at lunch" and I'll log only that.\n\n*For your situation:*\nYour real movement target will be smaller — and that's fine. What matters is intentional walking:\n• 10-min walk on a break: ~1,000 steps\n• Walking to/from your vehicle or canteen\n• 20-min walk at home in the evening\n\nShould I set your step target to reflect what you can actually walk — not what the car registers for you?`;
     await logChat(user.id, message, inflatedReply, "INFLATED_STEPS");
     return inflatedReply;
+  }
+
+  // ---- LOW MOBILITY — "I can't walk much / bad knees / wheelchair / heart condition" ----
+  // 2026-07-12, Kam (twice): "some people can't walk a lot — we need to accommodate that."
+  // Concern-first, then the crucial truth that keeps them on the app: results come from
+  // the FOOD deficit, not steps. Offer a realistic, lower step goal in one tap — never
+  // presume their ability, never make them feel broken. (Detector: utils.looksLikeLowMobility)
+  if (looksLikeLowMobility(m)) {
+    const goal = user.goalType || "fat_loss";
+    const goalWord = goal === "muscle_gain" ? "muscle" : goal === "recomposition" ? "results" : "fat loss";
+    const lowMobReply = `${capName}, I hear you — and this changes nothing about your results. 💛\n\nYour ${goalWord} comes from your *eating* — that's the engine, and we've got it dialled. Walking is a bonus on top, never the main thing. Plenty of people get real results barely walking.\n\n*Movement that counts for you:* chair marches, seated leg lifts, gentle arm circles, or a short flat stroll — even 5 minutes matters, and anything is a win.\n\nLet's set a step goal that fits *your* body, no pressure — pick one and I'll track against that:\n\n[BUTTONS:Set steps to 3000|Set steps to 5000|Log my food]`;
+    await logChat(user.id, message, lowMobReply, "LOW_MOBILITY");
+    return lowMobReply;
   }
 
   // ---- WALKING CALORIE BURN — "how many calories did I burn walking/steps?" ----

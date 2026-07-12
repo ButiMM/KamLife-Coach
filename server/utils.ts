@@ -595,6 +595,28 @@ export function looksLikeDirectionRequest(m: string): boolean {
     && !/\b(workout|exercise|meal plan|recipe|shopping|supplement|pay|cancel|refund|price|cost)\b/i.test(s);
 }
 
+// LOW MOBILITY — a client who physically can't walk much (bad knees, a wheelchair, a
+// heart condition, arthritis, an amputation, chronic pain). 2026-07-12, Kam (twice):
+// "some people can't walk a lot… we need to accommodate that." This must reach a warm,
+// deterministic accommodation — NOT the brain (which improvises), and NOT the generic
+// step logger. It reassures that results come from the food deficit (steps are a bonus)
+// and offers a realistic, lower step goal. Precise so it never fires on a lazy day.
+export function looksLikeLowMobility(m: string): boolean {
+  const s = m || "";
+  // Explicit inability to walk.
+  if (/\b(can'?t|cannot|can not|unable to|struggle(?:s|ing)? to|hard to|difficult to|too (?:sore|painful|weak|tired|heavy|old) to)\s+(?:really\s+|even\s+)?walk\b/i.test(s)) return true;
+  if (/\b(difficulty|trouble|problems?)\s+walking\b/i.test(s)) return true;
+  // Can't do the steps / that many steps.
+  if (/\b(?:can'?t|cannot|can not|unable to|struggle(?:s|ing)? to)\s+(?:do|hit|reach|manage|get|make)\s+(?:the\s+|my\s+|those\s+|that many\s+|so many\s+|\d[\d,\s]*\s*)?steps?\b/i.test(s)) return true;
+  // Standing disability / mobility conditions — these accommodate on their own.
+  if (/\b(wheelchair|on crutches|walking stick|walking cane|use a cane|mobility (?:issue|problem|aid|scooter)|disabled|disability|amputat|amputee|prosthe(?:sis|tic)|arthritis|chronic pain|bad heart|heart condition|can'?t be on my feet|bed ?ridden|housebound)\b/i.test(s)) return true;
+  // Body-part pain ONLY when it's about walking/standing/movement (so "sore back from
+  // deadlifts" doesn't trigger a walking accommodation).
+  if (/\b(?:bad|sore|painful|weak|dodgy|injured|replaced?)\s+(?:knee|knees|hip|hips|leg|legs|ankle|ankles|feet|foot|joint|joints)\b/i.test(s)
+      && /\b(walk|walking|steps?|on my feet|stand|standing|move|moving|mobility)\b/i.test(s)) return true;
+  return false;
+}
+
 // "Can I eat this?" is a DECIDING question — nothing is logged. The vision model
 // sometimes ignores the prompt and writes "Logged. 🍇" into the verdict anyway,
 // which then collides with the code's own "Reply *log it* and I'll count it." line
