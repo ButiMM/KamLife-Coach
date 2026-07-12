@@ -13,7 +13,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1461,22 +1461,21 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return bereavReply;
   }
 
-  // ---- UPDATE STEP TARGET — "steps goal 11000", "steps target 12000", "set steps to 10000" ----
-  const stepTargetMatch = m.match(/\bstep(?:s)?\s+(?:target|goal)\s+(?:to\s+)?(\d[\d,]*)\b/i)
-    || m.match(/\b(?:set|change|update|bump|raise|lower|increase|decrease)\s+(?:my\s+)?step(?:s)?(?:\s+(?:target|goal))?\s+to\s+(\d[\d,]*)\b/i);
-  if (stepTargetMatch) {
-    const rawNum = stepTargetMatch[1].replace(/,/g, "");
-    const newTarget = parseInt(rawNum, 10);
-    if (newTarget >= 2000 && newTarget <= 30000) {
-      await db.update(users).set({ stepsTarget: newTarget }).where(eq(users.phoneNumber, phone));
+  // ---- UPDATE STEP TARGET — "steps goal 11000", "set steps to 10000", "change my
+  // steps to 10 000", "make my steps 10k". ONE parser (utils.extractStepTargetChange)
+  // is shared with the brain gate so the two can never drift and every SA number
+  // format — "10000", "10,000", "10 000", "10k" — is caught and persisted (2026-07-12).
+  const parsedStepTarget = extractStepTargetChange(m);
+  if (parsedStepTarget !== null) {
+    if (parsedStepTarget >= 2000 && parsedStepTarget <= 30000) {
       const oldTarget = user.stepsTarget || 8500;
-      const direction = newTarget > oldTarget ? "raised" : newTarget < oldTarget ? "lowered" : "kept";
-      const stepUpdateReply = `Step target ${direction} to *${newTarget.toLocaleString()} steps/day*. ✅ Every screenshot you log will now track against this.`;
+      await db.update(users).set({ stepsTarget: parsedStepTarget }).where(eq(users.phoneNumber, phone));
+      const direction = parsedStepTarget > oldTarget ? "raised" : parsedStepTarget < oldTarget ? "lowered" : "kept";
+      const stepUpdateReply = `Step target ${direction} to *${parsedStepTarget.toLocaleString()} steps/day*. ✅ Every screenshot you log — and your morning brief — now tracks against this.`;
       await logChat(user.id, message, stepUpdateReply, "STEP_TARGET_UPDATE");
       return stepUpdateReply;
-    } else if (newTarget > 0) {
-      return `That step count doesn't look right (valid range: 2,000–30,000). What should your daily step goal be?`;
     }
+    return `That step count doesn't look right (valid range: 2,000–30,000). What should your daily step goal be?`;
   }
 
   // ---- STEP TRACKING APP RECOMMENDATION ----

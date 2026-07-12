@@ -535,10 +535,52 @@ export function isBareGreeting(m: string): boolean {
 // early-commands, never the brain. 2026-07-10: a client "had a discussion" with the
 // brain about moving to 10,000 steps; the brain agreed in words, persisted nothing,
 // and the morning brief kept saying 11,000 — the exact gaslighting the law forbids.
+//
+// 2026-07-12: it STILL said 11,000 after Kam asked "many times". Root cause: the old
+// regex only matched 3+ CONTIGUOUS digits, so the SA-natural "10 000" (space
+// thousands separator) and "10k" both slipped past the gate to the brain — which just
+// chatted ("steps are a bonus, we'll adjust as needed") and wrote nothing. The gate
+// and the handler had two SEPARATE regexes that could drift, too. Now ONE parser is
+// the single source of truth for both: it detects the intent AND returns the number.
+
+// Parse a step-target number in any format a South African actually types:
+// "10000", "10,000", "10 000" (space separator), "10k"/"10 K". Returns null if none.
+function parseStepNumberToken(raw: string): number | null {
+  const t = raw.trim().toLowerCase();
+  let n: number;
+  if (/^\d{1,3}\s*k$/.test(t)) n = parseInt(t, 10) * 1000; // "10k" → 10000
+  else n = parseInt(t.replace(/[ ,]/g, ""), 10);            // "10 000"/"10,000" → 10000
+  return Number.isFinite(n) ? n : null;
+}
+
+// A step number as written in SA: grouped ("10 000"/"10,000"), a k-suffix ("10k"),
+// or 3+ bare digits ("10000"). Deliberately NOT a lone 1–2 digit number (too
+// ambiguous — "make it 8" is not a step target).
+const STEP_NUM = String.raw`(\d{1,3}(?:[ ,]\d{3})+|\d{1,3}\s*[kK]|\d{3,})`;
+
+// Returns the intended NEW step target (unclamped) if the message asks to change it,
+// else null. Shared by the brain gate (skip → deterministic) and the updater (persist).
+export function extractStepTargetChange(m: string): number | null {
+  const s = m || "";
+  // A plain step LOG ("I walked 10 000 steps", "did 8000 today") is NOT a target change.
+  if (/\b(?:walked|walk|did|done|hit|got|logged|clocked|reached|managed|took)\b[^.!?]{0,20}\bsteps?\b/i.test(s)
+      && !/\b(?:target|goal|from now|going forward|set|change|make it)\b/i.test(s)) return null;
+  // Gaps are LAZY (`?`) so the greedy engine can't eat into the digits and leave
+  // STEP_NUM matching a trailing fragment (e.g. "10," consumed → "000" captured → 0).
+  const patterns = [
+    new RegExp(String.raw`\b(?:set(?:ting)?|chang(?:e|ing|ed)|updat(?:e|ing|ed)|bump(?:ing|ed)?|rais(?:e|ing|ed)|lower(?:ing|ed)?|increas(?:e|ing|ed)|decreas(?:e|ing|ed)|mak(?:e|ing)|mov(?:e|ing|ed)|adjust(?:ing|ed)?)\b[^.!?]{0,30}?\bsteps?\b[^.!?]{0,20}?\b(?:to\s+)?(?<![\d,])${STEP_NUM}\b`, "i"),
+    new RegExp(String.raw`\bsteps?\s+(?:target|goal)\s+(?:to\s+)?(?<![\d,])${STEP_NUM}\b`, "i"),
+    new RegExp(String.raw`\bsteps?\b[^.!?]{0,15}?\b(?<![\d,])${STEP_NUM}\b[^.!?]{0,25}?\b(?:from now|going forward|as (?:the|my) (?:standard|target|goal))\b`, "i"),
+  ];
+  for (const re of patterns) {
+    const mm = s.match(re);
+    if (mm && mm[1]) return parseStepNumberToken(mm[1]);
+  }
+  return null;
+}
+
 export function looksLikeStepsTargetChange(m: string): boolean {
-  return /\b(?:set(?:ting)?|chang(?:e|ing|ed)|updat(?:e|ing|ed)|bump(?:ing|ed)?|rais(?:e|ing|ed)|lower(?:ing|ed)?|increas(?:e|ing|ed)|decreas(?:e|ing|ed)|mak(?:e|ing)|mov(?:e|ing|ed)|adjust(?:ing|ed)?)\b[^.!?]{0,30}\bsteps?\b[^.!?]{0,20}\b(?:to\s+)?\d[\d,]{2,}\b/i.test(m)
-    || /\bsteps?\s+(?:target|goal)\s+(?:to\s+)?\d[\d,]{2,}\b/i.test(m)
-    || /\bsteps?\b[^.!?]{0,15}\b\d[\d,]{2,}\b[^.!?]{0,25}\b(?:from now|going forward|as (?:the|my) (?:standard|target|goal))\b/i.test(m);
+  return extractStepTargetChange(m) !== null;
 }
 
 // "Give me direction / what do I do today" — must reach the deterministic daily-

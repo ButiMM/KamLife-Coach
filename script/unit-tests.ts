@@ -23,7 +23,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1743,6 +1743,27 @@ test("brain gate: steps-target changes skip the brain (deterministic updater mus
     assert.ok(looksLikeStepsTargetChange(msg), `must skip brain: ${msg}`);
   for (const msg of ["I walked 10000 steps", "how many steps today", "steps are hard"])
     assert.ok(!looksLikeStepsTargetChange(msg), `must NOT match: ${msg}`);
+});
+
+// 2026-07-12 — it STILL said 11,000 after Kam asked "many times". Root cause: the SA-
+// natural number formats "10 000" (space separator) and "10k" never matched the gate,
+// so the message hit the brain (which chatted, saved nothing). ONE parser now backs
+// both the gate and the updater, and returns the persisted number in every format.
+test("steps target: parses every SA number format, and only for a CHANGE (not a log)", () => {
+  const cases: Array<[string, number]> = [
+    ["change my steps to 10000", 10000],
+    ["change my steps to 10,000", 10000],
+    ["change my steps to 10 000", 10000],   // SA space thousands separator
+    ["make my steps 10k", 10000],           // k-suffix
+    ["set my step goal to 12 000", 12000],
+    ["steps target 8000", 8000],
+    ["bump my steps to 15k", 15000],
+  ];
+  for (const [msg, want] of cases)
+    assert.equal(extractStepTargetChange(msg), want, `${msg} → ${want}`);
+  // plain step LOGS must NOT be read as a target change (they go to the step logger)
+  for (const msg of ["I walked 10 000 steps", "did 8000 steps today", "walked 10k steps", "hit 12,000 steps"])
+    assert.equal(extractStepTargetChange(msg), null, `log must not change target: ${msg}`);
 });
 
 test("brain gate: cancellation/billing skips the brain (real flow must run)", () => {
