@@ -30,6 +30,7 @@ const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { getMachineSlug, buildMachineIdPrompt } = await import("../server/handlers/equipment-vision");
+const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 
 let passed = 0;
 let failed = 0;
@@ -1227,6 +1228,43 @@ test("machine id prompt: teaches the tells for the machines that get confused", 
   assert.ok(/never by the weight plates|not by the plates|never.*plates/i.test(p), "must warn against judging by plates");
   // Must ask for a confidence so a shaky guess can be de-escalated.
   assert.ok(p.includes("confidence") && p.includes("low"), "asks for a confidence signal");
+});
+
+// ============================================================
+// FOOD SCANNER PRECISION (2026-07-12, Kam: "go deep" on calorie precision). The scanner
+// must identify every food in a multi-item log AND never double-count a protein when a
+// specific dish and a generic component both light up. Locks two real double-count bugs
+// found by probe: restaurant chicken + phantom "Chicken thigh", and a curry combo +
+// standalone curry.
+// ============================================================
+function scanNames(msg: string): string[] {
+  return scanForSAFoods(msg).map((f: any) => f.name);
+}
+
+test("food scan: multi-item logs identify every component", () => {
+  const eggsPap = scanNames("2 eggs and pap");
+  assert.ok(eggsPap.includes("Eggs") && eggsPap.some(n => /pap/i.test(n)), "eggs + pap both found");
+  const chkVeg = scanNames("grilled chicken breast and sweet potato");
+  assert.ok(chkVeg.includes("Chicken breast") && chkVeg.includes("Sweet potato"), "breast + sweet potato");
+});
+
+test("food scan: no chicken double-count when a specific dish + bare 'chicken' collide", () => {
+  const nandos = scanNames("nandos quarter chicken and chips");
+  assert.ok(nandos.includes("Nando's quarter chicken"), "keeps the real dish");
+  assert.ok(!nandos.includes("Chicken thigh") && !nandos.includes("Chicken breast"), "drops phantom generic cut");
+  const rot = scanNames("rotisserie chicken and veg");
+  assert.ok(!rot.includes("Chicken thigh") && !rot.includes("Chicken breast"), "rotisserie doesn't add a phantom cut");
+});
+
+test("food scan: a typed cut word keeps the generic cut (not a phantom)", () => {
+  assert.ok(scanNames("chicken thigh and rice").includes("Chicken thigh"), "typed 'thigh' kept");
+  assert.ok(scanNames("chicken breast and rice").includes("Chicken breast"), "typed 'breast' kept");
+  assert.deepEqual(scanNames("chicken"), ["Chicken thigh"], "bare 'chicken' still logs a cut");
+});
+
+test("food scan: curry combo doesn't double-count the standalone curry", () => {
+  assert.deepEqual(scanNames("chicken curry and rice"), ["Chicken curry and rice"], "combo only, no extra curry");
+  assert.deepEqual(scanNames("chicken curry"), ["Curry (chicken)"], "standalone curry still works alone");
 });
 
 // ============================================================

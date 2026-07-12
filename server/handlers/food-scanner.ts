@@ -255,7 +255,7 @@ const COMBO_OVERRIDES: Record<string, string[]> = {
   "Eggs on toast": ["Eggs", "Brown bread", "White bread"],
   "Pap and stew": ["Pap (stiff maize porridge)", "Stewing beef"],
   "Pap and wors": ["Pap (stiff maize porridge)", "Boerewors"],
-  "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Brown rice", "White rice"],
+  "Chicken curry and rice": ["Chicken thigh", "Chicken breast", "Curry (chicken)", "Brown rice", "White rice"],
   "Mince and pap": ["Beef mince", "Pap (stiff maize porridge)"],
   "Boerewors roll": ["Boerewors", "Brown bread", "White bread"],
   "Peanut butter on bread": ["Peanut butter", "Peanut butter (smooth)", "Brown bread", "White bread"],
@@ -316,6 +316,23 @@ function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
   }
 
   // PASS 4: Alias collision cleanup
+
+  // A generic chicken CUT (thigh/breast) that lit up only from the bare word "chicken"
+  // is a phantom when a more SPECIFIC chicken dish also matched via a non-"chicken"
+  // alias — e.g. "Nando's quarter chicken" (matched on "nandos quarter") double-counted
+  // a "Chicken thigh" off the word "chicken" in the same phrase (2026-07-12 probe). The
+  // substring-dedup in scanForSAFoods can't catch it because the specific dish's matched
+  // alias doesn't contain "chicken". Drop the generic cut unless the client actually
+  // named a cut ("thigh", "breast", "fillet", "drumstick", "wing", "piece").
+  const GENERIC_CHICKEN = ["Chicken thigh", "Chicken breast"];
+  const typedCutWord = /\b(thighs?|breasts?|fillets?|drumsticks?|wings?|pieces?)\b/i.test(lower);
+  if (!typedCutWord) {
+    const hasSpecificChickenDish = cleaned.some(f => !GENERIC_CHICKEN.includes(f.name) && /chicken/i.test(f.name));
+    if (hasSpecificChickenDish) {
+      cleaned = cleaned.filter(f => !GENERIC_CHICKEN.includes(f.name));
+    }
+  }
+
   const names = new Set(cleaned.map(f => f.name));
   if (names.has("Peanut butter") && names.has("Peanut butter (smooth)")) {
     cleaned = cleaned.filter(f => f.name !== "Peanut butter (smooth)");
