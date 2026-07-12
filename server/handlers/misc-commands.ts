@@ -1062,6 +1062,7 @@ export async function handleMiscCommands(ctx: {
       }
 
       const days = Object.entries(dailyTotals).sort((a, b) => b[0].localeCompare(a[0]));
+      const wKg = parseFloat(user.currentWeight as string || "0") || 75;
       const waterTarget = waterTargetLitres(user.currentWeight as string);
       const avgDaily = days.length > 0 ? days.reduce((s, [, v]) => s + v, 0) / days.length : 0;
       const targetHitDays = days.filter(([, v]) => v >= waterTarget).length;
