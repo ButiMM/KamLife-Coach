@@ -17,7 +17,6 @@ import { assertAiOnline } from "./ai-offline";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused, claimProactive } from "./scheduler/shared";
-import { buildWeekCard } from "./week-card";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
 
 const openai = new OpenAI({
@@ -40,6 +39,7 @@ interface ClientWeekData {
   mealsLoggedDays: number;
   workoutStreak: number;
   lifeContext: string | null; // illness, bereavement, injury, family crisis detected this week
+  topFoods: string[]; // the client's ACTUAL most-logged foods this week — makes the voice personal, not generic
 }
 
 const LIFE_EVENT_PATTERNS = /\b(sick|ill|flu|fever|vomit|nausea|hospital|clinic|doctor|emergency|funeral|died|death|passed away|passed on|lost my|losing my|granny|grandma|grandfather|gran|bereave|mourning|grieving|surgery|operation|injury|injured|hurt|broken|fracture|sprain|overwhelm|breakdown|depressed|depression|anxiety|mental health|can't cope|cant cope|crisis|accident|icu|intensive care|covid|quarantine|isolat)\b/i;
@@ -91,6 +91,24 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
     const latestWeight = weightRes.rows[0]?.weight ? parseFloat(weightRes.rows[0].weight) : null;
     const oldWeight = oldWeightRows[0]?.weight ? parseFloat(oldWeightRows[0].weight) : null;
     const weightChange = latestWeight !== null && oldWeight !== null ? latestWeight - oldWeight : null;
+
+    // The client's ACTUAL most-logged foods this week — this is what stops the voice
+    // note sounding like a generic report card read aloud (2026-07-12, Kam: "it sounds
+    // generic"). A coach who names what you actually ate feels like they know you.
+    let topFoods: string[] = [];
+    try {
+      const { rows: foodRows } = await pool.query<{ food: string; n: string }>(
+        `SELECT lower(trim(item->>'name')) AS food, COUNT(*) AS n
+           FROM meal_logs, jsonb_array_elements(items) AS item
+          WHERE user_id=$1 AND logged_at > $2 AND items IS NOT NULL
+            AND length(trim(coalesce(item->>'name',''))) > 1
+          GROUP BY 1 ORDER BY n DESC, food ASC LIMIT 4`,
+        [userId, weekAgo]
+      );
+      topFoods = foodRows.map(r => r.food).filter(Boolean);
+    } catch (e: any) {
+      console.warn("[RECAP] Top-foods fetch failed:", e.message);
+    }
 
     // Detect life events from last 14 days of chat history + memories
     let lifeContext: string | null = null;
@@ -150,6 +168,7 @@ async function getClientWeekData(userId: string): Promise<ClientWeekData | null>
       mealsLoggedDays: parseInt(mealsRes.rows[0].days, 10),
       workoutStreak: u.workout_streak ?? 0,
       lifeContext,
+      topFoods,
     };
   } catch (e: any) {
     console.error(`[RECAP] Failed to fetch data for ${userId}:`, e.message);
@@ -185,32 +204,40 @@ export async function generateRecapScript(data: ClientWeekData): Promise<string>
     ? `hit training target (${data.workoutsThisWeek}/${trainingTarget})`
     : `missed ${trainingTarget - data.workoutsThisWeek} session${trainingTarget - data.workoutsThisWeek > 1 ? "s" : ""} (${data.workoutsThisWeek}/${trainingTarget})`;
 
+  const foodLine = data.topFoods.length
+    ? `Foods they actually logged this week (name one of these back to them so they know you saw it): ${data.topFoods.join(", ")}`
+    : `They logged little or no food this week — do NOT invent foods. Nudge them to snap one meal.`;
+
   const toneRules = data.lifeContext
     ? `TONE: Compassionate. Life comes first. Do NOT frame missed targets as failures.
 - Acknowledge the hard week directly. One sentence.
 - Give them permission to have had a slow week.
 - End with one warm, specific invitation to restart — no pressure, no urgency.`
-    : `TONE: Direct South African coach. No cheerleading. No corporate speak.
+    : `TONE: Direct South African coach talking to a mate on a voice note — warm, personal, spoken. NOT a report card read aloud.
 STRUCTURE (follow this exactly):
-1. Name the biggest NUMBER (one stat — workouts or steps). One sentence, no adjectives.
-2. Tell them what that number MEANS for their ${data.goalType || "fat loss"} goal. One sentence of real analysis — cause and effect. E.g. "That deficit means your body had to tap into fat stores" or "Missing those sessions means your muscle stimulus was below what we need for growth this month."
-3. ONE specific instruction for next week. Tied to their goal. Not vague. E.g. "This week: hit all ${trainingTarget} sessions AND log your weight every morning so I can tell if the recomp is actually shifting."
+1. Say ONE specific, human thing that proves you actually watched THEIR week — name a food they logged, their training streak, or their weight move. Real detail, not a stat dump. This is what makes it feel personal.
+2. Tell them what it MEANS for their ${data.goalType || "fat loss"} goal in plain words — cause and effect, one sentence.
+3. ONE specific thing to do next week. Tied to their goal. Concrete, not vague.
 
-BANNED PHRASES — if any of these appear, rewrite: "keep pushing", "keep the momentum going", "you've got this", "let's keep pushing", "stay focused", "keep it up", "great effort", "fantastic effort", "well done", "amazing", "impressive", "that's great"`;
+DO NOT recite the numbers like a scorecard (they already got the written report card — repeating it is what makes the voice note feel generic). Pick ONE detail and talk about it like a human. Max ONE number in the whole script.
 
-  const prompt = `You are Coach K — a direct South African fitness coach. Write a weekly voice note script. Max 75 words. No fluff.
+BANNED PHRASES — if any of these appear, rewrite: "keep pushing", "keep the momentum going", "you've got this", "let's keep pushing", "stay focused", "keep it up", "keep it going", "great effort", "fantastic effort", "well done", "amazing", "impressive", "that's great", "let's dive in", "your week in review", "here's your recap"`;
+
+  const prompt = `You are Coach K — a direct South African fitness coach recording a short, personal voice note for ONE client. Max 65 words. It must sound spoken, warm, and specific to THEM — never like a template.
 
 CLIENT DATA:
 ${context}${lifeNote}
 Steps context: ${stepsVsTarget}
 Workouts context: ${workoutsVsTarget}
+${foodLine}
+
+${toneRules}
 
 RULES:
-- Start with EXACTLY: "Hey ${firstName}, it's Coach K."
-- Follow the STRUCTURE above — analysis then direction, not narration
-- Use real numbers. Say what they mean. Tell them what to do next week.
-- South African voice. Speak to them like a person, not a report card.
-- Hard limit: 75 words. No filler. No banned phrases.`;
+- Start with EXACTLY: "Hey ${firstName}, Coach K here."
+- The written report card already gave them every number — your job is the HUMAN layer, not a re-read.
+- South African voice, spoken rhythm. One idea, then the next.
+- Hard limit: 65 words. No filler. No banned phrases. At most ONE number.`;
 
   try {
     assertAiOnline("weeklyRecap");
@@ -229,22 +256,18 @@ RULES:
 
 function fallbackScript(firstName: string, data: ClientWeekData): string {
   const w = data.workoutsThisWeek;
-  const s = data.avgStepsThisWeek.toLocaleString();
   const target = data.trainingDaysPerWeek;
-  const stepsTarget = data.stepsTarget ?? 8500;
   const goal = data.goalType || "fat_loss";
+  // Lead with a real, personal detail — a food they actually logged — so even the
+  // offline fallback doesn't sound like a generic scorecard (2026-07-12).
+  const food = data.topFoods[0];
+  const foodOpener = food ? ` Saw the ${food} in your log — good real food.` : "";
   if (w >= target) {
-    const stepLine = data.avgStepsThisWeek >= stepsTarget
-      ? goal === "muscle_gain"
-        ? `${s} steps a day alongside training — active recovery without killing the surplus.`
-        : `${s} steps a day on top of that means your daily deficit is real.`
-      : goal === "muscle_gain"
-        ? `Steps at ${s} — aim for ${stepsTarget.toLocaleString()} to support recovery without overcooking the burn.`
-        : `Steps at ${s} — that needs to come up to ${stepsTarget.toLocaleString()} to support the deficit.`;
-    return `Hey ${firstName}, it's Coach K. ${w} out of ${target} sessions this week — you earned that. ${stepLine} This week: log your weight every morning. I need that data to tell if the ${goal === "muscle_gain" ? "muscle" : "fat"} is actually moving.`;
+    return `Hey ${firstName}, Coach K here.${foodOpener} You showed up all ${target} sessions this week, and that consistency is exactly what moves your ${goal === "muscle_gain" ? "muscle" : "fat loss"} goal. This week: log your weight every morning so I can see if it's actually shifting.`;
   }
   const missed = target - w;
-  return `Hey ${firstName}, it's Coach K. ${w} out of ${target} sessions — ${missed} missed. For ${goal === "muscle_gain" ? "muscle growth" : "fat loss"}, that shortfall matters. Your body needed that stimulus. This week: no skipping. Set an alarm for every training day and treat it like a meeting you can't move.`;
+  const trainedBit = w > 0 ? `You got ${w} in, but ${missed} slipped.` : `Training went quiet this week.`;
+  return `Hey ${firstName}, Coach K here.${foodOpener} ${trainedBit} For ${goal === "muscle_gain" ? "muscle growth" : "fat loss"} your body needs that stimulus regular. This week, pick your training days now and treat each one like a meeting you can't move.`;
 }
 
 async function storeRecapAudio(
@@ -355,15 +378,11 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
         [recapId]
       );
 
-      // The week card follows as its OWN message so a screenshot of it is clean
-      // (no voice-note transcript in frame). sendWhatsApp already logs it to
-      // chat_history as PROACTIVE. Card failure never fails the recap.
-      try {
-        const card = buildWeekCard(data);
-        if (card) await sendWhatsApp(data.phoneNumber, card);
-      } catch (cardErr: any) {
-        console.warn(`[RECAP] week card send failed for ${data.name ?? id.slice(-6)}:`, cardErr.message);
-      }
+      // NOTE: the week card is NOT sent here anymore (2026-07-12). The Sunday report
+      // job (scheduler/jobs/weekly.ts) already sends the *Week Report Card* text with
+      // all the numbers — the recap engine sending buildWeekCard too meant the client
+      // got the same stats TWICE plus the voice note reading them a third time. The
+      // voice note is now the ONLY thing this engine sends: one personal bubble.
 
       sent++;
       console.log(`[RECAP] ✓ ${data.name ?? id.slice(-6)} — ${script.slice(0, 60)}…`);
