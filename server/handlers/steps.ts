@@ -2,6 +2,7 @@ import { db } from "../db";
 import { stepLogs } from "../../shared/schema";
 import { eq, desc } from "drizzle-orm";
 import { educationNote } from "../education";
+import { stepBurnKcal } from "../targets";
 
 export async function getStepStreak(userId: string): Promise<number> {
   try {
@@ -79,7 +80,7 @@ function _stepEquivalent(burnKcal: number): string {
 export function getStepResponse(steps: number, target: number, weightKg = 75, streak = 0, weeklyAvg?: number, user?: any, isWorkoutDay = false): string {
   if (!target || target <= 0) target = 8500;
   const idx = Math.floor(Math.random() * 5);
-  const burnEst = Math.round(steps * 0.04 * (weightKg / 70));
+  const burnEst = stepBurnKcal(steps, weightKg);
   const burnNote = steps >= 3000 ? ` (~${burnEst} kcal burned)` : "";
   const equivalent = steps >= 4000 ? _stepEquivalent(burnEst) : "";
 

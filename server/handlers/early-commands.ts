@@ -3,7 +3,7 @@ import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../share
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
-import { calculateTargets } from "../targets";
+import { calculateTargets, stepBurnKcal } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
@@ -1540,17 +1540,15 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     } catch { /* non-fatal */ }
 
     const bodyWeightKg = user.currentWeight ? parseFloat(String(user.currentWeight)) : 75;
-    const weightFactor = Number.isFinite(bodyWeightKg) && bodyWeightKg >= 30 && bodyWeightKg <= 250
-      ? bodyWeightKg / 75 : 1;
-    const estimatedKcal = Math.round(todaySteps * weightFactor * 0.04);
+    const estimatedKcal = stepBurnKcal(todaySteps, bodyWeightKg);
     const stepsTarget = user.stepsTarget || 8500;
     const calTarget = user.calorieTarget || 1800;
     const nm = firstName ? `${firstName}, ` : "";
 
     let walkCalReply: string;
     if (todaySteps === 0) {
-      const perK = Math.round(weightFactor * 40);
-      const targetBurn = Math.round(stepsTarget * weightFactor * 0.04);
+      const perK = stepBurnKcal(1000, bodyWeightKg);
+      const targetBurn = stepBurnKcal(stepsTarget, bodyWeightKg);
       walkCalReply = `${nm}no steps logged yet today — send me your step count ("walked 6,000 steps") and I'll work it out exactly.\n\nFor you specifically, every 1,000 steps ≈ *~${perK} kcal*.\nHitting your ${stepsTarget.toLocaleString()} steps target burns roughly *~${targetBurn} kcal*.\n\n*One thing to know:* your *${calTarget} kcal daily target already includes your activity level.* Walk your steps, hit your calorie target — you're on track. You don't need to eat extra because you walked.`;
     } else {
       walkCalReply = `${nm}*Today's step burn:*\n${todaySteps.toLocaleString()} steps ≈ *~${estimatedKcal} kcal*\n\n*Important — how this fits your plan:*\nYour *${calTarget} kcal target already accounts for your activity level.* You don't "eat back" those walking calories on top of your target — the target was set to include them.\n\n*The rule:*\n✅ Hit your calorie target → you're eating the right amount\n✅ Hit your step target (${stepsTarget.toLocaleString()}) → your metabolism stays active, fat loss is faster\n❌ Adding step calories on top of your food target = eating at maintenance, not a deficit\n\nWalking accelerates fat loss. It doesn't mean you can eat more.`;

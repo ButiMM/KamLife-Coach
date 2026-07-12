@@ -207,6 +207,24 @@ export function suggestStepTargetAdjustment(
 }
 
 // ============================================================
+// STEP BURN — the ONE canonical walking-energy formula (2026-07-12, Kam: "we need to
+// be exactly precise… steps incorporated into [the deficit]"). Three call sites used to
+// disagree: the step logger and the "how much did I burn" answer scaled by body weight
+// (off 70kg AND 75kg — even those two disagreed), while the daily-deficit offset in the
+// food logger used a FLAT rate and under-credited every heavy client. Now all of them
+// use this. ~0.04 kcal/step at 70kg, scaled linearly by weight — a 120kg body genuinely
+// moves ~1.7× the mass per step of a 70kg one, so the deficit must reflect that.
+// Pure — no DB, unit-tested.
+// ============================================================
+export function stepBurnKcal(steps: number, weightKg?: number | null): number {
+  const s = Number.isFinite(steps) && steps > 0 ? steps : 0;
+  let w = Number.isFinite(weightKg as number) ? (weightKg as number) : 70;
+  if (w < 35) w = 70;      // junk/missing weight → assume an average adult
+  else if (w > 250) w = 250; // clamp implausible extremes
+  return Math.round(s * 0.04 * (w / 70));
+}
+
+// ============================================================
 // DAILY STEP CONTEXT — real-time adjustment for today's situation.
 // On workout days the gym session already burned 300-450 kcal; reduce step
 // demand so clients aren't double-taxed and can recover properly.

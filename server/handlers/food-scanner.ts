@@ -2,6 +2,7 @@ import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote } from "../education";
+import { stepBurnKcal } from "../targets";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
@@ -566,11 +567,13 @@ export function buildFoodLogReply(p: {
   const proteinRemaining = proteinTarget - runningProtein;
   const earlyInDay = runningCals < (calorieTarget * 0.4);
 
-  // Extra step burn: ~40 kcal per 1,000 steps beyond target
+  // Extra step burn beyond target — weight-scaled via the ONE canonical formula so a
+  // heavy client's deficit is credited correctly (was a flat rate that under-counted).
   const stepsTarget = user.stepsTarget || 8500;
   const todaySteps = p.todaySteps || 0;
+  const weightKgForBurn = user.currentWeight ? parseFloat(String(user.currentWeight)) : 75;
   const extraStepsBurned = todaySteps > stepsTarget
-    ? Math.round((todaySteps - stepsTarget) * 0.04)
+    ? stepBurnKcal(todaySteps - stepsTarget, weightKgForBurn)
     : 0;
 
   const effectiveRemaining = calRemaining + extraStepsBurned;

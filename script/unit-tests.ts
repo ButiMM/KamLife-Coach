@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
@@ -1203,6 +1203,25 @@ test("adaptive steps: never adjusts without enough real data, or on a broken tar
 
 test("adaptive steps: an established high target is never pushed past 12,000", () => {
   assert.equal(suggestStepTargetAdjustment(12000, 13000, 7), null, "already at the ceiling");
+});
+
+// STEP BURN (2026-07-12, Kam: "be exactly precise… steps incorporated into the deficit").
+// ONE canonical, weight-scaled formula behind the deficit offset, the step logger, and
+// the "how much did I burn" answer — they used to disagree (flat vs /70 vs /75).
+test("step burn: ~0.04 kcal/step at 70kg, and scales with body weight", () => {
+  assert.equal(stepBurnKcal(10000, 70), 400);
+  assert.equal(stepBurnKcal(10000, 140), 800);   // twice the mass → twice the burn
+  assert.equal(stepBurnKcal(10000, 35), 200);     // half the mass → half the burn
+  // a heavy client MUST be credited more than a light one for the same steps
+  assert.ok(stepBurnKcal(8000, 120) > stepBurnKcal(8000, 60), "heavier burns more per step");
+});
+
+test("step burn: junk/missing weight defaults to average; extremes clamped; no negatives", () => {
+  assert.equal(stepBurnKcal(10000, undefined), 400); // missing → 70kg
+  assert.equal(stepBurnKcal(10000, 0), 400);          // junk → 70kg
+  assert.equal(stepBurnKcal(10000, 5000), stepBurnKcal(10000, 250), "implausible weight clamped to 250");
+  assert.equal(stepBurnKcal(-500, 70), 0);            // negative steps → 0
+  assert.equal(stepBurnKcal(0, 70), 0);
 });
 
 // ============================================================
