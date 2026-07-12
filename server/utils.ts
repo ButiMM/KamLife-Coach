@@ -636,6 +636,41 @@ export function looksLikeDefeatedNoResults(m: string): boolean {
   return false;
 }
 
+// DIGESTIVE ISSUES — bloating, acid reflux, heartburn, indigestion, gas, constipation.
+// 2026-07-12, Kam's screenshot: a client disclosed "I struggle a lot with bloating…
+// taking tablets for acid reflux and heartburn" AFTER the form, casually. This must be
+// caught with care + practical food guidance (and a defer-to-doctor safety line), not
+// missed. Excludes the period/hormone context (handled elsewhere) and the non-scale
+// check-in where "bloated" is just one word in a list — requires complaint framing.
+export function looksLikeDigestiveIssue(m: string): boolean {
+  const s = m || "";
+  if (/\b(period|cycle|menstrual|pms|ovulation|time of (?:the )?month)\b/i.test(s)) return false;
+  const hasGI = /\b(acid reflux|reflux|heartburn|indigestion|ibs|irritable bowel|constipat(?:ed|ion)|bloat(?:ed|ing)|gassy|trapped gas|so much gas|stomach (?:issues?|problems?|cramps?|ache|pains?)|gut (?:issues?|problems?|health)|acidic stomach|acid stomach)\b/i.test(s);
+  if (!hasGI) return false;
+  const hasComplaint = /\b(i (?:struggle|suffer|get|have|feel|deal with|keep getting)|struggle with|suffer from|deal with|i'?m (?:always |often |really |so )?(?:bloated|gassy|nauseous|constipated)|taking (?:tablets|meds|medication|pills) for|forgot to mention|always|constant(?:ly)?|every ?time|after (?:i )?eat(?:ing)?|regular meal|a lot with)\b/i.test(s);
+  return hasComplaint;
+}
+
+// FOOD DISLIKE — "I hate chicken breast", "I force myself to eat X". 2026-07-12: a client
+// forced down chicken breast she hates because it's cheap protein. A coach offers an
+// alternative instead of pushing it. The handler confirms an actual food is named.
+export function looksLikeFoodDislike(m: string): boolean {
+  return /\b(i (?:really )?(?:hate|can'?t stand|cannot stand|despise|detest)|don'?t (?:like|enjoy) (?:eating |having )?|hate eating|can'?t stand eating|sick of eating|force (?:myself|it down|down)|forcing (?:myself|it down)|forced to eat)\b/i.test(m || "");
+}
+
+// OVER-TRAINING PLAN — a client STATING or asking about 5+ sessions a week (or "every
+// day"). 2026-07-12, Kam's screenshot: "I'm going to reduce your sessions from 5 to 4 or
+// 3. 5 is unnecessary." The coach right-sizes it; the app used to take it at face value.
+// (Distinct from the fatigue handler, which catches FEELING over-trained.)
+export function looksLikeOvertrainingPlan(m: string): boolean {
+  const s = m || "";
+  const trainWord = /\b(train(?:ing)?|work(?:ing)? ?out|gym|lift(?:ing)?|session|exercis(?:e|ing))\b/i;
+  if (trainWord.test(s) && /\b(every ?day|everyday|daily|7 days|all week|twice a day)\b/i.test(s)) return true;
+  if (/\b([5-9]|1[0-4])\s*(?:x|times?|days?|sessions?)\b[^.!?]{0,20}\b(?:a|per|each)?\s*week\b/i.test(s) && trainWord.test(s)) return true;
+  if (/\b(?:train|gym|work ?out|working out|lift|exercise)\b[^.!?]{0,15}\b([5-9]|1[0-4])\s*(?:x|times?|days?|sessions?)\b/i.test(s)) return true;
+  return false;
+}
+
 // "Can I eat this?" is a DECIDING question — nothing is logged. The vision model
 // sometimes ignores the prompt and writes "Logged. 🍇" into the verdict anyway,
 // which then collides with the code's own "Reply *log it* and I'll count it." line

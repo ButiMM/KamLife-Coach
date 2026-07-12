@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -647,7 +647,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     // "It's my genetics / tried for years, no results" → Kam's exact defeated-client
     // reframe (2026-07-12), deterministic so this high-stakes emotional moment lands the
     // same way every time instead of a model paraphrase.
-    || looksLikeDefeatedNoResults(m);
+    || looksLikeDefeatedNoResults(m)
+    // Health/coaching disclosures Kam handles a specific way (2026-07-12 onboarding
+    // screenshots): GI issues (bloating/reflux → care + food guidance), a food they
+    // hate (offer an alternative, never push it), and stating 5+ sessions/week (cap it).
+    || looksLikeDigestiveIssue(m)
+    || looksLikeFoodDislike(m)
+    || looksLikeOvertrainingPlan(m);
   // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings

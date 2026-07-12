@@ -24,7 +24,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1931,6 +1931,41 @@ test("brain gate: 'it's my genetics / tried for years' reaches Kam's reframe", (
     "how do I build muscle",
     "I did genetics at school",
   ]) assert.ok(!looksLikeDefeatedNoResults(msg), `must NOT trigger: ${msg}`);
+});
+
+// DIGESTIVE ISSUES (2026-07-12 onboarding screenshot). Catch a real GI disclosure, not
+// a period cramp or a one-word check-in answer.
+test("gate: GI disclosures (bloating/reflux/heartburn) are caught", () => {
+  for (const msg of [
+    "I struggle a lot with bloating",
+    "I'm taking tablets for acid reflux and heartburn",
+    "forgot to mention I get bloated every time after I eat",
+    "I suffer from indigestion",
+    "I always feel gassy after a regular meal",
+  ]) assert.ok(looksLikeDigestiveIssue(msg), `must catch: ${msg}`);
+  for (const msg of [
+    "Looser, High, Bloated, Great",     // non-scale check-in answer, not a complaint
+    "I get bloated around my period",   // hormone context handled elsewhere
+    "how many calories in a banana",
+  ]) assert.ok(!looksLikeDigestiveIssue(msg), `must NOT catch: ${msg}`);
+});
+
+// FOOD DISLIKE (2026-07-12). Offer an alternative instead of pushing a hated food.
+test("gate: food dislike is caught (handler then finds the food + offers a swap)", () => {
+  for (const msg of ["I hate chicken breast", "I can't stand broccoli", "I force myself to eat chicken", "I don't like eating fish"])
+    assert.ok(looksLikeFoodDislike(msg), `must catch: ${msg}`);
+  // The detector is phrasing-only (pure, can't scan foods) — the HANDLER falls through
+  // when no real food is named, so "I hate mondays" just skips the brain harmlessly.
+  for (const msg of ["I love chicken", "chicken and rice", "hate is a strong word"])
+    assert.ok(!looksLikeFoodDislike(msg), `must NOT catch: ${msg}`);
+});
+
+// OVER-TRAINING PLAN (2026-07-12, Kam: "5 is unnecessary"). Right-size 5+ sessions/week.
+test("gate: stating 5+ sessions a week (or every day) is caught; 3-4 is fine", () => {
+  for (const msg of ["I train 5 days a week", "I go to the gym 6 times a week", "should I train every day", "I want to work out 7 days a week", "I lift 5x a week"])
+    assert.ok(looksLikeOvertrainingPlan(msg), `must catch: ${msg}`);
+  for (const msg of ["I train 3 days a week", "I go to the gym 4 times a week", "I did 5 reps", "I walked 10000 steps"])
+    assert.ok(!looksLikeOvertrainingPlan(msg), `must NOT catch: ${msg}`);
 });
 
 test("brain gate: cancellation/billing skips the brain (real flow must run)", () => {

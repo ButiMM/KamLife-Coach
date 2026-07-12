@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1525,6 +1525,43 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const defeatReply = `${capName}, I completely understand how you feel. 💛\n\nGym, lifting, running, eating clean — that's what social media (TikTok, Instagram) sells everyone. What they *don't* tell you is you have to do the RIGHT things for *your* body and *your* goal — not some generic routine.\n\n*It's not your genetics.* You just haven't had the right help yet — and that's exactly what I'm here for.\n\nYou're here now. You can relax. 🧘 We keep it simple, I hold you accountable, and we do the right things for *you*. One step at a time.\n\n[BUTTONS:What do I do today?]`;
     await logChat(user.id, message, defeatReply, "DEFEATED_REFRAME");
     return defeatReply;
+  }
+
+  // ---- DIGESTIVE ISSUES — bloating / acid reflux / heartburn / indigestion (2026-07-12
+  // onboarding screenshot). Care first, practical food guidance, and a defer-to-doctor
+  // safety line. Detector (utils.looksLikeDigestiveIssue) excludes period + check-in noise.
+  if (looksLikeDigestiveIssue(m)) {
+    const giReply = `Thanks for telling me${capName ? ", " + capName : ""} — that matters, and we can work with it. 💛\n\nBloating, reflux and heartburn are really common. What helps most people:\n• *Smaller meals, more often* — big meals overload the gut.\n• Eat *slower*, sit up, and don't lie down for 2–3 hours after eating.\n• Common triggers: fizzy drinks, very fatty/fried food, too much dairy, big late-night meals, eating in a rush.\n• Sip water *between* meals, not gulping during.\n\nI'll keep your meals lighter and easier on your stomach. If it's regular or you're already on tablets for it, please also check in with your doctor — I work *alongside* them, never instead of them.\n\nTell me when it hits worst and I'll help you spot the trigger.`;
+    await logChat(user.id, message, giReply, "DIGESTIVE_ISSUE");
+    return giReply;
+  }
+
+  // ---- FOOD DISLIKE — "I hate chicken breast" / "I force myself to eat X" (2026-07-12).
+  // Offer an alternative in the same role; never make someone force down food they hate.
+  if (looksLikeFoodDislike(m)) {
+    const disliked = scanForSAFoods(m)[0];
+    if (disliked) {
+      const alts: Record<string, string> = {
+        protein: "eggs, chicken thighs, tinned pilchards or tuna, lean beef mince, or beans and lentils",
+        carb: "brown rice, oats, sweet potato, samp, or potatoes",
+        veg: "spinach or morogo, cabbage, broccoli, carrots, or butternut",
+        fruit: "banana, apple, orange, or naartjies",
+        dairy: "low-fat milk, maas, or Greek yoghurt",
+      };
+      const altLine = alts[disliked.category] || "something you actually enjoy in the same slot";
+      const dislikeReply = `${capName}, you never have to force down food you hate. 💛\n\nIf *${disliked.name.toLowerCase()}* isn't for you, swap it for ${altLine} — same job for your goal, and you'll actually stick to it. Log what you *enjoy* and I'll make the numbers work.\n\nWhat do you like eating? I'll build around that.`;
+      await logChat(user.id, message, dislikeReply, "FOOD_DISLIKE");
+      return dislikeReply;
+    }
+    // Dislike phrasing but no recognisable food — let it flow to the normal handlers.
+  }
+
+  // ---- OVER-TRAINING PLAN — client states 5+ sessions/week or "every day" (2026-07-12,
+  // Kam: "5 is unnecessary"). Right-size it: rest is where results happen.
+  if (looksLikeOvertrainingPlan(m)) {
+    const overReply = `${capName}, quick one — more than *4 sessions a week is unnecessary* for most people, and it usually backfires. 🛑\n\nYour muscles grow on the REST days, not in the gym. 3–4 focused sessions beat 5–6 rushed ones every single time — better results *and* your body recovers.\n\nLet's keep you at *3–4 quality sessions* and make each one count. Rest is part of the programme, not a break from it.\n\n[BUTTONS:Today's workout|My progress]`;
+    await logChat(user.id, message, overReply, "OVERTRAINING_PLAN");
+    return overReply;
   }
 
   // ---- WALKING CALORIE BURN — "how many calories did I burn walking/steps?" ----
