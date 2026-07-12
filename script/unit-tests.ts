@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
+import { classifyLoggedFood, buildGroceryPersonalization, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
@@ -334,6 +335,52 @@ test("Tier 3 and Tier 4 shopping lists have Week B for variety", () => {
   assert.ok(t4a, "Tier 4 Week A should exist");
   assert.ok(t4b, "Tier 4 Week B should exist");
   assert.notDeepEqual(t4a.items, t4b.items, "Tier 4 Week A and B should have different items");
+});
+
+// GROCERY PERSONALIZATION (2026-07-12, Kam: "they need to know the user"). The list
+// stays prescriptive for cold-start beginners, then adapts to what the client actually
+// logs — keep their staples, swap their junk, fill the gap.
+test("grocery: classifier buckets SA foods into protein/veg/wholecarb/fruit", () => {
+  assert.equal(classifyLoggedFood("eggs"), "protein");
+  assert.equal(classifyLoggedFood("chicken breast"), "protein");
+  assert.equal(classifyLoggedFood("morogo"), "veg");
+  assert.equal(classifyLoggedFood("spinach"), "veg");
+  assert.equal(classifyLoggedFood("brown rice"), "wholecarb");
+  assert.equal(classifyLoggedFood("banana"), "fruit");
+  assert.equal(classifyLoggedFood("coke"), "other");
+});
+
+test("grocery: cold-start client (< 3 distinct foods) gets NO personalization block", () => {
+  const thin: FoodProfile = { topFoods: [{ name: "eggs", count: 2 }, { name: "pap", count: 1 }], distinctCount: 2 };
+  assert.equal(buildGroceryPersonalization(thin, "fat_loss"), null);
+  assert.equal(buildGroceryPersonalization({ topFoods: [], distinctCount: 0 }, "fat_loss"), null);
+});
+
+test("grocery: an established logger's list names their staples, swaps junk, fills the gap", () => {
+  const profile: FoodProfile = {
+    topFoods: [
+      { name: "eggs", count: 6 }, { name: "chicken", count: 5 },
+      { name: "pap", count: 4 }, { name: "coke", count: 3 },
+    ],
+    distinctCount: 4,
+  };
+  const block = buildGroceryPersonalization(profile, "fat_loss")!;
+  assert.ok(block, "should personalize for an established logger");
+  assert.ok(/Kept in/i.test(block), "names the staples they already eat");
+  assert.ok(/eggs/i.test(block) && /chicken/i.test(block), "lists their real foods");
+  assert.ok(/Coke Zero|zero sugar/i.test(block), "swaps the Coke they keep logging");
+  assert.ok(/Add veg/i.test(block), "flags the missing veg (they logged none)");
+});
+
+test("grocery: a clean logger (protein+veg, no junk) still gets a warm 'kept in' block", () => {
+  const profile: FoodProfile = {
+    topFoods: [{ name: "eggs", count: 5 }, { name: "spinach", count: 4 }, { name: "brown rice", count: 3 }],
+    distinctCount: 3,
+  };
+  const block = buildGroceryPersonalization(profile, "muscle_gain")!;
+  assert.ok(/Kept in/i.test(block), "acknowledges their good staples");
+  assert.ok(!/One swap/i.test(block), "no junk to swap → no swap line");
+  assert.ok(!/Add veg|Add protein/i.test(block), "veg and protein both present → no gap line");
 });
 
 // ============================================================

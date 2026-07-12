@@ -395,6 +395,10 @@ export interface ShoppingListTargets {
   calorieTarget?: number;
   proteinTarget?: number;
   budgetTier?: string;
+  // Optional "I've been watching what you eat" block (grocery-personalize.ts). When
+  // present it's prepended after the intro so the prescriptive list feels personal.
+  // Absent for brand-new clients (cold start) — the template leads alone.
+  personalization?: string | null;
 }
 
 export function formatShoppingList(list: ShoppingList, userName?: string, goalType?: string, targets?: ShoppingListTargets): string {
@@ -410,6 +414,9 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     recomposition: `Your goal is body recomp — hold weight, swap fat for muscle. Every day: *${kcal} kcal* and *${prot}g protein*. Consistency over weeks beats any single perfect day.`,
   };
   const intro = goalIntros[goal] || goalIntros["fat_loss"];
+
+  // Personal "we know what you eat" block, when the client has logged enough to earn it.
+  const personalBlock = targets?.personalization ? `\n\n${targets.personalization}` : "";
 
   // Store advice by budget tier
   const budgetTier = targets?.budgetTier || "100_300";
@@ -478,5 +485,5 @@ export function formatShoppingList(list: ShoppingList, userName?: string, goalTy
     ? `\n\n*🚫 Leave these on the shelf:*\n• Sugary drinks (Coke, Oros, juice, flavoured water) — liquid calories you don't feel\n• Honey, syrup, white sugar — same impact as sweets; fruit handles your sweetness\n• Flavoured yoghurt — most have 15-25g added sugar; plain or Greek only\n• Breakfast cereals and instant oats with flavouring — mostly sugar in a box\n• Polony, Russians, Viennas — high sodium, minimal real protein\n• White bread if you can avoid it — brown bread only`
     : "";
 
-  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
+  return `${fn ? fn + ", this" : "This"} is your full week.\n\n${intro}${personalBlock}\n\n${store}\n\n*What to buy (${list.estimatedTotal} est. — ${list.coversDays} days):*${body}\n${dailyStructure}\n\n*Meal ideas to mix it up:*\n${ideas}${avoidSection}\n\n_Screenshot this. Tick off as you shop. Send me what you eat each day — photo or words — and I track the numbers.\n\nTo adjust: tell me what you don't eat, what you want to swap, or what you already have at home._`;
 }

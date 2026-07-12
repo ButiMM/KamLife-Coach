@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
+import { getGroceryPersonalization } from "../../grocery-personalize";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 
@@ -216,10 +217,12 @@ export async function runSundayWeeklyReport(): Promise<void> {
 
       try {
         const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly);
+        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly);
         const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
           calorieTarget: client.calorieTarget || undefined,
           proteinTarget: client.proteinTarget || undefined,
           budgetTier: budgetTierWeekly,
+          personalization,
         });
         await sendWhatsApp(client.phoneNumber, shoppingMsg);
       } catch (shopErr) { console.warn(`[SCHEDULER] Shopping list error — ${client.phoneNumber}:`, shopErr); }

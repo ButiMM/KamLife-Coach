@@ -6,6 +6,7 @@ import { buildDayWorkout, buildFullProgramme } from "../programme";
 import { calculateTargets } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
+import { getGroceryPersonalization } from "../grocery-personalize";
 import { sendWhatsApp } from "../scheduler";
 import { scanForSAFoods, recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
@@ -602,10 +603,12 @@ export async function handleEarlyCommands(ctx: {
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
+    const personalization = await getGroceryPersonalization(user.id, goal);
     const reply = formatShoppingList(list, user.name || undefined, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
       budgetTier: budget,
+      personalization,
     });
     await logChat(user.id, message, reply, "SHOPPING_LIST");
     return reply;
@@ -1146,10 +1149,12 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const goal = user.goalType || "fat_loss";
     const firstName = user.name?.split(" ")[0] || "there";
     const list = getShoppingList(budget, weekNum, goal);
+    const personalization = await getGroceryPersonalization(user.id, goal);
     const listText = formatShoppingList(list, firstName, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
       budgetTier: budget,
+      personalization,
     });
     const intro = goal === "muscle_gain"
       ? `${firstName}, a diet plan tells you what to eat — and most people stop following it by Wednesday. A shopping list builds the habit. Buy the right things and the eating takes care of itself.\n\n`
