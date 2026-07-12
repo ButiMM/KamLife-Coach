@@ -10,6 +10,7 @@ import { join } from "node:path";
 import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
+import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
 import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodProfile } from "../server/grocery-personalize";
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
@@ -1171,6 +1172,32 @@ test("steps: muscle_gain beginner — goal ceiling (6000) is dominant over begin
 });
 test("steps: default goalType arg (no arg) falls back to fat_loss behavior", () => {
   assert.equal(calculateStepsTarget(80, 30, 180, "intermediate"), 8500);
+});
+
+// ONBOARDING INTAKE PARSERS (2026-07-12) — the free-text intake Kam captures manually.
+// The onboarding flow has no automated coverage, so the logic that interprets a client's
+// own words is locked here.
+test("intake: food preferences split into likes and dislikes", () => {
+  const a = parseFoodPreferences("Love pap and chicken, can't stand broccoli");
+  assert.match(a.foodLikes || "", /pap and chicken/i);
+  assert.match(a.foodDislikes || "", /broccoli/i);
+  const b = parseFoodPreferences("I hate chicken breast");
+  assert.match(b.foodDislikes || "", /chicken breast/i);
+  const c = parseFoodPreferences("eggs, pap, morogo");   // no dislike marker → all likes
+  assert.match(c.foodLikes || "", /eggs, pap, morogo/i);
+  assert.equal(c.foodDislikes, null);
+  const d = parseFoodPreferences("skip");
+  assert.deepEqual(d, { foodLikes: null, foodDislikes: null });
+});
+
+test("intake: vision answer keeps the dream and captures a named struggle", () => {
+  const a = parseVisionAnswer("Lose my belly and keep my muscle. I struggle with snacking at night");
+  assert.match(a.dreamGoal || "", /belly.*muscle/i);
+  assert.match(a.biggestStruggle || "", /snacking at night/i);
+  const b = parseVisionAnswer("Just feel confident at the beach");   // no struggle marker
+  assert.match(b.dreamGoal || "", /confident at the beach/i);
+  assert.equal(b.biggestStruggle, null);
+  assert.deepEqual(parseVisionAnswer(""), { dreamGoal: null, biggestStruggle: null });
 });
 
 // ADAPTIVE STEP TARGET (2026-07-12, Kam: "50% of my clients can't walk 10,000 — make

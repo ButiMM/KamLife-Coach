@@ -1289,7 +1289,7 @@ export async function handleLifecycle(ctx: {
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
-    const personalization = await getGroceryPersonalization(user.id, goal);
+    const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes);
     const shoppingReply = formatShoppingList(list, user.name || undefined, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,

@@ -228,7 +228,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
 
       try {
         const list = getShoppingList(budgetTierWeekly, weekNum + 1, clientGoalWeekly);
-        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly);
+        const personalization = await getGroceryPersonalization(client.id, clientGoalWeekly, (client as any).foodDislikes);
         const shoppingMsg = formatShoppingList(list, name, clientGoalWeekly, {
           calorieTarget: client.calorieTarget || undefined,
           proteinTarget: client.proteinTarget || undefined,

@@ -165,10 +165,16 @@ export async function getRecentFoodProfile(userId: string, days = 14): Promise<F
  * Convenience for the four shopping-list callers: fetch the profile and build the block
  * in one call. Returns null on cold start or any error (list still sends, just generic).
  */
-export async function getGroceryPersonalization(userId: string, goalType?: string | null): Promise<string | null> {
+export async function getGroceryPersonalization(userId: string, goalType?: string | null, foodDislikes?: string | null): Promise<string | null> {
   try {
     const profile = await getRecentFoodProfile(userId);
-    return buildGroceryPersonalization(profile, goalType);
+    const block = buildGroceryPersonalization(profile, goalType);
+    // Honour the foods they told us at onboarding they can't stand — never on the list.
+    const disliked = (foodDislikes || "").trim();
+    if (disliked) {
+      return `${block}\n🚫 *Left off* — you told me you're not a fan of ${disliked.replace(/[.]+$/, "")}. Say the word if you want a swap for anything else.`;
+    }
+    return block;
   } catch (e: any) {
     console.warn("[GROCERY] personalization failed:", e?.message);
     return null;

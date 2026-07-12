@@ -447,6 +447,13 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS target_weight_kg NUMERIC`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_break_ends_at TIMESTAMP`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS diet_break_cal_target INTEGER`,
+    // Onboarding intelligence (2026-07-12) — the personal intake Kam captures manually:
+    // the 3-month dream goal in their words, their biggest struggle (how to coach them),
+    // and foods they love / can't stand (so the grocery list never pushes a hated food).
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS dream_goal TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS biggest_struggle TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS food_likes TEXT`,
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS food_dislikes TEXT`,
     // Bump all existing users from old 7000 default to new 8500 — only updates those still at 7000
     `UPDATE users SET steps_target = 8500 WHERE steps_target = 7000 OR steps_target IS NULL`,
     // Clear any stuck awaitingProgrammeAnswers flags older than 24 hours

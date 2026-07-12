@@ -43,6 +43,13 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const frame = energyFrameLine(user.goalType, user.calorieTarget);
     if (frame) lines.push(frame);
 
+    // Who this client is, in their own words (captured at onboarding) — reference their
+    // DREAM to motivate, their STRUGGLE to coach, and NEVER suggest a food they hate.
+    if (user.dreamGoal) lines.push(`Their 3-month dream, in their words: "${String(user.dreamGoal).slice(0, 160)}". Reference this to motivate — it's their why.`);
+    if (user.biggestStruggle) lines.push(`Their biggest struggle: "${String(user.biggestStruggle).slice(0, 140)}". Coach around THIS — it's where they need the most support.`);
+    if (user.foodDislikes) lines.push(`Foods they DISLIKE — never suggest these, always offer an alternative: ${String(user.foodDislikes).slice(0, 120)}.`);
+    if (user.foodLikes) lines.push(`Foods they LOVE — build meals around these: ${String(user.foodLikes).slice(0, 120)}.`);
+
     // ── Physique read from the baseline progress photos (physique-analysis.ts) — so
     // the coach can prioritise the muscles a client is behind on, which they often
     // can't judge on themselves. Drives targeted volume, never "variety".

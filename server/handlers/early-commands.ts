@@ -603,7 +603,7 @@ export async function handleEarlyCommands(ctx: {
     const weekNum = user.programmeWeek || 1;
     const goal = user.goalType || "fat_loss";
     const list = getShoppingList(budget, weekNum, goal);
-    const personalization = await getGroceryPersonalization(user.id, goal);
+    const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes);
     const reply = formatShoppingList(list, user.name || undefined, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,
@@ -1149,7 +1149,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const goal = user.goalType || "fat_loss";
     const firstName = user.name?.split(" ")[0] || "there";
     const list = getShoppingList(budget, weekNum, goal);
-    const personalization = await getGroceryPersonalization(user.id, goal);
+    const personalization = await getGroceryPersonalization(user.id, goal, (user as any).foodDislikes);
     const listText = formatShoppingList(list, firstName, goal, {
       calorieTarget: user.calorieTarget || undefined,
       proteinTarget: user.proteinTarget || undefined,

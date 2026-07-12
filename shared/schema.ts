@@ -74,6 +74,11 @@ export const users = pgTable(
     baselineWeekActive: boolean("baseline_week_active").default(false),
     baselineWeekComplete: boolean("baseline_week_complete").default(false),
     profileNotes: text("profile_notes"),
+    // Onboarding intelligence (2026-07-12): the personal intake Kam captures manually.
+    dreamGoal: text("dream_goal"),           // their 3-month dream, in their own words
+    biggestStruggle: text("biggest_struggle"), // consistency / nutrition / accountability…
+    foodLikes: text("food_likes"),           // foods they love — build meals around these
+    foodDislikes: text("food_dislikes"),     // foods they hate — never suggest these
     todayWater: numeric("today_water").default("0"),
     waterStreak: integer("water_streak").default(0),
     waterLastResetDate: text("water_last_reset_date"),
