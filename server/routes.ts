@@ -678,11 +678,6 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) return earlyResult;
 
-  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const brainReply = await runCoachBrain({ phone, message, m, user, openai });
-    if (brainReply !== null) return brainReply;
-  }
-
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {
     return handleMediaMessage({ phone, message, mediaUrl, mediaContentType, allMediaUrls, user, isCoach, openai, handleMessage });
@@ -858,6 +853,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const lifecycleResult = await handleLifecycle({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (lifecycleResult !== null) return lifecycleResult;
 
+
+  // ---- MODEL BRAIN — the conversation layer, LAST RESORT before the GPT fallback ----
+  // ARCHITECTURE (2026-07-13, completed after tester round 3): the brain used to run
+  // near the FRONT of the pipeline, so every phrasing not explicitly gated was front-run
+  // by the model — improvised workouts, generic meal plans, circular instructions. Now
+  // EVERY deterministic handler outranks it. The brain only ever sees messages no
+  // handler claimed — genuine conversation — and the gates below keep unparsed
+  // transactions (steps/water/weight phrasings the loggers missed) with gpt-block's
+  // pattern-aware fallback instead of the brain.
+  if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const brainReply = await runCoachBrain({ phone, message, m, user, openai });
+    if (brainReply !== null) return brainReply;
+  }
 
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   return handleGptBlock({ phone, message, m, user, intentPromise });
