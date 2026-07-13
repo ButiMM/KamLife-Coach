@@ -254,8 +254,12 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     ? `You told me your dream: *"${dreamText.length > 90 ? dreamText.slice(0, 90).trim() + "…" : dreamText}"* — I've got it, and I'll hold you to it.\n\n`
     : "";
   const commitLine = `Here's the deal: this is more *mental* than physical. Commit to the *habits*, trust the process, and you can relax — I carry the rest. 🧘\n\n`;
+  // 30-day expectation reset (2026-07-13 retention P0): they bought transformation, but
+  // no body changes in 14 days — and when it doesn't, THE PRODUCT failed them (in their
+  // story) and they quit. Reset the contract on day one: month one is about not quitting.
+  const expectationReset = `*The next 30 days, honestly:* you won't look like a new person yet — nobody does, and anyone who promises that is lying to you. What WILL happen: you'll prove to yourself you can show up for 30 days straight. That's the only goal this month. The body follows — it always does.\n\n`;
 
-  const msg1 = `${name}, your programme is built — and it stays *alive*. Your numbers adjust every week as your body changes; this isn't a plan you download once, it's a coach that keeps up with you.\n\n${dreamEcho}${commitLine}${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
+  const msg1 = `${name}, your programme is built — and it stays *alive*. Your numbers adjust every week as your body changes; this isn't a plan you download once, it's a coach that keeps up with you.\n\n${dreamEcho}${expectationReset}${commitLine}${goalHook[defaultGoal] || goalHook.fat_loss}\n\n*Your targets:*\n• ${calorieTarget} kcal/day · ${proteinTarget}g protein\n• ${stepsLabel} steps/day — non-negotiable\n• ${trainingDays} training sessions/week\n\n${trainingHook}${ageNote}${refCodeLine}`;
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;

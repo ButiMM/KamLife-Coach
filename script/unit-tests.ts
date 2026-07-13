@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
@@ -1299,6 +1299,19 @@ test("target audit: wrong protein is caught too; empty targets don't false-fire"
   assert.equal(p.ok, false, "180g for a 70kg female recomp is wrong");
   const empty = auditStoredTargets({ ...BONOLO, calorieTarget: null, proteinTarget: null });
   assert.equal(empty.ok, true, "unset targets are onboarding's job, not the auditor's");
+});
+
+// STEPS SANITY (2026-07-13, "across the board"): bounds-only — never second-guess a
+// value a client legitimately set ("change my steps to 10 000"), only catch corruption.
+test("steps audit: human-range values pass untouched; corruption is caught", () => {
+  const base = { currentWeight: "80", age: 30, heightCm: 175, trainingExperience: "beginner", goalType: "fat_loss" };
+  assert.equal(auditStepsTarget({ ...base, stepsTarget: 10000 }).ok, true, "user-set 10k passes");
+  assert.equal(auditStepsTarget({ ...base, stepsTarget: 3000 }).ok, true, "low-mobility 3k passes");
+  assert.equal(auditStepsTarget({ ...base, stepsTarget: 0 }).ok, false, "zero is corruption");
+  assert.equal(auditStepsTarget({ ...base, stepsTarget: null }).ok, false, "null is corruption");
+  assert.equal(auditStepsTarget({ ...base, stepsTarget: 90000 }).ok, false, "90k is corruption");
+  const a = auditStepsTarget({ ...base, stepsTarget: null });
+  assert.ok(a.expected >= 4000 && a.expected <= 12000, "expected fallback is the formula value");
 });
 
 test("water target: junk/missing weight defaults to an average adult (2.5L)", () => {

@@ -352,6 +352,51 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     }
   });
 
+  // ── CHURN SHAPE (2026-07-13 retention P0) — WHEN do people go silent? ──
+  // For every completed client who has gone quiet (≥5 days), compute the day-of-journey
+  // they last spoke and bucket it. Churn is usually 3 different problems wearing one
+  // mask (day 3-5 habit gap, day 11-14 mirror gap, day 28-30 renewal gap) — this shows
+  // the founder the actual shape so fixes can be aimed instead of guessed.
+  app.get("/api/admin/churn-shape", requireAdminKey, async (_req, res) => {
+    try {
+      const all = await db.select().from(users).where(eq(users.onboardingState, "COMPLETE"));
+      const now = Date.now();
+      const silent = all.filter(u => u.lastActiveAt && (now - new Date(u.lastActiveAt).getTime()) >= 5 * 86_400_000);
+      const detail = silent.map(u => {
+        const start = u.programmeStartDate || u.createdAt;
+        const dayOfJourney = start ? Math.max(0, Math.floor((new Date(u.lastActiveAt!).getTime() - new Date(start).getTime()) / 86_400_000)) : null;
+        return {
+          name: u.name, phone: u.phoneNumber?.slice(-4),
+          dayWentSilent: dayOfJourney,
+          daysSilentNow: Math.floor((now - new Date(u.lastActiveAt!).getTime()) / 86_400_000),
+          workoutsCompleted: u.totalWorkoutsCompleted || 0,
+          goal: u.goalType, subscription: u.subscriptionStatus,
+        };
+      }).sort((a, b) => (a.dayWentSilent ?? 999) - (b.dayWentSilent ?? 999));
+      const buckets: Record<string, number> = { "day 0-2": 0, "day 3-5": 0, "day 6-10": 0, "day 11-14": 0, "day 15-21": 0, "day 22-30": 0, "day 31+": 0 };
+      for (const d of detail) {
+        const day = d.dayWentSilent;
+        if (day == null) continue;
+        if (day <= 2) buckets["day 0-2"]++;
+        else if (day <= 5) buckets["day 3-5"]++;
+        else if (day <= 10) buckets["day 6-10"]++;
+        else if (day <= 14) buckets["day 11-14"]++;
+        else if (day <= 21) buckets["day 15-21"]++;
+        else if (day <= 30) buckets["day 22-30"]++;
+        else buckets["day 31+"]++;
+      }
+      res.json({
+        totalClients: all.length,
+        silentClients: silent.length,
+        histogram: buckets,
+        readIt: "The biggest bucket is your real churn problem. day 3-5 = habit gap (day-3 voice note attacks this). day 11-14 = mirror gap (day-14 receipt attacks this). day 22-30 = renewal/value gap.",
+        clients: detail,
+      });
+    } catch (err) {
+      res.status(500).json({ message: "Failed to compute churn shape" });
+    }
+  });
+
   // ── Beta testers (trial users) ──
   app.get("/api/admin/beta-testers", requireAdminKey, async (_req, res) => {
     try {

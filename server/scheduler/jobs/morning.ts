@@ -6,7 +6,7 @@ import {
   TRAINING_SCHEDULES, programmeDaysSince, wasSickOrInjured,
   todaySAST,
 } from "../shared";
-import { auditStoredTargets } from "../../targets";
+import { auditStoredTargets, auditStepsTarget } from "../../targets";
 import { proteinHint } from "../../utils";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
@@ -64,6 +64,25 @@ export async function runMorningCheckin(): Promise<void> {
         }).catch(() => {});
       }
     } catch (auditErr) { console.error("[TARGET_SANITY] audit failed:", auditErr); }
+
+    // Steps + programme-pointer sanity (2026-07-13, "across the board"): steps target
+    // outside the human range (corruption, not preference) resets to the formula value;
+    // programme pointers out of range clamp so workout serving can never index nonsense.
+    try {
+      const stepAudit = auditStepsTarget(client);
+      const daysInCycle = client.trainingDaysPerWeek || 3;
+      const dayPtr = client.programmeDayInWeek || 1;
+      const weekPtr = client.programmeWeek || 1;
+      const fixes: Record<string, number> = {};
+      if (!stepAudit.ok) fixes.stepsTarget = stepAudit.expected;
+      if (dayPtr < 1 || dayPtr > daysInCycle) fixes.programmeDayInWeek = 1;
+      if (weekPtr < 1 || weekPtr > 52) fixes.programmeWeek = 1;
+      if (Object.keys(fixes).length > 0) {
+        await db.update(users).set(fixes).where(eq(users.id, client.id));
+        Object.assign(client, fixes);
+        console.error(`[TARGET_SANITY] bounds fix ${client.phoneNumber.slice(-4)}:`, JSON.stringify(fixes));
+      }
+    } catch (boundsErr) { console.error("[TARGET_SANITY] bounds check failed:", boundsErr); }
     if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {

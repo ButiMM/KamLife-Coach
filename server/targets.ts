@@ -265,6 +265,29 @@ export function auditStoredTargets(u: {
 }
 
 // ============================================================
+// STEPS TARGET SANITY — bounds-only (2026-07-13, "across the board"). Unlike calories,
+// the steps target is LEGITIMATELY user-set ("change my steps to 10 000") and adaptively
+// suggested, so we never second-guess a value inside the human range — we only catch
+// corruption: null/zero, below the 2,000 floor, or above the 30,000 ceiling the manual
+// updater itself enforces. Expected fallback comes from the same onboarding formula.
+// Pure — no DB, unit-tested.
+// ============================================================
+export function auditStepsTarget(u: {
+  stepsTarget?: number | null;
+  currentWeight?: string | number | null;
+  age?: number | null; heightCm?: number | null;
+  trainingExperience?: string | null; goalType?: string | null;
+}): { ok: boolean; expected: number } {
+  const weight = typeof u.currentWeight === "string" ? parseFloat(u.currentWeight) : (u.currentWeight ?? NaN);
+  const expected = calculateStepsTarget(
+    Number.isFinite(weight as number) && (weight as number) > 0 ? (weight as number) : 75,
+    u.age || 30, u.heightCm || 170, u.trainingExperience || "beginner", u.goalType || "fat_loss",
+  );
+  const s = u.stepsTarget ?? 0;
+  return { ok: s >= 2000 && s <= 30000, expected };
+}
+
+// ============================================================
 // WATER TARGET — the ONE canonical daily hydration goal (2026-07-12, Kam: "apply the
 // same precision to all the other core areas"). 33 ml per kg of body weight, floored at
 // a sensible 2.0 L and rounded to one decimal. This exact expression was copy-pasted in
