@@ -2002,7 +2002,16 @@ test("pain triage: non-musculoskeletal and pain-free messages → null", () => {
     "what's my protein target",
     "I walked 10000 steps",
     "you hurt my feelings",
+    "my stomach hurts after every meal", // gut → digestive handler, never knee-triage
   ]) assert.equal(classifyPainReport(msg), null, `null: ${msg}`);
+});
+
+// 2026-07-12 collision probe — cross-detector routing bugs, locked so they stay dead.
+test("collisions: gut pain routes to GI; schedule-cancel never hits billing", () => {
+  assert.ok(looksLikeDigestiveIssue("my stomach hurts after every meal"), "stomach-hurts is GI");
+  assert.ok(!looksLikeBillingOrCancel("cancel today's workout, my back is acting up"), "schedule change, not billing");
+  assert.ok(!looksLikeBillingOrCancel("cancel this session please"), "session cancel, not billing");
+  assert.ok(looksLikeBillingOrCancel("cancel my subscription"), "real cancellation still caught");
 });
 
 // DIGESTIVE ISSUES (2026-07-12 onboarding screenshot). Catch a real GI disclosure, not

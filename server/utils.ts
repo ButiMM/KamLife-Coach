@@ -648,7 +648,9 @@ export type PainClass = "injury" | "soreness" | "ambiguous";
 export function classifyPainReport(m: string): PainClass | null {
   const s = m || "";
   // Not training pain: sickness/head/gut/period (own handlers), or emotional "hurt".
-  if (/\b(sore throat|headache|migraine|stomach ?ache|tummy|period pains?|hurt my feelings|feelings hurt)\b/i.test(s)) return null;
+  // Gut complaints ("stomach hurts after every meal") belong to the digestive handler,
+  // never musculoskeletal triage (2026-07-12 collision probe).
+  if (/\b(sore throat|headache|migraine|stomach|tummy|gut|belly ache|period pains?|hurt my feelings|feelings hurt)\b/i.test(s)) return null;
   const bodyPart = /\b(knee|knees|shoulder|shoulders|back|ankle|ankles|wrist|wrists|hip|hips|neck|elbow|elbows|leg|legs|arm|arms|hamstring|quad|calf|calves|glute|chest muscle|muscle)\b/i;
   const mentionsPain = /\b(pain|painful|hurts?|hurting|sore|soreness|stiff|aching|aches?|doms|eina)\b/i.test(s)
     || /\b(pulled|strained|tore|torn|twisted|sprained|injur|swollen|swelling|popped|gave (?:way|in|out))\b/i.test(s)
@@ -672,9 +674,9 @@ export function classifyPainReport(m: string): PainClass | null {
 export function looksLikeDigestiveIssue(m: string): boolean {
   const s = m || "";
   if (/\b(period|cycle|menstrual|pms|ovulation|time of (?:the )?month)\b/i.test(s)) return false;
-  const hasGI = /\b(acid reflux|reflux|heartburn|indigestion|ibs|irritable bowel|constipat(?:ed|ion)|bloat(?:ed|ing)|gassy|trapped gas|so much gas|stomach (?:issues?|problems?|cramps?|ache|pains?)|gut (?:issues?|problems?|health)|acidic stomach|acid stomach)\b/i.test(s);
+  const hasGI = /\b(acid reflux|reflux|heartburn|indigestion|ibs|irritable bowel|constipat(?:ed|ion)|bloat(?:ed|ing)|gassy|trapped gas|so much gas|stomach (?:issues?|problems?|cramps?|aches?|pains?|hurts?)|gut (?:issues?|problems?|health|hurts?)|tummy (?:aches?|hurts?|issues?)|acidic stomach|acid stomach)\b/i.test(s);
   if (!hasGI) return false;
-  const hasComplaint = /\b(i (?:struggle|suffer|get|have|feel|deal with|keep getting)|struggle with|suffer from|deal with|i'?m (?:always |often |really |so )?(?:bloated|gassy|nauseous|constipated)|taking (?:tablets|meds|medication|pills) for|forgot to mention|always|constant(?:ly)?|every ?time|after (?:i )?eat(?:ing)?|regular meal|a lot with)\b/i.test(s);
+  const hasComplaint = /\b(i (?:struggle|suffer|get|have|feel|deal with|keep getting)|struggle with|suffer from|deal with|i'?m (?:always |often |really |so )?(?:bloated|gassy|nauseous|constipated)|taking (?:tablets|meds|medication|pills) for|forgot to mention|always|constant(?:ly)?|every ?time|after (?:i )?eat(?:ing)?|after (?:every|each) meal|after meals?|regular meal|a lot with|hurts?)\b/i.test(s);
   return hasComplaint;
 }
 
@@ -719,7 +721,10 @@ export function stripFoodLoggedClaim(text: string): string {
 // cancelling my subscription" got a limp model reply and NO cancellation action.
 export function looksLikeBillingOrCancel(m: string): boolean {
   return /\b(cancel(?:ling|led)?|unsubscribe|stop (?:my )?(?:subscription|billing|payments?|coaching)|refund|charged? (?:me|twice|wrong)|billing (?:problem|issue|query)|payment (?:failed|problem|issue)|don'?t bill me|stop charging)\b/i.test(m)
-    && !/\bcancel (?:the |my )?(?:workout|session|order|meal|plan for)\b/i.test(m);
+    // "cancel today's workout / this session / tomorrow's meal" is a schedule change,
+    // never a subscription cancellation (2026-07-12 collision probe caught "cancel
+    // today's workout, my back is acting up" landing in the billing flow).
+    && !/\bcancel (?:the |my |today'?s? |tomorrow'?s? |tonight'?s? |this |that )?(?:workout|session|order|meal|training|gym|plan for)\b/i.test(m);
 }
 
 export function looksLikeWaterReport(m: string): boolean {
