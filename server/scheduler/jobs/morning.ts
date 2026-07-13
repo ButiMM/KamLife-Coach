@@ -392,7 +392,16 @@ export async function runMorningCheckin(): Promise<void> {
       // \n\n---\n\n is the Twilio message splitter — two separate WhatsApps
       const todaySection: string[] = [];
       todaySection.push(`*Today:*`);
-      todaySection.push(`👟 ${stepsTarget.toLocaleString()} steps — your phone counts them (health app). Send tonight's number or a screenshot; a weekly-average screenshot works too.`);
+      // Voice pass (2026-07-13): the how-to-log instruction repeated EVERY morning
+      // forever — three ideas of clutter a day-60 client has read sixty times. New
+      // clients (first week) get the how-to once a day while the habit forms; after
+      // that the line is just the target. Plain, one idea.
+      const daysOnProg = client.programmeStartDate
+        ? Math.floor((Date.now() - new Date(client.programmeStartDate).getTime()) / 86_400_000)
+        : 999;
+      todaySection.push(daysOnProg <= 7
+        ? `👟 ${stepsTarget.toLocaleString()} steps — your phone counts them. Send me tonight's number or a screenshot.`
+        : `👟 ${stepsTarget.toLocaleString()} steps`);
 
       if (isTodayTrainingDay) {
         // No inline "preview" — slicing the first 4 lines of the workout only ever
@@ -408,7 +417,7 @@ export async function runMorningCheckin(): Promise<void> {
         ON_A_RUN:   `\n\n_You're ${completedSessions28} sessions in over 4 weeks. Don't give this up — most people are nowhere near this._`,
         ON_TRACK:   ``,
         RECOVERING: `\n\n_Good to have you back. One day at a time — this week counts._`,
-        STRUGGLING: `\n\n_${completedSessions28} sessions in 4 weeks. The number needs to change. Start today._`,
+        STRUGGLING: `\n\n_${completedSessions28} sessions in 4 weeks — let's get one in today. Just one. Reply 1 and I'll send it._`,
         DISENGAGED: `\n\n_No sessions in 28 days. Today is not about intensity — just reply Hi and we go from there._`,
       };
       const closingLine = trajectoryClose[trajectory] || "";

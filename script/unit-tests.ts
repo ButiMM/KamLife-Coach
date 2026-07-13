@@ -1861,6 +1861,14 @@ test("vision prompt: still contains the greasy-food and TOTAL-format instruction
   assert.ok(/PREPARATION & GREASE/i.test(drinkPrompt));
 });
 
+// PORTION TRANSPARENCY (2026-07-13 precision sweep): photo estimates must state the
+// ASSUMED grams per item so the client can see and correct the assumption — the human
+// calibration loop that closes the photo-portion error bar.
+test("vision prompt: instructs per-item assumed portion grams (correctable estimates)", () => {
+  assert.ok(/ASSUMING in grams/i.test(drinkPrompt), "assumed-grams instruction present");
+  assert.ok(/~150g/.test(drinkPrompt), "worked example present");
+});
+
 // PHOTO "can I eat this?" → real SA shelf/menu swaps (2026-07-09). The approval verdict
 // must offer a swap they can actually get where they are — shop or takeaway.
 test("vision prompt: approval verdict offers real SA shelf + takeaway swaps", () => {
