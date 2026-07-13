@@ -43,6 +43,14 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     const frame = energyFrameLine(user.goalType, user.calorieTarget);
     if (frame) lines.push(frame);
 
+    // SICK STATE (2026-07-13): while sick_until is active, every reply must be
+    // sick-aware — no training pushes, no target pressure, comeback questions get the
+    // return plan. The proactive machine is already on hold via paused_until.
+    const sickMatch = String(user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
+    if (sickMatch && new Date(sickMatch[1]) >= new Date(sastToday())) {
+      lines.push(`⚠️ CLIENT IS SICK (resting until ~${sickMatch[1]}). No training pushes, no calorie pressure — care first. If they ask about coming back: nothing resets, first session back at ~70%, then normal.`);
+    }
+
     // Who this client is, in their own words (captured at onboarding) — reference their
     // DREAM to motivate, their STRUGGLE to coach, and NEVER suggest a food they hate.
     if (user.dreamGoal) lines.push(`Their 3-month dream, in their words: "${String(user.dreamGoal).slice(0, 160)}". Reference this to motivate — it's their why.`);

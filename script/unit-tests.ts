@@ -25,7 +25,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -2017,6 +2017,27 @@ test("brain gate: 'it's my genetics / tried for years' reaches Kam's reframe", (
     "how do I build muscle",
     "I did genetics at school",
   ]) assert.ok(!looksLikeDefeatedNoResults(msg), `must NOT trigger: ${msg}`);
+});
+
+// SICK FLOW (2026-07-13, the flu screenshots): the canned template was sent FOUR times
+// verbatim, twice in reply to comeback QUESTIONS, while proactive jobs blasted a
+// healthy-person rhythm 45 min after "I've got the flu". Every helper locked here.
+test("sick flow: comeback questions are detected (they get the plan, never the template)", () => {
+  for (const msg of [
+    "What do I need to do next week when I come back from the flu?",
+    "No, no, no, I'm saying when I come back from the flu, what happens then?",
+    "How does that affect my progress? My week? I'm sick",
+    "what do I do when I'm better?",
+  ]) assert.ok(isReturnFromSicknessQuestion(msg), `comeback question: ${msg}`);
+  for (const msg of ["I've got the flue", "I'm sick", "I walk today I'm sick", "what's my workout"])
+    assert.ok(!isReturnFromSicknessQuestion(msg), `NOT a comeback question: ${msg}`);
+});
+
+test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped", () => {
+  assert.equal(parseSickDays("I'll be not training for the next 5 days"), 5);
+  assert.equal(parseSickDays("sick for the rest of the week"), 7);
+  assert.equal(parseSickDays("I've got the flue"), 3, "unstated → 3-day default");
+  assert.equal(parseSickDays("out for 60 days"), 14, "capped at 14");
 });
 
 // PAIN TRIAGE (2026-07-12, Kam: "the coach needs to catch whether it's just sensitivity

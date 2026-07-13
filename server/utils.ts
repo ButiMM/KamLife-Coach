@@ -636,6 +636,33 @@ export function looksLikeDefeatedNoResults(m: string): boolean {
   return false;
 }
 
+// SICK FLOW HELPERS (2026-07-13, the flu screenshots: the canned sick template was sent
+// FOUR times verbatim — twice in reply to "what happens when I come back from the flu?"
+// — while the proactive machine blasted a week-summary 45 min after "I've got the flu").
+// Pure helpers so the sick handler can be question-aware, repeat-aware and duration-aware.
+
+// "I'll not be training for the next 5 days" → 5. Unstated → 3. Capped 1..14.
+export function parseSickDays(m: string): number {
+  const s = m || "";
+  const mm = s.match(/\b(?:for|next|about)?\s*(\d{1,2})\s*(?:more\s*)?days?\b/i);
+  if (mm) {
+    const n = parseInt(mm[1], 10);
+    if (Number.isFinite(n)) return Math.max(1, Math.min(14, n));
+  }
+  if (/\b(rest of (?:the|this) week|whole week|all week|a week)\b/i.test(s)) return 7;
+  if (/\b(two weeks|2 weeks|fortnight)\b/i.test(s)) return 14;
+  return 3;
+}
+
+// A QUESTION about the return/aftermath of being sick — must get the comeback plan,
+// never the rest-up template ("what happens when I come back from the flu?", "how does
+// that affect my progress/my week?", "what do I do when I'm better?").
+export function isReturnFromSicknessQuestion(m: string): boolean {
+  const s = m || "";
+  if (!/\b(sick|ill|flu|flue|fever|covid|better|recover)/i.test(s)) return false;
+  return /\b(when i (?:come|get|'?m) back|come back from|after (?:the )?(?:flu|sickness|being sick|i recover|i'?m better)|what happens? then|what happens? (?:when|after)|how (?:does|will) (?:that|this|it) affect|affect my (?:progress|week|programme|plan)|what (?:do|must|should) i do (?:when|after|once)|when i'?m (?:better|recovered|well)|back to training|resume|pick (?:it )?(?:back )?up)\b/i.test(s);
+}
+
 // WORKOUT REQUEST — natural phrasings must reach the deterministic programme, never the
 // brain (2026-07-13 tester screenshot: "Home workout with two dumbbells" matched nothing
 // — only exact "workout"/"my workout"/"1" did — so the MODEL improvised a generic

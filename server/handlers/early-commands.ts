@@ -14,12 +14,13 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
+import { handleSickFlow, looksSickMention } from "./sick-flow";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1281,30 +1282,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     await logChat(user.id, message, lsReply, "LOAD_SHEDDING");
     return lsReply;
   }
-
-  // ---- SICK / ILL — above-neck vs below-neck rule ----
-  const isAboveNeckOnly = /\b(runny nose|blocked nose|stuffy nose|sneezing|sneezy|light cold|mild cold|bit of a cold|slight headache|congested|congestion)\b/i.test(m)
-    && !/\b(fever|vomit|nausea|nauseous|throwing up|stomach|chest|flu|covid|body aches|can.?t breathe|diarr|diarrhoea)\b/i.test(m);
-  const isSick = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i.test(m)
-    && !/\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better|not sick|not ill|not unwell|i.?m not sick|no longer sick|not sick anymore|i.?m better|i.?m fine now|i.?m okay now|i.?m ok now|feel better|feeling better|better now|i.?m well|i.?m healthy|recovered from|over the|over it now)\b/i.test(m);
-  if (isAboveNeckOnly) {
-    const aboveNeckReply = `${capName}, above-the-neck rule: runny nose or congestion = light training is fine.\n\nYou can train — but drop the intensity. A 30-min walk, a light session at 60% effort. If you feel worse during warm-up, stop and rest. No heavy lifts, no max effort today.\n\n*Eat well:* protein + fluids. Vitamin C from fruit or juice. You'll be back to full speed in a day or two.`;
-    await logChat(user.id, message, aboveNeckReply, "SICK_ABOVE_NECK");
-    return aboveNeckReply;
-  }
-  if (isSick) {
-    const goal = user.goalType || "fat_loss";
-    const programmeRef = user.trainingMode
-      ? `Your ${user.trainingMode.replace(/_/g, " ")} programme is saved`
-      : "Your programme and targets are saved";
-    const weekendSick = /\b(over the weekend|since (friday|saturday|sunday|the weekend)|few days|couple of days|days now|since last week)\b/i.test(m);
-    const nutritionLine = goal === "muscle_gain"
-      ? `*Eat even if you have no appetite:* protein matters most right now — muscle breaks down fast when sick. Eggs, protein shake, yoghurt, chicken soup. Even small amounts help.`
-      : `*Eat small, real food:* pap, eggs, toast, yoghurt, soup — whatever you can keep down. No calorie pressure today.`;
-    const sickReply = `${capName}, no training${weekendSick ? " — and rest of this week if needed" : " today"}. Your body is fighting right now and that takes everything.\n\n${nutritionLine}\n\n• Sleep as much as you can\n• Fluids — water, Energade, soup, juice\n• No steps target today\n\n${programmeRef} — you pick up exactly where you left off when you're properly better. Don't rush back. Message me when you're ready.`;
-    await logChat(user.id, message, sickReply, "SICK_DAY");
-    return sickReply;
-  }
+  // ---- SICK / ILL — question-aware, repeat-aware, duration-aware (handlers/sick-flow.ts) ----
+  const sickResult = await handleSickFlow({ message, m, user, capName });
+  if (sickResult !== null) return sickResult;
+  const isSick = looksSickMention(m);
 
   // ---- RETURN PLANNING ("I'll be back Wednesday", "let's confirm I go back Monday") ----
   const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)

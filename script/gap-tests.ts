@@ -488,8 +488,10 @@ test("mealDateLabel: now → 'today'", () => {
   assert.equal(mealDateLabel(new Date()), "today");
 });
 
-test("mealDateLabel: 25 hours ago → 'yesterday'", () => {
-  assert.equal(mealDateLabel(new Date(Date.now() - 25 * 3_600_000)), "yesterday");
+test("mealDateLabel: 24 hours ago → 'yesterday' (clock-safe at any hour)", () => {
+  // 25h was a hidden clock flake: between 00:00–00:59 SAST, "25 hours ago" lands TWO
+  // calendar days back and the label is a day name. Exactly 24h is always yesterday.
+  assert.equal(mealDateLabel(new Date(Date.now() - 24 * 3_600_000)), "yesterday");
 });
 
 test("mealDateLabel: 2 days ago → day name (not 'today' or 'yesterday')", () => {
