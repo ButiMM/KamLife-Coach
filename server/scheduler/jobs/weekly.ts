@@ -201,13 +201,15 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const totalScore = logScore + trainScore + proteinScore + stepsScore;
       const scoreLabel = totalScore >= 85 ? "Outstanding" : totalScore >= 70 ? "Strong" : totalScore >= 50 ? "Building" : "Below target";
 
+      // "Showed up" leads (2026-07-13 retention reports): the first-month metric that
+      // retains is days-you-didn't-ghost-me, not kg. The scale line comes after effort.
       const lines = [
         `*${name} — Week ${weekNum} Report Card*`, ``,
+        `📅 Showed up: ${daysWithLogs}/7 days`,
         `${trainEmoji} Training: ${completedSessions}/${plannedSessions} sessions`,
-        `${weightEmoji} Weight: ${weightLine}`,
         `${stepsEmoji} Steps: ${stepsLine}`,
         `${proteinEmoji} Protein days: ${proteinDays}/${foodDays} meals tracked`,
-        `📅 Logged: ${daysWithLogs}/7 days`,
+        `${weightEmoji} Weight: ${weightLine}`,
         streakLine || "", ``,
         `*Weekly Score: ${totalScore}/100 — ${scoreLabel}*`, ``,
       ].filter(l => l !== null);

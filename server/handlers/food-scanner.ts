@@ -828,6 +828,12 @@ export function buildFoodLogReply(p: {
       .join(" ")
       .trim();
   }
+  // KFC protocol (2026-07-13 retention reports): the reply to a junk log decides
+  // whether they stay or quit. Affirm the LOGGING — "logging it instead of hiding it"
+  // makes the slip part of their identity as someone who doesn't hide. That person stays.
+  if (junkNoteClean) {
+    junkNoteClean += ` Logging it instead of hiding it — that's the actual difference. Tomorrow we go again.`;
+  }
   const junkNote = junkNoteClean ? `\n\n${junkNoteClean}` : "";
 
   let proteinTip = "";

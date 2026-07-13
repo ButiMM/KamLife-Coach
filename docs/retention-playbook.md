@@ -89,7 +89,35 @@ it's a *moment*, and it cuts across men/women/ages. All marketing speaks to that
 person: "You don't need another programme. You need to stop quitting. That's what I
 coach." Pods then make the narrow message spread wide (each convert brings four).
 
-## 5. Kam's manual-side week (no code required)
+## 5. Second-pass re-read — insights missed on the first pass (2026-07-13)
+
+Shipped same day:
+- **Day-3 quit-prevention message** (+ voice note when ElevenLabs configured). Both
+  reports put the first cliff at day 3–5; our earliest milestone was day 7 — nothing
+  landed on the danger day. Now: "your old brain is whispering 'this is too hard'…
+  that voice is lying… reply one word: *Here*."
+- **48h silence message sharpened** — silence is eating-shame, not busyness. New copy
+  makes the hard days safe to admit: "I count everything — *especially* the hard days."
+- **Week Report Card leads with "Showed up: X/7 days"** — effort before scale.
+- **KFC identity line** appended to junk-log replies: "Logging it instead of hiding
+  it — that's the actual difference. Tomorrow we go again."
+
+Still open from the re-read (specced, not built):
+- **Third-attempt awareness**: a client with ≥2 prior silence gaps >5 days should be
+  coached differently on return ("you've come back before and it didn't stick — this
+  time we go smaller"). Needs a silence-gap count on the profile; medium build.
+- **Weekly record-vs-record framing**: "you logged 5/7 — last month your best was 3"
+  (needs month-over-month logging-days history; ride on the week card later).
+- **WhatsApp Status 7-day campaign** (founder-side content, no code):
+  1. "You've tried quick. Quick quit on you. We're going slow because slow sticks."
+  2. "I don't care what you weigh in 30 days. I care that you're still here in 30 days."
+  3. "Day 4 is when most people quit. If you're on day 4, reply STILL HERE."
+  4. Screenshot of a client who logged the bad day and didn't quit (with permission).
+  5. "20 years of weight gain won't reverse in 20 days. But 20 days of showing up changes everything."
+  6. "Most people quit by day 12. You're on day 13. That's not luck. That's you."
+  7. "New pod opening Monday. 5 people. 30 days. Nobody quits alone. DM 'POD'."
+
+## 6. Kam's manual-side week (no code required)
 
 1. Win-back blast to the last 10 churned: *"You went quiet. No explanation needed.
    Want back in? Reply HERE and we start today."*

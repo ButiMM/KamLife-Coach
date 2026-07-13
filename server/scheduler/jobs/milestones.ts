@@ -23,6 +23,12 @@ export interface TwoWeekStats {
 }
 
 export function buildDayMilestoneMessage(name: string, days: number, workouts: number, weightKg: string | null, stats?: TwoWeekStats): string {
+  // DAY 3 — the first cliff (2026-07-13 retention reports: people vanish on day 3-5,
+  // and our earliest proactive milestone was day 7 — nothing landed on the exact day
+  // the old voice starts whispering "this is too hard"). Quit-prevention, Kam's voice:
+  // name the voice, call it a liar, ask for ONE word back. Sent with a voice note when
+  // ElevenLabs is configured — a human voice on the danger day, not a text template.
+  if (days === 3) return `${name}, day 3. This is the day your old brain starts whispering *"this is too hard."*\n\nI'm not going to tell you it's easy. I'm telling you that voice is lying — it said the same thing every other time you started. And every other time, you listened.\n\nNot this time. Reply one word: *"Here."* That's all I need today.`;
   if (days === 7) return `${name}, seven days in. ${workouts > 0 ? `${workouts} session${workouts > 1 ? "s" : ""} done.` : "Keep building."} Most people quit before week two — you are still here.\n\n🔓 *Week 2 unlocked:* Your programme steps up in intensity this week. Send your weight today so I can calibrate.`;
   if (days === 14) {
     // The receipt: every line is a FACT they created. Claims don't retain; proof does.
@@ -81,7 +87,8 @@ export async function runMilestoneCelebrations(): Promise<void> {
       const days = programmeDaysSince(client.programmeStartDate);
 
       // Day milestone — DB claim so a container recycle on the milestone day can't re-send.
-      if ([7, 14, 30, 60, 90, 180, 365].includes(days)) {
+      // Day 3 included (2026-07-13): the first quit cliff — see buildDayMilestoneMessage.
+      if ([3, 7, 14, 30, 60, 90, 180, 365].includes(days)) {
         if (await claimProactive(client.id, "day_milestone", `d${days}`)) {
           const firstWeight = await db.select({ weight: weightLogs.weight })
             .from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(asc(weightLogs.loggedAt)).limit(1);
@@ -113,7 +120,13 @@ export async function runMilestoneCelebrations(): Promise<void> {
             } catch (statErr) { console.warn("[MILESTONE] day-14 stats fetch failed — sending without receipt:", statErr); }
           }
           const msg = buildDayMilestoneMessage(name, days, workouts, firstWeightKg, stats);
-          if (msg) await sendWhatsApp(client.phoneNumber, msg);
+          // Day 3 lands as a VOICE note when configured — a human voice on the quit
+          // cliff beats a text template (text always sends as the body regardless).
+          let dayVoiceUrl: string | null = null;
+          if (days === 3 && msg) {
+            dayVoiceUrl = await generateVoiceNote(msg.replace(/[*_]/g, ""), "warm").catch(() => null);
+          }
+          if (msg) await sendWhatsApp(client.phoneNumber, msg, dayVoiceUrl || undefined);
         }
       }
 

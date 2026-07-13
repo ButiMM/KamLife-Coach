@@ -1344,6 +1344,16 @@ test("day-14 receipt: missing stats degrade to the plain milestone (no empty rec
   assert.ok(noStats.length > 50, "works with stats omitted entirely (backwards compatible)");
 });
 
+// DAY-3 QUIT PREVENTION (2026-07-13 retention reports): the first cliff is day 3-5 and
+// the earliest milestone used to be day 7 — nothing landed on the danger day.
+test("day-3 milestone: names the quitting voice, asks for ONE word back", () => {
+  const msg = buildDayMilestoneMessage("Bonolo", 3, 1, null);
+  assert.ok(/day 3/i.test(msg), "names the day");
+  assert.ok(/voice is lying|whispering/i.test(msg), "names the old voice and calls it a liar");
+  assert.ok(/"Here."/i.test(msg), "asks for the one-word reply");
+  assert.ok(!/easy/.test(msg.replace(/it'?s easy/i, "")) || /not going to tell you it's easy/i.test(msg), "honest, not cheerleading");
+});
+
 test("day-14 receipt: muscle-gain client sees weight UP as building fuel", () => {
   const msg = buildDayMilestoneMessage("Neo", 14, 6, "75", {
     steps14: 70000, mealDays14: 10, weightStart: 75, weightNow: 75.8, goal: "muscle_gain",
