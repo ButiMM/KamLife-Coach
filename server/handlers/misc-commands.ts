@@ -29,7 +29,7 @@ import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday, sastDayStart, looksLikeDirectionRequest } from "../utils";
+import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport } from "../utils";
 import { SA_FOODS_SEED } from "../foods";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -179,9 +179,25 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- FIX 3: HANDLER 4 — Injury during training ----
-  if (m.includes("i hurt") || m.includes("something hurts") || m.includes("i pulled") || m.includes("i strained") || m.includes("i injured") || m.includes("got injured") || (m.includes("pain") && (m.includes("training") || m.includes("gym") || m.includes("workout") || m.includes("lifting") || m.includes("running"))) || m.includes("pulled a muscle") || m.includes("strained my")) {
+  // ---- PAIN TRIAGE — soreness vs. real injury (2026-07-12, Kam: "the coach needs to
+  // catch whether it's just sensitivity from a workout or a real injury"). The old
+  // handler fired the full STOP-72-HOURS protocol on ANY pain mention — over-reacting
+  // to normal DOMS kills momentum and trust. Now: clear injury signals → protocol
+  // (and the injury is PERSISTED so the programme trains around it); ambiguous pain →
+  // ONE triage question; plain soreness → falls through to the DOMS handler.
+  const painClass = classifyPainReport(m);
+  if (painClass === "injury" || painClass === "ambiguous") {
     const injuredArea = m.includes("knee") ? "knee" : m.includes("shoulder") ? "shoulder" : m.includes("back") ? "back" : m.includes("ankle") ? "ankle" : m.includes("wrist") ? "wrist" : m.includes("hip") ? "hip" : m.includes("neck") ? "neck" : m.includes("elbow") ? "elbow" : "the affected area";
+
+    if (painClass === "ambiguous") {
+      // Ask the coach's question before prescribing anything — stash the area so the
+      // answer (caught at the top of early-commands) knows what we're talking about.
+      await db.update(users).set({ awaitingInputType: `pain_triage:${injuredArea}` }).where(eq(users.id, user.id)).catch(() => {});
+      const triageQ = `Before I change anything — help me understand the pain in ${injuredArea === "the affected area" ? "that area" : `your ${injuredArea}`}:\n\nIs it *sharp or stabbing* (especially in the joint, or worse when you load it)?\nOr more of a *dull all-over soreness/stiffness* that eases once you warm up?\n\n[BUTTONS:Sharp / stabbing|Just sore / stiff]`;
+      await logChat(user.id, message, triageQ, "PAIN_TRIAGE");
+      return triageQ;
+    }
+
     const safeAlternative: Record<string, string> = {
       knee: "upper body — chest press, rows, shoulder press, and arm work are all safe",
       shoulder: "lower body and core — squats, leg press, lunges, planks",
@@ -193,7 +209,16 @@ export async function handleMiscCommands(ctx: {
       elbow: "lower body and shoulder press — avoid any pulling or curling movements",
     };
     const safe = safeAlternative[injuredArea] || "anything that does not load that area";
-    const injuryReply = `Stop loading ${injuredArea} immediately. Rest it today. Ice for 15 minutes if swollen.\n\nIf the pain is severe, sharp, or does not settle within 48 hours — see a doctor or physio. Do not train through sharp pain.\n\nYou CAN still train ${safe}. One body part stops, the rest keeps going.\n\nRest ${injuredArea} for 72 hours minimum then reassess. Update me when you are back.`;
+    // REMEMBER the injury — the programme and swap logic read user.injuries, so from
+    // now every workout trains around it instead of re-prescribing the painful move.
+    if (injuredArea !== "the affected area") {
+      const existingInj = (user.injuries || "").toLowerCase();
+      if (!existingInj.includes(injuredArea)) {
+        const updatedInj = user.injuries && user.injuries !== "none" ? `${user.injuries}, ${injuredArea}` : injuredArea;
+        await db.update(users).set({ injuries: updatedInj }).where(eq(users.id, user.id)).catch(() => {});
+      }
+    }
+    const injuryReply = `Stop loading ${injuredArea} immediately. Rest it today. Ice for 15 minutes if swollen.\n\nIf the pain is severe, sharp, or does not settle within 48 hours — see a doctor or physio. Do not train through sharp pain.\n\nYou CAN still train ${safe}. One body part stops, the rest keeps going — I've noted it, so your sessions train *around* it from now on.\n\nRest ${injuredArea} for 72 hours minimum then reassess. Update me when you are back.\n\n[BUTTONS:Today's workout|Log food]`;
     await logChat(user.id, message, injuryReply, "INJURY");
     return injuryReply;
   }

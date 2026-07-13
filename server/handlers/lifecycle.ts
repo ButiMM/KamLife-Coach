@@ -1583,7 +1583,9 @@ export async function handleLifecycle(ctx: {
 
   // ---- SORE / DOMS HANDLER ----
   const isSoreMsg =
-    /\b(i.?m sore|so sore|very sore|muscle soreness|doms|delayed onset|my muscles are sore|legs are sore|arms are sore|body is sore|everything is sore|sore from|sore after|still sore|too sore to train|too sore to gym|can.?t move|can.?t walk properly|struggling to walk|legs killing me|arms killing me)\b/i.test(m);
+    /\b(i.?m sore|so sore|very sore|muscle soreness|doms|delayed onset|my muscles are sore|legs are sore|arms are sore|body is sore|everything is sore|sore from|sore after|still sore|too sore to train|too sore to gym|can.?t move|can.?t walk properly|struggling to walk|legs killing me|arms killing me)\b/i.test(m)
+    // "stiff"/"aching" are the same DOMS class (pain-triage routes them here, 2026-07-12)
+    || /\b(stiff|aching)\b/i.test(m) && /\b(legs?|arms?|muscles?|body|everywhere|workout|gym|training|leg day|yesterday)\b/i.test(m);
 
   if (isSoreMsg) {
     const name = user.name ? ` ${user.name}` : "";

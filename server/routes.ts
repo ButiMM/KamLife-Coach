@@ -40,7 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
-import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "./utils";
+import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
@@ -653,7 +653,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     // hate (offer an alternative, never push it), and stating 5+ sessions/week (cap it).
     || looksLikeDigestiveIssue(m)
     || looksLikeFoodDislike(m)
-    || looksLikeOvertrainingPlan(m);
+    || looksLikeOvertrainingPlan(m)
+    // Pain reports skip the brain (2026-07-12): soreness-vs-injury triage is high-stakes
+    // and must be deterministic — the injury protocol, the DOMS reassurance, and the ONE
+    // triage question in between all live in code, never a model paraphrase. Mid-triage
+    // (awaiting the answer) also skips: "Sharp / stabbing" alone has no pain word.
+    || classifyPainReport(m) !== null
+    || String(user.awaitingInputType || "").startsWith("pain_triage:");
   // A bare "hello"/"menu" must reach the warm deterministic menu (getMenuText, with tap
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings

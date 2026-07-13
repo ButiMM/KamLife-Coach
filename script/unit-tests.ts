@@ -25,7 +25,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -1958,6 +1958,51 @@ test("brain gate: 'it's my genetics / tried for years' reaches Kam's reframe", (
     "how do I build muscle",
     "I did genetics at school",
   ]) assert.ok(!looksLikeDefeatedNoResults(msg), `must NOT trigger: ${msg}`);
+});
+
+// PAIN TRIAGE (2026-07-12, Kam: "the coach needs to catch whether it's just sensitivity
+// from a workout or a real injury"). The classifier is the high-stakes piece: a wrong
+// "injury" call benches a healthy client for 72 hours; a wrong "soreness" call tells an
+// injured client to train through it. Ambiguity gets the ONE question, never a guess.
+test("pain triage: clear injury signals → injury (stop, protect, swap)", () => {
+  for (const msg of [
+    "I pulled a muscle in my back",
+    "sharp pain in my knee when I squat",
+    "my ankle is swollen after the run",
+    "I hurt my shoulder at gym today",
+    "the pain gets worse when I train",
+    "I think I strained my hamstring",
+    "my knee gave way on the last rep",
+  ]) assert.equal(classifyPainReport(msg), "injury", `injury: ${msg}`);
+});
+
+test("pain triage: DOMS language → soreness (normalise, keep momentum)", () => {
+  for (const msg of [
+    "I'm so sore from leg day",
+    "my legs are stiff and aching after yesterday's workout",
+    "DOMS is killing me",
+    "everything is sore but in a good way",
+  ]) assert.equal(classifyPainReport(msg), "soreness", `soreness: ${msg}`);
+});
+
+test("pain triage: unqualified pain → ambiguous (ask the ONE question)", () => {
+  for (const msg of [
+    "my knee hurts",
+    "I have shoulder pain, should I switch out the workout?",
+    "I'm having back problems",
+    "my hip is acting up",
+  ]) assert.equal(classifyPainReport(msg), "ambiguous", `ambiguous: ${msg}`);
+});
+
+test("pain triage: non-musculoskeletal and pain-free messages → null", () => {
+  for (const msg of [
+    "I have a sore throat",
+    "bad headache today",
+    "period pains are rough",
+    "what's my protein target",
+    "I walked 10000 steps",
+    "you hurt my feelings",
+  ]) assert.equal(classifyPainReport(msg), null, `null: ${msg}`);
 });
 
 // DIGESTIVE ISSUES (2026-07-12 onboarding screenshot). Catch a real GI disclosure, not

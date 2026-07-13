@@ -636,6 +636,33 @@ export function looksLikeDefeatedNoResults(m: string): boolean {
   return false;
 }
 
+// PAIN TRIAGE — the question a real coach asks before anything else (2026-07-12, Kam:
+// "a person says I'm having problems, should I switch out a workout? The coach needs to
+// catch whether it's just sensitivity from a workout or a REAL injury"). Three classes:
+//   "injury"    — sharp/structural signals → stop, protect, swap the workout, doctor line.
+//   "soreness"  — DOMS language → normalise it, train around it, keep momentum.
+//   "ambiguous" — pain named without qualifiers → ask ONE triage question, then route.
+// Pure — no DB, unit-tested. Chest pain etc. is caught by the SAFETY handler earlier in
+// the pipeline, so this only ever sees musculoskeletal reports.
+export type PainClass = "injury" | "soreness" | "ambiguous";
+export function classifyPainReport(m: string): PainClass | null {
+  const s = m || "";
+  // Not training pain: sickness/head/gut/period (own handlers), or emotional "hurt".
+  if (/\b(sore throat|headache|migraine|stomach ?ache|tummy|period pains?|hurt my feelings|feelings hurt)\b/i.test(s)) return null;
+  const bodyPart = /\b(knee|knees|shoulder|shoulders|back|ankle|ankles|wrist|wrists|hip|hips|neck|elbow|elbows|leg|legs|arm|arms|hamstring|quad|calf|calves|glute|chest muscle|muscle)\b/i;
+  const mentionsPain = /\b(pain|painful|hurts?|hurting|sore|soreness|stiff|aching|aches?|doms|eina)\b/i.test(s)
+    || /\b(pulled|strained|tore|torn|twisted|sprained|injur|swollen|swelling|popped|gave (?:way|in|out))\b/i.test(s)
+    || (bodyPart.test(s) && /\b(problems?|issues?|trouble|acting up|playing up|niggle|niggling)\b/i.test(s));
+  if (!mentionsPain) return null;
+  // INJURY — sharp/structural signals, or pain that worsens under load.
+  if (/\b(sharp|stabbing|shooting|popped|pop sound|snapped|tore|torn|tear|sprain(?:ed)?|twisted|swollen|swelling|gave (?:way|in|out)|can'?t (?:bend|straighten|put weight)|pulled (?:a muscle|my)|strained my|i (?:hurt|injured) my|got injured|injury)\b/i.test(s)) return "injury";
+  if (/\b(worse|worsens|getting worse|gets worse)\b/i.test(s) && /\b(train|lift|squat|press|run|walk|exercis|gym|rep)/i.test(s)) return "injury";
+  // SORENESS — DOMS language (dull, whole-muscle, post-training).
+  if (/\b(doms|sore|stiff|aching|aches?)\b/i.test(s)) return "soreness";
+  // Everything left ("knee pain", "my shoulder hurts", "back problems") → ask the question.
+  return "ambiguous";
+}
+
 // DIGESTIVE ISSUES — bloating, acid reflux, heartburn, indigestion, gas, constipation.
 // 2026-07-12, Kam's screenshot: a client disclosed "I struggle a lot with bloating…
 // taking tablets for acid reflux and heartburn" AFTER the form, casually. This must be
