@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
@@ -1261,6 +1261,44 @@ test("water target: 33ml/kg, one-decimal, floored at 2.0L", () => {
   assert.equal(waterTargetLitres("80"), 2.6);        // string weight parses
   // the drift fix: a light client is floored to 2.0, not 1.7 — same on every screen now
   assert.equal(waterTargetLitres(50), 2.0);
+});
+
+// TARGET SANITY AUDIT (2026-07-13, the Bonolo case): stored 2,346 kcal for a 70kg
+// female office recomposition — matched NO input combination of our formula (expected
+// ~1,950). Six code paths write targets; nothing validated them after the fact. A wrong
+// target must not survive 24h; legitimate deviations (trend ±150, diet break) must.
+const BONOLO = {
+  currentWeight: "70", goalType: "recomposition", lifeSituation: "office",
+  trainingDaysPerWeek: 4, gender: "female", age: 27, heightCm: 165,
+  trainingExperience: "beginner",
+};
+test("target audit: the Bonolo case — impossible 2,346 kcal is caught and corrected", () => {
+  const a = auditStoredTargets({ ...BONOLO, calorieTarget: 2346, proteinTarget: 126 });
+  assert.equal(a.ok, false, "2,346 kcal for this profile must be flagged");
+  assert.ok(a.expectedCal >= 1850 && a.expectedCal <= 2050, `expected ~1950, got ${a.expectedCal}`);
+  assert.equal(a.expectedProt, 126, "her protein was actually correct");
+  assert.match(a.reason || "", /calorieTarget 2346/);
+});
+
+test("target audit: legitimate trend adjustments (±150) and correct targets pass", () => {
+  const base = auditStoredTargets({ ...BONOLO, calorieTarget: 1950, proteinTarget: 126 });
+  assert.equal(base.ok, true, "correct targets pass");
+  const trended = auditStoredTargets({ ...BONOLO, calorieTarget: base.expectedCal + 150, proteinTarget: 126 });
+  assert.equal(trended.ok, true, "weigh-in trend adjustment must NOT be clobbered");
+});
+
+test("target audit: an active diet break is deliberate — never corrected", () => {
+  const a = auditStoredTargets({ ...BONOLO, calorieTarget: 2400, proteinTarget: 126, dietBreakEndsAt: new Date(Date.now() + 3 * 86_400_000) });
+  assert.equal(a.ok, true, "diet-break target left alone");
+  const expired = auditStoredTargets({ ...BONOLO, calorieTarget: 2400, proteinTarget: 126, dietBreakEndsAt: new Date(Date.now() - 86_400_000) });
+  assert.equal(expired.ok, false, "expired diet break no longer protects a high target");
+});
+
+test("target audit: wrong protein is caught too; empty targets don't false-fire", () => {
+  const p = auditStoredTargets({ ...BONOLO, calorieTarget: 1950, proteinTarget: 180 });
+  assert.equal(p.ok, false, "180g for a 70kg female recomp is wrong");
+  const empty = auditStoredTargets({ ...BONOLO, calorieTarget: null, proteinTarget: null });
+  assert.equal(empty.ok, true, "unset targets are onboarding's job, not the auditor's");
 });
 
 test("water target: junk/missing weight defaults to an average adult (2.5L)", () => {

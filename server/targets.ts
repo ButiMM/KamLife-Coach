@@ -207,6 +207,64 @@ export function suggestStepTargetAdjustment(
 }
 
 // ============================================================
+// TARGET SANITY AUDIT — a wrong calorie/protein target must not survive 24 hours
+// (2026-07-13: a tester's dashboard showed 2,346 kcal + 126g protein — the protein was
+// exactly right for her female/recomp profile, the calories matched NO input combination
+// of our own formula. Six different code paths write calorieTarget; targets are computed
+// once from whatever profile data exists at that moment and never validated again, so a
+// wrong number SURVIVES). This audit recomputes the expected targets from the stored
+// profile and flags stored values outside tolerance. Tolerance ±300 kcal / ±30g protein
+// absorbs the legitimate trend-based weigh-in adjustments (±150) without clobbering
+// them; an active diet break is skipped entirely (its higher target is deliberate).
+// Pure — no DB, unit-tested. The morning scheduler runs it daily and corrects + escalates.
+// ============================================================
+export interface TargetAudit {
+  ok: boolean;
+  expectedCal: number;
+  expectedProt: number;
+  reason?: string; // set when !ok — plain description for the escalation/log
+}
+
+export function auditStoredTargets(u: {
+  currentWeight?: string | number | null;
+  goalType?: string | null;
+  lifeSituation?: string | null;
+  trainingDaysPerWeek?: number | null;
+  gender?: string | null;
+  age?: number | null;
+  heightCm?: number | null;
+  trainingExperience?: string | null;
+  calorieTarget?: number | null;
+  proteinTarget?: number | null;
+  dietBreakEndsAt?: Date | string | null;
+}): TargetAudit {
+  const weight = typeof u.currentWeight === "string" ? parseFloat(u.currentWeight) : (u.currentWeight ?? NaN);
+  const { calorieTarget: expectedCal, proteinTarget: expectedProt } = calculateTargets(
+    Number.isFinite(weight as number) && (weight as number) > 0 ? (weight as number) : 75,
+    u.goalType || "fat_loss",
+    u.lifeSituation || "office",
+    u.trainingDaysPerWeek || 3,
+    u.gender || "male",
+    u.age || 30,
+    u.heightCm || 170,
+    u.trainingExperience || "beginner",
+  );
+  // An active diet break deliberately runs a higher temporary target — leave it alone.
+  if (u.dietBreakEndsAt && new Date(u.dietBreakEndsAt).getTime() > Date.now()) {
+    return { ok: true, expectedCal, expectedProt };
+  }
+  const storedCal = u.calorieTarget ?? 0;
+  const storedProt = u.proteinTarget ?? 0;
+  if (storedCal > 0 && Math.abs(storedCal - expectedCal) > 300) {
+    return { ok: false, expectedCal, expectedProt, reason: `calorieTarget ${storedCal} is ${storedCal > expectedCal ? "+" : ""}${storedCal - expectedCal} vs expected ${expectedCal} for this profile` };
+  }
+  if (storedProt > 0 && Math.abs(storedProt - expectedProt) > 30) {
+    return { ok: false, expectedCal, expectedProt, reason: `proteinTarget ${storedProt}g vs expected ${expectedProt}g for this profile` };
+  }
+  return { ok: true, expectedCal, expectedProt };
+}
+
+// ============================================================
 // WATER TARGET — the ONE canonical daily hydration goal (2026-07-12, Kam: "apply the
 // same precision to all the other core areas"). 33 ml per kg of body weight, floored at
 // a sensible 2.0 L and rounded to one decimal. This exact expression was copy-pasted in

@@ -1,11 +1,12 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, exerciseLogs,
+  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, exerciseLogs, escalations,
   eq, gte, and, lt, desc, sql, asc,
   sendWhatsApp, canSendProactive, recordProactiveSend, claimDailySlot,
   getActiveClients, isPaused, dayStart, getYesterdayLogs,
   TRAINING_SCHEDULES, programmeDaysSince, wasSickOrInjured,
   todaySAST,
 } from "../shared";
+import { auditStoredTargets } from "../../targets";
 import { proteinHint } from "../../utils";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
@@ -38,6 +39,31 @@ export async function runMorningCheckin(): Promise<void> {
       ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
       : 0;
     if (daysSilent > 7) continue;
+
+    // ---- TARGET SANITY AUDIT (2026-07-13) — a wrong calorie/protein target must not
+    // survive 24h. A tester carried 2,346 kcal that matched NO input combination of our
+    // own formula (correct for her profile: ~1,950); six code paths write targets and
+    // nothing validated them after the fact. Correct it, tell the client plainly in
+    // this morning's brief, and escalate so the founder SEES every correction.
+    let targetFixLine = "";
+    try {
+      const audit = auditStoredTargets(client);
+      if (!audit.ok) {
+        await db.update(users).set({
+          calorieTarget: audit.expectedCal,
+          proteinTarget: audit.expectedProt,
+        }).where(eq(users.id, client.id));
+        client.calorieTarget = audit.expectedCal;
+        client.proteinTarget = audit.expectedProt;
+        targetFixLine = `🔧 I've fine-tuned your daily targets to *${audit.expectedCal} kcal · ${audit.expectedProt}g protein* — the right numbers for your profile. `;
+        console.error(`[TARGET_SANITY] corrected ${client.phoneNumber.slice(-4)}: ${audit.reason}`);
+        await db.insert(escalations).values({
+          userId: client.id, reason: "target_sanity_correction", status: "open",
+          triggerMessage: audit.reason || "stored targets out of bounds",
+          priority: "high", slaDeadline: new Date(Date.now() + 48 * 3_600_000),
+        }).catch(() => {});
+      }
+    } catch (auditErr) { console.error("[TARGET_SANITY] audit failed:", auditErr); }
     if (client.workSchedule === "night_shift") continue;
 
     if (daysSilent >= 3) {
@@ -429,7 +455,7 @@ export async function runMorningCheckin(): Promise<void> {
         // awake, and 3× the Twilio cost on the biggest daily fan-out. Same content,
         // one message, breakfast question last so it reads as the ask.
         const breakfastAsk = `🍳 What's for breakfast?${repeatSuggestion || ""}`;
-        const fullMessage = parts.join(" ") + "\n\n" + todaySection.join("\n") + "\n\n" + breakfastAsk;
+        const fullMessage = targetFixLine + parts.join(" ") + "\n\n" + todaySection.join("\n") + "\n\n" + breakfastAsk;
         await sendWhatsApp(phone, fullMessage);
       }
     } catch (err) {
