@@ -668,14 +668,20 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // buttons + today's context) below — NOT the model, which answers it generically and
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings
   // ("hi, I ate eggs") are not bare, so they still flow to the brain/handlers normally.
+  // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
+  // ARCHITECTURE FLIP (2026-07-13, tester round 3): early-commands now runs BEFORE the
+  // brain. The brain-first order meant every phrasing not explicitly gated got front-run
+  // by the model — bare "Workout" got an improvised wall-of-text session instead of the
+  // real programme. Deterministic code OWNS its commands; the brain fronts only what no
+  // handler claims. The gates above still protect messages owned by LATER handlers
+  // (steps/water/weight logs, direction, billing, pain triage in misc).
+  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
+  if (earlyResult !== null) return earlyResult;
+
   if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) return brainReply;
   }
-
-  // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
-  const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
-  if (earlyResult !== null) return earlyResult;
 
   // ---- MEDIA: IMAGE or AUDIO — exclusive branches, always return ----
   if (mediaUrl) {

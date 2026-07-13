@@ -98,7 +98,16 @@ async function processTextAsync(
     const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
 
     // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
-    const { text: cleanReply, media: replyMediaUrls } = renderReplyMarkers(reply);
+    const { text: rawReply, media: replyMediaUrls } = renderReplyMarkers(reply);
+    // NEVER-SILENT GUARANTEE (2026-07-13): an empty reply used to send NOTHING — a
+    // tester's 38s form-check video got dead air ("And it has still not replied").
+    // Whatever failed upstream, the client always hears back.
+    const cleanReply = rawReply && rawReply.trim().length > 0
+      ? rawReply
+      : (mediaType?.startsWith("video/")
+        ? `I got your video but couldn't process it — likely too long. Send a shorter clip (under 30 seconds, one set from the side) and I'll check your form.`
+        : `I got your message but hit a snag processing it. Try sending it again, or type it differently — I'm here.`);
+    if (!rawReply || rawReply.trim().length === 0) console.error(`[NEVER_SILENT] empty reply for ${phone.slice(-4)} — media=${mediaType || "none"} msg="${(message || "").slice(0, 60)}"`);
 
     // Image messages without a GIF/media attachment go through the coalescing buffer
     // so that album bursts (N photos sent together) result in ONE combined reply.
@@ -131,7 +140,11 @@ async function processVoiceAsync(
     const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
     // Render markers too — a voice note can trigger a workout (GIF + buttons) or a menu,
     // and previously those markers were sent to the client as literal text.
-    const { text, media } = renderReplyMarkers(reply);
+    const { text: rawVoiceText, media } = renderReplyMarkers(reply);
+    // Never-silent guarantee (2026-07-13) — see processTextAsync.
+    const text = rawVoiceText && rawVoiceText.trim().length > 0
+      ? rawVoiceText
+      : `I heard your voice note but couldn't work out what to do with it — say it once more, or type it.`;
     const parts = splitMessage(text);
     await sendParts(phone, parts, media);
     console.log(`[VOICE_ASYNC] delivered ${parts.length} part(s) to ${phone.slice(-4)}`);

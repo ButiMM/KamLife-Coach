@@ -644,6 +644,11 @@ export function looksLikeDefeatedNoResults(m: string): boolean {
 // serving it IS the answer — never navigation instructions.
 export function looksLikeWorkoutRequest(m: string): boolean {
   const s = m || "";
+  // Bare commands and the workout message's own button label typed back as text
+  // (2026-07-13 round 3: the model answered bare "Workout" with an improvised session,
+  // and "See every move" typed as text got circular navigation instructions — the
+  // deterministic serving carries the real link, so serving it IS the answer).
+  if (/^\s*(workout|my workout|today'?s?\s+workout|my programme|programme|my program|program|see every move)\W*$/i.test(s)) return true;
   // Not a request: done-reports, feedback, scheduling, and how-long/how-many questions.
   if (/\b(did|done|finished|completed|smashed|crushed|skipped|felt|was (easy|hard|tough)|cancel|skip|move|reschedule|postpone)\b/i.test(s)) return false;
   if (/\bhow (long|many|often|much)\b/i.test(s)) return false;
@@ -662,6 +667,14 @@ export function looksLikeWorkoutRequest(m: string): boolean {
   // ("check my form video" stays with the form-check flow: no demonstrat/exercise/moves.)
   if (/\bdemonstrat\w*\b/i.test(s)) return true;
   if (/\b(videos?|demos?)\b[^.!?]{0,20}\b(exercis\w*|moves?|workouts?)\b/i.test(s)) return true;
+  // 2026-07-13 tester round 2: "body weight exercises", "and for body weight exercises
+  // at home what should I do", "I don't know how to do them" — all reached the model,
+  // which improvised routines and then gave navigation instructions. Belly/abs context
+  // stays with the spot-reduction myth-buster, so exclude it here.
+  if (/\b(belly|stomach|tummy|abs|spot.?reduc)\b/i.test(s)) return false;
+  if (/\b(body ?weight|home)\s+exercises?\b/i.test(s)) return true;
+  if (/\bwhat exercises?\b/i.test(s)) return true;
+  if (/\b(don'?t|do not|dunno) know how to do (them|these|those|the (exercises?|moves?))\b/i.test(s)) return true;
   return false;
 }
 

@@ -2028,6 +2028,12 @@ test("workout request: natural phrasings reach the deterministic programme", () 
     "full body workout please",
     "what's my workout",
     "video demos of the exercises",
+    // 2026-07-13 tester round 3 — every one of these got a model improvisation:
+    "Workout",
+    "See every move",
+    "Body weight exercises",
+    "And for body weight exercises at home what should I do",
+    "I don't know how to do them",
   ]) assert.ok(looksLikeWorkoutRequest(msg), `must serve programme: ${msg}`);
 });
 
