@@ -636,6 +636,35 @@ export function looksLikeDefeatedNoResults(m: string): boolean {
   return false;
 }
 
+// WORKOUT REQUEST — natural phrasings must reach the deterministic programme, never the
+// brain (2026-07-13 tester screenshot: "Home workout with two dumbbells" matched nothing
+// — only exact "workout"/"my workout"/"1" did — so the MODEL improvised a generic
+// unformatted wall-of-text workout with no GIFs, no buttons, not her programme). Also
+// catches demo/video requests: the served session carries the "See every move" link, so
+// serving it IS the answer — never navigation instructions.
+export function looksLikeWorkoutRequest(m: string): boolean {
+  const s = m || "";
+  // Not a request: done-reports, feedback, scheduling, and how-long/how-many questions.
+  if (/\b(did|done|finished|completed|smashed|crushed|skipped|felt|was (easy|hard|tough)|cancel|skip|move|reschedule|postpone)\b/i.test(s)) return false;
+  if (/\bhow (long|many|often|much)\b/i.test(s)) return false;
+  // Questions ABOUT workouts ("Is a home workout as good as the gym?") go to the coach,
+  // not the programme — routing-audit caught this false-positive. Imperatives and
+  // "can/could you send…" remain requests.
+  if (/^\s*(is|are|does|do|why|would|will|when|where|who|should i|am i)\b/i.test(s)) return false;
+  // "home/quick/full-body/dumbbell/bodyweight/hotel workout"
+  if (/\b(home|quick|full.?body|dumbbell|bodyweight|hotel|travel|short)\s+(workout|session|training)\b/i.test(s)) return true;
+  // "give/send/need/want a workout", "can I get a workout"
+  if (/\b(give|send|show|need|want|get)\b[^.!?]{0,15}\b(workout|session)\b/i.test(s)) return true;
+  // "workout with dumbbells", "workout for today", "workout using bands"
+  if (/\bworkout\s+(with|using|for)\b/i.test(s)) return true;
+  if (/\bwhat.?s my workout\b/i.test(s)) return true;
+  // Demo/video requests — the workout message carries the swipe-through demo link.
+  // ("check my form video" stays with the form-check flow: no demonstrat/exercise/moves.)
+  if (/\bdemonstrat\w*\b/i.test(s)) return true;
+  if (/\b(videos?|demos?)\b[^.!?]{0,20}\b(exercis\w*|moves?|workouts?)\b/i.test(s)) return true;
+  return false;
+}
+
 // PAIN TRIAGE — the question a real coach asks before anything else (2026-07-12, Kam:
 // "a person says I'm having problems, should I switch out a workout? The coach needs to
 // catch whether it's just sensitivity from a workout or a REAL injury"). Three classes:

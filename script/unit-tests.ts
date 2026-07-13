@@ -25,7 +25,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -2004,6 +2004,36 @@ test("pain triage: non-musculoskeletal and pain-free messages → null", () => {
     "you hurt my feelings",
     "my stomach hurts after every meal", // gut → digestive handler, never knee-triage
   ]) assert.equal(classifyPainReport(msg), null, `null: ${msg}`);
+});
+
+// WORKOUT REQUEST (2026-07-13 tester screenshot: "Home workout with two dumbbells"
+// matched nothing → the MODEL improvised an unformatted generic workout instead of her
+// programme; "Videos of demonstrating" got navigation instructions instead of the demos).
+// Natural phrasings must reach the deterministic session with GIFs + buttons.
+test("workout request: natural phrasings reach the deterministic programme", () => {
+  for (const msg of [
+    "Home workout with two dumbbells",
+    "Videos of demonstrating",
+    "give me a workout",
+    "can you send me a quick workout",
+    "workout with no equipment",
+    "full body workout please",
+    "what's my workout",
+    "video demos of the exercises",
+  ]) assert.ok(looksLikeWorkoutRequest(msg), `must serve programme: ${msg}`);
+});
+
+test("workout request: done-reports, feedback, scheduling and form-checks do NOT match", () => {
+  for (const msg of [
+    "I did my workout",
+    "finished my workout, felt strong",
+    "cancel today's workout",
+    "move my workout to tomorrow",
+    "the workout felt easy",
+    "how many workouts per week should I do",
+    "check my form video",
+    "I walked 10000 steps",
+  ]) assert.ok(!looksLikeWorkoutRequest(msg), `must NOT match: ${msg}`);
 });
 
 // 2026-07-12 collision probe — cross-detector routing bugs, locked so they stay dead.

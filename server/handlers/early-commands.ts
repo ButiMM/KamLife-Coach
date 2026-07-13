@@ -14,11 +14,12 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
+import { resolvePainTriage } from "./pain-triage";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -39,35 +40,10 @@ export async function handleEarlyCommands(ctx: {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
 
-  // ---- PAIN TRIAGE ANSWER — the reply to the ONE question the coach asked (2026-07-12,
-  // soreness vs. real injury). Runs FIRST and only when we're mid-triage; the stashed
-  // area lives in awaitingInputType ("pain_triage:knee"). Sharp → injury protocol + the
-  // injury is persisted so the programme trains around it. Sore → DOMS reassurance.
-  // Neither → they changed topic; clear the flag and fall through, zero stickiness.
-  if ((user.awaitingInputType || "").startsWith("pain_triage:")) {
-    const triageArea = String(user.awaitingInputType).split(":")[1] || "the affected area";
-    const saidSharp = /\b(sharp|stab|stabbing|shooting|joint|worse|1)\b/i.test(m);
-    const saidSore = /\b(sore|stiff|dull|all over|eases|warm|muscle|doms|2)\b/i.test(m);
-    await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, user.id)).catch(() => {});
-    if (saidSharp && !saidSore) {
-      if (triageArea !== "the affected area") {
-        const existingInj = (user.injuries || "").toLowerCase();
-        if (!existingInj.includes(triageArea)) {
-          const updatedInj = user.injuries && user.injuries !== "none" ? `${user.injuries}, ${triageArea}` : triageArea;
-          await db.update(users).set({ injuries: updatedInj }).where(eq(users.id, user.id)).catch(() => {});
-        }
-      }
-      const sharpReply = `That's the one we take seriously. Stop loading ${triageArea === "the affected area" ? "it" : `your ${triageArea}`} — today's session changes, it doesn't die. I've noted it, so your workouts train *around* it from now on.\n\nIce 15 min if swollen. If it's severe or doesn't settle within 48 hours, see a doctor or physio — never train through sharp pain.\n\nReply *workout* and I'll give you today's session built around it.\n\n[BUTTONS:Today's workout|Log food]`;
-      await logChat(user.id, message, sharpReply, "INJURY");
-      return sharpReply;
-    }
-    if (saidSore) {
-      const soreReply = `Good news — that's *DOMS* (normal muscle soreness), not an injury. It means the training is working: your muscles are adapting.\n\n✅ Train — it eases as you warm up\n✅ Light walking speeds recovery\n✅ Protein — your muscles are rebuilding right now\n\nIt peaks around day 2 and fades by day 3. If it's ever *sharp* or in a *joint*, tell me straight away — that's a different story.\n\n[BUTTONS:Today's workout|Log food]`;
-      await logChat(user.id, message, soreReply, "DOMS");
-      return soreReply;
-    }
-    // Changed topic — flag already cleared; fall through to normal handling.
-  }
+  // ---- PAIN TRIAGE ANSWER — sharp-vs-sore reply resolver (handlers/pain-triage.ts).
+  // Runs FIRST and only when mid-triage; otherwise returns null and we fall through.
+  const triageResolved = await resolvePainTriage({ message, m, user });
+  if (triageResolved !== null) return triageResolved;
 
   // ---- PORTION CONTROL / HOW TO MEASURE — hand-portion method, goal-aware ----
   // The #1 post-onboarding question. We deliberately DON'T teach calorie counting or
@@ -352,7 +328,14 @@ export async function handleEarlyCommands(ctx: {
   const isBodyPartWorkoutRequest = !m.includes("?")
     && /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m);
 
-  if (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest) {
+  if (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest || looksLikeWorkoutRequest(m)) {
+    // Equipment named in the request itself ("home workout with two dumbbells", "workout
+    // with no equipment") overrides the mode for THIS serving via the same temp mechanism
+    // holiday mode uses — 2026-07-13 tester screenshot: this phrasing used to reach the
+    // model, which improvised an unformatted generic workout instead of her programme.
+    if (/\bdumbbells?\b/i.test(m)) tempEquipmentMode.set(phone, "gym_dumbbell");
+    else if (/\b(no equipment|bodyweight|nothing at home|home workout)\b/i.test(m)) tempEquipmentMode.set(phone, "home");
+
     // 5-minute cooldown: if we already delivered a full workout recently, return a short
     // "it's above ↑" reply instead of re-sending the full text again.
     // The cooldown only triggers on re-requests AFTER the delivery fix (text now reliably
@@ -365,7 +348,7 @@ export async function handleEarlyCommands(ctx: {
       .orderBy(desc(chatHistory.createdAt))
       .limit(10);
     if (recentSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
-      const cool = `Your workout was just sent — scroll up ↑ to see it. Type *done* when you finish the session.`;
+      const cool = `Your workout was just sent — scroll up ↑ to see it. Tap *See every move* on it for the video demos. Type *done* when you finish the session.`;
       await logChat(user.id, message, cool, "WORKOUT_COOLDOWN");
       return cool;
     }
