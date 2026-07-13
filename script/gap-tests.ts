@@ -30,6 +30,7 @@ const { parseLiftLog } = await import("../server/handlers/workout");
 const { assessWeightRate, weeklyTrendSlopeKg } = await import("../server/handlers/weight");
 const { parseMealDate, isRetroactiveMeal, mealDateLabel } = await import("../server/utils");
 const { getMachineSlug, buildMachineIdPrompt } = await import("../server/handlers/equipment-vision");
+const { buildDayMilestoneMessage } = await import("../server/scheduler/jobs/milestones");
 const { scanForSAFoods } = await import("../server/handlers/food-scanner");
 
 let passed = 0;
@@ -1305,6 +1306,49 @@ test("food quantity: size words scale the whole portion", () => {
   const adjNorm = adjustFoodsForSegment(scanForSAFoods("pap"), "pap") as any[];
   const big = adjBig.find(f => /pap/i.test(f.name)), norm = adjNorm.find(f => /pap/i.test(f.name));
   assert.ok(big && norm && big.adjustedCalories > norm.adjustedCalories, "big plate > normal plate");
+});
+
+// ============================================================
+// DAY-14 RECEIPT (2026-07-13, Kam: "people lose interest within two weeks — we have to
+// do better in our retention"). The two-week milestone must show PROOF (their own
+// numbers), never just a pep talk — and degrade gracefully when stats are missing.
+// ============================================================
+test("day-14 receipt: full stats produce a data-backed receipt with buttons", () => {
+  const msg = buildDayMilestoneMessage("Kam", 14, 5, "92", {
+    steps14: 98000, stepsBurnKcal: 5100, mealDays14: 11,
+    weightStart: 92, weightNow: 90.8, goal: "fat_loss",
+  });
+  assert.ok(/2-week receipt/i.test(msg), "receipt header present");
+  assert.ok(/5 training sessions/.test(msg), "sessions line");
+  assert.ok(/98,000 steps/.test(msg), "steps line");
+  assert.ok(/5,100 kcal/.test(msg), "weight-scaled burn line");
+  assert.ok(/11 days of meals/.test(msg), "meal-days line");
+  assert.ok(/1\.2kg down/.test(msg), "weight-loss line");
+  assert.ok(/week 4–6/.test(msg), "sets the mirror expectation honestly");
+  assert.ok(/\[BUTTONS:/.test(msg), "one-tap next action");
+});
+
+test("day-14 receipt: scale UP on fat loss is normalised, never shamed", () => {
+  const msg = buildDayMilestoneMessage("Thandi", 14, 4, "70", {
+    steps14: 60000, mealDays14: 8, weightStart: 70, weightNow: 70.6, goal: "fat_loss",
+  });
+  assert.ok(/normal at 2 weeks/i.test(msg), "up-tick framed as normal adaptation");
+  assert.ok(!/failure|behind|disappointing/i.test(msg), "no shame language");
+});
+
+test("day-14 receipt: missing stats degrade to the plain milestone (no empty receipt)", () => {
+  const msg = buildDayMilestoneMessage("Sipho", 14, 1, null, { steps14: 0, mealDays14: 0, weightStart: null, weightNow: null });
+  assert.ok(!/2-week receipt/i.test(msg), "no receipt block with <2 facts");
+  assert.ok(/two weeks/i.test(msg), "still a warm two-week message");
+  const noStats = buildDayMilestoneMessage("Sipho", 14, 3, null);
+  assert.ok(noStats.length > 50, "works with stats omitted entirely (backwards compatible)");
+});
+
+test("day-14 receipt: muscle-gain client sees weight UP as building fuel", () => {
+  const msg = buildDayMilestoneMessage("Neo", 14, 6, "75", {
+    steps14: 70000, mealDays14: 10, weightStart: 75, weightNow: 75.8, goal: "muscle_gain",
+  });
+  assert.ok(/building fuel/i.test(msg), "gain framed as the goal working");
 });
 
 // ============================================================
