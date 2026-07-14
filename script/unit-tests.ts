@@ -28,6 +28,11 @@ import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-
 import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, isAskingNotReporting } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
+// Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
+// stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
+// import below; the static imports above are all pure and don't touch db.
+process.env.KAMLIFE_DB_STUB = "1";
+
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
@@ -2149,6 +2154,22 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
       const n = plainProteinNudge({ proteinRemaining: pr, isMuscleGain: mg, hasGoodProteins: hp });
       assert.ok(n.length > 0 && !/\dg\b|\d+\s*kcal/.test(n), `nudge must be number-free: ${n}`);
     }
+  });
+}
+
+// ACTIVATION MOMENT (2026-07-14) — the expectation-setter + first-action celebration.
+{
+  const { isActivated, buildActivationBrief } = await import("../server/activation");
+  test("activation: brief sets expectations plainly, number-free, with the 4 beats", () => {
+    const b = buildActivationBrief("Thabo");
+    assert.ok(/How this works/i.test(b), "leads with how it works");
+    assert.ok(/only job/i.test(b) && /don'?t panic/i.test(b) && /30 days/i.test(b) && /yours to drive/i.test(b), "all four beats present");
+    assert.ok(!/\d+\s*kcal|\d+g protein/i.test(b), "expectation-setter is number-free");
+  });
+  test("activation: isActivated reads the token", () => {
+    assert.equal(isActivated({ profileNotes: "diet:halal activated:1" }), true);
+    assert.equal(isActivated({ profileNotes: "diet:halal" }), false);
+    assert.equal(isActivated({}), false);
   });
 }
 

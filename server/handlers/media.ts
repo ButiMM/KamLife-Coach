@@ -44,6 +44,7 @@ import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFrom
 import { extractMealLabel } from "./food-context";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { remainingInMeals } from "../education";
+import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
@@ -777,8 +778,7 @@ export async function handleMediaMessage(ctx: {
       // phrases stay as an extra belt.
       const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
-      // Number-free delivery for a low-numeracy client (numbers:low) — the vision
-      // prompt omits figures, and a final scrub nets anything that slips through.
+      // Number-free delivery for a numbers:low client (prompt omits figures + scrub net).
       const photoNumbersLow = getNumbersMode(user) === "low";
 
       const todayStartPhoto = sastDayStart();
@@ -1175,10 +1175,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      const photoReply = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
-      // Final net: for a numbers:low client, scrub any figure the model or a
-      // deterministic line leaked, so they NEVER see a number on a photo reply.
-      return photoNumbersLow ? stripNumbersFromProse(photoReply) : photoReply;
+      const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      // numbers:low → scrub leaked figures; then the once-only first-win celebration.
+      const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
+      return `${photoReply}${await firstActionCelebration(user, phone, "meal")}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);

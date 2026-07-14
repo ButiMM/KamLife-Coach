@@ -22,6 +22,7 @@ import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
+import { firstActionCelebration } from "../activation";
 
 export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }): string | null {
   const lo = msg.toLowerCase();
@@ -1194,8 +1195,9 @@ export async function handleFoodContext(ctx: {
         .find(note => note);
       const upsellNote = comboUpsell ? `\n\n${comboUpsell}` : "";
       const guiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
+      const activationNote = await firstActionCelebration(user, phone, "meal");
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}`;
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----

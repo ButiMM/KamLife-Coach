@@ -86,7 +86,7 @@ const FLOW_A: Flow = {
     { send: "gym", expectState: "ASK_GYM_SETUP", expectReply: [/what does your gym have/i] },
     { send: "Full gym (machines)", expectState: "ASK_BUDGET", expectReply: [/budget/i] },
     { send: "2", expectState: "ASK_EXPERIENCE", expectReply: [/experience/i] },
-    { send: "1", expectState: "COMPLETE", expectReply: [/programme is built/i, /The next 30 days, honestly/i, /kcal\/day/i, /steps\/day/i] },
+    { send: "1", expectState: "COMPLETE", expectReply: [/programme is built/i, /The next 30 days, honestly/i, /kcal\/day/i, /steps\/day/i, /How this works/i, /take one photo/i] },
   ],
   final: {
     name: "Thabo", gender: "male", age: 30, currentWeight: "83", heightCm: 175, bmi: "27.1",

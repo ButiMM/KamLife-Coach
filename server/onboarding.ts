@@ -4,6 +4,7 @@ import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer } from "./onboarding-intake";
 import { TRIAL_DAYS, TRIALS_ENABLED } from "./pricing-config";
+import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets, calculateStepsTarget } from "./targets";
@@ -275,7 +276,11 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
   const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. *7-day money-back guarantee* — if you're not happy in your first week, full refund, no questions. POPIA protected._`;
-  const msg4 = `*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths, you never count a thing.\n\n_I'll keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime and I'll show the calories and protein._\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
+  // ACTIVATION MOMENT — the calm, clear expectation-setter (what's required, don't
+  // panic, what to expect, at your own pace), then ONE tiny first action to hook the
+  // habit in the first five minutes.
+  const activationBrief = buildActivationBrief(u.name?.split(" ")[0]);
+  const msg4 = `${activationBrief}\n\n📸 *Right now, take one photo of your next meal or snack and send it.* That single act is your first win — and the whole habit in one move.\n\n_I keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime._`;
   return `${underweightNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
 }
 
