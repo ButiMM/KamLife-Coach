@@ -10,6 +10,9 @@
 
 import assert from "node:assert/strict";
 
+// Set before any dynamic server import below — auth.ts pulls in db.ts.
+process.env.KAMLIFE_DB_STUB = "1";
+
 let passed = 0;
 let failed = 0;
 const failures: string[] = [];
@@ -283,6 +286,47 @@ test("proactive pause: PROACTIVE_PAUSED=undefined → not paused", () => {
 test("proactive pause: PROACTIVE_PAUSED=1 (wrong value) → not paused", () => {
   assert.equal(isProactivePausedTest("1"), false);
 });
+
+// ── ADMIN CSRF GUARD (2026-07-14) ────────────────────────────────────────────
+// The dashboard "Activate" button silently 403'd every WRITE when the dashboard
+// was reached on a host that wasn't exactly APP_URL (e.g. the Railway URL while
+// APP_URL pointed at the custom domain): the CSRF guard rejected any Origin that
+// didn't start with APP_URL, and browsers send Origin on POST but not same-origin
+// GET — so reads worked, writes died. The founder's "it loads her but won't
+// override" bug. Fix: a SAME-ORIGIN write (Origin host === request Host) is safe
+// regardless of APP_URL; only genuinely cross-origin writes are blocked.
+{
+  const cryptoMod = await import("node:crypto");
+  process.env.COACH_DASHBOARD_KEY = "integ-test-secret";
+  process.env.APP_URL = "https://kamlifecoach.co.za";
+  const { requireAdminKey } = await import("../server/routes/auth");
+  const exp = Date.now() + 3_600_000;
+  const payload = `admin:${exp}`;
+  const sig = cryptoMod.createHmac("sha256", "integ-test-secret").update(payload).digest("hex");
+  const cookie = `admin_session=${payload}.${sig}`;
+  const decide = (host: string, origin?: string): "next" | number => {
+    let nexted = false, code = 0;
+    const req: any = { headers: { cookie, host, ...(origin ? { origin } : {}) } };
+    const res: any = { status: (c: number) => { code = c; return { json: () => {} }; } };
+    requireAdminKey(req, res, () => { nexted = true; });
+    return nexted ? "next" : code;
+  };
+  test("csrf: same-origin write on a non-APP_URL host is allowed (the Activate bug)", () => {
+    assert.equal(decide("kamlife-coach.up.railway.app", "https://kamlife-coach.up.railway.app"), "next");
+  });
+  test("csrf: same-origin write on the custom domain is allowed", () => {
+    assert.equal(decide("kamlifecoach.co.za", "https://kamlifecoach.co.za"), "next");
+  });
+  test("csrf: Origin matching APP_URL is allowed even behind a proxy host", () => {
+    assert.equal(decide("internal-proxy-host", "https://kamlifecoach.co.za"), "next");
+  });
+  test("csrf: a read with no Origin header is allowed", () => {
+    assert.equal(decide("kamlife-coach.up.railway.app", undefined), "next");
+  });
+  test("csrf: a genuinely cross-origin write from an attacker is still blocked", () => {
+    assert.equal(decide("kamlifecoach.co.za", "https://evil.example.com"), 403);
+  });
+}
 
 // ── Results ──────────────────────────────────────────────────────────────────
 

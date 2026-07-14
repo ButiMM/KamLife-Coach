@@ -49,15 +49,28 @@ export function requireAdminKey(req: any, res: any, next: any) {
   }
 
   // 1. httpOnly cookie — React dashboard
-  // CSRF guard: if Origin is present and doesn't match APP_URL, reject — prevents
-  // cross-origin form submissions from hijacking a logged-in admin session.
+  // CSRF guard: if Origin is present and matches NEITHER the request's own host
+  // (same-origin) NOR APP_URL, reject — prevents cross-origin form submissions from
+  // hijacking a logged-in admin session. Same-origin is accepted regardless of how
+  // APP_URL is set: a browser only sends this cookie on a request to the dashboard's
+  // own origin, so Origin===Host is definitionally safe. This is what unblocked the
+  // Activate button (2026-07-14): the dashboard was reached on the Railway URL while
+  // APP_URL pointed at the custom domain, so every WRITE (Origin sent) got 403'd
+  // while every READ (no Origin on same-origin GET) worked — the "loads her but
+  // won't override" symptom. Reads weren't affected because GETs omit Origin.
   const cookies = parseCookies(req);
   if (cookies.admin_session && verifySessionToken(cookies.admin_session, secret)) {
     const origin = req.headers.origin as string | undefined;
-    const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
-    if (origin && appUrl && !origin.startsWith(appUrl)) {
-      console.warn(`[AUTH] CSRF guard: unexpected Origin "${origin}" on cookie-auth request`);
-      return res.status(403).json({ message: "Forbidden" });
+    if (origin) {
+      const appUrl = (process.env.APP_URL || "").replace(/\/$/, "");
+      let originHost = "";
+      try { originHost = new URL(origin).host; } catch { /* malformed Origin */ }
+      const sameOrigin = originHost !== "" && originHost === req.headers.host;
+      const matchesAppUrl = appUrl !== "" && origin.startsWith(appUrl);
+      if (!sameOrigin && !matchesAppUrl) {
+        console.warn(`[AUTH] CSRF guard: cross-origin write blocked — Origin "${origin}" host="${originHost}" vs Host "${req.headers.host}" / APP_URL "${appUrl}"`);
+        return res.status(403).json({ message: "Forbidden" });
+      }
     }
     return next();
   }
