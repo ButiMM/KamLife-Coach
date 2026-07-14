@@ -56,6 +56,7 @@ import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runComebackProtocol } from "./scheduler/jobs/comeback";
 import { runQualityAudit } from "./scheduler/jobs/quality-audit";
+import { runDrillNightly } from "./scheduler/jobs/drill-nightly";
 import { runTrialCountdown } from "./scheduler/jobs/trial";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runMonthlyPhotoCheckin } from "./scheduler/jobs/progress-photo";
@@ -367,6 +368,7 @@ export async function initScheduler(): Promise<void> {
   // Samples the day's exchanges, scores them with a separate model, alerts the
   // coach if quality drifts below the bar. Runs late evening after the day's traffic.
   cron.schedule("30 21 * * *",   () => safe("runQualityAudit",        runQualityAudit),        { timezone: "UTC" }); // 11:30pm SAST
+  cron.schedule("0 1 * * *",     () => safe("runDrillNightly",        runDrillNightly),        { timezone: "UTC" }); // 3am SAST — replay every tester failure against the live brain; failures WhatsApp Kam (stabilization contract, box one)
 
   // ── Daily setup-checklist reminder ────────────────────────────────────────
   // Fires once/day at 9am SAST (7am UTC). Builds a WhatsApp message listing

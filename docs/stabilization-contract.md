@@ -35,11 +35,13 @@ measurable and layer 2 verified.
 
 ## The bar ("solid") — reopen features only when ALL boxes tick
 
-- [ ] **Live-brain battery in the loop:** drill-battery extended with EVERY tester
-      failure from 10–13 July (improvised workout, generic meal plan, circular
-      demo instructions, "All of them" chat spiral), run automatically in production
-      nightly (the prod key is already there), failures escalated to the founder
-      dashboard like any other escalation. The battery GROWS with every future
+- [x] **Live-brain battery in the loop** _(shipped 2026-07-14; ticks fully after the
+      first prod night run)_: cases moved to server/drill-cases.ts (shared by the
+      manual CLI and prod), extended with the 10–13 July failures (sick-state memory,
+      repeat-flu acknowledgement, third-person sickness, not-eaten-today contradiction,
+      improvised dumbbell workout, circular demo instructions), run nightly at 03:00
+      SAST by scheduler job runDrillNightly — failures WhatsApp the founder with the
+      case names, results land in ops telemetry. The battery GROWS with every future
       screenshot — a tester failure that isn't in the battery within 24h is a
       process violation.
 - [ ] **Onboarding data-capture verification:** one scripted end-to-end signup per
