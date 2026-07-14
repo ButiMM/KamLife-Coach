@@ -2,6 +2,7 @@ import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote, remainingInMeals } from "../education";
+import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
 import { stepBurnKcal } from "../targets";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
@@ -988,5 +989,18 @@ export function buildFoodLogReply(p: {
           : `🟢 Nicely done — still room for ${mealsLeft || "a bit more"} today.`)
     : "";
   const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
+
+  // ADAPTIVE DELIVERY (2026-07-14): a client the bot has learned can't read numbers
+  // gets a fully number-free reply — plain verdict + the food names + a words-only
+  // protein nudge. No kcal, no gram figures, nothing to work out. The numbers still
+  // exist (logged, on the dashboard, in the totals the bot reasons over) — they're
+  // just not put in front of a person who told us they don't understand them.
+  if (getNumbersMode(user) === "low") {
+    const plainHead = verdictHeadline || "🟢 Logged — nice one.";
+    const nudge = plainProteinNudge({ proteinRemaining, isMuscleGain, hasGoodProteins: !!hasGoodProteins });
+    const foods = stripFoodLineNumbers(foodLines);
+    return `${gentlePrefix}${plainHead}\n\n*Logged ✅*\n${foods}\n\n${nudge}[BUTTONS:My progress|Today's workout]`;
+  }
+
   return `${gentlePrefix}${head}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${addOn}[BUTTONS:My progress|Today's workout]`;
 }

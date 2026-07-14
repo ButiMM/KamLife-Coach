@@ -2097,6 +2097,32 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   assert.equal(parseSickDays("out for 60 days"), 14, "capped at 14");
 });
 
+// ADAPTIVE NUMBERS MODE (2026-07-14, Kam: "the bot should be adapting anyway").
+// A client the bot learns can't read numbers gets number-free food replies; the
+// figures still exist, they're just not put in front of them.
+{
+  const { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } = await import("../server/numbers-mode");
+  test("numbers-mode: profileNotes token drives the mode", () => {
+    assert.equal(getNumbersMode({ profileNotes: "diet:halal numbers:low" }), "low");
+    assert.equal(getNumbersMode({ profileNotes: "diet:halal" }), "normal");
+    assert.equal(getNumbersMode({ profileNotes: null }), "normal");
+    assert.equal(getNumbersMode({}), "normal");
+  });
+  test("numbers-mode: stripper removes kcal/protein, keeps food + description", () => {
+    assert.equal(stripFoodLineNumbers("• Pap: ~470 kcal, 10g protein (1 cup)"), "• Pap (1 cup)");
+    assert.equal(stripFoodLineNumbers("• Chicken breast: ~250 kcal | 30g protein"), "• Chicken breast");
+    const two = stripFoodLineNumbers("• Rice: ~200 kcal, 4g protein\n• Beef stew: ~350 kcal, 28g protein (1 bowl)");
+    assert.ok(!/\d/.test(two.replace(/\(.*?\)/g, "")), "no stray digits outside descriptions");
+    assert.ok(/Rice/.test(two) && /Beef stew/.test(two), "food names survive");
+  });
+  test("numbers-mode: plainProteinNudge never contains a gram figure", () => {
+    for (const [pr, mg, hp] of [[80, false, false], [0, true, true], [40, true, false]] as [number, boolean, boolean][]) {
+      const n = plainProteinNudge({ proteinRemaining: pr, isMuscleGain: mg, hasGoodProteins: hp });
+      assert.ok(n.length > 0 && !/\dg\b|\d+\s*kcal/.test(n), `nudge must be number-free: ${n}`);
+    }
+  });
+}
+
 // THE SHARED ASKING/REPORTING GATE (2026-07-14, Kam: "is our system smart enough
 // to detect when somebody is just asking?"). One floor for every lane: no write,
 // no template, on an ASKING message. The photo lane leaked exactly his phrasings

@@ -686,13 +686,32 @@ const CASES: Case[] = [
   { name: "calorie confusion: 'what is a calorie'",
     msg: "what is a calorie?",
     expect: [/data bundle|energy in food|never have to (understand|count)|my job/i] },
-  { name: "calorie confusion: 'too many numbers, I'm confused'",
+  // "too many numbers" is both confusion AND a request for less — the keep-it-simple
+  // handler catches it and ACTS (switches numbers off), the best possible outcome.
+  { name: "calorie confusion: 'too many numbers' switches to plain mode",
     msg: "this is too many numbers, I'm confused by the calories",
-    expect: [/data bundle|plain language|my job|room for a light/i] },
+    expect: [/no more numbers|plain words|keep it simple|show me the numbers/i] },
   // A normal totals question is NOT confusion — must still answer with the total.
   { name: "calorie literacy: 'how many calories left' still answers totals",
     msg: "how many calories do I have left today?",
     reject: [/data bundle/i] },
+
+  // ── ADAPTIVE NUMBERS MODE (2026-07-14) — the bot hides numbers for a client who
+  // can't read them, keeps them for everyone else, and both are togglable by voice.
+  { name: "numbers mode: low-numeracy client's food log has NO kcal figures",
+    msg: "I had chicken and rice for lunch",
+    user: { profileNotes: "numbers:low" },
+    reject: [/\d+\s*kcal/i, /\d+g protein/i] },
+  { name: "numbers mode: normal client still gets the kcal figures",
+    msg: "I had chicken and rice for lunch",
+    expect: [/kcal/i] },
+  { name: "numbers mode: 'keep it simple' switches numbers off",
+    msg: "keep it simple, no numbers please",
+    expect: [/no more numbers|plain words|show me the numbers/i] },
+  { name: "numbers mode: 'show me the numbers' switches them back on",
+    msg: "show me the numbers",
+    user: { profileNotes: "numbers:low" },
+    expect: [/calories and protein.*again|show the (calories|numbers)/i] },
 ];
 
 async function main() {

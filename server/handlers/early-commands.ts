@@ -21,6 +21,7 @@ import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
+import { handleNumbersLiteracy } from "./numbers-literacy";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1282,24 +1283,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return dbReply;
   }
 
-  // ---- CALORIE CONFUSION (2026-07-14, a tester: "it talks in calories and I don't
-  // understand calories — I don't know what it means"). Much of this market has never
-  // counted a calorie in their life. When someone says they don't get it, drop the
-  // number-talk entirely and explain in the two things everyone knows: a data bundle
-  // and a plate of food. Fires ANY day (not gated like the onboarding education note),
-  // and reassures that the COUNTING is our job, never theirs. ----
-  const isCalorieConfusion = /\b(what(?:'?s| is| are)?\s+(?:a |the )?calories?\b|don.?t (understand|get|know)( what)? (calories|kcal|this number|these numbers|the numbers)|calories?.*confus|confus.*calories?|too many numbers|what does (that|this|the number|kcal|calories?) mean|what(?:'?s| is)?\s+a?\s*kcal|explain (the )?calories?|i don.?t count calories|never counted calories)\b/i.test(m)
-    || (/\bcalor|kcal\b/i.test(m) && /\b(confused|lost|don.?t understand|makes? no sense|too complicated|i.?m not good with numbers)\b/i.test(m));
-  if (isCalorieConfusion) {
-    const goal = user.goalType || "fat_loss";
-    const tgt = user.calorieTarget || 1800;
-    const goalLine = goal === "muscle_gain"
-      ? `Yours is set a little *above* what your body burns, so there's extra to build muscle with.`
-      : `Yours is set a little *below* what your body burns, so the difference comes off as fat — without you ever going hungry.`;
-    const calmReply = `No stress${capName ? `, ${capName}` : ""} — you never have to understand calories or count anything. That's *my* job. 💛\n\nHere's the only picture you need: think of it like a *data bundle for food*. Every day you get a bundle. Every meal uses a little. When I send a number back, that's just *how much bundle is left* — nothing to work out.\n\n${goalLine}\n\nSo you just do the easy part: send me what you eat — a photo or a few words — and I'll tell you in plain language, like *"that's a solid lunch, room for a light dinner."* Deal?`;
-    await logChat(user.id, message, calmReply, "CALORIE_EXPLAINER");
-    return calmReply;
-  }
+  // ---- NUMBERS LITERACY — keep-it-simple / show-me-numbers / calorie confusion
+  // (handlers/numbers-literacy.ts). The adaptive delivery dial lives here. ----
+  const literacyReply = await handleNumbersLiteracy({ message, m, user, capName, phone });
+  if (literacyReply !== null) return literacyReply;
 
   // ---- LOAD SHEDDING ----
   const isLoadShedding = /\b(load.?shed|loadshed|eskom|no.?electricity|no.?power|stage\s*[1-8]|power.?cut|power.?out|blackout|no.?lights|lights.?out|inverter.?dead|battery.?dead|no.?signal.*load|generator.*off)\b/i.test(m);
