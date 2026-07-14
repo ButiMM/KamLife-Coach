@@ -805,6 +805,34 @@ export function looksLikeWeightReport(m: string): boolean {
   return /^\s*(?:i\s+)?(?:weigh(?:ed)?(?:\s+in)?(?:\s+at)?\s*|my\s+weight\s*(?:is|:)?\s*|weight\s*(?:is|:)?\s*)?\d{2,3}(?:[.,]\d{1,2})?\s*kgs?\s*(?:today|this morning)?\s*[.!]?\s*$/i.test(m);
 }
 
+// ONE shared answer to "is this message ASKING, or REPORTING?" — the systemic
+// gate (docs/adr-intent-lanes.md, Stage 2 floor). The disease was 50 loggers and
+// templates each deciding this with their own local regex, each with its own
+// holes ("does this fit my macros?" auto-logged the photo because the local
+// detector only knew "fit my goal/diet/plan"). Local heuristics stay as extra
+// belts; this function is the FLOOR every lane shares: no logger may take a
+// write side effect, and no template may fire, on a message this says is a
+// question. Bias when ambiguous: ASKING — answering a report as a question is
+// recoverable ("reply log it"), logging a question is the class of bug that
+// loses testers. Pure — unit-tested + generated-matrix-tested in routing-audit.
+export function isAskingNotReporting(message: string): boolean {
+  const s = (message || "").trim();
+  if (!s) return false;
+  if (/[?？]\s*$/.test(s)) return true;                                   // ends in a question mark
+  if (/^[?!¿]+$/.test(s)) return true;                                    // bare "?"
+  // Interrogative sentence starts ("did" excluded — "did my workout" is a report)
+  if (/^(what|what'?s|which|when|where|who|why|how)\b/i.test(s)) return true;
+  if (/^(can|could|should|shall|would|will|may|must) (i|we|you)\b/i.test(s)) return true;
+  if (/^(is|are|am|isn'?t|aren'?t|does|doesn'?t|do|don'?t) (i|it|this|that|these|those|they|we|you|my|the)\b/i.test(s)) return true;
+  // Mid-sentence asking shapes
+  if (/\b(can|could|should|may|must) i\b/i.test(s)) return true;
+  if (/\b(is|are) (this|that|these|those|it) (ok(ay)?|good|bad|fine|healthy|allowed|too|enough|alright)\b/i.test(s)) return true;
+  if (/\b(does|will|would) (this|that|it) (fit|work|count|help|hurt|matter|affect)\b/i.test(s)) return true;
+  if (/\bfits? (?:in(?:to)?|within)? ?(?:my|the) (calories|macros|kcal|goal|diet|plan|budget|numbers|targets?|deficit|surplus)\b/i.test(s)) return true;
+  if (/\b(what do you think|your thoughts|thoughts on|verdict|yay or nay|good or bad|good idea|bad idea|am i allowed|allowed to have|not sure if|any advice|help me decide|wondering if)\b/i.test(s)) return true;
+  return false;
+}
+
 // Goal-change vocabulary gate for the normalizer. A GOAL_CHANGE canonical rewrites
 // the client's whole programme, so it is only honoured when the ORIGINAL message
 // actually asks for it — otherwise a steps/food sentence can be hallucinated into

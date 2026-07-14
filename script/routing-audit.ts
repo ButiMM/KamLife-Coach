@@ -564,6 +564,46 @@ const CASES: Case[] = [
     ];
   })(),
 
+  // ── GENERATED QUESTION-MATRIX ────────────────────────────────────────────────
+  // The systemic version of qsafety: instead of hand-picked phrasings, every
+  // logger's canonical report phrase is wrapped in every question form and NONE
+  // may take a write side effect. Hand-picked cases depend on someone remembering
+  // a phrasing; this matrix covers the SHAPE. Add a report phrase or a wrapper
+  // and the whole product is re-measured.
+  ...(() => {
+    const NS = [
+      /\*Food logged|Food logged ✅|Running total today|Meal total:/i,
+      /Session \d+ (?:logged|—|in)\b|\d+ sessions? (?:in|done)\b|First workout done|WEEK \d COMPLETE|got it, logged to/i,
+      /Weight logged:/i,
+      /Goal updated to/i,
+      /\d[\d,]* steps (?:logged|today|—|done)|target (?:hit|crushed)|step streak/i,
+      /water target (?:hit|done|reached|for today)|\bL logged\b|L in — target/i,
+      /programme updated to/i,
+    ];
+    const reports: Array<[string, string]> = [
+      ["steps", "8000 steps"],
+      ["water", "2 litres of water"],
+      ["food", "chicken and rice"],
+      ["weight", "84kg"],
+      ["cardio", "a 5km run"],
+    ];
+    const wrappers: Array<[string, (r: string) => string]> = [
+      ["should-i", r => `Should I do ${r} today?`],
+      ["is-enough", r => `Is ${r} enough for my goal?`],
+      ["can-i-tomorrow", r => `Can I do ${r} tomorrow?`],
+      ["what-happens-if", r => `What happens if I only manage ${r}?`],
+      ["too-much", r => `Would ${r} be too much for me?`],
+      ["fit-macros", r => `Does ${r} fit in my calories and macros?`],
+    ];
+    const cases: Case[] = [];
+    for (const [rname, phrase] of reports) {
+      for (const [wname, wrap] of wrappers) {
+        cases.push({ name: `qmatrix: ${rname} × ${wname}`, msg: wrap(phrase), reject: NS });
+      }
+    }
+    return cases;
+  })(),
+
   // ── NEGATION-SAFETY BATTERY ──────────────────────────────────────────────────
   // The disease's most damaging form: a message reporting that the activity did NOT
   // happen ("couldn't run 5km", "missed my 5km", "didn't hit 8000 steps") gets logged

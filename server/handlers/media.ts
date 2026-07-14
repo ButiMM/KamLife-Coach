@@ -40,7 +40,7 @@ import { buildProgressComparisonPrompt } from "../physique-analysis";
 // ONE job processes the whole set with all angles in a single call and a single reply.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
@@ -766,8 +766,13 @@ export async function handleMediaMessage(ctx: {
       }
 
       // ---- FOOD PHOTO ----
-      // Detect "is this okay?" captions — client is asking for approval, not just logging
-      const isApprovalCaption = /^[?!¿]+$/.test((message || "").trim())
+      // An ASKING caption ("does this fit my macros?", "can I eat this?", "is this too
+      // much?") gets a verdict + "reply log it" — NEVER an automatic meal log. The
+      // shared isAskingNotReporting gate is the floor (2026-07-14: the old local list
+      // knew "fit my goal/diet/plan" but not "fit in my calories" or "fit my macros",
+      // so exactly the captions a deciding client sends were auto-logged); the local
+      // phrases stay as an extra belt.
+      const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
 
       const todayStartPhoto = sastDayStart();

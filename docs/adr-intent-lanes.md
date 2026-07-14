@@ -57,14 +57,25 @@ that intent must not own, run through the real `handleMessage` pipeline offline.
 Every new tester screenshot in this class gets a case there within 24h (freeze
 rule) — the battery is how we know the disease is shrinking instead of moving.
 
-### Stage 2 — lane assignment for loggers and templates (NEXT)
+### Stage 2 — lane assignment for loggers and templates (IN PROGRESS)
 
-`classifyIntent` (the Normalizer, already fired in the background on every message)
-returns a verdict; bind the high-risk handlers to it: a logger (food, steps, water,
-weight, lift) may only take a WRITE side effect when the classifier verdict agrees
-it's a report, with the existing deterministic detectors as the offline/timeout
-fallback (never a hard dependency — the classifier can be down). QUESTION verdicts
-already guard the step logger; extend to all loggers and all templates.
+**Shipped 2026-07-14 — the shared floor:** `isAskingNotReporting()` in
+server/utils.ts is the ONE answer to "asking or reporting?", replacing per-lane
+local regexes as the authority (locals stay as extra belts). First binding: the
+food-photo caption lane — "does this fit in my calories/macros?" auto-logged the
+meal because the local list didn't know those phrasings; now any question-shaped
+caption gets the verdict + "reply log it", never a write. Measurement went
+systemic at the same time: the GENERATED QUESTION-MATRIX in routing-audit wraps
+every logger's canonical report phrase in every question form (report × wrapper,
+currently 30 cases) — add a phrase or a wrapper and the whole product is
+re-measured. The matrix runs green on all text lanes; the photo lane was the leak
+(vision paths are invisible to the offline audit — exactly why it survived).
+
+**Remaining:** bind the classifier verdict (`classifyIntent`, already fired in the
+background on every message) as a second opinion on the high-risk loggers (food,
+steps, water, weight, lift) — write side effects only when the deterministic gate
+AND the classifier agree it's a report, with the deterministic side as the
+offline/timeout authority (the classifier can be down, never a hard dependency).
 
 ### Stage 3 — full lane router
 

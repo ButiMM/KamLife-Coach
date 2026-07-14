@@ -25,7 +25,7 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
-import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../server/utils";
+import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, isAskingNotReporting } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 
 let passed = 0;
@@ -2038,6 +2038,44 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   assert.equal(parseSickDays("sick for the rest of the week"), 7);
   assert.equal(parseSickDays("I've got the flue"), 3, "unstated → 3-day default");
   assert.equal(parseSickDays("out for 60 days"), 14, "capped at 14");
+});
+
+// THE SHARED ASKING/REPORTING GATE (2026-07-14, Kam: "is our system smart enough
+// to detect when somebody is just asking?"). One floor for every lane: no write,
+// no template, on an ASKING message. The photo lane leaked exactly his phrasings
+// ("does this fit in my calories/macros") because its local list didn't know them.
+test("asking gate: question-shaped messages are ASKING (never logged)", () => {
+  for (const msg of [
+    "Does this fit in my calories?",
+    "does this fit my macros",
+    "Can I eat this?",
+    "can I eat that",
+    "Is this okay for my goal?",
+    "is this too much",
+    "Should I eat this before gym?",
+    "How many calories is this?",
+    "What do you think of this meal",
+    "thoughts on this?",
+    "not sure if this fits my plan",
+    "Would this be too much for me?",
+    "Is 8000 steps enough for fat loss?",
+    "?",
+  ]) assert.ok(isAskingNotReporting(msg), `should be ASKING: ${msg}`);
+});
+
+test("asking gate: reports and confessions stay REPORTING (loggable)", () => {
+  for (const msg of [
+    "8000 steps",
+    "2L of water",
+    "chicken and rice for lunch",
+    "did my workout this morning",
+    "done",
+    "weight 84kg",
+    "ate too much at the party last night",
+    "had a slice of cake, counting it",
+    "I walked 12000 steps today",
+    "logged my lunch already",
+  ]) assert.ok(!isAskingNotReporting(msg), `should be REPORTING: ${msg}`);
 });
 
 // PAIN TRIAGE (2026-07-12, Kam: "the coach needs to catch whether it's just sensitivity
