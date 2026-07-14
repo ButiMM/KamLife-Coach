@@ -15,7 +15,7 @@ KamLife Coach is a South African AI fitness and nutrition coaching service deliv
 
 | | |
 |---|---|
-| **Monthly subscription** | R149/month (~R5/day) |
+| **Monthly subscription** | R199/month (~R6.63/day) |
 | **Free trial** | 7 days, full access, no credit card required |
 | **Always free** | Food logging, step tracking, water, weight logging, basic Q&A |
 | **Subscription unlocks** | Workout programmes, shopping lists, full coaching, meal plans |
