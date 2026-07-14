@@ -21,7 +21,7 @@ import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
-import { handleNumbersLiteracy } from "./numbers-literacy";
+import { handleNumbersLiteracy, handleToneSignal } from "./numbers-literacy";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -1283,8 +1283,10 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return dbReply;
   }
 
-  // ---- NUMBERS LITERACY — keep-it-simple / show-me-numbers / calorie confusion
-  // (handlers/numbers-literacy.ts). The adaptive delivery dial lives here. ----
+  // ---- ADAPTIVE DELIVERY PREFERENCES (handlers/numbers-literacy.ts) — numbers on/off
+  // + calorie confusion, and the tone dial (gentle / direct / hype). ----
+  const toneReply = await handleToneSignal({ message, m, user, capName, phone });
+  if (toneReply !== null) return toneReply;
   const literacyReply = await handleNumbersLiteracy({ message, m, user, capName, phone });
   if (literacyReply !== null) return literacyReply;
 

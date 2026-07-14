@@ -35,6 +35,7 @@ import { verifyBrainReply } from "./reply-verifier";
 import { SCENARIO_GUIDE } from "../handlers/gpt-block";
 import { buildClientSnapshot } from "./client-snapshot";
 import { captureQualitySignal } from "../quality-signals";
+import { getToneMode, toneSteer } from "../tone-mode";
 
 // Hard-case topics that warrant injecting the full scenario playbook. Routine chat
 // skips it — knowledge depth exactly when needed, tokens saved when not (margins).
@@ -394,8 +395,13 @@ export async function runCoachBrain(ctx: {
       recentTurns(user.id).catch(() => []),
       retrieveMemories(phone, message).catch(() => [] as string[]),
     ]);
+    // ADAPTIVE TONE (2026-07-14): a per-client tone: token flexes the voice. When the
+    // client hasn't set one, toneSteer returns "" and nothing is injected — the default
+    // voice is byte-identical to before.
+    const toneLine = toneSteer(getToneMode(user));
     const messages: any[] = [
       { role: "system", content: BRAIN_SYSTEM },
+      ...(toneLine ? [{ role: "system", content: toneLine }] : []),
       // Knowledge depth on demand: the full scenario playbook (sick/broke/travel/
       // GLP-1/period/plateau…) rides along ONLY when the message touches one.
       ...(SCENARIO_TOPIC_RE.test(m) ? [{ role: "system", content: SCENARIO_GUIDE }] : []),

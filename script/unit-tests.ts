@@ -2151,6 +2151,30 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   });
 }
 
+// ADAPTIVE TONE MODE (2026-07-14, Kam: "tone should be different for every client").
+{
+  const { getToneMode, detectToneSignal, toneSteer } = await import("../server/tone-mode");
+  test("tone-mode: token drives the mode; default is warm", () => {
+    assert.equal(getToneMode({ profileNotes: "diet:halal tone:direct" }), "direct");
+    assert.equal(getToneMode({ profileNotes: "tone:gentle" }), "gentle");
+    assert.equal(getToneMode({ profileNotes: "diet:halal" }), "warm");
+    assert.equal(getToneMode({}), "warm");
+  });
+  test("tone-mode: detector fires only on clear preference requests", () => {
+    assert.equal(detectToneSignal("just tell me straight, no fluff"), "direct");
+    assert.equal(detectToneSignal("can you be gentle with me"), "gentle");
+    assert.equal(detectToneSignal("push me harder coach"), "hype");
+    assert.equal(detectToneSignal("I need some tough love"), "hype");
+    // must NOT fire on ordinary messages or logistics
+    for (const msg of ["I had chicken and rice", "what's my workout", "I'm struggling to find time", "push day tomorrow?"])
+      assert.equal(detectToneSignal(msg), null, `must not trip: ${msg}`);
+  });
+  test("tone-mode: warm steer is empty (default voice byte-unchanged); others non-empty", () => {
+    assert.equal(toneSteer("warm"), "");
+    for (const t of ["gentle", "direct", "hype"] as const) assert.ok(toneSteer(t).length > 0);
+  });
+}
+
 // THE SHARED ASKING/REPORTING GATE (2026-07-14, Kam: "is our system smart enough
 // to detect when somebody is just asking?"). One floor for every lane: no write,
 // no template, on an ASKING message. The photo lane leaked exactly his phrasings

@@ -40,9 +40,17 @@ we do NOT ask people to self-classify up front.
 ## Adaptation is the throughline, not a one-off
 
 The founder's larger point: the bot should adapt in **every** facet — tone, depth,
-number-appetite — per client. `numbers-mode` is the first concrete instance. The
-same profileNotes-token pattern (durable, migration-free, read at reply time)
-extends to tone and other axes as we learn each client.
+number-appetite — per client. Two axes now ship on the same durable profileNotes-token
+pattern (read at reply time, absence = default so behaviour is byte-unchanged):
+
+- **`numbers:low`** — number-free food replies (typed, photo, and morning brief).
+- **`tone:gentle|direct|hype`** (`server/tone-mode.ts`) — flexes the coaching brain's
+  voice. Set when a client asks ("just tell me straight", "be gentle with me", "push
+  me"); the steer is injected as one extra system line into the brain (nothing injected
+  for the default "warm"). Currently reaches the model brain; extending it to the
+  gpt-block fallback and templated openers is the next step.
+
+The pattern generalises to any future axis (depth, language, cadence).
 
 ## Distribution vs retention
 

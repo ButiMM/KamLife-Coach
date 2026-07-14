@@ -712,6 +712,20 @@ const CASES: Case[] = [
     msg: "show me the numbers",
     user: { profileNotes: "numbers:low" },
     expect: [/calories and protein.*again|show the (calories|numbers)/i] },
+
+  // ── ADAPTIVE TONE (2026-07-14) — a client sets the voice; ordinary messages don't.
+  { name: "tone: 'just tell me straight' sets direct voice",
+    msg: "just tell me straight, no fluff",
+    expect: [/straight talk|no fluff|the answer and the next/i] },
+  { name: "tone: 'be gentle with me' sets gentle voice",
+    msg: "please be gentle with me",
+    expect: [/gentle|your pace|no pressure|small steps/i] },
+  { name: "tone: 'push me' sets hype voice",
+    msg: "push me harder coach",
+    expect: [/let'?s go|push you|work/i] },
+  { name: "tone: ordinary logistics ('struggling to find time') does NOT set tone",
+    msg: "I'm struggling to find time to train",
+    reject: [/straight talk from now|keep it gentle and go at your pace|shout every win/i] },
 ];
 
 async function main() {

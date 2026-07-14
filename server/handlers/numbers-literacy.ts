@@ -11,6 +11,29 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
+import { detectToneSignal } from "../tone-mode";
+
+// TONE PREFERENCE (2026-07-14) — a client who asks for a different voice ("just tell
+// me straight", "be gentle with me", "push me") gets it set as a durable tone: token,
+// which flexes the coaching brain's voice. Sits with the numbers handlers because both
+// are adaptive-delivery preferences.
+export async function handleToneSignal(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
+  const { message, m, user, capName, phone } = ctx;
+  const signal = detectToneSignal(m);
+  if (!signal) return null;
+  const cap = capName ? `, ${capName}` : "";
+  try {
+    const base = (user.profileNotes || "").replace(/\s*\btone:(gentle|direct|hype)\b/gi, "").trim();
+    await db.update(users).set({ profileNotes: base ? `${base} tone:${signal}` : `tone:${signal}` }).where(eq(users.phoneNumber, phone));
+  } catch (e) { console.error("[TONE_MODE] set failed:", e); }
+  const reply = signal === "direct"
+    ? `Got it${cap} — straight talk from now on, no fluff. Just the answer and the next move.`
+    : signal === "hype"
+      ? `Let's go${cap} 🔥 — I'll push you and shout every win from the rooftops. Time to work.`
+      : `Of course${cap} 💛 — I'll keep it gentle and go at your pace. Small steps, no pressure, ever. You've got this.`;
+  await logChat(user.id, message, reply, "TONE_PREF");
+  return reply;
+}
 
 export async function handleNumbersLiteracy(ctx: { message: string; m: string; user: any; capName: string; phone: string }): Promise<string | null> {
   const { message, m, user, capName, phone } = ctx;
