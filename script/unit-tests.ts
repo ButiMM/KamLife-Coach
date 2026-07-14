@@ -1980,6 +1980,33 @@ test("steps target: parses every SA number format, and only for a CHANGE (not a 
     assert.equal(extractStepTargetChange(msg), null, `log must not change target: ${msg}`);
 });
 
+// 2026-07-14 — the founder's OWN message went unheard: "I really only want to be
+// doing 10,000 steps now, nothing more" wrote NOTHING (only set/change verbs were
+// caught), so the bot agreed politely and the morning brief kept nagging 11,000.
+// People state targets as wants and limits — the detector must hear those, while
+// questions and single-day plans must never flip the standing target.
+test("steps target: preference/limit phrasings ARE a change; questions/day-plans are NOT", () => {
+  const changes: Array<[string, number]> = [
+    ["I really only want to be doing 10,000 steps now, nothing more", 10000],
+    ["I only want to do 10000 steps", 10000],
+    ["I want my steps to be 10,000", 10000],
+    ["let's keep my steps at 10000", 10000],
+    ["drop my steps to 10k", 10000],
+    ["10000 steps is my max, I can't do more", 10000],
+    ["Can you set my steps to 10000?", 10000],   // polite directive still counts
+  ];
+  for (const [msg, want] of changes)
+    assert.equal(extractStepTargetChange(msg), want, `${msg} → ${want}`);
+  for (const msg of [
+    "Should I keep my steps at 10,000?",              // asking, not changing
+    "Doesn't going over 10,000 steps affect my goals?",
+    "Is 8000 steps enough for fat loss?",
+    "I want to hit 10000 steps today",                // one day's plan, not the target
+    "Why am I on 11,000 steps a day? Make it make sense.",
+    "I usually tell people ten thousand steps",       // other people's steps
+  ]) assert.equal(extractStepTargetChange(msg), null, `must NOT change target: ${msg}`);
+});
+
 // LOW MOBILITY (2026-07-12, Kam ×2: "some people can't walk a lot — accommodate that").
 // Must reach the warm deterministic accommodation, never the brain or the step logger.
 // Precision matters: a lazy day or training soreness must NOT trigger it.

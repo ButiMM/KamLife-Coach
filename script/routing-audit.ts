@@ -561,6 +561,16 @@ const CASES: Case[] = [
       // "chicken" in a grocery request — must not log a meal
       x("grocery chicken request", "Can you add more chicken recipes to my grocery list?",
         { reject: [FOOD_LOGGED] }),
+      // Stated step PREFERENCE persists the target (2026-07-14, the founder's own
+      // message went unheard and the morning brief kept nagging the old number)
+      x("steps preference persists", "I really only want to be doing 10,000 steps now, nothing more",
+        { expect: [/Step target (?:raised|lowered|kept) (?:to|at) \*?10,000/i] }),
+      x("steps polite directive persists", "Can you set my steps to 10000?",
+        { expect: [/Step target (?:raised|lowered|kept) (?:to|at) \*?10,000/i] }),
+      x("steps question never flips target", "Should I keep my steps at 10,000?",
+        { reject: [/Step target (?:raised|lowered|kept)/i] }),
+      x("steps day-plan never flips target", "I want to hit 10000 steps today",
+        { reject: [/Step target (?:raised|lowered|kept)/i] }),
     ];
   })(),
 

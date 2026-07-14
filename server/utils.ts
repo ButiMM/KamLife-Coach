@@ -564,13 +564,29 @@ export function extractStepTargetChange(m: string): number | null {
   const s = m || "";
   // A plain step LOG ("I walked 10 000 steps", "did 8000 today") is NOT a target change.
   if (/\b(?:walked|walk|did|done|hit|got|logged|clocked|reached|managed|took)\b[^.!?]{0,20}\bsteps?\b/i.test(s)
-      && !/\b(?:target|goal|from now|going forward|set|change|make it)\b/i.test(s)) return null;
+      && !/\b(?:target|goal|from now|going forward|set|change|make it|only want|want to be)\b/i.test(s)) return null;
+  // ASKING about steps is not changing them ("Should I keep my steps at 10,000?") —
+  // but a polite directive ("can you set my steps to 10k") IS a change request.
+  if (isAskingNotReporting(s)
+      && !/\b(?:can|could|will|would) you\b[^.!?]{0,30}\b(?:set|change|make|update|drop|lower|raise|keep|cap|put)\b/i.test(s)) return null;
+  // Other people's steps, and single-day plans, are not a standing target change.
+  if (/\b(?:tell people|for people|my clients?|people should)\b/i.test(s)) return null;
+  if (/\b(?:today|tomorrow|tonight|yesterday|this (?:morning|afternoon|evening))\b/i.test(s)) return null;
   // Gaps are LAZY (`?`) so the greedy engine can't eat into the digits and leave
   // STEP_NUM matching a trailing fragment (e.g. "10," consumed → "000" captured → 0).
   const patterns = [
     new RegExp(String.raw`\b(?:set(?:ting)?|chang(?:e|ing|ed)|updat(?:e|ing|ed)|bump(?:ing|ed)?|rais(?:e|ing|ed)|lower(?:ing|ed)?|increas(?:e|ing|ed)|decreas(?:e|ing|ed)|mak(?:e|ing)|mov(?:e|ing|ed)|adjust(?:ing|ed)?)\b[^.!?]{0,30}?\bsteps?\b[^.!?]{0,20}?\b(?:to\s+)?(?<![\d,])${STEP_NUM}\b`, "i"),
     new RegExp(String.raw`\bsteps?\s+(?:target|goal)\s+(?:to\s+)?(?<![\d,])${STEP_NUM}\b`, "i"),
     new RegExp(String.raw`\bsteps?\b[^.!?]{0,15}?\b(?<![\d,])${STEP_NUM}\b[^.!?]{0,25}?\b(?:from now|going forward|as (?:the|my) (?:standard|target|goal))\b`, "i"),
+    // FIRST-PERSON PREFERENCE (2026-07-14, the founder's own message went unheard:
+    // "I really only want to be doing 10,000 steps now, nothing more" wrote NOTHING —
+    // only robot phrasings with set/change verbs were caught, so the bot agreed
+    // politely and kept nagging the old target every morning). People state targets
+    // as wants and limits, not commands.
+    new RegExp(String.raw`\bi(?:'?d)?\s+(?:really\s+)?(?:only\s+)?(?:want|prefer|rather|like)\b[^.!?]{0,40}?\b(?<![\d,])${STEP_NUM}\b[^.!?]{0,12}?\bsteps?\b`, "i"),
+    new RegExp(String.raw`\bi(?:'?d)?\s+(?:really\s+)?(?:only\s+)?(?:want|prefer|rather|like)\b[^.!?]{0,20}?\bsteps?\b[^.!?]{0,20}?\b(?:to be|at|to)\s*(?<![\d,])${STEP_NUM}\b`, "i"),
+    new RegExp(String.raw`\b(?:keep|cap|limit|stick(?:ing)?\s+(?:to|with)|drop|max)\b[^.!?]{0,20}?\bsteps?\b[^.!?]{0,15}?\b(?:at|to|of)?\s*(?<![\d,])${STEP_NUM}\b`, "i"),
+    new RegExp(String.raw`\b(?<![\d,])${STEP_NUM}\s*steps?\b[^.!?]{0,15}?\bis my (?:max(?:imum)?|limit|ceiling|cap)\b`, "i"),
   ];
   for (const re of patterns) {
     const mm = s.match(re);
