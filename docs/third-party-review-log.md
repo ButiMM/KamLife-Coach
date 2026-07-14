@@ -6,6 +6,27 @@ don't re-litigate. Newest review first._
 
 ---
 
+## Review #3 — Garry Tan (YC) on positioning + pricing (2026-07-14)
+
+A widely-shared tweet: *"Founders must stop building 2010-era businesses with 2026-era
+technology… Don't underprice! If it works it's worth a lot more… The rules of tech
+changed with AI. Play the new game."*
+
+- **Validates the direction.** Our "new game" is AI-native: human-coach quality
+  (memory, per-client tone/number adaptation, real emotional accountability) at R199 —
+  impossible in 2010 (you'd need a human coach at R2000+/mo). Keep positioning as the
+  behaviour-change OS, never "a fitness tracker."
+- **The one challenge — pricing.** "Don't underprice." Tensions with the mission
+  (R199 mass-market). **Resolution (not a raise of the R199 wedge):** build the
+  **premium value tiers sooner** (R399/R699, families, corporate wellness, medical-aid)
+  so those who can pay for "worth a lot more" do, while R199 stays the accessible
+  on-ramp. This moves the premium-tier decision from "much later" to **timely** — still
+  a founder call, but flagged as near-term.
+- **Clean on "no revenue tricks":** pay-to-start + money-back guarantee is real value,
+  not a gimmick.
+
+---
+
 ## Review #2 — VC / investment lens (2026-07-14)
 
 Framed as a top-tier VC ("does this become a $100M+ company or die"). Overall 9.1/10;

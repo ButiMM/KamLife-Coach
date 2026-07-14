@@ -51,7 +51,7 @@ import {
   runTrainingDataLog,
 } from "./scheduler/jobs/monday";
 import { runWaterReminder } from "./scheduler/jobs/water";
-import { runMidweekSessionCheck, runProteinStreakIntervention, runWednesdaySleepQuestion } from "./scheduler/jobs/midweek";
+import { runMidweekSessionCheck, runProteinStreakIntervention, runWednesdaySleepQuestion, runWeeklyFeelingsCheckin } from "./scheduler/jobs/midweek";
 import { runCipUpdate } from "./scheduler/jobs/cip-update";
 import { runMonthlyNarrative } from "./scheduler/jobs/narrative";
 import { runComebackProtocol } from "./scheduler/jobs/comeback";
@@ -318,6 +318,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("30 9 * * 3",    () => safe("runPausedClientLite",    runPausedClientLite),    { timezone: "UTC" }); // 11:30am SAST
   cron.schedule("0 12 * * 3",    () => safe("runMidweekSessionCheck", runMidweekSessionCheck), { timezone: "UTC" }); // 2pm SAST — zero-session intervention
   cron.schedule("0 18 * * 3",    () => safe("runWednesdaySleepQuestion", runWednesdaySleepQuestion), { timezone: "UTC" }); // 8pm SAST — weekly sleep question
+  cron.schedule("0 17 * * 2",    () => safe("runWeeklyFeelingsCheckin", runWeeklyFeelingsCheckin), { timezone: "UTC" }); // 7pm SAST Tuesday — weekly "how are you feeling" emotional check-in (the door to deep support)
 
   // ── Weekly — Thursday ─────────────────────────────────────────────────────
   cron.schedule("0 5 * * 4",     () => safe("runProteinStreakIntervention", runProteinStreakIntervention), { timezone: "UTC" }); // 7am SAST — protein pattern

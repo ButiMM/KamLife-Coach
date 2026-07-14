@@ -18,7 +18,7 @@ import {
   eq, gte, and, sql,
   sendWhatsApp, claimDailySlot, canSendProactive,
   getActiveClients, isPaused, dayStart,
-  TRAINING_SCHEDULES,
+  TRAINING_SCHEDULES, claimProactive, thisWeekUTC,
 } from "../shared";
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
@@ -123,6 +123,53 @@ export async function runWednesdaySleepQuestion(): Promise<void> {
     } catch (err) { console.error(`[MIDWEEK] Sleep question error — ${client.phoneNumber}:`, err); }
   }
   console.log(`[MIDWEEK] Sleep questions sent: ${sent}`);
+}
+
+// ── Weekly FEELINGS check-in (2026-07-14) — the proactive door to emotional support.
+// Kam's manual clients stay for the accountability + being asked how they ACTUALLY
+// feel. This reaches out once a week, before they spiral — not about the numbers, about
+// THEM. When they open up, the deep-emotional-support path (agents.ts, deep mode) catches
+// the reply. Catch them before Sunday's report, not after they've already quit.
+// ─────────────────────────────────────────────────────────────────────────────────────
+
+const FEELINGS_PROMPTS: Array<(name: string) => string> = [
+  (name) => `${name}, quick one — and forget the numbers for a second. How are you actually *feeling* about all this this week? Good, tired, frustrated, proud — be honest with me. I'm not just here for the food and the sessions; if something's weighing on you, I want to hear it. 💛`,
+  (name) => `${name}, real talk — how's your head this week, not your body? Some weeks are heavy. If you're feeling low, stuck, or even like giving up, tell me. That's exactly when I'm most useful. No judgement, ever.`,
+  (name) => `${name}, checking in on *you*, not your stats. How are you doing this week — honestly? Whatever it is, you can tell me. We figure it out together, always.`,
+  (name) => `${name}, one honest question: what's the hardest part for you right now? Not the workouts — the *real* thing. Talk to me. Getting it out of your head is half the battle, and you're not carrying it alone.`,
+];
+
+export async function runWeeklyFeelingsCheckin(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Weekly feelings check-in");
+  const clients = await getActiveClients();
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      // Reach clients who are still engaged (the comeback/re-engagement flow owns the
+      // long-silent), and not brand-new (they just met us at onboarding).
+      const daysSilent = client.lastActiveAt
+        ? Math.floor((Date.now() - new Date(client.lastActiveAt).getTime()) / 86_400_000)
+        : 999;
+      if (daysSilent > 14) continue;
+      const daysSinceJoin = client.createdAt
+        ? Math.floor((Date.now() - new Date(client.createdAt).getTime()) / 86_400_000)
+        : 999;
+      if (daysSinceJoin < 3) continue;
+      if (!canSendProactive(client.id)) continue;
+      // Once per week per client — DB-backed so a restart can't re-send.
+      if (!(await claimProactive(client.id, "feelings_checkin", thisWeekUTC()))) continue;
+
+      const name = (client.name || "there").split(" ")[0];
+      const prompt = FEELINGS_PROMPTS[sent % FEELINGS_PROMPTS.length](name);
+      if (await claimDailySlot(client.id, "feelings_checkin")) {
+        await sendWhatsApp(client.phoneNumber, prompt);
+        sent++;
+      }
+    } catch (err) { console.error(`[MIDWEEK] Feelings check-in error — ${client.phoneNumber}:`, err); }
+  }
+  console.log(`[MIDWEEK] Feelings check-ins sent: ${sent}`);
 }
 
 // ── Thursday: protein pattern intervention ────────────────────────────────────
