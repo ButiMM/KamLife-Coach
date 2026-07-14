@@ -138,9 +138,9 @@ export async function runReferralNudge(): Promise<void> {
       const name = client.name || "there";
       const code = client.referralCode;
       const msgs: Record<number, string> = {
-        7: `${name}, one week in and you are still here — most people are not. If you know someone who needs this, your referral code is *${code}*. They get their first month for R50. You get R20 off yours. Share it with one person today.`,
+        7: `${name}, one week in and you are still here — most people are not. If you know someone who needs this, your referral code is *${code}*. When a friend joins, you get a free month. Share it with one person today.`,
         30: `${name}, 30 days with Coach K. You are proof this works. Someone in your contacts needs to hear about this — share your code *${code}* and let them start where you did. One message, one person.`,
-        60: `${name}, 60 days in. Two months of real work. People around you have noticed. When they ask what you are doing, tell them — and share code *${code}*. Every referral earns you R20 off. No limit.`,
+        60: `${name}, 60 days in. Two months of real work. People around you have noticed. When they ask what you are doing, tell them — and share code *${code}*. Every friend who joins earns you a free month. No limit.`,
         90: `${name}, 90 days. A quarter year of consistency. That is rare and worth talking about. Your code is *${code}* — share it with someone who has been talking about getting fit. They get a cheaper start. You get rewarded.`,
       };
       if (!(await claimDailySlot(client.id, "referral_nudge"))) continue;

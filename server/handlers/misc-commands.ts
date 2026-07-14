@@ -862,7 +862,7 @@ export async function handleMiscCommands(ctx: {
     }
     const wk = user.workoutStreak || 0;
     const challengeTarget = `${user.trainingDaysPerWeek || 3} workouts + food logged 5 out of 7 days`;
-    const challengeReply = `*This week's challenge: ${challengeTarget}.*\n\nYou're ${wk > 0 ? `on a ${wk}-session streak` : "ready to start a streak"}. Now bring someone else in.\n\nSend your friend this message:\n\n_"I'm doing a weekly fitness challenge on WhatsApp with a real SA coach. Join me — text *join ${code}* to this number: ${process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "[your coach number]"}. First month R50 with my code."_\n\nWhen they join, you both get an extra accountability nudge each week.`;
+    const challengeReply = `*This week's challenge: ${challengeTarget}.*\n\nYou're ${wk > 0 ? `on a ${wk}-session streak` : "ready to start a streak"}. Now bring someone else in.\n\nSend your friend this message:\n\n_"I'm doing a weekly fitness challenge on WhatsApp with a real SA coach. Join me — text *join ${code}* to this number: ${process.env.TWILIO_WHATSAPP_NUMBER?.replace("whatsapp:", "") || "[your coach number]"}. There's a 7-day money-back guarantee, so no risk."_\n\nWhen they join, you both get an extra accountability nudge each week.`;
     await logChat(user.id, message, challengeReply, "CHALLENGE_INVITE");
     return challengeReply;
   }
@@ -895,9 +895,9 @@ export async function handleMiscCommands(ctx: {
     const waNum = (process.env.TWILIO_WHATSAPP_NUMBER || "").replace(/^whatsapp:/, "").replace(/\D/g, "");
     const waLink = waNum ? `https://wa.me/${waNum}?text=Hi%2C+I+was+referred+by+${code}` : null;
     const shareMsg = waLink
-      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R199/month, no app. Try it free for 7 days: ${waLink}"_`
-      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R199/month. Tell them code ${code} — your first month is 50% off and I get a free month."_`;
-    const referralReply = `*Your referral code: ${code}* 🎯\n\nSend your friend this:\n\n${shareMsg}\n\nWhen they subscribe, you get a free month. They get 50% off their first month. No cap — every friend earns you one.`;
+      ? `_"I've been using a WhatsApp fitness coach — real SA food, full workouts, daily check-ins. R199/month, no app, and a 7-day money-back guarantee so there's no risk: ${waLink}"_`
+      : `_"I've been using KamLife Coach — WhatsApp fitness coaching, real SA food, R199/month. Use my code ${code} when you join — there's a 7-day money-back guarantee, so zero risk."_`;
+    const referralReply = `*Your referral code: ${code}* 🎯\n\nSend your friend this:\n\n${shareMsg}\n\nWhen they subscribe, *you get a free month.* No cap — every friend who joins earns you one.`;
     await logChat(user.id, message, referralReply, "REFERRAL");
     return referralReply;
   }

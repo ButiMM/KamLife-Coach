@@ -230,7 +230,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const heightDisplay = u.heightCm != null ? ` · ${heightCm}cm` : "";
   const bmiDisplay = u.bmi ? ` · BMI ${u.bmi}` : "";
 
-  const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. Your friend gets 50% off month 1. You get R50 credit when they subscribe.` : "";
+  const refCodeLine = referralCode ? `\n\n🎁 *Your referral code: ${referralCode}* — share it. When a friend joins with it, *you get a free month.* They join at the normal R199, with the same 7-day money-back guarantee — zero risk.` : "";
 
   // Goal-specific hook line — personal, not generic
   const goalHook: Record<string, string> = {

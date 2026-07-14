@@ -213,7 +213,7 @@ export async function handleProgressCheck(ctx: {
       const streakLine = user.workoutStreak >= 5 ? `🔥 Streak: ${user.workoutStreak} sessions straight` : "";
       const totalLine = `📊 Total sessions with Coach K: ${totalWorkoutsAll}`;
       const winsLines = [workoutLine, stepsLine, weightLine, streakLine, totalLine].filter(Boolean).join("\n");
-      const refLine = user.referralCode ? `\n\nYour referral code: *${user.referralCode}* — they get month 1 for R50, you get R50 credit.` : "";
+      const refLine = user.referralCode ? `\n\nYour referral code: *${user.referralCode}* — when a friend joins, you get a free month (they come in at the normal R199, money-back guaranteed).` : "";
       winsCard = `\n\n---\n\n*Week ${weekNum} — ${clientDisplayName}*\n${winsLines}\n\n_KamLife Coach — R199/month_${refLine}\n\nShare this with someone who needs to start. 💪`;
     }
 
