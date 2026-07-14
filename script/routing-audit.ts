@@ -676,6 +676,23 @@ const CASES: Case[] = [
   { name: "injection benign: what's my workout (real question)",
     msg: "what's my workout for today?",
     reject: [/nice try|can.?t be talked into|whole job/i] },
+
+  // ── CALORIE LITERACY (2026-07-14, a tester: "it talks in calories and I don't
+  // understand calories") — confusion about the concept gets the plain "data bundle"
+  // explainer, never more number-talk, at any point in the journey.
+  { name: "calorie confusion: 'I don't understand calories'",
+    msg: "I don't understand calories, what does that mean?",
+    expect: [/data bundle|never have to (understand|count)|my job/i], reject: [/didn'?t catch/i] },
+  { name: "calorie confusion: 'what is a calorie'",
+    msg: "what is a calorie?",
+    expect: [/data bundle|energy in food|never have to (understand|count)|my job/i] },
+  { name: "calorie confusion: 'too many numbers, I'm confused'",
+    msg: "this is too many numbers, I'm confused by the calories",
+    expect: [/data bundle|plain language|my job|room for a light/i] },
+  // A normal totals question is NOT confusion — must still answer with the total.
+  { name: "calorie literacy: 'how many calories left' still answers totals",
+    msg: "how many calories do I have left today?",
+    reject: [/data bundle/i] },
 ];
 
 async function main() {

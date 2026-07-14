@@ -1,7 +1,7 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { educationNote } from "../education";
+import { educationNote, remainingInMeals } from "../education";
 import { stepBurnKcal } from "../targets";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
@@ -626,8 +626,15 @@ export function buildFoodLogReply(p: {
   // silent "Remaining today: ~0 kcal" hid a duplicate-inflated day from the client
   // instead of helping them fix it (2026-07-06: four copies of one dinner sailed
   // past this guard unremarked).
+  // PLAIN LANGUAGE (2026-07-14, a tester: "it talks in calories and I don't
+  // understand calories"). A number never travels alone — every "X remaining" is
+  // paired with what it means as FOOD ("a light meal or a good snack"), the unit
+  // this market actually thinks in. remainingInMeals already existed for the
+  // day-3 summary; surface it on every log, for every client, forever — not just
+  // the first weeks.
+  const mealsLeft = effectiveRemaining > 0 ? remainingInMeals(effectiveRemaining) : "";
   const runningLine = prevCals > 0 && runningTotalSane
-    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} remaining${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
+    ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} to go${mealsLeft ? ` — ${mealsLeft}` : ""}${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
     ? `Today's total (~${runningCals} kcal) looks high for this time of day — if something was logged twice, send *my meals* to check, then *remove the duplicates*.`
     : `Remaining today: ~${Math.max(0, effectiveRemaining)} kcal${stepsNote}`;
