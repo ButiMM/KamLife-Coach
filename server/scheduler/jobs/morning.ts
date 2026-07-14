@@ -8,6 +8,7 @@ import {
 } from "../shared";
 import { auditStoredTargets, auditStepsTarget } from "../../targets";
 import { proteinHint } from "../../utils";
+import { getNumbersMode } from "../../numbers-mode";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
 
@@ -45,6 +46,9 @@ export async function runMorningCheckin(): Promise<void> {
     // own formula (correct for her profile: ~1,950); six code paths write targets and
     // nothing validated them after the fact. Correct it, tell the client plainly in
     // this morning's brief, and escalate so the founder SEES every correction.
+    // Adaptive delivery: a numbers:low client's brief speaks plainly — no kcal or
+    // protein-gram figures (step counts stay: they're tangible, their phone shows them).
+    const numbersLow = getNumbersMode(client) === "low";
     let targetFixLine = "";
     try {
       const audit = auditStoredTargets(client);
@@ -55,7 +59,9 @@ export async function runMorningCheckin(): Promise<void> {
         }).where(eq(users.id, client.id));
         client.calorieTarget = audit.expectedCal;
         client.proteinTarget = audit.expectedProt;
-        targetFixLine = `🔧 I've fine-tuned your daily targets to *${audit.expectedCal} kcal · ${audit.expectedProt}g protein* — the right numbers for your profile. `;
+        targetFixLine = numbersLow
+          ? `🔧 I've fine-tuned your daily targets to the right levels for you — nothing you need to do. `
+          : `🔧 I've fine-tuned your daily targets to *${audit.expectedCal} kcal · ${audit.expectedProt}g protein* — the right numbers for your profile. `;
         console.error(`[TARGET_SANITY] corrected ${client.phoneNumber.slice(-4)}: ${audit.reason}`);
         await db.insert(escalations).values({
           userId: client.id, reason: "target_sanity_correction", status: "open",
@@ -307,7 +313,12 @@ export async function runMorningCheckin(): Promise<void> {
       if (foodLogs.length === 0) {
         parts.push(`No food logged yesterday — today starts now. Breakfast first.`);
       } else if (totalProtLogged >= proteinTarget * 0.9) {
-        parts.push(`${totalProtLogged}g protein logged yesterday — target hit.`);
+        parts.push(numbersLow
+          ? `Great protein yesterday — that's the muscle looked after. 💪`
+          : `${totalProtLogged}g protein logged yesterday — target hit.`);
+      } else if (numbersLow && totalProtLogged > 0) {
+        // Plain, number-free protein nudge — skip the gram-by-gram slot analysis.
+        parts.push(`A little short on protein yesterday — get some in early today: eggs, chicken, or fish keep you full and protect your muscle.`);
       } else if (totalProtLogged > 0) {
         const gap = proteinTarget - totalProtLogged;
         parts.push(`${totalProtLogged}g protein logged yesterday — ${gap}g short of your ${proteinTarget}g target.`);
