@@ -6,6 +6,41 @@ don't re-litigate. Newest review first._
 
 ---
 
+## Review #2 — VC / investment lens (2026-07-14)
+
+Framed as a top-tier VC ("does this become a $100M+ company or die"). Overall 9.1/10;
+core message: **you're underselling what you've built — you're not an AI fitness coach,
+you're an AI operating system for behaviour change. Sell the transformation, not the
+toolkit.** Would take another meeting immediately.
+
+### What we TAKE (and are acting on)
+
+| Insight | Our action | Status |
+|---|---|---|
+| **Sell transformation, not features.** The doc spends 80% on features; people buy "I've tried everything" and "becoming someone else", not calories. | Reposition: lead every external doc with behaviour change + consistency, features as applications. One sentence: **"KamLife helps ordinary South Africans finally stay consistent with their health."** | ✅ overview repositioned |
+| **Codify north-star principles.** | Written into the overview: *Consistency beats perfection · Reduce shame · Every reply reduces cognitive load · Coach before calculator · Human before AI.* | ✅ |
+| **A company belief.** ("Why does KamLife deserve to exist?") | Adopted: **"Nobody should fail their health because coaching is too expensive."** | ✅ in overview |
+| **Activation > retention. Obsess over the first 5 minutes.** A new member must think "oh wow", not "another chatbot". | BUILD: a magical first-session moment + a first-hour commitment hook (Review #1 #5 too). | 🔨 next build |
+| **Measure everything, publish metrics internally** (activation %, W1/W4 retention, CAC, LTV, AI cost/user, gross margin, DAU/WAU/MAU, msgs/day). | BUILD: an internal metrics endpoint computed from existing data; populate as real numbers arrive. | 🔨 queued (high value) |
+| **The data is the moat, not GPT.** Which messages/tone/foods predict churn, by segment — nobody has this SA dataset. | Reinforce behavioural-signal capture (quality_signals is the seed); this is why the tone/numbers adaptation matters. | ongoing |
+| **Your competitor is inaction ("I'll start Monday"), not MyFitnessPal.** | Messaging attacks inaction, not other apps. | messaging note |
+| **Reframe positioning:** "first AI accountability partner for ordinary South Africans"; fitness is one application (later: BP, diabetes, meds, sleep, savings…). | Adopted as the north-star framing in the overview (without over-promising features we haven't built). | ✅ framing |
+
+### What we DON'T take yet (adapt / defer / founder-decision)
+
+| Insight | Our position |
+|---|---|
+| **Price tiers R399 / R699 / families / corporate / medical-aid** | Real future upside, but NOT now — focus is nailing the mass-market R199 tier. VC agreed: keep R199 for the target market. Founder decision when we scale. |
+| **"You'll need an app eventually"** | Noted, not now. Stay WhatsApp-first; don't build a dashboard/native app/new login (both reviews agree). |
+| **"You're charging too little"** | Disagree for now — R199 is deliberately mass-market; the guarantee + pay-to-start already filter for commitment. Premium tiers come later. |
+| **Put metrics IN the investor doc** | We don't have meaningful real numbers yet (pre-scale). Build the metrics infra first, publish internally, add to the doc once honest. |
+| **Moat question "why can't Meta/OpenAI copy this?"** | Answer is the SA behavioural dataset + deterministic infrastructure + market understanding — not prompts. Captured in the overview's moat section. |
+
+**The VC's single strongest instruction — reposition around transformation/consistency —
+is applied to the overview now.** Activation + the metrics view are the next builds.
+
+---
+
 ## Review #1 — delivery, literacy & retention (2026-07-14)
 
 Focus: how to be frictionless for every literacy level without overbuilding or eroding

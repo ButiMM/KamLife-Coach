@@ -1,6 +1,21 @@
 # KamLife Coach — Comprehensive Overview
-### AI fitness & nutrition coaching delivered entirely over WhatsApp
+### The AI accountability partner that helps ordinary South Africans finally stay consistent with their health
 _Prepared for third-party review · 2026-07-14_
+
+> **What we're really building.** Not an AI fitness coach — an **operating system for
+> behaviour change**, delivered over WhatsApp. Fitness is the first application; the
+> engine (accountability, memory, adaptive delivery, deterministic safety) generalises
+> later to sleep, blood pressure, diabetes, medication adherence, savings. People don't
+> buy calories — they buy *becoming someone who shows up.*
+>
+> **Our belief:** *nobody should fail their health because coaching is too expensive.*
+>
+> **North stars** (every product and engineering decision flows from these):
+> *Consistency beats perfection · Reduce shame · Every reply reduces cognitive load ·
+> Coach before calculator · Human before AI.*
+>
+> **Who we actually compete with:** not MyFitnessPal or Noom — **inaction.** "I'll start
+> Monday." That's the enemy the product and the messaging attack.
 
 > This document is a complete, plain-language snapshot of the product, the market,
 > the business model, and the technical foundation. It is written so a reviewer with
