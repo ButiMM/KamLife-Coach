@@ -61,7 +61,10 @@ const BASE_USER = {
   totalWorkoutsCompleted: 8,
   buddyId: null,
   preferredLanguage: "en",
-  profileNotes: "",
+  // Baseline is an opted-in (numbers:full) power user so the numeric food-reply path
+  // stays fully exercised. The DEFAULT is now number-free (see the numbers-mode cases,
+  // which override profileNotes to "" to test the default experience).
+  profileNotes: "numbers:full",
   homeEquipment: "none",
   gymName: null,
   lastActiveAt: new Date(NOW - 3_600_000),
@@ -686,32 +689,36 @@ const CASES: Case[] = [
   { name: "calorie confusion: 'what is a calorie'",
     msg: "what is a calorie?",
     expect: [/data bundle|energy in food|never have to (understand|count)|my job/i] },
-  // "too many numbers" is both confusion AND a request for less — the keep-it-simple
-  // handler catches it and ACTS (switches numbers off), the best possible outcome.
-  { name: "calorie confusion: 'too many numbers' switches to plain mode",
+  // A default client is already number-free, so "too many numbers" gets the calm
+  // data-bundle reassurance (counting is our job), not a mode switch.
+  { name: "calorie confusion: 'too many numbers' gets the reassuring explanation",
     msg: "this is too many numbers, I'm confused by the calories",
-    expect: [/no more numbers|plain words|keep it simple|show me the numbers/i] },
+    user: { profileNotes: "" },
+    expect: [/data bundle|never have to (understand|count)|my job|plain language/i] },
   // A normal totals question is NOT confusion — must still answer with the total.
   { name: "calorie literacy: 'how many calories left' still answers totals",
     msg: "how many calories do I have left today?",
     reject: [/data bundle/i] },
 
-  // ── ADAPTIVE NUMBERS MODE (2026-07-14) — the bot hides numbers for a client who
-  // can't read them, keeps them for everyone else, and both are togglable by voice.
-  { name: "numbers mode: low-numeracy client's food log has NO kcal figures",
+  // ── ADAPTIVE NUMBERS MODE (2026-07-14) — DEFAULT is number-free (third-party
+  // review: "start everyone in number-free mode; power users opt in"). Numbers only
+  // appear for a client who explicitly asked (numbers:full).
+  { name: "numbers mode: DEFAULT client's food log has NO kcal figures",
     msg: "I had chicken and rice for lunch",
-    user: { profileNotes: "numbers:low" },
+    user: { profileNotes: "" },
     reject: [/\d+\s*kcal/i, /\d+g protein/i] },
-  { name: "numbers mode: normal client still gets the kcal figures",
+  { name: "numbers mode: opted-in (numbers:full) client DOES get the figures",
     msg: "I had chicken and rice for lunch",
+    user: { profileNotes: "numbers:full" },
     expect: [/kcal/i] },
-  { name: "numbers mode: 'keep it simple' switches numbers off",
-    msg: "keep it simple, no numbers please",
-    expect: [/no more numbers|plain words|show me the numbers/i] },
-  { name: "numbers mode: 'show me the numbers' switches them back on",
+  { name: "numbers mode: 'show me the numbers' opts a default client IN",
     msg: "show me the numbers",
-    user: { profileNotes: "numbers:low" },
-    expect: [/calories and protein.*again|show the (calories|numbers)/i] },
+    user: { profileNotes: "" },
+    expect: [/calories and protein.*from now|show the (calories|numbers)/i] },
+  { name: "numbers mode: 'keep it simple' turns a numbers:full client back off",
+    msg: "keep it simple, no numbers please",
+    user: { profileNotes: "numbers:full" },
+    expect: [/no more numbers|plain words|show me the numbers/i] },
 
   // ── ADAPTIVE TONE (2026-07-14) — a client sets the voice; ordinary messages don't.
   { name: "tone: 'just tell me straight' sets direct voice",

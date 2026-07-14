@@ -82,7 +82,7 @@ export async function runSilenceDetection(): Promise<void> {
         const ok = await claimProactive(client.id, "silence_2d", today);
         // Silence is usually eating-shame, not busyness (2026-07-13 retention reports).
         // Make the hard days SAFE to admit — that breaks the hide→avoid→quit spiral.
-        if (ok) await sendWhatsApp(client.phoneNumber, `${name}, two days quiet — no pressure, no catch-up needed.\n\nIf you ate something you weren't planning to, just tell me. I count everything — *especially* the hard days. That's the whole point of me.\n\nWhat are you eating today?`);
+        if (ok) await sendWhatsApp(client.phoneNumber, `${name}, two days quiet — and that's completely okay. Life happens. No judgement, ever. 💛\n\nNothing reset and nothing's lost — we just pick up exactly where you left off. And if you ate something off-plan, tell me anyway: I count everything, *especially* the hard days. That's the whole point of me.\n\nWhat did you eat today? One line is all I need.`);
       }
     } catch (err) {
       console.error(`[SCHEDULER] Silence detection error — ${client.phoneNumber}:`, err);

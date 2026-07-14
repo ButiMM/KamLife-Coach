@@ -266,7 +266,7 @@ const logReply = (over: Record<string, any>) => buildFoodLogReply({
   prevCals: 900,
   hasGoodProteins: true,
   hasCarbs: false,
-  user: { name: "Test", goalType: "fat_loss", stepsTarget: 8500 }, // no id → no edu note
+  user: { name: "Test", goalType: "fat_loss", stepsTarget: 8500, profileNotes: "numbers:full" }, // numbers:full → numeric verdict path (default is now number-free); no id → no edu note
   todaySteps: 0,
   ...over,
 });

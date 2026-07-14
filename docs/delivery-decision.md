@@ -19,12 +19,13 @@ we do NOT ask people to self-classify up front.
   to the numbers). Shipped: food-scanner `verdictHeadline`, and `remainingInMeals`
   surfaced on every running total (not just the day-3 summary).
 
-- **The bot adapts per client.** A `numbers:low` profileNotes token drives a
-  fully number-free reply (plain verdict + food names + a words-only protein nudge).
-  It's set automatically when a client signals they don't understand calories (the
-  calorie-confusion handler) or asks to "keep it simple", and cleared when they ask
-  to "show me the numbers". No onboarding question, no manual split — the bot learns.
-  Shipped: `server/numbers-mode.ts`, `handlers/numbers-literacy.ts`.
+- **Number-free by DEFAULT; power users opt in** _(2026-07-14, third-party review —
+  "start everyone in number-free mode; let the numbers-lover ask for detail")._ This
+  flips the friction: nobody meets a number they didn't ask for — a grandmother is
+  protected without having to be confused once first — while the Cal-AI crowd opts in
+  a single time with "show me the numbers" (sets `numbers:full`). Onboarding tells
+  every client they can ask. Absence of a token = number-free; only `numbers:full`
+  turns figures on. Shipped: `server/numbers-mode.ts`, `handlers/numbers-literacy.ts`.
 
 ## Why this and not the alternatives
 

@@ -2130,11 +2130,12 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
 // figures still exist, they're just not put in front of them.
 {
   const { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } = await import("../server/numbers-mode");
-  test("numbers-mode: profileNotes token drives the mode", () => {
+  test("numbers-mode: default is NUMBER-FREE; only numbers:full opts into figures", () => {
+    assert.equal(getNumbersMode({ profileNotes: "diet:halal numbers:full" }), "normal");
     assert.equal(getNumbersMode({ profileNotes: "diet:halal numbers:low" }), "low");
-    assert.equal(getNumbersMode({ profileNotes: "diet:halal" }), "normal");
-    assert.equal(getNumbersMode({ profileNotes: null }), "normal");
-    assert.equal(getNumbersMode({}), "normal");
+    assert.equal(getNumbersMode({ profileNotes: "diet:halal" }), "low", "default = number-free");
+    assert.equal(getNumbersMode({ profileNotes: null }), "low");
+    assert.equal(getNumbersMode({}), "low");
   });
   test("numbers-mode: stripper removes kcal/protein, keeps food + description", () => {
     assert.equal(stripFoodLineNumbers("• Pap: ~470 kcal, 10g protein (1 cup)"), "• Pap (1 cup)");

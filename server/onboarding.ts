@@ -269,7 +269,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
   const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
-  const msg4 = `*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths.\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
+  const msg4 = `*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths, you never count a thing.\n\n_I'll keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime and I'll show the calories and protein._\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
   return `${underweightNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
 }
 

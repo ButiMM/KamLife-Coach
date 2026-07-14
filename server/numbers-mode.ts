@@ -19,8 +19,14 @@
 
 export type NumbersMode = "low" | "normal";
 
+// DEFAULT IS NUMBER-FREE (2026-07-14, third-party review — "start everyone in
+// number-free mode; let power users opt IN"). This flips the friction: the mass
+// low-literacy market never meets a number they didn't ask for (a grandmother no
+// longer has to be confused ONCE before we protect her), while a numbers-lover opts
+// in a single time with "show me the numbers" (sets numbers:full). Only an explicit
+// numbers:full token turns figures on; absence — and numbers:low — mean number-free.
 export function getNumbersMode(user: any): NumbersMode {
-  return /\bnumbers:low\b/i.test(user?.profileNotes || "") ? "low" : "normal";
+  return /\bnumbers:full\b/i.test(user?.profileNotes || "") ? "normal" : "low";
 }
 
 // Strip the "~470 kcal, 10g protein" / "~470 kcal | 10g protein" figures from a
