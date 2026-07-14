@@ -17,16 +17,20 @@ import {
   sendWhatsApp, claimProactive, getActiveClients, isPaused,
   todaySAST, isProactivePaused,
 } from "../shared";
+import { TRIAL_DAYS, TRIALS_ENABLED } from "../../pricing-config";
 
 function trialDaysIn(betaBypassUntil: Date | null | undefined): number | null {
   if (!betaBypassUntil) return null;
-  const trialStart = new Date(betaBypassUntil).getTime() - 7 * 86_400_000;
+  const trialStart = new Date(betaBypassUntil).getTime() - TRIAL_DAYS * 86_400_000;
   return Math.floor((Date.now() - trialStart) / 86_400_000);
 }
 
 export async function runTrialCountdown(): Promise<void> {
   console.log("[SCHEDULER] JOB: Trial countdown");
   if (isProactivePaused()) return;
+  // Pay-to-start (no trials): nothing to nurture. Grandfathered trial users still
+  // convert via the normal paywall when their existing window expires.
+  if (!TRIALS_ENABLED) return;
 
   const appUrl = process.env.APP_URL || "";
   const merchantId = process.env.PAYFAST_MERCHANT_ID;

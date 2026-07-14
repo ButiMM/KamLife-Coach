@@ -3,6 +3,7 @@ import { users, weightLogs, chatHistory, stepLogs, escalations } from "../shared
 import { escalationSLA } from "./safety-detection";
 import { generateReferralCode } from "./onboarding-referral";
 import { parseFoodPreferences, parseVisionAnswer } from "./onboarding-intake";
+import { TRIAL_DAYS, TRIALS_ENABLED } from "./pricing-config";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets, calculateStepsTarget } from "./targets";
@@ -180,13 +181,18 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     programmeWeek: 1,
     programmeDayInWeek: 1,
     programmeStartDate: new Date(),
-    // betaBypassUntil is null until a trial is granted. Using it as the "never trialed"
-    // signal is safer than checking subscriptionStatus (which defaults to "inactive",
-    // making !u.subscriptionStatus always false). This closes the trial-restart exploit.
-    ...(!u.betaBypassUntil ? {
+    // betaBypassUntil is null until first onboarding completes. Using it as the "already
+    // onboarded" signal is safer than subscriptionStatus (which defaults to "inactive")
+    // and closes the trial-restart exploit. PAY-TO-START by default (no free window):
+    // status stays inactive so the paywall hits right after the Day-1 taste; set
+    // TRIAL_DAYS>0 to reinstate a free trial. (2026-07-14, founder: "I hate trials".)
+    ...(!u.betaBypassUntil ? (TRIALS_ENABLED ? {
       subscriptionStatus: "trial",
-      betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
-    } : {}),
+      betaBypassUntil: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
+    } : {
+      subscriptionStatus: "inactive",
+      betaBypassUntil: new Date(), // non-null → "onboarded"; closes the restart exploit
+    }) : {}),
     onboardingState: "COMPLETE",
     ...(referralCode && !u.referralCode ? { referralCode } : {}),
   }).where(eq(users.phoneNumber, phone));
@@ -268,7 +274,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   const msg1b = `${calExplainer}\n\nLog your first meal and I will show you exactly where it lands. Type what you ate — e.g. *2 eggs and pap* — and Coach K does the maths.`;
 
   const msg2 = `*Day 1 is ready.*\n\n${firstWorkout}`;
-  const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. Not satisfied after your first week? Message us and we'll make it right. POPIA protected._`;
+  const msg3 = `Your personalised shopping list and weekly meal plan are ready.\n\nPay to unlock them — and Day 2 drops the moment you finish today's session.\n\n*R199/month — cancel anytime:*\n${payLinkOnb}\n\n_R6.63/day. Less than a coffee. *7-day money-back guarantee* — if you're not happy in your first week, full refund, no questions. POPIA protected._`;
   const msg4 = `*From today, send me everything you eat.* Breakfast. Lunch. Dinner. A photo or a few words — I do the maths, you never count a thing.\n\n_I'll keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime and I'll show the calories and protein._\n\nSend your step count at the end of each day. Even if you missed the target — especially then.\n\n📸 *Progress photos* — front, side, back. Natural light, same position every time. Send them now to set your baseline. You will thank yourself in 8 weeks.`;
   return `${underweightNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
 }
@@ -947,12 +953,16 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       programmeWeek: 1,
       programmeDayInWeek: 1,
       programmeStartDate: new Date(),
-      // betaBypassUntil null = never trialed. subscriptionStatus defaults to "inactive"
-      // (notNull), so checking it directly is always false. Use betaBypassUntil instead.
-      ...(!u.betaBypassUntil ? {
+      // PAY-TO-START by default (TRIALS_ENABLED=false): status inactive, betaBypassUntil
+      // set non-null to mark "onboarded" and close the restart exploit. TRIAL_DAYS>0
+      // reinstates a free trial. (Mirrors the fast-track path above.)
+      ...(!u.betaBypassUntil ? (TRIALS_ENABLED ? {
         subscriptionStatus: "trial",
-        betaBypassUntil: new Date(Date.now() + 7 * 86_400_000),
-      } : {}),
+        betaBypassUntil: new Date(Date.now() + TRIAL_DAYS * 86_400_000),
+      } : {
+        subscriptionStatus: "inactive",
+        betaBypassUntil: new Date(),
+      }) : {}),
       onboardingState: "COMPLETE",
       popiConsent: true,
       popiConsentAt: new Date(),

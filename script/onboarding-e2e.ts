@@ -92,7 +92,7 @@ const FLOW_A: Flow = {
     name: "Thabo", gender: "male", age: 30, currentWeight: "83", heightCm: 175, bmi: "27.1",
     goalType: "fat_loss", medicalConditions: "none", injuries: "",
     trainingMode: "gym", weeklyFoodBudget: "100_300", budgetLevel: "medium",
-    trainingExperience: "beginner", subscriptionStatus: "trial",
+    trainingExperience: "beginner", subscriptionStatus: "inactive",
     programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1,
   },
   targetInputs: { weight: 83, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 30, heightCm: 175, exp: "beginner" },
@@ -130,7 +130,7 @@ const FLOW_B: Flow = {
     primaryFocusArea: "glutes_legs",
     trainingMode: "gym_dumbbell", homeEquipment: "dumbbells",
     weeklyFoodBudget: "under_100", budgetLevel: "low",
-    trainingExperience: "beginner", subscriptionStatus: "trial",
+    trainingExperience: "beginner", subscriptionStatus: "inactive",
   },
   targetInputs: { weight: 68, goal: "recomposition", situation: "office", days: 4, gender: "female", age: 27, heightCm: 163, exp: "beginner" },
 };
@@ -166,7 +166,7 @@ const FLOW_C: Flow = {
     name: "Sipho", gender: "male", age: 45, currentWeight: "100", heightCm: 172, bmi: "33.8",
     goalType: "muscle_gain", medicalConditions: "hypertension",
     trainingMode: "walk_only", weeklyFoodBudget: "over_600", budgetLevel: "premium",
-    trainingExperience: "advanced", subscriptionStatus: "trial",
+    trainingExperience: "advanced", subscriptionStatus: "inactive",
   },
   targetInputs: { weight: 100, goal: "muscle_gain", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "advanced" },
 };
@@ -223,7 +223,9 @@ async function runFlow(flow: Flow): Promise<void> {
     if (!/diet:halal/.test(u.profileNotes || "")) fail(flow.name, `profileNotes should carry diet:halal, got ${JSON.stringify(u.profileNotes)}`);
     if (!/walk:lifestyle/.test(u.profileNotes || "")) fail(flow.name, `profileNotes should carry walk:lifestyle, got ${JSON.stringify(u.profileNotes)}`);
   }
-  if (!u.betaBypassUntil) fail(flow.name, `betaBypassUntil (7-day trial) should be set`);
+  // betaBypassUntil is set (non-null) to mark "onboarded" and close the restart
+  // exploit — even under pay-to-start (where it's set to now, i.e. no free window).
+  if (!u.betaBypassUntil) fail(flow.name, `betaBypassUntil should be set (marks onboarded)`);
 
   // ── Target formula assertions — the Bonolo net at the CAPTURE end ──
   const ti = flow.targetInputs;
