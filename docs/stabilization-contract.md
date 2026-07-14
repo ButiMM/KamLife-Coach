@@ -54,9 +54,16 @@ measurable and layer 2 verified.
       prompt overwriting weight to 172kg, and completeOnboarding computing targets
       from stale (null) training experience — an advanced client got beginner
       calories. All three fixed with the regression pinned in the same commit.
-- [ ] **Video path verified:** a 10s, 30s and 60s video each produce either a real
-      form-check or the graceful fallback — never silence (guarantee already live;
-      verify the real replies).
+- [x] **Video path verified** _(shipped 2026-07-14; ticks fully on the CI strict
+      run)_: script/video-path-verify.ts builds REAL 10s/30s/60s clips with the same
+      ffmpeg binary production uses, runs them through the real extractVideoFrames
+      at both frame budgets (6 form-check / 8 workout-save), asserts frames exist,
+      are valid JPEGs, and land in time; corrupt/empty buffers must degrade to []
+      not throw; and every failure branch in the media handler must carry its
+      fallback reply. In the npm test chain (strict on CI). Bonus hardening: the
+      ffmpeg-static package can resolve while its postinstall-downloaded BINARY is
+      missing — video-frames.ts now screams at boot instead of degrading every
+      video silently forever, and the verify script fails a strict build on it.
 - [ ] **Churn-shape reviewed with real data** (endpoint is live) and the dominant
       bucket named — so post-freeze work is aimed by data.
 - [ ] **Tester green run:** one full pass of docs/live-test-script.md by a real tester

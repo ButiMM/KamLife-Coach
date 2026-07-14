@@ -10,6 +10,7 @@
  */
 
 import { tmpdir } from "os";
+import { existsSync } from "fs";
 import { writeFile, unlink, readFile, readdir, mkdir, rm } from "fs/promises";
 import { join as pathJoin } from "path";
 import { execFile } from "child_process";
@@ -18,6 +19,16 @@ import crypto from "crypto";
 import ffmpegPath from "ffmpeg-static";
 
 const execFileP = promisify(execFile);
+
+// The package resolving is NOT the binary existing — ffmpeg-static downloads the
+// binary in a postinstall step that can fail (network, proxy) while the import
+// still succeeds. Without this check a broken build would quietly degrade EVERY
+// video to the fallback reply forever. Scream once at load so it's in the deploy
+// logs, and let extractVideoFrames degrade per-call as before.
+export const FFMPEG_AVAILABLE = !!ffmpegPath && existsSync(ffmpegPath);
+if (!FFMPEG_AVAILABLE) {
+  console.error("[video-frames] ffmpeg binary MISSING from this build — every video will fall back to 'send a screenshot'. Re-run npm install / check the ffmpeg-static postinstall.");
+}
 
 /**
  * Extract up to `maxFrames` evenly-spaced JPEG frames from a video buffer.
@@ -28,7 +39,7 @@ export async function extractVideoFrames(
   ext: string,
   maxFrames = 8,
 ): Promise<string[]> {
-  if (!ffmpegPath) {
+  if (!FFMPEG_AVAILABLE || !ffmpegPath) {
     console.warn("[video-frames] ffmpeg binary unavailable — skipping extraction");
     return [];
   }
