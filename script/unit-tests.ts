@@ -2157,6 +2157,29 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   });
 }
 
+// DEEP EMOTIONAL SUPPORT (2026-07-14, Kam: manual clients send long voice notes —
+// they've tried everything and stay for the accountability + support).
+{
+  const { looksLikeDeepEmotionalShare, mentionsTriedEverything } = await import("../server/utils");
+  test("emotional: tried-everything + GLP-1 psychology is recognised", () => {
+    for (const m of ["I've tried everything", "been on ozempic and wegovy", "every diet, nothing ever works", "I always gain it all back", "tried banting, keto, shakes, the lot"])
+      assert.ok(mentionsTriedEverything(m), `should detect: ${m}`);
+    for (const m of ["I had chicken and rice", "8000 steps done"]) assert.ok(!mentionsTriedEverything(m), `should not: ${m}`);
+  });
+  test("emotional: deep shares (long+vulnerable, or quit/alone) get the support path", () => {
+    for (const m of [
+      "I've tried everything — Ozempic, every diet — and I'm about to give up. Nothing ever works.",
+      "I ate a whole cake and I feel so ashamed, I hate my body, I just want to quit.",
+      "I can't do this alone, I need help",
+      "Every time I lose a bit then gain it back. I've been on so many diets, I feel like a failure and I'm exhausted, I don't know what to do anymore and I just want to give up honestly.",
+    ]) assert.ok(looksLikeDeepEmotionalShare(m), `should be a deep share: ${m.slice(0, 40)}`);
+  });
+  test("emotional: normal logs and short messages are NOT deep shares (no over-firing)", () => {
+    for (const m of ["I had chicken and rice for lunch", "I'm a bit tired today", "should I take creatine", "8000 steps done", "workout done", "what's my protein target"])
+      assert.ok(!looksLikeDeepEmotionalShare(m), `should not be a deep share: ${m}`);
+  });
+}
+
 // ACTIVATION MOMENT (2026-07-14) — the expectation-setter + first-action celebration.
 {
   const { isActivated, buildActivationBrief } = await import("../server/activation");

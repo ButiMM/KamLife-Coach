@@ -733,6 +733,12 @@ const CASES: Case[] = [
   { name: "tone: ordinary logistics ('struggling to find time') does NOT set tone",
     msg: "I'm struggling to find time to train",
     reject: [/straight talk from now|keep it gentle and go at your pace|shout every win/i] },
+
+  // ── DEEP EMOTIONAL SHARE (2026-07-14) — a tearful "I ate a cake, tried everything,
+  // want to quit" must NOT get its cake logged; it flows to emotional support instead.
+  { name: "emotional: a deep share mentioning food is NOT logged as a meal",
+    msg: "I ate a whole cake last night and I feel so ashamed. I've tried everything — every diet, Ozempic — and I just want to give up.",
+    reject: [/\*Food logged|Food logged ✅|Running total today|Meal total:|kcal \| .*protein/i] },
 ];
 
 async function main() {

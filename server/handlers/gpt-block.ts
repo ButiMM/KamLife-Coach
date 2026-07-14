@@ -9,7 +9,7 @@ import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart, sastToday } from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday, looksLikeDeepEmotionalShare } from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
@@ -559,6 +559,16 @@ SA voice. Direct. Coach forward, not backward.`;
     agentType = "mindset";
     console.log(`[INTENT] RANT override → mindset agent (${Math.round(intentConfidence * 100)}% confidence)`);
   }
+  // DEEP EMOTIONAL SHARE (2026-07-14) — a long, vulnerable message or a "tried
+  // everything / ready to quit" moment gets the mindset agent in DEEP mode: full
+  // depth, the better model, and the tried-everything/accountability psychology. This
+  // is the accountability-partner value Kam's manual clients stay for. Never override
+  // a meta-criticism of the bot itself.
+  const deepEmotional = !isMetaCriticism && looksLikeDeepEmotionalShare(message);
+  if (deepEmotional) {
+    agentType = "mindset";
+    console.log(`[EMOTIONAL] deep share → mindset agent (deep mode)`);
+  }
 
   if (!checkGptRateLimit(user.id)) {
     console.warn(`[RATE] GPT rate limit hit for user ${user.id.slice(0, 8)}`);
@@ -576,7 +586,7 @@ SA voice. Direct. Coach forward, not backward.`;
       gptReply = await programmingAgent(user, message, memoryContext, prog, saContext);
     } else if (agentType === "mindset") {
       const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
-      gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext);
+      gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext, deepEmotional);
     } else if (agentType === "admin") {
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);

@@ -19,7 +19,7 @@ import {
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, looksLikeDeepEmotionalShare } from "../utils";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
@@ -270,6 +270,12 @@ export async function handleFoodContext(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
   const classifierQuestion = !!ctx.classifierQuestion;
+
+  // ---- SUPPORT BEFORE LOGGING (2026-07-14) — a deep emotional share ("I ate a whole
+  // cake, I've tried everything, I want to quit") must reach emotional support, NOT get
+  // its cake silently counted. Skip the food logger entirely and let it flow to the
+  // mindset/deep-support path. The person needs to be heard first; they can log later. ----
+  if (looksLikeDeepEmotionalShare(message)) return null;
 
   // ---- BOT MISSED A MEAL — "you missed a meal", "you didn't log that", "you forgot my lunch" ----
   // Must be caught BEFORE the correction detector which would re-route "you missed a meal" as food

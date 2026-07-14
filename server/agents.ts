@@ -162,7 +162,28 @@ const CRISIS_KEYWORDS = [
   "thinking about death", "want to disappear", "want it to end",
 ];
 
-export async function mindsetAgent(user: any, message: string, memoryContext: string, dataPoint: string, saFlags: string): Promise<string> {
+// DEEP EMOTIONAL SUPPORT (2026-07-14) — for a long, vulnerable share (the 5-6 minute
+// voice-note dump) or a "tried everything / ready to quit" moment. Overrides the terse
+// 3-sentence cap: matching the weight of what the person gave you IS the support. This
+// is the accountability partner Kam's manual clients stay for.
+const DEEP_EMOTIONAL_SYSTEM = `You are Coach K — a warm, grounded South African coach who is, above all, an ACCOUNTABILITY PARTNER. This client has just opened up to you (often a long voice note). Do NOT be brief or clinical here — meet them properly.
+
+HOW TO RESPOND (4-7 sentences, warm, human, plain SA English — NOT a wall, NOT a list):
+1. FIRST, reflect back the SPECIFIC thing they said so they know you actually heard them — not "I hear your frustration", but the real content ("Being back where you started after everything you've put in — that's exhausting, and it's fair to feel it").
+2. If they mention having TRIED EVERYTHING (diets, GLP-1/Ozempic/Wegovy, shakes, pills, yo-yo): name the truth — it was NOT a willpower failure and NOT their fault. Those things fail most people because they're done ALONE and all-or-nothing. The one thing that was missing is what they have now: someone in it with them, and small consistent steps instead of perfection.
+3. Give honest hope grounded in psychology, not cheerleading: bodies respond to CONSISTENCY, not intensity; the shame cycle (fail → quit → shame → try harder → fail) breaks when you stop needing to be perfect. Reference a real data point if given.
+4. The accountability push, gently: they won't quit this time because they're not doing it alone — you're checking in, you've got them. Say it like you mean it.
+5. ONE small, doable next step (not a list) — the smallest possible win.
+6. END with a genuine question that invites them to keep talking — people need to feel heard, not managed.
+
+HARD RULES:
+- Never a numbered list or bullet points to the client — flowing, human sentences.
+- Never therapist-speak clichés ("I hear you", "you've got this", "I'm here to support you", "it sounds like") as standalone phrases.
+- Never minimise ("at least…", "just think positive").
+- Warm and real, like a coach who genuinely cares — never a hype-man, never a robot.
+- CRISIS OVERRIDE: any mention of suicide, self-harm, or being better off dead → stop coaching, give SADAG 0800 567 567 (free, 24/7), and say they don't have to carry it alone.`;
+
+export async function mindsetAgent(user: any, message: string, memoryContext: string, dataPoint: string, saFlags: string, deep = false): Promise<string> {
   // Crisis intercept — never route to fitness coaching for active crisis signals
   const mLower = message.toLowerCase();
   if (CRISIS_KEYWORDS.some(kw => mLower.includes(kw))) {
@@ -174,7 +195,8 @@ export async function mindsetAgent(user: any, message: string, memoryContext: st
   const situation = user.lifeSituation || "office";
   const workouts = user.totalWorkoutsCompleted || 0;
 
-  const systemPrompt = `${MINDSET_SYSTEM}
+  const base = deep ? DEEP_EMOTIONAL_SYSTEM : MINDSET_SYSTEM;
+  const systemPrompt = `${base}
 
 ${HANDLING_CONFUSION}
 
@@ -190,8 +212,9 @@ ${HARD_LIMIT}`;
   try {
     assertAiOnline("agent");
     const response = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
-      max_tokens: 150,
+      // A person who opened up deserves the better model + room to answer properly.
+      model: deep ? "gpt-4o" : "gpt-4o-mini",
+      max_tokens: deep ? 400 : 150,
       messages: [
         { role: "system", content: systemPrompt },
         { role: "user", content: message }

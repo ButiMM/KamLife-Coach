@@ -670,6 +670,31 @@ export function parseSickDays(m: string): number {
   return 3;
 }
 
+// TRIED-EVERYTHING psychology (2026-07-14, Kam: manual clients send long voice notes —
+// "I've tried GLP-1s, every diet, and I'll quit without accountability"). This exact
+// moment is the emotional core of the product: someone exhausted by a history of
+// failure who needs to hear it's not their fault and that accountability is the thing
+// that was missing. Recognising it lets the coach lead with the right psychology.
+export function mentionsTriedEverything(m: string): boolean {
+  const s = m || "";
+  return /\b(tried (everything|it all|every ?thing|so many|all the|a lot of)|nothing (ever )?(works|worked|helps|helped)|every diet|been on (every|so many)|yo.?yo|(always|keep|keeps?) (putting|put|gain(?:ing)?|piling?|pile) (it|the weight) (all )?back|gained? (it|the weight) (all )?back|lost.{0,20}gained.{0,20}back|last resort|at my wits|desperate|given up before|keep failing|always fail)\b/i.test(s)
+    || /\b(glp.?1|glp1|ozempic|wegovy|saxenda|semaglutide|mounjaro|banting|keto|shakes|slimming (pills|tablets|teas)|diet pills|herbalife|weigh.?less)\b/i.test(s);
+}
+
+// A DEEP EMOTIONAL SHARE — a long, vulnerable message (the 5-6 minute voice-note dump
+// Kam describes) or a clear "I want to quit / I can't do this alone" moment. These
+// deserve DEPTH and warmth, not a curt 3-sentence coach reply — matching the weight of
+// what the person just gave you is the whole point. Pure — unit-tested.
+export function looksLikeDeepEmotionalShare(m: string): boolean {
+  const s = (m || "").trim();
+  const EMO = /\b(quit|give up|giving up|want to stop|can.?t do this|can.?t keep|no results|nothing.{0,15}chang|so tired|exhausted|overwhelmed|depress|anxious|hopeless|no hope|ashamed|embarrass|hate (my|myself|this body|my body)|feel (fat|ugly|worthless|like a failure)|not good enough|crying|breaking down|falling apart|struggling|struggle|alone|on my own|by myself|frustrat|defeated|lost (all )?motivation|about to give)\b/i;
+  const strong = mentionsTriedEverything(s)
+    || /\b(i (just )?want to (quit|give up|stop)|can.?t do this (any ?more|alone|on my own)|about to (quit|give up)|ready to give up|i (feel|am) (so )?(alone|hopeless|defeated|like giving up)|please help me|i don.?t know what (else )?to do|at the end of my rope)\b/i.test(s);
+  if (strong) return true;
+  // Otherwise: a genuinely long message (voice-note-length) carrying real emotion.
+  return s.length >= 220 && EMO.test(s);
+}
+
 // A QUESTION about the return/aftermath of being sick — must get the comeback plan,
 // never the rest-up template ("what happens when I come back from the flu?", "how does
 // that affect my progress/my week?", "what do I do when I'm better?").
