@@ -1960,6 +1960,34 @@ test("vision prompt: approval verdict offers real SA shelf + takeaway swaps", ()
   assert.ok(/grilled not fried/i.test(approve), "fried→grilled swap present");
 });
 
+// NUMBER-FREE PHOTO REPLIES for numbers:low clients (2026-07-14). The vision prompt
+// must instruct the model to omit figures BUT keep the internal TOTAL line for the
+// maths, and only in low mode — the default prompt is untouched.
+{
+  const { buildFoodVisionSystemPrompt } = await import("../server/handlers/food-vision-prompt");
+  const { stripNumbersFromProse } = await import("../server/numbers-mode");
+  test("vision prompt: numbersLow adds NUMBERS-OFF but keeps the TOTAL line; default unchanged", () => {
+    const low = buildFoodVisionUserPrompt({ message: "", isApprovalCaption: false, liveCal: 1800, liveProt: 120, numbersLow: true });
+    assert.ok(/NUMBERS-OFF MODE/.test(low), "low mode instructs no figures");
+    assert.ok(/TOTAL: X kcal/.test(low), "internal TOTAL line still required for logging");
+    const def = buildFoodVisionUserPrompt({ message: "", isApprovalCaption: false, liveCal: 1800, liveProt: 120 });
+    assert.ok(!/NUMBERS-OFF MODE/.test(def), "default prompt is NOT number-suppressed");
+    const lowSys = buildFoodVisionSystemPrompt({ clientName: "K", goal: "fat_loss", liveCal: 1800, liveProt: 120, isApprovalCaption: false, numbersLow: true });
+    assert.ok(/NUMBERS OFF/.test(lowSys), "system prompt carries the low-mode rule");
+    assert.ok(!/NUMBERS OFF/.test(buildFoodVisionSystemPrompt({ clientName: "K", goal: "fat_loss", liveCal: 1800, liveProt: 120, isApprovalCaption: false })), "default system prompt unchanged");
+  });
+  test("stripNumbersFromProse: the belt-and-braces net leaves NO digits", () => {
+    for (const s of [
+      "This looks like a sandwich, roughly 430 kcal | 18g protein. Solid lunch.",
+      "Chicken breast (~150g): 250 kcal and about 30g protein. Nice and lean.",
+      "That's a lovely breakfast spread! Roughly 1410 kcal, 40g protein.",
+    ]) assert.ok(!/\d/.test(stripNumbersFromProse(s)), `must be digit-free: ${stripNumbersFromProse(s)}`);
+    // clean prose is left intact
+    assert.equal(stripNumbersFromProse("A solid, balanced plate — pap, chicken and spinach. Nicely done."),
+      "A solid, balanced plate — pap, chicken and spinach. Nicely done.");
+  });
+}
+
 // PHYSIQUE ANALYSIS (2026-07-09) — read baseline photos → lagging vs dominant muscles,
 // gender-aware, to drive targeted-volume programming. The parser must validate the
 // model's free-form answer, never trust it raw.

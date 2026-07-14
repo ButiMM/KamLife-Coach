@@ -39,6 +39,32 @@ export function stripFoodLineNumbers(foodLines: string): string {
     .trim();
 }
 
+// Belt-and-braces net for low-numeracy PHOTO replies: the vision prompt already
+// tells the model to omit figures, but if a number slips through (model prose, a
+// deterministic total line), scrub it so a numbers:low client never sees a figure.
+// Deliberately conservative — only touches explicit kcal/calorie/gram-protein/portion
+// tokens, and tidies the small dangling artefacts that leaves ("roughly ,").
+export function stripNumbersFromProse(text: string): string {
+  return (text || "")
+    // figure tokens first
+    .replace(/~?\s*\d[\d,]*\s*kcal\s*[|,/]?\s*(?:and\s*)?~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
+    .replace(/~?\s*\d[\d,]*\s*(?:kcal|calories|cals?)\b/gi, "")
+    .replace(/~?\s*\d+\s*g\s*(?:of\s*)?protein/gi, "")
+    .replace(/\(\s*~?\s*\d[\d,]*\s*(?:g|ml|grams?)\s*\)/gi, "")
+    // clean the connective debris the removals leave behind
+    .replace(/:\s*(?:and|is|with|of|at)\b\s*(?=[.,!?;:])/gi, "") // "breast: and." → "breast."
+    .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
+    .replace(/\s+([.,!?;:])/g, "$1")   // pull punctuation back to the word
+    .replace(/[,:;]+(?=[.!?])/g, "")   // "slice,." → "slice."
+    .replace(/([!?])\.+/g, "$1")        // "spread!." → "spread!"
+    .replace(/\.{2,}/g, ".")            // ".." → "."
+    .replace(/:\s*(?=$|\n)/gm, "")      // dangling colon at line end
+    .replace(/\(\s*\)/g, "")
+    .replace(/[ \t]{2,}/g, " ")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 // Words-only protein nudge for low-numeracy clients — never a gram figure.
 export function plainProteinNudge(opts: { proteinRemaining: number; isMuscleGain: boolean; hasGoodProteins: boolean }): string {
   const { proteinRemaining, isMuscleGain, hasGoodProteins } = opts;

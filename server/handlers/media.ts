@@ -42,6 +42,8 @@ const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
 import { extractMealLabel } from "./food-context";
+import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
+import { remainingInMeals } from "../education";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
@@ -775,6 +777,9 @@ export async function handleMediaMessage(ctx: {
       // phrases stay as an extra belt.
       const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
+      // Number-free delivery for a low-numeracy client (numbers:low) — the vision
+      // prompt omits figures, and a final scrub nets anything that slips through.
+      const photoNumbersLow = getNumbersMode(user) === "low";
 
       const todayStartPhoto = sastDayStart();
       const photoCountResult = await db.select({ count: sql`count(*)` })
@@ -800,14 +805,14 @@ export async function handleMediaMessage(ctx: {
         messages: [
           {
             role: "system",
-            content: buildFoodVisionSystemPrompt({ clientName, goal, liveCal, liveProt, isApprovalCaption }),
+            content: buildFoodVisionSystemPrompt({ clientName, goal, liveCal, liveProt, isApprovalCaption, numbersLow: photoNumbersLow }),
           },
           {
             role: "user",
             content: [
               {
                 type: "text",
-                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt }),
+                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow }),
               },
               { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
             ],
@@ -1130,7 +1135,9 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
-          photoDailyTotal = `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target ✅"}_`;
+          photoDailyTotal = photoNumbersLow
+            ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : "That's your food for today — nicely done. ✅"}_`
+            : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : " On target ✅"}_`;
         }
         await db.update(users).set({
           todayCalories: totals.calories,
@@ -1147,7 +1154,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const totalSentPhotos = 1 + Math.min(extraImageUrls.length, 3);
       const totalLoggedFoodPhotos = extraReplies.filter(r => !/\d+,?\d* steps/i.test(r)).length + 1;
       const logNote = totalLoggedFoodPhotos >= totalSentPhotos ? "all logged" : `${totalLoggedFoodPhotos} of ${totalSentPhotos} logged`;
-      const multiPhotoNote = extraReplies.length > 0 ? `\n_${totalSentPhotos} photo${totalSentPhotos !== 1 ? "s" : ""} — ${logNote}. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_` : "";
+      const multiPhotoNote = extraReplies.length > 0
+        ? (photoNumbersLow
+            ? `\n_${totalSentPhotos} photo${totalSentPhotos !== 1 ? "s" : ""} — ${logNote}._`
+            : `\n_${totalSentPhotos} photo${totalSentPhotos !== 1 ? "s" : ""} — ${logNote}. Total: ~${totalPhotoKcal} kcal | ${totalPhotoProt}g protein_`)
+        : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
 
       // Honest coaching nudge for high-cal meals on fat-loss / recomp goals.
@@ -1164,7 +1175,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoTotalMs = Date.now() - mediaFlowStart;
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
-      return `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      const photoReply = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
+      // Final net: for a numbers:low client, scrub any figure the model or a
+      // deterministic line leaked, so they NEVER see a number on a photo reply.
+      return photoNumbersLow ? stripNumbersFromProse(photoReply) : photoReply;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);

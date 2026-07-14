@@ -17,9 +17,16 @@
 
 export function buildFoodVisionSystemPrompt(opts: {
   clientName: string; goal: string; liveCal: number; liveProt: number; isApprovalCaption: boolean;
+  numbersLow?: boolean;
 }): string {
-  const { clientName, goal, liveCal, liveProt, isApprovalCaption } = opts;
-  return `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein.
+  const { clientName, goal, liveCal, liveProt, isApprovalCaption, numbersLow } = opts;
+  // NUMBERS-OFF: a low-numeracy client (numbers:low) must see no figures. The model
+  // still emits the internal TOTAL: line — media.ts strips it from display and uses
+  // it for logging — so the maths is untouched; only the visible words go number-free.
+  const numbersOff = numbersLow
+    ? ` NUMBERS OFF — CRITICAL: This client does NOT want to see numbers; they overwhelm them. In your visible reply do NOT write any calorie, kcal, or gram-protein figures, and do NOT state gram/ml portion sizes. Describe the food in plain SA words and, for a full meal, give a one-line plain verdict (e.g. "a solid, balanced plate" or "tasty but a bit heavy — keep the next one lighter"). You MUST still end with the exact "TOTAL: X kcal | Yg protein" line — it is read by the system and NEVER shown to the client. Everything else must be number-free.`
+    : "";
+  return `You are Coach K, a South African fitness and nutrition coach with 20 years experience. Client: ${clientName}. Goal: ${goal}. Daily targets: ${liveCal} kcal and ${liveProt}g protein.${numbersOff}
 
 HOW TO REPLY — READ CAREFULLY: The client is LOGGING food they already have. They are NOT asking for advice. Your job is to identify it, give the numbers, and make logging feel easy and judgment-free. You are NOT here to lecture.
 - DEFAULT: a short, warm line plus confirmation it is logged. Nothing more.
@@ -53,9 +60,13 @@ Rules: only name dishes actually on the menu. Grilled beats fried; lean protein 
 
 export function buildFoodVisionUserPrompt(opts: {
   message: string; isApprovalCaption: boolean; liveCal: number; liveProt: number;
+  numbersLow?: boolean;
 }): string {
-  const { message, isApprovalCaption, liveCal, liveProt } = opts;
-  return `Analyse this food photo as Coach K.
+  const { message, isApprovalCaption, liveCal, liveProt, numbersLow } = opts;
+  const numbersOff = numbersLow
+    ? `\n\nNUMBERS-OFF MODE (CRITICAL): this client cannot read calorie/gram numbers. In your VISIBLE reply write NO kcal, calorie, or gram figures and NO gram/ml portion sizes — describe the plate in plain words and give a one-line plain verdict for a full meal. You MUST still output the exact "TOTAL: X kcal | Yg protein" line at the very end; it is used only for logging and is never shown. Everything except that TOTAL line must be number-free.`
+    : "";
+  return `Analyse this food photo as Coach K.${numbersOff}
 
 IDENTIFICATION: Always use SA names — pap not polenta, pilchards not sardines, vetkoek not fried dough, morogo not wild spinach, umngqusho not samp-and-beans, kota not bunny chow, magwinya not fat cake, smileys not sheep head, walkie talkies not chicken feet, mogodu not tripe, chakalaka not relish, boerewors not sausage, biltong not dried meat.
 
