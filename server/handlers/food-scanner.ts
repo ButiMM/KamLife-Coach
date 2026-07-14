@@ -972,5 +972,21 @@ export function buildFoodLogReply(p: {
   const addOn = [calorieFloorNote, junkNote, coachNoteOverride ? coachNote : "", proteinTip, coachNote, swapNote, eduNote, variableReinforcement]
     .find(s => s && s.trim()) || "";
 
-  return `${gentlePrefix}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${addOn}[BUTTONS:My progress|Today's workout]`;
+  // PLAIN LEADS, NUMBERS SUPPORT (2026-07-14, the delivery decision): every food
+  // reply now opens with a one-line, NUMBER-FREE human verdict — the thing a
+  // grandmother or a 13-year-old reads and instantly gets — and the kcal/protein
+  // detail sits below for the clients who want it (the Cal-AI crowd). One message,
+  // three literacy levels, nobody asked or split. Number-free by design so it never
+  // disturbs the kcal extractor or the low-numeracy reader.
+  const verdictHeadline = (prevCals > 0 && runningTotalSane)
+    ? (effectiveRemaining <= -100
+        ? (isMuscleGain
+            ? "🟢 Plenty of fuel in today — that's building material."
+            : "🟡 That's your food for the day — anything else, keep it light (protein + veg).")
+        : effectiveRemaining < 150
+          ? "🟢 Right on track for today."
+          : `🟢 Nicely done — still room for ${mealsLeft || "a bit more"} today.`)
+    : "";
+  const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
+  return `${gentlePrefix}${head}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${addOn}[BUTTONS:My progress|Today's workout]`;
 }
