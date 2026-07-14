@@ -1077,6 +1077,40 @@ test("brain: everyday chatter does NOT trip the health playbook", () => {
     assert.ok(!SCENARIO_TOPIC_RE.test(msg), `should NOT trigger: ${msg}`);
 });
 
+// SICK-MENTION PRECISION (2026-07-13, cross-intent sweep) — the word "sick"/"flu"
+// appearing in a message is NOT a sickness report. Third-person, idiom, prevention,
+// and overeating-regret must all stay out of the sick flow.
+const { looksSickMention } = await import("../server/handlers/sick-flow");
+
+test("sick gate: first-person reports fire", () => {
+  for (const msg of [
+    "I'm sick with flu, no training for me",
+    "I can't walk today, I'm sick. I'll be out for the next 5 days",
+    "woke up with a fever, feeling terrible",
+    "I've got covid",
+    "down with the flu",
+    "not feeling well today",
+  ]) assert.ok(looksSickMention(msg), `should fire: ${msg}`);
+});
+
+test("sick gate: third-person / idiom / prevention / regret do NOT fire", () => {
+  for (const msg of [
+    "The flu is going around at work",
+    "My sister is sick, I'm taking care of her this week",
+    "My kids have the flu so I might miss gym tomorrow",
+    "I'm sick of pap every single day, give me something else",
+    "I'm sick and tired of diets that don't work",
+    "Flu shot tomorrow, can I still train?",
+    "Ate so much at the party last night, I feel sick",
+    "That workout made me feel sick, was it too intense?",
+    "I'm feeling better now, over the flu",
+  ]) assert.ok(!looksSickMention(msg), `should NOT fire: ${msg}`);
+});
+
+test("sick gate: third-person context with a first-person report still fires", () => {
+  assert.ok(looksSickMention("Everyone at work has flu and now I'm sick too"), "first-person assertion overrides third-party context");
+});
+
 test("brain: eating-out playbook — permission + strategy, never guilt (Kam's manual pattern)", () => {
   assert.ok(/EATING OUT/i.test(BRAIN_SYS), "must handle going-out announcements");
   assert.ok(/lean protein/i.test(BRAIN_SYS) && /skip the alcohol/i.test(BRAIN_SYS), "3-part strategy present");

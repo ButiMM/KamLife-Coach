@@ -503,6 +503,67 @@ const CASES: Case[] = [
     ];
   })(),
 
+  // ── CROSS-INTENT BATTERY ─────────────────────────────────────────────────────
+  // Kam's diagnosis (2026-07-13): "You mention food in the sentence, and it brings
+  // up other nonsense. You mention workout... flu... other nonsense." The disease is
+  // keyword-PRESENCE routing: a trigger word appearing in a message about something
+  // else fires that word's handler. Every case here contains an intent word used in
+  // a context that intent must NOT own. Grows with every tester screenshot.
+  ...(() => {
+    const SICK_TPL = /above-the-neck rule|no training — rest until|paused your check-ins|Still resting —/i;
+    const SESSION_SERVE = /Reply \*DONE\* when finished|Next Session \(Day/i;
+    const SESSION_LOGGED = /Session \d+ (?:logged|—|in)\b|First workout done|got it, logged to/i;
+    const FOOD_LOGGED = /\*Food logged|Food logged ✅|Running total today|Meal total:/i;
+    const x = (name: string, msg: string, c: Partial<Case> = {}): Case => ({ name: `xintent: ${name}`, msg, ...c });
+    return [
+      // "flu" in the sentence, but nobody here is sick — template must stay holstered
+      x("flu going around at work", "The flu is going around at work",
+        { reject: [SICK_TPL] }),
+      x("sister is sick", "My sister is sick, I'm taking care of her this week",
+        { reject: [SICK_TPL] }),
+      x("kids have the flu", "My kids have the flu so I might miss gym tomorrow",
+        { reject: [SICK_TPL, SESSION_LOGGED] }),
+      x("sick of pap idiom", "I'm sick of pap every single day, give me something else",
+        { reject: [SICK_TPL] }),
+      x("sick and tired of diets", "I'm sick and tired of diets that don't work",
+        { reject: [SICK_TPL] }),
+      x("flu shot question", "Flu shot tomorrow, can I still train?",
+        { reject: [SICK_TPL] }),
+      x("hypothetical fever question", "Can you train with a fever or is that dangerous?",
+        { reject: [SICK_TPL] }),
+      // overeating "feel sick" is regret, not illness — must not pause check-ins for 3 days
+      x("ate too much feel sick", "Ate so much at the party last night, I feel sick",
+        { reject: [SICK_TPL] }),
+      x("workout made me feel sick", "That workout made me feel sick, was it too intense?",
+        { reject: [SICK_TPL, SESSION_SERVE] }),
+      // genuinely sick — the template SHOULD fire, with the duration remembered
+      x("real sick report", "I'm sick with flu, no training for me",
+        { expect: [/no training — rest until/i, /paused your check-ins/i] }),
+      // declares AND asks (Kam's exact class) — answer the question, RECORD the sickness
+      x("sick + comeback question records", "I can't walk today, I'm sick. How does that affect my progress? I'll be out for the next 5 days",
+        { expect: [/Nothing resets/i, /5 days/i, /paused your check-ins/i] }),
+      // already noted sick: repeat statement gets the short variant, never the template
+      x("repeat sick mention", "still feeling sick today",
+        { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },
+          expect: [/Still resting/i], reject: [/no training — rest until/i] }),
+      // already noted sick: a QUESTION falls to the sick-aware brain, never a template
+      x("question while sick", "Can I eat bread while I'm sick?",
+        { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },
+          reject: [SICK_TPL] }),
+      // "workout" in a food sentence — food lane, not a session dump
+      x("food after workout", "I had chicken and rice after my workout",
+        { reject: [SESSION_SERVE] }),
+      x("what to eat before workout", "What should I eat before my workout?",
+        { reject: [SESSION_SERVE, SESSION_LOGGED, FOOD_LOGGED] }),
+      // "gym" in a scheduling sentence — no session, no completion
+      x("gym clothes wet", "My gym clothes are still wet from washing, I'll train tomorrow instead",
+        { reject: [SESSION_SERVE, SESSION_LOGGED] }),
+      // "chicken" in a grocery request — must not log a meal
+      x("grocery chicken request", "Can you add more chicken recipes to my grocery list?",
+        { reject: [FOOD_LOGGED] }),
+    ];
+  })(),
+
   // ── NEGATION-SAFETY BATTERY ──────────────────────────────────────────────────
   // The disease's most damaging form: a message reporting that the activity did NOT
   // happen ("couldn't run 5km", "missed my 5km", "didn't hit 8000 steps") gets logged
