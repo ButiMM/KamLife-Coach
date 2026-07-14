@@ -153,11 +153,16 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
 
   const trainingDays = u.trainingDaysPerWeek || ((isYouth || isElderly) ? 3 : 4);
 
+  // Use the experience just ANSWERED (the exp arg), not u.trainingExperience — the
+  // in-memory row was loaded before this turn's update, so it's still null here and
+  // an advanced client's targets were silently computed as a beginner's
+  // (caught by onboarding-e2e Flow C, 2026-07-14).
+  const experience = exp || u.trainingExperience || "beginner";
   const { calorieTarget, proteinTarget } = calculateTargets(
-    actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm, u.trainingExperience || "beginner"
+    actualWeight, defaultGoal, u.lifeSituation || "office", trainingDays, gender, age, heightCm, experience
   );
 
-  const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, u.trainingExperience || "beginner", u.goalType || "fat_loss");
+  const stepsTarget = calculateStepsTarget(actualWeight, age, heightCm, experience, u.goalType || "fat_loss");
 
   const referralCode = await generateReferralCode(u.name);
 
@@ -704,9 +709,14 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const heightUnknown = /\b(don.?t know|dont know|no idea|not sure|unknown|skip|idk|have no idea|can.?t remember|cannot remember|never measured)\b/i.test(lowerMsg)
       || (lowerMsg.includes("height") && /\b(no|not|don.?t|unsure)\b/i.test(lowerMsg));
 
-    // ── Parse weight from message ──
-    const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)?/i);
-    if (!weightMatch && !heightUnknown) return `Your weight and height. Example: *78kg, 1.72m*`;
+    // ── Parse weight from message — prefer the kg-marked number so "172cm 78kg"
+    // never reads 172 as the weight. And once weight is SAVED, an unmarked reply is
+    // height-only (the estimate prompt says "type *1.72m* or *172cm*" — the old code
+    // read "1.72m" as weight 1.72 and rejected it, and "172cm" as weight 172kg). ──
+    const weightKgMatch = msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)\b/i);
+    const heightOnlyReply = !weightKgMatch && !!user.currentWeight;
+    const weightMatch = weightKgMatch || (heightOnlyReply ? null : msg.match(/(\d+(?:\.\d+)?)\s*(?:kg|kgs)?/i));
+    if (!weightMatch && !heightUnknown && !heightOnlyReply) return `Your weight and height. Example: *78kg, 1.72m*`;
 
     // If they said "don't know height" without giving weight yet, use saved weight or ask weight first
     if (heightUnknown && !weightMatch && !user.currentWeight) {
@@ -716,10 +726,15 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
     const weight = weightMatch ? parseFloat(weightMatch[1]) : parseFloat(user.currentWeight || "70");
     if (weight < 30 || weight > 300) return `That doesn't look right. Example: *78kg, 1.72m*`;
 
-    // Parse height — multiple formats: 1.72m, 172cm, 5'8, bare 3-digit number
-    const heightMMatch = msg.match(/(\d+\.\d+)\s*m(?!g|i)/i);
-    const heightCmMatch = msg.match(/(\d{3})\s*(?:cm)?/i);
-    const heightFtMatch = msg.match(/(\d)[''`]?\s*(\d{1,2})/);
+    // Parse height — multiple formats: 1.72m, 172cm, 5'8 — from the message WITHOUT
+    // the weight portion. CAPTURE BUG (caught by onboarding-e2e, 2026-07-14): the old
+    // ft-in regex matched ANY two adjacent digits, so "68kg" alone read as 6'8" and
+    // silently stored height 203cm; "100kg" alone read as height 100cm. Garbage
+    // height → garbage BMI → the Bonolo class of wrong targets, at the capture end.
+    const msgSansWeight = weightMatch ? msg.replace(weightMatch[0], " ") : msg;
+    const heightMMatch = msgSansWeight.match(/(\d+\.\d+)\s*m(?!g|i)/i);
+    const heightCmMatch = msgSansWeight.match(/(\d{3})\s*(?:cm)?/i);
+    const heightFtMatch = msgSansWeight.match(/(\d)\s*(?:['’`]|ft)\s*(\d{1,2})/i);
     let heightM = 0; let heightCmVal = 0;
 
     if (heightMMatch) {

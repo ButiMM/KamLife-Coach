@@ -44,10 +44,16 @@ measurable and layer 2 verified.
       case names, results land in ops telemetry. The battery GROWS with every future
       screenshot — a tester failure that isn't in the battery within 24h is a
       process violation.
-- [ ] **Onboarding data-capture verification:** one scripted end-to-end signup per
-      flow (full + fast-track) on the sandbox, asserting gender/age/height/goal all
-      land in the DB and targets match the formula for that profile. Run before
-      widening testers.
+- [x] **Onboarding data-capture verification** _(shipped 2026-07-14)_:
+      script/onboarding-e2e.ts drives three complete scripted signups through the
+      real handleMessage pipeline (male gym, female home with height-estimate path,
+      walk-only with weight-typed-alone), asserting every state transition, every
+      captured field, and formula-exact calorie/protein/steps targets. In the npm
+      test chain → runs in CI on every push. First run caught three REAL capture
+      bugs: "68kg" alone stored as height 6'8" (203cm), "172cm" typed at the height
+      prompt overwriting weight to 172kg, and completeOnboarding computing targets
+      from stale (null) training experience — an advanced client got beginner
+      calories. All three fixed with the regression pinned in the same commit.
 - [ ] **Video path verified:** a 10s, 30s and 60s video each produce either a real
       form-check or the graceful fallback — never silence (guarantee already live;
       verify the real replies).

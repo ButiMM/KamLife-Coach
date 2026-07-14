@@ -8,6 +8,10 @@ const { Pool } = pg;
 // Never set in production. Returns a chainable thenable proxy: any drizzle
 // query resolves to [] — except selects on the users table, which resolve to
 // [globalThis.__KAMLIFE_STUB_USER] so the message pipeline sees a real client.
+// Writes to the users table PERSIST into that global (update().set() and
+// insert().values() merge into it), so multi-turn offline tests — the
+// onboarding E2E walk — see real state transitions. Suites that need isolation
+// reassign __KAMLIFE_STUB_USER per case (routing-audit already does).
 const STUB = process.env.KAMLIFE_DB_STUB === "1";
 
 function makeStubDb(): any {
@@ -22,8 +26,15 @@ function makeStubDb(): any {
         }
         if (prop === "catch") return (h: any) => Promise.resolve([]).catch(h);
         if (prop === "finally") return (h: any) => Promise.resolve([]).finally(h);
-        return (...args: any[]) =>
-          (prop === "from" || prop === "into") ? chain({ table: args[0] }) : chain(state);
+        return (...args: any[]) => {
+          if (prop === "from" || prop === "into") return chain({ table: args[0] });
+          if ((prop === "set" || prop === "values") && state.table === (schema as any).users
+              && args[0] && typeof args[0] === "object" && !Array.isArray(args[0])) {
+            const stubUser = (globalThis as any).__KAMLIFE_STUB_USER;
+            if (stubUser) Object.assign(stubUser, args[0]);
+          }
+          return chain(state);
+        };
       },
       apply: () => chain(state),
     });
