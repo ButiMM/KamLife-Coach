@@ -350,6 +350,30 @@ export const escalationsRelations = relations(escalations, ({ one }) => ({
   user: one(users, { fields: [escalations.userId], references: [users.id] }),
 }));
 
+// === QUALITY SIGNALS — the product learning from every use (2026-07-14) ===
+// Every moment the bot FUMBLES — an empty/never-silent reply, the brain giving up
+// and deferring, an unreadable photo, the verifier catching it about to contradict
+// stored truth — used to be logged to console and evaporate: the only path to a fix
+// was the founder screenshotting it. This table captures each fumble so it becomes
+// (a) a founder review queue ("what did the bot get wrong this week") without any
+// screenshotting, and (b) candidate regression cases for the drill/routing batteries.
+// Deliberately NOT an escalation: escalations are client-facing SLA items; this is
+// internal product telemetry. Writes are fire-and-forget — never block or fail a reply.
+export const qualitySignals = pgTable("quality_signals", {
+  id: serial("id").primaryKey(),
+  userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+  phoneLast4: text("phone_last4"),       // enough to correlate without storing PII in the clear
+  kind: text("kind").notNull(),          // never_silent | brain_defer | verifier_violation | media_unreadable | low_confidence
+  messageIn: text("message_in"),
+  messageOut: text("message_out"),
+  detail: text("detail"),                // the violation / reason / model note
+  reviewed: boolean("reviewed").notNull().default(false),
+  createdAt: timestamp("created_at").defaultNow(),
+}, (table) => ({
+  kindDateIdx: index("quality_signals_kind_date_idx").on(table.kind, table.createdAt),
+  reviewedIdx: index("quality_signals_reviewed_idx").on(table.reviewed, table.createdAt),
+}));
+
 // === SCHEDULER STATE — global (non-per-user) job run tracking ===
 // Replaces the file-based .scheduler-state.json which is lost on container recycle.
 // Each key is a job name; value is the date/week string it last ran (e.g. "2026-06-22").

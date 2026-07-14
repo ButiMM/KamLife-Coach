@@ -6,6 +6,7 @@ import { sendWhatsAppButtons } from "../twilio-interactive";
 import { db } from "../db";
 import { processedWebhooks, users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
+import { captureQualitySignal } from "../quality-signals";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
 // of silence, their FIRST reply back opens with a warm welcome — the return must feel
@@ -125,7 +126,11 @@ async function processTextAsync(
       : (mediaType?.startsWith("video/")
         ? `I got your video but couldn't process it — likely too long. Send a shorter clip (under 30 seconds, one set from the side) and I'll check your form.`
         : `I got your message but hit a snag processing it. Try sending it again, or type it differently — I'm here.`);
-    if (!rawReply || rawReply.trim().length === 0) console.error(`[NEVER_SILENT] empty reply for ${phone.slice(-4)} — media=${mediaType || "none"} msg="${(message || "").slice(0, 60)}"`);
+    if (!rawReply || rawReply.trim().length === 0) {
+      console.error(`[NEVER_SILENT] empty reply for ${phone.slice(-4)} — media=${mediaType || "none"} msg="${(message || "").slice(0, 60)}"`);
+      // Turn the fumble into product improvement material instead of a dead log line.
+      captureQualitySignal("never_silent", { phone, messageIn: message, messageOut: cleanReply, detail: `media=${mediaType || "none"}` });
+    }
 
     // Image messages without a GIF/media attachment go through the coalescing buffer
     // so that album bursts (N photos sent together) result in ONE combined reply.

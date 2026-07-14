@@ -34,6 +34,7 @@ import { retrieveMemories, scanAndStoreClientFacts } from "../memory";
 import { verifyBrainReply } from "./reply-verifier";
 import { SCENARIO_GUIDE } from "../handlers/gpt-block";
 import { buildClientSnapshot } from "./client-snapshot";
+import { captureQualitySignal } from "../quality-signals";
 
 // Hard-case topics that warrant injecting the full scenario playbook. Routine chat
 // skips it — knowledge depth exactly when needed, tokens saved when not (margins).
@@ -449,6 +450,7 @@ export async function runCoachBrain(ctx: {
             continue; // regenerate within the same round budget
           }
           console.warn("[BRAIN_COACH] verifier failed twice — deferring (fail open)");
+          captureQualitySignal("verifier_violation", { userId: user?.id, phone, messageIn: message, messageOut: text, detail: verdict.violation });
           return null;
         }
         // Code-as-guardrail on the model's mouth: the fallback pipeline runs

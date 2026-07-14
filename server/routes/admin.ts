@@ -1,6 +1,6 @@
 import type { Express } from "express";
 import { db } from "../db";
-import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles, gptCosts } from "../../shared/schema";
+import { users, weightLogs, workoutLogs, stepLogs, chatHistory, mealLogs, escalations, clientActions, progressPhotos, weeklyCheckins, clothingCheckins, bodyMeasurements, exerciseLogs, paymentEvents, clientIntelligenceProfiles, gptCosts, qualitySignals } from "../../shared/schema";
 import { evaluateScaling } from "../scaling-milestones";
 import { eq, desc, asc, and, gte, isNull, or, inArray } from "drizzle-orm";
 import { sql } from "drizzle-orm";
@@ -837,6 +837,47 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       });
     } catch (err: any) {
       return res.status(500).json({ success: false, message: err.message || "Failed to trigger daily messages" });
+    }
+  });
+
+  // ── Admin: quality signals — the "what did the bot fumble" review queue ──
+  // GET /api/admin/quality-signals?kind=&reviewed=false&limit=50
+  // Every captured fumble (never-silent, brain defer, verifier catch, unreadable
+  // media) so real use improves the product without the founder screenshotting.
+  app.get("/api/admin/quality-signals", requireAdminKey, async (req, res) => {
+    try {
+      const kind = typeof req.query.kind === "string" ? req.query.kind : undefined;
+      const includeReviewed = req.query.reviewed === "true";
+      const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit || "50"), 10) || 50));
+      const conds = [] as any[];
+      if (kind) conds.push(eq(qualitySignals.kind, kind));
+      if (!includeReviewed) conds.push(eq(qualitySignals.reviewed, false));
+      const rows = await db.select().from(qualitySignals)
+        .where(conds.length ? and(...conds) : undefined)
+        .orderBy(desc(qualitySignals.createdAt)).limit(limit);
+      const since = new Date(Date.now() - 7 * 86_400_000);
+      const week = await db.select({ kind: qualitySignals.kind, n: sql<number>`count(*)::int` })
+        .from(qualitySignals).where(gte(qualitySignals.createdAt, since)).groupBy(qualitySignals.kind);
+      return res.json({
+        readIt: "Each row is a moment the bot fumbled. Recurring kinds/messages are your next regression cases — add them to the drill or routing battery.",
+        last7dByKind: Object.fromEntries(week.map(w => [w.kind, w.n])),
+        count: rows.length,
+        signals: rows,
+      });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed to load quality signals" });
+    }
+  });
+
+  // POST /api/admin/quality-signals/:id/reviewed  — mark a fumble triaged
+  app.post("/api/admin/quality-signals/:id/reviewed", requireAdminKey, async (req, res) => {
+    try {
+      const id = parseInt(req.params.id, 10);
+      if (!Number.isFinite(id)) return res.status(400).json({ error: "bad id" });
+      await db.update(qualitySignals).set({ reviewed: true }).where(eq(qualitySignals.id, id));
+      return res.json({ success: true });
+    } catch (err: any) {
+      return res.status(500).json({ error: err.message || "Failed" });
     }
   });
 

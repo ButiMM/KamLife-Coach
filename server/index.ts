@@ -232,6 +232,20 @@ async function runMigrations(): Promise<void> {
     `CREATE INDEX IF NOT EXISTS escalations_status_idx ON escalations(status)`,
     `CREATE INDEX IF NOT EXISTS escalations_user_idx ON escalations(user_id)`,
 
+    `CREATE TABLE IF NOT EXISTS quality_signals (
+      id SERIAL PRIMARY KEY,
+      user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+      phone_last4 TEXT,
+      kind TEXT NOT NULL,
+      message_in TEXT,
+      message_out TEXT,
+      detail TEXT,
+      reviewed BOOLEAN NOT NULL DEFAULT FALSE,
+      created_at TIMESTAMP DEFAULT NOW()
+    )`,
+    `CREATE INDEX IF NOT EXISTS quality_signals_kind_date_idx ON quality_signals(kind, created_at)`,
+    `CREATE INDEX IF NOT EXISTS quality_signals_reviewed_idx ON quality_signals(reviewed, created_at)`,
+
     `CREATE TABLE IF NOT EXISTS ab_experiments (
       id SERIAL PRIMARY KEY,
       name TEXT NOT NULL,
