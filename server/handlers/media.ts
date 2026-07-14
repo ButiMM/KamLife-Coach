@@ -41,6 +41,7 @@ import { buildProgressComparisonPrompt } from "../physique-analysis";
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
+import { extractMealLabel } from "./food-context";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
@@ -1110,7 +1111,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           carbsInt: 0,
           fatInt: 0,
           loggedAt: photoLoggedAt,
-          mealLabel: slotFromSastHour(photoLoggedAt),
+          // CAPTION WINS over the clock (2026-07-14, Bonolo's log): a photo captioned
+          // "Breakfast" sent at 1pm used to be stamped LUNCH because the slot came
+          // purely from slotFromSastHour(now) — she's a batch-logger who eats early
+          // and logs at midday, so her whole morning got dumped into LUNCH. Same
+          // function the text path uses: her word ("breakfast"/"snack") wins, then the
+          // low-cal snack rule, then the clock only as a last resort.
+          mealLabel: extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }) || slotFromSastHour(photoLoggedAt),
         }).catch(e => console.warn("[photo mealLogs write]", e));
         invalidateFoodTotalsCache(user.id);
       }

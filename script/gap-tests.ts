@@ -126,6 +126,22 @@ test("extractMealLabel: 'breakfast was' → breakfast", () => {
   assert.equal(extractMealLabel("breakfast was oats with milk"), "breakfast");
 });
 
+// BONOLO'S LOG (2026-07-14): a photo captioned "Breakfast" sent at 1pm was stamped
+// LUNCH because the PHOTO path used slotFromSastHour(now), ignoring her caption. The
+// caption keyword must win over the clock at any time of day — a batch-logger who
+// eats early and logs at midday must not have her whole morning dumped into LUNCH.
+test("extractMealLabel: caption wins over the clock — 'Breakfast' at 1pm → breakfast", () => {
+  const onePm = new Date("2026-07-14T13:00:00+02:00"); // SAST lunchtime
+  assert.equal(extractMealLabel("Breakfast", onePm), "breakfast");
+  assert.equal(extractMealLabel("Snack", onePm), "snack");
+  assert.equal(extractMealLabel("Dinner", onePm), "dinner");
+});
+
+test("extractMealLabel: no caption at 1pm → clock fallback (lunch)", () => {
+  const onePm = new Date("2026-07-14T13:00:00+02:00");
+  assert.equal(extractMealLabel("", onePm, { kcal: 600, protein: 30 }), "lunch");
+});
+
 test("extractMealLabel: 'dinner was' → dinner", () => {
   assert.equal(extractMealLabel("dinner was chicken and rice"), "dinner");
 });
