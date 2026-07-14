@@ -462,6 +462,17 @@ export async function handleWorkoutCommands(ctx: {
       week1Badge = `\n\n---\n\n🏆 *WEEK 1 COMPLETE*\n\nYou finished your first full training week. Most people quit before this.\n\nWorkout ${newTotal} is done. Week 2 starts next session — same time, same commitment.\n\nThe gap between who you were and who you're becoming is exactly this: showing up when nobody's watching.`;
     }
 
+    // COMMITMENT STREAK (2026-07-14, third-party review): a streak that counts comebacks,
+    // not perfect days. When someone returns after a real gap, don't imply they "lost"
+    // anything — reframe the miss as human and celebrate their CUMULATIVE persistence
+    // (total sessions), because the people who get there are the ones who come back.
+    const gapDays = (lastWorkout && !wasYesterday)
+      ? Math.floor((dayStartSAST(new Date()) - dayStartSAST(lastWorkout)) / 86_400_000)
+      : 0;
+    const comebackNote = (gapDays >= 2 && newTotal > 1 && !MILESTONE_TEXTS[newTotal])
+      ? `\n\n💛 *You came back — that's ${newTotal} sessions of showing up.* Missing a couple of days isn't failure, it's being human. The people who get there are the ones who come back. You just did.`
+      : "";
+
     // Detect rest-day bonus session (trained on a scheduled rest day)
     const wState = await getTodayWorkoutState(user);
     const bonusNote = wState.type === "REST"
@@ -510,7 +521,7 @@ export async function handleWorkoutCommands(ctx: {
     // milestone + week-1 badge + perfect day + rest-day bonus + form-video prompt. ONE
     // rides along: week-1 badge (once ever) > milestone > form prompt (once, session 2)
     // > perfect day > bonus. The feel question + lift prompt stay — they're the loop.
-    const doneAddOn = [week1Badge, milestoneMsg, formVideoPrompt, perfectDay || "", bonusNote]
+    const doneAddOn = [week1Badge, comebackNote, milestoneMsg, formVideoPrompt, perfectDay || "", bonusNote]
       .find(s => s && s.trim()) || "";
     return `${doneResponse}${doneAddOn}\n\n_How did that session feel — too easy, just right, or too hard? Tell me and I'll tune the next one._\n\n${liftPrompt}[BUTTONS:Log my lifts|Tomorrow's session|Log food]`;
   }
