@@ -3,7 +3,7 @@ import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../share
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
 import { buildDayWorkout, buildFullProgramme } from "../programme";
-import { calculateTargets, stepBurnKcal } from "../targets";
+import { calculateTargets, stepBurnKcal, recalcTargetsForProfile } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
 import { getGroceryPersonalization } from "../grocery-personalize";
@@ -549,17 +549,24 @@ export async function handleEarlyCommands(ctx: {
     else if (lower.includes("muscle") || lower.includes("build") || lower.includes("gain") || lower.includes("bulk")) goalType = "muscle_gain";
     else if (lower.includes("fat") || lower.includes("lose") || lower.includes("cut")) goalType = "fat_loss";
 
+    // RECALC-ON-CHANGE (2026-07-14): this write changes training days, experience AND
+    // goal — three calorie-formula inputs at once — so the stored targets MUST be
+    // recomputed here, not left stale for the nightly net to maybe catch. The old code
+    // updated the programme but kept (and displayed) the old calorieTarget: a client
+    // switching to muscle gain saw their old fat-loss numbers as if correct.
+    const recalcUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType };
+    const { calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps } = recalcTargetsForProfile(recalcUser);
     await db.update(users)
-      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, awaitingProgrammeAnswers: false, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
+      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps, awaitingProgrammeAnswers: false, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
       .where(eq(users.phoneNumber, phone));
 
-    const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode };
+    const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps };
     const programme = buildFullProgramme(updatedUser);
     const modeLabel = trainingMode === "gym" ? "Gym" : trainingMode === "gym_dumbbell" ? "Dumbbell Gym" : "Home";
-    const cal = user.calorieTarget ? `🔥 *Calories:* ${user.calorieTarget} kcal/day\n` : "";
-    const prot = user.proteinTarget ? `💪 *Protein:* ${user.proteinTarget}g/day\n` : "";
-    const steps = user.stepsTarget ? `👟 *Steps:* ${user.stepsTarget.toLocaleString()}/day\n` : "";
-    const targetsLine = (cal || prot || steps) ? `\n*Your daily targets:*\n${cal}${prot}${steps}` : "";
+    const cal = `🔥 *Calories:* ${newCal} kcal/day\n`;
+    const prot = `💪 *Protein:* ${newProt}g/day\n`;
+    const steps = `👟 *Steps:* ${newSteps.toLocaleString()}/day\n`;
+    const targetsLine = `\n*Your daily targets:*\n${cal}${prot}${steps}`;
     const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}${targetsLine}\n\n_Reply *menu* anytime to see all your options — workouts, food log, targets, shopping list, and more._`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
 

@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile } from "../server/targets";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
@@ -1299,6 +1299,36 @@ test("target audit: wrong protein is caught too; empty targets don't false-fire"
   assert.equal(p.ok, false, "180g for a 70kg female recomp is wrong");
   const empty = auditStoredTargets({ ...BONOLO, calorieTarget: null, proteinTarget: null });
   assert.equal(empty.ok, true, "unset targets are onboarding's job, not the auditor's");
+});
+
+// RECALC-ON-CHANGE (2026-07-14): the shared "recompute every target from the profile
+// as it stands now" helper. Must agree with the raw formula, and must MOVE when a
+// formula input changes — the guarantee that a mid-journey goal/training-days switch
+// can't leave stale calories on file (the Bonolo class, at the write end).
+test("recalc: helper output matches the raw formula for a profile", () => {
+  const r = recalcTargetsForProfile(BONOLO);
+  const raw = calculateTargets(70, "recomposition", "office", 4, "female", 27, 165, "beginner");
+  const rawSteps = calculateStepsTarget(70, 27, 165, "beginner", "recomposition");
+  assert.equal(r.calorieTarget, raw.calorieTarget, "calories match formula");
+  assert.equal(r.proteinTarget, raw.proteinTarget, "protein matches formula");
+  assert.equal(r.stepsTarget, rawSteps, "steps match formula");
+});
+
+test("recalc: changing goal/training-days/experience MOVES the targets (no stale numbers)", () => {
+  const before = recalcTargetsForProfile(BONOLO);
+  const afterGoal = recalcTargetsForProfile({ ...BONOLO, goalType: "muscle_gain" });
+  assert.notEqual(afterGoal.calorieTarget, before.calorieTarget, "goal flip must move calories");
+  const afterDays = recalcTargetsForProfile({ ...BONOLO, trainingDaysPerWeek: 6 });
+  assert.notEqual(afterDays.calorieTarget, before.calorieTarget, "more training days must move calories");
+  const afterExp = recalcTargetsForProfile({ ...BONOLO, trainingExperience: "advanced" });
+  assert.notEqual(afterExp.calorieTarget, before.calorieTarget, "experience change must move calories");
+});
+
+test("recalc: degrades safely on a bare/empty profile (never NaN)", () => {
+  const r = recalcTargetsForProfile({});
+  assert.ok(Number.isFinite(r.calorieTarget) && r.calorieTarget > 0, "calories finite + positive");
+  assert.ok(Number.isFinite(r.proteinTarget) && r.proteinTarget > 0, "protein finite + positive");
+  assert.ok(r.stepsTarget >= 2000, "steps sane");
 });
 
 // STEPS SANITY (2026-07-13, "across the board"): bounds-only — never second-guess a

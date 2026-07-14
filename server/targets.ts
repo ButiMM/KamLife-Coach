@@ -265,6 +265,40 @@ export function auditStoredTargets(u: {
 }
 
 // ============================================================
+// RECALC-ON-CHANGE — the single "recompute every target from the profile as it
+// stands NOW" helper (2026-07-14). The Bonolo class of danger — right label,
+// stale numbers — happens whenever a WRITE changes a field the formula depends on
+// (weight, goal, training days, experience, life situation, height, age) but the
+// targets aren't recomputed in the same breath. Two paths already did it inline
+// (weigh-in, goal-change); a third (the "programme answers" capture, which rewrites
+// training days + experience + goal at once) changed all three inputs and left the
+// calories untouched — then displayed the stale number as if correct. Every capture
+// point now calls THIS, so "the inputs that matter" live in one place and no path
+// can silently forget one. Pure — no DB, unit-tested.
+// ============================================================
+export interface RecalcedTargets { calorieTarget: number; proteinTarget: number; stepsTarget: number; }
+export function recalcTargetsForProfile(u: {
+  currentWeight?: string | number | null;
+  goalType?: string | null;
+  lifeSituation?: string | null;
+  trainingDaysPerWeek?: number | null;
+  gender?: string | null;
+  age?: number | null;
+  heightCm?: number | null;
+  trainingExperience?: string | null;
+}): RecalcedTargets {
+  const w = typeof u.currentWeight === "string" ? parseFloat(u.currentWeight) : (u.currentWeight ?? NaN);
+  const weight = Number.isFinite(w as number) && (w as number) > 0 ? (w as number) : 75;
+  const goal = u.goalType || "fat_loss";
+  const { calorieTarget, proteinTarget } = calculateTargets(
+    weight, goal, u.lifeSituation || "office", u.trainingDaysPerWeek || 3,
+    u.gender || "male", u.age || 30, u.heightCm || 170, u.trainingExperience || "beginner",
+  );
+  const stepsTarget = calculateStepsTarget(weight, u.age || 30, u.heightCm || 170, u.trainingExperience || "beginner", goal);
+  return { calorieTarget, proteinTarget, stepsTarget };
+}
+
+// ============================================================
 // STEPS TARGET SANITY — bounds-only (2026-07-13, "across the board"). Unlike calories,
 // the steps target is LEGITIMATELY user-set ("change my steps to 10 000") and adaptively
 // suggested, so we never second-guess a value inside the human range — we only catch
