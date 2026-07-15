@@ -15,6 +15,8 @@
 import type OpenAI from "openai";
 import { assertAiOnline, isAiOfflineError } from "../ai-offline";
 import { recordGptCost } from "../gpt";
+import { looksLikeRefusal } from "./refusal";
+export { looksLikeRefusal } from "./refusal";
 
 const SA_CLEAN_SYSTEM = `You clean South African English voice-note transcripts before a coach reads them. The speaker is an ordinary South African (often a low-literacy, first-language-not-English client) talking about food, training, and how they feel.
 
@@ -29,6 +31,18 @@ Return ONLY the cleaned transcript text — no quotes, no notes.`;
 
 function killswitchOff(): boolean {
   return process.env.SA_CLEAN === "off";
+}
+
+// A faithful clean keeps most of the speaker's own words (it fixes a handful). If the
+// output shares almost nothing with the input, the model went off-script — reject it.
+function retainsOriginal(raw: string, cleaned: string): boolean {
+  const words = (s: string) => new Set((s.toLowerCase().match(/[a-z']{3,}/g) || []));
+  const orig = words(raw);
+  if (orig.size < 6) return true; // too short to judge overlap — trust the length guard
+  const out = words(cleaned);
+  let kept = 0;
+  for (const w of orig) if (out.has(w)) kept++;
+  return kept / orig.size >= 0.4; // at least 40% of the original words survive a real clean
 }
 
 /**
@@ -57,9 +71,16 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
       completionTokens: resp.usage?.completion_tokens ?? 0,
     });
     const cleaned = (resp.choices[0]?.message?.content || "").trim();
-    // Guard against a runaway rewrite: if the model returned something wildly longer
-    // (it added content) or empty, keep the original.
-    if (!cleaned || cleaned.length > text.length * 1.8 + 40) return raw;
+    // Keep the ORIGINAL unless the output is a faithful light clean. Reject: empty, a
+    // runaway rewrite (added content), a refusal / model talking back, or a rewrite that
+    // dropped most of the speaker's own words. Any of these → the raw transcript wins.
+    if (!cleaned
+      || cleaned.length > text.length * 1.8 + 40
+      || looksLikeRefusal(cleaned)
+      || !retainsOriginal(text, cleaned)) {
+      if (looksLikeRefusal(cleaned)) console.warn("[SA_CLEAN] model refused — keeping raw transcript");
+      return raw;
+    }
     return cleaned;
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[SA_CLEAN] failed (using raw transcript):", (e as any)?.message || e);

@@ -29,6 +29,7 @@ import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, l
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
 import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
+import { looksLikeRefusal } from "../server/understanding/refusal";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2658,6 +2659,40 @@ test("compiler: an empty/default state stays quiet, never invents", () => {
   assert.ok(blurb.length > 0, "still produces a line");
   assert.ok(!/sick|frustrated|anxious|streak/i.test(blurb), "no invented state for a fresh client");
   assert.equal(compileKeyFacts(defaultUnderstanding("Kam")), "", "no key-facts line when there are none");
+});
+
+// ============================================================
+// SA transcript cleaner — refusal must NEVER become a transcript
+// (regression: the cleaner returned "I'm sorry, but I can't assist with
+//  that" on angry/profane notes and it was echoed + coached on. 2026-07-15)
+// ============================================================
+
+test("sa-transcript: catches model refusals so they never replace a transcript", () => {
+  const refusals = [
+    "I'm sorry, but I can't assist with that.",
+    "I'm sorry, but I can't assist with that",
+    "Sorry, I can't help with this request.",
+    "I cannot assist with that.",
+    "I am unable to assist with this.",
+    "As an AI, I can't process this.",
+    "I'm just an AI and cannot transcribe this.",
+    "Here's the cleaned transcript: ...",
+  ];
+  for (const r of refusals) assert.ok(looksLikeRefusal(r), `must flag refusal: "${r}"`);
+});
+
+test("sa-transcript: real SA transcripts are NOT mistaken for refusals", () => {
+  const genuine = [
+    "Yoh coach I'm sorry I missed gym today, I was feeling kak",
+    "I ate samp and beans with pilchards for lunch",
+    "Sorry I can't make it to the gym but I did my steps",
+    "I'm sorry but I won't be able to train this week, work is crazy",
+    "Coach I can't do that exercise, my knee is sore",
+    "I don't feel comfortable in my body yet, that's why I'm here",
+    "I'm not sure what to eat, can you help me plan",
+    "Eish I'm tired but I want to train legs today",
+  ];
+  for (const g of genuine) assert.ok(!looksLikeRefusal(g), `must NOT flag genuine speech: "${g}"`);
 });
 
 // ============================================================

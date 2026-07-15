@@ -22,6 +22,7 @@ import {
 } from "./chat-log";
 import { askCoachK } from "../gpt";
 import { cleanSATranscript } from "../understanding/sa-transcript";
+import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
@@ -1266,8 +1267,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const whisperPrompt = "South African gym coaching. Today I did chest flies, cable flies, lat pulldowns, seated rows, single-arm rows, leg press, hip thrusts, Romanian deadlifts, RDLs, squats, Bulgarian split squats, lunges, leg curls, leg extensions, calf raises, shoulder press, lateral raises, face pulls, bicep curls, tricep pushdowns, bench press, incline press, push-ups, pull-ups, planks, dead bugs. Full weight stack, 20kg plates, 10kg plates, 80kg, dumbbells, barbell, cable machine. Sets, reps, protein grams, calories, kcal, steps, gym, pap, pilchards, wors. English, Zulu, Xhosa, Afrikaans.";
 
       let transcribedText: string | undefined;
-      // Confidence signal only available from Whisper verbose_json path.
-      let voiceQuality: { avgLogprob: number; comp: number } | null = null;
+      let voiceQuality: { avgLogprob: number; comp: number } | null = null; // Whisper verbose_json only
 
       // ElevenLabs Scribe: better WER than Whisper on SA languages (Afrikaans, Zulu, Xhosa).
       // Try it first when configured; fall through to Whisper on any failure.
@@ -1288,8 +1288,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // Whisper fallback (3 attempts with quality signals)
       if (!transcribedText) {
         let transcription: { text?: string } = { text: "" };
-        // verbose_json gives avg_logprob + compression_ratio — the standard signals for
-        // catching Whisper's garble on SA languages it can't handle (guard further down).
+        // verbose_json gives avg_logprob + compression_ratio — signals for catching garble.
         console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
           const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
@@ -1378,12 +1377,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         clearVoiceFailure(user.id);
       }
 
-      // Low-confidence (garble) guard — when Whisper invents English-sounding words
-      // from a language it can't handle, a very negative avg_logprob or a high
-      // compression ratio gives it away. Don't coach on nonsense — ask the client to
-      // type instead (GPT reads typed SA languages well). Soft fail (recoverable);
-      // thresholds are conservative to avoid rejecting genuine accented English, and
-      // the metrics are logged above so they can be tuned against real notes.
+      // Low-confidence (garble) guard — a very negative avg_logprob or high compression
+      // ratio betrays Whisper inventing words from a language it can't handle. Don't coach
+      // on nonsense — ask them to type (GPT reads typed SA languages well). Conservative
+      // thresholds avoid rejecting genuine accented English; metrics logged above to tune.
       if (voiceQuality && wordCount >= 2 && (voiceQuality.avgLogprob < -1.0 || voiceQuality.comp > 2.5)) {
         console.log(`[VOICE] low_confidence_garble avgLogprob=${voiceQuality.avgLogprob.toFixed(2)} comp=${voiceQuality.comp.toFixed(2)} text="${transcribedText.slice(0, 80)}"`);
         const garbleCount = bumpVoiceFailure(user.id);
@@ -1395,8 +1392,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       }
       clearVoiceFailure(user.id);
 
-      // SA-ENGLISH CLEANER (safeguard D): fix local slang + food words STT mangles ("samp"→"stamp") before the coach + echo read it; fail-open.
+      // SA cleaner (safeguard D, fail-open) then HARD FLOOR: a transcript is the client's words, never a model refusal.
       transcribedText = await cleanSATranscript(openai, transcribedText, user.id);
+      if (looksLikeRefusal(transcribedText)) {
+        console.error(`[VOICE][${mediaTrace}] refusal_as_transcript — discarding "${transcribedText.slice(0, 80)}"`);
+        await cleanupTmp();
+        return "I got your voice note but couldn't make it out clearly this time. Please send it again, or type your message and I'll reply straight away.";
+      }
 
       const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
       const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme", "ke kopa", "ke batla"];
@@ -1426,9 +1428,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] voice_ok words=${wordCount} coach_reply_ms=${coachReplyMs} total_ms=${voiceTotalMs}`);
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
-      // Echo confirms transcription — but never parrot a 60s rant or its profanity back.
-      // Trim at a WORD boundary — cutting mid-word ("You and I had a discussion abou…")
-      // reads as the bot mangling their words (2026-07-10 screenshot).
+      // Echo confirms transcription (never parrot a rant/profanity; trim at a WORD boundary).
       let echoTrimmed = transcribedText;
       if (transcribedText.length > 220) {
         const cut = transcribedText.slice(0, 217);
