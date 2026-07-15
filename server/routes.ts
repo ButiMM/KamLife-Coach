@@ -40,6 +40,7 @@ import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
+import { runShadowEval, shadowEnabled } from "./understanding/shadow";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
@@ -864,11 +865,18 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // pattern-aware fallback instead of the brain.
   if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
-    if (brainReply !== null) return brainReply;
+    if (brainReply !== null) {
+      // SHADOW (Days 1-10): score the new Meaning Engine against what the client got.
+      // Flag-gated, fire-and-forget — never delays or changes this reply.
+      if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: brainReply });
+      return brainReply;
+    }
   }
 
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
-  return handleGptBlock({ phone, message, m, user, intentPromise });
+  const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
+  if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: gptReply });
+  return gptReply;
 
 
   } catch (err: any) {

@@ -548,7 +548,8 @@ const CASES: Case[] = [
       // already noted sick: repeat statement gets the short variant, never the template
       x("repeat sick mention", "still feeling sick today",
         { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },
-          expect: [/Still resting/i], reject: [/no training — rest until/i] }),
+          // holding-line variants rotate (never verbatim twice) — accept any of the three
+          expect: [/Still resting|Rest is still the job|holding everything for you/i], reject: [/no training — rest until/i] }),
       // already noted sick: a QUESTION falls to the sick-aware brain, never a template
       x("question while sick", "Can I eat bread while I'm sick?",
         { user: { profileNotes: `sick_until:2099-01-01 | paused_until:2099-01-01` },
