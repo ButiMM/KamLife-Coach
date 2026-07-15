@@ -6,6 +6,39 @@ don't re-litigate. Newest review first._
 
 ---
 
+## Review #6 — The Bodybuilding Dietitians "why calorie tracking is inaccurate" (2026-07-15)
+
+A 7-slide carousel aimed at serious lifters: even when you weigh food in grams, the
+calorie number is soft. HUMAN ERROR (user-generated DB entries are only as good as who
+made them); ROUNDING ERRORS (apps round to whole numbers; ±25% margin already on the
+panel; compounds across 30+ entries/day — Milo cereal: macros say 365.1, app shows 382);
+KILOJOULES VS CALORIES (macros aren't exactly 4/4/9 cal/g — protein ranges 2.8-6.7;
+calories carry more rounding than kJ); HIDDEN CALORIES (sugar alcohols, fibre, alcohol
+add energy not in the carb breakdown). Their own conclusion: **"largely disregard the
+displayed calorie total"** — track macros, weigh in grams, use a reliable DB, stay
+consistent raw-vs-cooked.
+
+**Read for OUR market (SA mass market):** if the number is soft for a lifter with a food
+scale, for a gogo eating pap from a shared pot with no scale and no barcode it is
+**fiction**. This is external validation that our **number-free default is correct** — we
+removed a false precision that doesn't even serve the precise crowd well.
+
+- **What we TAKE:** (1) **Consistency > accuracy** — the same food must return the same
+  estimate every time so a client's *trend* is honest even when the absolute is soft;
+  behaviour change runs on the trend, not the digit. (2) **Portions, not grams** — our
+  market will never weigh food; raw-vs-cooked alone swings 25-30%, so a "fist of pap,
+  palm of meat" primitive beats grams. (3) **kJ is the SA-native energy unit** — every SA
+  label is legally in kilojoules; "calories" is American (our voice says *never
+  American*), and many South Africans read kJ more fluently than calories.
+- **What we REJECT:** the weigh-in-grams / NUTTAB / track-individual-macros method — a
+  premium-bodybuilder game, the exact precision lane we opted out of (see "pick a pole").
+- **Action:** number-free default already shipped; log confirms it. Consistency of food
+  estimates = a quality invariant to protect. **Open founder decision:** for the
+  numbers-shown (opt-in) path, do we speak kJ instead of calories? (SA-native, on-brand,
+  not-American) — pending Kam's call, not built speculatively.
+
+---
+
 ## ⭐ FOUNDER DECISION — pricing & product focus (2026-07-15)
 
 _This supersedes the "premium tiers are near-term" framing in Reviews #3 and #5.
