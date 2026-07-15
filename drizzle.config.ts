@@ -34,5 +34,7 @@ export default defineConfig({
     "messages",
     "user_integrations",
     "client_intelligence_profiles",
+    "quality_signals",
+    "client_understanding",
   ],
 });

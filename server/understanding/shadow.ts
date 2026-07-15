@@ -15,9 +15,8 @@
 
 import type OpenAI from "openai";
 import { seedUnderstanding } from "./seed";
-import { runMeaningEngine } from "./meaning-engine";
-import { compileStateBlurb } from "./compiler";
-import { judgeReply } from "../eval/judge";
+import { loadUnderstanding, saveUnderstanding } from "./store";
+import { evaluateTurn } from "../eval/evaluate";
 import { captureQualitySignal } from "../quality-signals";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 
@@ -48,24 +47,18 @@ export function runShadowEval(input: ShadowInput): void {
       // adherence honestly (built here, in the detached shadow job — never on the client's
       // critical path). Falls back to no-snapshot if it's unavailable.
       const grounded = snapshot ?? await buildClientSnapshot(user).catch(() => undefined);
-      const prior = seedUnderstanding(user, grounded);
-      const result = await runMeaningEngine({ openai, user, message, prior, snapshot: grounded, history });
+      // Durable prior: what we already understand about this person, merged onto this turn.
+      const prior = user?.id ? await loadUnderstanding(user.id, seedUnderstanding(user, grounded)) : seedUnderstanding(user, grounded);
+      const result = await evaluateTurn({ openai, user, message, productionReply, snapshot: grounded, prior, history });
       if (!result) {
-        console.log(`[SHADOW] engine produced nothing for "${message.slice(0, 60)}"`);
+        console.log(`[SHADOW] engine/judge produced nothing for "${message.slice(0, 60)}"`);
         return;
       }
-      const blurb = compileStateBlurb(result.state);
-      const verdict = await judgeReply(openai, {
-        clientMessage: message,
-        stateBlurb: blurb,
-        candidateReply: result.reply,
-        baselineReply: productionReply,
-        userId: user?.id,
-      });
-      if (!verdict) {
-        console.log(`[SHADOW] judge unavailable for "${message.slice(0, 60)}"`);
-        return;
-      }
+      // Persist the EVOLVED understanding (durable subset only) — the client's cortex
+      // grows every message, even while the engine is still in shadow. When we flip it
+      // live, the memory is already there.
+      if (user?.id) await saveUnderstanding(user.id, result.state);
+      const verdict = result.verdict;
       const c = verdict.candidate;
       const b = verdict.baseline;
       console.log(
@@ -80,7 +73,7 @@ export function runShadowEval(input: ShadowInput): void {
           userId: user?.id,
           phone,
           messageIn: message,
-          messageOut: result.reply,
+          messageOut: result.candidateReply,
           detail: `winner=${verdict.winner} cand=${c.overall.toFixed(1)} base=${b?.overall.toFixed(1) ?? "-"} candIssue="${c.worstIssue}" prodReply="${productionReply.slice(0, 160)}"`,
         });
       }

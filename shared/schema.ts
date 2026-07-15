@@ -441,6 +441,22 @@ export const gptCosts = pgTable("gpt_costs", {
 
 export type GptCost = typeof gptCosts.$inferSelect;
 
+// === CLIENT UNDERSTANDING — the durable "cortex" (rebuild blueprint Days 11-20) ===
+// One row per client holding ONLY the trustworthy, slow-moving subset of
+// UnderstandingState: the profile (name, life-story, key facts, preferences) and the
+// coach's accumulated observations (confidence trend, frustration, readiness, trust).
+// Volatile fields (this-message mood/topic) and DB-derived stats are NEVER persisted
+// here — they're inferred/derived each turn. This is what lets Coach K remember a person
+// across turns ("how's the flu?", "remember how good you felt last week?").
+export const clientUnderstanding = pgTable("client_understanding", {
+  userId: uuid("user_id").primaryKey().references(() => users.id, { onDelete: "cascade" }),
+  profile: jsonb("profile"),           // { name, lifeStory, keyFacts[], preferences }
+  observations: jsonb("observations"), // { confidenceTrend, frustrationLevel, readinessToPush, trustLevel }
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
+
+export type ClientUnderstanding = typeof clientUnderstanding.$inferSelect;
+
 // === SENT PROACTIVE — durable dedupe for scheduled messages ===
 // Each scheduled proactive send claims a row (userId, messageKey, dedupeWindow).
 // The unique index below guarantees the same (user, messageKey, window) can only
