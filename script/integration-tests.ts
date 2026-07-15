@@ -337,3 +337,8 @@ if (failures.length > 0) {
   process.exit(1);
 }
 console.log("✓ all integration checks passed\n");
+// Exit cleanly: an imported module holds an open handle (DB pool), so the event loop
+// never drains on its own — without this the process hangs after the tests pass, which
+// would stall the CI job for its full timeout. Each suite is its own process, so this
+// does not truncate the `npm test` chain.
+process.exit(0);
