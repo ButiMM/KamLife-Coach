@@ -35,7 +35,7 @@ Rules:
 - topic: what this message is about (recovery/nutrition/workout/life/gratitude/progress).
 - observations.confidenceTrend / frustrationLevel(1-10) / readinessToPush(low/medium/high) / trustLevel(1-10): nudge SLOWLY over time; one message rarely swings these hard. If they're angry at the coach, trust drops and frustration rises.
 - profile.keyFacts: append a durable fact ONLY if they revealed something lasting. Two kinds count: (a) life facts — an injury, their job, family, a firm goal, a food they can't eat; and (b) EVIDENCE of how they respond — observed behaviour that ages well, e.g. "responds well to encouragement", "goes quiet when pushed hard", "mentioned wanting to quit", "logs food daily", "opens up in voice notes". Store the EVIDENCE (what they said or did), never your interpretation ("trustLevel 7", "mood frustrated") — those you infer fresh each message. Never store a passing mood as a fact.
-- profile.lifeStory: a <=50-word evolving narrative of who they are and what drives them. Refine it if this message adds something real; otherwise leave it.
+- profile.lifeStory: a <=50-word narrative in TWO parts. First, WHO THEY ARE (permanent — e.g. "a cleaner, two daughters, wants to be strong for her grandchildren") — keep this stable. Then THEIR CURRENT CHAPTER (what's happening now — e.g. "recovering from flu, confidence dipping, looking forward to next week") — update only this part as things change. Splitting it this way keeps the permanent truth from being overwritten by a passing week.
 - Leave stats untouched (those come from the database, not from you).
 
 Return ONLY valid JSON matching the shape you were given. No prose, no explanation.`;
