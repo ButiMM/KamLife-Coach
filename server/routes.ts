@@ -378,7 +378,10 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     /\b(jesus christ|oh my god|oh god|oh dear|good god)\b/i.test(m),
   ].filter(Boolean).length;
 
-  if ((STRONG_FRUSTRATION || frustrationSignalCount >= 2) && !HAS_CLEAR_ACTION) {
+  // Days 31-40: when the engine is live it owns frustration/pushback moments — its
+  // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
+  // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
+  if (!engineLive() && (STRONG_FRUSTRATION || frustrationSignalCount >= 2) && !HAS_CLEAR_ACTION) {
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)
