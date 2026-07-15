@@ -24,6 +24,7 @@ import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
 import { runMeaningEngine } from "./meaning-engine";
+import { classifyDomain } from "./domain-guard";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
@@ -66,8 +67,20 @@ export async function runMeaningEngineLive(ctx: {
       ? await loadUnderstanding(user.id, seedUnderstanding(user, snapshot))
       : seedUnderstanding(user, snapshot);
 
+    // DOMAIN BOUNDARY GATE (Law 11) — keep Coach K a coaching platform, not a general
+    // assistant. Out-of-domain gets a warm redirect (never runs the engine); a partial
+    // (life stuff a coach can bridge) passes a note so the engine steers back to the journey.
+    const domain = await classifyDomain(openai, message);
+    if (domain.classification === "out-of-domain" && domain.redirectMessage) {
+      await logChat(user.id, message, domain.redirectMessage, "DOMAIN_REDIRECT").catch(() => {});
+      return domain.redirectMessage;
+    }
+    const bridgeNote = domain.classification === "partially-related"
+      ? { role: "assistant" as const, content: "[COACH NOTE: this is a life topic — acknowledge it warmly, then gently connect it back to their health journey. Do not refuse it.]" }
+      : null;
+
     const history = user?.id ? await recentTurns(user.id) : [];
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history });
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history });
     if (!result || !result.reply.trim()) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).

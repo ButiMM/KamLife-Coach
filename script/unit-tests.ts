@@ -30,6 +30,7 @@ import { enforceCoachGuardrails } from "../server/coach-guardrails";
 import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 import { looksLikeRefusal } from "../server/understanding/refusal";
+import { isObviouslyInDomain } from "../server/understanding/domain-guard";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2693,6 +2694,31 @@ test("sa-transcript: real SA transcripts are NOT mistaken for refusals", () => {
     "Eish I'm tired but I want to train legs today",
   ];
   for (const g of genuine) assert.ok(!looksLikeRefusal(g), `must NOT flag genuine speech: "${g}"`);
+});
+
+// ============================================================
+// Domain Boundary Gate (Law 11) — keep Coach K a coach, never refuse a
+// real client, never burn a model call on obvious health talk.
+// ============================================================
+
+test("domain-guard: obvious coaching messages take the deterministic in-domain fast-path", () => {
+  const inDomain = [
+    "hi coach", "yebo", "thanks", "I did my workout today",
+    "what should I eat for lunch", "I'm feeling exhausted and want to give up",
+    "my knee is sore after squats", "84.5kg", "8500 steps",
+    "I can't afford chicken this week, what's cheaper", "how am I doing",
+    "I was too busy with work to train", "sawubona coach",
+  ];
+  for (const m of inDomain) assert.ok(isObviouslyInDomain(m), `must fast-path in-domain: "${m}"`);
+});
+
+test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to classifier)", () => {
+  const ambiguous = [
+    "write me an essay about the French Revolution please",
+    "can you help me fix this python code that keeps crashing",
+    "who is going to win the elections next year in the country",
+  ];
+  for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
 });
 
 // ============================================================
