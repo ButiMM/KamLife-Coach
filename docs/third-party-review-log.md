@@ -6,6 +6,29 @@ don't re-litigate. Newest review first._
 
 ---
 
+## ⭐ FOUNDER DECISION — pricing & product focus (2026-07-15)
+
+_This supersedes the "premium tiers are near-term" framing in Reviews #3 and #5.
+Both reviews were right that the top end has pricing power — but the sequencing call
+is the founder's, and it's made:_
+
+- **R199 only, for now.** One price, mass market. **Prove R199 first** — it's an
+  extremely strong wedge and the whole thesis rests on nailing it. Premium tiers
+  (R399/R699, family, corporate, medical-aid) come **later, in layers, as we grow** —
+  NOT now. Do not build tier infrastructure or gate features speculatively.
+- **Premium QUALITY at the R199 price.** Every core feature must be premium-grade —
+  the price is mass-market, the craft is not. "Premium, premium, premium quality" on
+  what we already ship; depth over breadth.
+- **Go DEEPER, not wider** — the ongoing investment is deeper *adaptation* (per-client
+  tone, number-free delivery, remembering the person) and deeper *accountability*
+  (catching people, pushing + supporting, real emotional presence). That's the moat.
+- **Play within the rules, break them safely.** Give people exactly what they want and
+  need — but never at the cost of safety. The hard safety layer (crisis/medical,
+  no diagnosing/dosing, sick = rest only, no invented conditions) is non-negotiable.
+  "Breaking the rules" = category-defining coaching, never cutting a safety corner.
+
+---
+
 ## Review #5 — Ryan Hawkes "Industry Intelligence: pick a pole" (2026-07-15)
 
 A 9-slide market carousel on where the fitness industry is heading. Thesis: capital is
