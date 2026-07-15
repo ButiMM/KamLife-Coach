@@ -23,7 +23,7 @@ import type { UnderstandingState } from "../understanding/state";
 // the engine owns CONVERSATION; safety (sick/injury/pain/overtraining/comeback) and
 // transactions/commands (logging, payment, workout + programme delivery, equipment) stay
 // on the deterministic rails. What's left is the engine's real territory.
-const SKIP_INTENT = /(_LOG$|_OK$|_ACK$|_DONE$|PAYMENT|MEDIA_|STEP_|WATER_|FOOD_LOG|WEIGHT|SUPPLEMENT_LOG|EQUIPMENT|PROFILE_UPDATE|SYSTEM|SICK|OVERTRAIN|RETURN_PLAN|INJURY|DOMS|PAIN|LOAD_SHEDDING|PROGRAMME|WORKOUT)/i;
+const SKIP_INTENT = /(_LOG$|_OK$|_ACK$|_DONE$|PAYMENT|MEDIA_|STEP_|WATER_|FOOD_LOG|WEIGHT|SUPPLEMENT_LOG|EQUIPMENT|PROFILE_UPDATE|SYSTEM|SICK|OVERTRAIN|RETURN_PLAN|INJURY|DOMS|PAIN|LOAD_SHEDDING|PROGRAMME|WORKOUT|EXERCISE|DEMO|FORM_CHECK|VIDEO|PORTION_GUIDE|SUPPLEMENT_GUIDE)/i;
 const isMarker = (s: string) => /^\s*\[/.test(s || "");
 
 interface Turn { userId: string; messageIn: string; messageOut: string; intent: string | null }
