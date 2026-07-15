@@ -1308,7 +1308,8 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- MEAL TIMING COACH — "when should I eat", "pre workout meal", "post workout" ----
-  if (/\b(pre.?workout|post.?workout|before\s*(?:gym|training|workout)|after\s*(?:gym|training|workout)|when\s*(?:should|must|do)\s*i\s*eat|meal\s*timing|eating\s*before|eating\s*after)\b/i.test(m)) {
+  // Conversational nutrition question (kcal-heavy template) — engine owns it when live.
+  if (process.env.ENGINE_LIVE !== "on" && /\b(pre.?workout|post.?workout|before\s*(?:gym|training|workout)|after\s*(?:gym|training|workout)|when\s*(?:should|must|do)\s*i\s*eat|meal\s*timing|eating\s*before|eating\s*after)\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name?.split(" ")[0] || "";
@@ -1533,7 +1534,7 @@ export async function handleMiscCommands(ctx: {
       return reply;
     }
 
-    // General stress/mood handler
+    if (process.env.ENGINE_LIVE === "on") return null; // engine owns emotional support (its low-mood guard keeps the SADAG net)
     const name = user.name?.split(" ")[0] || "";
     const isStressed = /\b(stress|overwhelm|burnt?\s*out|not\s*coping|too\s*much)\b/i.test(m);
     const isAnxious = /\b(anxious|anxiety|panic|worry|worried)\b/i.test(m);
@@ -1583,7 +1584,7 @@ export async function handleMiscCommands(ctx: {
       return `Fast complete${fastDuration} 🍽️\n\nBreak your fast with protein first — eggs, chicken, or pilchards. Protein after fasting maximises muscle retention.\n\nAvoid breaking with sugar or processed carbs — blood sugar will spike and crash hard after a fast.\n\nLog your first meal now: tell me what you ate.`;
     }
 
-    // General fasting guide
+    if (process.env.ENGINE_LIVE === "on") return null; // engine owns fasting advice; start/end tracking above stays deterministic
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";
     let guide = `*⏱️ Intermittent Fasting Guide${name ? ` — ${name}` : ""}*\n\n`;
@@ -1776,8 +1777,7 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----
-  // Conversational advisory (canned template, no data write) — defers to the Meaning
-  // Engine when it's live; stays as the deterministic fallback when the engine is off.
+  // Conversational advisory template (no data write) — engine owns it when live.
   if (process.env.ENGINE_LIVE !== "on" && /\b(braai\s*day|heritage\s*day|christmas\s*(?:meal|food|eat)|easter\s*(?:meal|food|eat)|new\s*year.?s?\s*(?:meal|food|eat)|holiday\s*(?:meal|food|eat)|party\s*food|social\s*eating|eating\s*out\s*(?:guide|tips|help))\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";

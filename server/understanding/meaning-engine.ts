@@ -102,9 +102,20 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       ? `⚠️ ABSOLUTE — THIS CLIENT IS SICK OR RECOVERING RIGHT NOW. Care comes first. Do NOT push training, steps, workouts, a schedule, or targets. Acknowledge how they feel, hold rest, keep it gentle and short. This overrides everything else.`
       : "";
 
+    // LOW-MOOD / MENTAL-HEALTH GUARD. Genuine crisis (self-harm) is caught upstream by the
+    // Safety handler before we ever run; this is the softer tier — a client who is stressed,
+    // anxious, low, or overwhelmed. Detect it deterministically and inject a care-first
+    // directive that keeps the SADAG safety net the old canned handler used to provide.
+    const MOOD_RE = /\b(depress(ed|ion|ing)?|anxious|anxiety|panic|so stressed|really stressed|overwhelm(ed|ing)?|burnt? ?out|not coping|can'?t cope|feeling (down|low|hopeless|empty|worthless|numb)|hopeless|falling apart|breaking down|mentally (done|drained|exhausted))\b/i;
+    const isLowMood = state.current.mood === "anxious" || MOOD_RE.test(message);
+    const moodDirective = isLowMood
+      ? `⚠️ THIS CLIENT IS STRUGGLING EMOTIONALLY (stressed, anxious, or low). Lead with genuine care — hear them first, in one warm human sentence. Do NOT lecture, do NOT dump a plan, do NOT list cortisol facts. If their low mood sounds persistent or heavy, gently offer SADAG (South African Depression & Anxiety Group): 0800 567 567 — free, 24 hours, confidential. Keep it short and human.`
+      : "";
+
     const systemParts = [
       CONSTITUTION,
       sickDirective,
+      moodDirective,
       BRAIN_SYSTEM,
       THINK_HEADER,
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
