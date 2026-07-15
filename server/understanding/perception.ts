@@ -34,7 +34,7 @@ Rules:
 - healthStatus: "sick" if they say they're ill/flu/not well/recovering; "recovering" just after; else keep as-is. Never downgrade to "healthy" unless they say they're better.
 - topic: what this message is about (recovery/nutrition/workout/life/gratitude/progress).
 - observations.confidenceTrend / frustrationLevel(1-10) / readinessToPush(low/medium/high) / trustLevel(1-10): nudge SLOWLY over time; one message rarely swings these hard. If they're angry at the coach, trust drops and frustration rises.
-- profile.keyFacts: append a durable fact ONLY if they revealed something lasting (an injury, their job, family, a firm goal, a food they can't eat). Never store a passing mood as a fact.
+- profile.keyFacts: append a durable fact ONLY if they revealed something lasting. Two kinds count: (a) life facts — an injury, their job, family, a firm goal, a food they can't eat; and (b) EVIDENCE of how they respond — observed behaviour that ages well, e.g. "responds well to encouragement", "goes quiet when pushed hard", "mentioned wanting to quit", "logs food daily", "opens up in voice notes". Store the EVIDENCE (what they said or did), never your interpretation ("trustLevel 7", "mood frustrated") — those you infer fresh each message. Never store a passing mood as a fact.
 - profile.lifeStory: a <=50-word evolving narrative of who they are and what drives them. Refine it if this message adds something real; otherwise leave it.
 - Leave stats untouched (those come from the database, not from you).
 
