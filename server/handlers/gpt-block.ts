@@ -4,6 +4,8 @@ import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
 import { buildClientSnapshot } from "../brain/client-snapshot";
+import { getToneMode, toneSteer } from "../tone-mode";
+import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
@@ -253,7 +255,12 @@ export async function handleGptBlock(ctx: {
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
   const clientName = user.name || "there";
   const trainingMode = user.trainingMode || "home";
-  const saContext = [getNowContextSA(), getSAContextFlags(user)].filter(Boolean).join("\n\n");
+  // ADAPTATION IN CONVERSATION (2026-07-15): tone was only reaching food/photo/morning,
+  // never a normal back-and-forth. Fold the per-client tone steer into saContext, which
+  // every agent AND askCoachK already inject — so the whole conversation adapts to
+  // tone:gentle/direct/hype, not just logging. Empty when the client has no tone set, so
+  // the default voice is unchanged.
+  const saContext = [getNowContextSA(), getSAContextFlags(user), toneSteer(getToneMode(user))].filter(Boolean).join("\n\n");
 
   // Live daily status — injected into every GPT call so the AI knows exactly where the client stands
   let todayStatusBlock = "";
@@ -618,7 +625,14 @@ SA voice. Direct. Coach forward, not backward.`;
   // fires when a pattern conflict is detected — adds ~400ms in that case.
   const rawReply = langPrefix ? `${langPrefix}${gptReply}` : gptReply;
   const gateResult = await safetyGate(rawReply, user, message);
-  const finalReply = sanitizeCoachReply(gateResult.response, message, user.weeklyFoodBudget, user.injuries);
+  let finalReply = sanitizeCoachReply(gateResult.response, message, user.weeklyFoodBudget, user.injuries);
+
+  // NUMBER-FREE DELIVERY IN CONVERSATION (2026-07-15): the number-free default only
+  // reached food/photo replies — a normal conversation still quoted calories to a
+  // client who told us numbers confuse them. Extend it here so a numbers:low client
+  // never gets a kcal/protein figure in a general reply either. Conservative strip
+  // (only calorie/protein tokens; leaves sets/reps/steps), and numbers:full opts out.
+  if (getNumbersMode(user) === "low") finalReply = stripNumbersFromProse(finalReply);
 
   // ---- MEMORY: store important facts for future sessions ----
   try {
