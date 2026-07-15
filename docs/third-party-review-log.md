@@ -6,6 +6,74 @@ don't re-litigate. Newest review first._
 
 ---
 
+## Review #5 — Ryan Hawkes "Industry Intelligence: pick a pole" (2026-07-15)
+
+A 9-slide market carousel on where the fitness industry is heading. Thesis: capital is
+consolidating the **value pole** (Planet Fitness, EoS ~$1.5B in 2025, Crunch to Leonard
+Green) AND the **premium pole** has pricing power (Life Time, Equinox — affluent members
+aren't price-sensitive). **The undifferentiated middle gets caught** — "nicer than budget,
+cheaper than luxury" with no identity gets bought or forced to reposition. Record gym
+visits prove it's a *positioning* problem, not a demand one. The operator move (Mastrov
+buying 24 Hr Fitness back, building UFC Gym + recovery/longevity): **the middle comes back
+reinvented.** Two ways to win: commit to a pole, or reinvent the middle into something
+people actively choose. Only way to lose: stay the generic middle.
+
+- **Validates our lane, hard.** KamLife is unambiguously the **value pole** for the SA
+  mass market — R199, WhatsApp-native, no app to download, coaches a gogo who's never
+  counted a calorie. We are not the middle. Keep it that way: never drift into "a nicer
+  MyFitnessPal" (feature-list middle) — stay "the coach in your pocket that actually
+  knows you," which is the *reinvented* version, not the generic one.
+- **What we TAKE:** (1) The number-free / plain-language delivery, per-client tone, and
+  real emotional accountability ARE our "undeniable in the lane" — they're what a budget
+  tracker can't copy and a premium human coach can't do at R199. That's the moat; keep
+  investing there. (2) The premium-pole pricing-power point reinforces Review #3: build
+  the R399/R699 / family / corporate tiers so the top end who'll "pay up for experience"
+  can — without touching the R199 wedge.
+- **What we DON'T take:** nothing to reject — it's a market map, not a product critique.
+  One guard: "reinvent the middle" is NOT a licence to add features for their own sake
+  (Kam's "without overbuilding"). Undeniable-in-the-lane means *deeper*, not *wider*.
+- **Action:** no build required today — this is a strategic-memory entry confirming
+  positioning. It raises confidence on the near-term premium tiers (already flagged in
+  Review #3) and on continuing to deepen adaptation/accountability over adding surface.
+
+---
+
+## Review #4 — "Pre-launch security" playbook (thedslabs, 2026-07-15)
+
+A 10-slide security carousel ("Vibe coders are getting sued") — a 30-minute pre-launch
+checklist: (1) protect yourself legally (privacy policy, know where data lives, nothing
+dodgy); (2) lock down the DB (RLS/authz, server-side validation, non-leaky errors);
+(3) test auth failure cases; (4) run 4 review prompts every launch; (5) protect infra /
+your wallet (rate-limit paid-API endpoints, hard daily caps + alerts at 50%, CAPTCHA,
+CORS, API keys server-side). "$20 → $200 in a single day, one endpoint, no rate limit."
+
+**Audit of KamLife against the checklist (what we already have vs the one real gap):**
+
+| Checklist item | KamLife posture | Verdict |
+|---|---|---|
+| Privacy policy / POPIA, data location | POPIA handler in pipeline; docs/SA_COMPLIANCE_CHECKLIST.md | ✅ have |
+| DB locked down / authz on routes | Not public Supabase; Express routes behind auth; admin routes `requireAdminKey` | ✅ have |
+| Server-side validation, non-leaky errors | Zod + server validation; structured error logs, no `SELECT *` leakage | ✅ have |
+| Webhook authenticity | Twilio `validateRequest` signature check + PayFast ITN validation | ✅ have |
+| Rate-limit inbound / abuse | `checkRateLimit` per phone + MessageSid dedup (`processed_webhooks`) on the WA webhook | ✅ have |
+| API keys server-side | All model/Twilio/PayFast keys are server env vars; none in client bundle | ✅ have |
+| Per-user spend cap | Monthly $ cap (gpt.ts) + daily call cap (gpt-block.ts) | ✅ have |
+| **Account-wide daily spend cap + alerts at 50%** | **Was missing — per-user caps never see the SUM** | ⚠️ **built now** |
+
+- **What we TAKE:** the wallet/"$20→$200" item — the only genuine gap. Built
+  `scheduler/jobs/spend-watchdog.ts`: hourly, sums the day's `gpt_costs` across all
+  users, WhatsApps Kam at 50% and 100% of `GLOBAL_AI_DAILY_SOFT_CAP_USD` (default $15).
+  A **tripwire, not a killswitch** — never stops coaching (per-user caps are the hard
+  brakes); the point is early warning on a runaway. Directly serves the margin ask.
+- **What we DON'T need (already covered):** everything else on the list is already in
+  place (table above). No CAPTCHA needed — the surface is a signature-verified Twilio
+  webhook, not a public sign-up form; CORS/keys are non-issues server-side.
+- **Standing practice:** fold the "4 review prompts every launch" idea into how we ship
+  — a security pass (secrets, authz, spend, PII in logs) before any change that touches
+  payments, webhooks, or data export. No new tooling; a habit.
+
+---
+
 ## Review #3 — Garry Tan (YC) on positioning + pricing (2026-07-14)
 
 A widely-shared tweet: *"Founders must stop building 2010-era businesses with 2026-era
