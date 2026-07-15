@@ -161,6 +161,26 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     user.subscriptionStatus = "active";
   }
 
+  // ---- COACH COMMAND: "replay" → run the rebuild scorecard, text it back ----
+  // No shell for a non-technical founder: text "replay" (optionally "replay 50") and the
+  // Meaning Engine is dry-run over real history, scored vs production, results sent here.
+  if (isCoach) {
+    const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
+    if (rc) {
+      const limit = Math.max(10, Math.min(200, parseInt(rc[1] || "60", 10) || 60));
+      (async () => {
+        try {
+          const { runReplayScorecard } = await import("./eval/replay");
+          const card = await runReplayScorecard(openai, limit);
+          await sendWhatsApp(phone, card.whatsappText.slice(0, 1500));
+        } catch (e: any) {
+          await sendWhatsApp(phone, `Replay hit a snag: ${e?.message || e}`).catch(() => {});
+        }
+      })();
+      return `📊 Running the scorecard over your last ${limit} real conversations — replaying each through the new engine and grading it against what the coach actually said. This takes a few minutes; I'll text you the results here.`;
+    }
+  }
+
   // ---- BETA TESTER ALLOWLIST — comma/space/newline-separated numbers in BETA_TESTERS ----
   // Testers get a rolling non-expiring trial: full product access AND inclusion in the
   // scheduler's active-client set (so they receive proactive messages and can test
