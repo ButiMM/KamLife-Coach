@@ -27,6 +27,8 @@ import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
 import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, isAskingNotReporting } from "../server/utils";
 import { enforceCoachGuardrails } from "../server/coach-guardrails";
+import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persistableUnderstanding } from "../server/understanding/state";
+import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2600,6 +2602,62 @@ test("vision prompt: coaches hidden added fats the photo can't measure", () => {
   // must stay a FULL-MEAL-only, kind, next-time nudge — never shame, never for snacks
   assert.ok(/FULL COOKED MEAL only/i.test(drinkPrompt), "hidden-fat advice is full-meal only");
   assert.ok(/never .?shame|never "your log is wrong"/i.test(drinkPrompt), "must stay kind, not shaming");
+});
+
+// ============================================================
+// UnderstandingState — the trust gate (safeguard A) + Prompt Compiler (safeguard C)
+// ============================================================
+
+test("understanding: coerce clamps out-of-range + whitelists invented enums", () => {
+  const dirty = coerceUnderstanding({
+    profile: { name: "Bonolo", lifeStory: "x".repeat(999), keyFacts: [123, "cleaner, long hours"], preferences: { numberFree: "yes" } },
+    current: { mood: "furious", healthStatus: "dying", topic: "banking" },
+    observations: { confidenceTrend: "collapsing", frustrationLevel: 99, readinessToPush: "extreme", trustLevel: -4 },
+    stats: { streak: -1, weightDirection: "sideways", recentProteinAvg: 120, recentStepAvg: 8000 },
+  });
+  assert.equal(dirty.current.mood, "neutral", "invented mood falls back to default");
+  assert.equal(dirty.current.healthStatus, "healthy", "invented health falls back");
+  assert.equal(dirty.observations.frustrationLevel, 10, "frustration clamped to 10");
+  assert.equal(dirty.observations.trustLevel, 1, "trust clamped to >=1");
+  assert.equal(dirty.observations.readinessToPush, "medium", "invented readiness falls back");
+  assert.equal(dirty.stats.streak, 0, "negative streak clamped to 0");
+  assert.equal(dirty.stats.weightDirection, "stable", "invented weight dir falls back");
+  assert.ok(dirty.profile.lifeStory.length <= 400, "lifeStory truncated");
+  assert.deepEqual(dirty.profile.keyFacts, ["cleaner, long hours"], "non-string facts dropped");
+  assert.equal(dirty.profile.preferences.numberFree, true, "non-bool pref falls back to true (number-free default)");
+});
+
+test("understanding: parse bad JSON returns a safe default, never throws", () => {
+  const s = parseUnderstanding("{not valid json");
+  assert.equal(s.current.mood, "neutral");
+  assert.equal(s.profile.preferences.numberFree, true);
+});
+
+test("understanding: persistable subset is profile+observations only (no volatile/stats)", () => {
+  const p = persistableUnderstanding(defaultUnderstanding("Kam"));
+  assert.deepEqual(Object.keys(p).sort(), ["observations", "profile"], "only durable fields persist");
+});
+
+test("compiler: a sick + frustrated client yields a care-first, number-free blurb", () => {
+  const s = defaultUnderstanding("Bonolo");
+  s.current.healthStatus = "sick";
+  s.current.mood = "frustrated";
+  s.observations.frustrationLevel = 8;
+  s.observations.confidenceTrend = "falling";
+  s.stats.streak = 3;
+  const blurb = compileStateBlurb(s);
+  assert.ok(/sick/i.test(blurb), "mentions sickness");
+  assert.ok(/hold rest|do not push|care/i.test(blurb), "steers to rest, not a push");
+  assert.ok(/number-free|no calorie/i.test(blurb), "flags number-free delivery");
+  assert.ok(!/\bsteps?\b.*today|hit your steps/i.test(blurb), "never nudges steps for a sick client");
+  assert.ok(blurb.split(/\s+/).length <= 60, "blurb stays compact (margin)");
+});
+
+test("compiler: an empty/default state stays quiet, never invents", () => {
+  const blurb = compileStateBlurb(defaultUnderstanding("Kam"));
+  assert.ok(blurb.length > 0, "still produces a line");
+  assert.ok(!/sick|frustrated|anxious|streak/i.test(blurb), "no invented state for a fresh client");
+  assert.equal(compileKeyFacts(defaultUnderstanding("Kam")), "", "no key-facts line when there are none");
 });
 
 // ============================================================
