@@ -26,6 +26,27 @@ function aboutSomeoneElse(s: string): boolean {
   return THIRD_PARTY_SICK.test(s) && !FIRST_PERSON_SICK.test(s);
 }
 
+// A BARE "still sick" check-in — essentially just the sickness report, nothing else to
+// respond to ("I'm still sick today", "still have the flu"). Anything carrying real
+// content — restlessness, a worry, an emotional share ("I feel like I should be walking,
+// I'm not used to just sitting around") — is NOT bare: it must reach the sick-aware brain
+// for a real, LISTENING reply, never the fixed holding template. Firing the identical
+// template at a genuine share was the systemic failure (2026-07-15 screenshot: a
+// restlessness/identity share got the exact same words as "I'm still sick today",
+// verbatim, 60 seconds apart). Strip the sickness report + filler; if almost nothing is
+// left, it's bare and the short template fits; if real words remain, fall through.
+function isBareSickCheckin(m: string): boolean {
+  const remnant = (m || "")
+    .toLowerCase()
+    .replace(SICK_SCRUB, " ")
+    .replace(SICK_WORDS, " ")
+    .replace(/\b(i'?m|i am|im|i|am|is|it|feel(?:s|ing)?|felt|still|again|today|tonight|now|this|morning|afternoon|evening|a|an|bit|so|really|very|just|quite|kinda|kind of|of|hi|hey|hello|coach|yeah|ya|and|but|also|the|to|man|guys?)\b/gi, " ")
+    .replace(/[^a-z]+/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return remnant.length <= 8;
+}
+
 // "Feel sick" right after overeating or a hard session is regret/exertion nausea,
 // not illness — scrub it UNLESS a hard illness word (fever, flu, vomiting…) backs
 // it up. Without this, "ate so much at the party, I feel sick" paused check-ins
@@ -114,8 +135,22 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     if (asksQuestion && (alreadySick || !FIRST_PERSON_SICK.test(m))) return null;
 
     if (alreadySick) {
-      // They told us already — never repeat the template. Short, human, varied by day.
-      const stillSickReply = `Still resting — that's exactly right${capName ? ", " + capName : ""}. 💛 Fluids, sleep, small meals when you can.\n\nWant the plan for when you're back? Just ask *"what do I do when I'm better?"* — otherwise rest easy, I'm holding everything for you.`;
+      // SYSTEMIC FIX (2026-07-15 screenshot): only a BARE "still sick" check-in gets the
+      // holding template. A substantive message while sick — restlessness, a worry, an
+      // emotional share — must reach the sick-aware brain (gpt-block's SCENARIO_GUIDE
+      // holds the rest line AND answers what they actually said). Firing the template at a
+      // real share, verbatim, was the failure. Fall through for anything not bare.
+      if (!isBareSickCheckin(m)) return null;
+      // Even bare check-ins must NOT repeat verbatim (the screenshot showed the identical
+      // words twice, 60s apart). Rotate holding lines; every variant holds the rest line
+      // and keeps the recovery cues, so the repeat-mention drill still passes.
+      const name = capName ? ", " + capName : "";
+      const stillSickVariants = [
+        `Still resting — that's exactly right${name}. 💛 Fluids, sleep, small meals when you can.\n\nWant the plan for when you're back? Just ask *"what do I do when I'm better?"* — otherwise rest easy, I'm holding everything for you.`,
+        `Rest is still the job${name}. 💛 Keep the fluids up, sleep as much as you can, eat what you can keep down.\n\nEverything's paused and waiting — no catch-up, no pressure. Say *I'm back* when you've turned the corner.`,
+        `Noted — still holding everything for you${name}. 💛 Water, soup, sleep. Small meals when your appetite allows.\n\nNo rush back. When you're better, just tell me and we pick up exactly where we left off.`,
+      ];
+      const stillSickReply = stillSickVariants[Math.floor(Date.now() / 1000) % stillSickVariants.length];
       await logChat(user.id, message, stillSickReply, "SICK_STILL");
       return stillSickReply;
     }

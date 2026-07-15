@@ -1127,6 +1127,31 @@ test("sick gate: third-person context with a first-person report still fires", (
   assert.ok(looksSickMention("Everyone at work has flu and now I'm sick too"), "first-person assertion overrides third-party context");
 });
 
+// SICK FLOW — a substantive message while already sick must NOT get the holding template
+// (2026-07-15 screenshot: a restlessness/identity share got the EXACT same words as a
+// bare "still sick", verbatim 60s apart). Bare check-ins still get a (varied) template;
+// anything carrying real content falls through to the sick-aware brain.
+const { handleSickFlow } = await import("../server/handlers/sick-flow");
+const sickUser = { id: "sick-user", goalType: "fat_loss", trainingMode: "gym", profileNotes: "sick_until:2099-01-01 | paused_until:2099-01-01" };
+const sickCtx = (raw: string) => ({ message: raw, m: raw.toLowerCase(), user: sickUser, capName: "Kam" });
+
+test("sick flow: bare 'still sick' check-in gets a holding template", async () => {
+  const r = await handleSickFlow(sickCtx("I'm still sick today"));
+  assert.ok(r !== null, "bare check-in should return a template");
+  assert.ok(/rest|holding|paused|fluids|soup/i.test(r!), "template holds the rest line");
+});
+
+test("sick flow: a substantive share while sick FALLS THROUGH to the brain (no template)", async () => {
+  for (const msg of [
+    "I feel like I should be walking or doing something, I'm not used to just sitting around but I'm also not well, I can feel it",
+    "the flu is killing me and I feel so alone",
+    "I still have the flu and honestly I'm scared I'm losing all my progress",
+  ]) {
+    const r = await handleSickFlow(sickCtx(msg));
+    assert.strictEqual(r, null, `substantive sick message must fall through, not template: "${msg.slice(0, 40)}"`);
+  }
+});
+
 test("brain: eating-out playbook — permission + strategy, never guilt (Kam's manual pattern)", () => {
   assert.ok(/EATING OUT/i.test(BRAIN_SYS), "must handle going-out announcements");
   assert.ok(/lean protein/i.test(BRAIN_SYS) && /skip the alcohol/i.test(BRAIN_SYS), "3-part strategy present");
