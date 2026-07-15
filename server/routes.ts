@@ -41,6 +41,7 @@ import { handleEarlyCommands } from "./handlers/early-commands";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runShadowEval, shadowEnabled } from "./understanding/shadow";
+import { runMeaningEngineLive, engineLive } from "./understanding/live";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
@@ -883,6 +884,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // handler claimed — genuine conversation — and the gates below keep unparsed
   // transactions (steps/water/weight phrasings the loggers missed) with gpt-block's
   // pattern-aware fallback instead of the brain.
+  // ---- ENGINE LIVE (Days 31-40 rollout) — genuine conversation to the Meaning Engine ----
+  // Everything on the deterministic rails (sick/injury/pain, logging/payment, workout +
+  // programme delivery) has already been handled above; only conversation reaches here.
+  // Flag-gated (ENGINE_LIVE=on) and fail-open — a null defers to the brain/gpt-block below.
+  if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai });
+    if (engineReply !== null) return engineReply;
+  }
+
   if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const brainReply = await runCoachBrain({ phone, message, m, user, openai });
     if (brainReply !== null) {
