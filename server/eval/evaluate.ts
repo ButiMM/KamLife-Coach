@@ -49,6 +49,7 @@ export async function evaluateTurn(input: EvaluateInput): Promise<EvaluateResult
     stateBlurb: blurb,
     candidateReply: engine.reply,
     baselineReply: productionReply,
+    candidateModel: engine.model, // Law 12 — judge runs on a DIFFERENT model than the writer
     userId: user?.id,
   });
   if (!verdict) return null;

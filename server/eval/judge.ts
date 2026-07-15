@@ -67,13 +67,21 @@ export interface JudgeInput {
   stateBlurb: string;         // the compiled understanding (what the coach knew)
   candidateReply: string;     // the new engine's reply
   baselineReply?: string;     // the current production reply (shadow comparison)
+  candidateModel?: string;    // the model that WROTE the candidate — the judge picks a different one
   userId?: string | null;
 }
 
+// Law 12 — no self-judging. The judge must never run on the same model that wrote the
+// reply, or it grades with the same blind spots. Pick the opposite of the writer's model.
+function pickJudgeModel(candidateModel?: string): "gpt-4o" | "gpt-4o-mini" {
+  return candidateModel === "gpt-4o" ? "gpt-4o-mini" : "gpt-4o";
+}
+
 export async function judgeReply(openai: OpenAI, input: JudgeInput): Promise<JudgeComparison | null> {
-  const { clientMessage, stateBlurb, candidateReply, baselineReply, userId } = input;
+  const { clientMessage, stateBlurb, candidateReply, baselineReply, candidateModel, userId } = input;
   try {
     assertAiOnline("judge");
+    const judgeModel = pickJudgeModel(candidateModel);
     const system = JUDGE_SYSTEM.replace("%BASELINE%", baselineReply ? BASELINE_SLOT : "");
     const userParts = [
       `CLIENT STATE (what the coach knew): ${stateBlurb || "(none)"}`,
@@ -83,7 +91,7 @@ export async function judgeReply(openai: OpenAI, input: JudgeInput): Promise<Jud
     if (baselineReply) userParts.push(`BASELINE (current production) REPLY: "${baselineReply.slice(0, 800)}"`);
 
     const resp = await openai.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: judgeModel,
       temperature: 0,
       max_tokens: 300,
       response_format: { type: "json_object" },
@@ -94,7 +102,7 @@ export async function judgeReply(openai: OpenAI, input: JudgeInput): Promise<Jud
     });
     recordGptCost({
       userId: userId ?? null,
-      model: "gpt-4o-mini",
+      model: judgeModel,
       feature: "judge",
       promptTokens: resp.usage?.prompt_tokens ?? 0,
       completionTokens: resp.usage?.completion_tokens ?? 0,
