@@ -1320,7 +1320,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- OVER-TRAINING SIGNAL ----
   const isFatigueMessage = /\b(so tired|exhausted|body.*sore|everything.*sore|can.?t move|legs.*dead|dead.*legs|burnt out|overtrain|worn out|body.*aching|aching all over|too sore|too tired|destroyed|wrecked|ruined|my body.*killing|killing me.*gym|can.?t walk|can.?t lift|barely.*move)\b/i.test(m);
-  if (isFatigueMessage && (user.workoutStreak || 0) >= 4) {
+  if (process.env.ENGINE_LIVE !== "on" && isFatigueMessage && (user.workoutStreak || 0) >= 4) {
     const overtrainReply = `${capName}, that's your body telling you to stop — and you should listen.\n\n${user.workoutStreak} days straight is real work. But without rest, you're breaking muscle down, not building it. Progress lives in recovery.\n\n*Today: rest.* No gym, no run. Walk if you want, but nothing intense.\n\n*Eat:* hit your protein target — your muscles repair during rest, not during training.\n\n*Tomorrow:* come back. You will lift more, feel better, and actually make progress. Rest is not quitting — it's part of the programme.`;
     await logChat(user.id, message, overtrainReply, "OVERTRAIN");
     return overtrainReply;
@@ -1329,7 +1329,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // ---- ALCOHOL QUESTION (not a log — asking about it) ----
   const isAlcoholQuestion = /\b(can i (drink|have.*alcohol|have.*beer|have.*wine)|alcohol.*ok|ok.*alcohol|is (beer|wine|alcohol|drinking) ok|what about (alcohol|drinking|beer|wine)|alcohol.*diet|diet.*alcohol|drinking.*weekends?|weekends?.*drink|how bad.*alcohol|affect.*results|alcohol.*results|skip.*alcohol|cut.*alcohol|limit.*alcohol)\b/i.test(m)
     && !(/\b(had|drank|drinking|having|tonight|last night|yesterday|at the braai|at the party)\b/i.test(m));
-  if (isAlcoholQuestion) {
+  if (process.env.ENGINE_LIVE !== "on" && isAlcoholQuestion) {
     const goal = user.goalType || "fat_loss";
     const alcoholQReply = goal === "muscle_gain"
       ? `${capName}, alcohol and muscle gain don't mix well — here's the honest version:\n\nYour body burns alcohol before everything else. While it's processing the drinks, testosterone drops and cortisol (the breakdown hormone) rises. That means less muscle built from that session.\n\n*Practical rule:* 1–2 drinks max on social occasions. Not every weekend. The more you drink, the more you undo.\n\n*What actually kills gains:* missing protein meals the next day because you're hungover. Eat your protein even on bad nights.`
@@ -1354,7 +1354,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- BAD EATING DAY / BINGE RECOVERY ----
   const isBadEatingDay = /\b(ate (badly|everything|too much|junk|rubbish|badly today)|went off track|off track (today|completely)|had a (bad|terrible|awful) (day|eating)|cheat day gone (wrong|bad|too far)|couldn.?t stop eating|binge(d|ing)|ate everything in sight|blew (my|the) (diet|plan|calories)|messed up (today|my diet|my eating)|fell off|ruined (today|my diet|it)|ate like (crazy|mad|pig)|stress (ate|eating))\b/i.test(m);
-  if (isBadEatingDay) {
+  if (process.env.ENGINE_LIVE !== "on" && isBadEatingDay) {
     const badDayReply = `${capName}, one bad day doesn't undo weeks of work. It's one meal — not one month.\n\nHere's what actually matters now:\n\n*Tonight:* drink water, get to sleep at a decent time. Don't try to "make up" for it by skipping tomorrow's meals — that makes it worse.\n\n*Tomorrow:* back to normal. First meal — protein. Eggs, chicken, tuna. Don't punish yourself with restriction, just get back on track.\n\n*The truth:* fat loss happens over weeks and months. One rough day is noise in the data. What you do the next 3 days is what actually matters.`;
     await logChat(user.id, message, badDayReply, "BAD_EATING_DAY");
     return badDayReply;
