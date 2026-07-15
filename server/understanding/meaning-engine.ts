@@ -91,8 +91,20 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
     // 3. ORCHESTRATOR — one Coach K, assess→plan→reply, grounded in state + real numbers.
     assertAiOnline("meaning_engine");
     const model = pickModel(message);
+    // HARD SICK GUARD (scorecard #1 loss: "ignores sickness"). Don't rely on the model to
+    // infer sickness — detect it deterministically from the message, the recent history, or
+    // the stored health state, and inject an absolute directive. Care first, never push.
+    const SICK_RE = /\b(sick|ill|unwell|flu|fever|not well|feeling (sick|ill|unwell|terrible|rough)|vomit|nausea|nauseous|can'?t train|too sick|recovering|bed ?rest|in bed)\b/i;
+    const isSick = state.current.healthStatus === "sick" || state.current.healthStatus === "recovering"
+      || SICK_RE.test(message)
+      || (history || []).some(h => h.role === "user" && SICK_RE.test(h.content));
+    const sickDirective = isSick
+      ? `⚠️ ABSOLUTE — THIS CLIENT IS SICK OR RECOVERING RIGHT NOW. Care comes first. Do NOT push training, steps, workouts, a schedule, or targets. Acknowledge how they feel, hold rest, keep it gentle and short. This overrides everything else.`
+      : "";
+
     const systemParts = [
       CONSTITUTION,
+      sickDirective,
       BRAIN_SYSTEM,
       THINK_HEADER,
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
