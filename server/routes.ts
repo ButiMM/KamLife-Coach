@@ -888,9 +888,13 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Everything on the deterministic rails (sick/injury/pain, logging/payment, workout +
   // programme delivery) has already been handled above; only conversation reaches here.
   // Flag-gated (ENGINE_LIVE=on) and fail-open — a null defers to the brain/gpt-block below.
+  // COACH DIAGNOSTIC TAG: only on the founder's own number, append which brain answered
+  // so Kam can SEE what's actually running while we roll out. Never shown to real clients.
+  const tag = (reply: string, src: string) => (isCoach ? `${reply}\n\n_· ${src} ·_` : reply);
+
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai });
-    if (engineReply !== null) return engineReply;
+    if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 
   if (process.env.MODEL_BRAIN === "on" && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
@@ -899,14 +903,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       // SHADOW (Days 1-10): score the new Meaning Engine against what the client got.
       // Flag-gated, fire-and-forget — never delays or changes this reply.
       if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: brainReply });
-      return brainReply;
+      return tag(brainReply, "old brain");
     }
   }
 
   // ---- GPT BLOCK — language detection, instruction building, agent routing ----
   const gptReply = await handleGptBlock({ phone, message, m, user, intentPromise });
   if (shadowEnabled()) runShadowEval({ openai, user, phone, message, productionReply: gptReply });
-  return gptReply;
+  return tag(gptReply, "gpt fallback");
 
 
   } catch (err: any) {
