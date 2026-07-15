@@ -79,6 +79,43 @@ interface UnderstandingState {
 the past ("how's the flu?", "remember how good you felt last week?") without a giant
 history log.
 
+## 3a. Four structural safeguards (ARMOR — do not skip)
+These are non-negotiable implementation details that prevent hidden landmines around
+Day 21–30. The 60-day roadmap is only safe with all four in place.
+
+**A. Two AI passes — never let the replier also write the state (the "State Update Trap").**
+If the same model both writes the reply AND updates `UnderstandingState`, it will
+reverse-engineer the state to justify its own reply (give a harsh push, then
+hallucinate "readinessToPush: high" to excuse it). Split into two passes:
+1. **Perception pass** (cheap/fast model): raw message + current state → outputs
+   ONLY the updated `UnderstandingState` (new mood, frustration, lifeStory delta).
+2. **Action pass** (the Orchestrator): raw message + the freshly-updated state →
+   Assess → Plan → Reply.
+Fact-finding is separated from decision-making, so the reply can't corrupt the state.
+
+**B. A Judge LLM scores shadow mode — build it BEFORE Day 1.**
+No human scores 200+ shadow replies/day; that abandons shadow mode within a week.
+A judge model (gpt-4o-mini + strict rubric) receives `[client message] + [old reply]
++ [new reply]` and scores 0–10 on **State Adherence** (did it remember the sickness?),
+**Intent Accuracy** (did it avoid the workout trap?), **Tone Consistency**. Humans
+review ONLY ties and low scores. This makes the "5 consecutive days better" threshold
+objective and scales infinitely.
+
+**C. A Prompt Compiler renders state → a ~30-word narrative before injection (protect R199 margin).**
+Never dump raw `UnderstandingState` JSON into the prompt every message — it blows the
+token budget. A compiler step turns it into a compressed blurb:
+`"Bonolo's confidence has dropped over 3 days. She's frustrated and sick — she needs
+reassurance, not a push."` (~60% fewer input tokens than the JSON.)
+
+**D. A post-transcription SA-English cleaner sits before the Meaning Engine.**
+South Africans code-switch ("Yoh, I'm feeling mos kak today, neh?") and use local
+food words (samp, morogo). Generic STT butchers these — and that corrupts the whole
+reply (real failure: "samp" → "stamp" → a lecture on the wrong food). After
+transcription, pass the raw transcript to a cheap model: *"Clean this South African
+English voice transcript — fix local slang (mos, neh, yoh) and SA food words, keep the
+emotional tone intact."* The Meaning Engine then gets a clean signal even when STT
+produces garbage.
+
 ## 4. Critical pragmatism (avoid over-correction)
 "Delete 170 templates tomorrow" and "flip `MODEL_BRAIN=ON` immediately" are reckless.
 **Shadow-mode first, incremental always.**
@@ -122,16 +159,23 @@ history log.
 - **Retention lift:** do clients on the new engine stay longer? (the real R199 test)
 
 ## 8. The 60-day roadmap
+- **Before Day 1 — build the Judge (safeguard B):** the automated scorer must exist
+  before shadow mode starts, or shadow mode dies in a week.
 - **Days 1–10 — Observability & shadow:** dual-write; new engine processes silently;
-  daily human-scored comparison dashboard; identify top 20 conversational templates.
-- **Days 11–20 — Understanding State:** implement the schema (abstract interface;
-  Postgres + cache); a read/write service per client; **only persist validated fields.**
-- **Days 21–30 — the "think" prompt:** rewrite the orchestrator prompt (Assess → Plan
-  → Act only if explicitly asked → Reply); dry-run 100 historical conversations.
+  the **Judge** scores every pair daily (humans review only flags); identify top 20
+  conversational templates.
+- **Days 11–20 — Understanding State (two passes, safeguard A):** implement the schema
+  (abstract interface; Postgres + cache); a read/write service per client; **only
+  persist validated fields.** Split into a cheap **Perception pass** (writes state)
+  and the **Orchestrator** (reads state, replies) — the replier never writes state.
+- **Days 21–30 — the "think" prompt + Prompt Compiler (safeguard C):** rewrite the
+  orchestrator prompt (Assess → Plan → Act only if explicitly asked → Reply); add the
+  compiler that renders state → a ~30-word blurb before injection; dry-run 100
+  historical conversations.
 - **Days 31–40 — incremental rollout:** redirect the top 20 intents to the engine;
   keep long-tail + better templates (e.g. "Logged ✅").
-- **Days 41–50 — async voice & video:** instant ack → queue → transcribe → engine →
-  final reply. 0% silence on media.
+- **Days 41–50 — async voice & video:** instant ack → queue → transcribe →
+  **SA-English cleaner (safeguard D)** → engine → final reply. 0% silence on media.
 - **Days 51–60 — the flip & archive:** expand engine to 100% of conversation; archive
   conversational templates (keep safety, payments, logging confirmations).
 
