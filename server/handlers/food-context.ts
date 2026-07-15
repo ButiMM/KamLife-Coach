@@ -569,7 +569,7 @@ export async function handleFoodContext(ctx: {
 
   // ---- BRAAI / SOCIAL EVENT GUIDE ----
   const hasSocialEventKeyword = /\b(braai|braaing|braaiing|party|wedding|funeral|umemulo|umkhosi|stokvel|church.*food|family.*gathering|get.?together|celebration)\b/i.test(m);
-  if (hasSocialEventKeyword && !isQuestion && !isFrustration) {
+  if (process.env.ENGINE_LIVE !== "on" && hasSocialEventKeyword && !isQuestion && !isFrustration) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";
     const isBraai = /braai/i.test(m);
