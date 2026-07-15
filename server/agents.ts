@@ -24,7 +24,7 @@ ABSOLUTE RULES:
 - Never mention water unless the client specifically asked about water
 - Always use the client's actual name`;
 
-export async function nutritionAgent(user: any, message: string, memoryContext: string, saFlags: string): Promise<string> {
+export async function nutritionAgent(user: any, message: string, memoryContext: string, saFlags: string, liveSnapshot = ""): Promise<string> {
   const name = user.name || "there";
   const goal = user.goalType || "fat_loss";
   const calorieTarget = user.calorieTarget || 1800;
@@ -54,7 +54,7 @@ Protein target: ${proteinTarget}g/day
 Weekly food budget: ${budget}
 Medical conditions: ${medicalConditions}
 Nutrition protocol: ${protocol || "standard"}
-${saFlags ? "\n" + saFlags : ""}${foodDbContext}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
+${liveSnapshot ? `\nTHIS CLIENT'S LIVE PICTURE RIGHT NOW (real data — today's food, protein trend, weight direction; use these exact numbers, never generic advice when you can name where they actually are):\n${liveSnapshot}\n` : ""}${saFlags ? "\n" + saFlags : ""}${foodDbContext}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
 
 ${HARD_LIMIT}`;
 
@@ -91,7 +91,7 @@ ABSOLUTE RULES:
 - Progressive overload is the only rule — more weight or more reps every session
 - Always use the client's actual name`;
 
-export async function programmingAgent(user: any, message: string, memoryContext: string, programme: string, saFlags: string): Promise<string> {
+export async function programmingAgent(user: any, message: string, memoryContext: string, programme: string, saFlags: string, liveSnapshot = ""): Promise<string> {
   const name = user.name || "there";
   const mode = user.trainingMode || "home";
   const experience = user.trainingExperience || "beginner";
@@ -112,7 +112,7 @@ Training days per week: ${days}
 Injuries: ${injuries}
 Goal: ${goal}
 Medical conditions: ${medConditions}
-${saFlags ? "\n" + saFlags : ""}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
+${liveSnapshot ? `\nTHIS CLIENT'S LIVE PICTURE RIGHT NOW (real data — sessions, streak, weight direction, sick state; reference where they actually are, never generic):\n${liveSnapshot}\n` : ""}${saFlags ? "\n" + saFlags : ""}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
 
 THEIR CURRENT PROGRAMME (${mode.toUpperCase()}, ${experience.toUpperCase()}):
 ${programme}
@@ -183,7 +183,7 @@ HARD RULES:
 - Warm and real, like a coach who genuinely cares — never a hype-man, never a robot.
 - CRISIS OVERRIDE: any mention of suicide, self-harm, or being better off dead → stop coaching, give SADAG 0800 567 567 (free, 24/7), and say they don't have to carry it alone.`;
 
-export async function mindsetAgent(user: any, message: string, memoryContext: string, dataPoint: string, saFlags: string, deep = false): Promise<string> {
+export async function mindsetAgent(user: any, message: string, memoryContext: string, liveSnapshot: string, saFlags: string, deep = false): Promise<string> {
   // Crisis intercept — never route to fitness coaching for active crisis signals
   const mLower = message.toLowerCase();
   if (CRISIS_KEYWORDS.some(kw => mLower.includes(kw))) {
@@ -204,7 +204,9 @@ CLIENT PROFILE:
 Name: ${name}
 Life situation: ${situation}
 Total workouts completed: ${workouts}
-Real data point to reference: ${dataPoint || "They showed up and sent this message — that means they have not quit."}
+${liveSnapshot
+  ? `\nTHIS CLIENT'S LIVE PICTURE RIGHT NOW (real data — reference it specifically, never reply with generic empathy when you can name their actual numbers, streak, or today):\n${liveSnapshot}`
+  : "Real data point to reference: They showed up and sent this message — that means they have not quit."}
 ${saFlags ? "\n" + saFlags : ""}${memoryContext ? "\n\nCOACH K MEMORY — WHAT YOU KNOW ABOUT THIS CLIENT FROM PREVIOUS SESSIONS:\n" + memoryContext : ""}
 
 ${HARD_LIMIT}`;

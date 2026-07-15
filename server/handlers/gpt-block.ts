@@ -3,6 +3,7 @@ import { users, chatHistory, stepLogs } from "../../shared/schema";
 import { eq, desc, and, gte } from "drizzle-orm";
 import { askCoachK, getSAContextFlags, getNowContextSA, isUnderGPTCallLimit, selectModel, classifyIntent, type ClassifiedIntent } from "../gpt";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "../agents";
+import { buildClientSnapshot } from "../brain/client-snapshot";
 import { recomputeTodayFoodTotals } from "./food-scanner";
 import { storeMemory, retrieveMemories } from "../memory";
 import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
@@ -578,15 +579,25 @@ SA voice. Direct. Coach forward, not backward.`;
   let gptReply: string;
   const AGENT_ERROR = "Eish Coach K had a moment. Try that again.";
 
+  // COHERENCE FIX (2026-07-15): the specialist agents used to reply from name +
+  // workout count alone — so the exact human moments (a rant, an emotional share, a
+  // nutrition question) got a GENERIC answer because the coach couldn't see today's
+  // food, the protein trend, the weight direction, the streak, or the sick state. The
+  // rich live snapshot already exists (the brain used it); now the ACTIVE path gets it
+  // too, so every agent references the client's real right-now picture. Built once,
+  // fail-open AND time-boxed: if the snapshot is slow or unavailable the agent still
+  // replies (just without the live picture, exactly as before) — a coach reply must
+  // never hang on context assembly.
+  const liveSnapshot = await withTimeout("live_snapshot", 4000, () => buildClientSnapshot(user)).catch(() => "");
+
   try {
     if (agentType === "nutrition") {
-      gptReply = await nutritionAgent(user, message, memoryContext, saContext);
+      gptReply = await nutritionAgent(user, message, memoryContext, saContext, liveSnapshot);
     } else if (agentType === "programming") {
       const prog = getKamlifeProgramme(user);
-      gptReply = await programmingAgent(user, message, memoryContext, prog, saContext);
+      gptReply = await programmingAgent(user, message, memoryContext, prog, saContext, liveSnapshot);
     } else if (agentType === "mindset") {
-      const dataPoint = `${user.totalWorkoutsCompleted || 0} workouts completed, ${user.programmeWeek || 1} weeks on programme`;
-      gptReply = await mindsetAgent(user, message, memoryContext, dataPoint, saContext, deepEmotional);
+      gptReply = await mindsetAgent(user, message, memoryContext, liveSnapshot, saContext, deepEmotional);
     } else if (agentType === "admin") {
       const targetValue = `Calorie target: ${user.calorieTarget || 1800} kcal | Protein target: ${user.proteinTarget || 120}g | Steps target: ${user.stepsTarget || 8500}`;
       gptReply = await adminAgent(user, message, "log", message, targetValue);
