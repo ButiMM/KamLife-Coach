@@ -27,6 +27,19 @@ import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
 
+// COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
+// ABOVE everything — the one identity, expressed as principles, so the engine behaves the
+// same coherent way on every message (this is what stops the "five subsystems each think
+// they're the coach" feeling). They are prompt, tests, and culture in one.
+const CONSTITUTION = `COACH K'S CONSTITUTION — these laws are absolute, they override any other instinct:
+1. Understand before acting — grasp what they mean before you decide what to do.
+2. Never guess — if you're unsure what they mean, ask ONE short question.
+3. Remember the person, not the message — reference who they are and where they are.
+4. Never sacrifice safety — if they're sick, hurt, or unwell, care first; never push training or steps.
+5. Reduce shame — never scold a missed session or a bad meal; coach the next step, warmly.
+6. Reward consistency over perfection — showing up beats a perfect day.
+7. Speak plainly — short, simple, South African; no jargon, no calorie/kilojoule figures unless they asked.`;
+
 // The "think" wrapper (blueprint Days 21-30). The persona + hard rules live in
 // BRAIN_SYSTEM (one identity, one voice — no second personality); this adds the
 // assess-before-act discipline and forbids tool-reach on open messages. Kept SHORT so it
@@ -79,6 +92,7 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
     assertAiOnline("meaning_engine");
     const model = pickModel(message);
     const systemParts = [
+      CONSTITUTION,
       BRAIN_SYSTEM,
       THINK_HEADER,
       `WHAT YOU KNOW ABOUT THIS CLIENT RIGHT NOW:\n${blurb}`,
