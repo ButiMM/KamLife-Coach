@@ -19,6 +19,7 @@ import { runMeaningEngine } from "./meaning-engine";
 import { compileStateBlurb } from "./compiler";
 import { judgeReply } from "../eval/judge";
 import { captureQualitySignal } from "../quality-signals";
+import { buildClientSnapshot } from "../brain/client-snapshot";
 
 export function shadowEnabled(): boolean {
   return process.env.SHADOW_ENGINE === "on";
@@ -43,8 +44,12 @@ export function runShadowEval(input: ShadowInput): void {
   const { openai, user, phone, message, productionReply, snapshot, history } = input;
   (async () => {
     try {
-      const prior = seedUnderstanding(user, snapshot);
-      const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history });
+      // Ground the engine in the client's REAL numbers so the Judge can score state
+      // adherence honestly (built here, in the detached shadow job — never on the client's
+      // critical path). Falls back to no-snapshot if it's unavailable.
+      const grounded = snapshot ?? await buildClientSnapshot(user).catch(() => undefined);
+      const prior = seedUnderstanding(user, grounded);
+      const result = await runMeaningEngine({ openai, user, message, prior, snapshot: grounded, history });
       if (!result) {
         console.log(`[SHADOW] engine produced nothing for "${message.slice(0, 60)}"`);
         return;

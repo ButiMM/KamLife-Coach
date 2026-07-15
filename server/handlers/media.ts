@@ -21,6 +21,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
+import { cleanSATranscript } from "../understanding/sa-transcript";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
@@ -1260,10 +1261,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const storedLangPref = (user.profileNotes || "").match(/lang:([a-z]{2})/)?.[1];
       const whisperLangMap: Record<string, string> = { zu: "zu", xh: "xh", st: "st", tn: "tn", ts: "ts", af: "af", en: "en" };
       const whisperLang = storedLangPref && whisperLangMap[storedLangPref] ? whisperLangMap[storedLangPref] : undefined;
-      // Whisper uses the prompt as a vocabulary bias — including exercise names here is the
-      // single biggest lever on transcription accuracy. Without them, "chest fly" → "Just fly,
-      // dude", "full weight stack" → gibberish. Keep it as natural prose so Whisper reads it
-      // as prior context, not a word list. Under the 224-token API limit.
+      // Whisper uses the prompt as vocabulary bias — exercise names here are the biggest
+      // lever on accuracy ("chest fly" → "Just fly, dude" without them). Natural prose, <224 tokens.
       const whisperPrompt = "South African gym coaching. Today I did chest flies, cable flies, lat pulldowns, seated rows, single-arm rows, leg press, hip thrusts, Romanian deadlifts, RDLs, squats, Bulgarian split squats, lunges, leg curls, leg extensions, calf raises, shoulder press, lateral raises, face pulls, bicep curls, tricep pushdowns, bench press, incline press, push-ups, pull-ups, planks, dead bugs. Full weight stack, 20kg plates, 10kg plates, 80kg, dumbbells, barbell, cable machine. Sets, reps, protein grams, calories, kcal, steps, gym, pap, pilchards, wors. English, Zulu, Xhosa, Afrikaans.";
 
       let transcribedText: string | undefined;
@@ -1289,10 +1288,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // Whisper fallback (3 attempts with quality signals)
       if (!transcribedText) {
         let transcription: { text?: string } = { text: "" };
-        // Confidence signal from attempt 1 (verbose_json). Whisper "hallucinates"
-        // English-sounding words when handed a language it can't handle (most SA
-        // languages beyond EN/AF/ZU). avg_logprob and compression_ratio are the
-        // standard signals for catching that garble — see the guard further down.
+        // verbose_json gives avg_logprob + compression_ratio — the standard signals for
+        // catching Whisper's garble on SA languages it can't handle (guard further down).
         console.log(`[VOICE] whisper_attempt_1 bytes=${audioBuffer.byteLength} ext=${audioExt} lang=${whisperLang || "auto"}`);
         try {
           const v: any = await withTimeout("voice_transcribe", 25000, () => openai.audio.transcriptions.create({
@@ -1397,6 +1394,9 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return "I caught some of that, but not clearly enough to be sure I understood you right. Could you type it instead? I read English, Zulu, Xhosa, Sotho, Tswana, Tsonga and Afrikaans text well. 🙏";
       }
       clearVoiceFailure(user.id);
+
+      // SA-ENGLISH CLEANER (safeguard D): fix local slang + food words STT mangles ("samp"→"stamp") before the coach + echo read it; fail-open.
+      transcribedText = await cleanSATranscript(openai, transcribedText, user.id);
 
       const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
       const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme", "ke kopa", "ke batla"];
