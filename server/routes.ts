@@ -865,8 +865,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (foodCtxResult !== null) return foodCtxResult;
 
   // ---- PROGRESS CHECK ----
-  const progressResult = await handleProgressCheck({ phone, message, m, user });
-  if (progressResult !== null) return progressResult;
+  // Days 31-40 rollout: when the engine is live it OWNS the "how am I doing / my progress"
+  // conversation — snapshot-grounded (real numbers injected) and sick-aware, so it stops
+  // the old advisory template's training-push at a sick client. The deterministic progress
+  // stays the fallback (ENGINE_LIVE=off reverts instantly). Advisory-only, so nothing is
+  // lost by deferring it.
+  if (!engineLive()) {
+    const progressResult = await handleProgressCheck({ phone, message, m, user });
+    if (progressResult !== null) return progressResult;
+  }
 
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (miscResult !== null) return miscResult;
