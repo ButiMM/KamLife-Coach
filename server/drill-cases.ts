@@ -166,6 +166,20 @@ export const DRILL_CASES: DrillCase[] = [
     user: "Where can I see how to do the exercises?",
     mustNot: [/tap (on|the)/i, /click (on|the)/i, /scroll (down|to)/i, /in the (app|menu)/i, /go to the.{0,20}(tab|section)/i],
   },
+  // ── 2026-07-15 understand-before-act failures (the inverted-pipeline class) ──
+  {
+    name: "open/reflective request must NOT dump a workout — understand first (2026-07-15 'map my journey')",
+    user: "Map out my entire journey",
+    mustNot: [/\b\d\s*(sets?|reps?)\b/i, /\b\d\s*x\s*\d/i, /upper body|lower body|week \d|warm-?up|machine chest press/i, /today'?s (session|workout|target)/i],
+    should: [/journey|plan|from here|where|mean|which|\?/i],
+  },
+  {
+    name: "sick + open request: no workout, no step-nag, hold rest (2026-07-15 'map my journey after the flu')",
+    user: "Don't give me a workout. Map my journey from here onwards after I recover from the flu",
+    snapshot: SICK_SNAPSHOT,
+    mustNot: [/here'?s your (workout|session)/i, /\b\d\s*(sets?|reps?)\b/i, /hit your steps|steps today|next training day|rest day\b.*thursday/i],
+    should: [/rest|recover|flu|better first|when you|no rush/i],
+  },
 ];
 
 export type DrillResult = { pass: boolean; warns: string[]; reply: string };
