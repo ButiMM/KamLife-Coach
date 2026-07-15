@@ -436,8 +436,8 @@ export async function runCoachBrain(ctx: {
       const msg = resp?.choices?.[0]?.message;
       if (!msg) return null;
 
-      const toolCall = msg.tool_calls?.[0];
-      if (!toolCall) {
+      const toolCalls = (msg.tool_calls || []).filter((t: any) => t.type === "function");
+      if (toolCalls.length === 0) {
         const text = (msg.content || "").trim();
         if (!text) return null;
         // SELF-CORRECTING LOOP (the systemic fix, 2026-07-07): every draft is
@@ -477,11 +477,12 @@ export async function runCoachBrain(ctx: {
         return guarded.reply;
       }
 
-      if (toolCall.function?.name === "defer") return null;
-
-      // Terminal tool: the full programme is long + already formatted, so send it
-      // straight to the client rather than let the model paraphrase and truncate it.
-      if (toolCall.function?.name === "get_full_programme") {
+      // Terminal tools decide the whole turn no matter what else was called
+      // alongside them. defer hands back to the deterministic pipeline; the full
+      // programme is long + already formatted, so it goes straight to the client
+      // rather than letting the model paraphrase and truncate it.
+      if (toolCalls.some((t: any) => t.function?.name === "defer")) return null;
+      if (toolCalls.some((t: any) => t.function?.name === "get_full_programme")) {
         let prog = "";
         try { prog = (buildFullProgramme(user) || "").trim(); } catch { return null; }
         if (!prog) return null;
@@ -489,13 +490,23 @@ export async function runCoachBrain(ctx: {
         return prog;
       }
 
-      let parsedArgs: any = {};
-      try { parsedArgs = JSON.parse(toolCall.function?.arguments || "{}"); } catch { /* {} */ }
-      const result = await execTool(toolCall.function!.name, parsedArgs, { user, m });
-      if (result === null) return null; // tool declined (guardrail / unparseable) → defer
-
+      // OpenAI requires a tool message for EVERY tool_call_id on the assistant
+      // message — respond to ALL of them, not just the first, or the next request
+      // 400s ("must be followed by tool messages responding to each tool_call_id").
+      // A parallel-tool turn used to silently defer here (the brain gave up).
       messages.push(msg);
-      messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
+      let anyDeclined = false;
+      for (const toolCall of toolCalls) {
+        let parsedArgs: any = {};
+        try { parsedArgs = JSON.parse(toolCall.function?.arguments || "{}"); } catch { /* {} */ }
+        const result = await execTool(toolCall.function!.name, parsedArgs, { user, m });
+        // A declined tool (guardrail / unparseable) means defer — but we must STILL
+        // answer every tool_call_id we already committed to, so feed a neutral stub
+        // and bail after the loop rather than leaving a dangling call id.
+        messages.push({ role: "tool", tool_call_id: toolCall.id, content: result ?? "[unavailable — do not answer from this tool]" });
+        if (result === null) anyDeclined = true;
+      }
+      if (anyDeclined) return null;
     }
     return null; // exhausted rounds → defer
   } catch (e) {
