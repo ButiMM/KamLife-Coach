@@ -18,7 +18,12 @@ import { seedUnderstanding } from "../understanding/seed";
 import { evaluateTurn } from "./evaluate";
 import type { UnderstandingState } from "../understanding/state";
 
-const SKIP_INTENT = /(_LOG$|_OK$|_ACK$|_DONE$|PAYMENT|MEDIA_(SUCCESS|FAILURE)|STEP_|WATER_|FOOD_LOG|WEIGHT|SUPPLEMENT_LOG|EQUIPMENT_UPDATE|PROFILE_UPDATE|SYSTEM)/i;
+// Skip the turns that STAY deterministic in the rollout — the engine will never own
+// these, so grading it on them is measuring the wrong thing. This is the blueprint split:
+// the engine owns CONVERSATION; safety (sick/injury/pain/overtraining/comeback) and
+// transactions/commands (logging, payment, workout + programme delivery, equipment) stay
+// on the deterministic rails. What's left is the engine's real territory.
+const SKIP_INTENT = /(_LOG$|_OK$|_ACK$|_DONE$|PAYMENT|MEDIA_|STEP_|WATER_|FOOD_LOG|WEIGHT|SUPPLEMENT_LOG|EQUIPMENT|PROFILE_UPDATE|SYSTEM|SICK|OVERTRAIN|RETURN_PLAN|INJURY|DOMS|PAIN|LOAD_SHEDDING|PROGRAMME|WORKOUT)/i;
 const isMarker = (s: string) => /^\s*\[/.test(s || "");
 
 interface Turn { userId: string; messageIn: string; messageOut: string; intent: string | null }
