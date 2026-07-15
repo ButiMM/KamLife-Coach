@@ -17,6 +17,9 @@
  * keeps growing.
  */
 
+import { eq, desc } from "drizzle-orm";
+import { db } from "../db";
+import { chatHistory } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
@@ -28,6 +31,25 @@ import { logChat } from "../handlers/chat-log";
 
 export function engineLive(): boolean {
   return process.env.ENGINE_LIVE === "on";
+}
+
+// Last few real turns of THIS conversation, so the engine has short-term memory and
+// stops answering each message in a vacuum ("it doesn't listen / forgets what I said").
+// Best-effort: an empty list never blocks a reply. Skips internal markers.
+async function recentTurns(userId: string): Promise<Array<{ role: "user" | "assistant"; content: string }>> {
+  try {
+    const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+      .from(chatHistory).where(eq(chatHistory.userId, userId))
+      .orderBy(desc(chatHistory.createdAt)).limit(5);
+    const turns: Array<{ role: "user" | "assistant"; content: string }> = [];
+    for (const r of rows.reverse()) {
+      const inMsg = (r.messageIn || "").trim();
+      const outMsg = (r.messageOut || "").trim();
+      if (inMsg && !inMsg.startsWith("[")) turns.push({ role: "user", content: inMsg.slice(0, 400) });
+      if (outMsg && !outMsg.startsWith("[")) turns.push({ role: "assistant", content: outMsg.slice(0, 500) });
+    }
+    return turns.slice(-8);
+  } catch { return []; }
 }
 
 export async function runMeaningEngineLive(ctx: {
@@ -44,7 +66,8 @@ export async function runMeaningEngineLive(ctx: {
       ? await loadUnderstanding(user.id, seedUnderstanding(user, snapshot))
       : seedUnderstanding(user, snapshot);
 
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot });
+    const history = user?.id ? await recentTurns(user.id) : [];
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history });
     if (!result || !result.reply.trim()) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
