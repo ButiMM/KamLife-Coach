@@ -184,15 +184,23 @@ export async function runDrillCase(openai: OpenAI, c: DrillCase): Promise<DrillR
     });
     const msg = resp.choices[0]?.message;
     if (!msg) break;
-    const toolCall = msg.tool_calls?.[0];
-    if (!toolCall || toolCall.type !== "function") { reply = (msg.content || "").trim(); break; }
-    if (toolCall.function.name === "defer") { reply = "[DEFERRED — the brain refused to answer a coaching question]"; break; }
-    // Canned tool results — snapshot for stats, a stub for everything else
-    const result = toolCall.function.name === "get_client_snapshot"
-      ? (c.snapshot || MORNING_SNAPSHOT)
-      : "[tool unavailable in drill — answer from the snapshot]";
+    const toolCalls = (msg.tool_calls || []).filter(t => t.type === "function");
+    if (toolCalls.length === 0) { reply = (msg.content || "").trim(); break; }
+    // If the brain deferred, that's a hard fail regardless of what else it called.
+    if (toolCalls.some(t => t.function.name === "defer")) {
+      reply = "[DEFERRED — the brain refused to answer a coaching question]";
+      break;
+    }
+    // OpenAI requires a tool message for EVERY tool_call_id on the assistant
+    // message — respond to ALL of them, not just the first, or the next request
+    // 400s ("must be followed by tool messages responding to each tool_call_id").
     messages.push(msg);
-    messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
+    for (const toolCall of toolCalls) {
+      const result = toolCall.function.name === "get_client_snapshot"
+        ? (c.snapshot || MORNING_SNAPSHOT)
+        : "[tool unavailable in drill — answer from the snapshot]";
+      messages.push({ role: "tool", tool_call_id: toolCall.id, content: result });
+    }
   }
 
   const failures = c.mustNot.filter(re => re.test(reply)).map(re => `mustNot hit: ${re}`);

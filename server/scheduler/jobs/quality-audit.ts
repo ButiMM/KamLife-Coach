@@ -90,7 +90,11 @@ export async function runQualityAudit(): Promise<void> {
       return;
     }
 
-    // ── 1. Sample a random handful of the last 24h of real two-way exchanges ──
+    // ── 1. Sample a random handful of the last 24h of REAL two-way exchanges ──
+    // Exclude telemetry/system rows: media latency logs ([MEDIA_OK:photo] → total_ms=…),
+    // failure logs, and other internal markers get written to chat_history too, and
+    // scoring "total_ms=6404" as a coaching reply falsely tanked the average (a tester
+    // caught the alert at 6.4/10). Only real client↔coach text should be graded.
     const since = new Date(Date.now() - 24 * 60 * 60 * 1000);
     const rows = await db
       .select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
@@ -100,14 +104,24 @@ export async function runQualityAudit(): Promise<void> {
           gte(chatHistory.createdAt, since),
           isNotNull(chatHistory.messageIn),
           isNotNull(chatHistory.messageOut),
+          sql`${chatHistory.intent} IS DISTINCT FROM 'MEDIA_SUCCESS'`,
+          sql`${chatHistory.intent} IS DISTINCT FROM 'MEDIA_FAILURE'`,
         ),
       )
       .orderBy(sql`RANDOM()`)
-      .limit(SAMPLE_SIZE);
+      .limit(SAMPLE_SIZE * 4); // over-fetch so the content filter below can't starve the sample
 
+    // A REAL exchange is human text on both sides — not an internal marker/telemetry
+    // payload. Belt to the SQL intent filter (covers any marker written under a
+    // different intent, now or later).
+    const isTelemetry = (s: string) =>
+      /^\s*(total_ms=|coach_reply_ms=|latency=)/i.test(s)
+      || /^\s*\[(MEDIA_OK|MEDIA_FAIL|auto|STEP_|SYSTEM)/i.test(s)
+      || /^\s*\[[A-Z_]+\]\s*$/.test(s); // a bare "[SOMETHING]" marker with no real content
     const exchanges: SampledExchange[] = rows
       .map(r => ({ messageIn: r.messageIn ?? "", messageOut: r.messageOut ?? "" }))
-      .filter(e => e.messageIn.trim() && e.messageOut.trim());
+      .filter(e => e.messageIn.trim() && e.messageOut.trim() && !isTelemetry(e.messageIn) && !isTelemetry(e.messageOut))
+      .slice(0, SAMPLE_SIZE);
 
     if (exchanges.length < MIN_TO_AUDIT) {
       console.log(`[QUALITY_AUDIT] not enough exchanges to audit (${exchanges.length} found, need ${MIN_TO_AUDIT})`);
