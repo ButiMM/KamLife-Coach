@@ -1,10 +1,12 @@
 # KamLife Coach — Rebuild Execution Report
 
 **Purpose:** an honest, auditable account of what was built against
-`docs/REBUILD-BLUEPRINT.md`, how, and where it lives in the code — so an
-independent reviewer can verify it. Written for a technical third party.
+`docs/REBUILD-BLUEPRINT.md` **and the frozen "Definitive Build Document"
+(2026-07-16)**, how, and where it lives in the code — so an independent reviewer
+can verify it. Written for a technical third party. §7 below covers the frozen
+document's additional deltas.
 
-**Status date:** 2026-07-15
+**Status date:** 2026-07-16
 **Branch / deploy:** `main`, auto-deploys to Railway on push.
 **Headline:** the full architecture from the blueprint is implemented, wired,
 and verified by the offline suites. It runs **behind flags** (`ENGINE_LIVE`,
@@ -151,8 +153,10 @@ questions, period/cycle), and commands (fact/tip).
 |---|---|---|
 | TypeScript compiles clean | ✅ | `npm run check` = 0 errors |
 | Deterministic routing intact | ✅ | routing-audit 257/257 |
-| Unit logic (state trust-gate, compiler, refusal) | ✅ | unit-tests 360/360 |
+| Unit logic (state trust-gate, compiler, refusal, domain-guard) | ✅ | unit-tests 362/362 |
 | Engine beats production on real data | ✅ | replay 6.6 vs 4.6, wins 65 % (60 convos) |
+| Domain gate keeps Coach K in-lane (Law 11) | ✅ | fast-path unit tests + fail-open to answering |
+| Judge no longer self-judges (Law 12) | ✅ | judge model ≠ writer model |
 | 0 % silence on media | ✅ | every media path returns a reply (§2) |
 | Emotional support keeps SADAG safety net | ✅ | low-mood guard + upstream crisis handler |
 | "5 consecutive winning days" before full flip | ⏳ pending | requires days of live shadow/replay data |
@@ -200,6 +204,61 @@ remains the real acceptance gate.
 3. Token cost per conversation under `ENGINE_LIVE=on` vs the R199 margin.
 4. Coverage of the deterministic/engine split — any conversational intent still
    trapped by a keyword handler, or any transaction wrongly handed to the engine.
+
+---
+
+## 7. Frozen "Definitive Build Document" (2026-07-16) — additional deltas
+The frozen document reframes the same architecture around **17 laws** and **five
+systems**, and adds components the blueprint did not name. Status of each:
+
+### The five systems → where they live in the code
+| System | Responsibility | Code |
+|---|---|---|
+| **Perception** | raw input → clean structured data | `handlers/media.ts` (voice/video), `understanding/sa-transcript.ts` + `refusal.ts` |
+| **Reasoning** | judgement only — understand, classify, plan | `understanding/domain-guard.ts`, `perception.ts` (writes state), `meaning-engine.ts` (reads state, plans, replies) |
+| **Memory** | facts persist, inferences decay | `understanding/state.ts` (trust gate), `store.ts` (validated-subset persistence), `seed.ts` |
+| **Execution** | deterministic actions & math | the deterministic handlers (`handlers/*`), targets/programme/shopping calculators — the engine v1 holds **no tools**, so all calculation stays here |
+| **Observation** | evaluation, logging, replay | `eval/judge.ts`, `eval/replay.ts`, `eval/evaluate.ts`, `understanding/shadow.ts`, gpt-cost + quality-signal logging |
+
+### New/changed components implemented for the frozen document
+| Frozen-doc item | Implementation | File |
+|---|---|---|
+| **Domain Boundary Gate (Law 11)** — keep Coach K in the health lane, not a general assistant | Layered: deterministic in-domain fast-path + gpt-4o-mini classifier (IN/PARTIAL/OUT/SAFETY); out-of-domain → warm redirect; partial → bridge-back note; fail-open to answering; killswitch `DOMAIN_GUARD=off` | `understanding/domain-guard.ts`, wired in `understanding/live.ts` |
+| **Constitution laws 9–12** — trust before cleverness (7), client is hero / coach is guide (13), stay in lane (11), know your limits → offer a human (14) | Injected above the orchestrator prompt | `understanding/meaning-engine.ts` |
+| **Judge must not self-judge (Law 12)** | Judge now runs on a **different model** than the one that wrote the reply (writer's model threaded through `evaluateTurn`) | `eval/judge.ts`, `eval/evaluate.ts` |
+| **Acknowledge-first + no-numbers-open (Law 8, §7 metrics)** | Constitution law 8 + THINK_HEADER two-move reply | `understanding/meaning-engine.ts` |
+
+### Frozen-doc items already satisfied by existing architecture
+- **Law 4 (Brain never writes the DB directly):** the engine never calls the DB;
+  its state output is validated/clamped by `coerceUnderstanding` and only the
+  durable subset is written via `store.ts` — a validation gateway in practice.
+- **Law 5 (facts sacred, inferences decay):** volatile inferences (mood,
+  frustration) are re-inferred every message by the Perception pass and are
+  **never** persisted (`persistableUnderstanding` keeps only profile +
+  observations). Perception is instructed to store **evidence, not labels**.
+- **Law 8 / Replay:** every engine turn is cost-logged and Judge-scored; the
+  `replay` command reproduces the decision path over real conversations.
+- **Failure philosophy / 0 % silence:** every media and engine path is fail-open
+  and returns a human reply — no branch returns silence.
+
+### Honest gaps against the frozen document (recommended next, not yet built)
+1. **Formal inference expiry (`expiresAt` + `evidence[]` structs, Law 5):** today
+   inferences simply aren't persisted; the explicit typed-with-expiry model is
+   not implemented. Behaviourally equivalent for now, but not the exact schema.
+2. **A formal `PersistenceGateway` class (Law 4)** and a full per-decision
+   **audit log with version stamps** (constitution/prompt/rubric/model versions,
+   Law 8): logging exists piecemeal; a single typed audit record does not.
+3. **Tool Permission Gate's four states (Law 9)** — moot until the engine is
+   given tools (v1 has none; transactions stay deterministic).
+4. **Law 17 (client OUTCOMES as the north star):** retention/adherence/protein-
+   compliance lift is the real metric and can only be measured from production
+   over time — it is not yet instrumented as a scorecard.
+
+These gaps are deliberately deferred: they add structure, not client-visible
+behaviour, and the CTO's own verdict was to **freeze and prove with real users**
+before building more scaffolding. They are logged here so nothing is hidden.
+
+---
 
 *This report reflects the state of `main` at the stated date. It is generated
 from the code, not aspiration; every file path above is real and inspectable.*
