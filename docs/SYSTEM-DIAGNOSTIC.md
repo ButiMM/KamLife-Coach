@@ -19,6 +19,8 @@ This document does not soften anything. Where something is broken, it says so.
 
 **The gap this document is about:** the promise is "a coach that knows you." The lived experience is too often **generic, robotic, canned, or silent** — and fixes have not held across the board over ~6 months.
 
+**Honest current state:** the deterministic/offline test suites pass (~750 checks green), which measures whether messages *route* correctly — **not** whether a real client feels understood. On the metric that matters — a real target-market client's lived experience — recent live sessions with actual testers place this closer to **3/10 than 9/10**: mis-transcribed voice notes, wrong-food advice, ignored corrections, information overload, and replies that feel like a chore. This document exists because the internal green lights and the real-world experience have diverged badly, and that gap needs an outside fix.
+
 ---
 
 ## 2. The stack, and how a message actually flows today
@@ -83,6 +85,17 @@ The specialist agents (especially the **mindset** agent that handles emotional m
 ### P7 — Regression whack-a-mole
 Because behaviour is spread across 223 templates plus two model paths, fixing one phrasing frequently re-surfaces a problem elsewhere, or a template quietly re-captures a message a fix was meant to send to the model. The founder's repeated, accurate observation: **"same sheet, same sheet — we've been fixing this for six months."** The absence of a single decision point for "what should the coach say here" makes durable fixes hard.
 
+### P9 — Voice transcription fails on the demographic's own vocabulary and accent (and the error cascades)
+Our clients are **voice-first** and speak South African English with South African food words. The transcription layer does not handle this.
+
+**Evidence (live, real tester "Bonolo"):** she sent a voice note about her meal. She said **"samp"** (a staple SA maize dish) and that she was having **leftovers**. The system transcribed it as **"stamp and chicken fingers."** Because the transcript was wrong, the coach then **coached the wrong food**, condescendingly: *"Bonolo, you're unsure about what varies in South African meals. Stamp and chicken fingers might be more convenient, but they often don't pack the protein…"* — advising her to swap a food she never mentioned. **One bad transcription poisoned the entire reply.** For a voice-first product serving this market, unreliable transcription of local vocabulary (samp, morogo, pap, pilchards, pilau, chakalaka…) is a foundational failure, not an edge case.
+
+### P10 — The coach doesn't understand corrections or conversational context
+Bonolo's voice note was a **correction** — "it's not pap and stew, it's samp" — fixing a meal the coach had just logged from a photo. The coach did not recognize it as a correction to the existing log; it treated it as a **fresh nutrition question** and launched into generic advice. The system has no robust concept of "the client is amending what we just recorded / referring to the previous turn." It answers each message in a vacuum.
+
+### P11 — Information overload: the replies are a chore, not a relief
+The same client's takeaway: **"it's just information, it's just a chore, I don't understand what's happening."** The replies are long, dense, and stack multiple ideas (grease critique + dinner math + a motivational speech + a protein target) onto someone who wanted to be understood, not lectured. For a low-literacy, low-effort-by-design product, **density is a defect.** The bar is: the client feels *seen and relieved*, not *assigned homework*.
+
 ### P8 — Testing does not exercise the live model paths well
 The offline test suites (unit/routing/gap — ~750 checks) validate the **deterministic** routing and pass reliably. But the **integration suite hangs** in a sandbox without network/DB, and the **live-model behaviour** is only checked by a nightly "drill battery" against the real model. So a large class of failures — exactly the model-misroute and generic-reply failures above — **are not caught before a client hits them.**
 
@@ -131,6 +144,7 @@ A candidate end-state — **we want an expert to pressure-test this**:
 ## 7. Open questions for the reviewer
 
 1. **Models:** we run gpt-4o (hard/emotional moments) and gpt-4o-mini (routine), plus vision and voice. Are these the right choices for cost/quality at R199 scale? Where would you spend or save?
+1a. **Voice transcription is a top risk:** our clients are voice-first and use SA English + local food vocabulary that the current transcription mis-hears ("samp" → "stamp"), which then corrupts the whole reply. What transcription approach (model, prompt-biasing/vocabulary hints, a domain dictionary, confirm-back-what-I-heard UX) fixes this for South African speech?
 2. **Brain-on decision:** is a single always-on tool-calling brain the right owner of conversation for this use case, or is a more constrained design safer/cheaper?
 3. **Latency & voice:** WhatsApp + voice notes + multi-step model calls — how should we structure this for fast, reliable replies?
 4. **Testing model behaviour:** how do we get trustworthy pre-production signal on model-quality regressions, not just deterministic routing?
@@ -163,6 +177,8 @@ A candidate end-state — **we want an expert to pressure-test this**:
 | 2b | voice: "Don't give me a workout. Map my journey from here onwards after I recover from the flu" (angry) | Dumped a **training schedule** + "hit your steps today" (to a sick, angry client) | Acknowledge the anger + the flu, hold rest, then map the forward progression — no schedule |
 | 3 | a 0:38 video | **No reply at all** | Always acknowledge; attempt analysis or ask for a clearer clip |
 | 4 | (general chat) emotional shares | **Generic** empathy | Reference the client's real numbers/streak/today — presence, not platitude |
+| 5 | voice (SA accent): "it's not pap and stew, it's **samp**" (a correction; leftovers) | Transcribed **"stamp and chicken fingers"**, then **lectured on the wrong food** condescendingly | Transcribe SA vocabulary correctly; recognize a correction to the logged meal; a short, warm confirmation |
+| 6 | (photo log reply, same client) | Dense multi-idea essay (grease + dinner math + speech + target) | One short, warm, human line — "seen and relieved", not homework |
 
 ## Appendix B — what changed this week (partial mitigations, not the cure)
 - Sick-flow now falls through to the listening layer for substantive messages (bare check-ins still templated, and no longer verbatim-repeating).
