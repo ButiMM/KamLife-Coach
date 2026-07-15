@@ -1776,7 +1776,9 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- SA HOLIDAY MEAL GUIDE — braai, Christmas, Easter, Heritage Day ----
-  if (/\b(braai\s*day|heritage\s*day|christmas\s*(?:meal|food|eat)|easter\s*(?:meal|food|eat)|new\s*year.?s?\s*(?:meal|food|eat)|holiday\s*(?:meal|food|eat)|party\s*food|social\s*eating|eating\s*out\s*(?:guide|tips|help))\b/i.test(m)) {
+  // Conversational advisory (canned template, no data write) — defers to the Meaning
+  // Engine when it's live; stays as the deterministic fallback when the engine is off.
+  if (process.env.ENGINE_LIVE !== "on" && /\b(braai\s*day|heritage\s*day|christmas\s*(?:meal|food|eat)|easter\s*(?:meal|food|eat)|new\s*year.?s?\s*(?:meal|food|eat)|holiday\s*(?:meal|food|eat)|party\s*food|social\s*eating|eating\s*out\s*(?:guide|tips|help))\b/i.test(m)) {
     const goal = user.goalType || "fat_loss";
     const name = user.name?.split(" ")[0] || "";
     const isBraai = /braai/i.test(m);
