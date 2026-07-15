@@ -1099,7 +1099,10 @@ export async function handleLifecycle(ctx: {
   }
 
   // ---- "AM I ON TRACK?" STATUS COMMAND — no GPT ----
-  if (/\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status|how.?s my progress|how is my progress|tell me.*progress|my progress on kamlife|kamlife progress|progress.*this week|check my progress|show.*progress|any progress|how far am i)\b/i.test(m)) {
+  // Days 31-40: this is the SECOND "how am I doing" handler (the duplicate that caused the
+  // whack-a-mole — redirecting progress.ts alone didn't fix it because this one grabbed it
+  // next, pushing "complete 4 more workouts" at a sick client). Gated to the engine too.
+  if (process.env.ENGINE_LIVE !== "on" && /\b(am i on track|on track\??|how am i doing|progress check|my status|status check|how have i been|weekly status|how.?s my progress|how is my progress|tell me.*progress|my progress on kamlife|kamlife progress|progress.*this week|check my progress|show.*progress|any progress|how far am i)\b/i.test(m)) {
     const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
     const todayStart = sastDayStart();
     const [stepLogsWeek, workoutLogsWeek, weightLogsRecent, foodLogsToday] = await Promise.all([

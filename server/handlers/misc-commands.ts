@@ -554,7 +554,7 @@ export async function handleMiscCommands(ctx: {
   if (["7 day meals", "7day meals", "full meal plan", "day by day meals"].includes(m)) {
     return getOnboardingMealPlan(user);
   }
-  if (["progress", "my progress", "how am i doing"].includes(m)) {
+  if (process.env.ENGINE_LIVE !== "on" && ["progress", "my progress", "how am i doing"].includes(m)) {
     const daysOn = user.programmeStartDate
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
       : 0;
@@ -610,10 +610,12 @@ export async function handleMiscCommands(ctx: {
 
   // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
   // Gives a directional assessment — not a wall of numbers, just honest + specific.
+  // Days 31-40: gated to the engine (the 3rd/4th "how am I doing" duplicate) when live.
   if (
+    process.env.ENGINE_LIVE !== "on" && (
     /\b(where am i going|on track\??|am i on track|will i reach|when will i see results|how long will this take|is this working|where is my body going|any progress|am i making progress|is it working|heading somewhere|see(ing)? results|showing results|progress\??|working\??)\b/i.test(m)
     || ["trajectory", "on track", "progress check", "am i progressing", "body check", "check in"].includes(m)
-  ) {
+  )) {
     try {
       const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000);
       const goal = user.goalType || "fat_loss";
