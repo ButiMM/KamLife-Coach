@@ -97,3 +97,35 @@ export function remainingInMeals(kcal: number): string {
   if (kcal > 0) return "a small snack at most — choose well";
   return "";
 }
+
+/**
+ * GOAL-AWARE STATUS LINE (2026-07-16, founder: "a number must never travel alone").
+ * "Over by 117 kcal" means OPPOSITE things per goal — a fat-loss stumble, a muscle-gain
+ * plan-working, a recomp drift. ONE education line, goal-aware, never shaming, short
+ * enough not to overwhelm. Single source of truth for every food status footer (meal
+ * lists, photo path, text path) so the coaching can never drift apart again.
+ */
+export function goalStatusLine(goalType: string | null | undefined, calRemaining: number): string {
+  const goal = (goalType || "fat_loss").toLowerCase();
+  const over = Math.abs(Math.min(0, calRemaining));
+  const building = goal === "muscle_gain" || goal === "weight_gain";
+  if (calRemaining > 100) {
+    const meals = remainingInMeals(calRemaining);
+    return building
+      ? `~${calRemaining} kcal still to eat — the surplus IS the muscle fuel, don't leave it on the table.`
+      : `~${calRemaining} kcal still available${meals ? ` — ${meals}` : ""}. Deficit on track. ✅`;
+  }
+  if (calRemaining >= -100) {
+    return building
+      ? `Target hit — surplus landed. That's exactly how muscle gets built. ✅`
+      : goal === "recomposition" || goal === "maintenance"
+        ? `Right on the line — recomp lives exactly here. ✅`
+        : `Right on target. This is how the weight comes off — one honest day at a time. ✅`;
+  }
+  if (building) {
+    return over <= 400
+      ? `~${over} kcal past target — the surplus is already built INTO your target, so aim to stop at it. Occasionally over is fine in a building phase.`
+      : `~${over} kcal over — a surplus builds muscle, a flood builds fat. Cap it here; back to target tomorrow.`;
+  }
+  return `Over by ~${over} kcal. One day never breaks a ${goal === "recomposition" || goal === "maintenance" ? "recomp" : "deficit"} — the WEEK decides. Next meal: protein + veg, and a 20-minute walk claws most of this back.`;
+}

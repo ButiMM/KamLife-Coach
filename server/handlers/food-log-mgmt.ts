@@ -7,6 +7,7 @@ import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
+import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
@@ -449,9 +450,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const proteinTarget = user.proteinTarget || 120;
     const calRemaining = calorieTarget - totalCals;
     const protRemaining = proteinTarget - totalProtein;
-    const remainingLine = calRemaining >= 0
-      ? `Remaining: ~${calRemaining} kcal | ~${Math.max(0, protRemaining)}g protein`
-      : `Over target by ~${Math.abs(calRemaining)} kcal`;
+    const remainingLine = `${goalStatusLine(user.goalType, calRemaining)}${protRemaining > 0 ? `\nProtein: ~${protRemaining}g still to hit today.` : ""}`;
     return `*Today's meals (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total:* ~${totalCals} kcal | ~${totalProtein}g protein\n${remainingLine}`;
   }
 

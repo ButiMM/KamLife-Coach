@@ -20,6 +20,7 @@ import {
   buildDayWorkout, buildFullProgramme, getKamlifeProgramme,
 } from "../programme";
 import { withTimeout, logChat } from "./chat-log";
+import { goalStatusLine } from "../education";
 import { calculateTargets, waterTargetLitres } from "../targets";
 import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -1269,9 +1270,10 @@ export async function handleLifecycle(ctx: {
       diaryCoachNote = `\n\n⚠️ *Under-eating alert:* ${totalCal} kcal at this time of day is too low. You are ${calRemaining} kcal short. Eat a proper meal tonight — protein and carbs. Starving is not a fat loss strategy, it is a metabolism killer.`;
     } else if (totalCal > 0 && calRemaining > 500 && !isLateEnough) {
       diaryCoachNote = `\n\n${calRemaining} kcal still to go. Spread it across your remaining meals — do not leave it all for dinner.`;
-    } else if (totalCal > calTarget * 1.1) {
-      diaryCoachNote = `\n\nOver target by ${Math.abs(calRemaining)} kcal. Keep the next meal protein-only — ${proteinOptions(user)} — and skip the starch.`;
     }
+    // Over-target coaching now lives in goalStatusLine (goal-aware, shared with every
+    // food footer) — a number never travels alone, and "over" means different things
+    // for fat_loss vs muscle_gain vs recomp (2026-07-16 founder review).
 
     const diaryLines = [
       `*Today's food log (${mealLines.length} ${mealLines.length === 1 ? "meal" : "meals"}):*`,
@@ -1279,7 +1281,7 @@ export async function handleLifecycle(ctx: {
       ``,
       `*Running total:* ~${totalCal} kcal | ${totalProt}g protein`,
       `*Target:* ${calTarget} kcal | ${protTarget}g protein`,
-      calRemaining > 0 ? `*Remaining:* ~${calRemaining} kcal` : `*Status:* Over target by ~${Math.abs(calRemaining)} kcal`,
+      `*Status:* ${goalStatusLine(user.goalType, calRemaining)}`,
     ];
     const diaryReply = diaryLines.join("\n") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");

@@ -45,7 +45,7 @@ import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
 import { extractMealLabel } from "./food-context";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
-import { remainingInMeals } from "../education";
+import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto } from "./equipment-vision";
@@ -1132,12 +1132,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
-          // THREE states, matching the text path (2026-07-16: over-target used to collapse
-          // into "On target ✅" — congratulating a blown day). Over = care, not shame.
-          const overNote = "Next meal if you're hungry: protein + veg only. A 20-minute walk today helps. Tomorrow resets — one day never breaks a programme.";
+          // Numbers-on uses the SHARED goal-aware status (education.goalStatusLine) —
+          // one brain for every food footer. Number-free keeps words, same three states.
           photoDailyTotal = photoNumbersLow
-            ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : remaining >= -100 ? "That's your food for today — nicely done. ✅" : `That's past today's food — kitchen closed. ${overNote}`}_`
-            : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein.${remaining > 100 ? ` ${remaining} kcal remaining.` : remaining >= -100 ? " On target ✅" : ` Over by ~${Math.abs(remaining)} kcal. ${overNote}`}_`;
+            ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : remaining >= -100 ? "That's your food for today — nicely done. ✅" : "That's past today's food — kitchen closed. Protein + veg if you must, a 20-minute walk helps, tomorrow resets. One day never breaks a programme."}_`
+            : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein. ${goalStatusLine(user.goalType, remaining)}_`;
         }
         await db.update(users).set({
           todayCalories: totals.calories,

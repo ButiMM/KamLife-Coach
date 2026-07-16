@@ -34,6 +34,7 @@ import { isObviouslyInDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
+import { goalStatusLine } from "../server/education";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2792,6 +2793,35 @@ test("water: looksLikeWaterReport accepts spoken amounts (voice-first clients)",
   assert.ok(looksLikeWaterReport("had two glasses of water"), "two glasses spoken");
   assert.ok(looksLikeWaterReport("drank 500ml"), "digits still work");
   assert.ok(!looksLikeWaterReport("I want to drink more water"), "intent is not a log");
+});
+
+// ============================================================
+// Goal-aware status line — "over by 117" means OPPOSITE things per goal.
+// A number never travels alone; the education line must match the journey.
+// ============================================================
+
+test("goalStatus: fat_loss over-target educates (week decides, walk), never congratulates", () => {
+  const s = goalStatusLine("fat_loss", -117);
+  assert.ok(/over by ~117/i.test(s), "names the number");
+  assert.ok(/week decides|one day never breaks/i.test(s), "educates: one day ≠ broken");
+  assert.ok(/walk|protein/i.test(s), "gives the next action");
+  assert.ok(!/✅|nicely done|on target/i.test(s), "never congratulates a blown fat-loss day");
+});
+
+test("goalStatus: muscle_gain slightly over is NOT scolded — surplus is the plan", () => {
+  const s = goalStatusLine("muscle_gain", -117);
+  assert.ok(!/one day never breaks|walk claws/i.test(s), "no fat-loss damage talk for a builder");
+  assert.ok(/surplus/i.test(s), "frames it around the surplus");
+});
+
+test("goalStatus: muscle_gain way over gets the flood warning; under gets fuel push", () => {
+  assert.ok(/flood builds fat/i.test(goalStatusLine("muscle_gain", -600)), "big overshoot warned");
+  assert.ok(/don'?t leave it on the table|still to eat/i.test(goalStatusLine("muscle_gain", 400)), "under-eating a surplus is called out");
+});
+
+test("goalStatus: on-target and room-left read right for fat_loss", () => {
+  assert.ok(/on target|honest day/i.test(goalStatusLine("fat_loss", 0)), "on the line = win");
+  assert.ok(/still available|deficit on track/i.test(goalStatusLine("fat_loss", 500)), "room left with meaning");
 });
 
 // ============================================================
