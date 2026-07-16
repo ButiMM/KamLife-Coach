@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, workoutCooldownApplies } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -350,10 +350,10 @@ export async function handleEarlyCommands(ctx: {
       .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, fiveMinAgo)))
       .orderBy(desc(chatHistory.createdAt))
       .limit(10);
-    // The cooldown must NEVER eat a CHANGE request or a complaint (2026-07-16: "switch it
-    // to gym-based" and "you keep showing me a home-based program" both got "scroll up ↑").
-    const isChangeOrComplaint = /\b(switch|change|swap|instead|wrong|why|you (keep|said|switched)|not (a |the )?(home|gym)|gym.?based|home.?based|confus|idiot)\b/i.test(m);
-    if (!isChangeOrComplaint && recentSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
+    // Cooldown decision is PURE and unit-tested (utils.workoutCooldownApplies): never on
+    // a change request/complaint, and never when the programme changed since the last
+    // send — "scroll up ↑" must never point at a session the bot itself just replaced.
+    if (workoutCooldownApplies(recentSends.map(r => r.intent), m)) {
       const cool = `Your workout was just sent — scroll up ↑ to see it. Tap *See every move* on it for the video demos. Type *done* when you finish the session.`;
       await logChat(user.id, message, cool, "WORKOUT_COOLDOWN");
       return cool;

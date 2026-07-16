@@ -773,6 +773,15 @@ const CASES: Case[] = [
   { name: "playbook: 'can I have this' TEXT question is a question, never an equipment write",
     msg: "Can I have this energy drink?",
     reject: [/updated to home training|programme will use what you have/i] },
+  // ── 2026-07-16 19:54 live: gym switch → "Show me the workout" → "scroll up ↑"
+  // pointed at the stale HOME session the bot itself had just replaced. These two run
+  // back-to-back against the same stub user, mirroring the real exchange.
+  { name: "playbook: gym switch acknowledges the update",
+    msg: "Switch me to gym program",
+    expect: [/updated to \*?full gym|programme updated/i] },
+  { name: "playbook: 'show me the workout' right after a switch serves FRESH, never 'scroll up'",
+    msg: "Show me the workout",
+    reject: [/scroll up ↑/i] },
 ];
 
 async function main() {

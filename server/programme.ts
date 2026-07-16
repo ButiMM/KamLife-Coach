@@ -1229,7 +1229,7 @@ const GOAL_FINISH_GYM: Record<string, string> = {
   recomposition: "_After: protein within 60 min, moderate carbs. Sweet potato or pap + chicken. Fuel the rebuild._",
 };
 
-export function getWeekContext(phase: number, week: number, isBeginner = false): { rationale: string; sets: string; reps: string; rest: string } {
+export function getWeekContext(phase: number, week: number, isBeginner = false, sessionsDone = 0): { rationale: string; sets: string; reps: string; rest: string } {
   // Returns week-specific coaching rationale and progressive sets/reps.
   // Each phase has a distinct goal; within each phase, intensity climbs weekly.
   const P1: Record<number, { rationale: string; sets: string; reps: string; rest: string }> = {
@@ -1258,10 +1258,19 @@ export function getWeekContext(phase: number, week: number, isBeginner = false):
 
   if (phase === 1 && P1[week]) {
     const ctx = P1[week];
+    // RESTART-AWARE Week 1 (2026-07-16 live: "Week 1 — Session 21" told a client with
+    // a 125kg chest fly "First session... the weight will feel light in 4 weeks... no
+    // ego, just consistency"). A goal change legitimately restarts the PLAN at Week 1 —
+    // the client's strength doesn't restart with it, and beginner copy to a veteran
+    // reads as the coach forgetting who they are.
+    const veteran = sessionsDone >= 12;
+    if (week === 1 && veteran) {
+      return { ...ctx, rationale: "Week 1 of your new programme — the plan restarts, your strength doesn't. Keep your usual working weights and focus on owning the new movements. The weeks build from here." };
+    }
     // Beginner ease-in: first 2 Foundation weeks at 2 working sets, then build to 3.
     // Protects never-trained / heavier / older bodies from week-one overload and DOMS
     // that makes people quit. The third set comes in once the movement pattern is owned.
-    if (isBeginner && week <= 2) {
+    if (isBeginner && week <= 2 && !veteran) {
       return { ...ctx, sets: "2", rationale: `${ctx.rationale} Starting at 2 sets while your body adapts — we add the third set in week 3. No ego, just consistency.` };
     }
     return ctx;
@@ -1375,10 +1384,13 @@ function formatGymDay(
   isDumbbell = false,
   injuries = "none",
   experience = "",
-  showMachineHint = false
+  showMachineHint = false,
+  sessionsDone = 0
 ): string {
-  const isBeginner = experience === "beginner" || experience === "";
-  const wCtx = getWeekContext(phase, week, isBeginner);
+  // 12+ logged sessions outranks a stale "beginner" label — no "New to this?" hints
+  // or 2-set adaptation copy for a body that's been training for weeks (2026-07-16).
+  const isBeginner = (experience === "beginner" || experience === "") && sessionsDone < 12;
+  const wCtx = getWeekContext(phase, week, isBeginner, sessionsDone);
   const finisher = GOAL_FINISH_GYM[goal] || GOAL_FINISH_GYM.fat_loss;
   const equipNote = isDumbbell
     ? `_No machine? Each exercise has a modification listed._\n\n`
@@ -1509,7 +1521,7 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
       const phase = user.programmePhase || 1;
       const multiplier = getPhaseMultiplier(phase);
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", true, user.injuries || "none", exp) + safetyNote + walkingFooter;
+      return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0) + safetyNote + walkingFooter;
     }
     const dbTrainingDays = user.trainingDaysPerWeek || 3;
     const dbGender = user.gender || "male";
@@ -1540,7 +1552,7 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
       const femaleLabelMap: Record<1 | 2 | 3, string> = { 1: "Glutes + Shoulders", 2: "Back + Hamstrings", 3: "Full Body + Glutes" };
       const phase = user.programmePhase || 1;
       const phaseName = getPhaseNames()[phase] || "Foundation";
-      const fSession = formatGymDay(femaleExMap[slotClamped], femaleLabelMap[slotClamped], phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp);
+      const fSession = formatGymDay(femaleExMap[slotClamped], femaleLabelMap[slotClamped], phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
       return prefix + fSession + safetyNote + walkingFooter;
     }
     return `${FEMALE_DAY_A}\n\n---\n\n${FEMALE_DAY_B}\n\n---\n\n${FEMALE_DAY_C}`;
@@ -1555,7 +1567,7 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
       const isLower = day % 2 === 0;
       const intExercises = isLower ? INTERMEDIATE_LOWER_EX : INTERMEDIATE_UPPER_EX;
       const intLabel = isLower ? "Lower Body" : "Upper Body";
-      const iSession = formatGymDay(intExercises, intLabel, phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp);
+      const iSession = formatGymDay(intExercises, intLabel, phase, phaseName, programmeWeek, getPhaseMultiplier(phase), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
       return prefix + iSession + safetyNote + walkingFooter;
     }
     return `${INTERMEDIATE_GYM_UPPER}\n\n---\n\n${INTERMEDIATE_GYM_LOWER}`;
@@ -1571,7 +1583,7 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
     const phase = user.programmePhase || 1;
     const multiplier = getPhaseMultiplier(phase);
     const phaseName = getPhaseNames()[phase] || "Foundation";
-    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", false, user.injuries || "none", exp) + safetyNote + walkingFooter;
+    return prefix + formatGymDay(exercises, label, phase, phaseName, user.programmeWeek || 1, multiplier, user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0) + safetyNote + walkingFooter;
   }
 
   const trainingDays = user.trainingDaysPerWeek || 3;
@@ -1699,18 +1711,18 @@ function buildDayWorkoutInner(user: any): string {
   // Dumbbell-only users — full 2/3/4-day programme, gender-specific
   if (mode === "gym_dumbbell") {
     const { exercises, label } = getNewDbDay(trainingDays, day, gender);
-    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", true, injuries, experience);
+    return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", true, injuries, experience, false, user.totalWorkoutsCompleted || 0);
   }
 
   // Home / no-equipment users — full 2/3/4-day programme, gender-specific
   if (mode !== "gym") {
     const { exercises, label } = getNewHomeDay(trainingDays, day, gender);
-    return formatGymDay(swapImpactForHeavy(exercises, user), label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience);
+    return formatGymDay(swapImpactForHeavy(exercises, user), label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience, false, user.totalWorkoutsCompleted || 0);
   }
 
   // Gym users — route to correct day based on trainingDaysPerWeek and gender
   const { exercises, label } = getNewGymDay(trainingDays, day, gender, isFemaleGluteFocus);
-  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience, true);
+  return formatGymDay(exercises, label, phase, phaseName, week, multiplier, user.goalType || "fat_loss", false, injuries, experience, true, user.totalWorkoutsCompleted || 0);
 }
 
 /**
@@ -1740,7 +1752,7 @@ export function getCurrentDayExercises(user: any): { exercises: DayExercise[]; l
   const phase = user.programmePhase || 1;
   const week = user.programmeWeek || 1;
   const isBeginner = (user.trainingExperience || "beginner").toLowerCase() === "beginner";
-  const wCtx = getWeekContext(phase, week, isBeginner);
+  const wCtx = getWeekContext(phase, week, isBeginner, user.totalWorkoutsCompleted || 0);
 
   const exercises: DayExercise[] = raw.exercises.map((ex) => ({
     name: ex.name,

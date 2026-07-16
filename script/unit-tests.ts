@@ -277,6 +277,52 @@ test("week context: defaults to non-beginner when flag omitted", () => {
 });
 
 // ============================================================
+// getWeekContext — veteran restart (2026-07-16 live: "Week 1 — Session 21" told a
+// client with a 125kg chest fly "First session... no ego, just consistency")
+// ============================================================
+
+test("week context: 12+ sessions NEVER gets 'First session' beginner copy at week 1", () => {
+  const ctx = getWeekContext(1, 1, true, 21);
+  assert.ok(!/first session|feel light in 4 weeks|no ego/i.test(ctx.rationale), `veteran copy leaked: ${ctx.rationale}`);
+  assert.match(ctx.rationale, /strength doesn'?t|usual working weights/i, "restart framed as plan-reset, not strength-reset");
+});
+test("week context: veteran restart keeps full 3 sets even with beginner label", () => {
+  assert.equal(getWeekContext(1, 1, true, 21).sets, "3", "21 sessions outranks a stale 'beginner' label");
+  assert.equal(getWeekContext(1, 2, true, 21).sets, "3", "week 2 too");
+});
+test("week context: a real beginner (few sessions) still gets the ease-in", () => {
+  assert.equal(getWeekContext(1, 1, true, 3).sets, "2", "3 sessions is still a beginner");
+  assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
+});
+
+// ============================================================
+// workoutCooldownApplies — "scroll up ↑" must never point at a replaced programme
+// (2026-07-16 19:54 live: gym switch → "Show me the workout" → cooldown served stale)
+// ============================================================
+{
+  const { workoutCooldownApplies } = await import("../server/utils");
+  test("cooldown: applies on a plain re-request after a recent send", () => {
+    assert.ok(workoutCooldownApplies(["WORKOUT_VIEW"], "show me the workout"));
+    assert.ok(workoutCooldownApplies(["FOOD_LOG", "WORKOUT_VIEW"], "workout"));
+  });
+  test("cooldown: NEVER after an equipment/goal change newer than the last send", () => {
+    assert.ok(!workoutCooldownApplies(["EQUIPMENT_UPDATE", "WORKOUT_VIEW"], "show me the workout"), "the exact 19:54 incident");
+    assert.ok(!workoutCooldownApplies(["GOAL_TRANSITION", "WORKOUT_VIEW"], "workout"));
+  });
+  test("cooldown: an OLD change before the last send does not block it", () => {
+    assert.ok(workoutCooldownApplies(["WORKOUT_VIEW", "EQUIPMENT_UPDATE"], "show me the workout"), "send is newer than the change — on-screen session is current");
+  });
+  test("cooldown: never eats a change request or complaint", () => {
+    assert.ok(!workoutCooldownApplies(["WORKOUT_VIEW"], "switch it to gym-based"));
+    assert.ok(!workoutCooldownApplies(["WORKOUT_VIEW"], "you keep showing me a home-based program"));
+  });
+  test("cooldown: no recent send = no cooldown", () => {
+    assert.ok(!workoutCooldownApplies(["FOOD_LOG", "STEP_LOG"], "workout"));
+    assert.ok(!workoutCooldownApplies([], "workout"));
+  });
+}
+
+// ============================================================
 // getShoppingList — returns valid structure for all tiers/weeks
 // ============================================================
 
