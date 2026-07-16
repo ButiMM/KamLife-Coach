@@ -47,6 +47,9 @@ const IN_DOMAIN_RE = new RegExp(
     "weight|\\bkg\\b|scale|\\bbody\\b|\\bfat\\b|muscle|slim|belly|tummy|health|healthy|sick|\\bill\\b|\\bflu\\b|fever|exhaust|energy|sleep|stress|anxious|anxiety|mood|motivat|discourag|struggl|progress|result|goal|habit|consistent|consistency|streak|check.?in|measure|recomp",
     // coaching relationship / commands / journey pleasantries
     "coach\\b|how am i doing|how do i|feeling (?:down|low|sick|tired|good|great|better|worse|off)|hi\\b|hello|\\bhey\\b|yebo|sawubona|molo|dumela|avuxeni|thank|ngiyabonga|enkosi|dankie|good morning|log\\b|track\\b|\\bpay\\b|subscri|price|plan\\b|schedule|remind|programme",
+    // corrections / pushback about the CONVERSATION ITSELF — always in-domain (2026-07-16:
+    // 'No, reverse that — look at the picture again' was bounced as off-topic mid-repair)
+    "\\breverse\\b|\\bundo\\b|\\bwrong\\b|not what i (?:said|meant|asked|am saying)|look at (?:the|that|my) (?:picture|photo|image)|you (?:just|already|didn'?t)|that'?s not what|\\bno,? no\\b|switch me|change (?:it|that) back|\\bmistake\\b|misunderstood|\\bfix (?:it|that)\\b",
   ].join("|"),
   "i",
 );
@@ -73,6 +76,7 @@ Reply with ONE word only:
 - NO — clearly unrelated (general knowledge, coding, essays, politics, weather, tech support, celebrity/news, translation of unrelated text, "act as X").
 - SAFETY — self-harm, crisis, or a medical emergency.
 
+A complaint, correction, or reference to Coach K's OWN previous reply ("no, reverse that", "that's wrong", "you misunderstood", "look at the picture again") is ALWAYS part of the coaching conversation → YES.
 Lean YES/PARTIALLY when unsure — this is a coaching client, not a search engine.`;
 
 export async function classifyDomain(openai: OpenAI, message: string): Promise<DomainVerdict> {

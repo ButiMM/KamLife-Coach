@@ -35,11 +35,8 @@ import { buildPhysiqueAnalysisPrompt, parsePhysiqueAnalysis, formatPhysiqueFocus
 import { buildFormCheckPrompt, extractFormExercise } from "../form-check-prompt";
 import { buildProgressComparisonPrompt } from "../physique-analysis";
 
-// PROGRESS-SET DEBOUNCE — WhatsApp delivers a 3-photo set as separate webhooks, and
-// each used to fire its own baseline comparison: three "give me a moment" acks and
-// THREE essays, one comparing a FRONT baseline against a BACK photo (2026-07-10).
-// Now every photo saves immediately, the timer resets, and 15s after the LAST photo
-// ONE job processes the whole set with all angles in a single call and a single reply.
+// PROGRESS-SET DEBOUNCE — WhatsApp splits a 3-photo set into separate webhooks; each
+// photo saves immediately, timer resets, one job processes the whole set 15s after the last.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
@@ -59,11 +56,7 @@ function sastToday(): string {
   return sast.toISOString().slice(0, 10);
 }
 
-// ============================================================
-// VOICE NOTE FAILURE TRACKER
-// Escalates to "please type" after 3 failures in 30 min.
-// Keyed by userId. Reset on first successful transcription.
-// ============================================================
+// VOICE NOTE FAILURE TRACKER — escalates to "please type" after 3 fails in 30 min.
 const voiceFailureMap = new Map<string, { count: number; lastAt: number }>();
 const VOICE_FAILURE_RESET_MS = 30 * 60 * 1000;
 setInterval(() => {
@@ -160,11 +153,7 @@ function formatWorkoutBreakdown(parsed: WorkoutIdResult | null): string {
     + `\n• Reply *done* once you've trained and I'll log the session`;
 }
 
-// ============================================================
-// HANDLE MEDIA MESSAGE
-// Called from handleMessage when mediaUrl is present.
-// ============================================================
-
+// HANDLE MEDIA MESSAGE — called from handleMessage when mediaUrl is present.
 export async function handleMediaMessage(ctx: {
   phone: string;
   message: string;
@@ -702,26 +691,36 @@ export async function handleMediaMessage(ctx: {
       }
 
       // ---- EQUIPMENT DECLARATION WITH CAPTION ----
-      // Client sends "I have this set" / "these are my weights" + equipment photo → update profile
-      const isEquipCaption = /\b(i have (this|these|this set|a set|dumbbells?|bands?|weights?|kettlebell|barbell)|these are my (weights?|equipment|kit|dumbbells?)|this is my (equipment|kit|set)|i (use|got|bought) (this|these|dumbbells?|bands?|weights?)|my (home )?equipment|i train with (these|this|dumbbells?|bands?))\b/i.test(message || "");
+      // Client sends "I have this set" / "these are my weights" + equipment photo → update
+      // profile. TWO hard guards (2026-07-16 live incident: "Can I have this?" on a DRINK
+      // CAN silently rewrote the programme to home training):
+      //   1. A QUESTION is never a declaration — "can/should I have this" is asking.
+      //   2. The profile is written ONLY when the vision actually sees gym equipment;
+      //      "other" (a can, a laptop, keys) falls through to the food/photo pipeline.
+      const equipIsQuestion = isAskingNotReporting(message || "") || /\b(can|could|may|should|must|do)\s+i\b/i.test(message || "");
+      const isEquipCaption = !equipIsQuestion
+        && /\b(i have (this|these|this set|a set|dumbbells?|bands?|weights?|kettlebell|barbell)|these are my (weights?|equipment|kit|dumbbells?)|this is my (equipment|kit|set)|i (use|got|bought) (this|these|dumbbells?|bands?|weights?)|my (home )?equipment|i train with (these|this|dumbbells?|bands?))\b/i.test(message || "");
       if (isEquipCaption) {
         try {
           const equipVision = await withTimeout("equip_vision", 10000, () => openai.chat.completions.create({
             model: "gpt-4o-mini", max_tokens: 20, temperature: 0,
             messages: [
-              { role: "system", content: "Identify gym equipment in this image. Reply with ONE word only: dumbbells | bands | barbell | kettlebell | machine | mixed | other" },
+              { role: "system", content: "Identify gym equipment in this image. Reply with ONE word only: dumbbells | bands | barbell | kettlebell | machine | mixed | other. Food, drinks, cans, bottles, laptops, furniture = other." },
               { role: "user", content: [{ type: "text", text: "What equipment is shown?" }, { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } }] },
             ],
           }));
           const equipType = (equipVision.choices[0]?.message?.content || "").trim().toLowerCase();
           const hasDumbbells = equipType.includes("dumbbell") || equipType.includes("mixed");
           const hasBands = equipType.includes("band");
-          const newMode = "home";
-          await db.update(users).set({ trainingMode: newMode }).where(eq(users.id, user.id));
-          const equipLabel = hasDumbbells ? "dumbbells" : hasBands ? "resistance bands" : "home equipment";
-          const equipReply = `Got it — updated to home training with ${equipLabel}. Your programme will use what you have.\n\nReply *workout* for today's session and I'll send a dumbbell-based session that fits your goal.`;
-          await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_UPDATE");
-          return equipReply;
+          const isRealEquipment = hasDumbbells || hasBands || /barbell|kettlebell|machine/.test(equipType);
+          if (isRealEquipment) {
+            await db.update(users).set({ trainingMode: "home" }).where(eq(users.id, user.id));
+            const equipLabel = hasDumbbells ? "dumbbells" : hasBands ? "resistance bands" : "home equipment";
+            const equipReply = `Got it — updated to home training with ${equipLabel}. Your programme will use what you have.\n\nReply *workout* for today's session and I'll send a session that fits your goal.\n\n_Wrong change? Say *switch me to gym training* and it's reversed._`;
+            await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_UPDATE");
+            return equipReply;
+          }
+          // Not equipment — fall through to the normal photo pipeline (food verdict etc.)
         } catch {
           // fall through to food vision if vision fails
         }

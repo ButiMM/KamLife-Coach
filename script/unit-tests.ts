@@ -2712,6 +2712,8 @@ test("domain-guard: obvious coaching messages take the deterministic in-domain f
     "my knee is sore after squats", "84.5kg", "8500 steps",
     "I can't afford chicken this week, what's cheaper", "how am I doing",
     "I was too busy with work to train", "sawubona coach",
+    "No, no, no. Reverse that. That's not what I'm saying to you. Look at the picture again.",
+    "you've made a mistake, change it back", "that's wrong, undo it",
   ];
   for (const m of inDomain) assert.ok(isObviouslyInDomain(m), `must fast-path in-domain: "${m}"`);
 });
