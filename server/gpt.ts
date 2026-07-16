@@ -13,10 +13,8 @@ import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
 
 // ============================================================
-// CONCURRENCY LIMITER — max 25 simultaneous OpenAI calls
-// Prevents thundering-herd when 100s of messages arrive at once.
-// Callers beyond the limit wait in line rather than all hitting
-// the API simultaneously and getting rate-limited together.
+// CONCURRENCY LIMITER — max 25 simultaneous OpenAI calls. Prevents thundering-herd
+// when 100s of messages arrive at once; callers beyond the limit wait in line.
 // ============================================================
 let _openaiSlots = 25;
 const _openaiQueue: Array<() => void> = [];
@@ -64,10 +62,8 @@ const openai = new OpenAI({
 });
 
 // ── Prompt-injection sanitiser for user-supplied free-text fields ──
-// A user who types "ignore previous instructions" in their name or injury field
-// could corrupt the system prompt. We neutralise the most common injection
-// patterns and enforce a length cap so the profile block stays bounded.
-// This is defence-in-depth; GPT still interprets context sensibly for benign content.
+// A user who types "ignore previous instructions" in their name/injury field could corrupt
+// the system prompt. We neutralise common injection patterns and cap length (defence-in-depth).
 export function sanitizeProfileField(v: string | null | undefined, maxLen = 200): string {
   if (!v) return "";
   let s = v
@@ -1405,6 +1401,7 @@ RULES:
 - "building phase" / "change muscle composition" / "bulk" → GOAL_CHANGE muscle gain. "cut" / "lean out" → fat loss.
 - "Today's workout" / "my workout" / "give me my workout" = requesting the plan = OTHER. No canonical needed.
 - FOOD_PLANNED requires EXPLICIT future words from the client ("going to", "gonna", "later", "tonight", "will have"). A bare food list — meal name then items, no verbs — is ALWAYS FOOD_LOG (already eaten). When in doubt between FOOD_LOG and FOOD_PLANNED, choose FOOD_LOG.
+- MULTILINGUAL: clients log in isiZulu, isiXhosa, Sesotho, Setswana, Afrikaans. TRANSLATE the foods and numbers into the canonical English form. Common: ipapa/papa→pap, inyama/nama→meat, isonka→bread, amaqanda/mazai→eggs, inkukhu/kgoho→chicken, izinyathelo/mehato→steps; "ngidle/ngidlile/nditye/ke jele"→i ate; "ngihambe/ke tsamaile"→i walked; "namuhla/namhlanje/kajeno"→today; "izolo/gister/maabane"→yesterday.
 
 Examples:
 "Also, I want to go into a building phase. I want to change the muscle composition." → {"intent":"GOAL_CHANGE","confidence":0.95,"canonical":"change my goal to muscle gain"}
@@ -1413,6 +1410,11 @@ Examples:
 "Luch\nTin fish\nRice\nMixed veggies" → {"intent":"FOOD_LOG","confidence":0.95,"canonical":"i had tin fish, rice and mixed veggies for lunch"}
 "Tonight I'm going to make chicken and pap for dinner" → {"intent":"FOOD_PLANNED","confidence":0.9,"canonical":"i'm gonna have chicken and pap for dinner"}
 "Ek het ten thousand steps gedoen gister" → {"intent":"STEPS","confidence":0.9,"canonical":"10000 steps yesterday"}
+"Ngidle ipapa nenyama namuhla" → {"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had pap and meat"}
+"Ke jele papa le nama" → {"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had pap and meat"}
+"Nditye isonka namaqanda kusasa" → {"intent":"FOOD_LOG","confidence":0.9,"canonical":"i had bread and eggs for breakfast"}
+"Ngihambe izinyathelo eziyi-8000" → {"intent":"STEPS","confidence":0.9,"canonical":"8000 steps"}
+"Ngiqedile ukujima" → {"intent":"WORKOUT_LOG","confidence":0.9,"canonical":"workout done"}
 "Today's workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "Give me my workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}
