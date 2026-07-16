@@ -1623,7 +1623,7 @@ export async function handleLifecycle(ctx: {
   const isWorkoutNutrition =
     /\b(what.*eat.*(?:before|pre).?(?:gym|workout|training|session)|(?:before|pre).?(?:gym|workout|training).*(?:eat|food|meal|snack)|pre.?workout.*(?:food|meal|eat|nutrition)|what.*eat.*after.*(?:gym|workout|training)|post.?workout.*(?:food|meal|eat|nutrition)|after.*gym.*eat|eat.*after.*training)\b/i.test(m);
 
-  if (isWorkoutNutrition) {
+  if (process.env.ENGINE_LIVE !== "on" && isWorkoutNutrition) {
     const name = user.name ? ` ${user.name}` : "";
     const goal = user.goalType || "fat_loss";
     const isPre = /\b(before|pre.?workout|pre.?gym)\b/i.test(m);
@@ -1645,7 +1645,7 @@ export async function handleLifecycle(ctx: {
     /\b(what.*(?:eat|have|make|cook).*(?:for|at)?\s*(?:breakfast|lunch|dinner|supper|snack)|(?:breakfast|lunch|dinner|supper|snack).*(?:ideas?|option|suggestion|help|advice)|what.*(?:breakfast|lunch|dinner|supper)|good.*(?:breakfast|lunch|dinner|supper))\b/i.test(m) &&
     !/\b(i had|i ate|i have|just had|just ate)\b/i.test(m); // exclude food logs
 
-  if (isMealSpecificQ) {
+  if (process.env.ENGINE_LIVE !== "on" && isMealSpecificQ) {
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name ? ` ${user.name}` : "";
@@ -1751,7 +1751,7 @@ export async function handleLifecycle(ctx: {
     /\b(i saw on tiktok|tiktok says|tiktok said|saw on instagram|instagram says|instagram said|social media.*says|youtube says|youtube said|i read.*that|someone told me.*that|my friend.*told me|my sister.*told me|my mom.*told me)\b/i.test(m) &&
     /\b(lose weight|fat loss|diet|exercise|burn fat|slim|weight loss|calories|protein|carb|food|workout|supplement|detox|cleanse|tea|drink)\b/i.test(m);
 
-  if (isSocialMediaMythMsg) {
+  if (process.env.ENGINE_LIVE !== "on" && isSocialMediaMythMsg) {
     const name = user.name ? `, ${user.name}` : "";
     const socialReply = `Eish${name} — this is important.\n\nSocial media fitness advice is almost always wrong, exaggerated, or selling something.\n\n*The algorithm rewards:* drama, extreme claims, quick fixes, and shocking content. It does NOT reward: "eat protein, walk daily, strength train 3 times a week, sleep 8 hours" — because that is boring and it does not sell anything.\n\n*Real results come from boring basics:*\n1. Consistent strength training 3-4 days\n2. 8,500-15,000 steps daily\n3. Enough protein every meal\n4. 7-9 hours sleep\n5. Patience\n\nAnything promising faster than 0.5-1kg per week is either a lie or dangerous. What specifically did you see — I will tell you whether it is real or rubbish.`;
     await logChat(user.id, message, socialReply, "MYTH_BUSTER");
@@ -1773,7 +1773,7 @@ export async function handleLifecycle(ctx: {
     /\b(what should i eat|what do i eat|how should i eat|what to eat|healthy eating|eating right|how to eat|my diet|best way to eat|eating habits|what foods|food choices|nutritional advice|nutrition advice|diet advice)\b/i.test(m) &&
     !/\b(today|tonight|breakfast|lunch|dinner|meal plan|shopping)\b/i.test(m);
 
-  if (isPlateMethodQ) {
+  if (process.env.ENGINE_LIVE !== "on" && isPlateMethodQ) {
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
     const name = user.name ? `, ${user.name}` : "";
