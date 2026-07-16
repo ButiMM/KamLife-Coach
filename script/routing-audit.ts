@@ -763,11 +763,9 @@ const CASES: Case[] = [
     msg: "just had one litre of water",
     expect: [/logged|total|added|so far/i],
     reject: [/How much\? Tell me the amount/i] },
-  // TODO(P0 residual): in compound food+water the WATER logs (below) but the food half
-  // falls to the fallback instead of the meal logger — reply must eventually carry BOTH.
-  { name: "playbook: compound food+water — water logs, never 'How much?'",
+  { name: "playbook: compound food+water logs BOTH halves in one reply",
     msg: "I had an apple and a pear and one litre of water",
-    expect: [/water logged|logged.*water|\dL/i],
+    expect: [/apple/i, /pear/i, /2\.7\s?L/i],
     reject: [/How much\? Tell me the amount/i] },
   { name: "playbook: compound steps+water — steps log, never dropped",
     msg: "walked 8000 steps and drank 2 litres of water",
