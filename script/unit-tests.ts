@@ -32,6 +32,7 @@ import { compileStateBlurb, compileKeyFacts } from "../server/understanding/comp
 import { looksLikeRefusal } from "../server/understanding/refusal";
 import { isObviouslyInDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
+import { decayObservations } from "../server/understanding/state";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2746,6 +2747,30 @@ test("action-router: conversation/advice/feelings/myths (any SA language) go to 
     "what can we focus on while im sick", "i had a hard week",
   ];
   for (const m of mustReachEngine) assert.ok(!mustStayDeterministic(m), `should reach Coach K, not a template: "${m}"`);
+});
+
+// ============================================================
+// Inference decay (Law 5) — stale reads fade; trust is durable.
+// ============================================================
+
+test("decay: a fresh read (<48h) is untouched", () => {
+  const o = { confidenceTrend: "falling" as const, frustrationLevel: 8, readinessToPush: "low" as const, trustLevel: 7 };
+  assert.deepEqual(decayObservations(o, 5), o, "recent reads still hold");
+});
+
+test("decay: after a 2-day gap, frustration/trend/readiness fade toward neutral but trust holds", () => {
+  const o = { confidenceTrend: "falling" as const, frustrationLevel: 9, readinessToPush: "low" as const, trustLevel: 8 };
+  const d = decayObservations(o, 72);
+  assert.equal(d.confidenceTrend, "stable", "no stale trend");
+  assert.equal(d.readinessToPush, "medium", "readiness re-earned");
+  assert.ok(d.frustrationLevel < 9 && d.frustrationLevel > 3, "frustration eases toward baseline, not wiped");
+  assert.equal(d.trustLevel, 8, "trust is earned — it does not fade after 2 days");
+});
+
+test("decay: after a month away, trust finally softens toward baseline", () => {
+  const o = { confidenceTrend: "rising" as const, frustrationLevel: 3, readinessToPush: "high" as const, trustLevel: 9 };
+  const d = decayObservations(o, 24 * 40);
+  assert.ok(d.trustLevel < 9 && d.trustLevel >= 5, "trust fades slowly after a long absence, never below baseline");
 });
 
 // ============================================================

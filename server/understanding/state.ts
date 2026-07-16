@@ -66,6 +66,27 @@ export function defaultUnderstanding(name = "there"): UnderstandingState {
   };
 }
 
+/**
+ * INFERENCE DECAY (Law 5 — facts are sacred, inferences expire). `observations` are the
+ * coach's READ on the person (frustration, confidence trend, readiness) — educated guesses,
+ * not facts. After a gap they go stale: nothing worse than a coach still treating someone as
+ * "anxious" or "frustrated" weeks later. So on reload we pull the volatile reads back toward
+ * neutral. TRUST is different — it's EARNED, durable, and only fades after a long absence.
+ */
+export function decayObservations(
+  o: UnderstandingState["observations"],
+  ageHours: number,
+): UnderstandingState["observations"] {
+  if (!(ageHours >= 48)) return o; // fresh (<2 days) — the read still holds
+  const d = defaultUnderstanding().observations;
+  return {
+    confidenceTrend: "stable",   // no trend assumption survives a gap
+    readinessToPush: "medium",   // re-earn the read on how hard to push
+    frustrationLevel: Math.round(o.frustrationLevel * 0.5 + d.frustrationLevel * 0.5), // halfway back to baseline
+    trustLevel: ageHours >= 24 * 30 ? Math.round(o.trustLevel * 0.7 + d.trustLevel * 0.3) : o.trustLevel, // trust only fades after ~a month away
+  };
+}
+
 const MOODS = new Set<Mood>(["frustrated", "anxious", "motivated", "neutral", "hopeful"]);
 const HEALTH = new Set<HealthStatus>(["sick", "recovering", "healthy"]);
 const TOPICS = new Set<Topic>(["recovery", "nutrition", "workout", "life", "gratitude", "progress"]);

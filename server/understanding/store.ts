@@ -20,6 +20,7 @@ import {
   type UnderstandingState,
   coerceUnderstanding,
   persistableUnderstanding,
+  decayObservations,
 } from "./state";
 
 /**
@@ -39,6 +40,11 @@ export async function loadUnderstanding(userId: string, seed: UnderstandingState
       { profile: row.profile, observations: row.observations },
       seed.profile.name,
     );
+    // Law 5 — decay stale inferences. If it's been a while since we last read this client,
+    // their frustration/confidence/readiness reads have expired; pull them back to neutral
+    // so the coach never greets a returning client stuck on a weeks-old mood.
+    const ageHours = row.updatedAt ? (Date.now() - new Date(row.updatedAt).getTime()) / 3_600_000 : 0;
+    stored.observations = decayObservations(stored.observations, ageHours);
     return {
       profile: {
         // name/prefs from the seed (live source of truth); narrative/facts from storage.
