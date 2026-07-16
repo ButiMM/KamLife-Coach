@@ -26,7 +26,7 @@ import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
-import { handleWater } from "./handlers/water";
+import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { handleProgressCheck } from "./handlers/progress";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
@@ -860,9 +860,22 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     }
   }
 
-  // ---- WATER LOGGING HANDLER ----
-  const waterResult = await handleWater({ phone, message, m, user });
-  if (waterResult !== null) return waterResult;
+  // ---- WATER LOGGING HANDLER (compound-aware) ----
+  // "Just had an apple and a pear, and one litre of water" (2026-07-16 tester voice note)
+  // must log BOTH: the water logs here, but if the message also carries real food, we
+  // carry the water confirmation as a reply part and let the food pipeline log the meal —
+  // never return early and drop half of what the client told us.
+  const waterHasFoodToo = scanForSAFoods(m).some(f => !/^water$/i.test(f.name));
+  if (waterHasFoodToo) {
+    const waterPart = await tryLogWater({ phone, message, m, user });
+    if (waterPart !== null) {
+      stepReplyPart += waterPart.replace(/\[BUTTONS:[^\]]*\]\s*$/, "").trim() + "\n\n";
+    }
+    // fall through — food-context logs the meal and prepends stepReplyPart
+  } else {
+    const waterResult = await handleWater({ phone, message, m, user });
+    if (waterResult !== null) return waterResult;
+  }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
   const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage, classifierQuestion: normalizedQuestion });

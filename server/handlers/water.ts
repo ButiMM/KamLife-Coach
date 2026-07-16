@@ -7,8 +7,9 @@ import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq, sql } from "drizzle-orm";
 import { logChat } from "./chat-log";
-import { sastToday, mentionsNotDone } from "../utils";
+import { sastToday, mentionsNotDone, digitizeSpokenAmounts } from "../utils";
 import { waterTargetLitres } from "../targets";
+import { scanForSAFoods } from "./food-scanner";
 
 /**
  * Log water from a message that contains an amount + a water keyword. Returns the
@@ -25,7 +26,9 @@ export async function tryLogWater(ctx: {
   m: string;
   user: any;
 }): Promise<string | null> {
-  const { phone, message, m, user } = ctx;
+  const { phone, message, user } = ctx;
+  // Voice notes say amounts in words ("one litre") — digitize before parsing (2026-07-16).
+  const m = digitizeSpokenAmounts(ctx.m);
 
   // ---- WATER LOGGING HANDLER — no GPT ----
   const waterMatch = m.match(/(\d+(?:\.\d+)?)\s*(l|litre|liter|litres|liters|ml|millilitre|milliliter|glass(?:es)?|cup(?:s)?|bottle(?:s)?)\b/i);
@@ -126,7 +129,8 @@ export async function handleWater(ctx: {
   m: string;
   user: any;
 }): Promise<string | null> {
-  const { phone, message, m, user } = ctx;
+  const { phone, message, user } = ctx;
+  const m = digitizeSpokenAmounts(ctx.m); // "one litre" → "1 litre" (voice notes)
 
   // Log water first (amount + water keyword).
   const loggedWater = await tryLogWater(ctx);
@@ -142,7 +146,11 @@ export async function handleWater(ctx: {
 
   // ---- WATER WITHOUT AMOUNT — prompt instead of silently ignoring ----
   // e.g. "I drank water", "drank some water", "had water"
-  if (!waterMatch && hasWaterKeyword && !waterIsQuestion && !waterNotConsumed && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
+  // COMPOUND GUARD (2026-07-16 tester voice note): "an apple and a pear and water" must
+  // NOT be swallowed by the how-much ask, dropping the meal — if the message carries real
+  // food beyond water itself, defer to the food pipeline (it owns the meal; water unstated).
+  const carriesRealFood = scanForSAFoods(m).some(f => !/^water$/i.test(f.name));
+  if (!waterMatch && hasWaterKeyword && !carriesRealFood && !waterIsQuestion && !waterNotConsumed && /\b(drank|drunk|had|drinking|drank some|had some)\b/i.test(m)) {
     const wTarget = waterTargetLitres(user.currentWeight as string);
     const todayW = Math.round((parseFloat(user.todayWater as string || "0")) * 10) / 10;
     const remaining = Math.max(0, Math.round((wTarget - todayW) * 10) / 10);

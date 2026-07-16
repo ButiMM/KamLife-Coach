@@ -837,7 +837,21 @@ export function looksLikeBillingOrCancel(m: string): boolean {
     && !/\bcancel (?:the |my |today'?s? |tomorrow'?s? |tonight'?s? |this |that )?(?:workout|session|order|meal|training|gym|plan for)\b/i.test(m);
 }
 
-export function looksLikeWaterReport(m: string): boolean {
+// Voice-first clients SAY amounts as words — "one litre of water", "two glasses", "half a
+// litre" — and the digit-only parsers replied "How much?" to someone who'd just said how
+// much (2026-07-16 tester voice note). Convert spoken container amounts to digits before
+// any water parsing. Deliberately narrow: only number-words directly attached to a
+// water-container unit, so food phrases ("one apple") are untouched.
+export function digitizeSpokenAmounts(m: string): string {
+  const NUM: Record<string, string> = { a: "1", an: "1", one: "1", two: "2", three: "3", four: "4", five: "5", six: "6", seven: "7", eight: "8", nine: "9", ten: "10" };
+  return m
+    .replace(/\bhalf\s+a\s+(litre|liter)\b/gi, "0.5 $1")
+    .replace(/\b(a|an|one|two|three|four|five|six|seven|eight|nine|ten)\s+(litres?|liters?|glass(?:es)?|cups?|bottles?)\b/gi,
+      (_all, w: string, unit: string) => `${NUM[w.toLowerCase()]} ${unit}`);
+}
+
+export function looksLikeWaterReport(raw: string): boolean {
+  const m = digitizeSpokenAmounts(raw);
   return /\b(?:drank|drinking|had)\b.{0,24}\b\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?|glass(?:es)?|bottles?)\s*(?:of\s+)?(?:water)?\b/i.test(m)
     || /^\s*\d+(?:[.,]\d+)?\s*(?:ml|l|litres?|liters?)(?:\s+(?:of\s+)?water)?\s*$/i.test(m);
 }

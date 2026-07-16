@@ -33,6 +33,7 @@ import { looksLikeRefusal } from "../server/understanding/refusal";
 import { isObviouslyInDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
+import { digitizeSpokenAmounts } from "../server/utils";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2771,6 +2772,26 @@ test("decay: after a month away, trust finally softens toward baseline", () => {
   const o = { confidenceTrend: "rising" as const, frustrationLevel: 3, readinessToPush: "high" as const, trustLevel: 9 };
   const d = decayObservations(o, 24 * 40);
   assert.ok(d.trustLevel < 9 && d.trustLevel >= 5, "trust fades slowly after a long absence, never below baseline");
+});
+
+// ============================================================
+// Spoken water amounts (2026-07-16 voice-note regression): "one litre of
+// water" must parse — never ask "How much?" at someone who just said how much.
+// ============================================================
+
+test("water: spoken amounts digitize — one litre / two glasses / half a litre / a glass", () => {
+  assert.equal(digitizeSpokenAmounts("just had one litre of water"), "just had 1 litre of water");
+  assert.equal(digitizeSpokenAmounts("drank two glasses of water"), "drank 2 glasses of water");
+  assert.equal(digitizeSpokenAmounts("had half a litre"), "had 0.5 litre");
+  assert.equal(digitizeSpokenAmounts("a glass of water"), "1 glass of water");
+  assert.equal(digitizeSpokenAmounts("an apple and a pear"), "an apple and a pear", "food words untouched — only container units digitize");
+});
+
+test("water: looksLikeWaterReport accepts spoken amounts (voice-first clients)", () => {
+  assert.ok(looksLikeWaterReport("just had one litre of water"), "one litre spoken");
+  assert.ok(looksLikeWaterReport("had two glasses of water"), "two glasses spoken");
+  assert.ok(looksLikeWaterReport("drank 500ml"), "digits still work");
+  assert.ok(!looksLikeWaterReport("I want to drink more water"), "intent is not a log");
 });
 
 // ============================================================
