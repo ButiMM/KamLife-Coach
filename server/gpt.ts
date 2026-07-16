@@ -91,9 +91,7 @@ export function sanitizeProfileField(v: string | null | undefined, maxLen = 200)
   return s;
 }
 
-// ── Per-call GPT cost recorder ──
-// Fire-and-forget: never throws, never blocks a coaching reply.
-// Model prices (per 1M tokens, USD) as of mid-2025.
+// ── Per-call GPT cost recorder (fire-and-forget; prices per 1M tokens USD, mid-2025) ──
 const GPT_PRICE_PER_1M: Record<string, { prompt: number; completion: number }> = {
   "gpt-4o":           { prompt: 2.50,  completion: 10.00 },
   "gpt-4o-mini":      { prompt: 0.15,  completion: 0.60  },
@@ -1387,7 +1385,8 @@ WORKOUT_LOG  - ALREADY COMPLETED exercise/session → canonical: "workout done [
                NEVER add "yesterday" to canonical unless the word "yesterday" (or equivalent retro date) is in the original
 WEIGHT       - body weight check-in → canonical: "<number>kg"
 GOAL_CHANGE  - wants different goal: building/bulking phase, cut, lean out, muscle composition → canonical: "change my goal to <muscle gain|fat loss|recomposition>"
-TOTALS_QUERY - asking today's calories/protein/remaining → canonical: "today's calories"
+TOTALS_QUERY - asking today's calorie/protein NUMBERS or remaining → canonical: "today's calories"
+               Asking to SEE the meals/food/log itself ("show me today's food", "every meal I logged", "what did I eat") is NOT a totals query → OTHER, canonical ""
 QUESTION     - asking about fitness/nutrition/health (even if it contains numbers!) → canonical: ""
 RANT         - venting frustration/emotion → canonical: ""
 GREETING     - purely social opener → canonical: ""
@@ -1419,6 +1418,7 @@ Examples:
 "Give me my workout" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}
 "Hack squat I did 25kg each side for the first time. 6 reps" → {"intent":"OTHER","confidence":0.95,"canonical":""}
+"Show me today's food, every single meal that I've logged" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "bench press 80kg 3x10" → {"intent":"OTHER","confidence":0.95,"canonical":""}`,
         },
         { role: "user", content: m.slice(0, 300) },

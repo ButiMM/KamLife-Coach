@@ -409,9 +409,16 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   // Loose on purpose: "Sow me the meals" (typo), "show me today's meals" fell through
   // to the model, which hallucinated "I can't show you the meals directly" and recited
   // a wrong list from memory (2026-07-06 audit). The real numbered list must own this.
-  if (/^(show|sow|see|view|check)\s+(me\s+)?(my\s+|the\s+|today'?s?\s+)*(meal|food)s?(\s+log)?$/i.test(m.trim()) ||
-      /^(meal|food)\s+log$|^what\s+did\s+i\s+(log|eat)(\s+today)?\??$/i.test(m.trim()) ||
-      /^(my|today'?s?)\s+meals?$/i.test(m.trim())) {
+  // UNANCHORED (2026-07-16): voice speech never matches ^…$ — "Show me today's food,
+  // every single meal that I've logged" and "No, show me today's meals, all the meals"
+  // broke the anchors, fell to the model, and it hallucinated "check the app" (there is
+  // no app). Show-verb + meal/food-log noun ANYWHERE in the message owns this now.
+  const asksMealList =
+    /\b(show|sow|see|view|check|list|display|give)\b.{0,50}\b(meals?|meal\s*log|food\s*log|food\s+(?:i(?:'?ve)?\s+)?(?:ate|eaten|logged)|today'?s?\s+food)\b/i.test(m) ||
+    /\bwhat\s+(?:did|have)\s+i\s+(?:eat|eaten|logged?)\b/i.test(m) ||
+    /^(my|today'?s?)\s+meals?\s*[.!?]*$/i.test(m.trim()) ||
+    /^(meal|food)\s+log$/i.test(m.trim());
+  if (asksMealList) {
     const todayStart = sastDayStart();
     const logs = await db.select({
       kcalInt: mealLogs.kcalInt,

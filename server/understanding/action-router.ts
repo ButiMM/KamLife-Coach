@@ -22,6 +22,11 @@
 // keepers. NOT the advisory templates (plate method, myth-busters, meal timing) — those are
 // conversation and belong to Coach K.
 const DETERMINISTIC_ACTION = new RegExp([
+  // ── data corrections & log management (2026-07-16: engine PROMISED a deletion it
+  //    cannot perform — these must reach the deterministic food-log-mgmt commands) ──
+  "\\b(remove|delete|undo|scrap|erase)\\b.{0,30}\\b(meal|food|log|breakfast|lunch|dinner|supper|snack|entry|that|last)\\b",
+  "double.?logg?ed", "logged (it |that )?(twice|again|double)", "\\bduplicate\\b", "\\breset today\\b",
+  "\\bmy meals\\b", "what (did|have) i (eat|eaten|logg?ed)", "show me today'?s? (food|meals?)", "\\b(meal|food) log\\b",
   // ── logging & reports (numbers that must be recorded exactly) ──
   "\\b\\d{3,5}\\s*steps?\\b", "\\bsteps?\\b.*\\b\\d{3,5}\\b", "\\b\\d+(?:\\.\\d+)?\\s*(?:kg|kgs|kilos?)\\b",
   "\\b\\d+(?:\\.\\d+)?\\s*(?:l|litres?|liters?|ml|glasses?|cups?)\\b.*water|water.*\\b\\d",

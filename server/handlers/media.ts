@@ -27,7 +27,7 @@ import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods, findDuplicateMealToday } from "./food-scanner";
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext, waterTargetLitres } from "../targets";
@@ -1095,20 +1095,19 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoLoggedAt = parseMealDate(message || "");
       const photoIsRetro = isRetroactiveMeal(message || "");
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
-        // NO nutrition-based dedup here. Two genuinely different meals routinely land on
-        // the same calorie estimate (a breakfast bun and a tuna salad are both ~350 kcal),
-        // and clients send several meal photos back-to-back — so matching on kcal silently
-        // dropped real meals. True duplicate DELIVERIES (Twilio webhook retries, rapid
-        // same-sender bursts, and album webhooks) are already dropped upstream in
-        // routes/whatsapp.ts by URL / MessageSid / phone dedup. Any photo that reaches here
-        // is a distinct meal and must be logged.
-        // Store a READABLE description — "[Photo]" rendered as "details not logged"
-        // in every meal list and made "remove the eggs" / "same as my breakfast"
-        // matching impossible for photo meals (2026-07-06 audit). Caption wins;
-        // otherwise the vision identification's first real line.
+        // kcal-based dedup stays banned (different meals share totals; deliveries deduped
+        // upstream). Readable description: caption wins, else vision's first real line.
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
           || (visionDisplay.split("\n").find(l => l.trim().length > 5) || "").replace(/[*_•]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110)
           || "[Photo]";
+        // NAME-overlap duplicate guard (2026-07-16): photo of a meal ALREADY logged today
+        // by text/voice must not double-log — ask, don't silently inflate the day.
+        const dupe = await findDuplicateMealToday(user.id, photoDesc);
+        if (dupe) {
+          const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, say *"same as ${dupe.slot}"* and I'll log it properly.`;
+          await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
+          return dupeReply;
+        }
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: photoDesc,
