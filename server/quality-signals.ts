@@ -23,7 +23,8 @@ export type QualitySignalKind =
   | "verifier_violation"  // reply contradicted stored truth and was corrected/blocked
   | "media_unreadable"    // a photo/video couldn't be processed → fallback ask
   | "low_confidence"      // a handler served but flagged its own uncertainty
-  | "shadow_review";      // shadow Meaning Engine scored low or tied vs production → human look
+  | "shadow_review"       // shadow Meaning Engine scored low or tied vs production → human look
+  | "daily_review";       // nightly self-audit graded a LIVE exchange weak → auto-filed for fixing
 
 const clip = (s: string | null | undefined, n = 500): string | null => {
   if (s == null) return null;

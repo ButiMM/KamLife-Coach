@@ -25,6 +25,7 @@ import {
   todaySAST,
 } from "../shared";
 import { gptCosts } from "../../../shared/schema";
+import { captureQualitySignal } from "../../quality-signals";
 
 // ── OpenAI client (module-level, shared) ─────────────────────────────────────
 const openai = new OpenAI({
@@ -32,9 +33,10 @@ const openai = new OpenAI({
 });
 
 // ── Tunables ─────────────────────────────────────────────────────────────────
-const SAMPLE_SIZE = 8;        // exchanges pulled per run (batched into one call)
+const SAMPLE_SIZE = 20;       // exchanges pulled per run (still ONE batched call)
 const MIN_TO_AUDIT = 3;       // below this there's nothing meaningful to score
-const ALERT_THRESHOLD = 7.0;  // overall avg below this pings the coach
+const ALERT_THRESHOLD = 7.0;  // overall avg below this pings the coach loudly
+const WEAK_EXCHANGE = 6.0;    // any single exchange below this is auto-FILED for fixing
 const TRUNCATE = 200;         // chars per side fed to the checker
 
 type Dimension = "specificity" | "personalisation" | "safety" | "format";
@@ -204,39 +206,58 @@ export async function runQualityAudit(): Promise<void> {
       perExchangeAvg(s) < perExchangeAvg(lo) ? s : lo, scores[0]);
     const worstExchange = exchanges[worst.index];
 
-    // ── 6. Always log the full picture ──
+    // ── 6. AUTO-FILE every weak exchange (the self-correcting flywheel) ──
+    // Weak live exchanges land in quality_signals automatically, where they become
+    // regression cases — the founder stops being the screenshot department.
+    const weak = scores.filter(s => perExchangeAvg(s) < WEAK_EXCHANGE);
+    for (const s of weak) {
+      const ex = exchanges[s.index];
+      captureQualitySignal("daily_review", {
+        messageIn: ex.messageIn,
+        messageOut: ex.messageOut,
+        detail: `nightly self-audit ${perExchangeAvg(s).toFixed(1)}/10 — ${s.worst_issue}`,
+      });
+    }
+
+    // ── 7. Always log the full picture ──
     const dimSummary = DIMENSIONS.map(d => `${d}=${dimAvg[d].toFixed(1)}`).join(" ");
     console.log(
       `[QUALITY_AUDIT] sampled=${exchanges.length} scored=${scores.length} ` +
-      `overall=${overall.toFixed(2)}/10 | ${dimSummary} | ` +
+      `overall=${overall.toFixed(2)}/10 weak=${weak.length} | ${dimSummary} | ` +
       `worst=#${worst.index} (${perExchangeAvg(worst).toFixed(1)}/10) issue="${worst.worst_issue}" ` +
       `CLIENT="${truncate(worstExchange.messageIn, 120)}" COACH="${truncate(worstExchange.messageOut, 120)}"`,
     );
 
-    // ── 7. Alert the coach only when quality has actually drifted ──
-    if (overall < ALERT_THRESHOLD) {
-      const state = loadState();
-      const today = todaySAST();
-      if (state["quality_audit_alert"] === today) {
-        console.log("[QUALITY_AUDIT] below threshold but already alerted today — skipping send");
-        return;
-      }
+    // ── 8. DAILY DIGEST — one short message every morning, so the system reports to
+    // the founder instead of the founder screenshotting the system. Loud version when
+    // quality drifted below threshold; one-liner when healthy. Once per day.
+    const state = loadState();
+    const today = todaySAST();
+    if (state["quality_audit_alert"] === today) {
+      console.log("[QUALITY_AUDIT] digest already sent today — skipping send");
+      return;
+    }
+    const to = coachPhone.startsWith("whatsapp:") ? coachPhone : `whatsapp:${coachPhone}`;
 
+    if (overall < ALERT_THRESHOLD) {
       const breakdown = DIMENSIONS.map(d => `• ${d}: ${dimAvg[d].toFixed(1)}/10`).join("\n");
-      const body =
+      await sendWhatsApp(to,
         `⚠️ *KamLife Quality Audit* — avg ${overall.toFixed(1)}/10 (below ${ALERT_THRESHOLD})\n\n` +
         `Based on ${scores.length} recent exchanges:\n${breakdown}\n\n` +
         `*Worst exchange* (${perExchangeAvg(worst).toFixed(1)}/10)\n` +
         `Issue: ${worst.worst_issue}\n` +
         `CLIENT: "${truncate(worstExchange.messageIn, 160)}"\n` +
         `COACH: "${truncate(worstExchange.messageOut, 160)}"\n\n` +
-        `Check recent prompt or data changes — reply quality has slipped.`;
-
-      const to = coachPhone.startsWith("whatsapp:") ? coachPhone : `whatsapp:${coachPhone}`;
-      await sendWhatsApp(to, body);
-      saveState("quality_audit_alert", today);
-      console.log("[QUALITY_AUDIT] alert sent to coach");
+        `${weak.length} weak exchange${weak.length === 1 ? "" : "s"} auto-filed for fixing. Check recent prompt or data changes.`);
+    } else {
+      await sendWhatsApp(to,
+        `📋 *Coach K self-review* — scored ${scores.length} of yesterday's conversations: *${overall.toFixed(1)}/10*.\n` +
+        (weak.length
+          ? `${weak.length} weak one${weak.length === 1 ? "" : "s"} auto-filed for fixing (worst: "${worst.worst_issue}"). No action needed from you.`
+          : `No weak exchanges — clean day. ✅`));
     }
+    saveState("quality_audit_alert", today);
+    console.log(`[QUALITY_AUDIT] daily digest sent (weak filed: ${weak.length})`);
   } catch (err) {
     console.error("[QUALITY_AUDIT] failed:", err);
     return;
