@@ -46,7 +46,18 @@ function keyFactsFromUser(user: any): string[] {
   if (goal) facts.push(`goal: ${String(goal).replace(/_/g, " ")}`);
   const job = (user?.jobType || user?.lifeSituation || "").trim();
   if (job) facts.push(`life/work: ${job}`);
-  return facts.slice(0, 8);
+  // FOOD IDENTITY (2026-07-16: Coach K asked a 6-month client "what do you usually like
+  // to eat?" — the onboarding answers existed all along and never reached the engine).
+  const likes = (user?.foodLikes || "").trim();
+  if (likes) facts.push(`their staple foods: ${likes.slice(0, 90)}`);
+  const dislikes = (user?.foodDislikes || "").trim();
+  if (dislikes && dislikes.toLowerCase() !== "none") facts.push(`won't eat: ${dislikes.slice(0, 60)}`);
+  const budget = String(user?.weeklyFoodBudget || user?.budgetLevel || "").trim();
+  if (budget) facts.push(`food budget: ${budget.replace(/_/g, " ")}`);
+  const med = (user?.medicalConditions || "").trim();
+  if (med && med.toLowerCase() !== "none") facts.push(`medical: ${med.slice(0, 60)}`);
+  if (user?.trainingMode) facts.push(`trains: ${String(user.trainingMode).replace(/_/g, " ")}${user?.homeEquipment ? ` (${user.homeEquipment})` : ""}, ${user?.trainingDaysPerWeek || "?"} days/week`);
+  return facts.slice(0, 10);
 }
 
 export function seedUnderstanding(user: any, snapshot?: string): UnderstandingState {
