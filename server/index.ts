@@ -376,6 +376,17 @@ async function runMigrations(): Promise<void> {
       pattern_flags      JSONB,
       coach_narrative    TEXT
     )`,
+    // Meaning Engine memory (the "cortex"): the durable subset of a client's
+    // UnderstandingState. Created here idempotently so the engine's cross-session memory
+    // works on every deploy WITHOUT `npm run db:push` (which drizzle-kit blocks on drift).
+    // Without this table saveUnderstanding fails open and Coach K forgets clients between
+    // conversations — this guarantees it exists.
+    `CREATE TABLE IF NOT EXISTS client_understanding (
+      user_id      UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      profile      JSONB,
+      observations JSONB,
+      updated_at   TIMESTAMPTZ DEFAULT NOW()
+    )`,
   ];
 
   let created = 0;
