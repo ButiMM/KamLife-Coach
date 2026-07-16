@@ -26,9 +26,9 @@ let passed = 0, failed = 0;
 for (const c of DRILL_CASES) {
   try {
     const r = await runDrillCase(openai, c);
-    const status = r.pass ? "✅ PASS" : "❌ FAIL";
+    const tag = r.pass ? "✅ PASS" : (r.protection === "deterministic" ? "🟡 FAIL (canary — prod routes this to a deterministic handler; clients safe)" : "❌ FAIL (brain owns this in prod — client-facing)");
     if (r.pass) passed++; else failed++;
-    console.log(`\n${status} — ${c.name}`);
+    console.log(`\n${tag} — ${c.name}`);
     console.log(`  client: ${c.user}`);
     console.log(`  coach:  ${r.reply.replace(/\n/g, "\n          ")}`);
     for (const w of r.warns) console.log(`  ⚠️  ${w}`);

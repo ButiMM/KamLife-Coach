@@ -19,6 +19,20 @@
 
 import type OpenAI from "openai";
 import { BRAIN_SYSTEM, TOOLS } from "./brain/coach-brain";
+import { looksLikeWorkoutRequest, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport } from "./utils";
+
+// HONEST CANARY: this battery drills the RAW brain in isolation. But in production many of
+// these inputs never reach the raw brain — a deterministic handler claims them first (the
+// exact fix we shipped for several of these tester failures). So a raw-brain FAIL on a
+// deterministically-routed input is a canary that the fallback drifted — NOT a client-facing
+// leak. We classify each case by the REAL production routing predicates (not a guess) so the
+// nightly alert can say what's actually true instead of crying "back in production" for an
+// input clients never hit the brain with. Default is "brain" — the loud, conservative case.
+export function prodProtection(userMessage: string): "deterministic" | "brain" {
+  return looksLikeWorkoutRequest(userMessage) || looksLikeStepsReport(userMessage)
+    || looksLikeWaterReport(userMessage) || looksLikeWeightReport(userMessage)
+    ? "deterministic" : "brain";
+}
 
 // Canned snapshot — mirrors the production buildClientSnapshot format for a
 // muscle-gain client mid-morning with one breakfast logged. If the production
@@ -182,7 +196,7 @@ export const DRILL_CASES: DrillCase[] = [
   },
 ];
 
-export type DrillResult = { pass: boolean; warns: string[]; reply: string };
+export type DrillResult = { pass: boolean; warns: string[]; reply: string; protection: "deterministic" | "brain" };
 
 export async function runDrillCase(openai: OpenAI, c: DrillCase): Promise<DrillResult> {
   const messages: any[] = [
@@ -219,5 +233,5 @@ export async function runDrillCase(openai: OpenAI, c: DrillCase): Promise<DrillR
 
   const failures = c.mustNot.filter(re => re.test(reply)).map(re => `mustNot hit: ${re}`);
   const warns = (c.should || []).filter(re => !re.test(reply)).map(re => `should missed: ${re}`);
-  return { pass: failures.length === 0 && reply !== "" && !reply.startsWith("[DEFERRED"), warns: [...failures, ...warns], reply };
+  return { pass: failures.length === 0 && reply !== "" && !reply.startsWith("[DEFERRED"), warns: [...failures, ...warns], reply, protection: prodProtection(c.user) };
 }
