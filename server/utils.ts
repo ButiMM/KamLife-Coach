@@ -728,6 +728,12 @@ export function looksLikeWorkoutRequest(m: string): boolean {
   if (/\b(home|quick|full.?body|dumbbell|bodyweight|hotel|travel|short)\s+(workout|session|training)\b/i.test(s)) return true;
   // "give/send/need/want a workout", "can I get a workout"
   if (/\b(give|send|show|need|want|get)\b[^.!?]{0,15}\b(workout|session)\b/i.test(s)) return true;
+  // PROGRAMME requests in natural speech (2026-07-16 voice note: "Show me my gym
+  // program" missed every exact-match trigger and the engine replied "I can't show you
+  // the gym program directly, but reply program" — knowing the command and not running
+  // it). Show-verb + programme/plan, or a qualified programme mention, DELIVERS it.
+  if (/\b(give|send|show|see|view|check|get|what'?s)\b[^.!?]{0,20}\b(program(?:me)?|workout plan|training plan)\b/i.test(s)) return true;
+  if (/\b(my|the|gym|full|whole|entire)\s+program(?:me)?\b/i.test(s)) return true;
   // "workout with dumbbells", "workout for today", "workout using bands"
   if (/\bworkout\s+(with|using|for)\b/i.test(s)) return true;
   if (/\bwhat.?s my workout\b/i.test(s)) return true;

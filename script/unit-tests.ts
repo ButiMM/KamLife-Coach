@@ -2827,6 +2827,20 @@ test("goalStatus: on-target and room-left read right for fat_loss", () => {
 });
 
 // ============================================================
+// Programme requests in natural speech deliver the programme (2026-07-16:
+// "Show me my gym program" → engine said "reply program to see it")
+// ============================================================
+
+test("workout-request: spoken programme phrasings deliver, questions still coach", () => {
+  for (const m of ["Show me my gym program", "show me my programme", "send my full programme", "what's my training plan", "check my program"]) {
+    assert.ok(looksLikeWorkoutRequest(m), `must deliver programme: "${m}"`);
+  }
+  for (const m of ["Is a home workout as good as the gym?", "how long is my programme", "I finished my workout"]) {
+    assert.ok(!looksLikeWorkoutRequest(m), `must NOT hijack: "${m}"`);
+  }
+});
+
+// ============================================================
 // Results
 // ============================================================
 
