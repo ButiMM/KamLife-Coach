@@ -46,6 +46,12 @@ const CASES: Case[] = [
   { lang: "isiZulu",   msg: "Namuhla ngingu-85kg",                 intent: "WEIGHT", mustContain: ["85"] },
   // ── question guard: a question that MENTIONS steps must NOT be logged ──
   { lang: "isiZulu",   msg: "Ingabe izinyathelo ezi-10000 zanele?", intent: "QUESTION" },
+  // ── "yesterday" / retro-date (must land on the right day, never invent the day) ──
+  { lang: "English",   msg: "I ate pap and chicken yesterday",     intent: "FOOD_LOG", mustContain: ["pap", "chicken", "yesterday"] },
+  { lang: "English",   msg: "I had eggs for breakfast",            intent: "FOOD_LOG", mustContain: ["eggs"], mustNotContain: ["yesterday"] },
+  { lang: "isiZulu",   msg: "Ngidle irayisi izolo",               intent: "FOOD_LOG", mustContain: ["rice", "yesterday"] },
+  // ── uncertain / hedged amount: understand it, but the canonical must not fabricate a number ──
+  { lang: "English",   msg: "I think I ate around some pap yesterday, not sure", intent: "FOOD_LOG", mustContain: ["pap", "yesterday"] },
 ];
 
 let passed = 0, failed = 0;

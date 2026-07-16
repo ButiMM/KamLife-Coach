@@ -55,9 +55,18 @@ document" converged on: **AI owns judgement; deterministic code owns actions.**
   safety) — auditable, not a black box.
 - **Safety rails**: a crisis handler (SADAG/Lifeline) runs before anything else;
   sick/injury guards; no medical claims or diagnosis.
-- **Positioning (business-side, not code)**: disclosed as an automated coach
-  ("Coach K, part of your KamLife experience"), never impersonating a human or
-  another AI. This is the 80% of Meta compliance that lives in copy, not code.
+- **Positioning (business-side)**: disclosed as an automated coach ("Coach K,
+  part of your KamLife experience"), never impersonating a human or another AI.
+  Compliance depends on **both** product behaviour **and** how the business is
+  presented — website, onboarding copy, privacy policy, approved message
+  templates, opt-in language, and the actual conversations must all read as one
+  thing: a fitness coaching service. The practical test (per review): if someone
+  from Meta watched ten real Coach K conversations, would they conclude "fitness
+  coach," not "general AI assistant"? The Domain Gate supports that; the copy
+  must match it. **These items are business/legal work, tracked separately.**
+- **POPIA (SA data protection)**: user data is stored per-client and deletion is
+  supported; the onboarding POPIA-consent step already runs in the pipeline. A
+  formal privacy policy + data-handling review is a pre-launch business task.
 
 ### Product quality (not robotic/generic)
 - Coach K understands *before* it acts, acknowledges feeling before advice, and
@@ -89,10 +98,28 @@ Everything is flag-gated and fail-open:
 | 3 — Language & Voice | 8–11 | Hard battery: logging + coaching in Zulu/Xhosa/Sotho/Tswana/Afrikaans, text + voice, must pass before launch | pending |
 | 4 — Results Engine | 11–13 | Auto-adjust deficit/surplus on weight trend; menu scan; grocery-list fix; safe-math verification | pending |
 | 5 — Retention, Safety, Meta | 13–15 | Human accountability nudges; safety verification; Meta positioning; final language battery | pending |
+| **Closed beta** | after 5 | **20–50 real users; measure outcomes** (retention, adherence, weight trend) **before public launch** | added per review |
 
 **Verification discipline:** each phase is proven against a real-language test
 battery *before* the founder sees it — we do not ship a screenshot to be
-disproven.
+disproven. And per both reviews, we do **not** go from Phase 5 straight to
+public launch: a closed beta with real users, with outcomes measured, is the
+gate. Real users expose what no document can.
+
+**Two items the reviews correctly flagged as missing, now tracked:**
+1. **Health-outcome & retention metrics (Law 17).** Conversation scores
+   (trust/warmth) are not enough — investors and we care about *outcomes*. A
+   dashboard tracking weekly check-in completion, workout adherence, meal-log
+   consistency, average weight change, retention at 30/90/180 days, response
+   latency, and human-escalation rate. Instrumented before the closed beta.
+2. **Inference decay (Law 5).** Facts persist; *inferences* (mood, frustration,
+   readiness) must expire (24–48h) and be re-derived each message, so the coach
+   is never stuck on a stale assumption ("still treating them as anxious weeks
+   later"). Scheduled into Phase 3/5.
+
+**One boundary we hold forever (per Reviewer 1):** the Meaning Engine never
+computes calories, protein, macros, dates, weights, or unit conversions — those
+live in deterministic code, permanently. The engine decides; code calculates.
 
 ---
 
