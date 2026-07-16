@@ -17,7 +17,7 @@
 
 export function buildFoodVisionSystemPrompt(opts: {
   clientName: string; goal: string; liveCal: number; liveProt: number; isApprovalCaption: boolean;
-  numbersLow?: boolean;
+  numbersLow?: boolean; remainingToday?: number;
 }): string {
   const { clientName, goal, liveCal, liveProt, isApprovalCaption, numbersLow } = opts;
   // NUMBERS-OFF: a low-numeracy client (numbers:low) must see no figures. The model
@@ -60,9 +60,16 @@ Rules: only name dishes actually on the menu. Grilled beats fried; lean protein 
 
 export function buildFoodVisionUserPrompt(opts: {
   message: string; isApprovalCaption: boolean; liveCal: number; liveProt: number;
-  numbersLow?: boolean;
+  numbersLow?: boolean; remainingToday?: number;
 }): string {
-  const { message, isApprovalCaption, liveCal, liveProt, numbersLow } = opts;
+  const { message, isApprovalCaption, liveCal, liveProt, numbersLow, remainingToday } = opts;
+  // "Can I eat this?" verdict layer 2 — TODAY'S budget (2026-07-16 founder spec): the
+  // goal verdict alone isn't enough; a food can be fine for the goal but not fit what's
+  // LEFT of today. remainingToday is computed deterministically from the DB before the
+  // call; the model only compares its own kcal estimate against it.
+  const todayBudget = typeof remainingToday === "number"
+    ? `\nTHEIR DAY SO FAR: they have ~${Math.max(0, remainingToday)} kcal left of today's budget${remainingToday < -100 ? ` — in fact they are ALREADY ~${Math.abs(remainingToday)} kcal OVER today's target` : remainingToday <= 100 ? " — today's food is essentially done" : ""}.`
+    : "";
   const numbersOff = numbersLow
     ? `\n\nNUMBERS-OFF MODE (CRITICAL): this client cannot read calorie/gram numbers. In your VISIBLE reply write NO kcal, calorie, or gram figures and NO gram/ml portion sizes — describe the plate in plain words and give a one-line plain verdict for a full meal. You MUST still output the exact "TOTAL: X kcal | Yg protein" line at the very end; it is used only for logging and is never shown. Everything except that TOTAL line must be number-free.`
     : "";
@@ -85,5 +92,9 @@ FOOD CHECK FIRST: Before anything else, verify this image actually shows food or
 - For all other non-food images (selfie, gym mirror, screenshot of an app, scenery, body progress photo, scale, exercise equipment, pet, person without food, meme, blank/black/blurry, etc.) — respond with EXACTLY: NOT_FOOD${message ? ` — unless the client caption "${message}" clearly says they are reporting food they ate, in which case treat the caption as the food log.` : ""}
 - IMPORTANT: A supplement bottle, protein powder tub, protein shake can, protein bar wrapper, or food packaging IS food — do NOT return NOT_FOOD for these. Estimate the nutrition.
 
-BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. Identify starches by colour AND texture — do NOT default every pale starch to pap: a smooth white or cream mound = pap OR mashed potato (use context); an orange or yellow mound = sweet potato or butternut (NOT pap); loose yellow grains = savoury/yellow rice or corn; large white kernels = samp; plain white grains = rice; a bowl of plain white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message && !isApprovalCaption ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : isApprovalCaption ? `\n\nCLIENT IS ASKING: "Is this food okay for my goal?" — identify the food from the photo, estimate calories/protein, and give a straight verdict (yes/no/portion size) for their goal, with ONE better swap if the verdict is no. Make the swap a REAL South African option they can actually get RIGHT WHERE THEY ARE — same shop, same menu, similar price: anything sugary → the ZERO SUGAR version (Coke Zero, Sprite Zero); fried → grilled or baked; processed meat (polony, russians, viennas) → real protein (chicken, eggs, tinned pilchards/tuna); at a takeaway (Nando's, KFC, Steers, Chicken Licken) → grilled not fried, skip the creamy/cheesy sides and the sugary drink, take the smaller size; at a shop (Checkers, Shoprite, Pick n Pay, Spar) → the leaner or lower-sugar version on the same shelf. ONE swap, plainly, no lecture. Do NOT log it and do NOT say "logged" — they are DECIDING (often still in the shop), not reporting. Still end with the TOTAL: line.` : ""}`;
+BEST GUESS RULE: For images that ARE food, always make your best estimate even if the photo is not perfect. Identify starches by colour AND texture — do NOT default every pale starch to pap: a smooth white or cream mound = pap OR mashed potato (use context); an orange or yellow mound = sweet potato or butternut (NOT pap); loose yellow grains = savoury/yellow rice or corn; large white kernels = samp; plain white grains = rice; a bowl of plain white porridge = oats or pap. Brown liquid in a cup = coffee or tea. Dark stew = beef or chicken stew. If you are 70%+ sure — state your estimate with "roughly" and give the numbers. Only if it IS food but you genuinely cannot tell what kind (completely dark, blurry beyond recognition) — respond only with: Eish, I cannot make out the food clearly. Take the photo in better light and send again.${message && !isApprovalCaption ? `\n\nCLIENT CAPTION: "${message}" — use this as the primary food identification. Even if the photo is unclear, log based on the caption.` : isApprovalCaption ? `\n\nCLIENT IS ASKING: "Can I eat this?" — identify the food, estimate calories/protein, then answer in TWO layers (this is the whole point — both, always):${todayBudget}
+LAYER 1 — THE GOAL: is this food a good choice for their goal generally? One kind, straight sentence.
+LAYER 2 — TODAY: compare YOUR kcal estimate to the budget above. Both layers can differ and you must say so plainly: "Good choice for your goal, and today has room for it — enjoy" / "Generally fine, but today's basically full — save it for tomorrow, or take half" / "Not the best pick for your goal, though today could absorb it — if you really feel like it, have it and enjoy it" / "Not great for the goal AND today is done — this one's a skip". If they are already over, be honest but kind — never shame.
+LAYER 3 — THE SWAP (only when Layer 1 is no): ONE better option they can get RIGHT WHERE THEY ARE — same shop, same menu, similar price: sugary → ZERO SUGAR version (Coke Zero, Sprite Zero); fried → grilled or baked; processed meat (polony, russians, viennas) → real protein (chicken, eggs, tinned pilchards/tuna); takeaway (Nando's, KFC, Steers, Chicken Licken) → grilled not fried, skip creamy/cheesy sides and the sugary drink, smaller size; shop shelf (Checkers, Shoprite, Pick n Pay, Spar) → the leaner or lower-sugar version on the same shelf. ONE swap, plainly, no lecture.
+${numbersLow ? "NUMBERS-OFF applies to the verdict too: say it in words only ('today still has room' / 'today's food is done'), zero figures visible." : ""}Do NOT log it and do NOT say "logged" — they are DECIDING (often still in the shop), not reporting. Still end with the TOTAL: line.` : ""}`;
 }

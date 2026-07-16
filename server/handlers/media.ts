@@ -772,12 +772,8 @@ export async function handleMediaMessage(ctx: {
       }
 
       // ---- FOOD PHOTO ----
-      // An ASKING caption ("does this fit my macros?", "can I eat this?", "is this too
-      // much?") gets a verdict + "reply log it" — NEVER an automatic meal log. The
-      // shared isAskingNotReporting gate is the floor (2026-07-14: the old local list
-      // knew "fit my goal/diet/plan" but not "fit in my calories" or "fit my macros",
-      // so exactly the captions a deciding client sends were auto-logged); the local
-      // phrases stay as an extra belt.
+      // An ASKING caption ("can I eat this?") gets a verdict + "reply log it" — NEVER an
+      // auto meal log. isAskingNotReporting is the floor; local phrases the extra belt.
       const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
       // Number-free delivery for a numbers:low client (prompt omits figures + scrub net).
@@ -795,6 +791,11 @@ export async function handleMediaMessage(ctx: {
       const { calorieTarget: liveCal, proteinTarget: liveProt } = calculateTargets(
         parseFloat(user.currentWeight || "75"), goal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner"
       );
+      // "Can I eat this?" needs TODAY'S budget, not just the target — the verdict's second
+      // layer compares the item against what's actually left of the day (founder spec).
+      const remainingToday = isApprovalCaption
+        ? await recomputeTodayFoodTotals(user.id).then(t => liveCal - t.calories).catch(() => undefined)
+        : undefined;
       const foodVisionDecision = selectVisionModel("food_photo", isCoach ? "active" : user.subscriptionStatus);
       if (!foodVisionDecision.allowed) {
         return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
@@ -814,7 +815,7 @@ export async function handleMediaMessage(ctx: {
             content: [
               {
                 type: "text",
-                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow }),
+                text: buildFoodVisionUserPrompt({ message, isApprovalCaption, liveCal, liveProt, numbersLow: photoNumbersLow, remainingToday }),
               },
               { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}`, detail: foodVisionDecision.detail } },
             ],
