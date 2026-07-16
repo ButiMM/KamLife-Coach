@@ -849,13 +849,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
       stepReplyPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
 
-      // Check if message ALSO contains food — if so, don't return yet, let food scanner handle it too
+      // COMPOUND: if the message ALSO carries food or water, don't return — the client
+      // told us several things in one breath (voice notes especially) and every one of
+      // them must log. Steps ride along as stepReplyPart; water/food handlers append.
       const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
-      if (!alsoHasFood) {
+      const alsoHasWater = looksLikeWaterReport(m);
+      if (!alsoHasFood && !alsoHasWater) {
         await logChat(user.id, message, stepReplyPart, "STEP_LOG");
         return stepReplyPart;
       }
-      // If food is also present, log steps but continue to food scanning below
+      // Food and/or water also present — log steps but continue down the pipeline
       await logChat(user.id, message, stepReplyPart, "STEP_LOG");
     }
   }
@@ -874,7 +877,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     // fall through — food-context logs the meal and prepends stepReplyPart
   } else {
     const waterResult = await handleWater({ phone, message, m, user });
-    if (waterResult !== null) return waterResult;
+    // Steps may have logged above and passed through ("8000 steps and 2L of water") —
+    // carry that confirmation so the client sees BOTH logs, never just the second one.
+    if (waterResult !== null) return stepReplyPart ? `${stepReplyPart.trim()}\n\n${waterResult}` : waterResult;
   }
 
   // ---- FOOD CONTEXT (corrections, braai, eating out, relog, scanner, GPT fallback) ----
