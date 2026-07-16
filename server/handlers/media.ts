@@ -27,7 +27,7 @@ import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
 import { handleWeightLog } from "./weight";
 import { handleWater } from "./water";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods, findDuplicateMealToday } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, scanForSAFoods, findDuplicateMealToday, parseFoodLogTotalsFromMessageOut } from "./food-scanner";
 import { buildFoodVisionSystemPrompt, buildFoodVisionUserPrompt, buildMenuPickPrompt } from "./food-vision-prompt";
 import { selectVisionModel, estimateVisionCostUSD } from "../gpt";
 import { calculateTargets, getDailyStepContext, waterTargetLitres } from "../targets";
@@ -260,10 +260,8 @@ export async function handleMediaMessage(ctx: {
           if (uncaptionedType === "exercise") {
             const isFormCheckCaption = /\b(form|check|correct|right|wrong|how does|how do i look|am i doing|my form|check my|is this right|watch me|look at me)\b/i.test(message || "");
             if (isFormCheckCaption) {
-              // FORM CHECK from a photo — analyse the movement and give 1-2 plain fixes
-              // (2026-07-09: used to refuse; the whole point of remote coaching is to
-              // direct form without touching people). If the model can't judge the angle
-              // it says so and asks for a side-on shot — that instruction is in the prompt.
+              // FORM CHECK from a photo — analyse the movement and give 1-2 plain fixes (2026-07-09: used to refuse; the whole point of remote coaching is to direct
+              // form without touching people). If the model can't judge the angle it says so and asks for a side-on shot — that instruction is in the prompt.
               const { system: fSys, user: fUser } = buildFormCheckPrompt({ clientName: user.name || "", exerciseName: extractFormExercise(message || "") });
               const fDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
               const formReply = await withTimeout("form_check_photo", 15000, () => openai.chat.completions.create({
@@ -307,12 +305,8 @@ export async function handleMediaMessage(ctx: {
               return equipReply;
             }
 
-            // ── Smart machine identification → match against today's real plan ──────
-            //   exact      → "that's the machine your plan calls for — here's your sets + how"
-            //   substitute → "same muscles, same movement — swap it in"
-            //   other      → "here's how to use it; it's not on today's plan"
-            // Prescription (sets/how/mistake) comes from the user's real programme, so the
-            // photo reply never contradicts their workout text.
+            // ── Smart machine identification → match against today's real plan ────── exact → "that's the machine your plan calls for — here's your sets + how" substitute → "same muscles, same movement —
+            // swap it in" other → "here's how to use it; it's not on today's plan" Prescription (sets/how/mistake) comes from the user's real programme, so the photo reply never contradicts their workout text.
             const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType, message))
               || `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
@@ -690,13 +684,9 @@ export async function handleMediaMessage(ctx: {
         return `${progressCountLabel} ✅ — send the rest of the set if there's more. Breakdown coming in a moment 📸`;
       }
 
-      // ---- EQUIPMENT DECLARATION WITH CAPTION ----
-      // Client sends "I have this set" / "these are my weights" + equipment photo → update
-      // profile. TWO hard guards (2026-07-16 live incident: "Can I have this?" on a DRINK
-      // CAN silently rewrote the programme to home training):
-      //   1. A QUESTION is never a declaration — "can/should I have this" is asking.
-      //   2. The profile is written ONLY when the vision actually sees gym equipment;
-      //      "other" (a can, a laptop, keys) falls through to the food/photo pipeline.
+      // ---- EQUIPMENT DECLARATION WITH CAPTION ---- Client sends "I have this set" / "these are my weights" + equipment photo → update profile. TWO hard guards (2026-07-16 live
+      // incident: "Can I have this?" on a DRINK CAN silently rewrote the programme to home training): 1. A QUESTION is never a declaration — "can/should I have this"
+      // is asking. 2. The profile is written ONLY when the vision actually sees gym equipment; "other" (a can, a laptop, keys) falls through to the food/photo pipeline.
       const equipIsQuestion = isAskingNotReporting(message || "") || /\b(can|could|may|should|must|do)\s+i\b/i.test(message || "");
       const isEquipCaption = !equipIsQuestion
         && /\b(i have (this|these|this set|a set|dumbbells?|bands?|weights?|kettlebell|barbell)|these are my (weights?|equipment|kit|dumbbells?)|this is my (equipment|kit|set)|i (use|got|bought) (this|these|dumbbells?|bands?|weights?)|my (home )?equipment|i train with (these|this|dumbbells?|bands?))\b/i.test(message || "");
@@ -1013,7 +1003,22 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // Nothing was logged — this is a deciding question. Scrub any stray "Logged"
         // claim the model wrote so it can't contradict the "reply log it" line below.
         const verdict = stripFoodLoggedClaim(visionDisplay);
-        return `${verdict}\n\n_Eating it? Reply *log it* and I'll count it._`;
+        // DETERMINISTIC TODAY-VERDICT (2026-07-16: the model identified the can and gave
+        // NO verdict at all — "let's assume the usual values"). The education must not
+        // depend on model manners: CODE computes "does today allow this?" from the parsed
+        // TOTAL + the client's real remaining budget and appends it, every single time.
+        let todayLine = "";
+        const parsedItem = parseFoodLogTotalsFromMessageOut(visionReply || visionDisplay);
+        if (typeof remainingToday === "number") {
+          const itemKcal = parsedItem?.calories ?? null;
+          const fits = itemKcal !== null ? remainingToday - itemKcal >= -100 : remainingToday > 100;
+          todayLine = photoNumbersLow
+            ? (fits ? `\n\n✅ *Today has room for it.*` : `\n\n⚠️ *Today's food is basically done — better saved for tomorrow, or take half.*`)
+            : (fits
+              ? `\n\n✅ *Today allows it:* ~${Math.max(0, remainingToday)} kcal left${itemKcal !== null ? `, this is ~${itemKcal}` : ""}.`
+              : `\n\n⚠️ *Today doesn't really allow it:* ${remainingToday <= 0 ? `you're ~${Math.abs(remainingToday)} kcal over already` : `only ~${remainingToday} kcal left${itemKcal !== null ? ` and this is ~${itemKcal}` : ""}`} — save it for tomorrow, or take half.`);
+        }
+        return `${verdict}${todayLine}\n\n_Eating it? Reply *log it* and I'll count it._`;
       }
 
       // ── MULTI-PHOTO: process any extra images sent in the same message ──
@@ -1374,10 +1379,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         clearVoiceFailure(user.id);
       }
 
-      // Low-confidence (garble) guard — a very negative avg_logprob or high compression
-      // ratio betrays Whisper inventing words from a language it can't handle. Don't coach
-      // on nonsense — ask them to type (GPT reads typed SA languages well). Conservative
-      // thresholds avoid rejecting genuine accented English; metrics logged above to tune.
+      // Low-confidence (garble) guard — a very negative avg_logprob or high compression ratio betrays Whisper inventing words from a language it can't handle. Don't coach on
+      // nonsense — ask them to type (GPT reads typed SA languages well). Conservative thresholds avoid rejecting genuine accented English; metrics logged above to tune.
       if (voiceQuality && wordCount >= 2 && (voiceQuality.avgLogprob < -1.0 || voiceQuality.comp > 2.5)) {
         console.log(`[VOICE] low_confidence_garble avgLogprob=${voiceQuality.avgLogprob.toFixed(2)} comp=${voiceQuality.comp.toFixed(2)} text="${transcribedText.slice(0, 80)}"`);
         const garbleCount = bumpVoiceFailure(user.id);

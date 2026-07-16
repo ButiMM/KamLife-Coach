@@ -39,8 +39,9 @@ const REDIRECT =
 // which leans in-domain, so no client is ever refused — the fast-path only saves a call.
 const IN_DOMAIN_RE = new RegExp(
   [
-    // training / movement
-    "workout|train|training|gym|exercise|run(?:ning)?|walk(?:ing)?|steps?|cardio|lift(?:ing)?|weights?|reps?|\\bsets?\\b|squat|deadlift|bench|glute|abs\\b|core|stretch|mobility|rest day|recover|recovery|doms|sore|soreness|injur|\\bpain\\b|\\bform\\b|programme|routine|session|leg day|push day|pull day",
+    // training / movement (incl. exercise NAMES — 2026-07-16: 'show me a shoulder press'
+    // was bounced as off-topic, twice; no gym word may ever leave the lane)
+    "workout|train|training|gym|exercise|run(?:ning)?|walk(?:ing)?|steps?|cardio|lift(?:ing)?|weights?|reps?|\\bsets?\\b|squat|deadlift|bench|glute|abs\\b|core|stretch|mobility|rest day|recover|recovery|doms|sore|soreness|injur|\\bpain\\b|\\bform\\b|programme|routine|session|leg day|push day|pull day|\\bpress\\b|\\bcurl|\\brow\\b|\\braise\\b|lunge|plank|push.?up|pull.?up|pulldown|\\bfly\\b|\\bdip\\b|crunch|\\brdl\\b|kettlebell|dumbbell|barbell|\\bdemo\\b",
     // nutrition / food
     "eat|ate|eating|food|meal|breakfast|lunch|dinner|supper|snack|protein|carbs?|calorie|kilojoule|\\bkj\\b|diet|nutrition|water|hydrate|shake|supplement|creatine|vitamin|\\bpap\\b|samp|morogo|pilchard|wors|braai|veg|fruit|sugar|craving|hungry|portion|shopping list|grocer|chicken|beef|mince|\\bfish\\b|\\begg|bread|rice|potato|afford|cheap",
     // body / health / state

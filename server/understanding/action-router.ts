@@ -41,6 +41,9 @@ const DETERMINISTIC_ACTION = new RegExp([
   "\\bfact\\b", "daily tip", "did you know", "\\breferral\\b", "\\bchallenge\\b",
   "\\btoday'?s? (?:workout|session)\\b", "\\bmy workout\\b", "\\bfull (?:plan|programme|program)\\b",
   "\\bdemo\\b", "how to do", "\\bshow me\\b.*(?:exercise|move)",
+  // exercise demos by NAME (2026-07-16 live: 'show me a shoulder press' bounced twice) —
+  // the deterministic EXERCISE_DEMO owns these, with GIFs and form cues
+  "\\b(?:show|see|watch|demonstrate)\\b.{0,24}\\b(?:press|squat|deadlift|curl|row|raise|lunge|plank|push.?up|pull.?up|extension|fly|kick.?back|pulldown|thrust|dip|crunch|rdl)\\b",
   // ── transactions (mood score, fasting timer, NPS) ──
   "\\b(?:mood|stress|feeling)\\s*\\d\\b", "\\b(?:mood|stress)\\s*\\d\\s*(?:/|out of)\\s*(?:5|10)",
   "start(?:ed|ing)?\\s*(?:my\\s*)?fast", "broke\\s*(?:my\\s*)?fast", "end(?:ed|ing)?\\s*(?:my\\s*)?fast",

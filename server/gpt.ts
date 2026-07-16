@@ -246,14 +246,10 @@ export function getSAContextFlags(user?: any): string {
   return `SA CONTEXT FLAGS:\n${flags.map((f, i) => `${i + 1}. ${f}`).join("\n")}`;
 }
 
-// ============================================================
-// REAL-TIME AWARENESS — current SAST date, weekday, and time of day.
-// Railway runs in UTC; SAST is UTC+2 with no daylight saving, so we
-// shift the epoch by +2h and read the UTC fields as SAST wall-clock.
-// Injected into every GPT path so the coach actually knows WHEN "now"
-// is — morning vs midnight, weekday vs weekend, the real date — instead
-// of guessing or sounding timeless.
-// ============================================================
+// ============================================================ REAL-TIME AWARENESS — current SAST date, weekday, and time of day. Railway runs in UTC; SAST is
+// UTC+2 with no daylight saving, so we shift the epoch by +2h and read the UTC fields as
+// SAST wall-clock. Injected into every GPT path so the coach actually knows WHEN "now" is — morning vs
+// midnight, weekday vs weekend, the real date — instead of guessing or sounding timeless. ============================================================
 export function getNowContextSA(): string {
   const sast = new Date(Date.now() + 2 * 3_600_000);
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
@@ -1213,14 +1209,11 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   }
 }
 
-// ============================================================
-// MILESTONE VOICE SCRIPT GENERATOR
-// Replaces static hardcoded scripts with a GPT-generated 2-3 sentence
-// voice note personalised to the client's engagement this week, their
-// history, and their specific achievement numbers.
-// Cost: one gpt-4o-mini call per milestone (milestones are rare — negligible).
-// Falls back to a static script on any error so voice notes never silently drop.
-// ============================================================
+// ============================================================ MILESTONE VOICE SCRIPT GENERATOR Replaces static hardcoded scripts with a GPT-generated
+// 2-3 sentence voice note personalised to the client's engagement this week, their
+// history, and their specific achievement numbers. Cost: one gpt-4o-mini call per milestone
+// (milestones are rare — negligible). Falls back to a static script on
+// any error so voice notes never silently drop. ============================================================
 
 export type MilestoneType = "weight_loss" | "goal_reached_fat_loss" | "goal_reached_muscle" | "workout_sessions";
 
@@ -1419,6 +1412,7 @@ Examples:
 "I just finished my session" → {"intent":"WORKOUT_LOG","confidence":0.95,"canonical":"workout done"}
 "Hack squat I did 25kg each side for the first time. 6 reps" → {"intent":"OTHER","confidence":0.95,"canonical":""}
 "Show me today's food, every single meal that I've logged" → {"intent":"OTHER","confidence":0.95,"canonical":""}
+"How do my calories adjust while I'm sick? Or do they stay the same?" → {"intent":"QUESTION","confidence":0.95,"canonical":""}
 "bench press 80kg 3x10" → {"intent":"OTHER","confidence":0.95,"canonical":""}`,
         },
         { role: "user", content: m.slice(0, 300) },

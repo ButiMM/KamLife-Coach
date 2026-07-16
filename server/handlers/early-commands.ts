@@ -47,13 +47,9 @@ export async function handleEarlyCommands(ctx: {
   const triageResolved = await resolvePainTriage({ message, m, user });
   if (triageResolved !== null) return triageResolved;
 
-  // ---- PORTION CONTROL / HOW TO MEASURE — hand-portion method, goal-aware ----
-  // The #1 post-onboarding question. We deliberately DON'T teach calorie counting or
-  // food scales — research and retention both favour the hand method: always available,
-  // sized to the body, sustainable. Anxious trackers especially need the pressure taken off.
-  // Runs BEFORE the calorie-target INSTANT ANSWER block so "how do I count calories" gets
-  // the METHOD, not just their target number. Target-number phrasings ("calories left",
-  // "my calorie target") contain no measure/count/portion words and fall through correctly.
+  // ---- PORTION CONTROL / HOW TO MEASURE — hand-portion method, goal-aware ---- The #1 post-onboarding question. We deliberately DON'T teach calorie counting or food scales — research and retention
+  // both favour the hand method: always available, sized to the body, sustainable. Anxious trackers especially need the pressure taken off. Runs BEFORE the calorie-target INSTANT ANSWER block so "how
+  // do I count calories" gets the METHOD, not just their target number. Target-number phrasings ("calories left", "my calorie target") contain no measure/count/portion words and fall through correctly.
   const isPortionControlQ =
     /\b(portion control|portion size|portion sizes|portioning|how big.*portion|portions? (right|correct|properly|wrong))\b/i.test(m)
     || /\bhow (do|can|should|would) i (measure|count|track|weigh|portion|estimate|work out|know how much|gauge)\b/i.test(m)
@@ -133,10 +129,8 @@ export async function handleEarlyCommands(ctx: {
     return `Protein target: *${prot}g per day.*\n\nBest sources at SA prices: ${_protSources}.`;
   }
 
-  // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak".
-  // Only fire the workout-streak report when the message looks like a genuine progress
-  // question (no food-log trigger words, no SA-food matches). The morning after a
-  // braai a lot of people will type "steak and pap" — must not be intercepted here.
+  // Guard: "had a streak wrap and fries" is a food log — user typo'd "steak" as "streak". Only fire the workout-streak report when the message looks like a genuine
+  // progress question (no food-log trigger words, no SA-food matches). The morning after a braai a lot of people will type "steak and pap" — must not be intercepted here.
   const mentionsStreakWord = /\b(streak|my streak|workout streak|current streak|consistency)\b/i.test(m);
   const looksLikeFoodLogMsg = /\b(had|ate|eaten|eating|having|for\s+(breakfast|lunch|dinner|supper|snack)|wrap|fries|burger|chips|bun)\b/i.test(m)
     || scanForSAFoods(m).length > 0;
@@ -243,23 +237,30 @@ export async function handleEarlyCommands(ctx: {
   // Negation guard: "I have NO gym access", "don't have weights", "can't get to the gym"
   // is the OPPOSITE of an equipment upgrade — without this, "no gym access this week"
   // flipped the client's programme to full gym (caught by routing-audit).
-  const negatedEquipment =
+  const negatedEquipment = (
     /\b(no|don'?t|do not|won'?t|can'?t|cannot|without|lost|left|quit|cancelled?|stopped)\b[\w\s]{0,18}\b(gym|equipment|dumbbells?|weights|bands?|access)\b/i.test(m) ||
-    /\bno\s+(gym\s+)?access\b/i.test(m);
+    /\bno\s+(gym\s+)?access\b/i.test(m)
+    // "no no 4 days AT THE GYM" / "not home — SWITCH to gym" are positive gym statements,
+    // not loss-of-access (2026-07-16: the negation veto ate ten switch attempts).
+  ) && !/\b(at the gym|to (the )?gym|gym.?based|switch|change)\b/i.test(m);
   // Trip guard: "Going to the gym first/now/later" is a statement of TODAY'S PLANS
   // (usually an answer to "what's for breakfast?"), not a membership declaration —
   // it flipped a home client's whole programme to full gym (production, 2026-07-03).
   // Mode changes need a DURABLE signal: joined / membership / switch me to.
   const isGymTripStatement = /\b(going|heading|off|about|gonna|on my way|about to go)\s+to\s+(?:the\s+)?gym\b/i.test(m)
     && !/\b(joined|member|membership|signed up|switch|change)\b/i.test(m);
-  // Keyword-level question backstop (works when the AI classifier is offline): a
-  // question about switching ("Should I switch to full gym?", "Is home as good?")
-  // must never flip the programme — only a command/declaration does.
-  const modeChangeIsQuestion = m.includes("?")
+  // Keyword-level question backstop (works when the AI classifier is offline): a question about switching ("Should I switch to full gym?", "Is home as good?") must never flip the programme — only
+  // a command/declaration does. Only a TRAILING "?" is a question — voice notes carry mid-text "Right?" fillers ("My program is home-based. Right? Switch it to gym-based") that vetoed real commands.
+  const modeChangeIsQuestion = /\?\s*$/.test(m.trim())
     || /^(should|is|are|do|does|can|could|would|will|which|what|why|how)\b/i.test(m.trim());
   const isEquipmentUpdate = !negatedEquipment && !isGymTripStatement && !ctx.isQuestion && !modeChangeIsQuestion && (
     /\b(i (have|got|bought|use|train with|now have|just got)|my (home )?(equipment|kit|setup|gear) is|i.?ve (got|purchased|bought))\b.{0,40}\b(dumbbell|dumbbells|db|resistance band|bands|gym|weights|full gym)\b/i.test(m) ||
     /\b(joined|signed up|now (go to|at|train at)|started at|switch(?:ed)? (?:me )?to|got a(?: gym)? membership)\b.{0,20}\b(gym|virgin|planet fitness|curves|fitness centre|membership)\b/i.test(m) ||
+    // 2026-07-16 live incident (ten failed attempts): "switch it to gym-based", "I want a
+    // gym based program", "gym based program not a home based" — all must WRITE the mode.
+    /\b(switch|change|swap|move|set|make|put)\b[^.!?]{0,25}\b(gym|home)([- ]?based)?\b/i.test(m) ||
+    /\b(i want|give me|i need)\b[^.!?]{0,20}\b(gym|home)[- ]?based\b/i.test(m) ||
+    /\b(gym|home)[- ]?based (program(?:me)?|workout|training|plan)\b/i.test(m) ||
     /\bchange my (equipment|training mode|setup|training setup|training|gym)\b/i.test(m) ||
     /\bupdate my (equipment|training mode|setup)\b/i.test(m));
 
@@ -349,7 +350,10 @@ export async function handleEarlyCommands(ctx: {
       .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, fiveMinAgo)))
       .orderBy(desc(chatHistory.createdAt))
       .limit(10);
-    if (recentSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
+    // The cooldown must NEVER eat a CHANGE request or a complaint (2026-07-16: "switch it
+    // to gym-based" and "you keep showing me a home-based program" both got "scroll up ↑").
+    const isChangeOrComplaint = /\b(switch|change|swap|instead|wrong|why|you (keep|said|switched)|not (a |the )?(home|gym)|gym.?based|home.?based|confus|idiot)\b/i.test(m);
+    if (!isChangeOrComplaint && recentSends.some(r => ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"].includes(r.intent || ""))) {
       const cool = `Your workout was just sent — scroll up ↑ to see it. Tap *See every move* on it for the video demos. Type *done* when you finish the session.`;
       await logChat(user.id, message, cool, "WORKOUT_COOLDOWN");
       return cool;
@@ -370,6 +374,16 @@ export async function handleEarlyCommands(ctx: {
     tempEquipmentMode.delete(phone);
 
     const state = await getTodayWorkoutState(user);
+
+    // SICK-AWARE SERVING (2026-07-16: a client resting until tomorrow was told "today is
+    // the reset — one session and you're back in it"). While sick_until is active the
+    // programme is served TO LOOK AT — never as a push, never counting missed days.
+    const sickUntilMatch = String(user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
+    const sastTodayStr = new Date(Date.now() + 2 * 3_600_000).toISOString().slice(0, 10);
+    const sickActive = !!(sickUntilMatch && sickUntilMatch[1] >= sastTodayStr);
+    const sickViewHeader = sickActive
+      ? `You're resting until ${sickUntilMatch![1]} — no pressure to do this today, it's just here to look at. Say *I'm back* when you're ready.\n\n`
+      : "";
 
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 
@@ -408,7 +422,7 @@ export async function handleEarlyCommands(ctx: {
     // MISSED SESSION(S)
     if (state.type === "MISSED") {
       const missed = state.missedSessions.join(" and ");
-      const catchupIntro = pick([
+      const catchupIntro = sickActive ? sickViewHeader.trim() : pick([
         `${firstName ? firstName + ", y" : "Y"}ou missed ${missed}. ${state.todayName} is still a training day — do it now and you're back on track.`,
         `${firstName ? firstName + " —" : ""} ${missed} missed. But today counts. Get this session done and the week is back on track.`,
         `${missed} didn't happen. That's done — don't double back. ${state.todayName}'s session is what matters now.`,
@@ -442,7 +456,7 @@ export async function handleEarlyCommands(ctx: {
       : "";
     const workoutGifUrl = getPrimaryWorkoutGifUrl(workout);
     const gifMarker = workoutGifUrl ? `\n[MEDIA:${workoutGifUrl}]` : "";
-    const reply = `${weekNote}${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
+    const reply = `${sickViewHeader}${weekNote}${poContext}${workout}${injuryNote}\n\n${doneHint}${gifMarker}[BUTTONS:Done 💪|Too hard — modify|Skip today]`;
     await logChat(user.id, message, reply.replace(/\[MEDIA:[^\]]+\]|\[BUTTONS:[^\]]+\]/g, "").trim(), "WORKOUT_VIEW");
     return reply;
   }
@@ -557,8 +571,15 @@ export async function handleEarlyCommands(ctx: {
     // switching to muscle gain saw their old fat-loss numbers as if correct.
     const recalcUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType };
     const { calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps } = recalcTargetsForProfile(recalcUser);
+    // PROGRESSION IS PRESERVED on a same-goal rebuild (2026-07-16: changing days/equipment
+    // reset a Week-2, 21-session client to 'Week 1' and re-locked his supplement gate).
+    // Only a genuine GOAL change restarts the programme clock.
+    const goalChanged = goalType !== (user.goalType || goalType);
+    const progression = goalChanged
+      ? { programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() }
+      : {};
     await db.update(users)
-      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps, awaitingProgrammeAnswers: false, programmePhase: 1, programmeWeek: 1, programmeDayInWeek: 1, programmeStartDate: new Date() })
+      .set({ trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps, awaitingProgrammeAnswers: false, ...progression })
       .where(eq(users.phoneNumber, phone));
 
     const updatedUser = { ...user, trainingDaysPerWeek: trainingDays, trainingExperience: experience, goalType, trainingMode, calorieTarget: newCal, proteinTarget: newProt, stepsTarget: newSteps };

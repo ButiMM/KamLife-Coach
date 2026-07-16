@@ -60,6 +60,9 @@ export function stripNumbersFromProse(text: string): string {
     // clean the connective debris the removals leave behind
     .replace(/:\s*(?:and|is|with|of|at)\b\s*(?=[.,!?;:])/gi, "") // "breast: and." → "breast."
     .replace(/\b(?:roughly|about|approximately|around|is|at|and|with|of)\s*(?=[.,!?;:])/gi, "")
+    // stranded quantifier mid-sentence (2026-07-16 live: "space for about left today" —
+    // the amount was stripped, the word 'about' stayed): bridge it readably.
+    .replace(/\b(about|roughly|around|approximately)\s+(left|remaining|to go|over|short|more)\b/gi, "a bit $2")
     .replace(/\s+([.,!?;:])/g, "$1")   // pull punctuation back to the word
     .replace(/[,:;]+(?=[.!?])/g, "")   // "slice,." → "slice."
     .replace(/([!?])\.+/g, "$1")        // "spread!." → "spread!"

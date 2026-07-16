@@ -66,8 +66,12 @@ export function enforceCoachGuardrails(input: string, context: GuardrailContext)
       reply = reply.replace(pattern, replacement);
     }
   }
-  // Clean up double spaces and leading/trailing whitespace left by removals
-  reply = reply.replace(/\s{2,}/g, " ").replace(/^\s+/, "").replace(/\.\s+\./g, ".").trim();
+  // Clean up the debris removals leave behind (2026-07-16 live: replies opened with
+  // ", Kam." / "but waist trainers…" / "and I'm sorry…" after a banned opener was
+  // stripped): orphan leading punctuation, orphan leading conjunctions, then re-capitalize.
+  reply = reply.replace(/\s{2,}/g, " ").replace(/,\s*,/g, ",").replace(/\.\s+\./g, ".").trim();
+  reply = reply.replace(/^[\s,;:—–-]+/, "").replace(/^(and|but|so|or|because|though|however)\b[\s,—-]*/i, "").trim();
+  if (reply && /[a-z]/.test(reply[0])) reply = reply[0].toUpperCase() + reply.slice(1);
 
   if (GENERIC_ASK_RE.test(reply)) {
     violations.push("GENERIC_OPEN_QUESTION");

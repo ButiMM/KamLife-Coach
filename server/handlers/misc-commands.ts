@@ -54,14 +54,9 @@ export async function handleMiscCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
-  // ---- DIRECTION / OVERALL PLAN ----
-  // "Give me direction", "what do I do today and this week", "what's my overall plan" —
-  // the client wants the WHOLE plan across every pillar (train/rest, food, steps, water),
-  // not a bare workout dump (2026-07-09: a client asked exactly this and got an exercise
-  // list). Deterministic + plain, pulls their real targets and today's training state.
-  // Single shared detector (utils.looksLikeDirectionRequest) — the SAME check gates the
-  // brain in routes.ts, so a direction ask can never be swallowed by the model again
-  // (2026-07-11: brain answered it with contradicting workout dumps on a rest day).
+  // ---- DIRECTION / OVERALL PLAN ---- "Give me direction", "what do I do today and this week", "what's my overall plan" — the client wants the WHOLE plan across every pillar (train/rest, food,
+  // steps, water), not a bare workout dump (2026-07-09: a client asked exactly this and got an exercise list). Deterministic + plain, pulls their real targets and today's training state. Single shared detector (utils.looksLikeDirectionRequest)
+  // — the SAME check gates the brain in routes.ts, so a direction ask can never be swallowed by the model again (2026-07-11: brain answered it with contradicting workout dumps on a rest day).
   if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
     return buildDailyDirection(user, ws as any);
@@ -132,10 +127,24 @@ export async function handleMiscCommands(ctx: {
   };
   const suppMatch = Object.entries(suppKeywords).find(([kw]) => m.includes(kw));
   if (suppMatch || m.includes("supplement") || m.includes("what should i take") || m.includes("should i take")) {
-    // Supplement week gate — locked before week 4, BUT safety/medical questions always get through
+    // ALREADY TAKING IT (2026-07-16 live: 'But I'm already taking creatine daily' was
+    // first week-gated, then SOLD the full creatine pitch — contradiction + deaf). A
+    // client already on a supplement gets acknowledgment + usage guidance, no gate, no sell.
+    if (/\b(already|currently)\b.{0,20}\b(taking|on|using|use|drink(ing)?)\b/i.test(m) || /\bi take\b/i.test(m)) {
+      const suppName = suppMatch ? suppMatch[1] : "it";
+      const alreadyReply = suppName === "creatine"
+        ? `Good — keep the creatine going: 5g every day (training days and rest days), any time, with water. Consistency is the whole game with it; you'll feel the full effect after 2–4 weeks. Nothing else needed.`
+        : `Good — if it's working for you and it's a basic (${suppName}), keep it consistent and keep your protein from real food the priority. If you ever notice side effects, tell me.`;
+      await logChat(user.id, message, alreadyReply, "SUPPLEMENT");
+      return alreadyReply;
+    }
+    // Supplement week gate — locked before week 4, BUT safety/medical questions always get
+    // through, and a RESET programme week never re-locks a veteran (2026-07-16: a rebuild
+    // set programmeWeek back to 1 and week-gated a 21-session client): lifetime sessions count.
     const isSafetyQuestion = /\b(safe|safety|danger|dangerous|side effect|kidney|liver|heart|allergy|allergic|interact|reaction|risk|harm|harmful|dose|overdose|too much|cancer|blood pressure|diabetes)\b/i.test(m);
     const progWeek = user.programmeWeek || 1;
-    if (progWeek < 4 && !isSafetyQuestion) {
+    const isVeteran = (user.totalWorkoutsCompleted || 0) >= 12;
+    if (progWeek < 4 && !isVeteran && !isSafetyQuestion) {
       const weekGate = `Supplements unlock at Week 4.\n\nYou are in Week ${progWeek} — food consistency is the foundation. No supplement will out-work a solid week of eating right.\n\nFocus now: hit your ${user.proteinTarget || 120}g protein target daily from real food. When you reach Week 4, I give you the full supplement protocol — creatine, protein timing, the works.`;
       await logChat(user.id, message, weekGate, "SUPPLEMENT_GATED");
       return weekGate;
@@ -921,12 +930,8 @@ export async function handleMiscCommands(ctx: {
     return `Your BMI is ${bmiVal.toFixed(1)} — ${cat}.\n\n${bmiNote}\n\nBMI is one number, not the full picture. Strength, energy, and consistency matter more.`;
   }
 
-  // ---- NEW: TODAY'S WORKOUT ----
-  // Exact phrases PLUS a tolerant matcher. Voice transcripts arrive with artifacts
-  // ("Meet today's workout." — Whisper mishearing "what's"), real typing arrives with
-  // punctuation ("Today's workout?"), and follow-ups arrive as deixis ("Show it to me").
-  // Every one of these must deliver the plan deterministically — when they miss, GPT
-  // improvises an unformatted workout paragraph with no warm-up and no logging path.
+  // ---- NEW: TODAY'S WORKOUT ---- Exact phrases PLUS a tolerant matcher. Voice transcripts arrive with artifacts ("Meet today's workout." — Whisper mishearing "what's"), real typing arrives with punctuation ("Today's workout?"), and follow-ups arrive
+  // as deixis ("Show it to me"). Every one of these must deliver the plan deterministically — when they miss, GPT improvises an unformatted workout paragraph with no warm-up and no logging path.
   const wReqStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
   const WORKOUT_REQ_EXACT = ["today", "today's workout", "todays workout", "my workout", "workout today", "show workout", "give me workout",
     "show me", "show", "send it", "send workout", "show session", "today's session", "todays session",
@@ -970,12 +975,8 @@ export async function handleMiscCommands(ctx: {
     return `*${phaseName} Phase · Week ${week}${sessionNote}*\n\n${poCtx}*Day ${dayNum} — Today's Workout*\n\n${workout}\n\nSend *done* when finished. Log lifts: "bench 80kg 3x10"${viewerLine}${gif2 ? `\n[MEDIA:${gif2}]` : ""}`;
   }
 
-  // ---- NEW: NEXT WORKOUT ----
-  // Exact bare phrases PLUS a shape match, so prefixed and voice-transcribed
-  // phrasings ("show me tomorrow's workout", "what's tomorrow's session") route
-  // here deterministically. "tomorrow" is deliberately excluded from the today
-  // handler above, so without this these requests fall through to GPT — which
-  // fabricates a generic workout with no sets, weights, or logging path.
+  // ---- NEW: NEXT WORKOUT ---- Exact bare phrases PLUS a shape match, so prefixed and voice-transcribed phrasings ("show me tomorrow's workout", "what's tomorrow's session") route here deterministically. "tomorrow" is
+  // deliberately excluded from the today handler above, so without this these requests fall through to GPT — which fabricates a generic workout with no sets, weights, or logging path.
   const nextStripped = m.replace(/^[.!?,;:'"\s]+|[.!?,;:'"\s]+$/g, "");
   // Bare "tomorrow"/"what's tomorrow" removed: "Tomorrow???" is usually the client
   // QUESTIONING something the coach just said ("Tomorrow: lead breakfast with 3
@@ -1636,12 +1637,9 @@ export async function handleMiscCommands(ctx: {
     return reply;
   }
 
-  // ---- EXERCISE VARIANTS GUIDE — "show me shoulder press", "types of leg press", "row options" ----
-  // A GENERIC movement name ("shoulder press") means "which machine is this and how do I use
-  // it" — clients without a trainer ask this constantly. Show the menu of real-world variants
-  // with how-to-spot-each. A SPECIFIC variant ("machine shoulder press") or an explicit form
-  // request ("shoulder press form") returns null here and falls through to the single-image
-  // demo below — so the guide can safely point users at "<movement> form" without looping.
+  // ---- EXERCISE VARIANTS GUIDE — "show me shoulder press", "types of leg press", "row options" ---- A GENERIC movement name ("shoulder press") means "which machine is this and how
+  // do I use it" — clients without a trainer ask this constantly. Show the menu of real-world variants with how-to-spot-each. A SPECIFIC variant ("machine shoulder press") or an explicit
+  // form request ("shoulder press form") returns null here and falls through to the single-image demo below — so the guide can safely point users at "<movement> form" without looping.
   {
     const famKey = matchVariantGuideRequest(m);
     if (famKey) {

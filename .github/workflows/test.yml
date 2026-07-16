@@ -11,10 +11,15 @@ name: Tests
 # The whole suite is pure (no real DB, no network) — the food-scanner tests set a
 # dummy DATABASE_URL and the AI calls run in offline mode — so it runs anywhere.
 
+# NOT on push (2026-07-16): Actions minutes are exhausted, so every push spawned an
+# instant billing-gate failure + a "Run failed" email — dozens a day screaming at the
+# founder about nothing. The builder runs the full suite locally before every push;
+# CI re-verifies on PRs, once nightly, and on demand. Re-add push triggers when the
+# minutes quota is refilled.
 on:
-  push:
-    branches: [main]
   pull_request:
+  schedule:
+    - cron: "0 2 * * *" # 4am SAST, once daily
   workflow_dispatch: {}
 
 concurrency:

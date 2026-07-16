@@ -740,6 +740,41 @@ const CASES: Case[] = [
   { name: "emotional: a deep share mentioning food is NOT logged as a meal",
     msg: "I ate a whole cake last night and I feel so ashamed. I've tried everything — every diet, Ozempic — and I just want to give up.",
     reject: [/\*Food logged|Food logged ✅|Running total today|Meal total:|kcal \| .*protein/i] },
+
+  // ── TESTER PLAYBOOK (2026-07-16) — the AUTOMATED TESTER. Every live founder-found
+  // incident becomes a scenario here THE SAME DAY, phrased the way it was spoken. This
+  // battery is what replaces manual screenshot QA: it runs the FULL pipeline on every
+  // push, so these classes can never silently return.
+  { name: "playbook: spoken meal-list request reaches the real list, never 'the app'",
+    msg: "Show me today's food, every single meal that I've logged",
+    expect: [/No food logged yet today|Today'?s (meals|food log)/i],
+    reject: [/can'?t show|in the app|check your meal log/i] },
+  { name: "playbook: 'No, show me today's meals, all the meals' also reaches the list",
+    msg: "No, show me today's meals, all the meals.",
+    expect: [/No (food|meals) logged yet today|Today'?s (meals|food log)/i],
+    reject: [/can'?t show|in the app/i] },
+  { name: "playbook: spoken programme request DELIVERS, never 'reply program to see it'",
+    msg: "Show me my gym program",
+    expect: [/week|day|session|workout|phase/i],
+    reject: [/reply\s*\*?program|can'?t show/i] },
+  // (stub DB returns 0 running totals, so assert the ROUTING guarantee: it logged —
+  //  never the "How much?" ask — rather than the echoed amount)
+  { name: "playbook: spoken water amount logs — never 'How much?' at a stated amount",
+    msg: "just had one litre of water",
+    expect: [/logged|total|added|so far/i],
+    reject: [/How much\? Tell me the amount/i] },
+  // TODO(P0 residual): in compound food+water the WATER logs (below) but the food half
+  // falls to the fallback instead of the meal logger — reply must eventually carry BOTH.
+  { name: "playbook: compound food+water — water logs, never 'How much?'",
+    msg: "I had an apple and a pear and one litre of water",
+    expect: [/water logged|logged.*water|\dL/i],
+    reject: [/How much\? Tell me the amount/i] },
+  { name: "playbook: compound steps+water — steps log, never dropped",
+    msg: "walked 8000 steps and drank 2 litres of water",
+    expect: [/8[,\s.]?000/] },
+  { name: "playbook: 'can I have this' TEXT question is a question, never an equipment write",
+    msg: "Can I have this energy drink?",
+    reject: [/updated to home training|programme will use what you have/i] },
 ];
 
 async function main() {

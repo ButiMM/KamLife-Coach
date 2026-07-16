@@ -508,6 +508,14 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
         console.log(`[NORMALIZER] GOAL_CHANGE brake — no goal vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
         canon = "";
       }
+      // TOTALS_QUERY brake (2026-07-16 live, twice): "how do my calories ADJUST when I'm
+      // sick?" is a coaching QUESTION, not a totals lookup — rewriting it to "today's
+      // calories" served the canned totals card at a nuanced question. Only a bare
+      // lookup gets the rewrite; any reasoning vocabulary keeps the original message.
+      if (pre.intent === "TOTALS_QUERY" && /\b(adjust|change|why|what happens|should|if i|when i.?m|sick|ill|holiday|rest|not (walking|training)|stay the same|missing the point)\b/i.test(originalMBeforeNorm)) {
+        console.log(`[NORMALIZER] TOTALS brake — reasoning vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
+        canon = "";
+      }
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
         const canonLower = canon.toLowerCase();
         if (canonLower !== m) {
