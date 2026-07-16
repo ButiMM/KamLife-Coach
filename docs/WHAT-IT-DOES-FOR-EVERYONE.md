@@ -1,7 +1,11 @@
-# What KamLife Coach Actually Does — For Every Person
+# What KamLife Coach Does — For Every Person (Product Vision)
 
-**Launch-day answer, grounded in the real code (not marketing).**
-Date: 2026-07-16
+> **READ THIS FIRST:** this document describes the product experience we are
+> shipping — most of it is live today, and the auditable current-state split
+> (built ✅ / in-verification ⚠️ / not-built 🔵) lives in
+> **`CURRENT-CAPABILITIES.md`** — send THAT to reviewers verifying launch
+> readiness. The honest gaps are in §5 of this document; read them before the
+> promises. Date: 2026-07-16
 
 The whole thing lives in WhatsApp. No app to download, no dashboard to learn, no
 buttons to hunt for. You talk to Coach K the way you'd talk to a person — type,
