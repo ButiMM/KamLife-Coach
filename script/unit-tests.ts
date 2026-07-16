@@ -31,6 +31,7 @@ import { defaultUnderstanding, coerceUnderstanding, parseUnderstanding, persista
 import { compileStateBlurb, compileKeyFacts } from "../server/understanding/compiler";
 import { looksLikeRefusal } from "../server/understanding/refusal";
 import { isObviouslyInDomain } from "../server/understanding/domain-guard";
+import { mustStayDeterministic } from "../server/understanding/action-router";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -2719,6 +2720,32 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
     "who is going to win the elections next year in the country",
   ];
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
+});
+
+// ============================================================
+// THE INVERSION — actions stay deterministic; conversation goes to Coach K.
+// A false "goes to engine" could drop a food/step log — unforgivable — so the
+// action side is the one that must never regress.
+// ============================================================
+
+test("action-router: logs, commands, data, health & billing STAY deterministic (never lost)", () => {
+  const mustBeDeterministic = [
+    "walked 3000 steps today", "84.5kg", "log my breakfast", "stats", "how am i doing",
+    "my progress", "weight chart", "my workouts", "shopping list", "portions", "fact",
+    "mood 4/10", "started my fast", "broke my fast", "creatine", "my knee is injured",
+    "my period started", "pay", "cancel my subscription", "today's workout", "2.5L water",
+  ];
+  for (const m of mustBeDeterministic) assert.ok(mustStayDeterministic(m), `must STAY deterministic (a lost action is unforgivable): "${m}"`);
+});
+
+test("action-router: conversation/advice/feelings/myths (any SA language) go to Coach K", () => {
+  const mustReachEngine = [
+    "what about my diet while resting", "can i eat avocado every day",
+    "is running good for weight loss", "what about ozempic", "i feel like giving up",
+    "how can i improve", "ngidle ipapa ne soup", "yoh im so tired coach",
+    "what can we focus on while im sick", "i had a hard week",
+  ];
+  for (const m of mustReachEngine) assert.ok(!mustStayDeterministic(m), `should reach Coach K, not a template: "${m}"`);
 });
 
 // ============================================================

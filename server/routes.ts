@@ -42,6 +42,7 @@ import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runShadowEval, shadowEnabled } from "./understanding/shadow";
 import { runMeaningEngineLive, engineLive } from "./understanding/live";
+import { mustStayDeterministic } from "./understanding/action-router";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
 
@@ -878,6 +879,20 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     if (progressResult !== null) return progressResult;
   }
 
+  // ================= THE INVERSION (Phase 1 — Coach K is the FRONT DOOR) =================
+  // Coach K now runs BEFORE the Misc/Lifecycle template handlers, not after them. Genuine
+  // CONVERSATION (questions, feelings, advice, myths, any SA language) goes to Coach K first,
+  // so no hardcoded template can front-run understanding. Only ACTIONS —
+  // mustStayDeterministic(m): logging, data lookups, commands, health/safety, billing — skip
+  // Coach K and stay on the deterministic rails below. Fail-open: if Coach K declines (null),
+  // the deterministic handlers still run as fallback, so a log/command is NEVER lost.
+  // Flag-gated (ENGINE_LIVE=on) and instantly reversible (ENGINE_LIVE=off).
+  const tag = (reply: string, src: string) => (isCoach ? `${reply}\n\n_· ${src} ·_` : reply);
+  if (engineLive() && !mustStayDeterministic(m) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
+    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai });
+    if (engineFront !== null) return tag(engineFront, "🧠 new engine");
+  }
+
   const miscResult = await handleMiscCommands({ phone, message, m, user, isQuestion: normalizedQuestion });
   if (miscResult !== null) return miscResult;
 
@@ -898,10 +913,10 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Everything on the deterministic rails (sick/injury/pain, logging/payment, workout +
   // programme delivery) has already been handled above; only conversation reaches here.
   // Flag-gated (ENGINE_LIVE=on) and fail-open — a null defers to the brain/gpt-block below.
-  // COACH DIAGNOSTIC TAG: only on the founder's own number, append which brain answered
-  // so Kam can SEE what's actually running while we roll out. Never shown to real clients.
-  const tag = (reply: string, src: string) => (isCoach ? `${reply}\n\n_· ${src} ·_` : reply);
-
+  // COACH DIAGNOSTIC TAG defined above (front-door inversion). This TAIL is the final
+  // backstop: a message that stayed deterministic (mustStayDeterministic) but that no
+  // Misc/Lifecycle handler actually claimed still gets one last crack at Coach K rather
+  // than falling through to the raw brain.
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
