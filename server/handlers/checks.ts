@@ -89,7 +89,12 @@ export async function getDamageControlNote(userId: string, message: string): Pro
     ? /\bcoke\b/i.test(lowerMsg)
     : lowerMsg.includes(t)
   ).length;
-  if (triggerCount < 2) return "";
+  // ALCOHOL BINGE (2026-07-16 founder review: 'what does it say when they go over with
+  // alcohol?' — nothing fired): 3+ drinks logged/confessed counts as damage on its own.
+  const alcoholBinge = /\b([3-9]|\d{2,})\s*(beers?|shots?|ciders?|drinks?|glasses (of )?wine|savannas?|castles?|black labels?)\b/i.test(lowerMsg)
+    || /\b(drank|had) (a lot|too much|way too much|heavily)\b.{0,20}\b(beer|wine|alcohol|booze)\b/i.test(lowerMsg)
+    || /\b(hungover|hangover|babalaas|babelas)\b/i.test(lowerMsg);
+  if (triggerCount < 2 && !alcoholBinge) return "";
   const todayStart = sastDayStart();
   const recentDamage = await db.select({ id: chatHistory.id }).from(chatHistory)
     .where(and(eq(chatHistory.userId, userId), eq(chatHistory.intent, "DAMAGE_CONTROL"), gte(chatHistory.createdAt, todayStart)))

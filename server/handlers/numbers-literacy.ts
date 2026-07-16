@@ -12,6 +12,36 @@ import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { detectToneSignal } from "../tone-mode";
+import { messageSpeaksNumbers } from "../numbers-mode";
+import { sendWhatsApp } from "../scheduler";
+
+// AUTO OPT-IN BY FLUENCY (2026-07-16 founder: "be brighter than that"). A client who
+// speaks in kcal/macros THREE times has voted with their vocabulary — flip them to
+// full numbers without making them find the magic phrase. Counter rides in
+// profileNotes (numfluent:N, same migration-free pattern as sick_until). Called
+// fire-and-forget from routes at message entry, so it counts EVERY text message no
+// matter which handler wins, and never blocks or replaces a reply — the one-time
+// notice goes out as its own WhatsApp message.
+export async function bumpNumericFluency(user: any, m: string, phone: string): Promise<void> {
+  try {
+    const notes = user?.profileNotes || "";
+    if (/\bnumbers:full\b/i.test(notes)) return; // already opted in
+    if (!messageSpeaksNumbers(m)) return;
+    const count = parseInt((notes.match(/\bnumfluent:(\d+)\b/i) || [])[1] || "0", 10) + 1;
+    if (count >= 3) {
+      const base = notes.replace(/\s*\bnumfluent:\d+\b/gi, "").replace(/\s*\bnumbers:(low|full)\b/gi, "").trim();
+      await db.update(users).set({ profileNotes: base ? `${base} numbers:full` : "numbers:full" }).where(eq(users.phoneNumber, phone));
+      const notice = `I've noticed you speak calories 📊 — so from now on I'll show the full numbers (kcal + protein) on every meal. If it ever gets to be too much, just say *"keep it simple"* and I'll go back to plain words.`;
+      await sendWhatsApp(phone, notice);
+      await logChat(user.id, "[system: numeric fluency detected]", notice, "NUMBERS_AUTO_ON");
+    } else {
+      const base = notes.replace(/\s*\bnumfluent:\d+\b/gi, "").trim();
+      await db.update(users).set({ profileNotes: base ? `${base} numfluent:${count}` : `numfluent:${count}` }).where(eq(users.phoneNumber, phone));
+    }
+  } catch (e) {
+    console.warn("[NUMERIC_FLUENCY] non-fatal:", (e as Error)?.message || e);
+  }
+}
 
 // TONE PREFERENCE (2026-07-14) — a client who asks for a different voice ("just tell
 // me straight", "be gentle with me", "push me") gets it set as a durable tone: token,

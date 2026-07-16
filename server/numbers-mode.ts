@@ -74,6 +74,21 @@ export function stripNumbersFromProse(text: string): string {
     .trim();
 }
 
+// NUMERIC-FLUENCY DETECTOR (2026-07-16 founder: "some want calories and some don't —
+// we need to be brighter than that"). A client who TALKS in kcal/macros has told us
+// who they are without ever saying "show me the numbers". Pure and strict: only
+// calorie/kilojoule/macro vocabulary WITH a digit, or explicit macro-speak — steps,
+// kg bodyweight, reps and litres never count (everyone says those).
+export function messageSpeaksNumbers(message: string): boolean {
+  const m = (message || "").toLowerCase();
+  if (/\b\d[\d,.]*\s*(?:kcal|kj|kilojoules?|cal(?:orie)?s?)\b/.test(m)) return true;
+  if (/\b\d+(?:\.\d+)?\s*g(?:rams?)?\s*(?:of\s+)?(?:protein|carbs?|fat)\b/.test(m)) return true;
+  if (/\bmacros\b/.test(m)) return true;
+  if (/\b(?:calorie|kcal|energy)\s+(?:deficit|surplus|budget|goal)\b/.test(m)) return true;
+  if (/\bhow (?:many|much)\b.{0,30}\b(?:kcal|calories|protein|carbs)\b/.test(m)) return true;
+  return false;
+}
+
 // Words-only protein nudge for low-numeracy clients — never a gram figure.
 export function plainProteinNudge(opts: { proteinRemaining: number; isMuscleGain: boolean; hasGoodProteins: boolean }): string {
   const { proteinRemaining, isMuscleGain, hasGoodProteins } = opts;

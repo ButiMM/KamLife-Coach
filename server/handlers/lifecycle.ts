@@ -31,7 +31,7 @@ import { sendCriticalAlert } from "../scheduler/shared";
 import { sastToday, sastDayStart, proteinOptions } from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
-import { scanForSAFoods } from "./food-scanner";
+import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
 
 export async function handleLifecycle(ctx: {
   phone: string;
@@ -1283,7 +1283,10 @@ export async function handleLifecycle(ctx: {
       `*Target:* ${calTarget} kcal | ${protTarget}g protein`,
       `*Status:* ${goalStatusLine(user.goalType, calRemaining)}`,
     ];
-    const diaryReply = diaryLines.join("\n") + diaryCoachNote;
+    // Weekly-journey footer — the diary is where a treat day gets judged, so this is
+    // where the week must visibly absorb it (2026-07-16 founder review).
+    const weekLine = await weeklyNetLine(user);
+    const diaryReply = diaryLines.join("\n") + (weekLine ? `\n\n${weekLine}` : "") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");
     return diaryReply;
   }

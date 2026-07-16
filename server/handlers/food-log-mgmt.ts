@@ -8,7 +8,7 @@ import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
 import { goalStatusLine } from "../education";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine } from "./food-scanner";
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 
@@ -451,7 +451,10 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     const calRemaining = calorieTarget - totalCals;
     const protRemaining = proteinTarget - totalProtein;
     const remainingLine = `${goalStatusLine(user.goalType, calRemaining)}${protRemaining > 0 ? `\nProtein: ~${protRemaining}g still to hit today.` : ""}`;
-    return `*Today's meals (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total:* ~${totalCals} kcal | ~${totalProtein}g protein\n${remainingLine}`;
+    // Weekly-journey footer — zooms the client out from today to the week, so one
+    // heavy day reads as a data point, not a failure (2026-07-16 founder review).
+    const weekLine = await weeklyNetLine(user);
+    return `*Today's meals (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total:* ~${totalCals} kcal | ~${totalProtein}g protein\n${remainingLine}${weekLine ? `\n\n${weekLine}` : ""}`;
   }
 
   return null;

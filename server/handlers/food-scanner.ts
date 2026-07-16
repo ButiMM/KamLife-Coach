@@ -1,7 +1,7 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { educationNote, remainingInMeals } from "../education";
+import { educationNote, remainingInMeals, weeklyNetWording } from "../education";
 import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
 import { stepBurnKcal } from "../targets";
 import { db } from "../db";
@@ -543,6 +543,39 @@ export async function findDuplicateMealToday(userId: string, desc: string): Prom
     }
   } catch (e) { console.warn("[DUP_MEAL_GUARD] check failed (logging normally):", (e as Error)?.message); }
   return null;
+}
+
+/**
+ * WEEKLY-JOURNEY LINE (2026-07-16 founder review): sum the last 7 SAST days of
+ * logged food against loggedDays × daily target and hand the numbers to the one
+ * wording brain (education.weeklyNetWording). Only days with an actual log count —
+ * an unlogged Saturday is unknown, not a 0 kcal triumph. Fail-open: any error
+ * returns "" and the meal list serves without it.
+ */
+export async function weeklyNetLine(user: any): Promise<string> {
+  try {
+    const target = user?.calorieTarget || 1800;
+    const weekStart = new Date(sastDayStart().getTime() - 6 * 86_400_000);
+    const rows = await db.select({
+      day: sql<string>`to_char(${mealLogs.loggedAt} + interval '2 hours', 'YYYY-MM-DD')`,
+      kcal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
+    }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, weekStart)))
+      .groupBy(sql`to_char(${mealLogs.loggedAt} + interval '2 hours', 'YYYY-MM-DD')`);
+    const loggedDays = rows.filter(r => (r.kcal || 0) > 0);
+    if (loggedDays.length < 3) return "";
+    const eaten = loggedDays.reduce((s, r) => s + (r.kcal || 0), 0);
+    const goal = String(user?.goalType || "fat_loss").toLowerCase();
+    return weeklyNetWording({
+      loggedDays: loggedDays.length,
+      netKcal: eaten - loggedDays.length * target,
+      building: goal === "muscle_gain" || goal === "weight_gain",
+      numbersLow: getNumbersMode(user) === "low",
+    });
+  } catch (e) {
+    console.warn("[WEEKLY_NET] non-fatal:", (e as Error)?.message || e);
+    return "";
+  }
 }
 
 export async function recomputeTodayFoodTotals(userId: string): Promise<{ calories: number; protein: number }> {

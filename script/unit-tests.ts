@@ -2165,6 +2165,70 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   });
 }
 
+// NUMERIC-FLUENCY AUTO-DETECT (2026-07-16, Kam: "some want calories and some don't —
+// we need to be brighter than that"). A client who speaks in kcal/macros is a numbers
+// person; everyday numbers (steps, kg, reps, litres) must never trip it.
+{
+  const { messageSpeaksNumbers } = await import("../server/numbers-mode");
+  test("numeric fluency: kcal/macro speech IS detected", () => {
+    for (const m of [
+      "that was about 450 kcal",
+      "i had 300 calories of oats",
+      "how many calories do i have left today?",
+      "is 30g protein enough for lunch?",
+      "what are my macros looking like",
+      "am i still in a calorie deficit?",
+      "had 40 g of protein at breakfast",
+      "roughly 2000 kj i think",
+    ]) assert.ok(messageSpeaksNumbers(m), `should detect: ${m}`);
+  });
+  test("numeric fluency: everyday numbers do NOT count", () => {
+    for (const m of [
+      "did 8500 steps today",
+      "i weigh 82kg now",
+      "3 sets of 12 reps done",
+      "drank 2 litres of water",
+      "i had 2 eggs and pap",
+      "see you at 6pm",
+      "i'm 34 years old",
+      "had 3 beers last night",
+    ]) assert.ok(!messageSpeaksNumbers(m), `should NOT detect: ${m}`);
+  });
+}
+
+// WEEKLY-JOURNEY LINE (2026-07-16, Kam: "teach them about their weekly goals —
+// you're on a weekly journey"). One wording brain, goal- and numbers-mode-aware;
+// the over branch must teach "tomorrow stays NORMAL", never a punishment day.
+{
+  const { weeklyNetWording } = await import("../server/education");
+  test("weekly journey: under 3 logged days says nothing", () => {
+    assert.equal(weeklyNetWording({ loggedDays: 2, netKcal: 900, building: false, numbersLow: false }), "");
+  });
+  test("weekly journey: on-track week is called a win, whatever one day did", () => {
+    const s = weeklyNetWording({ loggedDays: 5, netKcal: 300, building: false, numbersLow: false });
+    assert.ok(/on track/i.test(s), `should read on-track: ${s}`);
+  });
+  test("weekly journey: over-budget fat-loss week teaches NORMAL tomorrow, never starving", () => {
+    const s = weeklyNetWording({ loggedDays: 6, netKcal: 1500, building: false, numbersLow: false });
+    assert.ok(/normal/i.test(s) && /never starve/i.test(s), `must teach the law: ${s}`);
+    assert.ok(/1500/.test(s), "numbers client sees the real figure");
+  });
+  test("weekly journey: numbers-low wording carries ZERO digits", () => {
+    for (const net of [-1400, 0, 1400]) {
+      for (const building of [true, false]) {
+        const s = weeklyNetWording({ loggedDays: 5, netKcal: net, building, numbersLow: true });
+        assert.ok(s.length > 0 && !/\d/.test(s), `must be digit-free: ${s}`);
+      }
+    }
+  });
+  test("weekly journey: goal-aware — under budget is a warning when building, a win when cutting", () => {
+    const b = weeklyNetWording({ loggedDays: 5, netKcal: -1200, building: true, numbersLow: false });
+    assert.ok(/under|fuel/i.test(b) && /eat/i.test(b), `builder told to eat: ${b}`);
+    const c = weeklyNetWording({ loggedDays: 5, netKcal: -1200, building: false, numbersLow: false });
+    assert.ok(/ahead of plan/i.test(c), `cutter ahead of plan: ${c}`);
+  });
+}
+
 // DEEP EMOTIONAL SUPPORT (2026-07-14, Kam: manual clients send long voice notes —
 // they've tried everything and stay for the accountability + support).
 {

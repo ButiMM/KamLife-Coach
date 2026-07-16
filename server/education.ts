@@ -99,6 +99,45 @@ export function remainingInMeals(kcal: number): string {
 }
 
 /**
+ * WEEKLY-JOURNEY WORDING (2026-07-16, founder: "what does the bot teach them about
+ * their weekly goals... you're on a weekly journey"). One line that zooms the client
+ * out from today to the week, so a deliberate treat or a heavy braai stops reading
+ * as failure the moment the week can be SEEN absorbing it. Pure — the DB summing
+ * lives in food-scanner.weeklyNetLine; this is the single wording brain, goal-aware
+ * and numbers-mode-aware. netKcal is (eaten − loggedDays×target): positive = over.
+ * The over branch always teaches the same law: tomorrow stays NORMAL — a punishment
+ * day is how diets die.
+ */
+export function weeklyNetWording(opts: { loggedDays: number; netKcal: number; building: boolean; numbersLow: boolean }): string {
+  const { loggedDays, netKcal, building, numbersLow } = opts;
+  if (loggedDays < 3) return ""; // too thin to judge a week — say nothing
+  const perDayBand = 100; // within ±100 kcal/day of budget = on track
+  const onTrack = Math.abs(netKcal) <= loggedDays * perDayBand;
+  const over = netKcal > 0;
+  if (numbersLow) {
+    if (onTrack) return `📅 *Your week:* on track. One heavy day never decides anything — the week does, and yours is winning.`;
+    if (over) {
+      return building
+        ? `📅 *Your week:* plenty of fuel in — make sure the training matches it so it builds muscle, not padding.`
+        : `📅 *Your week:* running a bit heavy. No punishment day — eat NORMAL tomorrow (regular meals, protein first) and the week comes right on its own.`;
+    }
+    return building
+      ? `📅 *Your week:* under-fuelled overall — muscle can't be built from air. Eat your full days.`
+      : `📅 *Your week:* ahead of plan. Don't turn that into starving — keep eating your normal days and let the week do the work.`;
+  }
+  const abs = Math.abs(netKcal);
+  if (onTrack) return `📅 *Your week:* ${loggedDays} days logged, within ~${abs} kcal of budget overall — the week is on track, whatever any single day did.`;
+  if (over) {
+    return building
+      ? `📅 *Your week:* ~${abs} kcal over your building budget across ${loggedDays} days — fine if training is hard; if not, ease back toward target.`
+      : `📅 *Your week:* ~${abs} kcal over budget across ${loggedDays} days. That's the week talking, not one day — and the fix is boring: tomorrow stays NORMAL (target, protein first). Never starve to repay a day; that's how diets die.`;
+  }
+  return building
+    ? `📅 *Your week:* ~${abs} kcal UNDER your building budget across ${loggedDays} days — that's muscle fuel left on the table. Eat your full target.`
+    : `📅 *Your week:* ~${abs} kcal under budget across ${loggedDays} days — ahead of plan. Keep meals normal; no need to bank more.`;
+}
+
+/**
  * GOAL-AWARE STATUS LINE (2026-07-16, founder: "a number must never travel alone").
  * "Over by 117 kcal" means OPPOSITE things per goal — a fat-loss stumble, a muscle-gain
  * plan-working, a recomp drift. ONE education line, goal-aware, never shaming, short

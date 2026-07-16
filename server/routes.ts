@@ -26,6 +26,7 @@ import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
+import { bumpNumericFluency } from "./handlers/numbers-literacy";
 import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { handleProgressCheck } from "./handlers/progress";
@@ -152,6 +153,11 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     const name = user.name ? `${user.name}, ` : "";
     return `${name}before we continue I need your consent to process your personal health and fitness data.\n\nKamLife Coach stores your weight, food logs, workout records, and health information to give you personalised coaching. This is protected under POPIA (Protection of Personal Information Act).\n\nYour data is:\n- Used only for your coaching\n- Never sold to anyone\n- Deleted on request (reply "delete my data" at any time)\n\nReply *yes* or *agree* to continue. Reply "delete my data" if you would like us to remove all your information.`;
   }
+
+  // ---- NUMERIC-FLUENCY DETECTOR (fire-and-forget) — a client who talks in
+  // kcal/macros three times gets full numbers turned on automatically, with a
+  // one-time notice sent separately. Never blocks or alters this reply. ----
+  if (!mediaUrl && message.length >= 2) void bumpNumericFluency(user, m, phone);
 
   // ---- COACH / OWNER BYPASS — never paywall the coach's own number ----
   // Checks COACH_ALERT_PHONE and ADMIN_PHONE_OVERRIDE (either env var works)
