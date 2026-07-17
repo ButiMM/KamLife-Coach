@@ -30,13 +30,16 @@ it argued architecture, not guessed features. Verified against code before verdi
 - `inferenceQuality` block in `/api/admin/outcomes`: meals30d, corrected30d,
   correctionRatePct, clientsCorrecting30d.
 
-### TAKE (committed, post-launch P1) — adaptive portion learning
-The review's single best recommendation, adopted as the first post-launch build:
-per-(client, food) median portion from their own logs overrides the static
-`typicalPortion*` after >=3 logs of that food. Cheap (SQL over meal_logs.items),
-immediate retention leverage, builds the personal-context moat incrementally.
-BUILD TRIGGER: correctionRatePct sustained above ~15%, or first 50 real clients —
-whichever comes first. The metric shipped today exists to time this correctly.
+### TAKE (BUILT same day, 2026-07-17) — adaptive portion learning
+The review's single best recommendation. Initially committed as a trigger-gated
+post-launch P1; the founder overrode the wait ("let's build them") — and rightly,
+since the design is fail-open (no history = static defaults, zero day-one cost).
+Built as `server/portion-memory.ts`: per-(client, food) MEDIAN portion from their
+own meal_logs items (90d, >=3 logs, clamped 0.5x-3x of the table default, protein
+scaled to preserve macro shape). Overrides ONLY in silence — explicit counts and
+size words always win. Reply shows "— your usual". Corrections invalidate the
+memory cache, so every fix teaches the very next log. The correctionRatePct
+metric now MEASURES the loop instead of gating it.
 
 ### ADAPT / DEFER (with reasons)
 - Confidence model + "one short question": our answer at WhatsApp friction levels is
