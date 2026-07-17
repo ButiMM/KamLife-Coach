@@ -75,6 +75,7 @@ const CACHE_TTL_MS = 60_000;
 /** Invalidate after any meal insert/correction so the next log learns immediately. */
 export function invalidatePortionMemory(userId: string): void {
   _cache.delete(userId);
+  _slotCache.delete(userId); // slot memory learns from the same rows
 }
 
 export async function getPortionMemory(userId: string): Promise<Map<string, PortionStat>> {
@@ -93,5 +94,74 @@ export async function getPortionMemory(userId: string): Promise<Map<string, Port
   } catch (e) {
     console.warn("[PORTION_MEMORY] non-fatal:", (e as Error)?.message);
     return new Map(); // fail-open: static defaults
+  }
+}
+
+// ── PERSONAL MEAL-SLOT LEARNING (Review #7 items 3b + gap-heuristic + behavioural
+// shift detection, built 2026-07-17). The clock says 10:00 = breakfast; this client's
+// own history may say 10:00 = lunch. Their pattern wins once it's strong enough —
+// which also catches rotating/irregular shift workers the onboarding flag misses:
+// eleven 02:00 "night meal" logs teach the system regardless of any flag. ──────────
+
+export type SlotContext = { personalByHour: Map<number, string>; todaySlots: string[] };
+
+const MAIN_SLOTS = ["breakfast", "lunch", "dinner"];
+
+/** Pure: dominant meal label per SAST hour — qualifies at >=3 logs and >=70% share. */
+export function dominantSlotByHour(rows: Array<{ loggedAt: Date | string | null; mealLabel: string | null }>): Map<number, string> {
+  const byHour = new Map<number, Map<string, number>>();
+  for (const r of rows) {
+    const label = (r.mealLabel || "").toLowerCase().trim();
+    if (!label || !r.loggedAt) continue;
+    const h = new Date(new Date(r.loggedAt).getTime() + 2 * 3_600_000).getUTCHours();
+    const counts = byHour.get(h) || new Map<string, number>();
+    counts.set(label, (counts.get(label) || 0) + 1);
+    byHour.set(h, counts);
+  }
+  const out = new Map<number, string>();
+  for (const [h, counts] of byHour) {
+    let total = 0, topLabel = "", topN = 0;
+    for (const [label, n] of counts) { total += n; if (n > topN) { topN = n; topLabel = label; } }
+    if (topN >= 3 && topN / total >= 0.7) out.set(h, topLabel);
+  }
+  return out;
+}
+
+/**
+ * Pure: the final inferred slot. Personal hour-pattern beats the clock fallback;
+ * then the collision rule — a LIGHT (<300 kcal) second meal landing on a main slot
+ * already used today is a snack, not a duplicate "breakfast" (a real second plate
+ * keeps its slot honestly: two breakfasts happened). Explicit keywords never reach
+ * this function — it only runs when the client said nothing about the meal.
+ */
+export function resolveInferredSlot(fallback: string, hour: number, ctx: SlotContext | undefined, kcal?: number | null): string {
+  let slot = ctx?.personalByHour?.get(hour) || fallback;
+  if (ctx?.todaySlots?.includes(slot) && MAIN_SLOTS.includes(slot) && kcal != null && kcal < 300) slot = "snack";
+  return slot;
+}
+
+const _slotCache = new Map<string, { at: number; ctx: SlotContext }>();
+
+export async function getSlotContext(userId: string): Promise<SlotContext> {
+  const empty: SlotContext = { personalByHour: new Map(), todaySlots: [] };
+  try {
+    const c = _slotCache.get(userId);
+    if (c && Date.now() - c.at < CACHE_TTL_MS) return c.ctx;
+    const sixtyDaysAgo = new Date(Date.now() - 60 * 86_400_000);
+    const rows = await db.select({ loggedAt: mealLogs.loggedAt, mealLabel: mealLogs.mealLabel }).from(mealLogs)
+      .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sixtyDaysAgo)))
+      .orderBy(desc(mealLogs.loggedAt))
+      .limit(300);
+    const sastMidnight = new Date(new Date(Date.now() + 2 * 3_600_000).setUTCHours(0, 0, 0, 0) - 2 * 3_600_000);
+    const todaySlots = [...new Set(rows
+      .filter(r => r.loggedAt && new Date(r.loggedAt) >= sastMidnight)
+      .map(r => (r.mealLabel || "").toLowerCase().trim()).filter(Boolean))];
+    const ctx: SlotContext = { personalByHour: dominantSlotByHour(rows), todaySlots };
+    if (_slotCache.size > 2000) _slotCache.clear();
+    _slotCache.set(userId, { at: Date.now(), ctx });
+    return ctx;
+  } catch (e) {
+    console.warn("[SLOT_MEMORY] non-fatal:", (e as Error)?.message);
+    return empty; // fail-open: clock fallback, exactly as before
   }
 }

@@ -41,14 +41,25 @@ size words always win. Reply shows "— your usual". Corrections invalidate the
 memory cache, so every fix teaches the very next log. The correctionRatePct
 metric now MEASURES the loop instead of gating it.
 
+### TAKE (BUILT same day, round 2) — personal meal-slot learning
+Founder: "if it makes the system better, build it now." One module covers three of
+the review's gaps at once (`portion-memory.ts` slot section):
+- Correction→learning (3b): the client's dominant label per SAST hour (60d, >=3 logs,
+  >=70% share) beats the clock fallback — corrections shift the histogram, so three
+  "that was lunch" fixes at 10:00 teach 10:00 = lunch for that client.
+- Gap-since-last-meal: a light (<300 kcal) second meal landing on an already-used
+  main slot demotes to snack; a real second plate honestly keeps its slot.
+- Behavioural shift detection: eleven 02:00 "night meal" logs teach the pattern
+  regardless of any onboarding flag — rotating/irregular shifts covered from data.
+Fail-open: no history or DB error = clock behaviour, byte-identical to before.
+
 ### ADAPT / DEFER (with reasons)
 - Confidence model + "one short question": our answer at WhatsApp friction levels is
   SHOW-don't-ask — every reply displays the inferred label + foods, correctable in one
   message. Formal confidence scores wait for real correction data.
 - Inference audit trail: consciously deferred scaffolding (frozen-doc §7 gap #2);
   inputs/outputs/labels are already stored and replayable.
-- Gap-since-last-meal: cosmetic (labels, not totals) — cheap fix queued, not urgent.
-- Shift-pattern detection from behaviour: revisit with real night-window log data.
+- (Gap-since-last-meal and behavioural shift detection moved to TAKE — built round 2.)
 
 ### REJECT (with reasons)
 - 10,000-input synthetic inference corpus: wrong instrument at this scale — 273 real-

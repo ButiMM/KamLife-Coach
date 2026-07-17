@@ -1124,7 +1124,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           loggedAt: photoLoggedAt,
           // CAPTION WINS over the clock (2026-07-14, batch-loggers): "Breakfast" captioned
           // at 1pm stays breakfast — client's word, then snack rule, clock last.
-          mealLabel: extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user) || slotFromSastHour(photoLoggedAt),
+          mealLabel: extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt),
         }).catch(e => console.warn("[photo mealLogs write]", e));
         invalidateFoodTotalsCache(user.id);
       }

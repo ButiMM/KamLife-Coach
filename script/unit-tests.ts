@@ -324,6 +324,34 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// PERSONAL MEAL-SLOT LEARNING (2026-07-17, Review #7 items 3b + gap-heuristic +
+// behavioural shift detection). The client's own hour-pattern beats the clock;
+// a light second meal on a used slot demotes to snack; weak patterns change nothing.
+{
+  const { dominantSlotByHour, resolveInferredSlot } = await import("../server/portion-memory");
+  const at = (sastHour: number, label: string) => ({ loggedAt: new Date(Date.UTC(2026, 6, 10, (sastHour - 2 + 24) % 24, 15)), mealLabel: label });
+  test("slot learning: hour qualifies at >=3 logs and >=70% share — never on noise", () => {
+    const strong = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "lunch"), at(10, "breakfast")]);
+    assert.equal(strong.get(10), "lunch", "3/4 lunch at 10:00 = personal lunch hour");
+    const weak = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "breakfast"), at(10, "breakfast")]);
+    assert.ok(!weak.has(10), "50/50 split teaches nothing");
+    const thin = dominantSlotByHour([at(10, "lunch"), at(10, "lunch")]);
+    assert.ok(!thin.has(10), "2 logs is not a pattern");
+  });
+  test("slot learning: personal hour beats the clock; shift worker learned without a flag", () => {
+    const ctx = { personalByHour: new Map([[10, "lunch"], [2, "night meal"]]), todaySlots: [] };
+    assert.equal(resolveInferredSlot("breakfast", 10, ctx, 600), "lunch", "the reviewer's 10:00 case");
+    assert.equal(resolveInferredSlot("snack", 2, ctx, 250), "night meal", "02:00 history wins, no onboarding flag needed");
+    assert.equal(resolveInferredSlot("breakfast", 7, ctx, 400), "breakfast", "no pattern for 07:00 = clock stands");
+  });
+  test("slot learning: light second meal on a used slot = snack; a real plate keeps its slot", () => {
+    const ctx = { personalByHour: new Map<number, string>(), todaySlots: ["breakfast"] };
+    assert.equal(resolveInferredSlot("breakfast", 9, ctx, 180), "snack", "09:30 fruit after 07:30 breakfast");
+    assert.equal(resolveInferredSlot("breakfast", 9, ctx, 650), "breakfast", "a second full plate is honestly a second breakfast");
+    assert.equal(resolveInferredSlot("breakfast", 9, undefined, 180), "breakfast", "no context = old behaviour, fail-open");
+  });
+}
+
 // INTELLIGENT INFERENCE — night-meal slotting (2026-07-17 design execution: the
 // 22:00–05:00 window demoted every plate to "snack"; a night-shift worker's 02:00
 // pap-and-wors is their MAIN meal). Day windows must stay byte-identical.

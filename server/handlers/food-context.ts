@@ -20,12 +20,12 @@ import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, isNightWorker, looksLikeDeepEmotionalShare } from "../utils";
-import { getPortionMemory, personalPortionFor, type PortionStat } from "../portion-memory";
+import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
 
-export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }, user?: any): string | null {
+export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: number | null; protein?: number | null }, user?: any, slotCtx?: SlotContext): string | null {
   const lo = msg.toLowerCase();
   if (/\b(for breakfast|breakfast was|had breakfast|breakfast:|ate breakfast|morning meal)\b/i.test(lo)) return "breakfast";
   if (/\b(for lunch|lunch was|had lunch|lunch:|ate lunch|midday)\b/i.test(lo)) return "lunch";
@@ -43,10 +43,13 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
   // Clock-slotting it as breakfast/lunch steals the meal slot, and a later "same breakfast
   // as yesterday" then copies the snack as a meal (production bug, 2026-07-01).
   if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";
-  // Time-of-day fallback — no keyword, so infer from the meal's SAST hour: atDate for retro
-  // logs (multi-day catch-up), else now. Night-shift clients (and any substantial late
-  // plate) get "night meal", never a demoted "snack". Total — never returns null.
-  return slotFromSastHour(atDate, { nightWorker: isNightWorker(user), substantial: (macros?.kcal ?? 0) >= 300 });
+  // Time-of-day fallback — no keyword. Night-shift clients (and any substantial late
+  // plate) get "night meal", never a demoted "snack". Then the LEARNED layer: this
+  // client's own hour-pattern beats the clock, and a light second meal on an already-
+  // used main slot demotes to snack (Review #7, built 2026-07-17). Never returns null.
+  const fallback = slotFromSastHour(atDate, { nightWorker: isNightWorker(user), substantial: (macros?.kcal ?? 0) >= 300 });
+  const sastHour = new Date((atDate ? atDate.getTime() : Date.now()) + 2 * 3_600_000).getUTCHours();
+  return resolveInferredSlot(fallback, sastHour, slotCtx, macros?.kcal);
 }
 
 /**
@@ -468,7 +471,7 @@ export async function handleFoodContext(ctx: {
           await db.insert(mealLogs).values({
             userId: user.id, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
             kcalInt: vKcal, proteinInt: vProt, carbsInt: 0, fatInt: 0,
-            mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }, user),
+            mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }, user, await getSlotContext(user.id)),
           }).catch(e => console.warn("[verdict log-it]", e));
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
@@ -503,7 +506,7 @@ export async function handleFoodContext(ctx: {
             proteinInt: totalProt2,
             carbsInt: 0,
             fatInt: 0,
-            mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }, user),
+            mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }, user, await getSlotContext(user.id)),
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
           invalidatePatternCache(user.id);
           invalidateFoodTotalsCache(user.id);
@@ -880,6 +883,7 @@ export async function handleFoodContext(ctx: {
     }
 
     if (multiPlan.length >= 2) {
+      const slotCtxMulti = await getSlotContext(user.id);
       await Promise.all(multiPlan.map(p =>
         db.insert(mealLogs).values({
           userId: user.id,
@@ -890,7 +894,7 @@ export async function handleFoodContext(ctx: {
           carbsInt: 0,
           fatInt: 0,
           loggedAt: p.date,
-          mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user),
+          mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user, slotCtxMulti),
         }).catch(e => console.warn("[multiday-log insert]", e))
       ));
       const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");
@@ -1160,7 +1164,7 @@ export async function handleFoodContext(ctx: {
         return s + Math.min(dry, ratio);
       }, 0));
       const firstSegLabel = mealSegments.find(s => s.label)?.label
-        || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) }, user);
+        || extractMealLabel(message, undefined, { kcal: totalCals, protein: Math.round(totalProtein) }, user, await getSlotContext(user.id));
       const scannerItems = allAdjustedFoods.map(f => ({
         name: f.name,
         grams: Math.round((f.typicalPortionGrams || 100) * (f.quantity || 1)),
@@ -1250,7 +1254,7 @@ export async function handleFoodContext(ctx: {
           items: gptFallbackResult.foods.map((f: any) => ({
             name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
           })),
-          mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user),
+          mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user, await getSlotContext(user.id)),
           loggedAt: gptLoggedAt,
         });
         const { prevCals: fbPrevCals, runningCals, runningProtein } = committed;
@@ -1324,7 +1328,7 @@ export async function handleFoodContext(ctx: {
         items: gptFallbackResult.foods.map((f: any) => ({
           name: f.name, grams: 0, kcal: f.kcal, protein: f.protein_g, category: f.category,
         })),
-        mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user),
+        mealLabel: extractMealLabel(message, undefined, { kcal: gptFallbackResult.totalKcal, protein: gptFallbackResult.totalProtein }, user, await getSlotContext(user.id)),
         loggedAt: fb2LoggedAt,
       });
       const { prevCals: fb2PrevCals, runningCals, runningProtein } = committed2;
