@@ -20,6 +20,7 @@ import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, isNightWorker, looksLikeDeepEmotionalShare } from "../utils";
+import { getPortionMemory, personalPortionFor, type PortionStat } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
 import { firstActionCelebration } from "../activation";
@@ -206,7 +207,7 @@ function normaliseWordNumbers(text: string): string {
   return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
 }
 
-export function adjustFoodsForSegment(foods: SAFood[], segText: string) {
+export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal?: Map<string, PortionStat>) {
   const normText = normaliseWordNumbers(segText);
 
   // Portion-size modifier — "big plate of pap" → 1.5×, "half a portion" → 0.5×
@@ -227,6 +228,7 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string) {
   return foods.map(f => {
     const allAliases = [f.name.toLowerCase(), ...f.aliases.map(a => a.toLowerCase())];
     let quantity = 1;
+    let explicitQty = false; // the client SAID an amount — memory never overrides speech
     for (const alias of allAliases) {
       const qtyDirect = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:${escapeRegex(alias)})`, "i"));
       const qtyWithFiller = normText.match(new RegExp(`(\\d+(?:\\.\\d+)?)\\s+(?:slices?|pieces?|cups?|bowls?|plates?|portions?|servings?|tablespoons?|teaspoons?|tbsp|tsp|glasses?)\\s+(?:of\\s+)?(?:${escapeRegex(alias)})`, "i"));
@@ -237,6 +239,7 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string) {
         : null;
       const qtyBefore = qtyDirect || qtyWithFiller || qtyWithAnyFiller;
       if (qtyBefore) {
+        explicitQty = true;
         const userQty = parseFloat(qtyBefore[1]);
         const defaultQty = portionDefaultCount(f.typicalPortionDescription);
         if (userQty > 0 && defaultQty > 0 && userQty !== defaultQty) {
@@ -246,6 +249,21 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string) {
       }
     }
     quantity = quantity * sizeMultiplier;
+    // ADAPTIVE PORTION (2026-07-17): when the client stated NO amount and NO size word,
+    // their own median portion of this food (portion-memory, >=3 logs, clamped) beats
+    // the table default. Memory fills silence; it never overrides what they said.
+    if (!explicitQty && sizeMultiplier === 1 && personal) {
+      const pp = personalPortionFor(personal, f.name, f.typicalPortionCalories, f.typicalPortionProtein);
+      if (pp.personal) {
+        return {
+          ...f,
+          adjustedCalories: pp.kcal,
+          adjustedProtein: pp.protein,
+          adjustedDescription: `${f.typicalPortionDescription} — your usual`,
+          quantity: 1,
+        };
+      }
+    }
     return {
       ...f,
       adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
@@ -468,7 +486,7 @@ export async function handleFoodContext(ctx: {
         if (foodsInLastMsg.length > 0) {
           // Quantity-aware ("3 eggs" = 3 eggs, "big plate" = 1.5×) — the main scanner
           // path always scaled portions; this smart-log path summed raw typicals.
-          const adjSmart = adjustFoodsForSegment(foodsInLastMsg, lastUnloggedFood.messageIn || "");
+          const adjSmart = adjustFoodsForSegment(foodsInLastMsg, lastUnloggedFood.messageIn || "", await getPortionMemory(user.id));
           let totalCals = 0; let totalProt2 = 0;
           const parts: string[] = [];
           for (const food of adjSmart) {
@@ -855,7 +873,7 @@ export async function handleFoodContext(ctx: {
       const segDate = parseMealDate(seg.day + " " + seg.text);
       // Quantity-aware, same as the main scanner path — "3 eggs and pap on Wednesday"
       // logged a single egg portion before this.
-      const adjMulti = adjustFoodsForSegment(segFoods, seg.text);
+      const adjMulti = adjustFoodsForSegment(segFoods, seg.text, await getPortionMemory(user.id));
       let segKcal = 0, segProt = 0;
       for (const f of adjMulti) { segKcal += f.adjustedCalories || 0; segProt += f.adjustedProtein || 0; }
       multiPlan.push({ label: mealDateLabel(segDate), foods: adjMulti, kcal: segKcal, prot: segProt, date: segDate, raw: seg.day + ": " + seg.text });
@@ -955,7 +973,7 @@ export async function handleFoodContext(ctx: {
 
     for (const seg of mealSegments) {
       const segFoods = scanForSAFoods(seg.text);
-      const adjusted = segFoods.length > 0 ? adjustFoodsForSegment(segFoods, seg.text) : [];
+      const adjusted = segFoods.length > 0 ? adjustFoodsForSegment(segFoods, seg.text, await getPortionMemory(user.id)) : [];
       segmentBuckets.push({ label: seg.label, text: seg.text, foods: adjusted });
       allAdjustedFoods.push(...adjusted);
     }

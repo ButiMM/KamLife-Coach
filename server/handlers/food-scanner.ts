@@ -23,6 +23,9 @@ const _foodTotalsCache = new Map<string, FoodTotalsEntry>();
 /** Invalidate cached totals for a user after any food log INSERT or DELETE. */
 export function invalidateFoodTotalsCache(userId: string): void {
   _foodTotalsCache.delete(userId);
+  // Portion memory learns from the same rows — refresh it on the same events so a
+  // correction teaches the very next log (fire-and-forget; import stays lazy).
+  import("../portion-memory").then(m => m.invalidatePortionMemory(userId)).catch(() => {});
 }
 
 // Periodic cleanup to avoid stale entries accumulating in long-running process

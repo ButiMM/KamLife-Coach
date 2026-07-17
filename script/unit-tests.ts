@@ -298,6 +298,32 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
 });
 
+// ADAPTIVE PORTION LEARNING (2026-07-17, Review #7's flagship — built on the founder's
+// order). The client's own median portion beats the table default — but ONLY in
+// silence: explicit amounts and size words always win, and no history changes nothing.
+{
+  const { medianPortions, personalPortionFor, normalizeFoodKey } = await import("../server/portion-memory");
+  const mkMem = (kcals: number[]) => medianPortions(kcals.map(k => [{ name: "Eggs", kcal: k, protein: Math.round(k / 10) }]));
+  test("portion memory: median needs 3+ logs; keys normalise variants together", () => {
+    assert.equal(mkMem([200, 220]).size, 0, "2 logs = no memory");
+    assert.equal(mkMem([200, 220, 240]).get("eggs")?.kcal, 220, "3 logs = median");
+    assert.equal(normalizeFoodKey("Chicken breast (grilled)"), normalizeFoodKey("chicken breast"), "prep variants share history");
+  });
+  test("portion memory: clamp holds — one poisoned log can't blow past 0.5x-3x of the table", () => {
+    assert.equal(personalPortionFor(mkMem([2000, 2000, 2000]), "Eggs", 140, 12).kcal, 420, "capped at 3x");
+    assert.equal(personalPortionFor(mkMem([10, 10, 10]), "Eggs", 140, 12).kcal, 70, "floored at 0.5x");
+    assert.ok(!personalPortionFor(new Map(), "Eggs", 140, 12).personal, "no history = table default");
+  });
+  test("portion memory: personal median lands with macro shape preserved", () => {
+    const r = personalPortionFor(mkMem([280, 280, 280]), "Eggs", 140, 12);
+    assert.ok(r.personal && r.kcal === 280 && r.protein === 24, `2x kcal scales protein 2x: ${JSON.stringify(r)}`);
+    // The silence-only guard (explicit counts and size words beat memory) lives in
+    // adjustFoodsForSegment — source-guarded here, behaviour-verified in prod replies.
+    const src = readFileSync(join("server", "handlers", "food-context.ts"), "utf-8");
+    assert.ok(/!explicitQty && sizeMultiplier === 1 && personal/.test(src), "memory must only fill silence");
+  });
+}
+
 // INTELLIGENT INFERENCE — night-meal slotting (2026-07-17 design execution: the
 // 22:00–05:00 window demoted every plate to "snack"; a night-shift worker's 02:00
 // pap-and-wors is their MAIN meal). Day windows must stay byte-identical.
