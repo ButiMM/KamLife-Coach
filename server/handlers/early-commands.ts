@@ -21,7 +21,7 @@ import { generateMealPlan } from "../meal-plan";
 import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
-import { handleNumbersLiteracy, handleToneSignal } from "./numbers-literacy";
+import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion } from "./numbers-literacy";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -82,6 +82,12 @@ export async function handleEarlyCommands(ctx: {
     await logChat(user.id, message, portionReply, "PORTION_CONTROL");
     return `${portionReply}\n[MEDIA:${handGuideUrl}]\n[MEDIA:${plateGuideUrl}]`;
   }
+
+  // ---- SURPLUS/DEFICIT QUESTIONS — computed, never generated (2026-07-17 drill). MUST
+  // run before the totals card, whose how-much+calories regex answering with today's
+  // gap IS the original failure. ----
+  const surplusReply = await handleSurplusDeficitQuestion({ message, m, user });
+  if (surplusReply !== null) return surplusReply;
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
@@ -339,11 +345,9 @@ export async function handleEarlyCommands(ctx: {
     if (/\bdumbbells?\b/i.test(m)) tempEquipmentMode.set(phone, "gym_dumbbell");
     else if (/\b(no equipment|bodyweight|nothing at home|home workout)\b/i.test(m)) tempEquipmentMode.set(phone, "home");
 
-    // NO COOLDOWN, EVER (2026-07-16 founder, after "scroll up ↑" pointed at a stale
-    // session for the second night running: "Why doesn't he want to send me my
-    // programme? It's nonsense."). A client who asks for their session GETS their
-    // session — re-sending text costs nothing; refusing a direct request costs trust.
-
+    // NO COOLDOWN, EVER (2026-07-16 founder: "Why doesn't he want to send me my
+    // programme? It's nonsense."). A client who asks for their session GETS it —
+    // re-sending text costs nothing; refusing a direct request costs trust.
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
       const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);

@@ -792,6 +792,23 @@ const CASES: Case[] = [
     msg: "programme",
     expect: [/whole plan/i],
     reject: [/scroll up ↑/i] },
+  // ── 2026-07-17 nightly drill: 'what should my surplus be' regressed on the model
+  // path for the third time. Now DETERMINISTIC — computed from their targets, the
+  // model never touches it. The exact drill phrasings, on the full pipeline:
+  { name: "drill→deterministic: 'how much should my surplus be' = built-in, never today's gap",
+    msg: "On a regular normal eating day how much should my surplus be? 500 calories, 200 calories, what?",
+    user: { goalType: "muscle_gain", calorieTarget: 2996 },
+    expect: [/built into your target/i, /2596/],
+    reject: [/\b2396\b/, /deficit of/i] },
+  { name: "drill→deterministic: 'am I in a deficit' mid-morning never panics",
+    msg: "Am I in a deficit? I've only had breakfast",
+    user: { goalType: "fat_loss", calorieTarget: 1800 },
+    expect: [/built into your target/i, /2250/],
+    reject: [/deficit of [\d,]+/i, /under your (daily )?target by/i] },
+  { name: "drill→deterministic: two-part surplus + steps answers BOTH halves",
+    msg: "What's my surplus and how are my steps today?",
+    user: { goalType: "muscle_gain", calorieTarget: 2996 },
+    expect: [/surplus/i, /steps/i] },
 ];
 
 async function main() {

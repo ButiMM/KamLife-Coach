@@ -8,12 +8,49 @@
 // The mode token (numbers:full = on, else off) is read by the food reply builder.
 
 import { db } from "../db";
-import { users } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { users, stepLogs } from "../../shared/schema";
+import { eq, and, gte } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { detectToneSignal } from "../tone-mode";
 import { messageSpeaksNumbers } from "../numbers-mode";
 import { sendWhatsApp } from "../scheduler";
+import { sastDayStart, looksLikeSurplusDeficitQuestion } from "../utils";
+
+// SURPLUS/DEFICIT IS MATHS, NOT PROSE (2026-07-17 nightly drill caught the third
+// recurrence of this class on the model path). The client's target ALREADY contains
+// the goal adjustment — muscle gain sits ~400 above maintenance, fat loss ~450 below
+// (the same estimates the snapshot's Energy frame teaches). A model kept answering
+// with today's remaining kcal instead; now the answer is computed, never generated.
+export async function handleSurplusDeficitQuestion(ctx: { message: string; m: string; user: any }): Promise<string | null> {
+  const { message, m, user } = ctx;
+  if (!looksLikeSurplusDeficitQuestion(m)) return null;
+  const target = user.calorieTarget || 0;
+  if (!target) return null;
+  const goal = String(user.goalType || "fat_loss").toLowerCase();
+  const building = goal === "muscle_gain" || goal === "weight_gain";
+  let reply: string;
+  if (building) {
+    reply = `Your surplus is already built into your target — nothing to add on top. Your body burns roughly ~${target - 400} kcal a day (maintenance), and your ${target} kcal target sits ~400 above that. Eat to ${target} and you ARE in your building surplus.\n\nAnd it's judged on the full day — the kcal still open right now is just space left in the day, not a deficit.`;
+  } else if (goal === "fat_loss") {
+    reply = `Your deficit is already built into your target — nothing extra to cut. Your body burns roughly ~${target + 450} kcal a day (maintenance), and your ${target} kcal target sits ~450 below that. Finish the day at ${target} and you ARE in your deficit.\n\nIt's judged on the full day — being under target mid-day is normal, the day isn't done yet.`;
+  } else {
+    reply = `For your goal you eat AT maintenance — your ${target} kcal target IS the plan. No surplus or deficit to chase; hitting that number consistently is the whole game.`;
+  }
+  // Two-part asks ("what's my surplus and how are my steps today?") answer BOTH halves —
+  // dropping half the question reads as not listening (locked drill case).
+  if (/\bsteps?\b/i.test(m)) {
+    try {
+      const row = await db.select({ steps: stepLogs.steps }).from(stepLogs)
+        .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sastDayStart()))).limit(1);
+      const todaySteps = row[0]?.steps ?? 0;
+      reply += todaySteps > 0
+        ? `\n\nSteps today: ${todaySteps.toLocaleString()} so far vs your ${(user.stepsTarget || 8500).toLocaleString()} target.`
+        : `\n\nNo steps logged yet today — send your count when you have it.`;
+    } catch { /* the steps half is best-effort; the surplus answer stands alone */ }
+  }
+  await logChat(user.id, message, reply, "SURPLUS_EXPLAINER");
+  return reply;
+}
 
 // AUTO OPT-IN BY FLUENCY (2026-07-16 founder: "be brighter than that"). A client who
 // speaks in kcal/macros THREE times has voted with their vocabulary — flip them to

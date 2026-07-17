@@ -295,6 +295,32 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
 });
 
+// SURPLUS/DEFICIT QUESTIONS (2026-07-17 nightly drill: third recurrence on the model
+// path → now deterministic). The predicate is shared by the handler AND the drill's
+// routing map, so production and the nightly alert can never disagree about who owns it.
+{
+  const { looksLikeSurplusDeficitQuestion } = await import("../server/utils");
+  test("surplus predicate: definitional/status asks ARE claimed", () => {
+    for (const s of [
+      "on a regular normal eating day how much should my surplus be? 500 calories, 200 calories, what?",
+      "am i in a deficit? i've only had breakfast",
+      "what's my surplus and how are my steps today?",
+      "what should my deficit be",
+      "is my surplus big enough",
+      "how big should my deficit be?",
+    ]) assert.ok(looksLikeSurplusDeficitQuestion(s), `should claim: ${s}`);
+  });
+  test("surplus predicate: reasoning and reports stay with Coach K", () => {
+    for (const s of [
+      "why am i not losing weight in a deficit",
+      "i was in a surplus yesterday",
+      "the deficit is killing me",
+      "had eggs for breakfast",
+      "how are my steps today?",
+    ]) assert.ok(!looksLikeSurplusDeficitQuestion(s), `should NOT claim: ${s}`);
+  });
+}
+
 // The workout cooldown ("scroll up ↑") was REMOVED entirely on 2026-07-16 after it
 // refused the founder's direct request twice in one night — a client who asks for
 // their session gets their session, always. The guard below keeps it dead.

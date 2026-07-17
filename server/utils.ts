@@ -901,3 +901,16 @@ export function isAskingNotReporting(message: string): boolean {
 export function hasGoalChangeVocabulary(message: string): boolean {
   return /\b(bulk|bulking|cut|cutting|lean|leaning|shred|building\s+phase|build\s+muscle|muscle\s+(?:gain|mass|composition|building)|gain(?:ing)?\s+(?:muscle|weight|mass|size)|add\s+(?:size|mass|muscle)|put\s+on\s+(?:size|mass|muscle|weight)|fat\s+loss|lose\s+(?:weight|fat|belly)|losing\s+(?:weight|fat)|slim|tone|toning|recomp\w*|maintenance|maintain|change\s+(?:my\s+)?goal|switch\s+(?:my\s+)?goal|new\s+goal|different\s+goal)\b/i.test(message || "");
 }
+
+// SURPLUS/DEFICIT QUESTION (pure, unit-tested; shared by the deterministic handler
+// AND drill-cases.prodProtection so the nightly alert's routing map stays truthful).
+// 2026-07-17 nightly drill: 'what should my surplus be' regressed on the model path —
+// third recurrence of the 2026-07-06 class. The rule lives in two prompts and still
+// leaked, so the model is out of the loop: the answer is pure maths on their targets.
+// "why" questions stay with Coach K — reasoning is his lane, arithmetic is not.
+export function looksLikeSurplusDeficitQuestion(m: string): boolean {
+  if (!/\b(surplus|deficit)\b/i.test(m)) return false;
+  if (/\bwhy\b/i.test(m)) return false;
+  return /\b(what|how (?:much|big)|should|am i|is my|what'?s)\b[^.!?]{0,60}\b(surplus|deficit)\b/i.test(m)
+    || /\b(surplus|deficit)\b[^.!?]{0,25}\bbe\b/i.test(m);
+}
