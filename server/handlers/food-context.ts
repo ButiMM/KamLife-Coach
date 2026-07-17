@@ -1050,6 +1050,13 @@ export async function handleFoodContext(ctx: {
       const proteinTarget = user.proteinTarget || 120;
       const junkFoods = allAdjustedFoods.filter(f => f.category === "junk");
       const goodProteins = allAdjustedFoods.filter(f => f.category === "protein");
+      // JUNK-DOMINANT (2026-07-17 live: "beef bacon burger with fries" read as a clean
+      // protein meal — bacon's protein category cancelled the junk note, so the reply led
+      // with "🟢 Nicely done / Good protein 👍" on a takeaway). Judge the MEAL, not one
+      // item: when junk foods are the majority of the calories it's a treat, whatever else
+      // is on the plate. 0.6 spares "viennas + eggs" (~52%), where the egg genuinely helps.
+      const mealJunkCals = junkFoods.reduce((s, f) => s + (f.adjustedCalories || 0), 0);
+      const junkDominant = totalCals > 0 && mealJunkCals / totalCals >= 0.6;
 
       let foodLines: string;
       if (isMultiMeal && mealLines.length > 0) {
@@ -1069,7 +1076,7 @@ export async function handleFoodContext(ctx: {
       } catch { /* non-fatal */ }
 
       let junkNoteText = "";
-      if (junkFoods.length > 0 && goodProteins.length === 0) {
+      if (junkFoods.length > 0 && (goodProteins.length === 0 || junkDominant)) {
         // Only surface the junk note when the meal has NO real protein at all.
         // If someone ate viennas WITH eggs, the eggs are doing the work — the meal is fine.
         // Flagging "Highly processed" after "Strong meal" contradicts the coach and shames
@@ -1195,7 +1202,7 @@ export async function handleFoodContext(ctx: {
       const reply = buildFoodLogReply({
         foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
         runningCals, runningProtein, calorieTarget, proteinTarget, prevCals,
-        junkNoteText, hasGoodProteins: goodProteins.length > 0,
+        junkNoteText, hasGoodProteins: goodProteins.length > 0, junkDominant,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
         coachNoteOverride: denseFoodCoachNote,
         user, todaySteps: todayStepCount, userMessage: message,

@@ -650,6 +650,9 @@ export function buildFoodLogReply(p: {
   junkNoteText?: string;
   hasGoodProteins?: boolean;
   hasCarbs?: boolean;
+  /** the MEAL is majority junk calories (takeaway/treat) — verdict must be honest, not
+   *  a green "Nicely done" just because it fits the calorie budget (2026-07-17 live). */
+  junkDominant?: boolean;
   coachNoteOverride?: string;
   user: any;
   todaySteps?: number;
@@ -658,7 +661,7 @@ export function buildFoodLogReply(p: {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
     runningCals, runningProtein, calorieTarget, proteinTarget,
-    prevCals, junkNoteText, hasGoodProteins, hasCarbs,
+    prevCals, junkNoteText, hasGoodProteins, hasCarbs, junkDominant,
     coachNoteOverride, user,
   } = p;
 
@@ -1054,6 +1057,13 @@ export function buildFoodLogReply(p: {
         ? (isMuscleGain
             ? "🟢 Plenty of fuel in today — that's building material."
             : "🟡 That's your food for the day — anything else, keep it light (protein + veg).")
+        // JUNK-AWARE (2026-07-17): a takeaway/treat never gets a green "Nicely done" just
+        // for fitting the budget — that reads as the coach endorsing junk. Honest and
+        // non-shaming: name it a treat, point the rest of the day at real food.
+        : junkDominant
+          ? (isMuscleGain
+              ? "🟢 Logged — fuel's in. Make the next meal whole-food protein (chicken, eggs, mince) — that's what actually builds."
+              : "🟡 Logged — that's a takeaway, no drama. Balance it out: keep the rest of today protein + veg.")
         : effectiveRemaining < 150
           ? "🟢 Right on track for today."
           : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
@@ -1067,7 +1077,9 @@ export function buildFoodLogReply(p: {
   // just not put in front of a person who told us they don't understand them.
   if (getNumbersMode(user) === "low") {
     const plainHead = verdictHeadline || "🟢 Logged — nice one.";
-    const nudge = plainProteinNudge({ proteinRemaining, isMuscleGain, hasGoodProteins: !!hasGoodProteins });
+    // Never praise "Good protein 👍" on a takeaway — the burger's protein doesn't make
+    // a burger a protein meal. junkDominant forces the forward-looking nudge instead.
+    const nudge = plainProteinNudge({ proteinRemaining, isMuscleGain, hasGoodProteins: !!hasGoodProteins && !junkDominant });
     const foods = stripFoodLineNumbers(foodLines);
     return `${gentlePrefix}${plainHead}\n\n*Logged ✅*\n${foods}\n\n${nudge}[BUTTONS:My progress|Today's workout]`;
   }

@@ -324,6 +324,41 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// JUNK-AWARE VERDICT (2026-07-17 live: "beef bacon burger with fries" got "🟢 Nicely
+// done / Good protein 👍" — bacon's protein category cancelled the junk read, so a
+// takeaway looked like a clean win. The MEAL is judged now, not one item on the plate.)
+{
+  const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+  const junkMeal = (goal: string, notes: string, junkDominant: boolean) => buildFoodLogReply({
+    foodLines: "• Burger\n• Chips\n• Bacon", mealLabel: "lunch",
+    totalMealCals: 1425, totalMealProtein: 55, runningCals: 1425, runningProtein: 55,
+    calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
+    junkDominant, user: { goalType: goal, profileNotes: notes },
+  });
+  test("junk verdict: a takeaway never gets 🟢 'Nicely done' or protein praise (fat loss)", () => {
+    const r = junkMeal("fat_loss", "numbers:full", true);
+    assert.ok(/takeaway/i.test(r) && !/Nicely done/i.test(r), `honest treat verdict: ${r.split("\n")[0]}`);
+    assert.ok(!/Good protein in that one/i.test(r), "no praise on junk protein");
+  });
+  test("junk verdict: number-free path also honest, with a forward-coaching nudge", () => {
+    const r = junkMeal("fat_loss", "", true);
+    assert.ok(/takeaway/i.test(r) && /protein.*next meal|more protein/i.test(r), `plain honest: ${r}`);
+    assert.ok(!/Good protein in that one/i.test(r));
+  });
+  test("junk verdict: muscle gain — fuel acknowledged, pushed to whole-food protein", () => {
+    assert.ok(/whole.?food protein|actually builds/i.test(junkMeal("muscle_gain", "numbers:full", true)));
+  });
+  test("junk verdict: a CLEAN meal still keeps the green light", () => {
+    const r = buildFoodLogReply({
+      foodLines: "• Chicken\n• Rice", mealLabel: "lunch",
+      totalMealCals: 500, totalMealProtein: 40, runningCals: 500, runningProtein: 40,
+      calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
+      junkDominant: false, user: { goalType: "fat_loss", profileNotes: "numbers:full" },
+    });
+    assert.ok(/Nicely done|Right on track/.test(r), "clean meal is not punished");
+  });
+}
+
 // PERSONAL MEAL-SLOT LEARNING (2026-07-17, Review #7 items 3b + gap-heuristic +
 // behavioural shift detection). The client's own hour-pattern beats the clock;
 // a light second meal on a used slot demotes to snack; weak patterns change nothing.
