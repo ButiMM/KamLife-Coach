@@ -809,6 +809,18 @@ const CASES: Case[] = [
     msg: "What's my surplus and how are my steps today?",
     user: { goalType: "muscle_gain", calorieTarget: 2996 },
     expect: [/surplus/i, /steps/i] },
+  // ── 2026-07-17 founder: "eat this instead of that IS the coaching" — swap ASKS get
+  // the deterministic table answer, never a model improvisation, never the totals card
+  // (whose "what can i eat" token used to hijack exactly this phrasing).
+  { name: "swap ask: 'what can I eat instead of mayonnaise' answers from the swap table",
+    msg: "What can I eat instead of mayonnaise?",
+    user: { goalType: "fat_loss" },
+    expect: [/light mayo/i],
+    reject: [/Today so far:|kcal \| .*protein\*/i] },
+  { name: "swap ask: grocery-store 'alternative to banana' is goal-aware for fat loss",
+    msg: "Is there an alternative to banana?",
+    user: { goalType: "fat_loss" },
+    expect: [/berries/i] },
 ];
 
 async function main() {

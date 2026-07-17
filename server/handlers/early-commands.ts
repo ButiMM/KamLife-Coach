@@ -22,6 +22,7 @@ import { handleMealRepeat } from "./meal-repeat";
 import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion } from "./numbers-literacy";
+import { answerSwapAsk } from "../food-swaps";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -83,11 +84,13 @@ export async function handleEarlyCommands(ctx: {
     return `${portionReply}\n[MEDIA:${handGuideUrl}]\n[MEDIA:${plateGuideUrl}]`;
   }
 
-  // ---- SURPLUS/DEFICIT QUESTIONS — computed, never generated (2026-07-17 drill). MUST
-  // run before the totals card, whose how-much+calories regex answering with today's
-  // gap IS the original failure. ----
+  // ---- SURPLUS/DEFICIT QUESTIONS — computed, never generated; before the totals card ----
   const surplusReply = await handleSurplusDeficitQuestion({ message, m, user });
   if (surplusReply !== null) return surplusReply;
+
+  // ---- SWAP ASKS ("instead of mayo?") — the swap table answers; before the totals card ----
+  const swapAnswer = answerSwapAsk(m, user.goalType);
+  if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
   if (
@@ -345,9 +348,7 @@ export async function handleEarlyCommands(ctx: {
     if (/\bdumbbells?\b/i.test(m)) tempEquipmentMode.set(phone, "gym_dumbbell");
     else if (/\b(no equipment|bodyweight|nothing at home|home workout)\b/i.test(m)) tempEquipmentMode.set(phone, "home");
 
-    // NO COOLDOWN, EVER (2026-07-16 founder: "Why doesn't he want to send me my
-    // programme? It's nonsense."). A client who asks for their session GETS it —
-    // re-sending text costs nothing; refusing a direct request costs trust.
+    // NO COOLDOWN, EVER (2026-07-16 founder): asking for your session GETS it, always.
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
       const persistedMode = user.awaitingInputType.slice("holiday_equipment:".length);
@@ -1307,8 +1308,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return dbReply;
   }
 
-  // ---- ADAPTIVE DELIVERY PREFERENCES (handlers/numbers-literacy.ts) — numbers on/off
-  // + calorie confusion, and the tone dial (gentle / direct / hype). ----
+  // ---- ADAPTIVE DELIVERY (numbers-literacy.ts): numbers on/off, confusion, tone dial ----
   const toneReply = await handleToneSignal({ message, m, user, capName, phone });
   if (toneReply !== null) return toneReply;
   const literacyReply = await handleNumbersLiteracy({ message, m, user, capName, phone });

@@ -27,6 +27,7 @@ import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handl
 import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
 import { bumpNumericFluency } from "./handlers/numbers-literacy";
+import { handleOnboardingBodyPhotos } from "./onboarding-physique";
 import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { handleProgressCheck } from "./handlers/progress";
@@ -131,6 +132,12 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     (!mediaUrl && message.length >= 2 && message.length <= 500)
       ? classifyIntent(message, user.id).catch((e) => { console.error("[INTENT_CLASSIFY]", e?.message || e); return { intent: "OTHER" as ClassifiedIntent, confidence: 0 }; })
       : Promise.resolve({ intent: "OTHER" as ClassifiedIntent, confidence: 0 });
+
+  // ---- DAY-ZERO PHYSIQUE READ — body photos sent during onboarding. handleOnboarding
+  // is text-only (mediaUrl never reaches it), so this state's photos are claimed here.
+  if (user.onboardingState === "ASK_BODY_PHOTOS" && mediaUrl && (mediaContentType || "").startsWith("image/")) {
+    return handleOnboardingBodyPhotos({ user, phone, urls: allMediaUrls?.length ? allMediaUrls : [mediaUrl], openai });
+  }
 
   // ---- ONBOARDING ----
   const ONBOARDING_DONE = ["COMPLETE", "COMPLETED"];

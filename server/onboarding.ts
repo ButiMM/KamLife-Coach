@@ -14,6 +14,7 @@ import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { getDisplayName, sastDayStart } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
+import { bodyPhotoAsk, MEDICAL_QUESTION } from "./onboarding-physique";
 
 // ============================================================
 // ONBOARDING STATE MACHINE — valid states (CTO audit #17/#41)
@@ -31,6 +32,7 @@ export const ONBOARDING_STATES = new Set<string>([
   "ASK_WEIGHT_HEIGHT_FAST", "ASK_MEDICAL", "ASK_INJURIES", "ASK_DIETARY",
   "ASK_FOODS", "ASK_VISION",
   "ASK_BUDGET", "ASK_EMAIL", "ASK_FEMALE_FOCUS", "ASK_POSTPARTUM",
+  "ASK_BODY_PHOTOS", "ASK_GOAL_CONFIRM",
 ]);
 
 // ============================================================
@@ -490,10 +492,10 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       await db.update(users).set({
         goalType: goal,
         proteinTarget: goalProt,
-        onboardingState: "ASK_MEDICAL",
+        onboardingState: "ASK_BODY_PHOTOS",
       }).where(eq(users.phoneNumber, phone));
       const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
-      return `Goal locked in: *${goalLabel}*.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
+      return `Goal locked in: *${goalLabel}*.\n\n${bodyPhotoAsk(!!user.heightCm)}`;
     }
 
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));
@@ -513,9 +515,9 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         heightCm: null,
         bmi: null,
         proteinTarget: skipProt,
-        onboardingState: "ASK_MEDICAL",
+        onboardingState: "ASK_BODY_PHOTOS",
       }).where(eq(users.phoneNumber, phone));
-      return `No stress. I will start with baseline targets and adjust once you log weight.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
+      return `No stress. I will start with baseline targets and adjust once you log weight.\n\n${bodyPhotoAsk(false)}`;
     }
 
     const weightMatch = msg.match(/(\d+(?:\.\d+)?)\s*kg/i);
@@ -557,10 +559,43 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
       heightCm: heightCmVal,
       bmi: bmiVal,
       proteinTarget: weightProt,
-      onboardingState: "ASK_MEDICAL",
+      onboardingState: "ASK_BODY_PHOTOS",
     }).where(eq(users.phoneNumber, phone));
 
-    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\nAny medical conditions I must know about?\n\n1️⃣ Diabetes\n2️⃣ High blood pressure\n3️⃣ Heart condition\n4️⃣ HIV on ARVs\n5️⃣ PCOS\n6️⃣ None of the above`;
+    return `Perfect — targets will be based on ${weight}kg${heightCmVal ? ` and ${heightCmVal}cm` : ""}.\n\n${bodyPhotoAsk(!!heightCmVal)}`;
+  }
+
+  // ---- ASK_BODY_PHOTOS — day-zero physique read; the PHOTOS arrive via routes.ts
+  // (this text handler covers skip and stray text while the state is open) ----
+  if (state === "ASK_BODY_PHOTOS") {
+    const bpLower = msg.toLowerCase().trim();
+    if (/^(skip|no|not comfortable|later|nope|next|pass|rather not)\b/.test(bpLower)) {
+      await db.update(users).set({ onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
+      return `No problem at all — you can add before-photos any time later, just by sending them.\n\n${MEDICAL_QUESTION}`;
+    }
+    return `Just send the photos as normal WhatsApp pictures (1–3: front, side, back) — or reply *skip* and we carry straight on.`;
+  }
+
+  // ---- ASK_GOAL_CONFIRM — the photo read recommended a DIFFERENT phase; they decide ----
+  if (state === "ASK_GOAL_CONFIRM") {
+    const gcLower = msg.toLowerCase();
+    const recMatch = (user.profileNotes || "").match(/\bgoalrec:(\w+)\b/i);
+    const recommended = recMatch ? recMatch[1] : null;
+    const cleanedNotes = (user.profileNotes || "").replace(/\s*\bgoalrec:\w+\b/gi, "").trim() || null;
+    const takeRec = /^1\b/.test(msg.trim()) || /\b(yes|yebo|go with|your read|recommendation|switch|do that|sounds right|trust you)\b/.test(gcLower);
+    const keepOwn = !takeRec && (/^2\b/.test(msg.trim()) || /\b(keep|stay|mine|original|no thanks|my choice)\b/.test(gcLower));
+    if (!takeRec && !keepOwn) {
+      return `Quick one so we build the right plan:\n\n1️⃣ Go with my read (recommended)\n2️⃣ Keep your original choice`;
+    }
+    const newGoal = takeRec && recommended ? recommended : (user.goalType || "fat_loss");
+    const wConf = parseFloat(user.currentWeight || "0") || (user.gender === "female" ? 65 : 75);
+    const { proteinTarget: confProt } = calculateTargets(wConf, newGoal, user.lifeSituation || "office", user.trainingDaysPerWeek || 3, user.gender || "male", user.age || 30, user.heightCm || 170, user.trainingExperience || "beginner");
+    await db.update(users).set({ goalType: newGoal, proteinTarget: confProt, profileNotes: cleanedNotes, onboardingState: "ASK_MEDICAL" }).where(eq(users.phoneNumber, phone));
+    const gcLabel = newGoal === "muscle_gain" ? "Build muscle" : newGoal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
+    const gcLine = takeRec && recommended
+      ? `Good call — *${gcLabel}* it is. That's the plan your body asked for.`
+      : `Understood — *${gcLabel}* stays. Your goal, your call, and I'll coach it properly either way.`;
+    return `${gcLine}\n\n${MEDICAL_QUESTION}`;
   }
 
   // ---- ASK_EQUIPMENT — route by training location ----

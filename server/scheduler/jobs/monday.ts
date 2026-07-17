@@ -9,13 +9,17 @@ import {
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
   if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runWeightReminder blocked"); return; }
-  const sevenDaysAgo = new Date(Date.now() - 7 * 86400_000);
+  // EVERY Monday is weigh-in day (2026-07-17 founder: "they should be sending scale
+  // waves every single Monday"). The old 7-day skip broke the ritual — a Wednesday
+  // weigh-in silenced the next Monday. Only a FRESH number (last 36h, i.e. Sunday
+  // morning onward) earns a pass; the weekly rhythm is the point.
+  const thirtySixHoursAgo = new Date(Date.now() - 36 * 3600_000);
   const threeDaysAgo = new Date(Date.now() - 3 * 86400_000);
   const activeClients = await db.select().from(users)
     .where(and(eq(users.onboardingState, "COMPLETE"), gte(users.lastActiveAt, threeDaysAgo)));
   let sent = 0;
   for (const client of activeClients) {
-    const [recent] = await db.select({ c: count() }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, sevenDaysAgo)));
+    const [recent] = await db.select({ c: count() }).from(weightLogs).where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, thirtySixHoursAgo)));
     if ((recent.c || 0) > 0) continue;
     const name = client.name?.split(" ")[0] || "there";
     const [lastWeightRow] = await db.select({ weight: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, client.id)).orderBy(desc(weightLogs.loggedAt)).limit(1).catch(() => [] as { weight: string | null }[]);

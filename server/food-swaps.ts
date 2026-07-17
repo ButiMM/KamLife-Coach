@@ -194,6 +194,28 @@ const SWAP_RULES: SwapRule[] = [
     swap: "low-fat frozen yoghurt, or a smaller scoop",
     reason: "the treat stays, the calories drop",
   },
+  // ── 2026-07-17, founder's real coaching swaps ("that's how I make my adjustments") ──
+  // Banana → berries (fat loss only — a banana is GOOD food, just calorie-dense).
+  {
+    match: /\b(bananas?)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "a cup of berries (fresh or frozen), or half the banana",
+    reason: "berries fill the same fruit craving for about a third of the calories",
+  },
+  // Nuts → a palm-sized portion, not the packet (fat loss; healthy but dense).
+  {
+    match: /\b(nuts|peanuts|almonds|cashews|macadamias?|pecans?|walnuts|mixed nuts|trail mix)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "a small handful — what fits in your palm — not the packet",
+    reason: "nuts are healthy but heavy: one packet can be a whole meal's calories",
+  },
+  // Avocado → half, not the whole (fat loss; same logic — good fat, dense).
+  {
+    match: /\b(avocados?|avos?)\b/i,
+    goals: ["fat_loss", "recomposition"],
+    swap: "half an avo instead of the whole one",
+    reason: "great fat, but a whole avo carries real calories — half gives the taste and the benefit",
+  },
 ];
 
 // Zero/diet/light variants must never be told to swap — they're already the answer.
@@ -223,4 +245,29 @@ export function swapNudge(foodName: string, goalType?: string | null): string {
   const s = suggestSwap(foodName, goalType);
   if (!s) return "";
   return `_Next time: swap it for ${s.swap} — ${s.reason}._`;
+}
+
+// ── SWAP QUESTIONS (2026-07-17, founder: "clients literally send pictures from the
+// grocery store asking what alternatives — eat this instead of that IS the coaching").
+// The ASK form ("what can I use instead of mayo?") used to fall to the model, which
+// improvised a different answer each time. Deterministic: parse the food out of the
+// question, answer from the ONE swap table. Unknown food → null (Coach K's judgement).
+
+const SWAP_ASK_RE = /\b(?:instead of|alternatives?\s+(?:to|for)|substitutes?\s+(?:for|to)|replacements?\s+for|replace|healthier\s+(?:option|choice|version|alternative)\s+(?:than|of|for|to)|swap\s+(?:out\s+)?(?:for\s+)?)\s*(?:my |the |some |a |an )?([a-z][a-z' \-]{1,40}?)(?:\s*[?.!,]|\s+(?:with|for|then|so|please|guys)\b|$)/i;
+
+/** Extract the food a swap-question is about, or null when it isn't a swap ask. */
+export function parseSwapAsk(message: string): string | null {
+  const m = (message || "").match(SWAP_ASK_RE);
+  if (!m) return null;
+  const food = m[1].trim().replace(/\s+/g, " ");
+  return food.length >= 2 ? food : null;
+}
+
+/** Full deterministic answer to a swap ask, or null to let Coach K handle it. */
+export function answerSwapAsk(message: string, goalType?: string | null): string | null {
+  const food = parseSwapAsk(message);
+  if (!food) return null;
+  const s = suggestSwap(food, goalType);
+  if (!s) return null;
+  return `Instead of ${food}: *${s.swap}* — ${s.reason}. 👌`;
 }

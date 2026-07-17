@@ -32,6 +32,60 @@ const SYNONYMS: Record<string, MuscleGroup> = {
 
 export type PhysiqueAnalysis = { dominant: MuscleGroup[]; lagging: MuscleGroup[]; note: string };
 
+// BODY-COMPOSITION STATE (2026-07-17, founder: "shouldn't we be using their pictures?
+// ...before we put people on the wrong program"). The photo read now also classifies
+// the overall body state, so the GOAL can be recommended from what the body actually
+// shows — not from self-diagnosis ("I don't want to lose my curves") and not from a
+// BMI the client can't provide because they don't know their height.
+export type BodyState = "lean" | "average" | "overfat" | "skinny_fat" | "underweight" | "unknown";
+
+export function parseBodyState(raw: string): BodyState {
+  const m = (raw || "").match(/BODY\s*:?\s*(.+)/i);
+  const s = (m ? m[1] : "").toLowerCase();
+  if (!s) return "unknown";
+  if (/skinny[\s-]?fat/.test(s)) return "skinny_fat";
+  if (/underweight|too thin|very thin/.test(s)) return "underweight";
+  if (/carrying (extra|excess) fat|overweight|obese|high body ?fat|overfat/.test(s)) return "overfat";
+  if (/\blean\b|athletic|defined/.test(s)) return "lean";
+  if (/\baverage\b|\bnormal\b|\bmoderate\b/.test(s)) return "average";
+  return "unknown";
+}
+
+/**
+ * Map what the photos SHOW to the goal the plan should serve. Returns null when the
+ * client's own choice already fits (their choice wins every tie — this is an assist,
+ * never an override; the client confirms before anything changes). The `reason` is
+ * written to be SAID to the client — warm, shame-free, and it protects the thing
+ * they're afraid of losing (the curves stay; the fat over them goes).
+ */
+export function recommendGoalFromRead(bodyState: BodyState, chosenGoal: string | null | undefined): { goal: string; reason: string } | null {
+  const chosen = (chosenGoal || "fat_loss").toLowerCase();
+  switch (bodyState) {
+    case "underweight":
+      return chosen === "muscle_gain" ? null : {
+        goal: "muscle_gain",
+        reason: "your photos show a frame that needs BUILDING first — cutting food now would cost you muscle and health, not fat. We fuel you up, lift, and build.",
+      };
+    case "overfat":
+      return chosen === "fat_loss" ? null : {
+        goal: "fat_loss",
+        reason: "your photos show the muscle is there — it's covered. We lift heavy and keep protein high so your shape and curves STAY, while the fat over them comes off. That's how the shape you want gets revealed, not lost.",
+      };
+    case "skinny_fat":
+      return chosen === "recomposition" ? null : {
+        goal: "recomposition",
+        reason: "your photos show a bit of both — not much muscle underneath, some fat on top. Pure cutting would leave you smaller, not better. We build muscle and drop fat at the same time: recomposition.",
+      };
+    case "lean":
+      return chosen === "fat_loss" ? {
+        goal: "recomposition",
+        reason: "you're already lean — there isn't much fat left to lose, and dieting harder would just make you smaller. Building shape is the win from here: recomposition.",
+      } : null;
+    default:
+      return null; // average / unreadable — the client's choice stands
+  }
+}
+
 // Gender-aware fallback: what to prioritise when the photo read is inconclusive. A
 // PRIOR only — it never overrides what the model actually saw, just fills a blank.
 export function genderLaggingPriors(gender: string | null | undefined): MuscleGroup[] {
@@ -63,7 +117,7 @@ export function buildPhysiqueAnalysisPrompt(opts: { gender?: string | null; goal
   const priors = genderLaggingPriors(gender).join(", ");
   return {
     system: `You are a physique-assessment coach with 20 years of experience reading bodies. You look at a client's photos and judge which muscle groups are DEVELOPED (dominant) and which are BEHIND (lagging), to steer their training. Be honest and specific but never unkind — this is programming, not judgement. Client is ${gender}, goal ${goalLabel}. Typical ${gender} priorities lean toward ${priors}, but judge what you actually SEE, not the stereotype.`,
-    user: `Assess this ${gender} client's physique from the photo(s). Judge development across: chest, back, shoulders, arms, core, glutes, quads, hamstrings, calves.\n\nReply in EXACTLY this format, using only muscle-group names from that list, nothing else:\nDOMINANT: <comma-separated groups that are relatively well-developed>\nLAGGING: <comma-separated groups that are behind and should get priority volume>\nNOTE: <one short, kind sentence a coach would say>\n\nIf the photo is unclear (lighting, clothing, angle), still give your best read and say so briefly in NOTE. Never invent detail you cannot see.`,
+    user: `Assess this ${gender} client's physique from the photo(s). Judge development across: chest, back, shoulders, arms, core, glutes, quads, hamstrings, calves.\n\nReply in EXACTLY this format, using only muscle-group names from that list, nothing else:\nDOMINANT: <comma-separated groups that are relatively well-developed>\nLAGGING: <comma-separated groups that are behind and should get priority volume>\nBODY: <exactly one of: lean | average | carrying extra fat | skinny-fat | underweight>\nNOTE: <one short, kind sentence a coach would say>\n\nBODY is the overall body-composition state: "carrying extra fat" when fat clearly covers the frame, "skinny-fat" when there is little muscle AND soft fat, "underweight" when the frame is visibly too thin, "lean" when defined with low fat, "average" otherwise. If the photo is unclear (lighting, clothing, angle), still give your best read and say so briefly in NOTE. Never invent detail you cannot see.`,
   };
 }
 

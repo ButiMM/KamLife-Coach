@@ -93,6 +93,16 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       } else {
         msg = `${name}, Week ${week} — ${sessions} sessions. You are in the top 5% of people who stick with a programme this long. What is your goal for this week? One specific thing.`;
       }
+      // MONDAY SCALE ACCOUNTABILITY (2026-07-17 founder: "extremely held accountable
+      // ... somebody is there doing it with them"): if the morning weigh-in prompt
+      // went unanswered, the evening check-in leads with the scale — one combined
+      // message, never a separate nag on an already-busy Monday.
+      const sastMidnight = new Date(new Date(Date.now() + 2 * 3_600_000).setUTCHours(0, 0, 0, 0) - 2 * 3_600_000);
+      const weighedToday = await db.select({ id: weightLogs.id }).from(weightLogs)
+        .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, sastMidnight))).limit(1);
+      if (weighedToday.length === 0) {
+        msg = `⚖️ First things first — what did the scale say this morning? Send me the number (e.g. *82.4kg*). Even if it's up, send it: the number is data, not judgment, and Monday's weigh-in is how we steer your whole week.\n\n${msg}`;
+      }
       // Daily-slot claim before send (preserves daily-cap reach; DB-backed, restart-safe).
       if (await claimDailySlot(client.id, "weekly_checkin")) { await sendWhatsApp(client.phoneNumber, msg); }
     } catch (err) { console.error(`[SCHEDULER] Weekly check-in error — ${client.phoneNumber}:`, err); }

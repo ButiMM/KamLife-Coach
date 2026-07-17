@@ -40,6 +40,9 @@ import { goalStatusLine } from "../server/education";
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
 // import below; the static imports above are all pure and don't touch db.
 process.env.KAMLIFE_DB_STUB = "1";
+// Some modules construct an OpenAI client at import time (meal-verifier via the
+// scheduler chain). Pure tests never call it — a stub key just lets imports load.
+process.env.OPENAI_API_KEY = process.env.OPENAI_API_KEY || "unit-test-stub";
 
 let passed = 0;
 let failed = 0;
@@ -294,6 +297,67 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   assert.equal(getWeekContext(1, 1, true, 3).sets, "2", "3 sessions is still a beginner");
   assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
 });
+
+// SWAP ASKS (2026-07-17, founder: "eat this instead of that IS the coaching" — clients
+// send grocery-store questions; the answer must be the SAME every time, goal-aware).
+{
+  const { parseSwapAsk, answerSwapAsk, suggestSwap } = await import("../server/food-swaps");
+  test("swap ask: question phrasings extract the food", () => {
+    assert.equal(parseSwapAsk("what can i use instead of mayonnaise?"), "mayonnaise");
+    assert.equal(parseSwapAsk("alternative to banana?"), "banana");
+    assert.equal(parseSwapAsk("healthier option than coke please"), "coke");
+    assert.equal(parseSwapAsk("substitute for white bread"), "white bread");
+    assert.equal(parseSwapAsk("i had eggs and pap"), null, "food logs are not swap asks");
+    assert.equal(parseSwapAsk("show me my meals"), null);
+  });
+  test("swap ask: deterministic answers ride the one swap table, goal-aware", () => {
+    assert.match(answerSwapAsk("what can i use instead of mayonnaise?", "fat_loss") || "", /light mayo/i);
+    assert.match(answerSwapAsk("alternative to banana?", "fat_loss") || "", /berries/i);
+    assert.equal(answerSwapAsk("alternative to banana?", "muscle_gain"), null, "banana is FINE for building — Coach K handles it");
+    assert.match(answerSwapAsk("healthier option than coke?", "fat_loss") || "", /zero/i);
+  });
+  test("swaps: founder's cases — nuts/avo get PORTION caps, never removal", () => {
+    assert.match(suggestSwap("cashews", "fat_loss")?.swap || "", /handful|palm/i);
+    assert.match(suggestSwap("avocado", "fat_loss")?.swap || "", /half/i);
+    assert.equal(suggestSwap("avocado", "muscle_gain"), null, "builders keep the avo");
+  });
+}
+
+// DAY-ZERO PHYSIQUE READ (2026-07-17, founder: "shouldn't they be sending us pictures
+// before we put people on the wrong program?"). The photo decides the recommendation;
+// the client decides the goal — assist, never override.
+{
+  const { parseBodyState, recommendGoalFromRead } = await import("../server/physique-analysis");
+  const { bodyPhotoAsk } = await import("../server/onboarding-physique");
+  test("body state: model output parses to canonical states", () => {
+    assert.equal(parseBodyState("DOMINANT: back\nLAGGING: chest\nBODY: carrying extra fat\nNOTE: solid base."), "overfat");
+    assert.equal(parseBodyState("BODY: skinny-fat"), "skinny_fat");
+    assert.equal(parseBodyState("BODY: underweight"), "underweight");
+    assert.equal(parseBodyState("BODY: lean"), "lean");
+    assert.equal(parseBodyState("BODY: average"), "average");
+    assert.equal(parseBodyState("no body line at all"), "unknown");
+  });
+  test("goal rec: the curves woman — chose muscle gain, carrying fat → fat loss, shape protected", () => {
+    const r = recommendGoalFromRead("overfat", "muscle_gain");
+    assert.ok(r && r.goal === "fat_loss", "must recommend fat loss");
+    assert.ok(/curves|shape/i.test(r!.reason) && /stay/i.test(r!.reason), `reason must protect the fear: ${r!.reason}`);
+  });
+  test("goal rec: underweight NEVER gets a cut; skinny-fat → recomp; lean cutter → recomp", () => {
+    assert.equal(recommendGoalFromRead("underweight", "fat_loss")?.goal, "muscle_gain");
+    assert.equal(recommendGoalFromRead("skinny_fat", "fat_loss")?.goal, "recomposition");
+    assert.equal(recommendGoalFromRead("lean", "fat_loss")?.goal, "recomposition");
+  });
+  test("goal rec: agreement and unreadable photos change NOTHING (client's choice wins)", () => {
+    assert.equal(recommendGoalFromRead("overfat", "fat_loss"), null);
+    assert.equal(recommendGoalFromRead("underweight", "muscle_gain"), null);
+    assert.equal(recommendGoalFromRead("average", "muscle_gain"), null);
+    assert.equal(recommendGoalFromRead("unknown", "fat_loss"), null);
+  });
+  test("photo ask: always optional, skip in the same breath; height-blind gets the stronger why", () => {
+    for (const known of [true, false]) assert.ok(/\*skip\*/i.test(bodyPhotoAsk(known)), "skip offered");
+    assert.ok(/without your height/i.test(bodyPhotoAsk(false)), "height-unknown framing present");
+  });
+}
 
 // SURPLUS/DEFICIT QUESTIONS (2026-07-17 nightly drill: third recurrence on the model
 // path → now deterministic). The predicate is shared by the handler AND the drill's
