@@ -298,6 +298,32 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
 });
 
+// INTELLIGENT INFERENCE — night-meal slotting (2026-07-17 design execution: the
+// 22:00–05:00 window demoted every plate to "snack"; a night-shift worker's 02:00
+// pap-and-wors is their MAIN meal). Day windows must stay byte-identical.
+{
+  const { slotFromSastHour, isNightWorker } = await import("../server/utils");
+  const at = (sastHour: number) => new Date(Date.UTC(2026, 6, 17, (sastHour - 2 + 24) % 24, 30));
+  test("slots: day windows unchanged (breakfast/lunch/dinner/snack)", () => {
+    assert.equal(slotFromSastHour(at(7)), "breakfast");
+    assert.equal(slotFromSastHour(at(12)), "lunch");
+    assert.equal(slotFromSastHour(at(19)), "dinner");
+    assert.equal(slotFromSastHour(at(16)), "snack", "15:00-17:00 gap stays snack");
+  });
+  test("slots: night window — light bite stays snack, real plate or night worker = night meal", () => {
+    assert.equal(slotFromSastHour(at(2)), "snack", "2am biscuit is a snack");
+    assert.equal(slotFromSastHour(at(2), { substantial: true }), "night meal", "2am 700-kcal plate is a MEAL");
+    assert.equal(slotFromSastHour(at(23), { nightWorker: true }), "night meal", "night worker's 23:00 plate");
+    assert.equal(slotFromSastHour(at(12), { nightWorker: true }), "lunch", "day windows never touched");
+  });
+  test("slots: isNightWorker reads the onboarding answers", () => {
+    assert.ok(isNightWorker({ workSchedule: "night shift" }));
+    assert.ok(isNightWorker({ lifeSituation: "security guard, night-shift" }));
+    assert.ok(!isNightWorker({ workSchedule: "office 9-5" }));
+    assert.ok(!isNightWorker({}));
+  });
+}
+
 // SWAP ASKS (2026-07-17, founder: "eat this instead of that IS the coaching" — clients
 // send grocery-store questions; the answer must be the SAME every time, goal-aware).
 {

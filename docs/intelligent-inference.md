@@ -1,8 +1,22 @@
 # Intelligent inference — "infer, don't interrogate"
 
-> **Status: DESIGN DISCUSSION — not yet built.** Captured 29 June 2026 from a
-> founder conversation. This is the agenda for that discussion, not a spec to
-> implement. Do **not** build from this without talking it through first.
+> **Status: EXECUTED — 17 July 2026.** The design conversation happened and the
+> verification-first pass found MOST of the agenda already built (see below).
+> The one real gap — night-shift meal slotting — was closed the same day.
+>
+> Verified as already built (with file pointers):
+> - Meal-slot inference: keyword extraction + light-bite snack heuristic +
+>   total time-of-day fallback (`food-context.extractMealLabel`, `utils.slotFromSastHour`).
+> - Portion defaults: `typicalPortion*` per food + `portionDefaultCount` divisor.
+> - Retro timing: `parseMealDate` ("yesterday", day names) + retro-diet guard.
+> - Corrections: slot relabels, quantity corrections ("2 eggs not 3"), removals,
+>   `log_repeat_meal` ("same as lunch") — all deterministic.
+> - Steps/water/weight: infer-and-log via `looksLike*` + `digitizeSpokenAmounts`.
+>
+> Closed 17 July: the 22:00–05:00 window demoted EVERY plate to "snack" — a
+> night-shift client's 02:00 main meal included. Now: substantial late plates
+> (≥300 kcal) and night-workers' plates (from `workSchedule`/`lifeSituation`)
+> label as "night meal"; a 2am biscuit stays a snack. Unit-tested.
 
 ## The problem (founder's words, paraphrased)
 

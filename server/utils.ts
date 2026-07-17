@@ -41,15 +41,23 @@ export function sastDayStart(date?: Date): Date {
 }
 
 // Deterministic meal slot from the SAST hour — used to label a food log when the client
-// doesn't say which meal it is. Total over all 24h (no gaps): the 15:00–17:00 and
-// 22:00–05:00 windows with no obvious meal fall to "snack". Preserves the existing
-// breakfast/lunch/dinner windows exactly — only the two former null gaps become "snack".
-export function slotFromSastHour(date: Date = new Date()): "breakfast" | "lunch" | "dinner" | "snack" {
+// doesn't say which meal it is. Total over all 24h (no gaps): the 15:00–17:00 window
+// falls to "snack". The 22:00–05:00 window is snack ONLY for genuinely light bites —
+// a night-shift client's 02:00 plate of pap and wors is their MAIN meal, not a snack
+// (2026-07-17 inference design: infer, don't interrogate — and don't mislabel either).
+export function slotFromSastHour(date: Date = new Date(), opts?: { nightWorker?: boolean; substantial?: boolean }): "breakfast" | "lunch" | "dinner" | "snack" | "night meal" {
   const h = new Date(date.getTime() + 2 * 3_600_000).getUTCHours();
   if (h >= 5 && h < 11) return "breakfast";
   if (h >= 11 && h < 15) return "lunch";
   if (h >= 17 && h < 22) return "dinner";
+  if ((h >= 22 || h < 5) && (opts?.nightWorker || opts?.substantial)) return "night meal";
   return "snack";
+}
+
+// Does this client work nights? Read from the onboarding answers we already hold —
+// the same data that steers their programme timing.
+export function isNightWorker(user: any): boolean {
+  return /night/i.test(String(user?.workSchedule || "")) || /night.?shift/i.test(String(user?.lifeSituation || user?.jobType || ""));
 }
 
 // Parse time references from food log messages and return the appropriate loggedAt date.
