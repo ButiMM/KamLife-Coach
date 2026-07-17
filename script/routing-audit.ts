@@ -782,6 +782,16 @@ const CASES: Case[] = [
   { name: "playbook: 'show me the workout' right after a switch serves FRESH, never 'scroll up'",
     msg: "Show me the workout",
     reject: [/scroll up ↑/i] },
+  // ── 2026-07-16 founder: "It sent me the wrong programme" — asking for the PROGRAMME
+  // returned a single day. Programme = the whole multi-day plan; workout = today.
+  { name: "playbook: 'my full programme' serves the WHOLE plan, never one day",
+    msg: "Show me my full programme",
+    expect: [/whole plan/i, /---/],
+    reject: [/scroll up ↑/i] },
+  { name: "playbook: bare 'programme' also serves the whole plan",
+    msg: "programme",
+    expect: [/whole plan/i],
+    reject: [/scroll up ↑/i] },
 ];
 
 async function main() {

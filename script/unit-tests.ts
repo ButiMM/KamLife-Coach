@@ -295,32 +295,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   assert.match(getWeekContext(1, 1, true, 0).rationale, /first session/i, "day-one copy intact for day-one clients");
 });
 
-// ============================================================
-// workoutCooldownApplies — "scroll up ↑" must never point at a replaced programme
-// (2026-07-16 19:54 live: gym switch → "Show me the workout" → cooldown served stale)
-// ============================================================
-{
-  const { workoutCooldownApplies } = await import("../server/utils");
-  test("cooldown: applies on a plain re-request after a recent send", () => {
-    assert.ok(workoutCooldownApplies(["WORKOUT_VIEW"], "show me the workout"));
-    assert.ok(workoutCooldownApplies(["FOOD_LOG", "WORKOUT_VIEW"], "workout"));
-  });
-  test("cooldown: NEVER after an equipment/goal change newer than the last send", () => {
-    assert.ok(!workoutCooldownApplies(["EQUIPMENT_UPDATE", "WORKOUT_VIEW"], "show me the workout"), "the exact 19:54 incident");
-    assert.ok(!workoutCooldownApplies(["GOAL_TRANSITION", "WORKOUT_VIEW"], "workout"));
-  });
-  test("cooldown: an OLD change before the last send does not block it", () => {
-    assert.ok(workoutCooldownApplies(["WORKOUT_VIEW", "EQUIPMENT_UPDATE"], "show me the workout"), "send is newer than the change — on-screen session is current");
-  });
-  test("cooldown: never eats a change request or complaint", () => {
-    assert.ok(!workoutCooldownApplies(["WORKOUT_VIEW"], "switch it to gym-based"));
-    assert.ok(!workoutCooldownApplies(["WORKOUT_VIEW"], "you keep showing me a home-based program"));
-  });
-  test("cooldown: no recent send = no cooldown", () => {
-    assert.ok(!workoutCooldownApplies(["FOOD_LOG", "STEP_LOG"], "workout"));
-    assert.ok(!workoutCooldownApplies([], "workout"));
-  });
-}
+// The workout cooldown ("scroll up ↑") was REMOVED entirely on 2026-07-16 after it
+// refused the founder's direct request twice in one night — a client who asks for
+// their session gets their session, always. The guard below keeps it dead.
+test("no workout cooldown: 'scroll up' refusal must not exist in any handler", () => {
+  const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+  assert.ok(!/scroll up ↑ to see it/i.test(src), "the cooldown refusal text has returned — remove it");
+});
 
 // ============================================================
 // getShoppingList — returns valid structure for all tiers/weeks

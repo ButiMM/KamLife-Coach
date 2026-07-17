@@ -22,7 +22,7 @@
 import { db } from "../db";
 import { exerciseLogs, mealLogs, chatHistory, users } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
-import { buildDayWorkout, buildFullProgramme } from "../programme";
+import { buildDayWorkout, getKamlifeProgramme } from "../programme";
 import { parseLiftLog } from "../handlers/workout";
 import { looksLikeQuestion, sastDayStart, sastToday } from "../utils";
 import { logChat } from "../handlers/chat-log";
@@ -492,7 +492,10 @@ export async function runCoachBrain(ctx: {
       if (toolCalls.some((t: any) => t.function?.name === "defer")) return null;
       if (toolCalls.some((t: any) => t.function?.name === "get_full_programme")) {
         let prog = "";
-        try { prog = (buildFullProgramme(user) || "").trim(); } catch { return null; }
+        // The REAL multi-day plan (getKamlifeProgramme, todayOnly=false) — never the
+        // Day-1-only onboarding drip (buildFullProgramme), which answered "show me my
+        // programme" with a single day and read as the wrong programme (2026-07-16).
+        try { prog = (getKamlifeProgramme(user, false) || "").trim(); } catch { return null; }
         if (!prog) return null;
         await logChat(user.id, message, prog, "BRAIN_PROGRAMME").catch(() => {});
         return prog;

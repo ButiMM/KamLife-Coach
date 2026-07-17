@@ -1526,20 +1526,20 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
     const dbTrainingDays = user.trainingDaysPerWeek || 3;
     const dbGender = user.gender || "male";
     if (dbTrainingDays <= 2) {
-      const dA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-      const dB = formatGymDay(dbGender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const dA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+      const dB = formatGymDay(dbGender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
       return `${dA}\n\n---\n\n${dB}`;
     }
     if (dbTrainingDays >= 4) {
-      const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-      const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-      const ub = formatGymDay(dbGender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-      const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+      const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+      const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+      const ub = formatGymDay(dbGender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+      const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
       return `${ua}\n\n---\n\n${la}\n\n---\n\n${ub}\n\n---\n\n${lb}`;
     }
-    const dA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-    const dB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
-    const dC = formatGymDay(dbGender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true);
+    const dA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const dB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const dC = formatGymDay(dbGender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", true, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
     return `${dA}\n\n---\n\n${dB}\n\n---\n\n${dC}`;
   }
 
@@ -1589,20 +1589,20 @@ function getKamlifeProgrammeInner(user: any, todayOnly = false): string {
   const trainingDays = user.trainingDaysPerWeek || 3;
   const gender = user.gender || "male";
   if (trainingDays <= 2) {
-    const dayA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const dayB = formatGymDay(gender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const dayA = formatGymDay(NEW_2DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const dayB = formatGymDay(gender === "female" ? NEW_2DAY_B_WOMEN : NEW_2DAY_B_MEN, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
     return `${dayA}\n\n---\n\n${dayB}`;
   }
   if (trainingDays >= 4) {
-    const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const ub = formatGymDay(gender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-    const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+    const ua = formatGymDay(NEW_4DAY_UPPER_A, "Upper Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const la = formatGymDay(NEW_4DAY_LOWER_A, "Lower Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const ub = formatGymDay(gender === "female" ? NEW_4DAY_UPPER_B_WOMEN : NEW_4DAY_UPPER_B_MEN, "Upper Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+    const lb = formatGymDay(NEW_4DAY_LOWER_B, "Lower Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
     return `${ua}\n\n---\n\n${la}\n\n---\n\n${ub}\n\n---\n\n${lb}`;
   }
-  const dayA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-  const dayB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
-  const dayC = formatGymDay(gender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss");
+  const dayA = formatGymDay(NEW_3DAY_A, "Full Body A", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+  const dayB = formatGymDay(NEW_3DAY_B, "Full Body B", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
+  const dayC = formatGymDay(gender === "female" ? NEW_3DAY_C_WOMEN : NEW_3DAY_C_MEN, "Full Body C", 1, "Foundation", 1, getPhaseMultiplier(1), user.goalType || "fat_loss", false, user.injuries || "none", exp, false, user.totalWorkoutsCompleted || 0);
   return `${dayA}\n\n---\n\n${dayB}\n\n---\n\n${dayC}`;
 }
 

@@ -2,7 +2,7 @@ import { db } from "../db";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
-import { buildDayWorkout, buildFullProgramme } from "../programme";
+import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme } from "../programme";
 import { calculateTargets, stepBurnKcal, recalcTargetsForProfile } from "../targets";
 import { askCoachK } from "../gpt";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, workoutCooldownApplies } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -339,25 +339,10 @@ export async function handleEarlyCommands(ctx: {
     if (/\bdumbbells?\b/i.test(m)) tempEquipmentMode.set(phone, "gym_dumbbell");
     else if (/\b(no equipment|bodyweight|nothing at home|home workout)\b/i.test(m)) tempEquipmentMode.set(phone, "home");
 
-    // 5-minute cooldown: if we already delivered a full workout recently, return a short
-    // "it's above ↑" reply instead of re-sending the full text again.
-    // The cooldown only triggers on re-requests AFTER the delivery fix (text now reliably
-    // lands at 1500-char chunks), so this won't trap users whose first request failed.
-    // We check WORKOUT_VIEW, WORKOUT_MISSED_CATCHUP and WORKOUT_HOLIDAY intents.
-    const fiveMinAgo = new Date(Date.now() - 5 * 60 * 1000);
-    const recentSends = await db.select({ intent: chatHistory.intent })
-      .from(chatHistory)
-      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, fiveMinAgo)))
-      .orderBy(desc(chatHistory.createdAt))
-      .limit(10);
-    // Cooldown decision is PURE and unit-tested (utils.workoutCooldownApplies): never on
-    // a change request/complaint, and never when the programme changed since the last
-    // send — "scroll up ↑" must never point at a session the bot itself just replaced.
-    if (workoutCooldownApplies(recentSends.map(r => r.intent), m)) {
-      const cool = `Your workout was just sent — scroll up ↑ to see it. Tap *See every move* on it for the video demos. Type *done* when you finish the session.`;
-      await logChat(user.id, message, cool, "WORKOUT_COOLDOWN");
-      return cool;
-    }
+    // NO COOLDOWN, EVER (2026-07-16 founder, after "scroll up ↑" pointed at a stale
+    // session for the second night running: "Why doesn't he want to send me my
+    // programme? It's nonsense."). A client who asks for their session GETS their
+    // session — re-sending text costs nothing; refusing a direct request costs trust.
 
     // Restore holiday equipment mode from DB if the in-memory map was lost (server restart)
     if (!tempEquipmentMode.has(phone) && user.awaitingInputType?.startsWith("holiday_equipment:")) {
@@ -384,6 +369,20 @@ export async function handleEarlyCommands(ctx: {
     const sickViewHeader = sickActive
       ? `You're resting until ${sickUntilMatch![1]} — no pressure to do this today, it's just here to look at. Say *I'm back* when you're ready.\n\n`
       : "";
+
+    // FULL PLAN vs TODAY (2026-07-16 live: "show me my programme" answered with ONE
+    // day — while the menu itself promises *programme* = the full plan and *workout* =
+    // today's session). Programme/plan vocabulary without "today" gets the WHOLE plan;
+    // "workout", "today's workout", body-part asks and menu "1" stay today-only.
+    const wantsFullPlan = /\b(program(?:me)?s?|full plan|whole plan|training plan|workout plan)\b/i.test(m)
+      && !/\btoday\b/i.test(m) && !isBodyPartWorkoutRequest;
+    if (wantsFullPlan) {
+      const week = user.programmeWeek || 1;
+      const fullProg = getKamlifeProgramme(effectiveUser, false);
+      const fullReply = `${sickViewHeader}*Your full programme — Week ${week}*\n\n${fullProg}\n\nThat's the whole plan. Say *workout* for just today's session.`;
+      await logChat(user.id, message, fullReply, "PROGRAMME_VIEW");
+      return fullReply;
+    }
 
     const pick = <T>(arr: T[]): T => arr[Math.floor(Math.random() * arr.length)];
 

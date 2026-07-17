@@ -901,22 +901,3 @@ export function isAskingNotReporting(message: string): boolean {
 export function hasGoalChangeVocabulary(message: string): boolean {
   return /\b(bulk|bulking|cut|cutting|lean|leaning|shred|building\s+phase|build\s+muscle|muscle\s+(?:gain|mass|composition|building)|gain(?:ing)?\s+(?:muscle|weight|mass|size)|add\s+(?:size|mass|muscle)|put\s+on\s+(?:size|mass|muscle|weight)|fat\s+loss|lose\s+(?:weight|fat|belly)|losing\s+(?:weight|fat)|slim|tone|toning|recomp\w*|maintenance|maintain|change\s+(?:my\s+)?goal|switch\s+(?:my\s+)?goal|new\s+goal|different\s+goal)\b/i.test(message || "");
 }
-
-// WORKOUT COOLDOWN — pure decision, unit-tested. "Your workout was just sent — scroll
-// up ↑" is only valid while the message on screen is still the CURRENT programme:
-//   - never on a change request or complaint (2026-07-16: "switch it to gym-based"
-//     and "you keep showing me a home-based program" both got "scroll up ↑");
-//   - never when the programme CHANGED since the last send (2026-07-16 19:54 live:
-//     "switch me to gym program" → bot says "reply workout to see today's updated
-//     session" → "Show me the workout" → "scroll up ↑" pointed at the stale HOME
-//     session the bot itself had just replaced).
-// recentIntents is newest-first (lower index = more recent).
-const WORKOUT_SEND_INTENTS = ["WORKOUT_VIEW", "WORKOUT_MISSED_CATCHUP", "WORKOUT_HOLIDAY"];
-const PROGRAMME_CHANGE_INTENTS = ["EQUIPMENT_UPDATE", "GOAL_TRANSITION", "GOAL_CHANGE_CONFIRM", "PROFILE_UPDATE"];
-export function workoutCooldownApplies(recentIntentsNewestFirst: Array<string | null>, m: string): boolean {
-  if (/\b(switch|change|swap|instead|wrong|why|you (keep|said|switched)|not (a |the )?(home|gym)|gym.?based|home.?based|confus|idiot)\b/i.test(m)) return false;
-  const sendIdx = recentIntentsNewestFirst.findIndex(i => WORKOUT_SEND_INTENTS.includes(i || ""));
-  if (sendIdx === -1) return false;
-  const changeIdx = recentIntentsNewestFirst.findIndex(i => PROGRAMME_CHANGE_INTENTS.includes(i || ""));
-  return changeIdx === -1 || changeIdx > sendIdx;
-}
