@@ -1,5 +1,58 @@
 # Third-party review log
 
+## Review #7 — "Infer, Don't Interrogate" post-execution deep review (2026-07-17)
+
+Six-seat review of the executed inference design. The strongest review to date —
+it argued architecture, not guessed features. Verified against code before verdicts.
+
+### What it got RIGHT (verified)
+- **Static, not learning:** portion defaults are per-food, never per-client; corrections
+  fix the log but update no personal model; the cascade infers, it does not learn. TRUE.
+- **`corrected` flag existed in schema, never set by any code path** — correction-rate
+  tracking (their leading churn indicator) was unwired. TRUE, and fixed same day.
+- Gap-since-last-meal heuristic absent (a 09:30 log after a 07:30 breakfast can double-
+  label "breakfast"). TRUE — labels only, totals unaffected.
+
+### What it got WRONG (corrected with evidence)
+- "One-tap correction UX unverified" → it IS one message: "that was lunch" relabels in a
+  transaction (`food-context.ts` relabel path); "2 eggs not 3" scales item-level maths.
+- "Progressive disclosure not described" → built and default-ON: numbers-mode ships
+  word-free replies to everyone; figures are opt-in/auto-detected (`numbers-mode.ts`).
+- "'Same as yesterday' unsupported" → `log_repeat_meal` supports it (source: 'yesterday').
+- "70% right / 30% corrected" churn math → invented numbers; the correction-rate metric
+  now measures reality instead.
+- Missed that the ≥300 kcal night-meal branch is flag-independent — rotating/irregular
+  shift workers are partially covered without the onboarding flag.
+
+### TAKE (done 2026-07-17)
+- `corrected: true` stamped on every in-place fix (relabel, quantity, ingredient
+  negation, item removal).
+- `inferenceQuality` block in `/api/admin/outcomes`: meals30d, corrected30d,
+  correctionRatePct, clientsCorrecting30d.
+
+### TAKE (committed, post-launch P1) — adaptive portion learning
+The review's single best recommendation, adopted as the first post-launch build:
+per-(client, food) median portion from their own logs overrides the static
+`typicalPortion*` after >=3 logs of that food. Cheap (SQL over meal_logs.items),
+immediate retention leverage, builds the personal-context moat incrementally.
+BUILD TRIGGER: correctionRatePct sustained above ~15%, or first 50 real clients —
+whichever comes first. The metric shipped today exists to time this correctly.
+
+### ADAPT / DEFER (with reasons)
+- Confidence model + "one short question": our answer at WhatsApp friction levels is
+  SHOW-don't-ask — every reply displays the inferred label + foods, correctable in one
+  message. Formal confidence scores wait for real correction data.
+- Inference audit trail: consciously deferred scaffolding (frozen-doc §7 gap #2);
+  inputs/outputs/labels are already stored and replayable.
+- Gap-since-last-meal: cosmetic (labels, not totals) — cheap fix queued, not urgent.
+- Shift-pattern detection from behaviour: revisit with real night-window log data.
+
+### REJECT (with reasons)
+- 10,000-input synthetic inference corpus: wrong instrument at this scale — 273 real-
+  incident pipeline scenarios + nightly judge on live traffic + the new correction
+  metric measure the same thing against reality, not synthetics.
+
+
 _A running record of outside reviews of KamLife and what we did with each
 recommendation — apply / adapt / defer / disagree — so decisions have memory and we
 don't re-litigate. Newest review first._

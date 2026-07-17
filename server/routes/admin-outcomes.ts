@@ -21,7 +21,7 @@ export function registerAdminOutcomes(app: Express) {
     try {
       const now = new Date();
 
-      const [weightR, adherenceR, retentionR, escalationR] = await Promise.all([
+      const [weightR, adherenceR, retentionR, escalationR, inferenceR] = await Promise.all([
         // Weight movement in the client's GOAL direction, from first→latest weigh-in.
         db.execute(sql`
           WITH w AS (
@@ -82,12 +82,24 @@ export function registerAdminOutcomes(app: Express) {
             COUNT(DISTINCT user_id)::int AS clients_escalated_30d
           FROM escalations WHERE created_at >= NOW() - INTERVAL '30 days'
         `),
+        // INFERENCE QUALITY (2026-07-17 third-party review: correction rate is the
+        // leading indicator of logging churn — a client who keeps fixing the bot's
+        // guesses stops logging). corrected=true is stamped by every in-place fix
+        // (relabel, quantity, ingredient negation, item removal).
+        db.execute(sql`
+          SELECT
+            COUNT(*)::int AS meals_30d,
+            COUNT(*) FILTER (WHERE corrected = true)::int AS corrected_30d,
+            COUNT(DISTINCT user_id) FILTER (WHERE corrected = true)::int AS clients_correcting_30d
+          FROM meal_logs WHERE logged_at >= NOW() - INTERVAL '30 days'
+        `),
       ]);
 
       const w = (weightR.rows[0] || {}) as Record<string, any>;
       const a = (adherenceR.rows[0] || {}) as Record<string, any>;
       const r = (retentionR.rows[0] || {}) as Record<string, any>;
       const e = (escalationR.rows[0] || {}) as Record<string, any>;
+      const inf = (inferenceR.rows[0] || {}) as Record<string, any>;
 
       const pct = (num: number, den: number) => (den > 0 ? Math.round((num / den) * 100) : null);
       const active = Number(a.active_clients || 0);
@@ -122,6 +134,13 @@ export function registerAdminOutcomes(app: Express) {
           clientsEscalated30d: Number(e.clients_escalated_30d || 0),
           ratePct: pct(Number(e.clients_escalated_30d || 0), active),
           note: "Share of active clients who needed a human in 30 days. Reviewer target: <2%.",
+        },
+        inferenceQuality: {
+          meals30d: Number(inf.meals_30d || 0),
+          corrected30d: Number(inf.corrected_30d || 0),
+          correctionRatePct: pct(Number(inf.corrected_30d || 0), Number(inf.meals_30d || 0)),
+          clientsCorrecting30d: Number(inf.clients_correcting_30d || 0),
+          note: "Share of logged meals the client had to correct — the leading indicator of logging churn. Rising rate = the bot's guesses are wrong for these clients; the signal that the adaptive portion-learning layer is due.",
         },
       });
     } catch (err) {

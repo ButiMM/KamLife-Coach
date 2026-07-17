@@ -69,7 +69,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
             const newItems = logItems.filter(i => i !== deniedItem);
             const newKcal = Math.max(0, targetLog.kcalInt - (deniedItem.kcal || 0));
             const newProt = Math.max(0, targetLog.proteinInt - (deniedItem.protein || 0));
-            await db.update(mealLogs).set({ kcalInt: newKcal, proteinInt: newProt, items: newItems }).where(eq(mealLogs.id, targetLog.id));
+            await db.update(mealLogs).set({ kcalInt: newKcal, proteinInt: newProt, items: newItems, corrected: true }).where(eq(mealLogs.id, targetLog.id));
           } else {
             // Denied item is the whole meal (or items not stored) — delete the log entry
             await db.delete(mealLogs).where(eq(mealLogs.id, targetLog.id));
@@ -126,7 +126,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           const newKcalQC = Math.max(0, (targetQC.kcalInt || 0) - itemQC.kcal + newItemKcal);
           const newProtQC = Math.max(0, (targetQC.proteinInt || 0) - (itemQC.protein || 0) + newItemProt);
           const newItemsQC = itemsQC.map(i => i === itemQC ? { ...i, kcal: newItemKcal, protein: newItemProt } : i);
-          await db.update(mealLogs).set({ kcalInt: newKcalQC, proteinInt: newProtQC, items: newItemsQC }).where(eq(mealLogs.id, targetQC.id));
+          await db.update(mealLogs).set({ kcalInt: newKcalQC, proteinInt: newProtQC, items: newItemsQC, corrected: true }).where(eq(mealLogs.id, targetQC.id));
           invalidateFoodTotalsCache(user.id);
           const recQC = await recomputeTodayFoodTotals(user.id);
           await db.update(users).set({ todayCalories: recQC.calories, todayProteinG: recQC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
@@ -350,7 +350,7 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
             const rsRow = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt }).from(mealLogs).where(eq(mealLogs.id, targetMealLog.id)).limit(1);
             const newKcalRS = Math.max(0, (rsRow[0]?.kcalInt || 0) - (rsItem.kcal || 0));
             const newProtRS = Math.max(0, (rsRow[0]?.proteinInt || 0) - (rsItem.protein || 0));
-            await db.update(mealLogs).set({ kcalInt: newKcalRS, proteinInt: newProtRS, items: rsItems.filter(i => i !== rsItem) }).where(eq(mealLogs.id, targetMealLog.id));
+            await db.update(mealLogs).set({ kcalInt: newKcalRS, proteinInt: newProtRS, items: rsItems.filter(i => i !== rsItem), corrected: true }).where(eq(mealLogs.id, targetMealLog.id));
           } else {
             await db.delete(mealLogs).where(eq(mealLogs.id, targetMealLog.id));
           }

@@ -360,7 +360,7 @@ export async function handleFoodContext(ctx: {
         await db.transaction(async (tx) => {
           if (relabelTo && lastMealLogCorr) {
             // Relabel only — calories unchanged, so no recompute needed.
-            await tx.update(mealLogs).set({ mealLabel: relabelTo }).where(eq(mealLogs.id, lastMealLogCorr.id));
+            await tx.update(mealLogs).set({ mealLabel: relabelTo, corrected: true }).where(eq(mealLogs.id, lastMealLogCorr.id));
             relabelDone = true;
           } else {
             if (lastFoodLog) {
