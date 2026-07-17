@@ -821,6 +821,15 @@ const CASES: Case[] = [
     msg: "Is there an alternative to banana?",
     user: { goalType: "fat_loss" },
     expect: [/berries/i] },
+  // ── 2026-07-17 20:03 live: "two beef bacon burgers and fries" logged ONLY the bacon
+  // (plural-blind aliases) + the headline stuttered "room for room for".
+  { name: "playbook: plural burgers + fries log the BURGER and the chips, never bacon alone",
+    msg: "Had two beef bacon burgers And fries",
+    expect: [/[Bb]urger/, /[Cc]hips|fries/],
+    reject: [/room for room for/i] },
+  { name: "playbook: 'chicken and chips' logs the chips too",
+    msg: "chicken and chips for dinner",
+    expect: [/[Cc]hips/] },
 ];
 
 async function main() {

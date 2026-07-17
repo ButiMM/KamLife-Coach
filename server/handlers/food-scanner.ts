@@ -373,7 +373,10 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     const allAliases = [food.name.toLowerCase(), ...food.aliases.map(a => a.toLowerCase())];
     let longestHit = "";
     for (const alias of allAliases) {
-      const re = new RegExp(`\\b${escapeRegex(alias)}\\b`, "i");
+      // PLURAL-TOLERANT (2026-07-17 live: "two beef bacon burgers" logged only the
+      // bacon — \bburger\b cannot see "burgers", so the whole table was blind to
+      // plural speech). Optional s/es suffix; alias text itself stays the match key.
+      const re = new RegExp(`\\b${escapeRegex(alias)}(?:es|s)?\\b`, "i");
       if (re.test(lower) && alias.length > longestHit.length) {
         longestHit = alias;
       }
@@ -1053,7 +1056,7 @@ export function buildFoodLogReply(p: {
             : "🟡 That's your food for the day — anything else, keep it light (protein + veg).")
         : effectiveRemaining < 150
           ? "🟢 Right on track for today."
-          : `🟢 Nicely done — still room for ${mealsLeft || "a bit more"} today.`)
+          : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
     : "";
   const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
 
