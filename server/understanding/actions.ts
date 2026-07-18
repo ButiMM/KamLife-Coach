@@ -96,6 +96,21 @@ DO NOT call a tool — just talk — when it is NOT a fresh transaction:
 BUT a CORRECTION that CHANGES A STORED VALUE is a real write, not talk: "no, resting until MONDAY not Friday" changes the rest date → set_sick with the new day; "it was 2 eggs not 3" changes the log. Update the value with the tool.
 One message = at most ONE tool: pick the single real transaction. In genuine doubt, talk.`;
 
+/**
+ * MEMORY-GRIEVANCE GUARD — a deterministic net under the LLM's judgement, not a prompt hope.
+ * When a client complains that the coach FORGOT or ignored something already told ("I said
+ * I'm still sick until Monday, why did you forget?"), that is a complaint about the coach's
+ * memory — never a fresh instruction to write. The engine occasionally reads the "still sick
+ * until Monday" in it as a fresh SET_SICK (the 2026-07-18 false-write). This catches that
+ * class in code: a grievance can never fire a fresh sick write. Narrow on purpose — it keys
+ * on the forgot/already-told language, so a real declaration ("I'm sick") or a value
+ * correction ("resting until Monday, not Friday") is untouched.
+ */
+export function isMemoryGrievance(message: string): boolean {
+  const m = (message || "").toLowerCase();
+  return /\b(why (did|do|didn'?t) you (forget|remember|listen)|you (forgot|didn'?t (listen|remember))|already (said|told you)|told you (already|before)|like i (said|told))\b/.test(m);
+}
+
 function clampNum(v: unknown, lo: number, hi: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : NaN;

@@ -359,6 +359,25 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// MEMORY-GRIEVANCE GUARD — the deterministic net that keeps the ONE false-write at the gate
+// (2026-07-18: "I said I'm still sick until Monday, why did you forget" → SET_SICK) from ever
+// firing a fresh sick write. A complaint about the coach's memory is never an instruction.
+{
+  const { isMemoryGrievance } = await import("../server/understanding/actions");
+  test("grievance guard: a 'why did you forget / I already told you' complaint is caught", () => {
+    assert.equal(isMemoryGrievance("I said I'm still sick until Monday, why did you forget"), true);
+    assert.equal(isMemoryGrievance("you forgot I'm sick"), true);
+    assert.equal(isMemoryGrievance("I already told you I'm resting"), true);
+    assert.equal(isMemoryGrievance("like I said, I'm not training"), true);
+  });
+  test("grievance guard: a fresh declaration or a value correction is NOT a grievance (stays a write)", () => {
+    assert.equal(isMemoryGrievance("I'm sick, can't train today"), false, "a fresh declaration must still act");
+    assert.equal(isMemoryGrievance("too sick to train, resting for 3 days"), false);
+    assert.equal(isMemoryGrievance("No, I'm resting until Monday, not Friday"), false, "a value correction must still update");
+    assert.equal(isMemoryGrievance("feeling better now, ready to train"), false);
+  });
+}
+
 // THE ACTION DIRECTIVE — the calibration fix the first live replay demanded (18% missed,
 // "i had a burger for lunch" → JUST_REPLY). It must (a) explicitly override the text-only
 // constitution so a transaction CALLS a tool, and (b) still exclude questions/corrections so

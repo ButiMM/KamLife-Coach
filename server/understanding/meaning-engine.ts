@@ -26,7 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
-import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, type CoachAction } from "./actions";
+import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, isMemoryGrievance, type CoachAction } from "./actions";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -178,6 +178,11 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
         let args: any = {};
         try { args = JSON.parse(tc.function.arguments || "{}"); } catch { /* malformed → validateAction neutralises */ }
         action = validateAction({ name: tc.function.name, args });
+      }
+      // DETERMINISTIC GUARD (not a prompt hope): a memory grievance ("why did you forget
+      // I'm sick") can never fire a fresh sick write — it's a complaint, not an instruction.
+      if ((action.type === "SET_SICK" || action.type === "END_SICK") && isMemoryGrievance(message)) {
+        action = { type: "JUST_REPLY" };
       }
     }
     const reply = (msg?.content || "").trim();
