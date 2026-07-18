@@ -324,6 +324,34 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
+// streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
+// trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.
+{
+  const { morningClosingLine } = await import("../server/morning-closing");
+  const eng = { activelyEngaged: true, completedSessions28: 4 };
+  const lapsed = { activelyEngaged: false, completedSessions28: 4 };
+  test("morning close: an actively-engaged client is NEVER told 'welcome back' or 'reply Hi'", () => {
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      const line = morningClosingLine(t, eng);
+      assert.ok(!/have you back|reply Hi/i.test(line), `absence framing leaked (${t}): ${line}`);
+    }
+  });
+  test("morning close: an actually-lapsed client still gets the warm return line", () => {
+    assert.match(morningClosingLine("RECOVERING", lapsed), /have you back/i);
+    assert.match(morningClosingLine("DISENGAGED", lapsed), /reply Hi/i);
+  });
+  test("morning close: engaged lines make NO 'session today' push — safe on a rest day", () => {
+    for (const t of ["RECOVERING", "DISENGAGED"] as const) {
+      assert.ok(!/(one|a session).*today|today.*session|get one in today/i.test(morningClosingLine(t, eng)), `rest-day-unsafe (${t})`);
+    }
+  });
+  test("morning close: ON_A_RUN unchanged for everyone", () => {
+    assert.match(morningClosingLine("ON_A_RUN", eng), /sessions in over 4 weeks/);
+    assert.equal(morningClosingLine("ON_TRACK", eng), "");
+  });
+}
+
 // JUNK-AWARE VERDICT (2026-07-17 live: "beef bacon burger with fries" got "🟢 Nicely
 // done / Good protein 👍" — bacon's protein category cancelled the junk read, so a
 // takeaway looked like a clean win. The MEAL is judged now, not one item on the plate.)

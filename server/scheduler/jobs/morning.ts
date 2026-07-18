@@ -11,6 +11,7 @@ import { proteinHint } from "../../utils";
 import { getNumbersMode } from "../../numbers-mode";
 import { selectVariantMessage, recordDelivery } from "../../ab";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
+import { morningClosingLine } from "../../morning-closing";
 
 export async function runMorningCheckin(): Promise<void> {
   console.log("[SCHEDULER] JOB: Morning check-in");
@@ -468,15 +469,12 @@ export async function runMorningCheckin(): Promise<void> {
         todaySection.push(`🛌 Rest day. No training — stay on food and steps.`);
       }
 
-      // Trajectory-aware closing line — replaces generic "send me your meals" with context-driven push
-      const trajectoryClose: Record<Trajectory, string> = {
-        ON_A_RUN:   `\n\n_You're ${completedSessions28} sessions in over 4 weeks. Don't give this up — most people are nowhere near this._`,
-        ON_TRACK:   ``,
-        RECOVERING: `\n\n_Good to have you back. One day at a time — this week counts._`,
-        STRUGGLING: `\n\n_${completedSessions28} sessions in 4 weeks — let's get one in today. Just one. Reply 1 and I'll send it._`,
-        DISENGAGED: `\n\n_No sessions in 28 days. Today is not about intensity — just reply Hi and we go from there._`,
-      };
-      const closingLine = trajectoryClose[trajectory] || "";
+      // Trajectory-aware closing line. ENGAGEMENT-AWARE (2026-07-19 live: a client with a
+      // 19-day food streak + 2-session streak got "Good to have you back" — trajectory is
+      // workout-only, so a daily logger who trains moderately read as lapsed-and-returned).
+      // Someone logging every day never left: the absence-framed lines are gated out.
+      const activelyEngaged = foodLogStreakCount >= 3;
+      const closingLine = morningClosingLine(trajectory, { activelyEngaged, completedSessions28 });
       if (closingLine) todaySection.push(closingLine);
 
       if (await claimDailySlot(client.id, "morning")) {
