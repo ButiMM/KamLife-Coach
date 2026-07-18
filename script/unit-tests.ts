@@ -784,6 +784,19 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// SHADOW REVIEW — the coach's confirmation lap must be wired: a "shadow" command that reads
+// the dry-run action-decisions logged in shadow mode, so on/off is decided from real traffic.
+{
+  test("shadow: the review function reads ENGINE_ACTION_SHADOW logs and is wired to a command", () => {
+    const live = readFileSync(join("server", "understanding", "live.ts"), "utf-8");
+    assert.match(live, /export async function recentShadowDecisions/, "the shadow reader must exist");
+    assert.match(live, /ENGINE_ACTION_SHADOW/, "and query the shadow intent");
+    const routes = readFileSync(join("server", "routes.ts"), "utf-8");
+    assert.match(routes, /\^shadow\(\?:\\s\+\(\\d\{1,2\}\)\)\?\$/, "the 'shadow' coach command must be wired");
+    assert.match(routes, /recentShadowDecisions/, "and call the reader");
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.

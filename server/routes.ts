@@ -253,6 +253,16 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       })();
       return `⏳ Checking the ENGINE_ACTIONS gate…`;
     }
+
+    // ---- COACH COMMAND: "shadow" → review the engine's live action-decisions ----
+    // The confirmation lap: in ENGINE_ACTIONS=shadow every real message's would-be action is
+    // logged (dry-run, nothing written). This shows the recent ones so you can scan for a
+    // wrong write before flipping to on — no Railway logs needed. "shadow 30" for more.
+    const sh = m.trim().match(/^shadow(?:\s+(\d{1,2}))?$/i);
+    if (sh) {
+      const { recentShadowDecisions } = await import("./understanding/live");
+      return await recentShadowDecisions(parseInt(sh[1] || "15", 10) || 15);
+    }
   }
 
   // ---- BETA TESTER ALLOWLIST — comma/space/newline-separated numbers in BETA_TESTERS ----

@@ -60,6 +60,31 @@ function deriveSourceId(userId: string, message: string): string {
   return `d${(h >>> 0).toString(36)}`;
 }
 
+// SHADOW REVIEW — the confirmation lap in WhatsApp. In shadow mode every emitted action is
+// logged (dry-run, nothing written) as ENGINE_ACTION_SHADOW: messageIn = the real message,
+// messageOut = "<action> → <status>". This pulls the recent ones so the coach can scan for a
+// wrong decision before flipping ENGINE_ACTIONS=on — no Railway logs needed.
+export async function recentShadowDecisions(limit = 15): Promise<string> {
+  try {
+    const rows = await db.select({ messageIn: chatHistory.messageIn, messageOut: chatHistory.messageOut })
+      .from(chatHistory)
+      .where(eq(chatHistory.intent, "ENGINE_ACTION_SHADOW"))
+      .orderBy(desc(chatHistory.createdAt))
+      .limit(Math.max(5, Math.min(40, limit)));
+    if (!rows.length) {
+      return "🕶️ *Shadow* — no action-decisions logged yet.\n\nSet *ENGINE_ACTIONS=shadow* in Railway; once real messages come in, Coach K's would-be actions show here (dry-run — nothing is written).";
+    }
+    const lines = rows.map(r => {
+      const msg = (r.messageIn || "").replace(/\s+/g, " ").slice(0, 42);
+      const decision = (r.messageOut || "").replace(/\s*→\s*\w+(\(dup\))?\s*$/i, "").trim() || "(reply)";
+      return `• "${msg}" → *${decision}*`;
+    });
+    return `🕶️ *Shadow — last ${rows.length} action-decisions* (dry-run, nothing written)\n\n${lines.join("\n")}\n\n_These are the actions Coach K WOULD take on real messages. Scan for a wrong write; if it's clean, flip ENGINE_ACTIONS=on._`;
+  } catch (e) {
+    return `Shadow read hit a snag: ${(e as any)?.message || e}`;
+  }
+}
+
 // Last few real turns of THIS conversation, so the engine has short-term memory and
 // stops answering each message in a vacuum ("it doesn't listen / forgets what I said").
 // Best-effort: an empty list never blocks a reply. Skips internal markers.
