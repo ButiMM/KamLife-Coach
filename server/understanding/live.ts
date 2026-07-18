@@ -29,9 +29,34 @@ import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
 import { logChat } from "../handlers/chat-log";
+import { executeAction } from "./executor";
+import { describeAction } from "./actions";
 
 export function engineLive(): boolean {
   return process.env.ENGINE_LIVE === "on";
+}
+
+// THE INVERSION rollout dial (increment 4) — SEPARATE from ENGINE_LIVE so the action
+// emitter can be exercised without touching the conversational engine's rollout.
+//   off    — default. Coach K never emits actions; behaviour is byte-identical.
+//   shadow — emit + DRY-RUN execute + log the decision, but the client still gets the
+//            normal path. This is how we gather replay evidence in production, safely.
+//   on     — emit + REALLY execute; the deterministic executor's reply wins.
+export type ActionMode = "off" | "shadow" | "on";
+export function engineActionMode(): ActionMode {
+  const v = (process.env.ENGINE_ACTIONS || "off").toLowerCase();
+  return v === "on" ? "on" : v === "shadow" ? "shadow" : "off";
+}
+
+// Idempotency source id. The inbound WhatsApp MessageSid isn't threaded to this layer
+// yet, so derive a stable key from the user + message: a literal retry of the same text
+// within the dedup window collapses (correct), distinct messages don't. (SID threading
+// is a later refinement; harmless in shadow, where nothing is written.)
+function deriveSourceId(userId: string, message: string): string {
+  let h = 0;
+  const s = `${userId}:${message}`;
+  for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
+  return `d${(h >>> 0).toString(36)}`;
 }
 
 // Last few real turns of THIS conversation, so the engine has short-term memory and
@@ -80,11 +105,35 @@ export async function runMeaningEngineLive(ctx: {
       : null;
 
     const history = user?.id ? await recentTurns(user.id) : [];
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history });
-    if (!result || !result.reply.trim()) return null; // fail-open → existing pipeline runs
+    const actionMode = engineActionMode();
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" });
+    if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
     if (user?.id) saveUnderstanding(user.id, result.state).catch(() => {});
+
+    // THE INVERSION — Coach K decided on an action. Validate happened in the engine;
+    // here we execute it (dry-run in shadow) and, in `on` mode, let the deterministic
+    // executor's reply win. Fail-open: any miss falls back to the conversational reply.
+    if (actionMode !== "off" && result.action && result.action.type !== "JUST_REPLY") {
+      try {
+        const exec = await executeAction(result.action, {
+          user, phone: ctx.phone, sourceMessageId: deriveSourceId(user.id, message),
+          confidence: 0.9, // placeholder until replay calibrates the distribution
+          dryRun: actionMode === "shadow",
+        });
+        await logChat(user.id, message,
+          `${describeAction(result.action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip(dup)" : exec.error ? "error" : "noop"}`,
+          actionMode === "shadow" ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
+        if (actionMode === "on" && (exec.performed || exec.confirmed) && exec.reply.trim()) {
+          return exec.reply; // the deterministic side-effect + its reply
+        }
+      } catch (e) {
+        console.warn("[ENGINE_ACTION] execute failed (deferring):", (e as any)?.message || e);
+      }
+    }
+
+    if (!result.reply.trim()) return null; // no conversational reply → existing pipeline runs
 
     // Same guards production already trusts: safety gate → sanitize → number-free.
     const gate = await safetyGate(result.reply, user, message);

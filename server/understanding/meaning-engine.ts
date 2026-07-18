@@ -26,6 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
+import { COACH_ACTION_TOOLS, validateAction, type CoachAction } from "./actions";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -82,12 +83,18 @@ export interface MeaningInput {
   stats?: Partial<UnderstandingState["stats"]>;
   /** recent turns for continuity: [{role, content}] */
   history?: Array<{ role: "user" | "assistant"; content: string }>;
+  /** THE INVERSION (increment 4): when true, Coach K may emit a structured action via
+   *  the COACH_ACTION_TOOLS instead of freeform text. Off unless the caller opts in
+   *  (ENGINE_ACTIONS flag), so the default behaviour is byte-identical. */
+  emitActions?: boolean;
 }
 
 export interface MeaningResult {
   reply: string;
   state: UnderstandingState;
   model: string;
+  /** the action Coach K decided on (JUST_REPLY when it chose to just talk). */
+  action: CoachAction;
 }
 
 export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResult | null> {
@@ -145,8 +152,11 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       model,
       temperature: 0.5,
       max_tokens: 400,
-      messages, // v1: NO tools — the engine produces the CONVERSATIONAL reply; transactions
-                // stay on the deterministic pipeline until the engine graduates from shadow.
+      messages,
+      // THE INVERSION: with emitActions on, Coach K may return ONE structured action
+      // (validated + executed deterministically by the caller) instead of freeform text.
+      // Off → byte-identical to the old text-only engine.
+      ...(input.emitActions ? { tools: COACH_ACTION_TOOLS as any, tool_choice: "auto" as const } : {}),
     });
     recordGptCost({
       userId: user?.id ?? null,
@@ -156,9 +166,20 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
       completionTokens: resp.usage?.completion_tokens ?? 0,
     });
 
-    const reply = (resp.choices[0]?.message?.content || "").trim();
-    if (!reply) return null;
-    return { reply, state, model };
+    const msg = resp.choices[0]?.message;
+    let action: CoachAction = { type: "JUST_REPLY" };
+    if (input.emitActions) {
+      const tc: any = (msg?.tool_calls || []).find((t: any) => t.type === "function");
+      if (tc) {
+        let args: any = {};
+        try { args = JSON.parse(tc.function.arguments || "{}"); } catch { /* malformed → validateAction neutralises */ }
+        action = validateAction({ name: tc.function.name, args });
+      }
+    }
+    const reply = (msg?.content || "").trim();
+    // Nothing to say AND nothing to do → fail-open to the existing pipeline.
+    if (!reply && action.type === "JUST_REPLY") return null;
+    return { reply, state, model, action };
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[MEANING_ENGINE] failed (deferring):", (e as any)?.message || e);
     return null; // fail-open
