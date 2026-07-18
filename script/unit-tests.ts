@@ -324,6 +324,40 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE ACTION INTERFACE — Phase 1 of the inversion (2026-07-19). validateAction is the
+// Law-4 gate: untrusted model output → a safe action, or JUST_REPLY. Nothing the model
+// emits may crash, over-write state with a bad number, or fabricate a log.
+{
+  const { validateAction, describeAction } = await import("../server/understanding/actions");
+  test("action gate: malformed / unknown / empty input all fall back to JUST_REPLY", () => {
+    for (const junk of [null, undefined, {}, 42, "log_meal", { type: "DROP_TABLE" }, { name: "rm -rf" }])
+      assert.equal(validateAction(junk as any).type, "JUST_REPLY", `unsafe input must be neutralised: ${JSON.stringify(junk)}`);
+  });
+  test("action gate: numbers are clamped to sane ranges, never trusted raw", () => {
+    assert.equal((validateAction({ type: "LOG_STEPS", count: 9_999_999 }) as any).count, 100_000, "absurd steps clamped");
+    assert.equal((validateAction({ type: "LOG_WATER", litres: 999 }) as any).litres, 15, "absurd water clamped");
+    assert.equal((validateAction({ type: "LOG_WEIGHT", kg: 5 }) as any).type, "JUST_REPLY", "impossible weight → no action");
+    assert.equal((validateAction({ type: "SET_SICK", days: 999 }) as any).days, 14, "sick days capped");
+    assert.equal(validateAction({ type: "LOG_STEPS", count: "abc" }).type, "JUST_REPLY", "non-number → no log");
+  });
+  test("action gate: a LOG_MEAL with no valid food NEVER fabricates a log", () => {
+    assert.equal(validateAction({ type: "LOG_MEAL", items: [] }).type, "JUST_REPLY");
+    assert.equal(validateAction({ type: "LOG_MEAL", items: [{ name: "", kcal: 1, protein: 1 }] }).type, "JUST_REPLY");
+    const ok = validateAction({ type: "LOG_MEAL", items: [{ name: "Pap", kcal: 300, protein: 6 }], meal: "lunch" });
+    assert.equal(ok.type, "LOG_MEAL");
+    assert.equal((ok as any).meal, "lunch");
+  });
+  test("action gate: bad meal slot defaults to snack; unknown stays out", () => {
+    assert.equal((validateAction({ type: "LOG_MEAL", items: [{ name: "Chips", kcal: 400, protein: 5 }], meal: "brunchtime" }) as any).meal, "snack");
+    assert.equal((validateAction({ type: "LOG_MEAL", items: [{ name: "Eggs", kcal: 140, protein: 12 }], meal: "night meal" }) as any).meal, "night meal");
+  });
+  test("action gate: accepts the OpenAI tool-call name form too", () => {
+    assert.equal(validateAction({ name: "show_meals", args: {} }).type, "SHOW_MEALS");
+    assert.equal((validateAction({ name: "set_sick", args: { days: 2 } }) as any).days, 2);
+    assert.match(describeAction(validateAction({ name: "log_steps", args: { count: 8000 } })), /8000 steps/);
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.
