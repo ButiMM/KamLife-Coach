@@ -376,9 +376,16 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(ACTION_DIRECTIVE, /show_workout/);
     assert.match(ACTION_DIRECTIVE, /set_sick/);
   });
-  test("action directive: still fences OFF non-transactions (guards against new false writes)", () => {
-    assert.match(ACTION_DIRECTIVE, /question/i, "a question must stay conversation");
-    assert.match(ACTION_DIRECTIVE, /correction|clarif/i, "a correction must not re-fire the tool (the false-write we saw)");
+  test("action directive: reconciles care-first so a sick declaration still ACTS (the 86% miss cluster)", () => {
+    assert.match(ACTION_DIRECTIVE, /care is an action/i, "recording sick must be framed as the care, not its opposite");
+    assert.match(ACTION_DIRECTIVE, /set_sick \(MUST\)/, "a fresh sick declaration must be a MUST-act");
+    assert.match(ACTION_DIRECTIVE, /end_sick \(MUST\)/, "recovery must be a MUST-act");
+    assert.match(ACTION_DIRECTIVE, /weighed in at/i, "the weight phrasing that missed is now taught");
+  });
+  test("action directive: fences OFF non-transactions but UPDATES a value-changing correction", () => {
+    assert.match(ACTION_DIRECTIVE, /question/i, "a question stays conversation");
+    assert.match(ACTION_DIRECTIVE, /reaffirmation|still true/i, "a reaffirmation must not re-write state");
+    assert.match(ACTION_DIRECTIVE, /changes a stored value/i, "but a value-changing correction IS a write (the gold label)");
     assert.match(ACTION_DIRECTIVE, /at most one tool/i, "one message = one action");
   });
 }

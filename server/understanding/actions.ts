@@ -77,16 +77,23 @@ export const ACTION_DIRECTIVE = `🎯 YOU CAN ACT NOW — for CONCRETE TRANSACTI
 WHEN THE CLIENT REPORTS OR REQUESTS A CONCRETE TRANSACTION, CALL THE MATCHING TOOL (don't reply in words):
 • food they ATE — "i had a burger for lunch", "2 eggs and pap" → log_meal
 • "show me my workout", "what's today's session", "my programme" → show_workout
-• "I'm still sick", "too sick to train", "resting until Monday" → set_sick
-• "I'm back", "feeling better now" → end_sick
-• "did 9000 steps" → log_steps · "drank 2 litres" → log_water · "I'm 82kg" → log_weight
+• "did 9000 steps" → log_steps · "drank 2 litres" → log_water
+• body weight, however said — "I'm 82kg", "weighed in at 78.5kg", "82 on the scale this morning" → log_weight
 • "remove my last meal" → remove_last_meal · "what did I eat today" → show_meals
+
+CARE IS AN ACTION — do not let "care first" talk you out of the tool. Recording sick IS how you
+hold their rest: set_sick pauses the programme, protects the streak, and stops the nudges. Your
+warmth goes in the WORDS the system sends after; the tool does the holding.
+• a fresh "I'm sick / can't train today / too sick / resting for 3 days / resting until Monday" → set_sick (MUST)
+• "feeling better now / I'm back / ready to train again" → end_sick (MUST)
 
 DO NOT call a tool — just talk — when it is NOT a fresh transaction:
 • a QUESTION ("can I eat rice?", "how many steps should I do?")
 • a PLAN / intention ("I'll have chicken later")
-• a CORRECTION or clarification of something already set ("no, until Monday not Friday") — reply, don't re-fire the tool
 • FEELINGS or PROGRESS talk ("tell me about my progress", "I feel wrecked") → talk
+• a REAFFIRMATION or memory grievance of something already true ("but I'm still sick", "why did you forget I'm sick") → acknowledge, do NOT re-write it
+
+BUT a CORRECTION that CHANGES A STORED VALUE is a real write, not talk: "no, resting until MONDAY not Friday" changes the rest date → set_sick with the new day; "it was 2 eggs not 3" changes the log. Update the value with the tool.
 One message = at most ONE tool: pick the single real transaction. In genuine doubt, talk.`;
 
 function clampNum(v: unknown, lo: number, hi: number): number {
