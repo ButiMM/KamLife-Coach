@@ -959,6 +959,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   const foodCtxResult = await handleFoodContext({ phone, message, m, user, stepReplyPart, handleMessage, classifierQuestion: normalizedQuestion });
   if (foodCtxResult !== null) return foodCtxResult;
 
+  // ---- WEIGHT FORECAST / TRAJECTORY ----
+  // The anti-"it's a scam" tool: from the client's OWN logged food + steps vs their
+  // maintenance, deterministic energy math (never the LLM) projects the scale. If they
+  // logged a surplus, it says so — the plate, not the plan. Available to every client.
+  if (/^(forecast|my forecast|weight forecast|trajectory|my trajectory|projection|my projection|am i on track|will i (lose|gain|drop|pick up)|how much (weight )?(will|am|would) i (going to |gonna )?(lose|gain|drop|pick up))\b/i.test(m.trim())) {
+    const { getTrajectoryForUser } = await import("./trajectory-report");
+    const report = await getTrajectoryForUser(user.id);
+    if (report) return report.whatsappText;
+  }
+
   // ---- PROGRESS CHECK ----
   // Days 31-40 rollout: when the engine is live it OWNS the "how am I doing / my progress"
   // conversation — snapshot-grounded (real numbers injected) and sick-aware, so it stops

@@ -33,6 +33,9 @@ const DETERMINISTIC_ACTION = new RegExp([
   "\\blog\\b", "\\btrack\\b", "\\brecord\\b", "\\bweigh(?:ed|t)?\\s*in\\b",
   // ── data displays / lookups (need the real DB, which Coach K can't read) ──
   "\\bstats?\\b", "\\bmy progress\\b", "how am i doing", "\\bprogress\\b",
+  // weight forecast / trajectory — deterministic energy math, never the LLM (Law 4)
+  "\\bforecast\\b", "\\btrajector\\w*\\b", "\\bprojection\\b", "on track (for|to)",
+  "will i (lose|gain|drop|pick up)", "how much (weight )?(will|am|would) i",
   "weight\\s*(?:chart|graph|trend|history|journey)", "\\bmy workouts?\\b", "workout\\s*(?:history|diary)",
   "\\bachievements?\\b", "\\bbadges?\\b", "\\bcalendar\\b", "\\bconsistency\\b", "\\bstreak\\b",
   "\\bmonthly report\\b", "\\bmy numbers\\b",

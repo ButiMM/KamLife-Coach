@@ -4,28 +4,27 @@
 // Gender, age, height all factor in — no more one-size-fits-all
 // ============================================================
 
-export function calculateTargets(
+// ── MAINTENANCE (TDEE before the goal adjustment) ──
+// Mifflin-St Jeor BMR × activity multiplier + the training-calorie spread. This is the
+// break-even: eat exactly this and hold weight. The calorie TARGET is this ± the goal
+// adjustment. Extracted as the ONE source so the trajectory engine and the target
+// calculator can never disagree about a client's break-even. Pure — unit-tested.
+export function maintenanceKcal(
   weightKg: number,
-  goalType: string,
-  lifeSituation: string,
-  trainingDaysPerWeek: number,
   gender: string = "male",
   age: number = 30,
   heightCm: number = 170,
+  lifeSituation: string = "office",
+  trainingDaysPerWeek: number = 3,
   trainingExperience: string = "beginner",
-): { calorieTarget: number; proteinTarget: number } {
-
-  const isBreastfeeding = lifeSituation === "postpartum_breastfeeding";
-
-  // ── Mifflin-St Jeor BMR (far more accurate than weight × 22) ──
+): number {
+  const isFemale = gender === "female";
   // Male:   10 × weight(kg) + 6.25 × height(cm) − 5 × age + 5
   // Female: 10 × weight(kg) + 6.25 × height(cm) − 5 × age − 161
-  const isFemale = gender === "female";
   const bmr = isFemale
     ? (10 * weightKg) + (6.25 * heightCm) - (5 * age) - 161
     : (10 * weightKg) + (6.25 * heightCm) - (5 * age) + 5;
 
-  // ── Activity multiplier based on life situation ──
   const activityMult: Record<string, number> = {
     office: 1.3,
     student: 1.35,
@@ -44,12 +43,32 @@ export function calculateTargets(
   };
   const mult = activityMult[lifeSituation] || 1.3;
 
-  // ── Training calorie addition (spread over 7 days) ──
-  // Smaller addition for females — metabolic reality
-  // Beginners work at lower intensity initially; advanced athletes burn more per session
+  // Training calorie addition (spread over 7 days). Smaller for females (metabolic reality);
+  // beginners work at lower intensity, advanced athletes burn more per session.
   const calPerSession = isFemale ? 150 : 200;
   const expMult = trainingExperience === "advanced" ? 1.2 : trainingExperience === "intermediate" ? 1.0 : 0.75;
   const trainingAdj = Math.round((calPerSession * expMult * Math.min(trainingDaysPerWeek, 7)) / 7);
+
+  const m = Math.round(bmr * mult + trainingAdj);
+  return Number.isFinite(m) ? m : 2000;
+}
+
+export function calculateTargets(
+  weightKg: number,
+  goalType: string,
+  lifeSituation: string,
+  trainingDaysPerWeek: number,
+  gender: string = "male",
+  age: number = 30,
+  heightCm: number = 170,
+  trainingExperience: string = "beginner",
+): { calorieTarget: number; proteinTarget: number } {
+
+  const isBreastfeeding = lifeSituation === "postpartum_breastfeeding";
+  const isFemale = gender === "female";
+
+  // Break-even (TDEE) from the single source, then apply the goal adjustment below.
+  const maintenance = maintenanceKcal(weightKg, gender, age, heightCm, lifeSituation, trainingDaysPerWeek, trainingExperience);
 
   // ── Goal adjustment ──
   // Fat loss deficit is smaller for females to preserve hormonal health
@@ -63,7 +82,7 @@ export function calculateTargets(
   };
   const adj = goalAdj[goalType] ?? 0;
 
-  let calorieTarget = Math.round(bmr * mult + trainingAdj + adj);
+  let calorieTarget = Math.round(maintenance + adj);
 
   // ── Breastfeeding calorie bonus — milk production burns 300–500 kcal/day ──
   if (isBreastfeeding) calorieTarget += 400;

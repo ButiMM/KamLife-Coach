@@ -7,7 +7,8 @@
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile } from "../server/targets";
+import { calculateTargets, calculateStepsTarget, getDailyStepContext, energyFrameLine, suggestStepTargetAdjustment, stepBurnKcal, waterTargetLitres, auditStoredTargets, auditStepsTarget, recalcTargetsForProfile, maintenanceKcal } from "../server/targets";
+import { predictTrajectory } from "../server/trajectory";
 import { getDayType, getPhaseMultiplier, getPhaseNames, getWeekContext, cleanExerciseName, canonicalLiftKey } from "../server/programme";
 import { getShoppingList, formatShoppingList } from "../server/shopping-lists";
 import { parseFoodPreferences, parseVisionAnswer } from "../server/onboarding-intake";
@@ -98,6 +99,85 @@ test("female has smaller deficit than male for fat loss", () => {
   const female = calculateTargets(70, "fat_loss", "office", 3, "female", 30, 165);
   assert.ok(female.calorieTarget > male.calorieTarget - 200, "female deficit should be smaller (max 200 kcal diff at same weight)");
 });
+
+// ============================================================
+// MAINTENANCE (TDEE) — the single break-even source. calorieTarget = maintenance + goalAdj,
+// so the trajectory engine and the target calculator can never disagree.
+// ============================================================
+test("maintenanceKcal: Mifflin TDEE matches the hand-computed break-even", () => {
+  // male 80kg/175cm/30y office(1.3) 3 days beginner:
+  // BMR = 10×80 + 6.25×175 − 5×30 + 5 = 1748.75 · ×1.3 = 2273.375
+  // trainingAdj = round(200×0.75×3/7) = round(64.3) = 64 → maintenance ≈ 2337
+  const m = maintenanceKcal(80, "male", 30, 175, "office", 3, "beginner");
+  assert.ok(Math.abs(m - 2337) <= 2, `maintenance should be ~2337, got ${m}`);
+});
+test("maintenanceKcal: is the break-even calorieTarget is built on (target = maintenance + goalAdj)", () => {
+  const m = maintenanceKcal(80, "male", 30, 175, "office", 3, "beginner");
+  const { calorieTarget } = calculateTargets(80, "fat_loss", "office", 3, "male", 30, 175);
+  // male fat-loss adjustment is −400; target must sit that far below maintenance (above the floor).
+  assert.equal(calorieTarget, m - 400, `fat-loss target must be maintenance−400 (${m}−400), got ${calorieTarget}`);
+});
+test("maintenanceKcal: junk inputs never yield NaN", () => {
+  assert.ok(Number.isFinite(maintenanceKcal(NaN as any, "male", NaN as any, NaN as any, "office", 3, "beginner")));
+});
+
+// ============================================================
+// WEIGHT TRAJECTORY — the deterministic "what will the scale do" engine (2026-07-18).
+// The anti-"it's a scam" tool: honest energy math from the client's OWN logs.
+// ============================================================
+{
+  const week = (intakeKcal: number, steps: number, n = 5) => Array.from({ length: n }, () => ({ intakeKcal, steps }));
+
+  test("trajectory: a real deficit predicts weight LOSS and reads on-track for fat loss", () => {
+    const r = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days: week(1900, 8000) });
+    assert.equal(r.direction, "losing");
+    assert.ok(r.predictedWeeklyChangeKg < 0, "a deficit loses weight");
+    assert.equal(r.onTrackForGoal, true);
+    assert.equal(r.confidence, "high", "5 logged days is a solid read");
+  });
+  test("trajectory: THE anti-scam case — logging a SURPLUS on a fat-loss goal predicts a GAIN, and says so", () => {
+    const r = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days: week(3200, 3000) });
+    assert.equal(r.direction, "gaining");
+    assert.ok(r.predictedWeeklyChangeKg > 0, "a surplus gains, no matter the goal");
+    assert.equal(r.onTrackForGoal, false, "gaining on a fat-loss goal is NOT on track");
+    assert.match(r.headline, /scale isn'?t dropping|plate/i, "the honest 'it's the plate, not the plan' verdict");
+  });
+  test("trajectory: eating at break-even holds the scale (within noise)", () => {
+    // intake ≈ maintenance + stepburn so the daily balance is under the 100 kcal noise floor.
+    const r = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "recomposition", days: week(2460, 1000) });
+    assert.equal(r.direction, "holding");
+    assert.equal(r.onTrackForGoal, true, "holding IS the recomp target");
+  });
+  test("trajectory: muscle-gain client in a deficit is flagged NOT on track (growth will stall)", () => {
+    const r = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "muscle_gain", days: week(1800, 9000) });
+    assert.equal(r.direction, "losing");
+    assert.equal(r.onTrackForGoal, false);
+  });
+  test("trajectory: steps deepen the deficit (more walking → more predicted loss)", () => {
+    const low = predictTrajectory({ maintenanceKcal: 2400, weightKg: 90, goalType: "fat_loss", days: week(2200, 2000) });
+    const high = predictTrajectory({ maintenanceKcal: 2400, weightKg: 90, goalType: "fat_loss", days: week(2200, 14000) });
+    assert.ok(high.predictedWeeklyChangeKg < low.predictedWeeklyChangeKg, "more steps → more loss");
+  });
+  test("trajectory: confidence scales with days logged; an unlogged week is honest, not zero-calorie", () => {
+    assert.equal(predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days: week(1900, 8000, 2) }).confidence, "low");
+    assert.equal(predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days: week(1900, 8000, 4) }).confidence, "medium");
+    const none = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days: [] });
+    assert.equal(none.daysLogged, 0);
+    assert.equal(none.predictedWeeklyChangeKg, 0, "no logs → no fake crash-deficit prediction");
+    assert.match(none.headline, /log/i);
+  });
+  test("trajectory: weeks-to-goal only when actually moving toward the target weight", () => {
+    const toward = predictTrajectory({ maintenanceKcal: 2400, weightKg: 90, goalType: "fat_loss", days: week(1800, 9000), targetWeightKg: 80 });
+    assert.ok(toward.weeksToGoal && toward.weeksToGoal > 0, "losing toward a lower goal → an ETA");
+    const away = predictTrajectory({ maintenanceKcal: 2400, weightKg: 90, goalType: "fat_loss", days: week(3200, 2000), targetWeightKg: 80 });
+    assert.equal(away.weeksToGoal, null, "gaining while the goal is to lose → no fake ETA");
+  });
+  test("trajectory: an unlogged (zero-intake) day is skipped, not counted as a starvation day", () => {
+    const days = [{ intakeKcal: 2000, steps: 8000 }, { intakeKcal: 0, steps: 5000 }, { intakeKcal: 2000, steps: 8000 }];
+    const r = predictTrajectory({ maintenanceKcal: 2400, weightKg: 80, goalType: "fat_loss", days });
+    assert.equal(r.daysLogged, 2, "the 0-kcal day is unknown, not a crash deficit");
+  });
+}
 
 test("calories never below female minimum 1200", () => {
   const { calorieTarget } = calculateTargets(40, "fat_loss", "unemployed", 1, "female", 55, 150);
