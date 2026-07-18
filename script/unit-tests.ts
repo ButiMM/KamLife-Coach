@@ -340,16 +340,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal((validateAction({ type: "SET_SICK", days: 999 }) as any).days, 14, "sick days capped");
     assert.equal(validateAction({ type: "LOG_STEPS", count: "abc" }).type, "JUST_REPLY", "non-number → no log");
   });
-  test("action gate: a LOG_MEAL with no valid food NEVER fabricates a log", () => {
-    assert.equal(validateAction({ type: "LOG_MEAL", items: [] }).type, "JUST_REPLY");
-    assert.equal(validateAction({ type: "LOG_MEAL", items: [{ name: "", kcal: 1, protein: 1 }] }).type, "JUST_REPLY");
-    const ok = validateAction({ type: "LOG_MEAL", items: [{ name: "Pap", kcal: 300, protein: 6 }], meal: "lunch" });
+  test("action gate: a LOG_MEAL with no food text NEVER fabricates a log", () => {
+    assert.equal(validateAction({ type: "LOG_MEAL", food_text: "" }).type, "JUST_REPLY");
+    assert.equal(validateAction({ type: "LOG_MEAL", food_text: "x" }).type, "JUST_REPLY", "too short to be food");
+    const ok = validateAction({ type: "LOG_MEAL", food_text: "2 eggs and pap", meal: "lunch" });
     assert.equal(ok.type, "LOG_MEAL");
+    assert.equal((ok as any).foodText, "2 eggs and pap");
     assert.equal((ok as any).meal, "lunch");
   });
-  test("action gate: bad meal slot defaults to snack; unknown stays out", () => {
-    assert.equal((validateAction({ type: "LOG_MEAL", items: [{ name: "Chips", kcal: 400, protein: 5 }], meal: "brunchtime" }) as any).meal, "snack");
-    assert.equal((validateAction({ type: "LOG_MEAL", items: [{ name: "Eggs", kcal: 140, protein: 12 }], meal: "night meal" }) as any).meal, "night meal");
+  test("action gate: LOG_MEAL keeps a valid slot, drops a bad one (deterministic scanner infers it)", () => {
+    assert.equal((validateAction({ type: "LOG_MEAL", food_text: "chips", meal: "brunchtime" }) as any).meal, undefined);
+    assert.equal((validateAction({ type: "LOG_MEAL", food_text: "eggs", meal: "night meal" }) as any).meal, "night meal");
   });
   test("action gate: accepts the OpenAI tool-call name form too", () => {
     assert.equal(validateAction({ name: "show_meals", args: {} }).type, "SHOW_MEALS");
@@ -363,7 +364,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // (duplicated logs). Built onto the contract before the executor exists.
 {
   const { shouldAutoExecute, writesState, actionFingerprint, CONFIDENCE_TO_EXECUTE } = await import("../server/understanding/actions");
-  const meal = { type: "LOG_MEAL", items: [{ name: "Eggs", kcal: 140, protein: 12 }], meal: "breakfast", needsConfirmation: false } as any;
+  const meal = { type: "LOG_MEAL", foodText: "2 eggs and pap", meal: "breakfast", needsConfirmation: false } as any;
   test("confidence gate: a low-confidence STATE-WRITE waits for confirmation; a high one runs", () => {
     assert.equal(shouldAutoExecute(meal, 0.58), false, "'~2 eggs?' must not auto-log");
     assert.equal(shouldAutoExecute(meal, 0.98), true, "a confident log runs");
@@ -383,6 +384,44 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(actionFingerprint(meal, "u1", "SM123"), a, "a retry of the same message = same key");
     assert.notEqual(actionFingerprint(meal, "u1", "SM999"), a, "a genuinely separate message = new key");
     assert.notEqual(actionFingerprint(meal, "u2", "SM123"), a, "different user = different key");
+  });
+}
+
+// THE EXECUTOR — decision core (2026-07-19). The safety logic before any handler runs:
+// dry-run never writes, a low-confidence write confirms, JUST_REPLY is a no-op. These
+// paths return BEFORE delegating, so they're pure and testable without the DB chain.
+{
+  const { executeAction, _resetExecutorDedup } = await import("../server/understanding/executor");
+  _resetExecutorDedup();
+  const user = { id: "ex-test", name: "Kam", stepsTarget: 8500 };
+  const ctx = (over: any = {}) => ({ user, phone: "whatsapp:+27", sourceMessageId: "SM1", confidence: 0.95, ...over });
+  const meal = { type: "LOG_MEAL", foodText: "2 eggs and pap", needsConfirmation: false } as any;
+  test("executor: JUST_REPLY performs nothing", async () => {
+    const r = await executeAction({ type: "JUST_REPLY" } as any, ctx());
+    assert.equal(r.performed, false);
+    assert.equal(r.reply, "");
+  });
+  test("executor: dry-run reports but NEVER writes (replay-safe)", async () => {
+    const r = await executeAction(meal, ctx({ dryRun: true }));
+    assert.equal(r.performed, false, "dry-run must not perform");
+    assert.match(r.reply, /\[dry-run\] would log/i);
+  });
+  test("executor: a low-confidence state-write CONFIRMS instead of writing", async () => {
+    const r = await executeAction(meal, ctx({ confidence: 0.5 }));
+    assert.equal(r.confirmed, true);
+    assert.equal(r.performed, false);
+    assert.match(r.reply, /reply \*yes\*/i);
+  });
+  test("executor: a model-flagged needs_confirmation always confirms, even at high confidence", async () => {
+    const r = await executeAction({ ...meal, needsConfirmation: true }, ctx({ confidence: 0.99 }));
+    assert.equal(r.confirmed, true);
+    assert.equal(r.performed, false);
+  });
+  test("executor: fingerprint is stable + present on every result (idempotency key)", async () => {
+    const a = await executeAction(meal, ctx({ dryRun: true }));
+    const b = await executeAction(meal, ctx({ dryRun: true }));
+    assert.equal(a.fingerprint, b.fingerprint, "same action + message = same key");
+    assert.ok(a.fingerprint.includes("SM1"));
   });
 }
 

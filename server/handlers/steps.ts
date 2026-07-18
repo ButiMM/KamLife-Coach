@@ -1,8 +1,34 @@
 import { db } from "../db";
 import { stepLogs } from "../../shared/schema";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and, gte, lt } from "drizzle-orm";
 import { educationNote } from "../education";
 import { stepBurnKcal } from "../targets";
+import { sastDayStart } from "../utils";
+
+/**
+ * STRUCTURED STEP WRITE (2026-07-19) — the executor's reuse point, mirroring the routes.ts
+ * inline upsert exactly: one row per SAST day, keep the HIGHER count (clients re-log a
+ * growing daily total) unless it's an explicit correction. Additive — routes keeps its
+ * own path; this is a clean callable for the action executor. Returns the day's count.
+ */
+export async function logStepsForUser(userId: string, steps: number, opts?: { correction?: boolean; at?: Date }): Promise<number> {
+  const at = opts?.at || new Date();
+  const dayStart = sastDayStart(at);
+  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
+  const existing = await db.select({ id: stepLogs.id, steps: stepLogs.steps })
+    .from(stepLogs)
+    .where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, dayStart), lt(stepLogs.loggedAt, dayEnd)))
+    .limit(1);
+  if (existing.length > 0) {
+    if (steps > (existing[0].steps ?? 0) || opts?.correction) {
+      await db.update(stepLogs).set({ steps }).where(eq(stepLogs.id, existing[0].id));
+      return steps;
+    }
+    return existing[0].steps ?? steps;
+  }
+  await db.insert(stepLogs).values({ userId, steps, loggedAt: at });
+  return steps;
+}
 
 export async function getStepStreak(userId: string): Promise<number> {
   try {

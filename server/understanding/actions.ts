@@ -21,15 +21,14 @@
 // The meal slots the logger understands (mirrors utils.slotFromSastHour's output).
 const MEAL_SLOTS = new Set(["breakfast", "lunch", "dinner", "snack", "night meal"]);
 
-export type MealItem = { name: string; kcal: number; protein: number };
-
 export type CoachAction =
   // Pure conversation — the default and the safe fallback. Coach K just talks.
   | { type: "JUST_REPLY" }
-  // Record a meal the client reported. Coach K supplies the parsed items + slot; the
-  // executor writes them. needsConfirmation flips on when Coach K is unsure (a treat, a
-  // vague amount) — the executor asks one question instead of silently logging.
-  | { type: "LOG_MEAL"; items: MealItem[]; meal: string; retro?: string; needsConfirmation: boolean }
+  // Record a meal the client reported. Coach K hands the FOOD TEXT ("2 eggs and pap")
+  // and an optional slot — NOT the calories. The deterministic SA food scanner owns the
+  // numbers (the LLM must never invent a kcal figure). needsConfirmation flips on when
+  // Coach K is unsure (a vague amount) — the executor asks one question, not a silent log.
+  | { type: "LOG_MEAL"; foodText: string; meal?: string; retro?: string; needsConfirmation: boolean }
   | { type: "REMOVE_LAST_MEAL" }
   | { type: "SHOW_MEALS" }
   | { type: "SHOW_WORKOUT" }
@@ -46,9 +45,9 @@ export type CoachActionType = CoachAction["type"];
 // contract the model reads, so they carry the safety intent (confirm when unsure, never
 // invent numbers, food logging is exact).
 export const COACH_ACTION_TOOLS = [
-  { type: "function", function: { name: "log_meal", description: "Record a meal the client REPORTED eating (past tense: 'I had', 'ate'). Provide each food's name, kcal and protein from the known SA food data — never invent figures. Set needs_confirmation=true when the amount is vague or it's a treat, so we ask instead of guessing. Do NOT call this for a question ('can I eat X?') or a plan ('I'll have X later').",
-    parameters: { type: "object", required: ["items"], properties: {
-      items: { type: "array", items: { type: "object", required: ["name", "kcal", "protein"], properties: { name: { type: "string" }, kcal: { type: "number" }, protein: { type: "number" } } } },
+  { type: "function", function: { name: "log_meal", description: "Record a meal the client REPORTED eating (past tense: 'I had', 'ate'). Pass food_text = the exact foods and amounts they named ('2 eggs and pap'); do NOT compute calories — the SA food database does that. Set needs_confirmation=true when the amount is vague ('some rice', 'a bit of'), so we ask instead of guessing. Do NOT call this for a question ('can I eat X?') or a plan ('I'll have X later').",
+    parameters: { type: "object", required: ["food_text"], properties: {
+      food_text: { type: "string", description: "the foods + amounts exactly as said, e.g. '2 eggs and pap'" },
       meal: { type: "string", enum: ["breakfast", "lunch", "dinner", "snack", "night meal"] },
       retro: { type: "string", description: "a past day if they said one, e.g. 'yesterday'" },
       needs_confirmation: { type: "boolean" },
@@ -109,19 +108,14 @@ export function validateAction(raw: any): CoachAction {
       return Number.isFinite(days) ? { type: "SET_SICK", days: Math.round(days) } : { type: "JUST_REPLY" };
     }
     case "LOG_MEAL": {
-      const items: MealItem[] = (Array.isArray(a.items) ? a.items : [])
-        .map((it: any) => ({
-          name: String(it?.name || "").replace(/\s+/g, " ").trim().slice(0, 60),
-          kcal: clampNum(it?.kcal, 0, 5000),
-          protein: clampNum(it?.protein, 0, 400),
-        }))
-        .filter((it: MealItem) => it.name.length > 0 && Number.isFinite(it.kcal) && Number.isFinite(it.protein));
-      // No valid food survived validation → never fabricate a log; just talk.
-      if (items.length === 0) return { type: "JUST_REPLY" };
+      // The LLM hands the FOOD TEXT; the deterministic scanner resolves foods + numbers.
+      // Empty text → never fabricate a log; just talk.
+      const foodText = String(a.food_text ?? a.foodText ?? "").replace(/\s+/g, " ").trim().slice(0, 300);
+      if (foodText.length < 2) return { type: "JUST_REPLY" };
       const mealRaw = String(a.meal || "").toLowerCase().trim();
-      const meal = MEAL_SLOTS.has(mealRaw) ? mealRaw : "snack";
+      const meal = MEAL_SLOTS.has(mealRaw) ? mealRaw : undefined;
       const retro = typeof a.retro === "string" && a.retro.trim() ? a.retro.trim().slice(0, 20) : undefined;
-      return { type: "LOG_MEAL", items, meal, retro, needsConfirmation: !!(a.needs_confirmation ?? a.needsConfirmation) };
+      return { type: "LOG_MEAL", foodText, meal, retro, needsConfirmation: !!(a.needs_confirmation ?? a.needsConfirmation) };
     }
     default:
       return { type: "JUST_REPLY" };
@@ -174,7 +168,7 @@ export function actionFingerprint(action: CoachAction, userId: string, sourceMes
 export function describeAction(action: CoachAction): string {
   switch (action.type) {
     case "JUST_REPLY": return "reply only (no action)";
-    case "LOG_MEAL": return `log ${action.items.length} item(s) as ${action.meal}${action.retro ? ` (${action.retro})` : ""}${action.needsConfirmation ? " — confirm first" : ""}`;
+    case "LOG_MEAL": return `log "${action.foodText}"${action.meal ? ` as ${action.meal}` : ""}${action.retro ? ` (${action.retro})` : ""}${action.needsConfirmation ? " — confirm first" : ""}`;
     case "REMOVE_LAST_MEAL": return "remove last meal";
     case "SHOW_MEALS": return "show today's meals";
     case "SHOW_WORKOUT": return "show workout / programme";
