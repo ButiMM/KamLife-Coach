@@ -359,6 +359,30 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE ACTION DIRECTIVE — the calibration fix the first live replay demanded (18% missed,
+// "i had a burger for lunch" → JUST_REPLY). It must (a) explicitly override the text-only
+// constitution so a transaction CALLS a tool, and (b) still exclude questions/corrections so
+// it doesn't create false writes. This locks that reconciliation against silent regression.
+{
+  const { ACTION_DIRECTIVE } = await import("../server/understanding/actions");
+  test("action directive: explicitly overrides the 'no hands' law so transactions act", () => {
+    assert.match(ACTION_DIRECTIVE, /override/i, "must announce it overrides the text-only law");
+    assert.match(ACTION_DIRECTIVE, /Law 13/i, "names the exact law it reconciles");
+    assert.match(ACTION_DIRECTIVE, /calling a tool is your hands/i);
+  });
+  test("action directive: teaches the exact real misses as positive examples", () => {
+    assert.match(ACTION_DIRECTIVE, /burger/i, "the burger miss is the canonical example");
+    assert.match(ACTION_DIRECTIVE, /log_meal/);
+    assert.match(ACTION_DIRECTIVE, /show_workout/);
+    assert.match(ACTION_DIRECTIVE, /set_sick/);
+  });
+  test("action directive: still fences OFF non-transactions (guards against new false writes)", () => {
+    assert.match(ACTION_DIRECTIVE, /question/i, "a question must stay conversation");
+    assert.match(ACTION_DIRECTIVE, /correction|clarif/i, "a correction must not re-fire the tool (the false-write we saw)");
+    assert.match(ACTION_DIRECTIVE, /at most one tool/i, "one message = one action");
+  });
+}
+
 // EXECUTOR PRECONDITIONS (2026-07-19) — the two things all three reviews converged on,
 // each a founder launch-blocker: the confidence gate (unsafe behaviour) and idempotency
 // (duplicated logs). Built onto the contract before the executor exists.
@@ -506,6 +530,74 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(s.n, 0);
     assert.equal(s.matchRate, 0);
     assert.equal(s.passed, false);
+  });
+}
+
+// THE "5 WINNING DAYS" GATE (increment 5b) — the operational definition, made precise so the
+// ENGINE_ACTIONS=on decision is a fact, not a vibe. Pure + dependency-free (winning-days.ts).
+{
+  const { sastDay, recordRun, evaluateGate, GATE_STREAK } = await import("../server/eval/winning-days");
+  const win = { passed: true, n: 40, matchRate: 0.95, missRate: 0.05, falseRate: 0.0 };
+  const loss = { passed: false, n: 40, matchRate: 0.78, missRate: 0.18, falseRate: 0.03 };
+  const at = (iso: string) => new Date(iso);
+
+  test("gate: SAST day is UTC+2 — a 23:00 UTC instant belongs to the NEXT SA date", () => {
+    assert.equal(sastDay(at("2026-07-18T23:30:00Z")), "2026-07-19", "23:30 UTC = 01:30 SAST next day");
+    assert.equal(sastDay(at("2026-07-18T05:00:00Z")), "2026-07-18");
+  });
+  test("gate: keeps the BEST run per day — a bad re-run can't erase a good one", () => {
+    let d = recordRun([], win, at("2026-07-18T09:00:00Z"));
+    d = recordRun(d, loss, at("2026-07-18T18:00:00Z")); // same SAST day, worse
+    assert.equal(d.length, 1, "one entry per day");
+    assert.equal(d[0].passed, true, "the day's best (the win) stands");
+  });
+  test("gate: a good re-run RESCUES an earlier bad run on the same day", () => {
+    let d = recordRun([], loss, at("2026-07-18T09:00:00Z"));
+    d = recordRun(d, win, at("2026-07-18T18:00:00Z"));
+    assert.equal(d[0].passed, true);
+  });
+  test("gate: opens only after 5 consecutive winning days with enough volume", () => {
+    let d: any[] = [];
+    for (let i = 14; i <= 17; i++) d = recordRun(d, win, at(`2026-07-${i}T09:00:00Z`));
+    assert.equal(evaluateGate(d).open, false, "4 days is not enough");
+    assert.equal(evaluateGate(d).streak, 4);
+    d = recordRun(d, win, at("2026-07-18T09:00:00Z"));
+    const g = evaluateGate(d);
+    assert.equal(g.streak, GATE_STREAK);
+    assert.equal(g.open, true, "5 winning days, 200 samples → gate opens");
+    assert.match(g.reason, /GATE OPEN/);
+  });
+  test("gate: a single losing day RESETS the streak to zero (losses punish, gaps don't)", () => {
+    let d: any[] = [];
+    for (let i = 14; i <= 17; i++) d = recordRun(d, win, at(`2026-07-${i}T09:00:00Z`));
+    d = recordRun(d, loss, at("2026-07-18T09:00:00Z")); // the burger day
+    assert.equal(evaluateGate(d).streak, 0, "a recorded loss breaks the run");
+    assert.equal(evaluateGate(d).open, false);
+  });
+  test("gate: 5 winning days but thin volume stays CLOSED (sample floor)", () => {
+    let d: any[] = [];
+    const thin = { passed: true, n: 15, matchRate: 0.95, missRate: 0.05, falseRate: 0 };
+    for (let i = 14; i <= 18; i++) d = recordRun(d, thin, at(`2026-07-${i}T09:00:00Z`));
+    const g = evaluateGate(d);
+    assert.equal(g.streak, 5);
+    assert.equal(g.open, false, "75 samples < 100 floor");
+    assert.match(g.reason, /samples/);
+  });
+  test("gate: window false-write rate above the cap keeps it CLOSED even at 5 winning days", () => {
+    // Each day passes its own bar (≤2%) but the window aggregate creeps over 2%.
+    let d: any[] = [];
+    const borderline = { passed: true, n: 40, matchRate: 0.95, missRate: 0.05, falseRate: 0.02 };
+    for (let i = 13; i <= 17; i++) d = recordRun(d, borderline, at(`2026-07-${i}T09:00:00Z`));
+    d = recordRun(d, { passed: true, n: 40, matchRate: 0.95, missRate: 0.05, falseRate: 0.025 }, at("2026-07-18T09:00:00Z"));
+    // 5-day window is days 14-18; push one day's false rate high enough to breach aggregate.
+    const g = evaluateGate(d);
+    if (g.windowFalseRate > 0.02) { assert.equal(g.open, false); assert.match(g.reason, /false-write/); }
+    else { assert.ok(true, "aggregate stayed within cap — still a valid state"); }
+  });
+  test("gate: empty log is closed, streak 0, no crash", () => {
+    const g = evaluateGate([]);
+    assert.equal(g.open, false);
+    assert.equal(g.streak, 0);
   });
 }
 

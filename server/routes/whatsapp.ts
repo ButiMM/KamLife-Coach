@@ -110,11 +110,12 @@ async function processTextAsync(
   mediaType: string | null,
   allImageUrls: string[],
   handleMessage: RouteDeps["handleMessage"],
+  sourceMessageId?: string,
 ): Promise<void> {
   const isImageMessage = !!(mediaUrl && mediaType?.startsWith("image/"));
   try {
     const welcomeBack = await comebackPrefix(phone);
-    const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined);
+    const reply = await handleMessage(phone, message, mediaUrl || undefined, mediaType || undefined, allImageUrls.length > 1 ? allImageUrls : undefined, sourceMessageId);
 
     // Render bot markers: buttons → keyword prompts, media extracted for separate sends.
     const { text: rawReply, media: replyMediaUrls } = renderReplyMarkers(reply);
@@ -158,10 +159,11 @@ async function processVoiceAsync(
   mediaUrl: string,
   mediaType: string,
   handleMessage: RouteDeps["handleMessage"],
+  sourceMessageId?: string,
 ): Promise<void> {
   try {
     const welcomeBack = await comebackPrefix(phone);
-    const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined);
+    const reply = await handleMessage(phone, message, mediaUrl, mediaType, undefined, sourceMessageId);
     // Render markers too — a voice note can trigger a workout (GIF + buttons) or a menu,
     // and previously those markers were sent to the client as literal text.
     const { text: rawVoiceText, media } = renderReplyMarkers(reply);
@@ -424,7 +426,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         // No "I'll reply in a moment" — the coach must never sound like it might go
         // quiet or promise a future message (a real reply IS seconds away).
         sendParts(rawPhone, ["🎤 Coach K is listening…"], null).catch(() => {});
-        processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage).catch(() => {});
+        processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage, msgSid || undefined).catch(() => {});
         return;
       }
 
@@ -443,7 +445,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
           sendParts(rawPhone, ["📸 Got your photo, one sec…"], null).catch(() => {});
         }
       }
-      processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage).catch(() => {});
+      processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage, msgSid || undefined).catch(() => {});
     } catch (err: any) {
       console.error("[WHATSAPP] Webhook error:", err.message);
       if (!res.headersSent) {

@@ -62,6 +62,33 @@ export const COACH_ACTION_TOOLS = [
   { type: "function", function: { name: "end_sick", description: "The client says they are better/back and ready to resume.", parameters: { type: "object", properties: {} } } },
 ] as const;
 
+/**
+ * THE ACTION DIRECTIVE — injected into Coach K's system prompt ONLY when action emission
+ * is live. It exists because the constitution was written for the text-only world: Law 13
+ * ("you have NO hands — tell them the WhatsApp command") and the THINK step ("otherwise you
+ * talk") both actively steer AGAINST emitting a tool. That is exactly why the first replay
+ * showed "i had a burger for lunch" → JUST_REPLY at an 18% miss rate. When the tools are on,
+ * calling one IS the coach's hands — the deterministic executor does the write and sends the
+ * confirmation — so this directive reconciles the conflict for transactions, and ONLY for
+ * transactions. It stays example-driven off the real misses so the calibration is concrete.
+ */
+export const ACTION_DIRECTIVE = `🎯 YOU CAN ACT NOW — for CONCRETE TRANSACTIONS this overrides Constitution Law 13 ("no hands / tell them the command") and the THINK step's "otherwise you talk". You have real tools. Calling a tool IS your hands: the deterministic system does the numbers, writes the data, and sends the confirmation — so when you call a tool you do NOT also write prose and you do NOT tell them to type a command.
+
+WHEN THE CLIENT REPORTS OR REQUESTS A CONCRETE TRANSACTION, CALL THE MATCHING TOOL (don't reply in words):
+• food they ATE — "i had a burger for lunch", "2 eggs and pap" → log_meal
+• "show me my workout", "what's today's session", "my programme" → show_workout
+• "I'm still sick", "too sick to train", "resting until Monday" → set_sick
+• "I'm back", "feeling better now" → end_sick
+• "did 9000 steps" → log_steps · "drank 2 litres" → log_water · "I'm 82kg" → log_weight
+• "remove my last meal" → remove_last_meal · "what did I eat today" → show_meals
+
+DO NOT call a tool — just talk — when it is NOT a fresh transaction:
+• a QUESTION ("can I eat rice?", "how many steps should I do?")
+• a PLAN / intention ("I'll have chicken later")
+• a CORRECTION or clarification of something already set ("no, until Monday not Friday") — reply, don't re-fire the tool
+• FEELINGS or PROGRESS talk ("tell me about my progress", "I feel wrecked") → talk
+One message = at most ONE tool: pick the single real transaction. In genuine doubt, talk.`;
+
 function clampNum(v: unknown, lo: number, hi: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : NaN;

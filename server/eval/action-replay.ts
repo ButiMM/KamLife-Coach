@@ -20,7 +20,7 @@
 import type OpenAI from "openai";
 import { desc, and, isNotNull, eq } from "drizzle-orm";
 import { db } from "../db";
-import { chatHistory, users } from "../../shared/schema";
+import { chatHistory, users, schedulerState } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "../understanding/seed";
 import { runMeaningEngine } from "../understanding/meaning-engine";
@@ -31,6 +31,7 @@ import {
   type ActionReplayPair,
   type ActionScore,
 } from "./action-score";
+import { recordRun, evaluateGate, type DayResult, type GateVerdict } from "./winning-days";
 
 export {
   expectedActionForIntent,
@@ -39,6 +40,32 @@ export {
   type ActionReplayPair,
   type ActionScore,
 } from "./action-score";
+
+// The SAST day-log of replay verdicts, persisted in the existing scheduler_state KV store
+// (no migration). The winning-days gate reads this to decide ENGINE_ACTIONS=on.
+const DAY_LOG_KEY = "action_replay_days";
+
+async function loadDayLog(): Promise<DayResult[]> {
+  try {
+    const [row] = await db.select().from(schedulerState).where(eq(schedulerState.key, DAY_LOG_KEY)).limit(1);
+    if (!row?.value) return [];
+    const parsed = JSON.parse(row.value);
+    return Array.isArray(parsed) ? parsed as DayResult[] : [];
+  } catch { return []; }
+}
+
+async function saveDayLog(days: DayResult[]): Promise<void> {
+  const value = JSON.stringify(days);
+  try {
+    await db.insert(schedulerState).values({ key: DAY_LOG_KEY, value, updatedAt: new Date() })
+      .onConflictDoUpdate({ target: schedulerState.key, set: { value, updatedAt: new Date() } });
+  } catch (e) { console.warn("[ACTION_REPLAY] day-log save failed:", (e as any)?.message || e); }
+}
+
+/** Read the gate WITHOUT running a replay — for a "gate" status command. */
+export async function actionGateStatus(): Promise<GateVerdict> {
+  return evaluateGate(await loadDayLog());
+}
 
 export interface ActionReplayReport extends ActionScore { whatsappText: string }
 
@@ -74,6 +101,12 @@ export async function runActionReplay(openai: OpenAI, limit = 120): Promise<Acti
   }
 
   const score = scoreActionReplay(pairs);
+
+  // Record this run into the SAST day-log (best-run-per-day) and read the gate.
+  const days = recordRun(await loadDayLog(), score, new Date());
+  await saveDayLog(days);
+  const gate = evaluateGate(days);
+
   const pct = (x: number) => `${Math.round(x * 100)}%`;
   const whatsappText =
     `🎯 *Action-Correctness Replay* (${score.n} real messages)\n\n` +
@@ -81,6 +114,7 @@ export async function runActionReplay(openai: OpenAI, limit = 120): Promise<Acti
     `Missed (should've acted): ${score.missedActions} (${pct(score.missRate)})\n` +
     `False writes (dangerous): ${score.falseActions} (${pct(score.falseRate)})\n` +
     `Wrong action: ${score.wrongActions}\n\n` +
+    `${gate.open ? "🟢" : "⏳"} *Gate:* ${gate.reason}\n\n` +
     `_Bar: ≥90% match, ≤2% false writes, ≤10% missed. 5 winning days → flip ENGINE_ACTIONS=on._` +
     (score.samples.length ? `\n\nTop misses:\n${score.samples.slice(0, 5).map(s => `• ${s}`).join("\n")}` : `\n\nNo mismatches — clean.`);
 

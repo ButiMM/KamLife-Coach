@@ -111,7 +111,7 @@ const getStepResponse = _getStepResponse;
 // MAIN MESSAGE HANDLER
 // ============================================================
 
-export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]): Promise<string> {
+export async function handleMessage(phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[], sourceMessageId?: string): Promise<string> {
   try {
   let m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
 
@@ -212,6 +212,22 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
         }
       })();
       return `🎯 Running the *action-correctness* replay over your last ${limit} real messages — checking whether Coach K would pick the right action (and never a wrong write). A few minutes; results land here.`;
+    }
+
+    // ---- COACH COMMAND: "gate" → the ENGINE_ACTIONS=on decision, read from the day-log ----
+    // The operational definition of "5 winning days", answered from stored replay verdicts —
+    // no replay run, no guessing. Says exactly how many winning days we have and what's left.
+    if (/^gate(\s+status)?$/i.test(m.trim())) {
+      (async () => {
+        try {
+          const { actionGateStatus } = await import("./eval/action-replay");
+          const g = await actionGateStatus();
+          await sendWhatsApp(phone, `${g.open ? "🟢 *ENGINE_ACTIONS gate: OPEN*" : "⏳ *ENGINE_ACTIONS gate: closed*"}\n\n${g.reason}\n\nStreak: ${g.streak}/5 winning days · ${g.windowSamples} samples in window.`);
+        } catch (e: any) {
+          await sendWhatsApp(phone, `Gate check hit a snag: ${e?.message || e}`).catch(() => {});
+        }
+      })();
+      return `⏳ Checking the ENGINE_ACTIONS gate…`;
     }
   }
 
@@ -947,7 +963,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Flag-gated (ENGINE_LIVE=on) and instantly reversible (ENGINE_LIVE=off).
   const tag = (reply: string, src: string) => (isCoach ? `${reply}\n\n_· ${src} ·_` : reply);
   if (engineLive() && !mustStayDeterministic(m) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai });
+    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId });
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }
 
@@ -976,7 +992,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Misc/Lifecycle handler actually claimed still gets one last crack at Coach K rather
   // than falling through to the raw brain.
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai });
+    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 

@@ -26,7 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
-import { COACH_ACTION_TOOLS, validateAction, type CoachAction } from "./actions";
+import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, type CoachAction } from "./actions";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -133,6 +133,10 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
 
     const systemParts = [
       CONSTITUTION,
+      // With action emission live, reconcile the constitution's text-only "no hands" laws so
+      // Coach K actually CALLS a tool on a transaction instead of narrating a command. Placed
+      // right under the constitution so the override sits beside the laws it modifies.
+      input.emitActions ? ACTION_DIRECTIVE : "",
       sickDirective,
       moodDirective,
       BRAIN_SYSTEM,

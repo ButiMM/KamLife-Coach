@@ -48,10 +48,11 @@ export function engineActionMode(): ActionMode {
   return v === "on" ? "on" : v === "shadow" ? "shadow" : "off";
 }
 
-// Idempotency source id. The inbound WhatsApp MessageSid isn't threaded to this layer
-// yet, so derive a stable key from the user + message: a literal retry of the same text
-// within the dedup window collapses (correct), distinct messages don't. (SID threading
-// is a later refinement; harmless in shadow, where nothing is written.)
+// Idempotency source id. The inbound WhatsApp MessageSid is now threaded from the webhook
+// (ctx.sourceMessageId) and is the stable key we prefer — the SAME identifier Twilio uses,
+// and the one our webhook-level dedup already trusts. This derived hash is only the
+// fallback for entrypoints without a SID (admin test-webhook, internal recursion): a
+// literal retry of the same text within the dedup window still collapses correctly.
 function deriveSourceId(userId: string, message: string): string {
   let h = 0;
   const s = `${userId}:${message}`;
@@ -84,6 +85,10 @@ export async function runMeaningEngineLive(ctx: {
   m: string;
   user: any;
   openai: any;
+  /** The inbound WhatsApp MessageSid, when the caller has it (webhook path). Used as the
+   *  idempotency key so a Twilio retry can never double-write. Absent for admin/test and
+   *  internal recursion, where we fall back to a user+message hash. */
+  sourceMessageId?: string;
 }): Promise<string | null> {
   const { message, user, openai } = ctx;
   try {
@@ -118,7 +123,8 @@ export async function runMeaningEngineLive(ctx: {
     if (actionMode !== "off" && result.action && result.action.type !== "JUST_REPLY") {
       try {
         const exec = await executeAction(result.action, {
-          user, phone: ctx.phone, sourceMessageId: deriveSourceId(user.id, message),
+          user, phone: ctx.phone,
+          sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, message),
           confidence: 0.9, // placeholder until replay calibrates the distribution
           dryRun: actionMode === "shadow",
         });
