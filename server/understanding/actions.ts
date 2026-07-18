@@ -111,6 +111,22 @@ export function isMemoryGrievance(message: string): boolean {
   return /\b(why (did|do|didn'?t) you (forget|remember|listen)|you (forgot|didn'?t (listen|remember))|already (said|told you)|told you (already|before)|like i (said|told))\b/.test(m);
 }
 
+/**
+ * SICK-REAFFIRMATION GUARD — the other half of the same class. A bare continuation of an
+ * ALREADY-KNOWN sick state ("but I'm still sick") is affirming what's true, not a fresh
+ * instruction to write — re-firing SET_SICK just re-dumps the rest template. Caught in code
+ * so the dangerous write goes to structural zero regardless of the model's temperature
+ * variance. Deliberately NOT caught: a NEW duration ("still sick until Monday", "still sick,
+ * 3 more days") IS a real update, and a fresh declaration ("I'm sick") has no "still" at all.
+ */
+export function isSickReaffirmation(message: string): boolean {
+  const m = (message || "").toLowerCase();
+  if (!/\bstill\b/.test(m)) return false;
+  if (!/\b(sick|ill|unwell|not\s+(well|better|ok(ay)?)|resting|recover(ing)?|in\s+bed)\b/.test(m)) return false;
+  const hasNewDuration = /\d+[^.!?]{0,10}\b(day|week)|\buntil\s+\w+|\btill\s+\w+|\bfor\s+(a|another|the)\b|\b(another|a\s+few|couple)\b[^.!?]{0,10}\b(day|week)/.test(m);
+  return !hasNewDuration;
+}
+
 function clampNum(v: unknown, lo: number, hi: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : NaN;

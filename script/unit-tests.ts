@@ -443,7 +443,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // (2026-07-18: "I said I'm still sick until Monday, why did you forget" → SET_SICK) from ever
 // firing a fresh sick write. A complaint about the coach's memory is never an instruction.
 {
-  const { isMemoryGrievance } = await import("../server/understanding/actions");
+  const { isMemoryGrievance, isSickReaffirmation } = await import("../server/understanding/actions");
   test("grievance guard: a 'why did you forget / I already told you' complaint is caught", () => {
     assert.equal(isMemoryGrievance("I said I'm still sick until Monday, why did you forget"), true);
     assert.equal(isMemoryGrievance("you forgot I'm sick"), true);
@@ -455,6 +455,18 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(isMemoryGrievance("too sick to train, resting for 3 days"), false);
     assert.equal(isMemoryGrievance("No, I'm resting until Monday, not Friday"), false, "a value correction must still update");
     assert.equal(isMemoryGrievance("feeling better now, ready to train"), false);
+  });
+  test("reaffirmation guard: 'but I'm still sick' is a continuation, never a fresh write", () => {
+    assert.equal(isSickReaffirmation("But I'm still sick."), true, "the exact 2026-07-18 false-write");
+    assert.equal(isSickReaffirmation("i'm still not well"), true);
+    assert.equal(isSickReaffirmation("still recovering"), true);
+  });
+  test("reaffirmation guard: a fresh declaration or a NEW duration is NOT caught (stays a write)", () => {
+    assert.equal(isSickReaffirmation("I'm sick, can't train today"), false, "no 'still' → a fresh declaration");
+    assert.equal(isSickReaffirmation("too sick to train, resting for 3 days"), false);
+    assert.equal(isSickReaffirmation("I'm still sick until Monday"), false, "a NEW end-date IS a real update");
+    assert.equal(isSickReaffirmation("still sick, 3 more days"), false, "a new duration writes");
+    assert.equal(isSickReaffirmation("I'm still hungry"), false, "no sick context → not a sick guard at all");
   });
 }
 

@@ -26,7 +26,7 @@ import { BRAIN_SYSTEM } from "../brain/coach-brain";
 import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
-import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, isMemoryGrievance, type CoachAction } from "./actions";
+import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -179,9 +179,11 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
         try { args = JSON.parse(tc.function.arguments || "{}"); } catch { /* malformed → validateAction neutralises */ }
         action = validateAction({ name: tc.function.name, args });
       }
-      // DETERMINISTIC GUARD (not a prompt hope): a memory grievance ("why did you forget
-      // I'm sick") can never fire a fresh sick write — it's a complaint, not an instruction.
-      if ((action.type === "SET_SICK" || action.type === "END_SICK") && isMemoryGrievance(message)) {
+      // DETERMINISTIC GUARD (not a prompt hope): a sick message that is NOT a fresh
+      // declaration — a memory grievance ("why did you forget I'm sick") or a bare
+      // reaffirmation ("but I'm still sick") — can never fire a fresh sick write. Both are
+      // acknowledgements, not instructions; this keeps the dangerous write at structural zero.
+      if ((action.type === "SET_SICK" || action.type === "END_SICK") && (isMemoryGrievance(message) || isSickReaffirmation(message))) {
         action = { type: "JUST_REPLY" };
       }
     }
