@@ -633,6 +633,39 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// COACHING VOICE — the two screenshot bugs (2026-07-18), fixed at the class level.
+// (a) "back to gym" handler heard a phrase, not a person: it answered a timing QUESTION
+//     ("when do I go back to my regular programme") with the canned declaration reply, twice.
+// (b) the engine named a food CATEGORY ("legumes") instead of a real township food.
+{
+  // (a) BACK_TO_GYM must fire on a DECLARATION but stand down for a timing QUESTION.
+  const TRIGGER = /\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i;
+  const ASKING = /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i;
+  const fires = (msg: string) => TRIGGER.test(msg) && !ASKING.test(msg);
+  test("back-to-gym: a DECLARATION still fires (never break the real command)", () => {
+    assert.ok(fires("i'm back at the gym"), "'back at the gym' is a declaration");
+    assert.ok(fires("back from holiday"), "'back from holiday' clears holiday mode");
+  });
+  test("back-to-gym: a timing QUESTION stands down so Coach K can answer WHEN", () => {
+    assert.ok(!fires("when do I go back to my regular programme"), "the exact screenshot miss must NOT fire the canned reply");
+    assert.ok(!fires("how long until I can go back to gym"), "asking how long is a question");
+    assert.ok(!fires("am I ready to go back to the gym?"), "asking readiness is a question");
+  });
+  test("back-to-gym: the guard is wired in the handler source (not just here)", () => {
+    const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    assert.match(src, /askingWhenToReturn/, "the question guard must exist in the handler");
+    assert.match(src, /!askingWhenToReturn &&/, "and it must gate the BACK_TO_GYM trigger");
+  });
+
+  // (b) the coaching voice must name real foods, never a food category.
+  test("coach voice: BRAIN_SYSTEM bans food-category jargon and names real township food", () => {
+    const src = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
+    assert.match(src, /NAME THE REAL FOOD/, "the class rule must be present");
+    assert.match(src, /NEVER "legumes"/, "the exact word that blew up must be banned by name");
+    assert.match(src, /sugar beans|pilchards|soya mince/, "and the real foods offered as the replacement");
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.

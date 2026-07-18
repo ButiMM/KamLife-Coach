@@ -176,9 +176,9 @@ export async function handleEarlyCommands(ctx: {
     }
   }
 
-  // ---- BACK TO GYM / CLEAR HOLIDAY MODE ----
-  // Fires before the holiday check so "back at the gym" doesn't re-trigger the equipment question.
-  if (/\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
+  // BACK TO GYM / CLEAR HOLIDAY — fires on a DECLARATION ("back at gym"), never a timing QUESTION ("when do I go back?" → Coach K answers, he knows the rest-until date). 2026-07-18 fix: was giving the canned reply to "when", twice.
+  const askingWhenToReturn = /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i.test(m);
+  if (!askingWhenToReturn && /\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
     tempEquipmentMode.delete(phone);
     awaitingEquipmentAnswer.delete(phone);
     user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
