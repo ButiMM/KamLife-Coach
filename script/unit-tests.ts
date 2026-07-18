@@ -601,6 +601,38 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// THE GOLD SET (increment 7) — the straight ruler. The history replay scored the engine
+// against production's own noisy intent labels ("tell me about my progress" → SET_SICK);
+// this is the hand-verified truth the gate actually trusts. We can't test the LLM's live
+// choice here, but we CAN lock the answer key's integrity so it never silently rots.
+{
+  const { ACTION_GOLD } = await import("../server/eval/action-gold");
+  const VALID = new Set(["LOG_MEAL","LOG_STEPS","LOG_WATER","LOG_WEIGHT","REMOVE_LAST_MEAL","SHOW_MEALS","SHOW_WORKOUT","SET_SICK","END_SICK","CONVERSATION"]);
+  test("gold set: big enough to gate (≥20) and every label is a real expected action", () => {
+    assert.ok(ACTION_GOLD.length >= 20, `need ≥20 cases to satisfy the scorer floor, have ${ACTION_GOLD.length}`);
+    for (const c of ACTION_GOLD) assert.ok(VALID.has(c.expected), `bad label "${c.expected}" for "${c.message}"`);
+  });
+  test("gold set: no duplicate messages (each case earns its place)", () => {
+    const seen = new Set<string>();
+    for (const c of ACTION_GOLD) {
+      const k = c.message.toLowerCase().trim();
+      assert.ok(!seen.has(k), `duplicate gold message: "${c.message}"`);
+      seen.add(k);
+    }
+  });
+  test("gold set: covers both a real transaction AND the tricky no-write cases", () => {
+    const has = (e: string) => ACTION_GOLD.some(c => c.expected === e);
+    assert.ok(has("LOG_MEAL") && has("SET_SICK") && has("SHOW_WORKOUT"), "must exercise real writes");
+    assert.ok(ACTION_GOLD.filter(c => c.expected === "CONVERSATION").length >= 8, "must exercise plenty of no-write turns (where the old ruler failed)");
+  });
+  test("gold set: the exact cases the broken ruler got wrong are labelled as NO write", () => {
+    const progress = ACTION_GOLD.find(c => /tell me about my progress/i.test(c.message));
+    assert.ok(progress && progress.expected === "CONVERSATION", "progress talk is conversation, NOT set_sick");
+    const grievance = ACTION_GOLD.find(c => /why did you forget/i.test(c.message));
+    assert.ok(grievance && grievance.expected === "CONVERSATION", "a memory grievance must not re-write the sick record");
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.

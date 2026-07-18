@@ -195,23 +195,40 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       return `📊 Running the scorecard over your last ${limit} real conversations — replaying each through the new engine and grading it against what the coach actually said. This takes a few minutes; I'll text you the results here.`;
     }
 
-    // ---- COACH COMMAND: "action replay" → score whether Coach K picks the RIGHT ACTION ----
-    // The mirror of the conversation scorecard: replays real messages with action emission
-    // (dry-run — nothing written) and grades action-correctness — missed actions and, the
-    // dangerous one, false writes. 5 winning days is the gate before ENGINE_ACTIONS=on.
-    const ar = m.trim().match(/^action[\s-]?replay(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^replay[\s-]?actions?(?:\s+(\d{1,3}))?$/i);
-    if (ar) {
-      const limit = Math.max(20, Math.min(200, parseInt(ar[1] || "80", 10) || 80));
+    // ---- COACH COMMAND: "action replay" → grade Coach K against the HAND-VERIFIED truth ----
+    // Scores whether Coach K picks the RIGHT ACTION against the gold set (real answers a human
+    // verified), NOT production's noisy intent labels. A decisive pass IS the gate — the gold
+    // set is fixed, so there's no calendar to wait out. Missed + (dangerous) false writes.
+    if (/^action[\s-]?replay$/i.test(m.trim()) || /^replay[\s-]?actions?$/i.test(m.trim()) || /^action[\s-]?gold$/i.test(m.trim())) {
+      (async () => {
+        try {
+          const { runGoldReplay } = await import("./eval/action-replay");
+          const report = await runGoldReplay(openai);
+          await sendWhatsApp(phone, report.whatsappText.slice(0, 1500));
+        } catch (e: any) {
+          await sendWhatsApp(phone, `Action replay hit a snag: ${e?.message || e}`).catch(() => {});
+        }
+      })();
+      return `🎯 Grading Coach K against the *truth set* — real messages with human-verified right answers. Checking he picks the right action and never a wrong write. A moment; result lands here.`;
+    }
+
+    // ---- COACH COMMAND: "field replay [N]" → the breadth check over real history ----
+    // Runs the engine over the last N real messages. Useful for SPOTTING new shapes in the
+    // wild, but its ground truth is the production classifier (noisy), so it's a signal, NOT
+    // the gate. The gate is "action replay" (the truth set) above.
+    const fr = m.trim().match(/^field[\s-]?replay(?:\s+(\d{1,3}))?$/i);
+    if (fr) {
+      const limit = Math.max(20, Math.min(200, parseInt(fr[1] || "80", 10) || 80));
       (async () => {
         try {
           const { runActionReplay } = await import("./eval/action-replay");
           const report = await runActionReplay(openai, limit);
           await sendWhatsApp(phone, report.whatsappText.slice(0, 1500));
         } catch (e: any) {
-          await sendWhatsApp(phone, `Action replay hit a snag: ${e?.message || e}`).catch(() => {});
+          await sendWhatsApp(phone, `Field replay hit a snag: ${e?.message || e}`).catch(() => {});
         }
       })();
-      return `🎯 Running the *action-correctness* replay over your last ${limit} real messages — checking whether Coach K would pick the right action (and never a wrong write). A few minutes; results land here.`;
+      return `🌍 Running the *field* replay over your last ${limit} real messages (a breadth signal — noisy ground truth, not the gate). Results land here.`;
     }
 
     // ---- COACH COMMAND: "gate" → the ENGINE_ACTIONS=on decision, read from the day-log ----

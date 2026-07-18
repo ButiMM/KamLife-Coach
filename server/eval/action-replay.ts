@@ -32,6 +32,7 @@ import {
   type ActionScore,
 } from "./action-score";
 import { recordRun, evaluateGate, type DayResult, type GateVerdict } from "./winning-days";
+import { ACTION_GOLD } from "./action-gold";
 
 export {
   expectedActionForIntent,
@@ -117,6 +118,46 @@ export async function runActionReplay(openai: OpenAI, limit = 120): Promise<Acti
     `${gate.open ? "🟢" : "⏳"} *Gate:* ${gate.reason}\n\n` +
     `_Bar: ≥90% match, ≤2% false writes, ≤10% missed. 5 winning days → flip ENGINE_ACTIONS=on._` +
     (score.samples.length ? `\n\nTop misses:\n${score.samples.slice(0, 5).map(s => `• ${s}`).join("\n")}` : `\n\nNo mismatches — clean.`);
+
+  return { ...score, whatsappText };
+}
+
+// A representative eval client so the engine has a real user shape to reason against. The
+// gold set judges ACTION CHOICE, which does not depend on any one person's history; the
+// snapshot fails open to undefined for this synthetic id (no DB row), which is fine.
+const GOLD_EVAL_USER = {
+  id: "gold-eval", name: "Sipho", goal: "fat_loss", numbersMode: "low",
+  stepsTarget: 8500, currentWeight: 82, isSick: false,
+};
+
+/**
+ * THE GOLD REPLAY — score the engine against the HAND-VERIFIED truth set, not production's
+ * noisy intent labels. This is the ruler the gate should trust. Because the gold set is
+ * fixed, a decisive pass IS the gate — there is no calendar to wait out (that only applies
+ * to live shadow over new traffic). Reuses the same pure scorer as the history replay.
+ */
+export async function runGoldReplay(openai: OpenAI): Promise<ActionReplayReport> {
+  const pairs: ActionReplayPair[] = [];
+  const snapshot = await buildClientSnapshot(GOLD_EVAL_USER as any).catch(() => undefined);
+  const prior = seedUnderstanding(GOLD_EVAL_USER as any, snapshot);
+  for (const c of ACTION_GOLD) {
+    try {
+      const res = await runMeaningEngine({ openai, user: GOLD_EVAL_USER as any, message: c.message, prior, snapshot, emitActions: true });
+      const emitted: CoachActionType = res?.action?.type || "JUST_REPLY";
+      pairs.push({ expected: c.expected, emitted, message: c.message });
+    } catch { pairs.push({ expected: c.expected, emitted: "JUST_REPLY", message: c.message }); }
+  }
+
+  const score = scoreActionReplay(pairs);
+  const pct = (x: number) => `${Math.round(x * 100)}%`;
+  const whatsappText =
+    `🎯 *Action Gate — TRUTH SET* (${score.n} hand-verified cases)\n\n` +
+    `${score.passed ? "🟢 *GATE OPEN* — safe to flip ENGINE_ACTIONS=on" : "⚠️ Not yet"} — match *${pct(score.matchRate)}*\n` +
+    `Missed (should've acted): ${score.missedActions} (${pct(score.missRate)})\n` +
+    `False writes (dangerous): ${score.falseActions} (${pct(score.falseRate)})\n` +
+    `Wrong action: ${score.wrongActions}\n\n` +
+    `_This is the straight ruler: real answers, not the production classifier. Bar: ≥90% match, ≤2% false writes, ≤10% missed. A decisive pass here IS the gate — no calendar wait._` +
+    (score.samples.length ? `\n\nStill failing:\n${score.samples.slice(0, 6).map(s => `• ${s}`).join("\n")}` : `\n\nEvery case correct — clean.`);
 
   return { ...score, whatsappText };
 }
