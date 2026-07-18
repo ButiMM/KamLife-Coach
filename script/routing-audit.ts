@@ -821,6 +821,13 @@ const CASES: Case[] = [
     msg: "Is there an alternative to banana?",
     user: { goalType: "fat_loss" },
     expect: [/berries/i] },
+  // ── 2026-07-19 live: "I said I'm still sick until Monday why did you forget that??"
+  // got the full first-report sick template — ignoring the accusation and re-committing
+  // the exact failure. Must OWN it, confirm the date, never re-dump the template.
+  { name: "sick memory complaint owns it + confirms the date, never re-dumps the template",
+    msg: "I said I'm still sick until Monday why did you forget that??",
+    expect: [/You'?re right/i, /resting until/i],
+    reject: [/Sleep as much as you can|No steps target while you'?re sick|comeback plan/i] },
   // ── 2026-07-17 20:03 live: "two beef bacon burgers and fries" logged ONLY the bacon
   // (plural-blind aliases) + the headline stuttered "room for room for".
   { name: "playbook: plural burgers + fries log the BURGER and the chips, never bacon alone",

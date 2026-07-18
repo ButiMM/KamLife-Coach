@@ -105,6 +105,26 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     const sickMatch = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/);
     const alreadySick = !!sickMatch && new Date(sickMatch[1]) >= new Date(new Date().toISOString().slice(0, 10));
 
+    // MEMORY COMPLAINT (2026-07-19 live: "I said I'm still sick until Monday why did you
+    // forget that??" got the full first-report template — re-committing the exact
+    // failure they're angry about, ignoring the accusation, and saying "~3 days" instead
+    // of their Monday). Own it, lock the date they gave, keep it SHORT — never re-dump.
+    const memoryComplaint = /\b(you forgot|forgot that|forgot i|did you forget|why (did|would|do|are) you|already (told|said)|i (told|said) you|i already|you (should )?(know|remember)|not listening|weren'?t listening|pay attention|do you (even )?remember)\b/i.test(m);
+    if (memoryComplaint) {
+      const hasDatePhrase = /\b(until|till|til|through|thru|by|for|next|about|\d+\s*days?|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(m);
+      let until = alreadySick ? sickMatch![1] : null;
+      if (!alreadySick || hasDatePhrase) {
+        const rec2 = await recordSickState(user, notes, m);
+        if (rec2) until = rec2.sickUntil;
+      }
+      const untilLabel = until
+        ? new Date(until + "T00:00:00+02:00").toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "short", timeZone: "Africa/Johannesburg" })
+        : null;
+      const ackReply = `You're right${capName ? ", " + capName : ""} — my mistake, and it's locked in now. ${untilLabel ? `You're resting until *${untilLabel}*` : "You're resting until you're better"} — no training, no step targets till then, nothing on your plate but getting well.\n\nSay *I'm back* when you're ready. 💛`;
+      await logChat(user.id, message, ackReply, "SICK_MEMORY_ACK");
+      return ackReply;
+    }
+
     if (isReturnFromSicknessQuestion(m)) {
       // Answering the question must not LOSE the report — "I can't walk today, I'm
       // sick... how does that affect my progress? ...next 5 days" both declares and

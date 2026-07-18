@@ -2398,6 +2398,18 @@ test("sick flow: duration parsing — '5 days' remembered, defaults sane, capped
   assert.equal(parseSickDays("out for 60 days"), 14, "capped at 14");
 });
 
+test("sick flow: 'until <day>' parses to the real weekday, not the ~3-day default (2026-07-19)", () => {
+  // Days-to-weekday is relative to today; assert the RANGE + that it isn't the 3 default
+  // when the day is deliberately chosen to differ from 3-out.
+  const DOW = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const todaySast = new Date(Date.now() + 2 * 3_600_000).getUTCDay();
+  for (let d = 0; d < 7; d++) {
+    const expected = (((d - todaySast + 7) % 7) || 7);
+    assert.equal(parseSickDays(`sick until ${DOW[d]}`), Math.min(14, expected), `until ${DOW[d]}`);
+  }
+  assert.equal(parseSickDays("got sick since monday"), 3, "'since <day>' is not a return date — stays default");
+});
+
 // ADAPTIVE NUMBERS MODE (2026-07-14, Kam: "the bot should be adapting anyway").
 // A client the bot learns can't read numbers gets number-free food replies; the
 // figures still exist, they're just not put in front of them.

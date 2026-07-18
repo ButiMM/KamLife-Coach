@@ -673,8 +673,20 @@ export function parseSickDays(m: string): number {
     const n = parseInt(mm[1], 10);
     if (Number.isFinite(n)) return Math.max(1, Math.min(14, n));
   }
-  if (/\b(rest of (?:the|this) week|whole week|all week|a week)\b/i.test(s)) return 7;
   if (/\b(two weeks|2 weeks|fortnight)\b/i.test(s)) return 14;
+  if (/\b(rest of (?:the|this) week|whole week|all week|a week)\b/i.test(s)) return 7;
+  // DAY-OF-WEEK (2026-07-19 live: "sick until Monday" defaulted to "~3 days" — the
+  // stated day was ignored). "until/till/through/by <day>" → days from today (SAST) to
+  // that weekday. Forward prepositions only, so "sick since Monday" isn't a return date.
+  const dayMatch = s.match(/\b(?:until|till|til|through|thru|by|to)\s+(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  if (dayMatch) {
+    const DOW: Record<string, number> = { sunday: 0, monday: 1, tuesday: 2, wednesday: 3, thursday: 4, friday: 5, saturday: 6 };
+    const target = DOW[dayMatch[1].toLowerCase()];
+    const todaySast = new Date(Date.now() + 2 * 3_600_000).getUTCDay();
+    let delta = (target - todaySast + 7) % 7;
+    if (delta === 0) delta = 7; // "until Monday" said on a Monday = next Monday
+    return Math.max(1, Math.min(14, delta));
+  }
   return 3;
 }
 
