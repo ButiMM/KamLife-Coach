@@ -130,22 +130,43 @@ const GOLD_EVAL_USER = {
   stepsTarget: 8500, currentWeight: 82, isSick: false,
 };
 
+/** Resolve to `fallback` if the promise hasn't settled in `ms` — so one stuck AI call can
+ *  never hang the whole replay silently (the failure mode that made it "not respond"). */
+function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+  return Promise.race([p, new Promise<T>(res => setTimeout(() => res(fallback), ms))]);
+}
+
 /**
  * THE GOLD REPLAY — score the engine against the HAND-VERIFIED truth set, not production's
  * noisy intent labels. This is the ruler the gate should trust. Because the gold set is
  * fixed, a decisive pass IS the gate — there is no calendar to wait out (that only applies
  * to live shadow over new traffic). Reuses the same pure scorer as the history replay.
+ *
+ * ROBUSTNESS (2026-07-18: the command went silent): every per-case AI call has a hard
+ * timeout, and cases run in bounded-concurrency batches — so it finishes in ~7 rounds, not
+ * 36 sequential waits, and a single slow/stuck call degrades to JUST_REPLY instead of
+ * freezing the whole run with no reply.
  */
 export async function runGoldReplay(openai: OpenAI): Promise<ActionReplayReport> {
-  const pairs: ActionReplayPair[] = [];
   const snapshot = await buildClientSnapshot(GOLD_EVAL_USER as any).catch(() => undefined);
   const prior = seedUnderstanding(GOLD_EVAL_USER as any, snapshot);
-  for (const c of ACTION_GOLD) {
+
+  const scoreOne = async (c: { message: string; expected: any }): Promise<ActionReplayPair> => {
     try {
-      const res = await runMeaningEngine({ openai, user: GOLD_EVAL_USER as any, message: c.message, prior, snapshot, emitActions: true });
-      const emitted: CoachActionType = res?.action?.type || "JUST_REPLY";
-      pairs.push({ expected: c.expected, emitted, message: c.message });
-    } catch { pairs.push({ expected: c.expected, emitted: "JUST_REPLY", message: c.message }); }
+      const res = await withTimeout(
+        runMeaningEngine({ openai, user: GOLD_EVAL_USER as any, message: c.message, prior, snapshot, emitActions: true }),
+        15_000, null,
+      );
+      return { expected: c.expected, emitted: (res?.action?.type as CoachActionType) || "JUST_REPLY", message: c.message };
+    } catch {
+      return { expected: c.expected, emitted: "JUST_REPLY", message: c.message };
+    }
+  };
+
+  const pairs: ActionReplayPair[] = [];
+  const CONCURRENCY = 5;
+  for (let i = 0; i < ACTION_GOLD.length; i += CONCURRENCY) {
+    pairs.push(...await Promise.all(ACTION_GOLD.slice(i, i + CONCURRENCY).map(scoreOne)));
   }
 
   const score = scoreActionReplay(pairs);

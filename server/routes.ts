@@ -203,8 +203,15 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       (async () => {
         try {
           const { runGoldReplay } = await import("./eval/action-replay");
-          const report = await runGoldReplay(openai);
-          await sendWhatsApp(phone, report.whatsappText.slice(0, 1500));
+          // NEVER-SILENT: even if the whole run stalls, a hard cap guarantees a reply so the
+          // command can't go quiet on you again. The per-call timeouts inside make this rare.
+          const report = await Promise.race([
+            runGoldReplay(openai),
+            new Promise<null>(res => setTimeout(() => res(null), 100_000)),
+          ]);
+          await sendWhatsApp(phone, report
+            ? report.whatsappText.slice(0, 1500)
+            : "⏱️ Action replay is taking longer than usual (the AI calls are slow right now). Give it a minute and send *action replay* again.");
         } catch (e: any) {
           await sendWhatsApp(phone, `Action replay hit a snag: ${e?.message || e}`).catch(() => {});
         }
