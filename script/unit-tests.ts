@@ -425,6 +425,90 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// ACTION-CORRECTNESS SCORER (increment 5) — the gate that decides ENGINE_ACTIONS=on.
+// Pure + dependency-free (action-score.ts), so it's provable here without booting the app.
+// Every reviewer's fear is a named counter: a MISSED action (state intent → JUST_REPLY,
+// the new template pile) and a FALSE write (chat → state-write, the dangerous one).
+{
+  const { expectedActionForIntent, scoreActionReplay } = await import("../server/eval/action-score");
+
+  test("intent map: production intents map to the action the inversion should emit", () => {
+    assert.equal(expectedActionForIntent("FOOD_LOG"), "LOG_MEAL");
+    assert.equal(expectedActionForIntent("STEP_LOG"), "LOG_STEPS");
+    assert.equal(expectedActionForIntent("WATER_LOG"), "LOG_WATER");
+    assert.equal(expectedActionForIntent("WEIGHT_LOG"), "LOG_WEIGHT");
+    assert.equal(expectedActionForIntent("SICK"), "SET_SICK");
+    assert.equal(expectedActionForIntent("SICK_RECOVER"), "END_SICK", "recovery beats the bare SICK rule (ordered)");
+    assert.equal(expectedActionForIntent("WORKOUT_VIEW"), "SHOW_WORKOUT");
+    assert.equal(expectedActionForIntent("MEAL_LIST"), "SHOW_MEALS");
+  });
+  test("intent map: conversation intents expect JUST_REPLY, not a write", () => {
+    assert.equal(expectedActionForIntent("GPT"), "CONVERSATION");
+    assert.equal(expectedActionForIntent("MINDSET"), "CONVERSATION");
+    assert.equal(expectedActionForIntent("QUESTION"), "CONVERSATION");
+    assert.equal(expectedActionForIntent("EMOTION"), "CONVERSATION");
+  });
+  test("intent map: an unknown / null intent is ambiguous → null (never scored, never noise)", () => {
+    assert.equal(expectedActionForIntent(null), null);
+    assert.equal(expectedActionForIntent(""), null);
+    assert.equal(expectedActionForIntent("SOME_NEW_INTENT"), null);
+  });
+
+  const pair = (expected: any, emitted: any, message = "x") => ({ expected, emitted, message });
+  test("scorer: a perfect replay passes (needs the ≥20 sample floor)", () => {
+    const rows = Array.from({ length: 20 }, () => pair("LOG_MEAL", "LOG_MEAL"));
+    const s = scoreActionReplay(rows);
+    assert.equal(s.correct, 20);
+    assert.equal(s.matchRate, 1);
+    assert.equal(s.passed, true);
+  });
+  test("scorer: too few samples never passes, however clean", () => {
+    const s = scoreActionReplay(Array.from({ length: 19 }, () => pair("LOG_MEAL", "LOG_MEAL")));
+    assert.equal(s.passed, false, "under 20 samples can't win a day");
+  });
+  test("scorer: a MISSED action (state intent → JUST_REPLY) is counted and fails the day", () => {
+    const rows = [...Array.from({ length: 17 }, () => pair("LOG_MEAL", "LOG_MEAL")),
+                  ...Array.from({ length: 3 }, () => pair("LOG_MEAL", "JUST_REPLY"))];
+    const s = scoreActionReplay(rows);
+    assert.equal(s.missedActions, 3);
+    assert.ok(s.missRate > 0.1, "3/20 missed breaches the ≤10% bar");
+    assert.equal(s.passed, false);
+    assert.ok(s.samples.some(x => /MISSED/.test(x)), "the miss is surfaced as a sample");
+  });
+  test("scorer: a FALSE write (conversation → state-write) is the dangerous one, capped at 2%", () => {
+    const rows = [...Array.from({ length: 19 }, () => pair("CONVERSATION", "JUST_REPLY")),
+                  pair("CONVERSATION", "LOG_MEAL", "how are you")];
+    const s = scoreActionReplay(rows);
+    assert.equal(s.falseActions, 1);
+    assert.ok(s.falseRate > 0.02, "1/20 false writes breaches the ≤2% bar");
+    assert.equal(s.passed, false, "a single false write on 20 samples fails the day");
+    assert.ok(s.samples.some(x => /FALSE-WRITE/.test(x)));
+  });
+  test("scorer: a read-only action on a chat turn is harmless (SHOW_MEALS is not a false write)", () => {
+    const rows = [...Array.from({ length: 19 }, () => pair("CONVERSATION", "JUST_REPLY")),
+                  pair("CONVERSATION", "SHOW_MEALS", "what did i eat")];
+    const s = scoreActionReplay(rows);
+    assert.equal(s.falseActions, 0, "showing meals corrupts nothing");
+    assert.equal(s.correct, 20);
+    assert.equal(s.passed, true);
+  });
+  test("scorer: a WRONG action (A→B) counts against match but isn't a miss or a false write", () => {
+    const rows = [...Array.from({ length: 19 }, () => pair("LOG_MEAL", "LOG_MEAL")),
+                  pair("LOG_STEPS", "LOG_WATER")];
+    const s = scoreActionReplay(rows);
+    assert.equal(s.wrongActions, 1);
+    assert.equal(s.missedActions, 0);
+    assert.equal(s.falseActions, 0);
+    assert.ok(s.matchRate < 1);
+  });
+  test("scorer: an empty replay is a non-pass, not a crash", () => {
+    const s = scoreActionReplay([]);
+    assert.equal(s.n, 0);
+    assert.equal(s.matchRate, 0);
+    assert.equal(s.passed, false);
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.

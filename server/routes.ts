@@ -194,6 +194,25 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       })();
       return `📊 Running the scorecard over your last ${limit} real conversations — replaying each through the new engine and grading it against what the coach actually said. This takes a few minutes; I'll text you the results here.`;
     }
+
+    // ---- COACH COMMAND: "action replay" → score whether Coach K picks the RIGHT ACTION ----
+    // The mirror of the conversation scorecard: replays real messages with action emission
+    // (dry-run — nothing written) and grades action-correctness — missed actions and, the
+    // dangerous one, false writes. 5 winning days is the gate before ENGINE_ACTIONS=on.
+    const ar = m.trim().match(/^action[\s-]?replay(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^replay[\s-]?actions?(?:\s+(\d{1,3}))?$/i);
+    if (ar) {
+      const limit = Math.max(20, Math.min(200, parseInt(ar[1] || "80", 10) || 80));
+      (async () => {
+        try {
+          const { runActionReplay } = await import("./eval/action-replay");
+          const report = await runActionReplay(openai, limit);
+          await sendWhatsApp(phone, report.whatsappText.slice(0, 1500));
+        } catch (e: any) {
+          await sendWhatsApp(phone, `Action replay hit a snag: ${e?.message || e}`).catch(() => {});
+        }
+      })();
+      return `🎯 Running the *action-correctness* replay over your last ${limit} real messages — checking whether Coach K would pick the right action (and never a wrong write). A few minutes; results land here.`;
+    }
   }
 
   // ---- BETA TESTER ALLOWLIST — comma/space/newline-separated numbers in BETA_TESTERS ----
