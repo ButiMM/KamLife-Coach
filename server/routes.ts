@@ -1007,7 +1007,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Flag-gated (ENGINE_LIVE=on) and instantly reversible (ENGINE_LIVE=off).
   const tag = (reply: string, src: string) => (isCoach ? `${reply}\n\n_· ${src} ·_` : reply);
   if (engineLive() && !mustStayDeterministic(m) && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId });
+    const engineFront = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineFront !== null) return tag(engineFront, "🧠 new engine");
   }
 
@@ -1036,7 +1036,7 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // Misc/Lifecycle handler actually claimed still gets one last crack at Coach K rather
   // than falling through to the raw brain.
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
-    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId });
+    const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
   }
 

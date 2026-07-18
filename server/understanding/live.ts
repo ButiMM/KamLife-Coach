@@ -48,6 +48,16 @@ export function engineActionMode(): ActionMode {
   return v === "on" ? "on" : v === "shadow" ? "shadow" : "off";
 }
 
+// COHORT GATE for the `on` rollout. Even with ENGINE_ACTIONS=on, real execution is limited
+// to the coach + beta testers (people who opted into testing) UNLESS ENGINE_ACTIONS_ALL=on
+// widens it to everyone. So "flip it on now" is safe: a wrong action on unseen live phrasing
+// can only ever touch a tester, never a real client, until you deliberately open the gate.
+// A non-cohort client in `on` mode runs the action DRY (byte-identical to today) — we still
+// log the would-be decision so `shadow` review shows the whole base, not just testers.
+export function engineActionsAll(): boolean {
+  return (process.env.ENGINE_ACTIONS_ALL || "").toLowerCase() === "on";
+}
+
 // Idempotency source id. The inbound WhatsApp MessageSid is now threaded from the webhook
 // (ctx.sourceMessageId) and is the stable key we prefer — the SAME identifier Twilio uses,
 // and the one our webhook-level dedup already trusts. This derived hash is only the
@@ -114,6 +124,9 @@ export async function runMeaningEngineLive(ctx: {
    *  idempotency key so a Twilio retry can never double-write. Absent for admin/test and
    *  internal recursion, where we fall back to a user+message hash. */
   sourceMessageId?: string;
+  /** May this user's actions REALLY execute in `on` mode? True for coach + beta testers.
+   *  Non-cohort users run dry (until ENGINE_ACTIONS_ALL=on), so `on` is safe to flip today. */
+  actionsLive?: boolean;
 }): Promise<string | null> {
   const { message, user, openai } = ctx;
   try {
@@ -147,16 +160,21 @@ export async function runMeaningEngineLive(ctx: {
     // executor's reply win. Fail-open: any miss falls back to the conversational reply.
     if (actionMode !== "off" && result.action && result.action.type !== "JUST_REPLY") {
       try {
+        // Cohort gate: execute for real only in `on` mode AND when this user is allowed
+        // (coach/beta-tester, or ENGINE_ACTIONS_ALL). Everyone else runs DRY — so flipping
+        // ENGINE_ACTIONS=on can only touch a tester until the gate is deliberately opened.
+        const cohortLive = ctx.actionsLive === true || engineActionsAll();
+        const runDry = actionMode === "shadow" || !cohortLive;
         const exec = await executeAction(result.action, {
           user, phone: ctx.phone,
           sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, message),
           confidence: 0.9, // placeholder until replay calibrates the distribution
-          dryRun: actionMode === "shadow",
+          dryRun: runDry,
         });
         await logChat(user.id, message,
           `${describeAction(result.action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip(dup)" : exec.error ? "error" : "noop"}`,
-          actionMode === "shadow" ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
-        if (actionMode === "on" && (exec.performed || exec.confirmed) && exec.reply.trim()) {
+          runDry ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
+        if (!runDry && (exec.performed || exec.confirmed) && exec.reply.trim()) {
           return exec.reply; // the deterministic side-effect + its reply
         }
       } catch (e) {

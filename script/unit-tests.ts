@@ -795,6 +795,14 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(routes, /\^shadow\(\?:\\s\+\(\\d\{1,2\}\)\)\?\$/, "the 'shadow' coach command must be wired");
     assert.match(routes, /recentShadowDecisions/, "and call the reader");
   });
+  test("cohort gate: ENGINE_ACTIONS=on only executes for real for coach/beta-testers until opened", () => {
+    const live = readFileSync(join("server", "understanding", "live.ts"), "utf-8");
+    assert.match(live, /engineActionsAll/, "the widen-to-all switch must exist");
+    assert.match(live, /const cohortLive = ctx\.actionsLive === true \|\| engineActionsAll\(\)/, "real execution is gated to the cohort");
+    assert.match(live, /const runDry = actionMode === "shadow" \|\| !cohortLive/, "non-cohort users run dry even in on mode");
+    const routes = readFileSync(join("server", "routes.ts"), "utf-8");
+    assert.match(routes, /actionsLive: isCoach \|\| isBetaTester/, "the cohort is coach + beta testers");
+  });
 }
 
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
