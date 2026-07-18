@@ -358,6 +358,34 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 }
 
+// EXECUTOR PRECONDITIONS (2026-07-19) — the two things all three reviews converged on,
+// each a founder launch-blocker: the confidence gate (unsafe behaviour) and idempotency
+// (duplicated logs). Built onto the contract before the executor exists.
+{
+  const { shouldAutoExecute, writesState, actionFingerprint, CONFIDENCE_TO_EXECUTE } = await import("../server/understanding/actions");
+  const meal = { type: "LOG_MEAL", items: [{ name: "Eggs", kcal: 140, protein: 12 }], meal: "breakfast", needsConfirmation: false } as any;
+  test("confidence gate: a low-confidence STATE-WRITE waits for confirmation; a high one runs", () => {
+    assert.equal(shouldAutoExecute(meal, 0.58), false, "'~2 eggs?' must not auto-log");
+    assert.equal(shouldAutoExecute(meal, 0.98), true, "a confident log runs");
+    assert.equal(shouldAutoExecute(meal, CONFIDENCE_TO_EXECUTE), true, "exactly at threshold runs");
+  });
+  test("confidence gate: read-only actions always run; needsConfirmation always blocks", () => {
+    assert.equal(shouldAutoExecute({ type: "SHOW_MEALS" } as any, 0.1), true, "nothing to corrupt → run");
+    assert.equal(shouldAutoExecute({ type: "JUST_REPLY" } as any, 0), true);
+    assert.equal(shouldAutoExecute({ ...meal, needsConfirmation: true }, 0.99), false, "model-flagged uncertainty always confirms");
+  });
+  test("writesState: separates the corruptible actions from the read-only ones", () => {
+    for (const t of ["LOG_MEAL", "LOG_STEPS", "SET_SICK", "REMOVE_LAST_MEAL"]) assert.ok(writesState(t as any));
+    for (const t of ["SHOW_MEALS", "SHOW_WORKOUT", "JUST_REPLY"]) assert.ok(!writesState(t as any));
+  });
+  test("idempotency: same message id collapses to one; different messages both log", () => {
+    const a = actionFingerprint(meal, "u1", "SM123");
+    assert.equal(actionFingerprint(meal, "u1", "SM123"), a, "a retry of the same message = same key");
+    assert.notEqual(actionFingerprint(meal, "u1", "SM999"), a, "a genuinely separate message = new key");
+    assert.notEqual(actionFingerprint(meal, "u2", "SM123"), a, "different user = different key");
+  });
+}
+
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
 // streak got "Good to have you back" — trajectory is workout-only, so a daily logger who
 // trains moderately read as lapsed-and-returned). Absence framing must never hit the engaged.

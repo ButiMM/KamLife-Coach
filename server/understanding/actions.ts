@@ -128,6 +128,48 @@ export function validateAction(raw: any): CoachAction {
   }
 }
 
+// ── EXECUTOR PRECONDITIONS (2026-07-19) — every reviewer converged here, and both map
+// to a founder launch-blocker: the CONFIDENCE gate (unsafe behaviour) and IDEMPOTENCY
+// (duplicated logs). They live on the contract so the executor increment is a thin, safe
+// consumer — it never decides whether to run, only how.
+
+// Coach K attaches a 0..1 confidence to each action. Below this, a STATE-WRITING action
+// is not auto-executed — it's confirmed first ("~2 eggs? reply yes"). Read-only actions
+// (SHOW_*, JUST_REPLY) ignore it — there's nothing to corrupt.
+export const CONFIDENCE_TO_EXECUTE = 0.75;
+
+const WRITES_STATE = new Set<CoachActionType>([
+  "LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL", "SET_SICK", "END_SICK",
+]);
+
+/** True if performing this action changes stored state (a wrong auto-run would corrupt). */
+export function writesState(type: CoachActionType): boolean {
+  return WRITES_STATE.has(type);
+}
+
+/**
+ * Should this action auto-execute, or be confirmed first? A read-only action always runs.
+ * A state-writing action runs only when confidence clears the bar AND the model didn't
+ * already flag it (LOG_MEAL.needsConfirmation). This is the whole "infer, don't
+ * interrogate — but confirm when unsure" posture, as one deterministic gate.
+ */
+export function shouldAutoExecute(action: CoachAction, confidence: number): boolean {
+  if (!writesState(action.type)) return true;
+  if (action.type === "LOG_MEAL" && action.needsConfirmation) return false;
+  return Number.isFinite(confidence) && confidence >= CONFIDENCE_TO_EXECUTE;
+}
+
+/**
+ * IDEMPOTENCY fingerprint — a deterministic key so a retry (WhatsApp redelivery, a
+ * replay run, a network re-send) never double-writes. Keyed on the SOURCE MESSAGE id,
+ * not the content: a literal retry of the same message collapses to one execution, while
+ * two genuinely-separate "2 eggs" messages (different ids) both log honestly. The executor
+ * skips a fingerprint it has already performed.
+ */
+export function actionFingerprint(action: CoachAction, userId: string, sourceMessageId: string): string {
+  return `${userId}:${sourceMessageId}:${action.type}`;
+}
+
 /** One-line human summary of an action — for the audit/replay log the inversion needs. */
 export function describeAction(action: CoachAction): string {
   switch (action.type) {

@@ -264,15 +264,22 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
           adjustedProtein: pp.protein,
           adjustedDescription: `${f.typicalPortionDescription} — your usual`,
           quantity: 1,
+          portionSource: "personal" as const,
         };
       }
     }
+    // PORTION PROVENANCE (2026-07-19): every inferred portion carries HOW it was decided —
+    // the audit-trail atom the reviews keep asking for, and the signal the confidence layer
+    // reads. "default" = a bare guess (no amount, no size word, no history) — the only case
+    // that's genuinely uncertain.
+    const portionSource = explicitQty ? "explicit" as const : sizeMultiplier !== 1 ? "size" as const : "default" as const;
     return {
       ...f,
       adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
       adjustedProtein: Math.round(f.typicalPortionProtein * quantity),
       adjustedDescription: scalePortionDescription(f.typicalPortionDescription, quantity),
       quantity,
+      portionSource,
     };
   });
 }
