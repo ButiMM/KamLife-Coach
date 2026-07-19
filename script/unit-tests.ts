@@ -803,6 +803,16 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const routes = readFileSync(join("server", "routes.ts"), "utf-8");
     assert.match(routes, /actionsLive: isCoach \|\| isBetaTester/, "the cohort is coach + beta testers");
   });
+  test("growth engine: transformation 'story' + 'cohort' commands are wired (thread #1)", () => {
+    const t = readFileSync(join("server", "transformation.ts"), "utf-8");
+    assert.match(t, /export async function getTransformationStory/, "the shareable receipt builder");
+    assert.match(t, /export async function getCohortSnapshot/, "the proof-cohort dashboard");
+    assert.match(t, /Day-30 paid retention/, "the North-Star metric #1");
+    assert.match(t, /Avg weight change \(retained\)/, "the North-Star metric #2");
+    const routes = readFileSync(join("server", "routes.ts"), "utf-8");
+    assert.match(routes, /getTransformationStory/, "'story' command wired");
+    assert.match(routes, /getCohortSnapshot/, "'cohort' command wired");
+  });
 }
 
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session

@@ -263,6 +263,22 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       const { recentShadowDecisions } = await import("./understanding/live");
       return await recentShadowDecisions(parseInt(sh[1] || "15", 10) || 15);
     }
+
+    // ---- COACH COMMAND: "story <name/last4>" → a client's shareable transformation card ----
+    // KamLife's biggest growth asset: the whole journey as data → a receipt you can share.
+    const st = m.trim().match(/^(?:story|transformation)\s+(.+)$/i);
+    if (st) {
+      const { getTransformationStory } = await import("./transformation");
+      return (await getTransformationStory(st[1])).whatsappText;
+    }
+
+    // ---- COACH COMMAND: "cohort" → the proof-cohort dashboard (day-30 retention + avg Δkg) ----
+    // The two numbers that decide the business, so you can track your 10 people relentlessly.
+    const co = m.trim().match(/^cohort(?:\s+(\d{1,2}))?$/i);
+    if (co) {
+      const { getCohortSnapshot } = await import("./transformation");
+      return (await getCohortSnapshot(parseInt(co[1] || "15", 10) || 15)).whatsappText;
+    }
   }
 
   // ---- BETA TESTER ALLOWLIST — comma/space/newline-separated numbers in BETA_TESTERS ----
