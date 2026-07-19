@@ -793,23 +793,33 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 //     ("when do I go back to my regular programme") with the canned declaration reply, twice.
 // (b) the engine named a food CATEGORY ("legumes") instead of a real township food.
 {
-  // (a) BACK_TO_GYM must fire on a DECLARATION but stand down for a timing QUESTION.
+  // (a) BACK_TO_GYM fires ONLY on an affirmative return. It must stand down for a QUESTION,
+  // a NEGATION ("I'm NOT going back"), or ANY sick/unwell signal (never push a sick client).
   const TRIGGER = /\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i;
-  const ASKING = /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i;
-  const fires = (msg: string) => TRIGGER.test(msg) && !ASKING.test(msg);
+  const SKIP = (msg: string) =>
+    /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i.test(msg)
+    || /\b(not|won'?t|wont|can'?t|cant|cannot|never|ain'?t)\b[^.!?]{0,24}\b(go|going|come|coming|back|return|train|gym|programme)\b/i.test(msg)
+    || /\b(sick|ill|unwell|not feeling (well|good|right|ok|okay)|feeling (sick|ill|unwell|terrible|bad|rough|weak)|flu|fever|nause|vomit|dizzy|injured|hurt|in pain)\b/i.test(msg);
+  const fires = (msg: string) => TRIGGER.test(msg) && !SKIP(msg);
   test("back-to-gym: a DECLARATION still fires (never break the real command)", () => {
     assert.ok(fires("i'm back at the gym"), "'back at the gym' is a declaration");
     assert.ok(fires("back from holiday"), "'back from holiday' clears holiday mode");
+    assert.ok(fires("no longer on holiday"), "'no longer on holiday' still fires — not a negation of returning");
   });
   test("back-to-gym: a timing QUESTION stands down so Coach K can answer WHEN", () => {
     assert.ok(!fires("when do I go back to my regular programme"), "the exact screenshot miss must NOT fire the canned reply");
     assert.ok(!fires("how long until I can go back to gym"), "asking how long is a question");
     assert.ok(!fires("am I ready to go back to the gym?"), "asking readiness is a question");
   });
+  test("back-to-gym: a NEGATION or a SICK message must NOT fire (the 2026-07-18 safety miss)", () => {
+    assert.ok(!fires("I'm still not feeling well so I'm not going back to the gym on Monday"), "sick + 'not going back' must NEVER push training");
+    assert.ok(!fires("I'm not going back to gym this week"), "a plain negation must not fire");
+    assert.ok(!fires("too sick to go back to the gym"), "sick context must stand it down");
+  });
   test("back-to-gym: the guard is wired in the handler source (not just here)", () => {
     const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
-    assert.match(src, /askingWhenToReturn/, "the question guard must exist in the handler");
-    assert.match(src, /!askingWhenToReturn &&/, "and it must gate the BACK_TO_GYM trigger");
+    assert.match(src, /skipBackToGym/, "the combined guard must exist in the handler");
+    assert.match(src, /!skipBackToGym &&/, "and it must gate the BACK_TO_GYM trigger");
   });
 
   // (b) the coaching voice must name real foods, never a food category.
