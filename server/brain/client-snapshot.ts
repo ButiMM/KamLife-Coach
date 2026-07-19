@@ -178,5 +178,18 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     console.error("[CLIENT_SNAPSHOT] partial:", (e as any)?.message || e);
   }
 
+  // ── LONG-TERM INTELLIGENCE (CIP): what we've LEARNED about this client over months —
+  // their patterns, weak days, best streaks, plateau history, the coach narrative. This was
+  // wired to the OLD gpt path but NEVER to the new engine (2026-07-19 audit: written in 7
+  // places, read into the brain in 0). This closes that gap so the LIVE brain actually knows
+  // the person, and gets smarter about them over time. Dynamic import avoids a cycle; bonus-only.
+  try {
+    const { getClientNarrative } = await import("../intelligence/profile");
+    const narrative = await getClientNarrative(user.id);
+    if (narrative && narrative.trim()) {
+      lines.push(`WHAT YOU'VE LEARNED ABOUT THIS CLIENT OVER TIME (their durable patterns — use it to sound like you know them, never recite it back): ${narrative.trim()}`);
+    }
+  } catch { /* the long-term narrative is a bonus — never blocks the snapshot */ }
+
   return lines.join("\n");
 }
