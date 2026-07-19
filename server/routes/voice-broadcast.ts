@@ -150,6 +150,28 @@ export function registerVoiceBroadcastRoutes(app: Express) {
     }
   });
 
+  // ── Progress-photo serving (for transformation stories) ──
+  // Public-by-UUID like the voice recap above — Twilio fetches WhatsApp media unauthenticated,
+  // so this has no auth guard; the UUID is unguessable and only surfaced to the coach via the
+  // `story` command. These are POPIA-sensitive body photos: private cache, and sharing one
+  // onward is the coach's decision WITH the client's consent.
+  app.get("/api/progress-photo/:id/image", async (req: any, res: any) => {
+    try {
+      const { rows } = await pool.query<{ photo_base64: string; content_type: string }>(
+        `SELECT photo_base64, content_type FROM progress_photos WHERE id = $1`,
+        [req.params.id]
+      );
+      if (!rows.length || !rows[0].photo_base64) return res.status(404).end();
+      const buf = Buffer.from(rows[0].photo_base64, "base64");
+      res.set("Content-Type", rows[0].content_type || "image/jpeg");
+      res.set("Content-Length", String(buf.length));
+      res.set("Cache-Control", "private, max-age=3600");
+      return res.send(buf);
+    } catch (e: any) {
+      return res.status(500).end();
+    }
+  });
+
   // ── ElevenLabs status + quota ──
   app.get("/api/admin/voice-recap/status", requireAdminKey, async (_req: any, res: any) => {
     const configured = isElevenLabsConfigured();

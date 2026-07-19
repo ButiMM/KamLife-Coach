@@ -47,7 +47,7 @@ export async function getTransformationStory(identifier: string): Promise<Transf
     if (!rows.length) return { found: false, whatsappText: `No client found for "${id}". Try a name or the last 4 digits of their number.` };
     const u = rows[0];
 
-    const [startW, latestW, sessions, mealDays, steps14, firstMsg, weekDays, photos] = await Promise.all([
+    const [startW, latestW, sessions, mealDays, steps14, firstMsg, weekDays, photos, beforePhoto, afterPhoto] = await Promise.all([
       pool.query<{ weight: string }>(`SELECT weight FROM weight_logs WHERE user_id=$1 ORDER BY logged_at ASC LIMIT 1`, [u.id]),
       pool.query<{ weight: string; logged_at: string }>(`SELECT weight, logged_at FROM weight_logs WHERE user_id=$1 ORDER BY logged_at DESC LIMIT 1`, [u.id]),
       pool.query<{ n: string }>(`SELECT COUNT(*) n FROM workout_logs WHERE user_id=$1 AND workout_completed=true`, [u.id]),
@@ -62,6 +62,9 @@ export async function getTransformationStory(identifier: string): Promise<Transf
       // before/after PHOTOS — the emotional proof. Count + span of distinct shoot days.
       pool.query<{ shoots: string; first: string | null; last: string | null }>(
         `SELECT COUNT(DISTINCT DATE(logged_at)) shoots, MIN(logged_at) first, MAX(logged_at) last FROM progress_photos WHERE user_id=$1`, [u.id]),
+      // the actual BEFORE (earliest) and AFTER (latest) photo ids, to attach as images.
+      pool.query<{ id: string }>(`SELECT id FROM progress_photos WHERE user_id=$1 ORDER BY logged_at ASC LIMIT 1`, [u.id]),
+      pool.query<{ id: string }>(`SELECT id FROM progress_photos WHERE user_id=$1 ORDER BY logged_at DESC LIMIT 1`, [u.id]),
     ]);
 
     const name = (u.name || "").split(" ")[0] || "This client";
@@ -107,9 +110,22 @@ export async function getTransformationStory(identifier: string): Promise<Transf
     const pLast = photos.rows[0]?.last ? new Date(photos.rows[0].last) : null;
     let photoLine = "";
     if (shoots >= 2 && pFirst && pLast) {
-      photoLine = `\n📸 *Before + after photos on file* — baseline Day 1 & re-shoot Day ${daysBetween(joined, pLast) + 1}. Side-by-side ready to share.`;
+      photoLine = `\n📸 *Before + after photos* — baseline Day 1 & re-shoot Day ${daysBetween(joined, pLast) + 1}. Sending them now 👇`;
     } else if (shoots === 1) {
       photoLine = `\n📸 Baseline photos captured — schedule the re-shoot to complete the before/after.`;
+    }
+
+    // Attach the actual before/after images (Twilio needs https media URLs). The command is
+    // coach-only; the reply pipeline turns [MEDIA:url] markers into WhatsApp image sends.
+    const railwayDomain = process.env.RAILWAY_PUBLIC_DOMAIN ? `https://${process.env.RAILWAY_PUBLIC_DOMAIN}` : null;
+    const raw = (process.env.APP_URL || railwayDomain || "").replace(/\/$/, "");
+    const appUrl = raw && /^https?:\/\//i.test(raw) ? raw : raw ? `https://${raw}` : "";
+    let mediaMarkers = "";
+    if (appUrl.startsWith("https://")) {
+      const beforeId = beforePhoto.rows[0]?.id;
+      const afterId = afterPhoto.rows[0]?.id;
+      if (beforeId) mediaMarkers += `\n[MEDIA:${appUrl}/api/progress-photo/${beforeId}/image]`;
+      if (afterId && afterId !== beforeId) mediaMarkers += `\n[MEDIA:${appUrl}/api/progress-photo/${afterId}/image]`;
     }
 
     const text =
@@ -120,7 +136,8 @@ export async function getTransformationStory(identifier: string): Promise<Transf
       `🍽️ ${mealLoggedDays} days logged${avgSteps > 0 ? ` · 👟 ${avgSteps.toLocaleString()} avg steps` : ""}` +
       forecastLine +
       photoLine +
-      `\n\n_The whole journey — words, weight, streak, and the photos — from their own logs. This is the receipt you share._`;
+      `\n\n_The whole journey — words, weight, streak, and the photos — from their own logs. This is the receipt you share._` +
+      mediaMarkers;
 
     return { found: true, whatsappText: text };
   } catch (e: any) {

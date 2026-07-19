@@ -871,6 +871,14 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(w, /daysLogged >= 3/, "only shown with enough data to be honest");
     assert.match(w, /🔮 Forecast/, "the forward-looking line is in the card");
   });
+  test("transformation: before/after photos are served + attached to the story card", () => {
+    const vb = readFileSync(join("server", "routes", "voice-broadcast.ts"), "utf-8");
+    assert.match(vb, /api\/progress-photo\/:id\/image/, "the public-by-UUID photo endpoint exists");
+    assert.match(vb, /FROM progress_photos WHERE id/, "and serves the stored image bytes");
+    const t = readFileSync(join("server", "transformation.ts"), "utf-8");
+    assert.match(t, /\[MEDIA:\$\{appUrl\}\/api\/progress-photo\//, "the story attaches the images as WhatsApp media");
+    assert.match(t, /afterId !== beforeId/, "one shoot → one photo, not a duplicate");
+  });
 }
 
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
