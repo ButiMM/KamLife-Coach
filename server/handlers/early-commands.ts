@@ -1319,7 +1319,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- LOAD SHEDDING ----
   const isLoadShedding = /\b(load.?shed|loadshed|eskom|no.?electricity|no.?power|stage\s*[1-8]|power.?cut|power.?out|blackout|no.?lights|lights.?out|inverter.?dead|battery.?dead|no.?signal.*load|generator.*off)\b/i.test(m);
-  if (isLoadShedding) {
+  if (process.env.ENGINE_LIVE !== "on" && isLoadShedding) {
     const lsReply = `${capName}, load shedding is real — it messes with routines, meals, and everything else. No blame.\n\nHere's what you can still do with zero power:\n- Home workout: 3 rounds of 15 squats, 10 push-ups, 20 jumping jacks, 30-sec plank. No equipment, no electricity needed.\n- Eating: cold food counts. Bread + peanut butter, fruit, biltong, yoghurt if still cold — log it.\n- Steps: even 20 minutes walking outside counts. Send me the count when you're back.\n\nWhen power's back, pick up where you left off. One missed session never killed progress — giving up does.`;
     await logChat(user.id, message, lsReply, "LOAD_SHEDDING");
     return lsReply;
@@ -1330,7 +1330,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)
     && !isSick
     && /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week|next month)\b/i.test(m);
-  if (isReturnPlanning) {
+  if (process.env.ENGINE_LIVE !== "on" && isReturnPlanning) {
     const dayMatch = m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i);
     const returnDay = dayMatch ? dayMatch[0].charAt(0).toUpperCase() + dayMatch[0].slice(1).toLowerCase() : "then";
     const goal = user.goalType || "fat_loss";
@@ -1364,7 +1364,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- FOODS TO AVOID / LIMIT ----
   const isFoodsToAvoidQ = /\b(what.*avoid|what.*not.*eat|foods?.*cut|foods?.*limit|foods?.*avoid|avoid.*foods?|what.*skip|bad.*foods?|worst.*foods?|should.*avoid|cut.*out|what.*hurting|what.*killing|killing.*results|what.*blocking|what.*slowing|bad for.*loss|bad for.*gain|what (not|never) (to )?eat)\b/i.test(m);
-  if (isFoodsToAvoidQ) {
+  if (process.env.ENGINE_LIVE !== "on" && isFoodsToAvoidQ) {
     const goal = user.goalType || "fat_loss";
     let avoidReply = "";
     if (goal === "muscle_gain") {
@@ -1387,7 +1387,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // ---- LOGGING CONFESSION — "I haven't been logging" (general, not about skipping meals) ----
   // Catches people apologising for not logging. Research: respond with curiosity not consequence.
   const isLoggingConfession = /\b(haven.?t been logging|haven.?t logged|not been logging|been bad (at|with) logging|been slack(ing)? (on|with) (logging|tracking)|forgot to (log|track)|haven.?t been tracking|I know I haven.?t|I know, I haven.?t|missed (my )?log(s|ging)?|no logs (lately|recently|this week)|haven.?t logged (anything|meals?|food)|been slipping (on|with) (logging|tracking))\b/i.test(m);
-  if (isLoggingConfession) {
+  if (process.env.ENGINE_LIVE !== "on" && isLoggingConfession) {
     const confessionReply = `${capName}, no guilt here. Logging is information — not a test you pass or fail.\n\nTell me one thing: what are you eating right now, or what did you have at your last meal? Just that. We pick up from here.`;
     await logChat(user.id, message, confessionReply, "LOGGING_CONFESSION");
     return confessionReply;
@@ -1403,7 +1403,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     || /\b(bits? and pieces|bits? here and there|eating here and there)\b/i.test(m)
     || /\b(no proper meal today|didn.?t have a proper meal|ate nothing proper)\b/i.test(m)
   );
-  if (isNibbling) {
+  if (process.env.ENGINE_LIVE !== "on" && isNibbling) {
     const nibblingReply = `${capName}, nibbling still counts — tell me what you had and I'll log it properly.\n\nWhat were you picking at? Even rough amounts — "a few crackers, some peanut butter, bits of chicken". Anything you give me is data I can coach from.`;
     await logChat(user.id, message, nibblingReply, "NIBBLING_CONFESSION");
     return nibblingReply;
@@ -1414,7 +1414,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // work-from-home, low movement, low appetite, one meal a day. Research: 2 eating occasions/day
   // is the threshold. Movement drives appetite. Never shame — make adding ONE thing feel easy.
   const isChronicUndereating = /\b(only eat once|eat once a day|once or twice a day|one meal a day|two meals a day|don.?t eat much|hardly eat|barely eat|struggle to eat|struggling to eat|hard to eat|can.?t eat much|small appetite|no appetite|not (really |very )?hungry (most|these|during|when)|never (really )?hungry|low appetite|lose my appetite|don.?t feel like eating)\b/i.test(m);
-  if (isChronicUndereating) {
+  if (process.env.ENGINE_LIVE !== "on" && isChronicUndereating) {
     const goal = user.goalType || "fat_loss";
     const undereatReply = goal === "muscle_gain"
       ? `${capName}, this is the thing holding your results back — and it's fixable.\n\nEating once or twice a day means your body never gets enough fuel to build. It breaks down muscle for energy instead. You can train perfectly and still go nowhere if the food isn't there.\n\n*The easy fix — don't force big meals:*\nAdd ONE protein snack between meals. No cooking:\n• Yoghurt + a banana\n• Peanut butter on 2 slices bread\n• A tin of pilchards or tuna\n• A shake with milk\n\nOne extra eating moment a day. Your appetite grows once your body learns food is coming regularly.`
@@ -1427,7 +1427,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Active client wants to push their start to next month. Don't let them go dark —
   // offer minimum viable engagement (walk + photo food) so the habit forms in the gap.
   const isDeferringStart = /\b(can.?t start (this month|now|yet|right now)|don.?t think i can start|not sure i can start|not (mentally )?ready (to start|yet|for this|to begin)|not mentally ready|mentally not ready|start (next month|later|properly (next|in)|in (january|february|march|april|may|june|july|august|september|october|november|december))|begin next month|postpone (my|the|this)|push (my|the) start|wait (until|till|for) next month)\b/i.test(m);
-  if (isDeferringStart) {
+  if (process.env.ENGINE_LIVE !== "on" && isDeferringStart) {
     const deferReply = `${capName}, I appreciate you being upfront instead of going quiet — that tells me you're serious.\n\nMental readiness is real. If your head isn't in it, the body won't follow. I get it.\n\nBut here's what we're going to do — this time is not wasted:\n\n*Just two things. No program, no pressure:*\n🚶 Walk when you can — send me your steps\n📸 Photo what you eat — I won't judge, I just want to see where you're starting\n\nThat's it. No strict rules. By the time you feel ready, you'll already be in the habit and I'll already know your patterns — so we hit the ground running instead of starting from scratch.\n\nEvery walk you take now counts more than you think. 💪`;
     await logChat(user.id, message, deferReply, "DEFER_START");
     return deferReply;
@@ -1442,7 +1442,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   ) || (
     /\bhow many (weeks?|months?) (until|to see|before)\b/i.test(m) && /\b(results?|changes?|difference|visible)\b/i.test(m)
   ) || /\b(when will i (see|notice|lose|feel)\s.{0,20}(results?|changes?|difference|weight)|how long (to|before) (see|notice) (results?|changes?|a difference)|how long (to|before) lose weight)\b/i.test(m);
-  if (isResultsTimelineQ) {
+  if (process.env.ENGINE_LIVE !== "on" && isResultsTimelineQ) {
     const goal = user.goalType || "fat_loss";
     let timelineReply: string;
     if (goal === "muscle_gain") {
@@ -1460,7 +1460,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Mining, nursing, security, casino — rotating schedules. Build around the schedule.
   const isShiftWorker =
     /\b(shift.?work(er|ing)?|rotating (shift|roster|schedule)|4\s*days?\s*(on|off|day.?shift|night.?shift)|work(ing)?\s+(day.?shift|night.?shift|on shift)|night.?shift\s+work|day.?shift\s+work|shift\s+(schedule|pattern|rotation|system|rota)|i\s+work\s+(days?\s+and\s+nights?|nights?\s+and\s+days?)|irregular\s+(shift|hours?)|12[\s\-]?hour\s+shift|24[\s\-]?hour\s+shift|working\s+(dayshift|nightshift|day\s+shift|night\s+shift)|going\s+(on|into)\s+shift|before\s+(my|the)\s+shift|come\s+off\s+shift|rotating\s+roster|i\s+work\s+(night|day)\s+shift)\b/i.test(m);
-  if (isShiftWorker) {
+  if (process.env.ENGINE_LIVE !== "on" && isShiftWorker) {
     const goal = user.goalType || "fat_loss";
     const shiftReply = `${capName}, KamLife is built to work around schedules like yours — miners, nurses, security, casino workers. You're not the first, and this is solvable.\n\n*On DAYSHIFT:* Train after your shift or first thing in the morning. Energy is normal.\n\n*On NIGHTSHIFT:* Train in the morning *before* you sleep — your body is still running after a night shift, use that window. Don't train right before going in.\n\n*On DAYS OFF:* These are your best training days. Full sessions.\n\n*Food on shift:* Pack your own. Canteen food is mostly refined carbs. Pre-pack chicken + rice, eggs + bread, biltong + fruit.\n\n*The one rule:* ${goal === "fat_loss" ? "Hit your protein target every 24 hours — timing matters less than consistency." : "Eat before and after every session. Muscle builds in the recovery window, not in the gym."}\n\nTell me your current rotation — dayshift, nightshift, or days off — and I'll tell you exactly what to do today.`;
     await logChat(user.id, message, shiftReply, "SHIFT_WORKER");
@@ -1471,7 +1471,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Sunk cost guilt. Don't reinforce it — offer the real choice honestly.
   const isInactiveGym =
     /\b(gym\s+(but|member|membership)\s+(i|but|only|haven.?t|barely|rarely|hardly)|only\s+(go|went|been)\s+(to\s+)?(the\s+)?gym\s+(once|twice|\d+\s+times?|\d+\s+days?|rarely|barely)|haven.?t\s+(been|gone)\s+(to\s+)?(the\s+)?gym\s+(in|for|since)\s+(weeks?|months?|ages?|a\s+long\s+time)|(rarely|hardly|barely|never)\s+(go|use|been\s+to)\s+(the\s+)?gym|gym\s+membership\s+(sitting|wasting|going\s+to\s+waste|i\s+don.?t\s+use)|paying\s+for\s+(a\s+)?gym\s+(but|and)\s+(don.?t|haven.?t|barely|rarely)|not\s+using\s+(the|my)\s+gym|wasted?\s+(on\s+)?gym\s+membership)\b/i.test(m);
-  if (isInactiveGym) {
+  if (process.env.ENGINE_LIVE !== "on" && isInactiveGym) {
     const inactiveGymReply = `${capName}, the membership is sunk cost — it's paid whether you go or not. Let's not make training decisions based on guilt about it.\n\nHonest question: what's actually stopping you from going?\n\n*If it's distance or time:* home training gets the same results. You don't need a gym.\n*If it's motivation:* home training is easier to start — no commute, no threshold to cross.\n*If it's schedule:* 30 minutes at home, 3 days a week, is enough.\n\n*Three options:*\n1. Switch fully to home training — I'll rebuild your programme right now\n2. Keep the gym for 1 day a week + home training for the rest\n3. Set one gym day as non-negotiable and build from there\n\nWhich one makes sense for where you are right now?`;
     await logChat(user.id, message, inactiveGymReply, "INACTIVE_GYM");
     return inactiveGymReply;
@@ -1479,7 +1479,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- SKIPPING MEALS / FORGOT TO EAT ----
   const isSkippingMeals = /\b(haven.?t eaten|forgot to eat|haven.?t had anything|skipped (breakfast|lunch|dinner|meals?|eating)|too busy to eat|no time to eat|nothing today|haven.?t had food|not eaten (yet|today|all day)|missed (breakfast|lunch|dinner|meals?)|didn.?t eat|didn.?t have (breakfast|lunch|dinner)|no food today)\b/i.test(m);
-  if (isSkippingMeals) {
+  if (process.env.ENGINE_LIVE !== "on" && isSkippingMeals) {
     const hourSAST = (new Date().getUTCHours() + 2) % 24;
     const skipReply = hourSAST >= 15
       ? `${capName}, it's late in the day and you haven't eaten — that's a problem. Your metabolism slows, cortisol rises, and you'll likely overeat tonight.\n\n*Eat something now:* 2 eggs + bread, peanut butter on toast, a tin of tuna — anything with protein. Don't wait for a "proper meal" that never comes.\n\nMissing meals doesn't speed up fat loss — it makes your body hold onto fat harder. Consistent eating wins every time.`
@@ -1531,7 +1531,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Common: truck drivers, miners, taxi drivers, machine operators.
   const isInflatedSteps =
     /\b(phone\s+(in|on|with\s+me\s+in)\s+(the\s+)?(car|truck|bakkie|vehicle)|driving\s+(around\s+)?with\s+(my\s+)?phone|car\s+(vibration|vibrates?)|machine\s+(vibration|vibrates?|shaking)|vibration\s+(is\s+too\s+much|count(s|ing)\s+as\s+steps?|giving\s+me\s+steps?)|steps?\s+(from|because\s+of|due\s+to)\s+(vibration|driving|car|truck)|inflated\s+steps?|steps?\s+not\s+(accurate|real|right|from\s+walking)|operating\s+(big|heavy|those|mining|the)\s+machine|step\s+count\s+(is\s+)?(from\s+)?(vibration|car|driving|machine))\b/i.test(m);
-  if (isInflatedSteps) {
+  if (process.env.ENGINE_LIVE !== "on" && isInflatedSteps) {
     const inflatedReply = `${capName}, car and machine vibration inflating step counts is a real issue — the phone accelerometer can't tell the difference between walking and road bumps.\n\n*Quick fix:* Phone in your *pocket* (not on the seat or console) filters out most vehicle vibration.\n\nOr just tell me your actual walking: "walked 2,000 steps at lunch" and I'll log only that.\n\n*For your situation:*\nYour real movement target will be smaller — and that's fine. What matters is intentional walking:\n• 10-min walk on a break: ~1,000 steps\n• Walking to/from your vehicle or canteen\n• 20-min walk at home in the evening\n\nShould I set your step target to reflect what you can actually walk — not what the car registers for you?`;
     await logChat(user.id, message, inflatedReply, "INFLATED_STEPS");
     return inflatedReply;
@@ -1643,7 +1643,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // Acknowledge specifically — people feel heard when you know their word.
   const isBellyFatQ =
     /\b(mkhaba|belly\s*(fat|flab)?|belly\s+is|my\s+belly|lose\s+(my\s+)?belly|flat\s+(stomach|tummy|belly)|stomach\s+fat|tummy\s+(fat|flab)|love\s+handles?|spare\s+tyre|spare\s+tire|fat\s+(belly|stomach|tummy)|pot\s+belly|get\s+rid\s+of\s+(my\s+)?(belly|stomach|mkhaba)|stomach\s+is\s+(big|huge|fat)|big\s+(belly|stomach|tummy))\b/i.test(m);
-  if (isBellyFatQ) {
+  if (process.env.ENGINE_LIVE !== "on" && isBellyFatQ) {
     const goal = user.goalType || "fat_loss";
     const bellyReply = `${capName}, the mkhaba — the most common target, and the most frustrating one. Here's the honest version:\n\n*You cannot spot-reduce belly fat.* No amount of sit-ups or crunches removes fat from a specific area — that's not how the body burns fat. Fat leaves from everywhere when you're in a calorie deficit, and the belly is usually the *last* area to go because that's where your body stores it last.\n\n*What actually shrinks it:*\n✅ Calorie deficit — eating less than you burn\n✅ High protein — preserves muscle while fat is lost\n✅ Steps — walking is the single most effective belly fat activity\n✅ Sleep — poor sleep raises cortisol, which stores fat specifically in the belly\n\n*What doesn't:*\n❌ Sit-ups (build abs under the fat, don't remove the fat)\n❌ Green tea, detoxes, waist trainers\n\n${goal === "fat_loss" || goal === "recomposition" ? "The good news: you're already on the right programme for this. Hit your calorie target, walk your steps, and the mkhaba goes — it just takes the full 3 months to become visible." : "For your muscle gain goal, eating a small surplus means the mkhaba won't grow — and once you build muscle, your metabolism burns more fat at rest. Recomp mode handles this well."}\n\nKeep logging. The belly is the last place it shows up and the last place it leaves — but it does leave.`;
     await logChat(user.id, message, bellyReply, "BELLY_FAT");
@@ -1654,7 +1654,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // "Can't walk outside — crime", "not safe to walk in my area", "too dangerous outside"
   // This is a real SA barrier. Acknowledge it, give indoor alternatives immediately.
   const isCrimeWalkingObjection = /\b(can.?t\s+walk\s+(?:outside|outside here|outside in my area|in my area|near me|around here|on the street)|not\s+safe\s+to\s+walk|unsafe\s+to\s+walk|scared\s+to\s+walk|afraid\s+to\s+walk|dangerous\s+(?:to walk|outside|around here|in my area|near me)|crime\s+(?:in my area|is bad|is high|outside|near me|around here)|too\s+much\s+crime|high\s+crime|crime\s+rate|it.?s\s+not\s+safe\s+(?:outside|to walk|here)|can.?t\s+go\s+outside|don.?t\s+feel\s+safe\s+(?:walking|outside)|neighbourhood\s+(?:is\s+)?(?:dangerous|unsafe|not safe))\b/i.test(m);
-  if (isCrimeWalkingObjection) {
+  if (process.env.ENGINE_LIVE !== "on" && isCrimeWalkingObjection) {
     const goal = user.goalType || "fat_loss";
     const target = user.stepsTarget || 8500;
     const crimeReply = `${capName}, that is a real issue — no argument. Walking in an unsafe area is not worth the risk.\n\nHere is what works instead:\n\n*Indoors:*\n• Walk on the spot while watching TV or on the phone — 30 min = ~2,500 steps\n• March up and down your passage — it counts\n• Stair climbs if you have stairs — 10 min = ~1,200 steps\n• Jump rope — 20 min = ${goal === "fat_loss" ? "~200 kcal burned" : "great conditioning"}\n\n*Safer outdoor options:*\n• Mall walking early morning before it fills up — free, well-lit, secure\n• Church grounds or school yard if access is possible\n• Taxi to a safer area for a morning walk if viable\n\nThe number is what matters — *${target.toLocaleString()} steps* — not where you walk. Indoor steps count exactly the same.\n\nSend me your step count at the end of the day, wherever you got them.`;
@@ -1664,7 +1664,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- MONTH-END / FINANCIAL STRESS ----
   const isMonthEnd = /\b(month.?end|end of month|no.?money|broke|short on cash|can.?t afford|salary.?not|waiting for.?(salary|pay|payday)|payday.*friday|payday.*next|no.?budget|empty|flat.?broke|nothing (left|to eat)|no.?food|can.?t buy|no.?groceries|no.?airtime|airtime.?finished)\b/i.test(m);
-  if (isMonthEnd) {
+  if (process.env.ENGINE_LIVE !== "on" && isMonthEnd) {
     const meReply = `${capName}, month-end is tough for everyone in SA. No shame in it.\n\nHere's how to keep it going on zero budget:\n- *Protein:* eggs (cheapest protein there is), pilchards, beans, lentils\n- *Carbs:* pap, brown bread, oats, rice, sweet potato\n- *Vegetables:* cabbage, spinach, frozen veg — all cheap and good\n\nType *cheap meals* and I'll send you a full day of eating under R30. Fitness doesn't stop when the money runs out — your body still needs fuel to change.`;
     await logChat(user.id, message, meReply, "MONTH_END");
     return meReply;
