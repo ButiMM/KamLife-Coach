@@ -179,9 +179,9 @@ export async function handleEarlyCommands(ctx: {
     }
   }
 
-  // BACK TO GYM / CLEAR HOLIDAY — fires ONLY on an affirmative return DECLARATION. Skip a QUESTION ("when do I go back?"), a NEGATION ("I'm NOT going back"), or ANY sick/unwell signal — never push a sick client to train (2026-07-18: fired on "when do I go back", and on "still not feeling well so I'm not going back" — a safety miss).
+  // CLEAR HOLIDAY MODE — MECHANICAL only: fires ONLY when real holiday/temp state exists to clear; otherwise "back to gym" is JUDGMENT and flows to the brain, not a template. Still skips a question/negation/sick signal (2026-07-18: told a sick client to train).
   const skipBackToGym = /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i.test(m) || /\b(not|won'?t|wont|can'?t|cant|cannot|never|ain'?t)\b[^.!?]{0,24}\b(go|going|come|coming|back|return|train|gym|programme)\b/i.test(m) || /\b(sick|ill|unwell|not feeling (well|good|right|ok|okay)|feeling (sick|ill|unwell|terrible|bad|rough|weak)|flu|fever|nause|vomit|dizzy|injured|hurt|in pain)\b/i.test(m);
-  if (!skipBackToGym && /\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
+  if ((tempEquipmentMode.has(phone) || (user.awaitingInputType || "").startsWith("holiday_equipment")) && !skipBackToGym && /\b(back (at|to|in) (the )?gym|back from (holiday|vacation|trip|travel)|back to (my )?(regular )?(gym|normal training|programme)|gym mode|cleared.*holiday|no longer (on holiday|travelling|traveling|away))\b/i.test(m)) {
     tempEquipmentMode.delete(phone);
     awaitingEquipmentAnswer.delete(phone);
     user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));

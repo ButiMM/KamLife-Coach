@@ -800,26 +800,29 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     /\b(when|how long|how many|what day|which day|should i|am i ready|is it (time|safe|ok|okay))\b/i.test(msg)
     || /\b(not|won'?t|wont|can'?t|cant|cannot|never|ain'?t)\b[^.!?]{0,24}\b(go|going|come|coming|back|return|train|gym|programme)\b/i.test(msg)
     || /\b(sick|ill|unwell|not feeling (well|good|right|ok|okay)|feeling (sick|ill|unwell|terrible|bad|rough|weak)|flu|fever|nause|vomit|dizzy|injured|hurt|in pain)\b/i.test(msg);
-  const fires = (msg: string) => TRIGGER.test(msg) && !SKIP(msg);
-  test("back-to-gym: a DECLARATION still fires (never break the real command)", () => {
-    assert.ok(fires("i'm back at the gym"), "'back at the gym' is a declaration");
-    assert.ok(fires("back from holiday"), "'back from holiday' clears holiday mode");
-    assert.ok(fires("no longer on holiday"), "'no longer on holiday' still fires — not a negation of returning");
+  // In the handler the trigger is ALSO gated on real holiday state existing (mechanical-only);
+  // here `passesGuard` tests the SKIP layer — the part that keeps sick/negation/questions out.
+  const passesGuard = (msg: string) => TRIGGER.test(msg) && !SKIP(msg);
+  test("back-to-gym: an affirmative return passes the guard (only holiday-state gates it)", () => {
+    assert.ok(passesGuard("i'm back at the gym"), "'back at the gym' is an affirmative return");
+    assert.ok(passesGuard("back from holiday"), "'back from holiday' passes the guard");
+    assert.ok(passesGuard("no longer on holiday"), "'no longer on holiday' passes — not a negation of returning");
   });
   test("back-to-gym: a timing QUESTION stands down so Coach K can answer WHEN", () => {
-    assert.ok(!fires("when do I go back to my regular programme"), "the exact screenshot miss must NOT fire the canned reply");
-    assert.ok(!fires("how long until I can go back to gym"), "asking how long is a question");
-    assert.ok(!fires("am I ready to go back to the gym?"), "asking readiness is a question");
+    assert.ok(!passesGuard("when do I go back to my regular programme"), "the exact screenshot miss must NOT fire the canned reply");
+    assert.ok(!passesGuard("how long until I can go back to gym"), "asking how long is a question");
+    assert.ok(!passesGuard("am I ready to go back to the gym?"), "asking readiness is a question");
   });
   test("back-to-gym: a NEGATION or a SICK message must NOT fire (the 2026-07-18 safety miss)", () => {
-    assert.ok(!fires("I'm still not feeling well so I'm not going back to the gym on Monday"), "sick + 'not going back' must NEVER push training");
-    assert.ok(!fires("I'm not going back to gym this week"), "a plain negation must not fire");
-    assert.ok(!fires("too sick to go back to the gym"), "sick context must stand it down");
+    assert.ok(!passesGuard("I'm still not feeling well so I'm not going back to the gym on Monday"), "sick + 'not going back' must NEVER push training");
+    assert.ok(!passesGuard("I'm not going back to gym this week"), "a plain negation must not fire");
+    assert.ok(!passesGuard("too sick to go back to the gym"), "sick context must stand it down");
   });
-  test("back-to-gym: the guard is wired in the handler source (not just here)", () => {
+  test("back-to-gym: MECHANICAL-only — the trigger is gated on real holiday state (judgment goes to the brain)", () => {
     const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
-    assert.match(src, /skipBackToGym/, "the combined guard must exist in the handler");
-    assert.match(src, /!skipBackToGym &&/, "and it must gate the BACK_TO_GYM trigger");
+    assert.match(src, /skipBackToGym/, "the safety guard must exist");
+    assert.match(src, /tempEquipmentMode\.has\(phone\) \|\| \(user\.awaitingInputType \|\| ""\)\.startsWith\("holiday_equipment"\)/, "fires only when real holiday state exists to clear");
+    assert.match(src, /startsWith\("holiday_equipment"\)\) && !skipBackToGym &&/, "holiday-state AND the safety guard both gate the trigger");
   });
 
   // (b) the coaching voice must name real foods, never a food category.
