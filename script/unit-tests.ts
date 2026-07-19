@@ -865,6 +865,12 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
     assert.match(sched, /runWeightStallIntervention/, "scheduled");
   });
+  test("retention: the Sunday report card carries the forward forecast (visible progress)", () => {
+    const w = readFileSync(join("server", "scheduler", "jobs", "weekly.ts"), "utf-8");
+    assert.match(w, /getTrajectoryForUser/, "the report pulls the trajectory");
+    assert.match(w, /daysLogged >= 3/, "only shown with enough data to be honest");
+    assert.match(w, /🔮 Forecast/, "the forward-looking line is in the card");
+  });
 }
 
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session

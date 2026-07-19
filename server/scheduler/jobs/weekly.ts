@@ -8,6 +8,7 @@ import {
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
 import { getGroceryPersonalization } from "../../grocery-personalize";
 import { suggestStepTargetAdjustment } from "../../targets";
+import { getTrajectoryForUser } from "../../trajectory-report";
 import { runWeeklyRecaps } from "../../weekly-recap";
 import { generateMealPlan } from "../../meal-plan";
 
@@ -201,6 +202,22 @@ export async function runSundayWeeklyReport(): Promise<void> {
       const totalScore = logScore + trainScore + proteinScore + stepsScore;
       const scoreLabel = totalScore >= 85 ? "Outstanding" : totalScore >= 70 ? "Strong" : totalScore >= 50 ? "Building" : "Below target";
 
+      // FORWARD look — the forecast from their OWN logs. The report card is backward
+      // (what happened); this is where they're HEADING, which is the #1 anti-churn force
+      // ("am I wasting my R199?"). Deterministic (trajectory engine). Only shown when there's
+      // enough logged data to be honest (≥3 days) — a low-confidence forecast is noise.
+      let forecastLine = "";
+      try {
+        const traj = await getTrajectoryForUser(client.id);
+        if (traj && traj.daysLogged >= 3) {
+          const kg = Math.abs(traj.predictedWeeklyChangeKg);
+          if (traj.direction === "losing") forecastLine = `🔮 Forecast: on track — about *${kg}kg/week* coming off if you hold this. The scale follows the logs.`;
+          else if (traj.direction === "gaining" && isMuscleGainWeekly) forecastLine = `🔮 Forecast: building — about *${kg}kg/week* on. Good.`;
+          else if (traj.direction === "gaining") forecastLine = `🔮 Forecast: your logs show a surplus — that's why the scale isn't dropping. Reply *forecast* and we trim one thing.`;
+          else forecastLine = `🔮 Forecast: right at maintenance. Reply *forecast* for the one lever that moves it.`;
+        }
+      } catch { /* forecast is a bonus — never blocks the report */ }
+
       // "Showed up" leads (2026-07-13 retention reports): the first-month metric that
       // retains is days-you-didn't-ghost-me, not kg. The scale line comes after effort.
       const lines = [
@@ -210,6 +227,7 @@ export async function runSundayWeeklyReport(): Promise<void> {
         `${stepsEmoji} Steps: ${stepsLine}`,
         `${proteinEmoji} Protein days: ${proteinDays}/${foodDays} meals tracked`,
         `${weightEmoji} Weight: ${weightLine}`,
+        ...(forecastLine ? [forecastLine] : []),
         streakLine || "", ``,
         `*Weekly Score: ${totalScore}/100 — ${scoreLabel}*`, ``,
       ].filter(l => l !== null);
