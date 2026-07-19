@@ -130,6 +130,54 @@ export function predictTrajectory(input: TrajectoryInput): TrajectoryResult {
   };
 }
 
+export interface WeighIn { weightKg: number; at: Date }
+export interface StallVerdict {
+  stalled: boolean;
+  spanDays: number;
+  deltaKg: number;
+  /** why the scale is stuck — drives the intervention message. */
+  kind: "eating-at-maintenance" | "real-deficit-hold" | null;
+}
+
+/**
+ * WEIGHT-STALL DETECTOR — the "this isn't working, I'm cancelling" churn preventer.
+ *
+ * An actively-logging client whose scale hasn't moved toward their goal in ~3 weeks is the
+ * highest-value churn risk the silence jobs MISS (they're engaged, not silent). This decides
+ * whether it's a real stall and, crucially, WHY — using the forecast direction from their own
+ * logs. Two very different messages:
+ *   • eating-at-maintenance — the forecast disagrees with the goal → it's the plate, coach it.
+ *   • real-deficit-hold     — the logs show a genuine deficit but the scale is flat → water /
+ *                             glycogen masks fat loss for 2–3 weeks; reassure and hold the line.
+ * Pure — unit-tested. Recomp/maintenance goals are never "stalled" (holding IS the goal).
+ */
+export function detectWeightStall(weighIns: WeighIn[], goalType: string, forecastDirection: Direction): StallVerdict {
+  const clean = (weighIns || [])
+    .filter(w => w && Number.isFinite(w.weightKg) && w.weightKg > 0 && w.at instanceof Date)
+    .sort((a, b) => a.at.getTime() - b.at.getTime());
+  if (clean.length < 2) return { stalled: false, spanDays: 0, deltaKg: 0, kind: null };
+
+  const latest = clean[clean.length - 1];
+  // Baseline = the most recent weigh-in that is still ≥18 days before the latest, so we judge
+  // a ~3-week window, not a two-month one.
+  const priors = clean.filter(w => w.at.getTime() <= latest.at.getTime() - 18 * 86_400_000);
+  if (!priors.length) return { stalled: false, spanDays: 0, deltaKg: 0, kind: null };
+  const baseline = priors[priors.length - 1];
+  const spanDays = Math.round((latest.at.getTime() - baseline.at.getTime()) / 86_400_000);
+  const deltaKg = round2(latest.weightKg - baseline.weightKg);
+
+  const goal = (goalType || "").toLowerCase();
+  let stalled: boolean;
+  if (goal === "fat_loss" || goal === "weight_loss") stalled = deltaKg > -0.4;      // lost <0.4kg in 3wk
+  else if (goal === "muscle_gain") stalled = deltaKg < 0.2;                          // gained <0.2kg in 3wk
+  else return { stalled: false, spanDays, deltaKg, kind: null };                     // recomp: holding is fine
+  if (!stalled) return { stalled: false, spanDays, deltaKg, kind: null };
+
+  const wantLose = goal === "fat_loss" || goal === "weight_loss";
+  const wrongEnergyBalance = wantLose ? forecastDirection !== "losing" : forecastDirection !== "gaining";
+  return { stalled: true, spanDays, deltaKg, kind: wrongEnergyBalance ? "eating-at-maintenance" : "real-deficit-hold" };
+}
+
 function buildHeadline(a: {
   direction: Direction; predictedWeeklyChangeKg: number; onTrackForGoal: boolean;
   goalType: string; daysLogged: number; confidence: string; weeksToGoal: number | null;

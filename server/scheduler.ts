@@ -22,7 +22,7 @@ import { runMilestoneCelebrations } from "./scheduler/jobs/milestones";
 import {
   runWeek3Intervention, runSilenceDetection, runDeepSilenceEscalation,
   runComebackMessages, runBuddyAccountability, runStreakAtRisk,
-  runPausedClientLite,
+  runPausedClientLite, runWeightStallIntervention,
 } from "./scheduler/jobs/retention";
 import {
   runFridayWeekendStrategy, runSundayWeeklyReport, runSundayEveningCheckin,
@@ -246,6 +246,7 @@ export async function initScheduler(): Promise<void> {
   cron.schedule("30 7 * * *",   () => safe("runTrialCountdown",          runTrialCountdown),           { timezone: "UTC" }); // 9:30am SAST — trial Day 2/5/7 conversion
   cron.schedule("0 5 * * *",    () => safe("runCulturalCalendar",       runCulturalCalendar),         { timezone: "UTC" }); // 7am SAST
   cron.schedule("0 19 * * *",   () => safe("runStreakAtRisk",           runStreakAtRisk),             { timezone: "UTC" }); // 9pm SAST
+  cron.schedule("0 8 * * 3",    () => safe("runWeightStallIntervention", runWeightStallIntervention), { timezone: "UTC" }); // 10am SAST Wed — engaged-but-plateaued churn catch
   cron.schedule("0 15 * * *",   () => safe("runComebackProtocol",       runComebackProtocol),         { timezone: "UTC" }); // 5pm SAST — structured 7-day return arc
   cron.schedule("0 7 * * *",    () => safe("runReferralNudge",          runReferralNudge),            { timezone: "UTC" }); // 9am SAST
   cron.schedule("0 4 * * *",    async () => {                                               // 6am SAST diet break

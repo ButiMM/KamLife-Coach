@@ -1,5 +1,5 @@
 import {
-  db, users, chatHistory, stepLogs, workoutLogs, mealLogs,
+  db, users, chatHistory, stepLogs, workoutLogs, mealLogs, weightLogs,
   eq, gte, and, lt, desc, sql,
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, dayStart, loadState, saveState,
@@ -8,6 +8,8 @@ import {
   escalations,
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
+import { detectWeightStall } from "../../trajectory";
+import { getTrajectoryForUser } from "../../trajectory-report";
 
 export async function runWeek3Intervention(): Promise<void> {
   console.log("[SCHEDULER] JOB: Week 3 intervention");
@@ -299,6 +301,59 @@ export async function runStreakAtRisk(): Promise<void> {
     }
   }
   console.log(`[SCHEDULER] Streak-at-risk: ${streakAlertsSent} alerts sent`);
+}
+
+// WEIGHT-STALL INTERVENTION — the "this isn't working, I'm cancelling" churn preventer.
+// Catches the ENGAGED client (logging, not silent) whose scale hasn't moved toward their goal
+// in ~3 weeks — the exact moment people quit — and reaches out with the HONEST reason from
+// their own logs: either it's the plate (eating at maintenance, coach it) or it's water/
+// glycogen masking a real deficit (reassure, hold the line). Runs weekly; once per 3-week
+// window per client. Uses the deterministic trajectory engine so the reason is never a guess.
+export async function runWeightStallIntervention(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Weight-stall intervention");
+  if (isProactivePaused()) { console.log("[SCHEDULER:PAUSED] runWeightStallIntervention blocked"); return; }
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const bucket = `w${Math.floor(now / (21 * 86_400_000))}`; // once per ~3-week window
+  let sent = 0;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      // Only ENGAGED clients — the silent ones have their own comeback flow.
+      const daysSinceActive = client.lastActiveAt
+        ? Math.floor((now - new Date(client.lastActiveAt).getTime()) / 86_400_000) : 999;
+      if (daysSinceActive > 4) continue;
+
+      const weighRows = await db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt })
+        .from(weightLogs)
+        .where(and(eq(weightLogs.userId, client.id), gte(weightLogs.loggedAt, new Date(now - 35 * 86_400_000))))
+        .orderBy(weightLogs.loggedAt);
+      if (weighRows.length < 2) continue;
+      const weighIns = weighRows
+        .map(r => ({ weightKg: parseFloat(String(r.weight)), at: new Date(r.loggedAt as any) }))
+        .filter(w => Number.isFinite(w.weightKg));
+
+      const [u] = await db.select({ goalType: users.goalType }).from(users).where(eq(users.id, client.id)).limit(1);
+      const goal = u?.goalType || "fat_loss";
+
+      const traj = await getTrajectoryForUser(client.id).catch(() => null);
+      const stall = detectWeightStall(weighIns, goal, traj?.direction || "holding");
+      if (!stall.stalled) continue;
+
+      if (!(await claimProactive(client.id, "weight_stall", bucket))) continue;
+
+      const name = client.name?.split(" ")[0] || "there";
+      const msg = stall.kind === "eating-at-maintenance"
+        ? `${name}, I've been watching your scale — flat about 3 weeks now, and I owe you the honest reason. It's not your effort. From what you've logged, you're eating right around your break-even, not under it — so the body has no reason to drop fat yet.\n\nThe fix is small — one lever, not a crash diet. Reply *forecast* and I'll show you your exact numbers, then we trim one thing together. We move this week.`
+        : `${name}, your scale's been flat about 3 weeks — and I know that's when most people quit. So hear me: from what you've logged, you ARE in a deficit. The fat is coming off. Water and glycogen are hiding it — that holds for 2–3 weeks, then the scale drops in one go (the "whoosh").\n\nDon't change a thing. You're doing it right. Reply *forecast* and I'll show you the numbers that prove it. 💪`;
+      await sendWhatsApp(client.phoneNumber, msg);
+      sent++;
+    } catch (err) {
+      console.error(`[SCHEDULER] Weight-stall error — ${client.phoneNumber}:`, err);
+    }
+  }
+  console.log(`[SCHEDULER] Weight-stall interventions sent: ${sent}`);
 }
 
 export async function runPausedClientLite(): Promise<void> {

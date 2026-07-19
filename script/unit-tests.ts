@@ -179,6 +179,43 @@ test("maintenanceKcal: junk inputs never yield NaN", () => {
   });
 }
 
+// WEIGHT-STALL DETECTOR — the engaged-but-plateaued churn catch. Pure, so provable here.
+{
+  const { detectWeightStall } = await import("../server/trajectory");
+  const daysAgo = (n: number) => new Date(Date.now() - n * 86_400_000);
+
+  test("stall: fat-loss client flat 3 weeks IS a stall — and the forecast names the reason", () => {
+    const flat = [{ weightKg: 90, at: daysAgo(24) }, { weightKg: 89.9, at: daysAgo(1) }];
+    // forecast says gaining/holding → it's the plate (eating at maintenance)
+    const plate = detectWeightStall(flat, "fat_loss", "holding");
+    assert.equal(plate.stalled, true);
+    assert.equal(plate.kind, "eating-at-maintenance");
+    // forecast says losing but scale flat → water/glycogen, hold the line
+    const hold = detectWeightStall(flat, "fat_loss", "losing");
+    assert.equal(hold.kind, "real-deficit-hold");
+  });
+  test("stall: a client actually losing is NOT stalled (no false alarm)", () => {
+    const dropping = [{ weightKg: 90, at: daysAgo(24) }, { weightKg: 88, at: daysAgo(1) }];
+    assert.equal(detectWeightStall(dropping, "fat_loss", "losing").stalled, false, "2kg down in 3wk is progress");
+  });
+  test("stall: muscle-gain client who isn't gaining IS stalled", () => {
+    const flat = [{ weightKg: 70, at: daysAgo(25) }, { weightKg: 70.05, at: daysAgo(2) }];
+    assert.equal(detectWeightStall(flat, "muscle_gain", "holding").stalled, true);
+  });
+  test("stall: needs a real ~3-week span — a week of flatness is NOT judged", () => {
+    const recent = [{ weightKg: 90, at: daysAgo(6) }, { weightKg: 90, at: daysAgo(1) }];
+    assert.equal(detectWeightStall(recent, "fat_loss", "holding").stalled, false, "too short a window to call a stall");
+  });
+  test("stall: recomp/maintenance goals are never 'stalled' (holding IS the goal)", () => {
+    const flat = [{ weightKg: 80, at: daysAgo(24) }, { weightKg: 80, at: daysAgo(1) }];
+    assert.equal(detectWeightStall(flat, "recomposition", "holding").stalled, false);
+  });
+  test("stall: fewer than two weigh-ins never fires", () => {
+    assert.equal(detectWeightStall([{ weightKg: 90, at: daysAgo(20) }], "fat_loss", "holding").stalled, false);
+    assert.equal(detectWeightStall([], "fat_loss", "holding").stalled, false);
+  });
+}
+
 test("calories never below female minimum 1200", () => {
   const { calorieTarget } = calculateTargets(40, "fat_loss", "unemployed", 1, "female", 55, 150);
   assert.ok(calorieTarget >= 1200, `female floor violated: ${calorieTarget}`);
