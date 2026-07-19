@@ -850,6 +850,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(routes, /getTransformationStory/, "'story' command wired");
     assert.match(routes, /getCohortSnapshot/, "'cohort' command wired");
   });
+  test("referral loop: the promised free month is GRANTED + notified on a friend's conversion", () => {
+    // Reward lives in the PayFast webhook (canonical path), idempotent via a paymentEvents
+    // sentinel — do NOT add a parallel scheduler grant (it would double-reward).
+    const pay = readFileSync(join("server", "routes", "payments.ts"), "utf-8");
+    assert.match(pay, /REF_REWARD_/, "idempotent referral-reward sentinel");
+    assert.match(pay, /referredBy/, "keys off the referred friend");
+    assert.match(pay, /You have earned one free month/i, "referrer is notified");
+  });
+  test("anti-churn: weight-stall intervention job is wired + scheduled", () => {
+    const r = readFileSync(join("server", "scheduler", "jobs", "retention.ts"), "utf-8");
+    assert.match(r, /export async function runWeightStallIntervention/);
+    assert.match(r, /detectWeightStall/, "uses the deterministic detector");
+    const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
+    assert.match(sched, /runWeightStallIntervention/, "scheduled");
+  });
 }
 
 // MORNING BRIEF CLOSING (2026-07-19 live: a client with a 19-day food streak + 2-session
