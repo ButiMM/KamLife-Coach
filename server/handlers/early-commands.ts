@@ -47,6 +47,9 @@ export async function handleEarlyCommands(ctx: {
   // Runs FIRST and only when mid-triage; otherwise returns null and we fall through.
   const triageResolved = await resolvePainTriage({ message, m, user });
   if (triageResolved !== null) return triageResolved;
+  // UNDERSTANDING BEFORE KEYWORDS: a sick/hurt person is heard FIRST, before any dumb keyword command (BACK_TO_GYM etc.) can grab the message. Used to run at the BOTTOM of this file — a thousand lines of pattern-matchers got first crack, and one told a sick client to train (2026-07-18). Safety is a front-door concern.
+  const sickFront = await handleSickFlow({ message, m, user, capName: firstName || "there" });
+  if (sickFront !== null) return sickFront;
 
   // ---- PORTION CONTROL / HOW TO MEASURE — hand-portion method, goal-aware ---- The #1 post-onboarding question. We deliberately DON'T teach calorie counting or food scales — research and retention
   // both favour the hand method: always available, sized to the body, sustainable. Anxious trackers especially need the pressure taken off. Runs BEFORE the calorie-target INSTANT ANSWER block so "how
@@ -1321,10 +1324,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     await logChat(user.id, message, lsReply, "LOAD_SHEDDING");
     return lsReply;
   }
-  // ---- SICK / ILL — question-aware, repeat-aware, duration-aware (handlers/sick-flow.ts) ----
-  const sickResult = await handleSickFlow({ message, m, user, capName });
-  if (sickResult !== null) return sickResult;
-  const isSick = looksSickMention(m);
+  const isSick = looksSickMention(m); // sick itself is handled at the TOP now (understanding before keywords)
 
   // ---- RETURN PLANNING ("I'll be back Wednesday", "let's confirm I go back Monday") ----
   const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)
