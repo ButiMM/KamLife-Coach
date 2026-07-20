@@ -835,6 +835,30 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!/whole grains|healthy fats/i.test(out), "other category jargon swapped too");
   });
 
+  // (b3) Kam's manual-coaching masterclasses must live in BOTH mouths, identically framed.
+  test("coach voice: deficit-resistance hard case encoded in BRAIN_SYSTEM and SCENARIO_GUIDE", () => {
+    const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
+    const guide = readFileSync(join("server", "handlers", "gpt-block.ts"), "utf-8");
+    for (const src of [brain, guide]) {
+      assert.match(src, /DEFICIT RESISTANCE/, "the hard case must exist");
+      assert.match(src, /spot-reduce/, "the spot-reduction truth");
+      assert.match(src, /smaller temporarily/, "the honest 'you'll look smaller first' expectation");
+      assert.match(src, /losing fat you don'?t want/, "Kam's reframe line");
+      assert.match(src, /hold the line/, "never cave to keep them happy");
+    }
+  });
+  test("coach voice: holiday/away masterclass encoded in BOTH mouths (list from THEIR foods)", () => {
+    const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
+    const guide = readFileSync(join("server", "handlers", "gpt-block.ts"), "utf-8");
+    for (const src of [brain, guide]) {
+      assert.match(src, /HOLIDAY \/ VACATION/, "the away case must exist");
+      assert.match(src, /FROM THEIR OWN LIST/, "the plan is built from the client's own named foods");
+      assert.match(src, /makes meals bigger without trying/i, "the cheap-veg add");
+      assert.match(src, /protein first/i, "the only rules");
+      assert.match(src, /still reporting is a WIN/i, "inconsistent-but-committed clients met with warmth");
+    }
+  });
+
   // (b) the coaching voice must name real foods, never a food category.
   test("coach voice: BRAIN_SYSTEM bans food-category jargon and names real township food", () => {
     const src = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
