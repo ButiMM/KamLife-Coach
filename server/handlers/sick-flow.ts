@@ -109,7 +109,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     // forget that??" got the full first-report template — re-committing the exact
     // failure they're angry about, ignoring the accusation, and saying "~3 days" instead
     // of their Monday). Own it, lock the date they gave, keep it SHORT — never re-dump.
-    const memoryComplaint = /\b(you forgot|forgot that|forgot i|did you forget|why (did|would|do|are) you|already (told|said)|i (told|said) you|i already|you (should )?(know|remember)|not listening|weren'?t listening|pay attention|do you (even )?remember)\b/i.test(m);
+    const memoryComplaint = /\b(you forgot|forgot that|forgot i|did you forget|why (did|would|do|are) you|already (told|said)|i (told|said) you|i keep (telling|saying)|keep telling you|i already|you (should )?(know|remember)|not listening|weren'?t listening|pay attention|do you (even )?remember)\b/i.test(m);
     if (memoryComplaint) {
       const hasDatePhrase = /\b(until|till|til|through|thru|by|for|next|about|\d+\s*days?|week|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(m);
       let until = alreadySick ? sickMatch![1] : null;

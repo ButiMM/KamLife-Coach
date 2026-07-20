@@ -486,6 +486,11 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(isMemoryGrievance("you forgot I'm sick"), true);
     assert.equal(isMemoryGrievance("I already told you I'm resting"), true);
     assert.equal(isMemoryGrievance("like I said, I'm not training"), true);
+    assert.equal(isMemoryGrievance("but I keep telling you that I'm not well"), true, "the 2026-07-20 'I keep telling you' repetition grievance");
+  });
+  test("sick memory-complaint: 'I keep telling you' gets the short ownership ack, never the re-dumped template", () => {
+    const src = readFileSync(join("server", "handlers", "sick-flow.ts"), "utf-8");
+    assert.match(src, /i keep \(telling\|saying\)/, "the complaint branch covers repetition grievances");
   });
   test("grievance guard: a fresh declaration or a value correction is NOT a grievance (stays a write)", () => {
     assert.equal(isMemoryGrievance("I'm sick, can't train today"), false, "a fresh declaration must still act");

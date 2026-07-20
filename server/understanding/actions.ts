@@ -108,7 +108,7 @@ One message = at most ONE tool: pick the single real transaction. In genuine dou
  */
 export function isMemoryGrievance(message: string): boolean {
   const m = (message || "").toLowerCase();
-  return /\b(why (did|do|didn'?t) you (forget|remember|listen)|you (forgot|didn'?t (listen|remember))|already (said|told you)|told you (already|before)|like i (said|told))\b/.test(m);
+  return /\b(why (did|do|didn'?t) you (forget|remember|listen)|you (forgot|didn'?t (listen|remember))|already (said|told you)|told you (already|before)|like i (said|told)|i keep (telling|saying)|keep telling you)\b/.test(m);
 }
 
 /**
