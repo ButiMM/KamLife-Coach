@@ -23,6 +23,7 @@ import { resolvePainTriage } from "./pain-triage";
 import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion } from "./numbers-literacy";
 import { answerSwapAsk } from "../food-swaps";
+import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -737,36 +738,21 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return rebuildReply;
   }
 
-  // ---- RESTAURANT SURVIVAL GUIDE — "eating at Nando's", "what to order at KFC" ----
-  const restaurantMatch = m.match(/\b(nando.?s|kfc|mcdonald.?s|mcdonalds|burger king|spur|steers|wimpy|ocean basket|debonairs|roman.?s|romans|galito.?s|galitos|hungry lion|fish aways|fishaways|chicken licken|barcelos)\b/i);
-  const isRestaurantQ = restaurantMatch && /\b(order|eat|have|get|menu|what.*should|best|healthy|smartest|good choice|low cal|protein)\b/i.test(m);
-  if (isRestaurantQ && restaurantMatch) {
-    const restaurant = restaurantMatch[1];
-    const goal = user.goalType || "fat_loss";
-    const pTarget = user.proteinTarget || 120;
-    const cTarget = user.calorieTarget || 1800;
-
-    const RESTAURANT_GUIDES: Record<string, string> = {
-      "nando's": `*Nando's Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* 1/4 chicken (breast, flame-grilled, no skin) + corn on the cob + side salad\n~420 kcal | ~45g protein\n\n🔸 *Decent:* Chicken wrap (grilled, not crispy) — ~480 kcal | ~35g protein\n\n❌ *Avoid:* Espetada (butter-loaded), creamy mashed potato, extra-large chips\n\n💡 *Pro tip:* Ask for peri-peri sauce on the side. Lemon & herb is the lowest calorie option. Skip the garlic bread — it's 400 kcal you won't feel.`,
-      "kfc": `*KFC Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Streetwise 2-piece (remove skin) + coleslaw\n~380 kcal | ~35g protein (without skin)\n\n🔸 *Decent:* Zinger burger (no mayo) — ~450 kcal | ~28g protein\n\n❌ *Avoid:* Dunked wings, anything "loaded", large chips, Krusher drinks\n\n💡 *Pro tip:* KFC skin = 150 extra kcal per piece. Remove it. The chicken underneath is solid protein.`,
-      "steers": `*Steers Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Classic burger (single patty, no cheese, extra salad) — ~450 kcal | ~30g protein\n\n🔸 *Decent:* Wacky Wednesday single — ~400 kcal | ~25g protein\n\n❌ *Avoid:* King Steer, anything double/triple, ribs combo, milkshakes\n\n💡 *Pro tip:* Skip the chips. Get a side salad or just the burger alone. A King Steer combo is 1,800 kcal — that's your entire day.`,
-      "spur": `*Spur Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* 300g rump steak + baked potato + garden salad — ~550 kcal | ~55g protein\n\n🔸 *Decent:* Chicken breast with veg — ~400 kcal | ~40g protein\n\n❌ *Avoid:* Ribs combo, cheese sauce, nachos starter, Spur burger with everything\n\n💡 *Pro tip:* Ask for sauce on the side. Their sauces add 200-400 kcal. The steak itself is excellent protein.`,
-      "wimpy": `*Wimpy Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Grilled chicken + rice + salad — ~450 kcal | ~40g protein\n\n🔸 *Decent:* Dagwood single — ~500 kcal | ~28g protein\n\n❌ *Avoid:* Double thick shake, cheese and bacon burger, onion rings\n\n💡 *Pro tip:* Wimpy breakfast (skip toast and sausage) = eggs + bacon + tomato = solid 30g protein for R85.`,
-      "mcdonald's": `*McDonald's Smart Order (${goal === "muscle_gain" ? "Muscle" : "Fat loss"})*\n\n✅ *Best:* Grilled chicken wrap — ~380 kcal | ~27g protein\n\n🔸 *Decent:* Big Mac (no sauce) — ~430 kcal | ~25g protein\n\n❌ *Avoid:* Large McFlurry (600 kcal), large fries (450 kcal), Grand anything\n\n💡 *Pro tip:* Ask for no mayo on any burger — saves 100-150 kcal instantly. Water not Coke saves another 200 kcal.`,
-    };
-
-    const key = Object.keys(RESTAURANT_GUIDES).find(k => restaurant.toLowerCase().includes(k.replace(/[^a-z]/g, "")));
-    if (key) {
-      const guide = RESTAURANT_GUIDES[key];
-      await logChat(user.id, message, guide, "RESTAURANT_GUIDE");
-      return guide;
-    }
-    // For restaurants not in the guide, use GPT
-    const gptRestaurant = await withTimeout("gpt_restaurant", 20000, () => askCoachK(message, user,
-      `Client is asking what to eat at ${restaurant}. Give a SA-focused restaurant guide:\n- Best option (calories + protein)\n- Decent option\n- What to avoid\n- One pro tip\nTheir goal is ${goal}, protein target ${pTarget}g/day, calorie target ${cTarget}/day. Max 6 lines. Be specific about menu items.`
-    ));
-    await logChat(user.id, message, gptRestaurant, "RESTAURANT_GUIDE");
-    return gptRestaurant;
+  // ---- RESTAURANT SMART ORDER — every major SA chain, goal-aware macros (server/restaurants.ts).
+  // Deterministic on purpose: accurate macros are the whole value; the numbers are never LLM-guessed.
+  // Discovery: "which restaurants can you help with" lists the coverage.
+  if (/\b(which|what|list).{0,20}\brestaurants?\b/i.test(m) && /\b(help|order|eat|handle|know|cover|do you)\b/i.test(m)) {
+    const names = listRestaurantNames();
+    const discReply = `I've got smart, goal-aware orders for these spots:\n\n${names.map((n) => `• ${n}`).join("\n")}\n\nJust tell me where you're eating — "I'm at KFC" or "what should I order at Spur" — and I'll give you the exact order with the numbers.`;
+    await logChat(user.id, message, discReply, "RESTAURANT_LIST");
+    return discReply;
+  }
+  const restaurantHit = matchRestaurant(m);
+  const isRestaurantQ = restaurantHit && /\b(order|eat|eating|have|get|getting|menu|what.*should|best|healthy|smartest|good choice|low cal|protein|going to|i'?m at|at the)\b/i.test(m);
+  if (isRestaurantQ && restaurantHit) {
+    const guide = formatRestaurantGuide(restaurantHit, user.goalType || "fat_loss");
+    await logChat(user.id, message, guide, "RESTAURANT_GUIDE");
+    return guide;
   }
 
   // ---- ALCOHOL AWARENESS — "had 3 beers", "wine tonight", "drinks at the braai" ----

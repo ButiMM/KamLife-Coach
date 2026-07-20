@@ -909,6 +909,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(brain, /OVER-TRAINING \(5\+/, "brain carries the over-training masterclass");
   });
 
+  test("restaurants: goal-aware smart order with deterministic macros (the MenuFit service)", async () => {
+    const { matchRestaurant, formatRestaurantGuide, listRestaurantNames } = await import("../server/restaurants");
+    assert.ok(listRestaurantNames().length >= 15, "comprehensive SA chain coverage");
+    const kfc = matchRestaurant("what should I order at kfc");
+    assert.ok(kfc && kfc.name === "KFC", "matches KFC");
+    assert.equal(matchRestaurant("I had eggs"), null, "no false match on a plain food log");
+    if (kfc) {
+      const cut = formatRestaurantGuide(kfc, "fat_loss");
+      const bulk = formatRestaurantGuide(kfc, "muscle_gain");
+      assert.match(cut, /Best for fat loss/, "fat loss leads with the lean pick");
+      assert.match(bulk, /Best for building/, "muscle gain leads with the mass pick");
+      assert.match(cut, /kcal/, "shows real macros, not vague advice");
+    }
+  });
+
   // (b2) DETERMINISTIC word-net: the prompt ban alone failed twice — the sanitizer must
   // guarantee category jargon can never reach a client, replaced with real SA foods.
   test("sanitize: food-category jargon is swapped for real foods in code, not hoped away", async () => {
