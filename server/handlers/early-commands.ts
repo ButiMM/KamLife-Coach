@@ -1503,7 +1503,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // English — a real client wrote "my grandfather passed on in the wee hours" and it
   // must reach this compassion path, never generic handling (2026-07-08 screenshot).
   const isBereaved = /\b(funeral|passed away|passed on|someone.*died|died.*someone|lost.*loved one|loved one.*lost|in mourning|family.*death|death.*family|my (mom|dad|mother|father|brother|sister|uncle|aunt|gogo|ouma|oupa|gran|grandma|grandfather|grandmother|friend).*(died|passed)|died.*(mom|dad|mother|father|brother|sister|uncle|aunt|gran)|umngcwabo|ukufa|silahlekelwe)\b/i.test(m);
-  if (isBereaved) {
+  if (process.env.ENGINE_LIVE !== "on" && isBereaved) {
     const bereavReply = `${capName}, I'm sorry for your loss. Take all the time you need — the programme will wait.\n\nFunerals mean long days, different food, no routine. That's okay. Eat what's there, stay hydrated, walk if you can. Don't stress about the plan right now.\n\nWhen you're ready to come back — even if it's weeks from now — just message me and I'll reset your programme from that day. There's no guilt here. Rest, mourn, be with your family.`;
     await logChat(user.id, message, bereavReply, "BEREAVEMENT");
     return bereavReply;
@@ -1544,8 +1544,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return inflatedReply;
   }
 
-  // LOW MOBILITY — concern-first; results come from the FOOD deficit, not steps; offer a lower step goal in one tap (2026-07-12 Kam, detector: utils.looksLikeLowMobility).
-  if (looksLikeLowMobility(m)) {
+  // LOW MOBILITY — concern-first; results come from the FOOD deficit, not steps; offer a lower step goal in one tap (2026-07-12 Kam, detector: utils.looksLikeLowMobility). JUDGMENT → brain owns it when live (brain bullet: CAN'T WALK MUCH).
+  if (process.env.ENGINE_LIVE !== "on" && looksLikeLowMobility(m)) {
     const goal = user.goalType || "fat_loss";
     const goalWord = goal === "muscle_gain" ? "muscle" : goal === "recomposition" ? "results" : "fat loss";
     const lowMobReply = `${capName}, I hear you — and this changes nothing about your results. 💛\n\nYour ${goalWord} comes from your *eating* — that's the engine, and we've got it dialled. Walking is a bonus on top, never the main thing. Plenty of people get real results barely walking.\n\n*Movement that counts for you:* chair marches, seated leg lifts, gentle arm circles, or a short flat stroll — even 5 minutes matters, and anything is a win.\n\nLet's set a step goal that fits *your* body, no pressure — pick one and I'll track against that:\n\n[BUTTONS:Set steps to 3000|Set steps to 5000|Log my food]`;
@@ -1553,8 +1553,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return lowMobReply;
   }
 
-  // DEFEATED / "IT'S MY GENETICS" — Kam's live masterclass, deterministic so it lands in his exact voice every time (2026-07-12).
-  if (looksLikeDefeatedNoResults(m)) {
+  // DEFEATED / "IT'S MY GENETICS" — Kam's masterclass (2026-07-12), now ported to the brain so the brain owns this JUDGMENT when live; template is the ENGINE_LIVE=off fallback.
+  if (process.env.ENGINE_LIVE !== "on" && looksLikeDefeatedNoResults(m)) {
     const defeatReply = `${capName}, I completely understand how you feel. 💛\n\nGym, lifting, running, eating clean — that's what social media (TikTok, Instagram) sells everyone. What they *don't* tell you is you have to do the RIGHT things for *your* body and *your* goal — not some generic routine.\n\n*It's not your genetics.* You just haven't had the right help yet — and that's exactly what I'm here for.\n\nYou're here now. You can relax. 🧘 We keep it simple, I hold you accountable, and we do the right things for *you*. One step at a time.\n\n[BUTTONS:What do I do today?]`;
     await logChat(user.id, message, defeatReply, "DEFEATED_REFRAME");
     return defeatReply;
@@ -1563,7 +1563,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   // ---- DIGESTIVE ISSUES — bloating / acid reflux / heartburn / indigestion (2026-07-12
   // onboarding screenshot). Care first, practical food guidance, and a defer-to-doctor
   // safety line. Detector (utils.looksLikeDigestiveIssue) excludes period + check-in noise.
-  if (looksLikeDigestiveIssue(m)) {
+  if (process.env.ENGINE_LIVE !== "on" && looksLikeDigestiveIssue(m)) {
     const giReply = `Thanks for telling me${capName ? ", " + capName : ""} — that matters, and we can work with it. 💛\n\nBloating, reflux and heartburn are really common. What helps most people:\n• *Smaller meals, more often* — big meals overload the gut.\n• Eat *slower*, sit up, and don't lie down for 2–3 hours after eating.\n• Common triggers: fizzy drinks, very fatty/fried food, too much dairy, big late-night meals, eating in a rush.\n• Sip water *between* meals, not gulping during.\n\nI'll keep your meals lighter and easier on your stomach. If it's regular or you're already on tablets for it, please also check in with your doctor — I work *alongside* them, never instead of them.\n\nTell me when it hits worst and I'll help you spot the trigger.`;
     await logChat(user.id, message, giReply, "DIGESTIVE_ISSUE");
     return giReply;
@@ -1571,7 +1571,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- FOOD DISLIKE — "I hate chicken breast" / "I force myself to eat X" (2026-07-12).
   // Offer an alternative in the same role; never make someone force down food they hate.
-  if (looksLikeFoodDislike(m)) {
+  if (process.env.ENGINE_LIVE !== "on" && looksLikeFoodDislike(m)) {
     const disliked = scanForSAFoods(m)[0];
     if (disliked) {
       const alts: Record<string, string> = {
@@ -1591,7 +1591,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
 
   // ---- OVER-TRAINING PLAN — client states 5+ sessions/week or "every day" (2026-07-12,
   // Kam: "5 is unnecessary"). Right-size it: rest is where results happen.
-  if (looksLikeOvertrainingPlan(m)) {
+  if (process.env.ENGINE_LIVE !== "on" && looksLikeOvertrainingPlan(m)) {
     const overReply = `${capName}, quick one — more than *4 sessions a week is unnecessary* for most people, and it usually backfires. 🛑\n\nYour muscles grow on the REST days, not in the gym. 3–4 focused sessions beat 5–6 rushed ones every single time — better results *and* your body recovers.\n\nLet's keep you at *3–4 quality sessions* and make each one count. Rest is part of the programme, not a break from it.\n\n[BUTTONS:Today's workout|My progress]`;
     await logChat(user.id, message, overReply, "OVERTRAINING_PLAN");
     return overReply;

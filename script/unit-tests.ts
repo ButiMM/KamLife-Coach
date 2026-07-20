@@ -889,6 +889,26 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     if (r && r.kind === "set") assert.equal(r.body, "weigh in", "the trailing 'on' is stripped with the day");
   });
 
+  test("keyword-wall sweep: the JUDGMENT handlers defer to the brain when live (voice ported to the brain first, so no regression)", () => {
+    const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    // Each emotional/coaching-judgment handler must stand down when ENGINE_LIVE is on.
+    for (const guard of [
+      /process\.env\.ENGINE_LIVE !== "on" && isBereaved/,
+      /process\.env\.ENGINE_LIVE !== "on" && looksLikeLowMobility\(m\)/,
+      /process\.env\.ENGINE_LIVE !== "on" && looksLikeDefeatedNoResults\(m\)/,
+      /process\.env\.ENGINE_LIVE !== "on" && looksLikeDigestiveIssue\(m\)/,
+      /process\.env\.ENGINE_LIVE !== "on" && looksLikeFoodDislike\(m\)/,
+      /process\.env\.ENGINE_LIVE !== "on" && looksLikeOvertrainingPlan\(m\)/,
+    ]) assert.match(src, guard, `judgment handler gated behind the brain: ${guard}`);
+    // The brain (live engine prompt) must actually carry that voice now, or gating regresses it.
+    const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");
+    assert.match(brain, /BEREAVEMENT \/ A DEATH/, "brain carries the bereavement masterclass");
+    assert.match(brain, /IT'S MY GENETICS/, "brain carries the defeated/genetics masterclass");
+    assert.match(brain, /DIGESTIVE \(bloating/, "brain carries the digestive masterclass");
+    assert.match(brain, /FOOD DISLIKE/, "brain carries the food-dislike masterclass");
+    assert.match(brain, /OVER-TRAINING \(5\+/, "brain carries the over-training masterclass");
+  });
+
   // (b2) DETERMINISTIC word-net: the prompt ban alone failed twice — the sanitizer must
   // guarantee category jargon can never reach a client, replaced with real SA foods.
   test("sanitize: food-category jargon is swapped for real foods in code, not hoped away", async () => {
