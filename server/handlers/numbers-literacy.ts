@@ -108,7 +108,11 @@ export async function handleNumbersLiteracy(ctx: { message: string; m: string; u
   const isFull = /\bnumbers:full\b/i.test(user.profileNotes || "");
 
   // ---- SHOW ME THE NUMBERS — a client opts INTO the figures (power user) ----
-  if (!isFull
+  // PLAN-CONTEXT GUARD (2026-07-20 live: "give me NUMBERS on how we are going to go about
+  // it" = asking for their PLAN, not a display preference — this toggle hijacked it). When
+  // the message is about a plan/approach, stand down: the brain answers the actual ask.
+  const isPlanAsk = /\b(plan|programme|program|roadmap|go about|how (we|are we|you)|strategy|approach|ease (me )?back)\b/i.test(m);
+  if (!isFull && !isPlanAsk
       && (/\b(show|give|see|want|bring back|turn on|display)\b[^.!?]{0,20}\b(numbers|calories|kcal|macros|the figures|the maths|protein numbers?|the detail|the breakdown)\b|\bshow me the (numbers|calories|macros|detail)\b|\bi (want|like) (the |to see )?(numbers|calories|macros|detail)\b|\bgive me the (numbers|detail|breakdown|macros)\b/i.test(m))) {
     try {
       const base = (user.profileNotes || "").replace(/\s*\bnumbers:(low|full)\b/gi, "").trim();

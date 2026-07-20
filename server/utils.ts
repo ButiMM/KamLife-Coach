@@ -934,3 +934,22 @@ export function looksLikeSurplusDeficitQuestion(m: string): boolean {
   return /\b(what|how (?:much|big)|should|am i|is my|what'?s)\b[^.!?]{0,60}\b(surplus|deficit)\b/i.test(m)
     || /\b(surplus|deficit)\b[^.!?]{0,25}\bbe\b/i.test(m);
 }
+
+// ── RETURN-DATE MEMORY — "back on Monday" → the actual SAST date (2026-07-20, Kam:
+// "we need to remember the time and dates when the person tells us they're going and
+// coming back"). Pure; used to persist back_on:YYYY-MM-DD so the coach REMEMBERS.
+export function nextDayDate(word: string): string | null {
+  const w = (word || "").toLowerCase().trim();
+  const sast = new Date(Date.now() + 2 * 3_600_000);
+  const names = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  let addDays: number;
+  if (w === "tomorrow") addDays = 1;
+  else if (w === "next week") addDays = 7;
+  else {
+    const idx = names.indexOf(w);
+    if (idx < 0) return null;
+    addDays = (idx - sast.getUTCDay() + 7) % 7 || 7; // next occurrence, never today
+  }
+  const d = new Date(sast.getTime() + addDays * 86_400_000);
+  return d.toISOString().slice(0, 10);
+}

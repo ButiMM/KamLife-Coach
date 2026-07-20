@@ -484,7 +484,12 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     .replace(/\bcomplex carb(ohydrate)?s\b/gi, "pap, brown bread, oats or rice")
     .replace(/\bwhole grains\b/gi, "brown bread and oats")
     .replace(/\blean proteins?\b/gi, "chicken, eggs or pilchards")
-    .replace(/\bhealthy fats\b/gi, "peanut butter, avo or nuts");
+    .replace(/\bhealthy fats\b/gi, "peanut butter, avo or nuts")
+    // Banned bot-phrases the prompt alone fails to stop (2026-07-20: "You've got this!"
+    // reached a client). Strip them in code — the sentence reads clean without them.
+    .replace(/\s*\bYou'?ve got this[.!]*/gi, "")
+    .replace(/\s*\bHow does that sound\??/gi, "")
+    .trim();
 
   // "have" alone is too broad — "does chicken have protein?" contains "have" but is a question.
   // Only use eating-specific verbs: had/ate/having/eating/just had/just ate/meal labels.

@@ -835,6 +835,45 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!/whole grains|healthy fats/i.test(out), "other category jargon swapped too");
   });
 
+  // (b4) 2026-07-20 deep-dive fixes — each locked against regression.
+  test("sick recovery: a DEFERRED return ('I'll let you know after Monday') is NOT 'welcome back'", () => {
+    const src = readFileSync(join("server", "handlers", "sick-flow.ts"), "utf-8");
+    assert.match(src, /isDeferredReturn/, "the deferral guard exists");
+    assert.match(src, /!isDeferredReturn\s*\n?\s*&&/, "and gates the recovery branch");
+    const DEFER = /\b(i'?ll let you know|let you know (after|by|on|how)|after (mon|tues|wednes|thurs|fri|satur|sun)day|not (yet|now|sure)|maybe|might|thinking (of|about)|will (see|decide)|we'?ll see|if i (feel|am)|once i (feel|am)|when i (feel|am)|hopefully)\b/i;
+    assert.ok(DEFER.test("i'll let you know after monday how i feel in terms of getting back to training"), "the exact live miss is caught");
+    assert.ok(!DEFER.test("i'm back and ready to train"), "a real return still clears");
+  });
+  test("numbers toggle: a PLAN ask ('give me numbers on how we go about it') is NOT a display toggle", () => {
+    const src = readFileSync(join("server", "handlers", "numbers-literacy.ts"), "utf-8");
+    assert.match(src, /isPlanAsk/, "the plan-context guard exists");
+    const PLAN = /\b(plan|programme|program|roadmap|go about|how (we|are we|you)|strategy|approach|ease (me )?back)\b/i;
+    assert.ok(PLAN.test("no i need the whole plan, give me numbers on how we are going to go about it"), "the exact hijack is caught");
+    assert.ok(!PLAN.test("show me the numbers"), "a genuine display request still toggles");
+  });
+  test("programme copy: full-plan Week 1 header never claims 'the plan restarts' to a viewer", () => {
+    const src = readFileSync(join("server", "programme.ts"), "utf-8");
+    assert.ok(!/the plan restarts, your strength doesn'?t/.test(src), "misleading restart copy removed");
+    assert.match(src, /Your strength carries over/, "replaced with copy true for restart AND viewing");
+  });
+  test("sanitize: banned bot-phrases are stripped in code ('You've got this', 'How does that sound?')", async () => {
+    const { sanitizeCoachReply } = await import("../server/handlers/food-scanner");
+    const out = sanitizeCoachReply("Focus on rest. You've got this! We'll ease back in. How does that sound?", "am I losing time?");
+    assert.ok(!/you'?ve got this/i.test(out) && !/how does that sound/i.test(out), "both phrases stripped");
+    assert.match(out, /Focus on rest/, "the real content survives");
+  });
+  test("memory: stated return day is computed to a real date (nextDayDate) and surfaced to the brain", async () => {
+    const { nextDayDate } = await import("../server/utils");
+    const d = nextDayDate("monday");
+    assert.ok(d && /^\d{4}-\d{2}-\d{2}$/.test(d), "a day name becomes a real date");
+    assert.ok(nextDayDate("tomorrow"), "tomorrow works");
+    assert.equal(nextDayDate("someday"), null, "junk is rejected");
+    const ec = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    assert.match(ec, /back_on:\$\{rpDate\}/, "the date is persisted whoever replies");
+    const snap = readFileSync(join("server", "brain", "client-snapshot.ts"), "utf-8");
+    assert.match(snap, /back_on:\(\\d\{4\}-\\d\{2\}-\\d\{2\}\)/, "and the snapshot surfaces it to the brain");
+  });
+
   // (b3) Kam's manual-coaching masterclasses must live in BOTH mouths, identically framed.
   test("coach voice: deficit-resistance hard case encoded in BRAIN_SYSTEM and SCENARIO_GUIDE", () => {
     const brain = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");

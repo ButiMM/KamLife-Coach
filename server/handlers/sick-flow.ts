@@ -191,7 +191,13 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   }
 
   // ---- RECOVERY — "I'm back / feeling better" clears the sick hold ----
-  if (/\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu)\b/i.test(m)
+  // DEFERRED-DECISION GUARD (2026-07-20 live: "I'll let you know AFTER Monday how I feel
+  // about getting back to training" matched "back to training" → "Welcome back!" to a
+  // still-sick client). A future/maybe is NOT a recovery declaration — stand down and let
+  // the sick-aware brain answer.
+  const isDeferredReturn = /\b(i'?ll let you know|let you know (after|by|on|how)|after (mon|tues|wednes|thurs|fri|satur|sun)day|not (yet|now|sure)|maybe|might|thinking (of|about)|will (see|decide)|we'?ll see|if i (feel|am)|once i (feel|am)|when i (feel|am)|hopefully)\b/i.test(m);
+  if (!isDeferredReturn
+      && /\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu)\b/i.test(m)
       && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
     try {
       const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until):\d{4}-\d{2}-\d{2}/g, "").trim();

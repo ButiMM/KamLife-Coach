@@ -14,7 +14,7 @@ import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate } from "../utils";
 import { educationNote, remainingInMeals } from "../education";
 import { getTodayWorkoutState, getTodaySlot } from "../workout-state";
 import { generateMealPlan } from "../meal-plan";
@@ -1330,6 +1330,14 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
   const isReturnPlanning = /\b(i.?ll (be back|start|resume|return|train|come back)|let.?s confirm|confirm (i|that i)|going back|back (on|from) (monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)|start(ing)? (again|back|monday|tuesday|wednesday|thursday|friday|tomorrow)|resume (on|from|monday|tuesday|wednesday|thursday|friday)|back to (training|gym|it) (on|from|monday|tuesday|wednesday|thursday|friday))\b/i.test(m)
     && !isSick
     && /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week|next month)\b/i.test(m);
+  // MEMORY (always, whoever replies): persist the stated return day as back_on:<date> — surfaced in the snapshot so the brain REMEMBERS it (2026-07-20 Kam).
+  const rpDay = isReturnPlanning ? m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i) : null;
+  const rpDate = rpDay ? nextDayDate(rpDay[0]) : null;
+  if (rpDate && user.id) {
+    const rpBase = (user.profileNotes || "").replace(/\s*\|?\s*back_on:\d{4}-\d{2}-\d{2}/g, "").trim();
+    const rpNotes = `${rpBase ? rpBase + " | " : ""}back_on:${rpDate}`;
+    db.update(users).set({ profileNotes: rpNotes }).where(eq(users.id, user.id)).then(() => { user.profileNotes = rpNotes; }).catch((e: any) => console.error("[RETURN_PLAN] persist failed:", e));
+  }
   if (process.env.ENGINE_LIVE !== "on" && isReturnPlanning) {
     const dayMatch = m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i);
     const returnDay = dayMatch ? dayMatch[0].charAt(0).toUpperCase() + dayMatch[0].slice(1).toLowerCase() : "then";
@@ -1499,10 +1507,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return bereavReply;
   }
 
-  // ---- UPDATE STEP TARGET — "steps goal 11000", "set steps to 10000", "change my
-  // steps to 10 000", "make my steps 10k". ONE parser (utils.extractStepTargetChange)
-  // is shared with the brain gate so the two can never drift and every SA number
-  // format — "10000", "10,000", "10 000", "10k" — is caught and persisted (2026-07-12).
+  // UPDATE STEP TARGET — ONE parser (utils.extractStepTargetChange) shared with the brain gate; all SA number formats caught + persisted (2026-07-12).
   const parsedStepTarget = extractStepTargetChange(m);
   if (parsedStepTarget !== null) {
     if (parsedStepTarget >= 2000 && parsedStepTarget <= 30000) {
@@ -1537,11 +1542,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return inflatedReply;
   }
 
-  // ---- LOW MOBILITY — "I can't walk much / bad knees / wheelchair / heart condition" ----
-  // 2026-07-12, Kam (twice): "some people can't walk a lot — we need to accommodate that."
-  // Concern-first, then the crucial truth that keeps them on the app: results come from
-  // the FOOD deficit, not steps. Offer a realistic, lower step goal in one tap — never
-  // presume their ability, never make them feel broken. (Detector: utils.looksLikeLowMobility)
+  // LOW MOBILITY — concern-first; results come from the FOOD deficit, not steps; offer a lower step goal in one tap (2026-07-12 Kam, detector: utils.looksLikeLowMobility).
   if (looksLikeLowMobility(m)) {
     const goal = user.goalType || "fat_loss";
     const goalWord = goal === "muscle_gain" ? "muscle" : goal === "recomposition" ? "results" : "fat loss";
@@ -1550,10 +1551,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     return lowMobReply;
   }
 
-  // ---- DEFEATED / "IT'S MY GENETICS" — the client who's tried for years, blames their
-  // genes, or was sold generic social-media advice. 2026-07-12, Kam's live masterclass
-  // ("It's not your genetics, you just need the right help… you're here now, you can
-  // relax"). Deterministic so this high-stakes moment lands in his exact voice every time.
+  // DEFEATED / "IT'S MY GENETICS" — Kam's live masterclass, deterministic so it lands in his exact voice every time (2026-07-12).
   if (looksLikeDefeatedNoResults(m)) {
     const defeatReply = `${capName}, I completely understand how you feel. 💛\n\nGym, lifting, running, eating clean — that's what social media (TikTok, Instagram) sells everyone. What they *don't* tell you is you have to do the RIGHT things for *your* body and *your* goal — not some generic routine.\n\n*It's not your genetics.* You just haven't had the right help yet — and that's exactly what I'm here for.\n\nYou're here now. You can relax. 🧘 We keep it simple, I hold you accountable, and we do the right things for *you*. One step at a time.\n\n[BUTTONS:What do I do today?]`;
     await logChat(user.id, message, defeatReply, "DEFEATED_REFRAME");

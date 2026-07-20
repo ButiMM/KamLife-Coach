@@ -1265,7 +1265,10 @@ export function getWeekContext(phase: number, week: number, isBeginner = false, 
     // reads as the coach forgetting who they are.
     const veteran = sessionsDone >= 12;
     if (week === 1 && veteran) {
-      return { ...ctx, rationale: "Week 1 of your new programme — the plan restarts, your strength doesn't. Keep your usual working weights and focus on owning the new movements. The weeks build from here." };
+      // Copy must be true BOTH when a goal change restarts the plan AND when a veteran is
+      // simply VIEWING the full programme (2026-07-20 live: "the plan restarts" alarmed a
+      // client who only asked to SEE his plan — nothing had reset).
+      return { ...ctx, rationale: "Week 1 — the foundation your whole plan builds from. Your strength carries over: keep your usual working weights and focus on owning the movements. The weeks build from here." };
     }
     // Beginner ease-in: first 2 Foundation weeks at 2 working sets, then build to 3.
     // Protects never-trained / heavier / older bodies from week-one overload and DOMS

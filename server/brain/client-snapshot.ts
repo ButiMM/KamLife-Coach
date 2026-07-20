@@ -178,6 +178,18 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     console.error("[CLIENT_SNAPSHOT] partial:", (e as any)?.message || e);
   }
 
+  // ── REMEMBERED DATES: the client TOLD us when they're away/back — never re-ask, never
+  // contradict (2026-07-20, Kam: "remember the time and dates when the person tells us").
+  try {
+    const notes = user.profileNotes || "";
+    const backOn = notes.match(/back_on:(\d{4}-\d{2}-\d{2})/)?.[1];
+    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+    const pausedUntil = notes.match(/paused_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+    if (backOn) lines.push(`The client TOLD you they plan to be back on ${backOn}. Remember it — reference it naturally, don't re-ask, and don't push training before then.`);
+    if (sickUntil) lines.push(`Client is SICK/resting until ${sickUntil} (they told you). Care first; no training pushes before that date.`);
+    if (pausedUntil) lines.push(`Client is on a PAUSE/break until ${pausedUntil}. Respect it — no programme pressure until then.`);
+  } catch { /* memory lines are bonus */ }
+
   // ── LONG-TERM INTELLIGENCE (CIP): what we've LEARNED about this client over months —
   // their patterns, weak days, best streaks, plateau history, the coach narrative. This was
   // wired to the OLD gpt path but NEVER to the new engine (2026-07-19 audit: written in 7
