@@ -36,5 +36,6 @@ export default defineConfig({
     "client_intelligence_profiles",
     "quality_signals",
     "client_understanding",
+    "reminders",
   ],
 });

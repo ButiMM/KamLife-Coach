@@ -61,6 +61,7 @@ import { runSpendWatchdog } from "./scheduler/jobs/spend-watchdog";
 import { runTrialCountdown } from "./scheduler/jobs/trial";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runMonthlyPhotoCheckin } from "./scheduler/jobs/progress-photo";
+import { runDueReminders } from "./scheduler/jobs/reminders";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, sendWhatsAppTemplate, deliveryStats };
@@ -269,6 +270,9 @@ export async function initScheduler(): Promise<void> {
   // ── Every 12 hours ────────────────────────────────────────────────────────
   cron.schedule("4 4,16 * * *",  () => safe("runSilenceDetection",    runSilenceDetection),    { timezone: "UTC" });
   cron.schedule("0 5,18 * * *",  () => safe("runDeepSilenceEscalation", runDeepSilenceEscalation), { timezone: "UTC" });
+
+  // ── Every minute — fire user-set reminders whose time has come ─────────────
+  cron.schedule("* * * * *",     () => safe("runDueReminders",       runDueReminders),             { timezone: "UTC" });
 
   // ── Hourly ────────────────────────────────────────────────────────────────
   cron.schedule("0 * * * *",     () => safe("runBuddyAccountability", runBuddyAccountability),     { timezone: "UTC" });

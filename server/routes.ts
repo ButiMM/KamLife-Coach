@@ -40,6 +40,7 @@ import { getTodayWorkoutState } from "./workout-state";
 import { handleMiscCommands } from "./handlers/misc-commands";
 import { handleLifecycle } from "./handlers/lifecycle";
 import { handleEarlyCommands } from "./handlers/early-commands";
+import { handleReminderCommand } from "./handlers/reminders-handler";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runShadowEval, shadowEnabled } from "./understanding/shadow";
@@ -807,6 +808,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // real programme. Deterministic code OWNS its commands; the brain fronts only what no
   // handler claims. The gates above still protect messages owned by LATER handlers
   // (steps/water/weight logs, direction, billing, pain triage in misc).
+  // ---- REMINDERS — a real capability the coach owns, before the keyword wall + brain so
+  // nothing hijacks "remind me to take creatine at 8pm". Deterministic parser = a kept promise.
+  const reminderResult = await handleReminderCommand({ phone, message, m, user });
+  if (reminderResult !== null) return reminderResult;
+
   const earlyResult = await handleEarlyCommands({ phone, message, m, user, hasMedia: !!mediaUrl, isQuestion: normalizedQuestion });
   if (earlyResult !== null) return earlyResult;
 

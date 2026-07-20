@@ -36,7 +36,11 @@ export type CoachAction =
   | { type: "LOG_WATER"; litres: number }
   | { type: "LOG_WEIGHT"; kg: number }
   | { type: "SET_SICK"; days: number }
-  | { type: "END_SICK" };
+  | { type: "END_SICK" }
+  // The client asks to be reminded of something later ("remind me to take creatine at 8pm").
+  // body = what to remind them; when = the natural-language time. The deterministic reminder
+  // parser owns the actual clock maths, so the LLM never has to compute a fire time.
+  | { type: "SET_REMINDER"; body: string; when: string };
 
 export type CoachActionType = CoachAction["type"];
 
@@ -60,6 +64,11 @@ export const COACH_ACTION_TOOLS = [
   { type: "function", function: { name: "log_weight", description: "The client REPORTED a body-weight reading (in kg).", parameters: { type: "object", required: ["kg"], properties: { kg: { type: "number" } } } } },
   { type: "function", function: { name: "set_sick", description: "The client says they are sick/unwell and cannot train. days = how long they'll rest (parse 'until Monday', '3 days'); default 3 if unstated.", parameters: { type: "object", required: ["days"], properties: { days: { type: "number" } } } } },
   { type: "function", function: { name: "end_sick", description: "The client says they are better/back and ready to resume.", parameters: { type: "object", properties: {} } } },
+  { type: "function", function: { name: "set_reminder", description: "The client asks to be reminded to do something at a later time ('remind me to take creatine at 8pm', 'nudge me about my meds tonight', 'remind me to weigh in Monday'). body = the task to remind them of; when = the time exactly as they said it ('at 8pm', 'tomorrow morning', 'in 2 hours', 'Monday'). Do NOT compute a clock time — the reminder system parses 'when'. Only for a real future reminder, never for a past log or a question.",
+    parameters: { type: "object", required: ["body", "when"], properties: {
+      body: { type: "string", description: "what to remind them to do, e.g. 'take creatine'" },
+      when: { type: "string", description: "the time phrase exactly as said, e.g. 'at 8pm' or 'tomorrow morning'" },
+    } } } },
 ] as const;
 
 /**
@@ -145,6 +154,7 @@ export function validateAction(raw: any): CoachAction {
     log_meal: "LOG_MEAL", remove_last_meal: "REMOVE_LAST_MEAL", show_meals: "SHOW_MEALS",
     show_workout: "SHOW_WORKOUT", log_steps: "LOG_STEPS", log_water: "LOG_WATER",
     log_weight: "LOG_WEIGHT", set_sick: "SET_SICK", end_sick: "END_SICK",
+    set_reminder: "SET_REMINDER",
   };
   const a = raw.args && typeof raw.args === "object" ? raw.args : raw;
   const type: string = raw.type || NAME_TO_TYPE[String(raw.name || "").toLowerCase()] || "";
@@ -171,6 +181,12 @@ export function validateAction(raw: any): CoachAction {
     case "SET_SICK": {
       const days = clampNum(a.days ?? a.sickDays, 1, 14);
       return Number.isFinite(days) ? { type: "SET_SICK", days: Math.round(days) } : { type: "JUST_REPLY" };
+    }
+    case "SET_REMINDER": {
+      const body = String(a.body ?? a.what ?? a.task ?? "").replace(/\s+/g, " ").trim().slice(0, 240);
+      const when = String(a.when ?? a.time ?? "").replace(/\s+/g, " ").trim().slice(0, 60);
+      if (body.length < 2) return { type: "JUST_REPLY" };
+      return { type: "SET_REMINDER", body, when };
     }
     case "LOG_MEAL": {
       // The LLM hands the FOOD TEXT; the deterministic scanner resolves foods + numbers.
@@ -199,6 +215,7 @@ export const CONFIDENCE_TO_EXECUTE = 0.75;
 
 const WRITES_STATE = new Set<CoachActionType>([
   "LOG_MEAL", "LOG_STEPS", "LOG_WATER", "LOG_WEIGHT", "REMOVE_LAST_MEAL", "SET_SICK", "END_SICK",
+  "SET_REMINDER", // creates a row; idempotency stops a retry from double-scheduling the ping
 ]);
 
 /** True if performing this action changes stored state (a wrong auto-run would corrupt). */
@@ -242,5 +259,6 @@ export function describeAction(action: CoachAction): string {
     case "LOG_WEIGHT": return `log ${action.kg}kg`;
     case "SET_SICK": return `set sick for ${action.days} day(s)`;
     case "END_SICK": return "end sick / resume";
+    case "SET_REMINDER": return `remind to "${action.body}"${action.when ? ` (${action.when})` : ""}`;
   }
 }

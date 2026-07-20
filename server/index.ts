@@ -387,6 +387,21 @@ async function runMigrations(): Promise<void> {
       observations JSONB,
       updated_at   TIMESTAMPTZ DEFAULT NOW()
     )`,
+    // User-set reminders — "remind me to take creatine at 8pm". A per-minute scheduler
+    // poll fires the pending ones whose fire_at has passed. Created idempotently here so
+    // the capability works on every deploy without db:push.
+    `CREATE TABLE IF NOT EXISTS reminders (
+      id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      user_id      UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      phone_number TEXT NOT NULL,
+      body         TEXT NOT NULL,
+      fire_at      TIMESTAMP NOT NULL,
+      status       TEXT NOT NULL DEFAULT 'pending',
+      created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+      sent_at      TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS reminders_due_idx ON reminders(status, fire_at)`,
+    `CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id, status)`,
   ];
 
   let created = 0;

@@ -71,6 +71,7 @@ function confirmQuestion(action: CoachAction, user: any): string {
     case "LOG_WATER": return `${hi}log *${action.litres}L* of water? Reply *yes*.`;
     case "LOG_WEIGHT": return `${hi}log your weight as *${action.kg}kg*? Reply *yes*.`;
     case "SET_SICK": return `${hi}rest you up and pause everything for now? Reply *yes* and I'll hold it all.`;
+    case "SET_REMINDER": return `${hi}set a reminder to ${action.body}${action.when ? ` ${action.when}` : ""}? Reply *yes*.`;
     default: return `${hi}reply *yes* and I'll sort it.`;
   }
 }
@@ -157,6 +158,12 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
     case "SHOW_WORKOUT": {
       const { handleEarlyCommands } = await import("../handlers/early-commands");
       return (await handleEarlyCommands({ phone, message: "workout", m: "workout", user, hasMedia: false })) || "";
+    }
+    case "SET_REMINDER": {
+      // Reuse the deterministic reminder command (parse + persist + two-step follow-ups).
+      const { handleReminderCommand } = await import("../handlers/reminders-handler");
+      const synth = `remind me to ${action.body} ${action.when}`.replace(/\s+/g, " ").trim();
+      return (await handleReminderCommand({ phone, message: synth, m: synth.toLowerCase(), user })) || "";
     }
     default:
       return "";

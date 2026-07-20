@@ -841,6 +841,54 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(!FOOD.test("gym is closed this week, what workout can I do"), "a pure training-away message is not a food context");
   });
 
+  // REMINDERS — the coach's first real user-scheduled capability. The parser is a promise,
+  // so it's deterministic and tested hard. (pure module: no DB import, safe in this harness.)
+  test("reminders: 'remind me to take creatine at 8pm' → task + 8pm SAST fire time", async () => {
+    const { parseReminderRequest } = await import("../server/reminders-parse");
+    const r = parseReminderRequest("remind me to take creatine at 8pm");
+    assert.ok(r && r.kind === "set", "it's a complete reminder");
+    if (r && r.kind === "set") {
+      assert.equal(r.body, "take creatine", "the task is clean, no time words");
+      const sastHour = new Date(r.fireAt.getTime() + 2 * 3_600_000).getUTCHours();
+      assert.equal(sastHour, 20, "8pm SAST = hour 20");
+      assert.ok(r.fireAt.getTime() > Date.now(), "always in the future");
+    }
+  });
+  test("reminders: relative 'in 2 hours', bare day 'tomorrow', and part-of-day 'tonight'", async () => {
+    const { parseReminderRequest } = await import("../server/reminders-parse");
+    const rel = parseReminderRequest("remind me to drink water in 2 hours");
+    assert.ok(rel && rel.kind === "set" && rel.body === "drink water", "relative parses");
+    if (rel && rel.kind === "set") {
+      const mins = (rel.fireAt.getTime() - Date.now()) / 60_000;
+      assert.ok(mins > 115 && mins < 125, "~120 minutes out");
+    }
+    const tom = parseReminderRequest("remind me to weigh in tomorrow");
+    assert.ok(tom && tom.kind === "set" && tom.body === "weigh in", "bare day → task kept, default time");
+    if (tom && tom.kind === "set") {
+      assert.equal(new Date(tom.fireAt.getTime() + 2 * 3_600_000).getUTCHours(), 8, "bare day defaults to 8am SAST");
+    }
+    const night = parseReminderRequest("remind me to stretch tonight");
+    assert.ok(night && night.kind === "set" && night.body === "stretch", "tonight parses");
+    if (night && night.kind === "set") {
+      assert.equal(new Date(night.fireAt.getTime() + 2 * 3_600_000).getUTCHours(), 19, "tonight = 7pm SAST");
+    }
+  });
+  test("reminders: a time with no task asks WHAT; a task with no time asks WHEN; a non-reminder is null", async () => {
+    const { parseReminderRequest } = await import("../server/reminders-parse");
+    assert.equal(parseReminderRequest("I had eggs for breakfast"), null, "not a reminder → null, never hijacks a food log");
+    assert.equal(parseReminderRequest("what's my workout today"), null, "not a reminder → null");
+    const noTime = parseReminderRequest("remind me to call the gym");
+    assert.ok(noTime && noTime.kind === "need_time" && noTime.body === "call the gym", "task but no time → ask when");
+    const noBody = parseReminderRequest("remind me at 6am");
+    assert.ok(noBody && noBody.kind === "need_body", "time but no task → ask what");
+  });
+  test("reminders: 'weigh in on monday' keeps a clean task (no dangling preposition)", async () => {
+    const { parseReminderRequest } = await import("../server/reminders-parse");
+    const r = parseReminderRequest("remind me to weigh in on monday");
+    assert.ok(r && r.kind === "set", "complete");
+    if (r && r.kind === "set") assert.equal(r.body, "weigh in", "the trailing 'on' is stripped with the day");
+  });
+
   // (b2) DETERMINISTIC word-net: the prompt ban alone failed twice — the sanitizer must
   // guarantee category jargon can never reach a client, replaced with real SA foods.
   test("sanitize: food-category jargon is swapped for real foods in code, not hoped away", async () => {

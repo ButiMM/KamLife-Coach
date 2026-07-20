@@ -605,6 +605,31 @@ export const clientIntelligenceProfiles = pgTable("client_intelligence_profiles"
   coachNarrative: text("coach_narrative"),
 });
 
+// USER-SET REMINDERS — the client asks the coach to remind them ("remind me to take
+// creatine at 8pm", "remind me to weigh in Monday"). One row per reminder. A scheduler
+// poll fires the ones whose fireAt has passed and flips status to 'sent'. fireAt is stored
+// in real UTC; the parser anchors everything to SAST (UTC+2). This is the first capability
+// the coach can actually DO for a client on their own schedule — not a canned nudge.
+export const reminders = pgTable(
+  "reminders",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+    phoneNumber: text("phone_number").notNull(),
+    body: text("body").notNull(),                 // what to remind them, phrased as the nudge text
+    fireAt: timestamp("fire_at").notNull(),        // when to send (real UTC)
+    status: text("status").notNull().default("pending"), // 'pending' | 'sent' | 'cancelled'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    sentAt: timestamp("sent_at"),
+  },
+  (table) => {
+    return {
+      dueIdx: index("reminders_due_idx").on(table.status, table.fireAt),
+      userIdx: index("reminders_user_idx").on(table.userId, table.status),
+    };
+  },
+);
+
 export const clientActionsRelations = relations(clientActions, ({ one }) => ({
   user: one(users, { fields: [clientActions.userId], references: [users.id] }),
 }));
@@ -715,6 +740,8 @@ export type BodyMeasurement = typeof bodyMeasurements.$inferSelect;
 export type InsertBodyMeasurement = z.infer<typeof insertBodyMeasurementSchema>;
 
 export type Escalation = typeof escalations.$inferSelect;
+
+export type Reminder = typeof reminders.$inferSelect;
 
 export type UpdateUserRequest = Partial<InsertUser>;
 export type UserResponse = User;
