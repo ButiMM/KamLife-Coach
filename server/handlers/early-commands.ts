@@ -185,7 +185,7 @@ export async function handleEarlyCommands(ctx: {
     tempEquipmentMode.delete(phone);
     awaitingEquipmentAnswer.delete(phone);
     user.awaitingInputType = null; await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] clear failed:", e));
-    const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Reply *menu* or *workout* for today's session.`;
+    const backMsg = `${firstName ? firstName + ", b" : "B"}ack to your regular programme. Say *workout* whenever you're ready for today's session.`;
     await logChat(user.id, message, backMsg, "BACK_TO_GYM");
     return backMsg;
   }
@@ -598,7 +598,7 @@ export async function handleEarlyCommands(ctx: {
     const prot = `💪 *Protein:* ${newProt}g/day\n`;
     const steps = `👟 *Steps:* ${newSteps.toLocaleString()}/day\n`;
     const targetsLine = `\n*Your daily targets:*\n${cal}${prot}${steps}`;
-    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}${targetsLine}\n\n_Reply *menu* anytime to see all your options — workouts, food log, targets, shopping list, and more._`;
+    const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}${targetsLine}\n\n_Just talk to me like a coach — tell me what you ate, send your steps, ask what to eat, or say *workout* for a session. I'm here all day._`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
 
     // Day 1 progress photo challenge — fires immediately after programme delivery.
@@ -1811,7 +1811,7 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const weekNote = user.programmeWeek ? ` You're on *Week ${user.programmeWeek}* of your programme.` : "";
     const snapSection = snapLines.length > 0 ? `\n\n*Where you left off:*\n${snapLines.join("\n")}` : "";
 
-    const comingBackReply = `${capName}, welcome back.${snapSection}\n\n${daysText} away — everyone has those stretches.${weekNote} Targets, programme, and logs are exactly where you left them.\n\n*To get back into it:*\n1. Tell me what you've eaten today (even if it wasn't great)\n2. Send your steps if you walked\n3. Reply *menu* for your session\n\nNo guilt. No catching up. Just today. Let's go.`;
+    const comingBackReply = `${capName}, welcome back.${snapSection}\n\n${daysText} away — everyone has those stretches.${weekNote} Targets, programme, and logs are exactly where you left them.\n\n*To get back into it:*\n1. Tell me what you've eaten today (even if it wasn't great)\n2. Send your steps if you walked\n3. Say *workout* when you're ready to train\n\nNo guilt. No catching up. Just today. Let's go.`;
     await logChat(user.id, message, comingBackReply, "COMEBACK");
     return comingBackReply;
   }

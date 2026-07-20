@@ -1466,7 +1466,7 @@ export async function handleMiscCommands(ctx: {
       ]);
 
       if (recentWorkouts.length === 0) {
-        return `No workouts logged in the last 30 days. Reply *1* to see today's workout and get started.`;
+        return `No workouts logged in the last 30 days. Say *workout* to see today's session and get started.`;
       }
 
       const name = user.name?.split(" ")[0] || "there";

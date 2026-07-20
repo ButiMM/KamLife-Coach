@@ -226,7 +226,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     firstWorkout = getKamlifeProgramme(updatedUser, true);
   } catch (e) {
     console.error("[ONBOARDING] getKamlifeProgramme failed in completeOnboarding — using fallback:", e);
-    firstWorkout = `Your Day 1 workout is ready — reply *1* or *workout* and I'll send it straight through.`;
+    firstWorkout = `Your Day 1 workout is ready — just say *workout* and I'll send it straight through.`;
   }
 
   const weightDisplay = u.currentWeight != null ? `\n*Weight:* ${actualWeight}kg` : "";

@@ -438,7 +438,7 @@ export async function handleLifecycle(ctx: {
     const matchedEquip = eqKeys.find(eq => m.includes(eq));
     let equipReply: string;
     if (matchedEquip) {
-      equipReply = `No ${matchedEquip}? Use ${EQUIPMENT_ALTERNATIVES[matchedEquip].join(" or ")}.\n\nFull home programme is available — reply *programme* or *menu* to see it. You do not need a gym to build real strength.`;
+      equipReply = `No ${matchedEquip}? Use ${EQUIPMENT_ALTERNATIVES[matchedEquip].join(" or ")}.\n\nFull home programme is available — just say *programme* to see it. You do not need a gym to build real strength.`;
     } else {
       // Deliver a home workout directly instead of just telling them to reply
       const homeUser = { ...user, trainingMode: "home" };
@@ -1056,14 +1056,14 @@ export async function handleLifecycle(ctx: {
           const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "recomposition" };
           profileReply = `Sharp${clientName ? `, ${clientName}` : ""}. Goal updated to ${goalLabel[updates.goalType] || updates.goalType}. New targets: ${updates.calorieTarget} kcal/day, ${updates.proteinTarget}g protein. Programme stays the same — reply *programme* to see it.`;
         } else {
-          profileReply = `Sharp. Profile updated. Reply *menu* to see your options.`;
+          profileReply = `Sharp. Profile updated. What do you need next?`;
         }
         await logChat(user.id, message, profileReply, "PROFILE_UPDATE");
         return profileReply;
       } catch (profileUpdateErr) {
         console.error("[PROFILE_UPDATE_ERR]", { updates, err: profileUpdateErr instanceof Error ? profileUpdateErr.message : String(profileUpdateErr) });
         // Surface a safe fallback rather than crashing to global handler
-        const fallbackReply = `Profile noted — your training mode and targets have been saved. Reply *menu* to see everything.`;
+        const fallbackReply = `Profile noted — your training mode and targets have been saved. Just tell me what you need next.`;
         await logChat(user.id, message, fallbackReply, "PROFILE_UPDATE").catch(() => {});
         return fallbackReply;
       }

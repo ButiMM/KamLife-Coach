@@ -154,8 +154,8 @@ export async function handleProgressCheck(ctx: {
       // Priority: no training > no logging > protein gap > steps gap
       if (completedSessions === 0 && plannedSessions > 0) {
         return isMuscleGain
-          ? `*Fix this week:* Zero sessions — no stimulus means zero growth regardless of what you eat. Calories without training = fat, not muscle. Reply *1* right now. Do today's session.`
-          : `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Reply *1* right now and do today's workout. 20 minutes changes the week.`;
+          ? `*Fix this week:* Zero sessions — no stimulus means zero growth regardless of what you eat. Calories without training = fat, not muscle. Say *workout* right now. Do today's session.`
+          : `*Fix this week:* No sessions logged — not one. Everything gets easier once you're training: sleep, hunger, protein choices. Say *workout* right now and do today's session. 20 minutes changes the week.`;
       }
       if (weekFoodLogDays < 3) {
         return `*Fix this week:* Log your food — even just dinner each night gives me enough to actually help. Right now I've only got ${weekFoodLogDays}/7 days, so let's start tonight, even if the meal wasn't perfect.`;
