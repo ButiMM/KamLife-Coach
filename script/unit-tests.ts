@@ -825,6 +825,16 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(src, /startsWith\("holiday_equipment"\)\) && !skipBackToGym &&/, "holiday-state AND the safety guard both gate the trigger");
   });
 
+  // (b2) DETERMINISTIC word-net: the prompt ban alone failed twice — the sanitizer must
+  // guarantee category jargon can never reach a client, replaced with real SA foods.
+  test("sanitize: food-category jargon is swapped for real foods in code, not hoped away", async () => {
+    const { sanitizeCoachReply } = await import("../server/handlers/food-scanner");
+    const out = sanitizeCoachReply("Eggs, chicken, and legumes are great choices. Add whole grains and healthy fats.", "what should I eat?");
+    assert.ok(!/legumes/i.test(out), "'legumes' must never survive the sanitizer");
+    assert.ok(/beans and lentils/i.test(out), "replaced with the real foods");
+    assert.ok(!/whole grains|healthy fats/i.test(out), "other category jargon swapped too");
+  });
+
   // (b) the coaching voice must name real foods, never a food category.
   test("coach voice: BRAIN_SYSTEM bans food-category jargon and names real township food", () => {
     const src = readFileSync(join("server", "brain", "coach-brain.ts"), "utf-8");

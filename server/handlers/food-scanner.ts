@@ -472,8 +472,19 @@ export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories
 }
 
 export function sanitizeCoachReply(reply: string, userMessage: string, budgetTier?: string | null, injuries?: string | null): string {
-  const trimmed = (reply || "").trim();
+  let trimmed = (reply || "").trim();
   const umLower = userMessage.toLowerCase();
+
+  // FOOD-CATEGORY WORD NET (deterministic — the prompt ban alone failed, 2026-07-19:
+  // "legumes" reached a township client AGAIN a day after the BRAIN_SYSTEM rule). Category
+  // jargon is swapped for the real SA foods the client actually buys. Same principle as the
+  // grievance guard: known-dangerous output is corrected in code, not hoped away.
+  trimmed = trimmed
+    .replace(/\blegumes\b/gi, "beans and lentils")
+    .replace(/\bcomplex carb(ohydrate)?s\b/gi, "pap, brown bread, oats or rice")
+    .replace(/\bwhole grains\b/gi, "brown bread and oats")
+    .replace(/\blean proteins?\b/gi, "chicken, eggs or pilchards")
+    .replace(/\bhealthy fats\b/gi, "peanut butter, avo or nuts");
 
   // "have" alone is too broad — "does chicken have protein?" contains "have" but is a question.
   // Only use eating-specific verbs: had/ate/having/eating/just had/just ate/meal labels.
