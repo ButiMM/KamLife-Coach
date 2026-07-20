@@ -233,9 +233,11 @@ export async function handleEarlyCommands(ctx: {
     return tReply;
   }
 
-  // If holiday/travel/gym-closed mentioned, ask what equipment they have
+  // HOLIDAY / TRAVEL EQUIPMENT — JUDGMENT, the brain owns it when live. Keyword template hijacked food/grocery
+  // messages (2026-07-18: "adjust my groceries on vacation" → a workout). Fallback: no food context, real training intent.
   const isWorkoutRequestInMessage = /\b(workout|training|session|programme|program|exercise|gym|train|send me|my workout|today)\b/i.test(m);
-  if (isHolidayMention) {
+  const isFoodOrGroceryContext = /\b(grocer|grocery|shopping list|meal|meals|eat|eating|food|snack|breakfast|lunch|dinner|portion|calorie|protein|recipe|cook|diet|fridge|cupboard|pantry)\b/i.test(m);
+  if (isHolidayMention && isWorkoutRequestInMessage && !isFoodOrGroceryContext && process.env.ENGINE_LIVE !== "on") {
     awaitingEquipmentAnswer.set(phone, true);
     user.awaitingInputType = "equipment";
     await db.update(users).set({ awaitingInputType: "equipment" }).where(eq(users.phoneNumber, phone)).catch((e) => console.error("[AWAITING] set equipment failed:", e));

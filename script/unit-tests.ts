@@ -829,6 +829,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(src, /tempEquipmentMode\.has\(phone\) \|\| \(user\.awaitingInputType \|\| ""\)\.startsWith\("holiday_equipment"\)/, "fires only when real holiday state exists to clear");
     assert.match(src, /startsWith\("holiday_equipment"\)\) && !skipBackToGym &&/, "holiday-state AND the safety guard both gate the trigger");
   });
+  test("holiday-equipment: JUDGMENT deferred to the brain, never hijacks a food/grocery message (the vacation shitshow, 2026-07-18)", () => {
+    const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    // The equipment-question template must NOT fire on a food/grocery context, must require a
+    // real training intent, and must stand down entirely when the brain is the live front-door.
+    assert.match(src, /isFoodOrGroceryContext/, "a food/grocery guard exists");
+    assert.match(src, /if \(isHolidayMention && isWorkoutRequestInMessage && !isFoodOrGroceryContext && process\.env\.ENGINE_LIVE !== "on"\)/, "food-guarded, training-gated, and deferred to the brain when live");
+    const FOOD = /\b(grocer|grocery|shopping list|meal|meals|eat|eating|food|snack|breakfast|lunch|dinner|portion|calorie|protein|recipe|cook|diet|fridge|cupboard|pantry)\b/i;
+    assert.ok(FOOD.test("I need you to adjust my grocery list while I'm on vacation"), "the exact live miss is a food context");
+    assert.ok(FOOD.test("what should I be eating on holiday"), "eating-on-holiday is a food context");
+    assert.ok(!FOOD.test("gym is closed this week, what workout can I do"), "a pure training-away message is not a food context");
+  });
 
   // (b2) DETERMINISTIC word-net: the prompt ban alone failed twice — the sanitizer must
   // guarantee category jargon can never reach a client, replaced with real SA foods.
