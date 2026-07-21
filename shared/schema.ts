@@ -617,7 +617,8 @@ export const reminders = pgTable(
     userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
     phoneNumber: text("phone_number").notNull(),
     body: text("body").notNull(),                 // what to remind them, phrased as the nudge text
-    fireAt: timestamp("fire_at").notNull(),        // when to send (real UTC)
+    fireAt: timestamp("fire_at").notNull(),        // when to send (real UTC); for a recurring reminder this is the NEXT fire
+    recurrence: text("recurrence"),                // null = one-shot | 'daily' | 'weekly' — poller re-schedules the next one
     kind: text("kind").notNull().default("user"),  // 'user' (client-set) | 'return' (auto night-before-return nudge)
     status: text("status").notNull().default("pending"), // 'pending' | 'sent' | 'cancelled'
     createdAt: timestamp("created_at").defaultNow().notNull(),

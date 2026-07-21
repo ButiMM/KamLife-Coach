@@ -11,12 +11,26 @@ import { db } from "./db";
 import { reminders } from "../shared/schema";
 import { eq, and, lte } from "drizzle-orm";
 
-import { returnNudgeTime } from "./reminders-parse";
+import { returnNudgeTime, describeFireTime } from "./reminders-parse";
+import type { Recurrence } from "./reminders-parse";
 export { parseReminderRequest, describeFireTime, returnNudgeTime } from "./reminders-parse";
-export type { ParsedReminder } from "./reminders-parse";
+export type { ParsedReminder, Recurrence } from "./reminders-parse";
 
-export async function createReminder(userId: string, phone: string, body: string, fireAt: Date): Promise<void> {
-  await db.insert(reminders).values({ userId, phoneNumber: phone, body, fireAt });
+export async function createReminder(userId: string, phone: string, body: string, fireAt: Date, recurrence: Recurrence = null): Promise<void> {
+  await db.insert(reminders).values({ userId, phoneNumber: phone, body, fireAt, recurrence });
+}
+
+/** "every day at 8:00am" / "every Monday at 6:00am" — the recurring form of describeFireTime. */
+export function describeRecurring(fireAt: Date, recurrence: Recurrence): string {
+  const one = describeFireTime(fireAt); // "today at 8:00am" / "Mon 21 Jul at 6:00am"
+  const time = one.replace(/^.*\bat\s+/, "at "); // keep just "at H:MMxm"
+  if (recurrence === "daily") return `every day ${time}`;
+  if (recurrence === "weekly") {
+    const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+    const d = new Date(fireAt.getTime() + 2 * 3_600_000).getUTCDay();
+    return `every ${days[d]} ${time}`;
+  }
+  return one;
 }
 
 /** Client-facing reminders only ('my reminders' should never list system nudges). */
@@ -67,4 +81,18 @@ export async function fetchDueReminders(nowUtc: Date = new Date()) {
 
 export async function markReminderSent(id: string): Promise<void> {
   await db.update(reminders).set({ status: "sent", sentAt: new Date() }).where(eq(reminders.id, id));
+}
+
+/** Next fire time for a recurring reminder, skipping any occurrences missed during downtime. */
+export function nextRecurrenceTime(fireAt: Date, recurrence: Recurrence): Date {
+  const ms = recurrence === "weekly" ? 7 * 86_400_000 : 86_400_000;
+  let next = fireAt.getTime() + ms;
+  const now = Date.now();
+  while (next <= now) next += ms; // after downtime, jump to the next FUTURE occurrence — never spam a backlog
+  return new Date(next);
+}
+
+/** Advance a recurring reminder to its next occurrence (stays pending). */
+export async function advanceRecurring(id: string, nextFireAt: Date): Promise<void> {
+  await db.update(reminders).set({ fireAt: nextFireAt }).where(eq(reminders.id, id));
 }

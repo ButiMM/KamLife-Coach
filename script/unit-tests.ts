@@ -882,6 +882,26 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const noBody = parseReminderRequest("remind me at 6am");
     assert.ok(noBody && noBody.kind === "need_body", "time but no task → ask what");
   });
+  test("reminders: recurring — 'every morning' / 'every day at 8pm' / 'every Monday' repeat, one-shots don't", async () => {
+    const { parseReminderRequest } = await import("../server/reminders-parse");
+    const { nextRecurrenceTime } = await import("../server/reminders");
+    const daily = parseReminderRequest("remind me to take creatine every morning");
+    assert.ok(daily && daily.kind === "set" && daily.recurrence === "daily", "every morning → daily");
+    if (daily && daily.kind === "set") {
+      assert.equal(daily.body, "take creatine", "recurrence words stripped from the task");
+      assert.equal(new Date(daily.fireAt.getTime() + 2 * 3_600_000).getUTCHours(), 7, "morning = 7am SAST");
+    }
+    const dailyTimed = parseReminderRequest("remind me to log my day every day at 8pm");
+    assert.ok(dailyTimed && dailyTimed.kind === "set" && dailyTimed.recurrence === "daily", "every day at 8pm → daily");
+    const weekly = parseReminderRequest("remind me to weigh in every monday");
+    assert.ok(weekly && weekly.kind === "set" && weekly.recurrence === "weekly", "every monday → weekly");
+    const oneShot = parseReminderRequest("remind me to take creatine at 8pm");
+    assert.ok(oneShot && oneShot.kind === "set" && oneShot.recurrence === null, "a normal reminder is one-shot, not recurring");
+    // The poller advances a daily reminder ~24h and skips a backlog after downtime.
+    const past = new Date(Date.now() - 3 * 86_400_000);
+    const next = nextRecurrenceTime(past, "daily");
+    assert.ok(next.getTime() > Date.now(), "a stale recurring reminder jumps to the next FUTURE fire, never spams the backlog");
+  });
   test("reminders: 'weigh in on monday' keeps a clean task (no dangling preposition)", async () => {
     const { parseReminderRequest } = await import("../server/reminders-parse");
     const r = parseReminderRequest("remind me to weigh in on monday");

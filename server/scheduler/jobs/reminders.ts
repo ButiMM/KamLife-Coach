@@ -1,7 +1,8 @@
 import { sendWhatsApp } from "../../scheduler";
 import { isProactivePaused } from "../shared";
 import { logChat } from "../../handlers/chat-log";
-import { fetchDueReminders, markReminderSent } from "../../reminders";
+import { fetchDueReminders, markReminderSent, nextRecurrenceTime, advanceRecurring } from "../../reminders";
+import type { Recurrence } from "../../reminders";
 
 /**
  * FIRE DUE REMINDERS — polls every minute. Sends every pending reminder whose fireAt has
@@ -22,8 +23,11 @@ export async function runDueReminders(): Promise<void> {
   console.log(`[SCHEDULER] JOB: firing ${due.length} due reminder(s)`);
   for (const r of due) {
     try {
-      // Mark sent FIRST so a mid-send crash can't double-fire the same reminder.
-      await markReminderSent(r.id);
+      // Advance/close FIRST so a mid-send crash can't double-fire. A recurring reminder rolls to
+      // its next occurrence (stays pending); a one-shot is marked sent.
+      const rec = (r as any).recurrence as Recurrence;
+      if (rec) await advanceRecurring(r.id, nextRecurrenceTime(new Date(r.fireAt as any), rec));
+      else await markReminderSent(r.id);
       // Client-set reminders get the ⏰ prefix; auto 'return' nudges are self-contained coach talk.
       const msg = (r as any).kind === "return" ? r.body : `⏰ Reminder: ${r.body}`;
       await sendWhatsApp(r.phoneNumber, msg);

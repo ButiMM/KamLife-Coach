@@ -434,6 +434,7 @@ async function runMigrations(): Promise<void> {
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
     // reminders.kind — added after the table shipped, so ensure it on existing instances.
     `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'user'`,
+    `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurrence TEXT`,
     // POPIA consent columns
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent BOOLEAN DEFAULT false`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent_at TIMESTAMP`,

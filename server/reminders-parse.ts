@@ -11,10 +11,11 @@ import { nextDayDate } from "./utils";
 const SAST_OFFSET_MS = 2 * 3_600_000;
 const pad = (n: number) => String(n).padStart(2, "0");
 
+export type Recurrence = "daily" | "weekly" | null;
 export type ParsedReminder =
-  | { kind: "set"; body: string; fireAt: Date }
+  | { kind: "set"; body: string; fireAt: Date; recurrence: Recurrence }
   | { kind: "need_time"; body: string }
-  | { kind: "need_body"; fireAt: Date }
+  | { kind: "need_body"; fireAt: Date; recurrence: Recurrence }
   | null;
 
 /** SAST wall-clock "now" as a Date whose UTC fields read the SAST time. */
@@ -44,6 +45,12 @@ export function parseReminderRequest(message: string): ParsedReminder {
 
   // Substrings we strip out of the body once matched.
   const strip: RegExp[] = [];
+
+  // ---- 0. RECURRENCE: "every day", "daily", "every morning", "every Monday" ----
+  let recurrence: Recurrence = null;
+  if (/\b(every ?day|everyday|daily|each day|every (morning|evening|night|afternoon))\b/i.test(m)) recurrence = "daily";
+  else if (/\bevery (monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/i.test(m)) recurrence = "weekly";
+  if (recurrence) strip.push(/\b(every ?day|everyday|daily|each day|every)\b/i);
 
   // ---- 1. RELATIVE: "in 2 hours", "in 30 minutes", "in 3 days" ----
   let fireAt: Date | null = null;
@@ -99,6 +106,8 @@ export function parseReminderRequest(message: string): ParsedReminder {
       hh = 12; strip.push(/\b(noon|midday|lunch ?time)\b/i);
     } else if (dayWord) {
       hh = 8; // a bare day ("remind me on Monday") defaults to 8am SAST
+    } else if (recurrence) {
+      hh = 8; // a recurring reminder with no stated time defaults to 8am SAST
     }
 
     if (hh !== null) {
@@ -126,10 +135,10 @@ export function parseReminderRequest(message: string): ParsedReminder {
   // ("weigh in on <monday>" → "weigh in on" → "weigh in").
   body = body.replace(/\s+\b(on|at|by|to|about|for|of|this|next)\b\s*$/i, "").trim();
 
-  if (fireAt && !body) return { kind: "need_body", fireAt };
+  if (fireAt && !body) return { kind: "need_body", fireAt, recurrence };
   if (!fireAt && body) return { kind: "need_time", body };
   if (!fireAt && !body) return { kind: "need_time", body: "" };
-  return { kind: "set", body: body.slice(0, 240), fireAt: fireAt! };
+  return { kind: "set", body: body.slice(0, 240), fireAt: fireAt!, recurrence };
 }
 
 /**

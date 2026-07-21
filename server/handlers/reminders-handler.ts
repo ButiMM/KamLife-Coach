@@ -11,7 +11,7 @@ import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import {
   parseReminderRequest, createReminder, listPendingReminders, cancelAllReminders,
-  describeFireTime,
+  describeFireTime, describeRecurring,
 } from "../reminders";
 
 async function setAwaiting(phone: string, user: any, value: string | null): Promise<void> {
@@ -34,8 +34,8 @@ export async function handleReminderCommand(ctx: {
     const parsed = parseReminderRequest(`remind me to ${body} ${message}`);
     if (parsed && parsed.kind === "set") {
       await setAwaiting(phone, user, null);
-      await createReminder(user.id, phone, parsed.body || body, parsed.fireAt);
-      const reply = `Got it — I'll remind you to ${parsed.body || body} ${describeFireTime(parsed.fireAt)}. ✅`;
+      await createReminder(user.id, phone, parsed.body || body, parsed.fireAt, parsed.recurrence);
+      const reply = `Got it — I'll remind you to ${parsed.body || body} ${describeRecurring(parsed.fireAt, parsed.recurrence)}. ✅`;
       await logChat(user.id, message, reply, "REMINDER_SET");
       return reply;
     }
@@ -72,7 +72,7 @@ export async function handleReminderCommand(ctx: {
       await logChat(user.id, message, reply, "REMINDER_LIST_EMPTY");
       return reply;
     }
-    const lines = pending.map((r) => `• ${r.body} — ${describeFireTime(new Date(r.fireAt as any))}`).join("\n");
+    const lines = pending.map((r) => `• ${r.body} — ${describeRecurring(new Date(r.fireAt as any), (r as any).recurrence)}`).join("\n");
     const reply = `${hi}here's what I'm holding for you:\n\n${lines}\n\nSay *cancel reminders* to clear them.`;
     await logChat(user.id, message, reply, "REMINDER_LIST");
     return reply;
@@ -93,8 +93,8 @@ export async function handleReminderCommand(ctx: {
   if (!parsed) return null; // not a reminder request — let the pipeline continue
 
   if (parsed.kind === "set") {
-    await createReminder(user.id, phone, parsed.body, parsed.fireAt);
-    const reply = `Got it — I'll remind you to ${parsed.body} ${describeFireTime(parsed.fireAt)}. ✅`;
+    await createReminder(user.id, phone, parsed.body, parsed.fireAt, parsed.recurrence);
+    const reply = `Got it — I'll remind you to ${parsed.body} ${describeRecurring(parsed.fireAt, parsed.recurrence)}. ✅`;
     await logChat(user.id, message, reply, "REMINDER_SET");
     return reply;
   }
