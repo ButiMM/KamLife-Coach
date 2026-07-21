@@ -77,7 +77,8 @@ const FLOW_A: Flow = {
     { send: "30", expectState: "ASK_EMAIL", expectReply: [/email/i] },
     { send: "skip", expectState: "ASK_WEIGHT_HEIGHT", expectReply: [/weight and height/i] },
     { send: "83kg, 1.75m", expectState: "ASK_GOAL", expectReply: [/83kg, 175cm/, /goal/i] },
-    { send: "1", expectState: "ASK_MEDICAL", expectReply: [/Goal locked in.*Lose fat/i, /medical/i] },
+    { send: "1", expectState: "ASK_BODY_PHOTOS", expectReply: [/Goal locked in.*Lose fat/i, /photos/i] },
+    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
     { send: "6", expectState: "ASK_INJURIES", expectReply: [/injuries/i] },
     { send: "none", expectState: "ASK_DIETARY", expectReply: [/dietary/i] },
     { send: "1", expectState: "ASK_FOODS", expectReply: [/foods you \*love\*/i] },
@@ -113,7 +114,8 @@ const FLOW_B: Flow = {
     // weight only — must SAVE the weight and offer the height-estimate menu, not loop
     { send: "68kg", expectState: "ASK_WEIGHT_HEIGHT", expectReply: [/68kg/, /height/i, /Average/i] },
     { send: "2", expectState: "ASK_GOAL", expectReply: [/163cm/] },
-    { send: "3", expectState: "ASK_MEDICAL", expectReply: [/Lose fat and build muscle/i] },
+    { send: "3", expectState: "ASK_BODY_PHOTOS", expectReply: [/Lose fat and build muscle/i, /photos/i] },
+    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
     { send: "5", expectState: "ASK_INJURIES" },
     { send: "bad knees", expectState: "ASK_DIETARY" },
     { send: "4", expectState: "ASK_FOODS" },
@@ -152,7 +154,8 @@ const FLOW_C: Flow = {
     // CAPTURE BUG 2: the menu says "Or type it: *1.72m*" — typing that used to be
     // read as weight 1.72 and rejected ("172cm" as weight 172kg). Must be height.
     { send: "1.72m", expectState: "ASK_GOAL", expectReply: [/100kg, 172cm/] },
-    { send: "2", expectState: "ASK_MEDICAL", expectReply: [/Build muscle/i] },
+    { send: "2", expectState: "ASK_BODY_PHOTOS", expectReply: [/Build muscle/i, /photos/i] },
+    { send: "skip", expectState: "ASK_MEDICAL", expectReply: [/medical/i] },
     { send: "2", expectState: "ASK_INJURIES" },
     { send: "none", expectState: "ASK_DIETARY" },
     { send: "2", expectState: "ASK_FOODS" },
@@ -162,13 +165,17 @@ const FLOW_C: Flow = {
     { send: "4", expectState: "ASK_EXPERIENCE" },
     { send: "4", expectState: "COMPLETE" },
   ],
+  // GOAL-REALITY GATE (2026-07-21): Sipho is 100kg at BMI 33.8 and chose "build muscle" — the
+  // gate correctly steers an obese client off a bulk and into fat-loss-first (he can override).
+  // So the stored goal + targets are fat_loss, NOT the muscle_gain he tapped. This flow now also
+  // proves the gate fires end-to-end.
   final: {
     name: "Sipho", gender: "male", age: 45, currentWeight: "100", heightCm: 172, bmi: "33.8",
-    goalType: "muscle_gain", medicalConditions: "hypertension",
+    goalType: "fat_loss", medicalConditions: "hypertension",
     trainingMode: "walk_only", weeklyFoodBudget: "over_600", budgetLevel: "premium",
     trainingExperience: "advanced", subscriptionStatus: "inactive",
   },
-  targetInputs: { weight: 100, goal: "muscle_gain", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "advanced" },
+  targetInputs: { weight: 100, goal: "fat_loss", situation: "office", days: 4, gender: "male", age: 45, heightCm: 172, exp: "advanced" },
 };
 
 let failures = 0;
