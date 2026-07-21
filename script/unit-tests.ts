@@ -890,7 +890,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
   });
 
   test("keyword-wall sweep: the JUDGMENT handlers defer to the brain when live (voice ported to the brain first, so no regression)", () => {
-    const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    const src = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
     // Each emotional/coaching-judgment handler must stand down when ENGINE_LIVE is on.
     for (const guard of [
       /process\.env\.ENGINE_LIVE !== "on" && isBereaved/,
@@ -926,7 +926,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const sick = readFileSync(join("server", "handlers", "sick-flow.ts"), "utf-8");
     assert.match(sick, /scheduleReturnNudge\(user\.id, user\.phoneNumber, sickUntil, "sick"\)/, "sick_until schedules the nudge");
     assert.match(sick, /cancelReturnNudges\(user\.id\)/, "recovery cancels the pending nudge");
-    const early = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    const early = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
     assert.match(early, /scheduleReturnNudge\(user\.id, phone, rpDate, "away"\)/, "back_on schedules the nudge");
   });
   test("intent bouncer: a STRATEGY message about training never dumps the programme (the running voice-note miss, 2026-07-21)", () => {
@@ -1071,7 +1071,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.ok(d && /^\d{4}-\d{2}-\d{2}$/.test(d), "a day name becomes a real date");
     assert.ok(nextDayDate("tomorrow"), "tomorrow works");
     assert.equal(nextDayDate("someday"), null, "junk is rejected");
-    const ec = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    const ec = readFileSync(join("server", "handlers", "advice-commands.ts"), "utf-8");
     assert.match(ec, /back_on:\$\{rpDate\}/, "the date is persisted whoever replies");
     const snap = readFileSync(join("server", "brain", "client-snapshot.ts"), "utf-8");
     assert.match(snap, /back_on:\(\\d\{4\}-\\d\{2\}-\\d\{2\}\)/, "and the snapshot surfaces it to the brain");
