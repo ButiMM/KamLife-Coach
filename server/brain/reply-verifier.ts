@@ -67,7 +67,7 @@ const MYTH_DEBUNK_RE =
 // movement. Progressive-overload phrasing ("add 2.5kg", "add a rep/set to your press")
 // never matches — those are the CORRECT answer, not a violation.
 const PROGRAMME_FREELANCE_RE =
-  /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|try (?:doing |adding |some ))\b[^.!?]{0,20}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?)\b/i
+  /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|add in|try (?:doing |adding |some ))\b[^.!?]{0,24}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?|pull[- ]?ups?|chin[- ]?ups?|dips|mountain climbers?|kettlebell\w*|box jumps?|jumping jacks?|russian twists?|leg raises?|jump squats?|snatch\w*|clean(?:s| and jerks?)?)\b/i
 ;
 
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {

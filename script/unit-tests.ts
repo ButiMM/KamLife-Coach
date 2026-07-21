@@ -3014,6 +3014,10 @@ test("verifier blocks the brain freelancing off-programme exercises", () => {
   assert.ok(!verifyBrainReply("Try adding exercises such as lunges and deadlifts to build your legs.", {}).ok);
   assert.ok(!verifyBrainReply("Incorporate squats and planks to strengthen your lower body.", {}).ok);
   assert.ok(!verifyBrainReply("Back & Core: incorporate exercises like rows. Legs: squats and lunges.", {}).ok);
+  // Slice 4 (2026-07-21): broadened net — more off-programme movements caught.
+  assert.ok(!verifyBrainReply("Start doing pull-ups and dips for your upper body.", {}).ok);
+  assert.ok(!verifyBrainReply("Add in some kettlebell swings and box jumps.", {}).ok);
+  assert.ok(!verifyBrainReply("Try adding burpees and mountain climbers between sets.", {}).ok);
 });
 
 test("verifier ALLOWS the CORRECT improvement answer (overload on existing lifts, no new moves)", () => {
