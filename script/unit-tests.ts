@@ -3049,6 +3049,16 @@ test("vision prompt: approval verdict offers real SA shelf + takeaway swaps", ()
   assert.ok(/grilled not fried/i.test(approve), "fried→grilled swap present");
 });
 
+// SHARED / COMMUNAL SPREAD (2026-07-21 founder spec): a shisa nyama / braai photo shared
+// among a group must be PORTIONED for the one person, never logged as their whole intake.
+test("vision prompt: a shared braai/shisa nyama spread is portioned, not totalled to one person", () => {
+  const p = buildFoodVisionUserPrompt({ message: "", isApprovalCaption: false, liveCal: 2000, liveProt: 150 });
+  assert.ok(/SHARED \/ COMMUNAL SPREAD/i.test(p), "the communal-spread rule exists");
+  assert.ok(/shisa nyama|braai board/i.test(p), "names the real SA shared-eating occasions");
+  assert.ok(/do NOT log the whole thing|NEVER the whole board/i.test(p), "never logs the whole platter to one person");
+  assert.ok(/fist of the leaner meat|half-to-one fist of pap/i.test(p), "coaches a realistic single-person portion");
+});
+
 // NUMBER-FREE PHOTO REPLIES for numbers:low clients (2026-07-14). The vision prompt
 // must instruct the model to omit figures BUT keep the internal TOTAL line for the
 // maths, and only in low mode — the default prompt is untouched.
