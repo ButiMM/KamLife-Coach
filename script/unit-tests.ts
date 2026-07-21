@@ -940,6 +940,22 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
     assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
   });
+  test("code-level intent bouncer: strategy/emotional turns withhold action tools; logs keep them (review Q1)", async () => {
+    const { isStrategyOrEmotional } = await import("../server/understanding/actions");
+    // Strategy/emotional → tools withheld (can only converse, never dump a workout/log).
+    assert.ok(isStrategyOrEmotional("let's talk about running and how to balance it with the gym"), "the running voice-note class");
+    assert.ok(isStrategyOrEmotional("map my journey for the next 3 months"), "map-my-journey");
+    assert.ok(isStrategyOrEmotional("I'm feeling really down and want to give up"), "emotional turn");
+    assert.ok(isStrategyOrEmotional("how do I incorporate cardio without losing gains"), "strategy question");
+    // A data write must NEVER be stripped, even inside an emotional message.
+    assert.ok(!isStrategyOrEmotional("rough day honestly, I only ate a slice of bread"), "a food log keeps its tools");
+    assert.ok(!isStrategyOrEmotional("feeling low but I did 9000 steps"), "a step report keeps its tools");
+    assert.ok(!isStrategyOrEmotional("workout"), "a bare command is not strategy");
+    assert.ok(!isStrategyOrEmotional("I had 2 eggs and pap"), "a plain log is not strategy");
+    // And it's wired into the live engine's emitActions gate.
+    const live = readFileSync(join("server", "understanding", "live.ts"), "utf-8");
+    assert.match(live, /emitActions: actionMode !== "off" && !strategyTurn/, "strategy turns pass emitActions=false");
+  });
   test("voice: long rambles get condensed to their actionable core before the brain (margin + clarity)", () => {
     const wedge = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
     assert.match(wedge, /export async function condenseVoiceRamble/, "the summariser wedge exists");

@@ -136,6 +136,28 @@ export function isSickReaffirmation(message: string): boolean {
   return !hasNewDuration;
 }
 
+/**
+ * CODE-LEVEL INTENT BOUNCER (external review Q1, 2026-07-21) — the mathematically-reliable
+ * kill for tool over-firing. When a turn is STRATEGY or EMOTIONAL, the engine hands the model
+ * NO action tools, so it physically cannot fire a workout dump / log / schedule on "let's talk
+ * about running", "map my journey", "I want to give up", "I'm feeling down". Prompt rules alone
+ * fail because the tool schema is salient in-context; removing the tool is absolute.
+ *
+ * Deliberately NARROW — a real data write must NEVER be stripped: any clear log/report signal
+ * (ate/had, a meal label, a number with steps/kg/km/reps) keeps the tools, even inside an
+ * emotional message ("rough day, only ate a slice of bread" still logs the bread).
+ */
+export function isStrategyOrEmotional(message: string): boolean {
+  const s = (message || "").toLowerCase().trim();
+  if (!s) return false;
+  // Guardrail: a log/report keeps its action ability — never strip a data write.
+  if (/\b(i (ate|had)|just (ate|had)|having|for (breakfast|lunch|dinner|supper)|logged)\b/.test(s)
+    || /\b\d+\s*(steps|kg|kgs|km|l\b|litres?|ml|glasses?|reps|sets|min(ute)?s)\b/.test(s)) return false;
+  const strategy = /\b(let'?s talk|talk(ing)? about|thoughts?\b|what do you (think|reckon)|how (do|can|should|would) i\b[^.!?]{0,40}\b(balance|incorporate|combine|approach|go about|fit|add|start|mix)|map (out )?my (journey|plan)|my (fitness )?journey|long.?term|where (am i|are we) (going|headed)|what'?s the point|giv(e|ing) up|why bother|i'?m done with|can'?t do this anymore)\b/.test(s);
+  const emotional = /\b(i'?m (feeling |so |really |just |a bit |very )*(sad|down|depressed|low|demotivat\w*|unmotivat\w*|frustrat\w*|overwhelm\w*|stress\w*|anxious|lost|hopeless|defeated|burnt out|burned out)|i feel like (giving|quitting|nothing)|feeling (really |so |very )*(down|low|sad|lost|defeated)|feeling like giving up|motivate me|encourage me|i'?ve been thinking|struggling (mentally|emotionally)|mentally (drained|exhausted|tired))\b/.test(s);
+  return strategy || emotional;
+}
+
 function clampNum(v: unknown, lo: number, hi: number): number {
   const n = Number(v);
   return Number.isFinite(n) ? Math.min(Math.max(n, lo), hi) : NaN;

@@ -30,7 +30,7 @@ import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
 import { logChat } from "../handlers/chat-log";
 import { executeAction } from "./executor";
-import { describeAction } from "./actions";
+import { describeAction, isStrategyOrEmotional } from "./actions";
 
 export function engineLive(): boolean {
   return process.env.ENGINE_LIVE === "on";
@@ -149,7 +149,11 @@ export async function runMeaningEngineLive(ctx: {
 
     const history = user?.id ? await recentTurns(user.id) : [];
     const actionMode = engineActionMode();
-    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" });
+    // CODE-LEVEL INTENT BOUNCER (review Q1): a strategy/emotional turn gets NO action tools —
+    // the model can only converse, so it can never over-fire a workout dump or a log.
+    const strategyTurn = isStrategyOrEmotional(message);
+    if (strategyTurn) console.log(`[ENGINE] strategy/emotional turn — action tools withheld`);
+    const result = await runMeaningEngine({ openai, user, message, prior, snapshot, history: bridgeNote ? [...history, bridgeNote] : history, emitActions: actionMode !== "off" && !strategyTurn });
     if (!result) return null; // fail-open → existing pipeline runs
 
     // Grow the client's durable memory (fail-open — a save miss never blocks the reply).
