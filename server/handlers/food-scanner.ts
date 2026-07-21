@@ -510,6 +510,16 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     .replace(/\s*\bHow does that sound\??/gi, "")
     .trim();
 
+  // CAPABILITY-DISCLAIMER GUARD — the whole product runs on photo/video analysis (progress pics,
+  // food photos, form checks, scale screenshots), but the raw model sometimes leaks its generic
+  // "I can't view images" reflex (2026-07-21 live: "I want to send my progress pictures" → "I
+  // can't view pictures, but…"). That's a capability LIE that kills trust instantly. Replace any
+  // such disclaimer with the truth: send them, I read them.
+  trimmed = trimmed.replace(
+    /(?:\bas\s+an?\s+[^,.]{0,30},\s*)?\bI(?:\s*'?m|\s+am)?\s+(?:really\s+|just\s+|actually\s+|currently\s+|sorry,?\s+|afraid\s+|directly\s+)*(?:can'?t|cannot|can\s+not|unable\s+to|not\s+able\s+to|(?:'?m\s+|am\s+)?(?:un|not\s+)?able\s+to)\s+(?:\w+\s+){0,2}?(?:view|see|look\s+at|process|analy[sz]e|read|open|receive|access)\s+(?:[\w'-]+\s+){0,3}?(?:pictures?|images?|photos?|pics?|videos?|screenshots?)\b[^.!?]*[.!?]/gi,
+    "Yes — send them through! Front, side and back in good light, and I'll read them and track your progress.",
+  ).replace(/\s{2,}/g, " ").trim();
+
   // BULLET-DUMP COLLAPSE (2026-07-21, IMG_6144: a good running answer still came out as a
   // "*Start Slow*: … / *Balance*: … / *Fuel Up*: …" list — reads like an app, not like Kam).
   // The brain prompt bans bullet dumps but the model does it anyway, so we enforce it in code:

@@ -1029,6 +1029,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(biz, /groupBy\(gptCosts\.feature\)/, "broken down by feature — the data was always there, now surfaced");
     assert.match(biz, /monthlyPerClient > 3\.5/, "a margin guard flags cost eating into the R199");
   });
+  test("capability guard: the model's 'I can't view pictures' lie is replaced with an invite (IMG_6162)", async () => {
+    const { sanitizeCoachReply } = await import("../server/handlers/food-scanner");
+    for (const lie of [
+      "I can't view pictures, but I'm here to help you with your journey!",
+      "I cannot see photos, however tell me how you feel.",
+      "As a text-based assistant, I can't process images. Let's talk instead.",
+      "I'm unable to view your progress pictures right now.",
+    ]) {
+      const out = sanitizeCoachReply(lie, "I want to send you my progress pictures");
+      assert.ok(!/can'?t\s+(view|see|process)|unable to view|text-based/i.test(out), `the capability lie must not survive: "${out}"`);
+      assert.match(out, /send them through/i, "replaced with a warm invite to send the photos");
+    }
+    // A normal reply is untouched (the guard only fires on the capability disclaimer).
+    assert.match(sanitizeCoachReply("Focus on hitting your protein target today.", "how am i doing"), /Focus on hitting your protein/);
+  });
   test("voice: a bullet-dump coaching reply is reflowed into coach prose (IMG_6144), short lists left alone", async () => {
     const { collapseBulletDump } = await import("../server/handlers/food-scanner");
     const dump = "Got it. To add running:\n- *Start Slow*: begin with short easy runs\n• *Balance with Gym*: run on non-lifting days\n• *Fuel Up*: eat enough for both";
