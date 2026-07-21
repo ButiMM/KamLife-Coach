@@ -4253,6 +4253,20 @@ test("goalStatus: on-target and room-left read right for fat_loss", () => {
   assert.ok(/still available|deficit on track/i.test(goalStatusLine("fat_loss", 500)), "room left with meaning");
 });
 
+// SPINE SURGERY slice 5 (2026-07-21): health-led goals get a plain-language food footer —
+// NO calories, NO deficit — while body-comp goals keep their numbers.
+test("goalStatus: wellness goals get a no-numbers habit line; body-comp keep the numbers", () => {
+  for (const g of ["general", "health_condition"]) {
+    const line = goalStatusLine(g, 500);
+    assert.ok(!/\d/.test(line), `${g} footer carries no numbers: ${line}`);
+    assert.ok(!/kcal|deficit|surplus|target/i.test(line), `${g} footer avoids macro language: ${line}`);
+    assert.ok(/habit|winning|protein|walk/i.test(line), `${g} footer still coaches the habit: ${line}`);
+  }
+  // Body-comp goals are unchanged — numbers stay.
+  assert.ok(/kcal|deficit/i.test(goalStatusLine("fat_loss", 500)));
+  assert.ok(/kcal|surplus|muscle fuel/i.test(goalStatusLine("muscle_gain", 400)));
+});
+
 // ============================================================
 // Programme requests in natural speech deliver the programme (2026-07-16:
 // "Show me my gym program" → engine said "reply program to see it")

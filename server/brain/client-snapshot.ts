@@ -107,8 +107,13 @@ export async function buildClientSnapshot(user: any): Promise<string> {
       const kcal = todayMeals.reduce((s, r) => s + (r.kcalInt || 0), 0);
       const prot = todayMeals.reduce((s, r) => s + (r.proteinInt || 0), 0);
       const labels = todayMeals.map(r => r.mealLabel).filter(Boolean).join(", ");
-      const remaining = calTarget > 0 ? Math.max(0, calTarget - kcal) : null;
-      lines.push(`Food TODAY so far: ~${kcal} kcal | ${prot}g protein across ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""}${labels ? ` (${labels})` : ""}.${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
+      // Health-led goals never get the "kcal still to eat / space left" budget framing —
+      // for them, count meals, not calories (goal-profiles: usesMacros=false).
+      const remaining = (profile.usesMacros && calTarget > 0) ? Math.max(0, calTarget - kcal) : null;
+      const foodCore = profile.usesMacros
+        ? `Food TODAY so far: ~${kcal} kcal | ${prot}g protein across ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""}${labels ? ` (${labels})` : ""}.`
+        : `Food TODAY so far: ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""} logged${labels ? ` (${labels})` : ""} — coach the QUALITY of the plate (protein first, veg, one carb), never a calorie count.`;
+      lines.push(`${foodCore}${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
     } else {
       lines.push(`Food TODAY: nothing logged yet — check the time above; early in the day this is normal. Don't scold, don't invent intake.`);
     }

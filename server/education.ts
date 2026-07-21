@@ -8,6 +8,7 @@
 // already exist.
 
 import { sastToday } from "./utils";
+import { getGoalProfile } from "./goal-profiles";
 
 type EduEvent = "meal" | "totals" | "steps";
 
@@ -145,6 +146,13 @@ export function weeklyNetWording(opts: { loggedDays: number; netKcal: number; bu
  * lists, photo path, text path) so the coaching can never drift apart again.
  */
 export function goalStatusLine(goalType: string | null | undefined, calRemaining: number): string {
+  // HEALTH-LED goals (general wellness / has-a-condition) never get a kcal/deficit footer
+  // (2026-07-21 spine surgery, founder: "even if we don't overpay somebody with numbers…
+  // educate the ones that don't want numbers"). A gogo gets a warm, plain-language line
+  // about the habit, never a calorie budget. Body-comp goals keep their numbers below.
+  if (!getGoalProfile(goalType).usesMacros) {
+    return `Logged 👌 Real food, tracked — that's the habit that actually changes things. Protein on the plate and a bit of a walk today, and you're winning.`;
+  }
   const goal = (goalType || "fat_loss").toLowerCase();
   const over = Math.abs(Math.min(0, calRemaining));
   const building = goal === "muscle_gain" || goal === "weight_gain";
