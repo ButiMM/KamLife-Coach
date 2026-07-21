@@ -28,6 +28,11 @@ mkdir(VOICE_DIR, { recursive: true }).catch(() => {});
  * Returns the public HTTPS URL for the audio file, or null if APP_BASE_URL is not set.
  */
 export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "warm"): Promise<string | null> {
+  // COST CIRCUIT-BREAKER (external review Q5): TTS is already reserved for milestone/emotional
+  // moments (never routine logs), but ElevenLabs is the one line item that can spike the R199
+  // margin. TTS=off kills all voice generation instantly from Railway — replies fall back to
+  // text, nothing breaks — so a cost spike is a one-env-var fix, not a deploy.
+  if (process.env.TTS === "off") { console.log("[TTS] disabled via killswitch (TTS=off) — text only"); return null; }
   let appUrl = (process.env.APP_BASE_URL || process.env.APP_URL || "").replace(/\/$/, "");
   if (!appUrl) {
     console.warn("[TTS] APP_BASE_URL / APP_URL not set — voice notes disabled");
