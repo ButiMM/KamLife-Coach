@@ -558,6 +558,16 @@ export async function handleFoodContext(ctx: {
   // Blocks directFoodScan and the main food scanner from firing on these messages.
   const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having)|still\s+to\s+(?:have|eat|grab|get|make|cook)|yet\s+to\s+(?:have|eat|grab|get)|haven.?t\s+(?:had|eaten|eat)|about\s+to\s+(?:have|eat|grab|make|cook|order)|still\s+(?:need|got|have)\s+to\s+(?:eat|have|grab))\b/i.test(m);
 
+  // A REQUEST for meal ideas ("give me meal suggestions for lunch and dinner", "suggest meals",
+  // "what should I eat for dinner", "meal ideas") is NOT a food log — but it contains "for
+  // lunch/dinner" which trips the food trigger. The client is ASKING, not reporting. Never send it
+  // to the food-log path (which would demand "describe the food"); defer so the coach answers with
+  // actual suggestions. (2026-07-21 live miss: a voice note asking for meal ideas was told to
+  // "describe what food that was".)
+  const isMealSuggestionRequest =
+    /\b(give me|send me|suggest|recommend|any (ideas?|options?)|(ideas?|options?) for|help me (plan|with)|what (should|can|do|must) i (eat|have|make|cook)|what to (eat|have|make|cook)|meal (suggestions?|ideas?|options?|plan)|plan my meals?|what (should|can) i (have|make|cook) for)\b/i.test(m)
+    && !/\b(i had|i ate|i just (had|ate)|just had|just ate|i'?ve (had|eaten)|having (a|some|my))\b/i.test(m);
+
   // ---- "ATE IT" — confirm a previously planned meal and log it ----
   // Closes the loop on FOOD_PLANNED: "gonna have X for lunch" → [eats] → "ate it" → logged.
   // Humans never type the magic phrase exactly — "Omg I just had it", "ok ate it now",
@@ -1317,7 +1327,7 @@ export async function handleFoodContext(ctx: {
   // Breakfast") from it. Don't call it — let the coach ask what they actually ate.
   const bareMealTimeReference = /^(?:i\s+)?(?:just\s+)?(?:had|have|having|ate|eating|did|done|for|my)?\s*(?:my\s+|some\s+|a\s+|the\s+)?(?:big\s+|small\s+|nice\s+|quick\s+|light\s+|heavy\s+|huge\s+|large\s+|good\s+|proper\s+|full\s+|lekker\s+)?(?:breakfast|lunch|dinner|supper|brunch|meal|food|brekkie|brekkies)\b[.!?]*$/i.test(m.trim());
   const tryGptFood = !isQuestion && !isEmotionalOnly && !hasActualFood && !voiceFallbackTooLong
-    && !isFuturePlanning && !bareMealTimeReference
+    && !isFuturePlanning && !bareMealTimeReference && !isMealSuggestionRequest
     && (hasStrongFoodTrigger || looksLikeBareFoodStatement);
   if (tryGptFood) {
     const gptFallbackResult = await gptFoodFallback(message, user);

@@ -64,6 +64,12 @@ export function isObviouslyInDomain(message: string): boolean {
   const t = (message || "").trim();
   if (t.length < 12) return true;         // greetings, acks, one-word commands — always fine
   if (/\d/.test(t) && t.length < 40) return true; // short numeric reports (steps/weight/reps)
+  // A very short reply — even one padded with emoji/punctuation ("Read‼️‼️", "yes!!", "come on man")
+  // — is a reaction in an ongoing coaching chat, NEVER an off-topic request. Cold-redirecting it
+  // ("I'm Coach K, here for your fitness journey") on a frustrated one-word reply is a trust
+  // breach (2026-07-21 live miss). Count real words, ignoring emoji/punctuation.
+  const words = (t.toLowerCase().match(/[a-z']+/g) || []);
+  if (words.length <= 2) return true;
   return IN_DOMAIN_RE.test(t);
 }
 

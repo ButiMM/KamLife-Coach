@@ -3961,6 +3961,26 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
 });
 
+// A short frustrated reaction must NEVER get the cold domain redirect (2026-07-21 live miss:
+// "Read‼️‼️" got "I'm Coach K, here for your fitness journey").
+test("domain-guard: a 1-2 word reaction is always in-domain, never cold-redirected", () => {
+  for (const m of ["Read‼️‼️‼️‼️", "yes!!", "come on", "seriously??", "wtf man", "no no"]) {
+    assert.ok(isObviouslyInDomain(m), `short reaction must stay in-domain: "${m}"`);
+  }
+});
+
+// A REQUEST for meal ideas is not a food LOG (2026-07-21 live miss: a voice note "give me meal
+// suggestions for lunch and dinner" was answered with "I didn't catch what food that was").
+test("food-context: a meal-suggestion request is never treated as a food log", () => {
+  const fc = readFileSync(join("server", "handlers", "food-context.ts"), "utf-8");
+  assert.match(fc, /isMealSuggestionRequest/, "the guard exists");
+  assert.match(fc, /!isFuturePlanning && !bareMealTimeReference && !isMealSuggestionRequest/, "it excludes the food-log path");
+  const REQ = /\b(give me|send me|suggest|recommend|any (ideas?|options?)|(ideas?|options?) for|help me (plan|with)|what (should|can|do|must) i (eat|have|make|cook)|what to (eat|have|make|cook)|meal (suggestions?|ideas?|options?|plan)|plan my meals?|what (should|can) i (have|make|cook) for)\b/i;
+  const LOG = /\b(i had|i ate|i just (had|ate)|just had|just ate|i'?ve (had|eaten)|having (a|some|my))\b/i;
+  assert.ok(REQ.test("give me meal suggestions for lunch and dinner") && !LOG.test("give me meal suggestions for lunch and dinner"), "the exact miss is caught as a request, not a log");
+  assert.ok(LOG.test("I had chicken and rice for lunch"), "a real food log is still a log, not a request");
+});
+
 // META-SAFETY: the domain decline must live in the PROMPT too (belt-and-suspenders) so every
 // path — engine, gpt-block fallback, old brain — refuses code/politics/essays, not just the
 // live-engine classifier. A fitness bot that writes Python for a reviewer is a compliance risk.
