@@ -112,3 +112,30 @@ export function usesMacroTargets(goalType: string | null | undefined): boolean {
 }
 
 export const GOAL_KEYS = Object.keys(PROFILES) as GoalKey[];
+
+// ── ONBOARDING GOAL DETECTION — from the client's own words or the menu number ──────────
+// Health-led goals (2026-07-21 spine surgery) are reachable at signup: someone who says
+// "I just want energy / to be healthy / manage my sugar" is NOT funnelled into a fat-loss
+// deficit. Pure/tested. Body-composition intent always wins ("lose weight to be healthy"
+// stays fat_loss) so the three existing goals never change.
+const BODY_COMP_RE = /\b(lose|fat|muscle|build|recomp\w*|both|weight|gain|bulk|cut|tone|shred|lean out)\b/i;
+const CONDITION_RE = /\b(diabet\w*|sugar|blood pressure|\bbp\b|hypertension|cholesterol|pre.?diabet\w*|my condition)\b/i;
+const WELLNESS_RE = /\b(health(?:y|ier)?|energy|energetic|tired|fatigue|wellness|well.?being|feel better|stay (?:active|well|healthy|fit)|keep (?:active|fit|moving|healthy)|get fit|mobil\w*|longevity|grandkids|grandchildren|keep up|general fitness|overall)\b/i;
+
+/** Did the client actually answer the goal question (a number 1–4 or any goal word)? */
+export function looksLikeGoalAnswer(msg: string): boolean {
+  const lower = (msg || "").toLowerCase();
+  return /[1-4]/.test(msg) || BODY_COMP_RE.test(lower) || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower);
+}
+
+/** Map the goal answer to a canonical goal key. Existing 1/2/3 behaviour is unchanged. */
+export function classifyGoalFromText(msg: string): GoalKey {
+  const lower = (msg || "").toLowerCase();
+  if (msg.includes("2") || /\b(build|muscle|gain|bulk)\b/i.test(lower)) return "muscle_gain";
+  if (msg.includes("3") || /\b(recomp\w*|both)\b/i.test(lower)) return "recomposition";
+  // Health-led ONLY when there's no body-composition intent in the message.
+  if (!BODY_COMP_RE.test(lower) && (msg.includes("4") || CONDITION_RE.test(lower) || WELLNESS_RE.test(lower))) {
+    return CONDITION_RE.test(lower) ? "health_condition" : "general";
+  }
+  return "fat_loss";
+}

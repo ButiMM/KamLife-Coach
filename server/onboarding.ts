@@ -8,6 +8,7 @@ import { buildActivationBrief } from "./activation";
 import { eq, and, desc, gte } from "drizzle-orm";
 import { buildFullProgramme, getKamlifeProgramme } from "./programme";
 import { calculateTargets, calculateStepsTarget } from "./targets";
+import { looksLikeGoalAnswer, classifyGoalFromText } from "./goal-profiles";
 import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
@@ -498,15 +499,13 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
   // ---- ASK_GOAL ----
   if (state === "ASK_GOAL") {
-    const lower = msg.toLowerCase();
-    const hasGoalNumber = /[1-3]/.test(msg);
-    const hasGoalKeyword = lower.includes("lose") || lower.includes("fat") || lower.includes("muscle") || lower.includes("build") || lower.includes("recomp") || lower.includes("both") || lower.includes("weight");
-    if (!hasGoalNumber && !hasGoalKeyword) {
-      return `What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both`;
+    // Goal detection is pure + tested in goal-profiles.ts. Health-led goals (general /
+    // health_condition) are now reachable at signup so a gogo or someone managing their
+    // sugar is never funnelled into a fat-loss deficit (2026-07-21 spine surgery).
+    if (!looksLikeGoalAnswer(msg)) {
+      return `What's your main goal?\n\n1️⃣ Lose fat\n2️⃣ Build muscle\n3️⃣ Both\n4️⃣ Just get healthier & feel good`;
     }
-    let goal = "fat_loss";
-    if (msg.includes("2") || lower.includes("build") || lower.includes("muscle") || lower.includes("gain")) goal = "muscle_gain";
-    else if (msg.includes("3") || lower.includes("recomp") || lower.includes("both")) goal = "recomposition";
+    const goal = classifyGoalFromText(msg);
 
     // If weight already captured (e.g., from ASK_WEIGHT_HEIGHT flow), skip the duplicate re-ask and set protein target now.
     const hasWeight = !!user.currentWeight;
@@ -518,8 +517,16 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
         proteinTarget: goalProt,
         onboardingState: "ASK_BODY_PHOTOS",
       }).where(eq(users.phoneNumber, phone));
-      const goalLabel = goal === "muscle_gain" ? "Build muscle" : goal === "recomposition" ? "Lose fat and build muscle" : "Lose fat";
-      return `Goal locked in: *${goalLabel}*.\n\n${bodyPhotoAsk(!!user.heightCm)}`;
+      const goalLabel = goal === "muscle_gain" ? "Build muscle"
+        : goal === "recomposition" ? "Lose fat and build muscle"
+        : goal === "general" ? "Get healthier & feel good"
+        : goal === "health_condition" ? "Healthier living"
+        : "Lose fat";
+      const healthLed = goal === "general" || goal === "health_condition";
+      const confirmLead = healthLed
+        ? `Love that — *${goalLabel}*. No scales, no calorie stress. We build steady energy, good food, and movement — at your pace.${goal === "health_condition" ? ` I'll coach your food, movement, and daily habits — and for anything about your condition, keep following your doctor.` : ""}`
+        : `Goal locked in: *${goalLabel}*.`;
+      return `${confirmLead}\n\n${bodyPhotoAsk(!!user.heightCm)}`;
     }
 
     await db.update(users).set({ goalType: goal, onboardingState: "ASK_WEIGHT_HEIGHT_FAST" }).where(eq(users.phoneNumber, phone));

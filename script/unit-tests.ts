@@ -19,7 +19,7 @@ import { classifyWorkoutFeedback } from "../server/workout-feedback";
 import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
-import { getGoalProfile, usesMacroTargets, GOAL_KEYS } from "../server/goal-profiles";
+import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -2777,6 +2777,32 @@ test("goal-profiles: body-composition goals push macros; health-led goals never 
     assert.strictEqual(getGoalProfile(g).energyStance, "maintenance", `${g} is coached around maintenance, never a deficit`);
     assert.strictEqual(getGoalProfile(g).dailyWin, "consistency_and_movement", `${g} wins on consistency, not macros`);
   }
+});
+
+// SPINE SURGERY slice 3 (2026-07-21): the health-led goals are REACHABLE at signup — a
+// gogo/tired/condition client can actually pick them, in their own words or via the menu.
+test("onboarding goal detection: health-led goals are selectable; body-comp unchanged", () => {
+  // The existing three are byte-identical.
+  assert.strictEqual(classifyGoalFromText("1"), "fat_loss");
+  assert.strictEqual(classifyGoalFromText("I want to lose fat"), "fat_loss");
+  assert.strictEqual(classifyGoalFromText("2"), "muscle_gain");
+  assert.strictEqual(classifyGoalFromText("build muscle"), "muscle_gain");
+  assert.strictEqual(classifyGoalFromText("3"), "recomposition");
+  assert.strictEqual(classifyGoalFromText("both"), "recomposition");
+  // New: general wellness in the client's own words, and the menu number.
+  assert.strictEqual(classifyGoalFromText("4"), "general");
+  assert.strictEqual(classifyGoalFromText("I just want to be healthy and have energy"), "general");
+  assert.strictEqual(classifyGoalFromText("keep active for my grandkids"), "general");
+  // Named condition → health_condition (scope boundary path).
+  assert.strictEqual(classifyGoalFromText("I want to manage my sugar"), "health_condition");
+  assert.strictEqual(classifyGoalFromText("my blood pressure is high"), "health_condition");
+  // CRITICAL: body-composition intent always wins — "lose weight to be healthy" is fat_loss.
+  assert.strictEqual(classifyGoalFromText("lose weight and get healthy"), "fat_loss");
+  assert.strictEqual(classifyGoalFromText("I want to build muscle and feel healthier"), "muscle_gain");
+  // The gate: a real goal answer is recognised; noise is re-asked.
+  assert.ok(looksLikeGoalAnswer("get healthier"));
+  assert.ok(looksLikeGoalAnswer("4"));
+  assert.ok(!looksLikeGoalAnswer("hmmmm ok"));
 });
 
 test("goal-profiles: only 'I have a condition' triggers the doctor scope boundary (liability line)", () => {
