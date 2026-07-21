@@ -69,25 +69,19 @@ export async function runDrillNightly(): Promise<void> {
   saveState("drill_nightly_result", `${today} ${summary}`);
   console.log(`[DRILL_NIGHTLY] ${summary}${warns.length ? ` (${warns.length} soft warns)` : ""}`);
 
-  // Only a front-door failure (Coach K's live engine, on an input it owns) warrants the
-  // loud "reaching clients" alarm. Backstop and canary fails are reported quietly so
-  // drift never goes unseen — but the alert says plainly that clients are protected.
-  if (failCount > 0) {
+  // WHO HEARS ABOUT DRIFT:
+  //   The builder — always, via the console logs + telemetry above (case names, replies, the
+  //     backstop/canary taxonomy, how to re-run the battery). That's where engineering detail belongs.
+  //   The founder — ONLY when something can actually reach a client (a live front-door fail), and
+  //     then in plain English, no jargon, no shell commands. Quiet internal drift where clients are
+  //     safe (backstop/canary only) never pings the phone — it would just be 3am noise.
+  if (frontDoor.length > 0) {
     const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
     if (coachPhone) {
-      const fdList = frontDoor.slice(0, 6).map(f => `• ${f}`).join("\n");
-      const bsList = backstop.slice(0, 4).map(f => `• ${f}`).join("\n");
-      const cnList = canary.slice(0, 4).map(f => `• ${f}`).join("\n");
-      const quiet = [
-        backstop.length ? `+${backstop.length} backstop-only (retiring brain drifted; clients meet it only if Coach K fails open):\n${bsList}` : "",
-        canary.length ? `+${canary.length} canary-only (a deterministic handler owns these in production — clients are safe):\n${cnList}` : "",
-      ].filter(Boolean).join("\n\n");
-      const body = frontDoor.length > 0
-        ? `🧪 Nightly drill: ${frontDoor.length} of ${total} cases FAILED on Coach K's LIVE front door — these can reach clients.\n\n${fdList}${frontDoor.length > 6 ? `\n…and ${frontDoor.length - 6} more` : ""}${quiet ? `\n\n(${quiet})` : ""}`
-        : `🧪 Nightly drill: Coach K's live front door passed every case. Quiet drift logged, CLIENTS NOT AFFECTED:\n\n${quiet}`;
-      await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`,
-        `${body}\n\nRun it yourself: npx tsx script/drill-battery.ts (Railway shell). Full replies in the logs under [DRILL_NIGHTLY].`
-      ).catch(e => console.error("[DRILL_NIGHTLY] alert send failed:", e?.message || e));
+      const n = frontDoor.length;
+      const body = `⚠️ Morning — this morning's automatic check found ${n} thing${n !== 1 ? "s" : ""} the coach might be getting wrong that could reach clients. The full details are logged for the tech team to fix. Nothing needs you right now — I'll flag it again tomorrow if it's still there.`;
+      await sendWhatsApp(`whatsapp:${coachPhone.replace(/\D/g, "")}`, body)
+        .catch(e => console.error("[DRILL_NIGHTLY] alert send failed:", e?.message || e));
     }
   }
 }
