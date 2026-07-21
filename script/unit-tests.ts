@@ -18,7 +18,7 @@ import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
 import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
-import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
+import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -2759,6 +2759,32 @@ const DAY = 86_400_000;
 const T = (hoursAgo: number): Date => new Date(Date.now() - hoursAgo * 3_600_000);
 const meal = (over: Partial<CopyableMeal>): CopyableMeal =>
   ({ kcalInt: 500, loggedAt: T(2), rawMessage: "some food", mealLabel: null, ...over });
+
+// PARSE MEAL-REPEAT TARGET (2026-07-21 live: client logged a fish lunch, typed "My dinner
+// will be the same. Log it", and the bot read "dinner" as the SOURCE to search for, found
+// none, and said "nothing logged" — forcing a voice note to make it work). "[meal] will be
+// the same" must mean: target = that meal, source = the most recent meal logged today.
+test("parseMealRepeatTarget: THE BUG — '[meal] will be the same' targets that meal, copies today's newest", () => {
+  const dinner = parseMealRepeatTarget("my dinner will be the same. log it");
+  assert.strictEqual(dinner.targetLabel, "dinner", "dinner is the TARGET, not the thing to search for");
+  assert.strictEqual(dinner.sourceHint, null, "no explicit source → copy the most recent meal today");
+  assert.strictEqual(dinner.crossish, true);
+  // Other natural phrasings of the same shape.
+  assert.strictEqual(parseMealRepeatTarget("dinner is the same").targetLabel, "dinner");
+  assert.strictEqual(parseMealRepeatTarget("supper will be the same").targetLabel, "dinner", "supper normalises to dinner");
+  assert.strictEqual(parseMealRepeatTarget("my lunch stays the same").targetLabel, "lunch");
+});
+
+test("parseMealRepeatTarget: existing shapes still resolve correctly (no regression)", () => {
+  // "same as X" → source X, target = current slot.
+  assert.strictEqual(parseMealRepeatTarget("dinner same as lunch").sourceHint, "lunch");
+  assert.strictEqual(parseMealRepeatTarget("dinner same as lunch").targetLabel, "dinner");
+  // "same for X" → target X, source = newest today.
+  assert.strictEqual(parseMealRepeatTarget("same thing for dinner").targetLabel, "dinner");
+  assert.strictEqual(parseMealRepeatTarget("same thing for dinner").sourceHint, null);
+  // A plain non-repeat sentence names no target.
+  assert.strictEqual(parseMealRepeatTarget("i had rice and chicken").targetLabel, null);
+});
 
 test("selectMealToCopy: THE BUG — 'lunch' hint with only a breakfast logged returns null (never copies breakfast as lunch)", () => {
   const meals = [meal({ rawMessage: "3 boiled eggs, 2 slices brown bread and 1 chicken vienna for breakfast", mealLabel: "breakfast", kcalInt: 549, loggedAt: T(26) })];

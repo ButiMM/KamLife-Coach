@@ -14,8 +14,8 @@
 import { db } from "../db";
 import { users, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
-import { sastDayStart, slotFromSastHour } from "../utils";
-import { selectMealToCopy, type CopyableMeal } from "../meal-select";
+import { sastDayStart } from "../utils";
+import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
 
@@ -53,28 +53,8 @@ export async function handleMealRepeat(ctx: {
 
   if (!sameAsMatch || wantsNotRepeat || isProtest) return null;
 
-  // Cross-meal: "dinner same as lunch" → copy FROM lunch, log AS dinner
-  const crossMealM =
-    m.match(/\b(breakfast|lunch|dinner|supper|snack)\b.{0,60}?\bsame\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i)
-    || m.match(/\bsame\s+(breakfast|lunch|dinner|supper|snack)\s+as\s+(?:my\s+)?(breakfast|lunch|dinner|supper|snack)\b/i);
-  // "I had the same (meal/food) as lunch" said at 20:38 = source lunch, target the
-  // CURRENT slot (dinner) — logging their dinner as a second "lunch" reads insane.
-  const sameAsMealM = !crossMealM && m.match(/\b(?:the\s+)?same\s+(?:meal|food|thing)?\s*as\s+(?:my\s+)?(breakfast|lunch|dinner|supper)\b/i);
-  // "Same thing FOR dinner" (said after logging lunch) = copy the most recent meal
-  // logged TODAY, log it AS dinner. Without this it fell through with sourceHint
-  // "dinner", found no dinner anywhere, and answered "No Dinner logged yesterday"
-  // (2026-07-05 audit).
-  const sameForM = !crossMealM && !sameAsMealM
-    && m.match(/\bsame\s+(?:meal|food|thing|one)?\s*(?:for|at)\s+(breakfast|lunch|dinner|supper|snack)\b/i);
-  const crossish = !!(crossMealM || sameAsMealM || sameForM);
-  const targetLabel = crossMealM ? crossMealM[1].toLowerCase().replace("supper", "dinner")
-    : sameAsMealM ? slotFromSastHour()
-    : sameForM ? sameForM[1].toLowerCase().replace("supper", "dinner")
-    : null;
-  const sourceHint = crossMealM ? crossMealM[2].toLowerCase().replace("supper", "dinner")
-    : sameAsMealM ? sameAsMealM[1].toLowerCase().replace("supper", "dinner")
-    : sameForM ? null // the slot word is the TARGET here, not the source — source = newest meal today
-    : (m.match(/\b(breakfast|lunch|dinner|supper|snack)\b/i)?.[1]?.toLowerCase().replace("supper", "dinner") || null);
+  // Which meal is copied and where it goes (pure — unit-tested in script/unit-tests.ts).
+  const { crossish, targetLabel, sourceHint } = parseMealRepeatTarget(m);
 
   // How many days back to look
   const daysBack = /\b(?:three|3)\s*days?\s*(?:ago|back)\b/i.test(m) ? 3
