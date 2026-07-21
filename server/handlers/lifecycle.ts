@@ -1142,6 +1142,7 @@ export async function handleLifecycle(ctx: {
 
   // ---- "WHAT SHOULD I DO NEXT WEEK / COACHING ADVICE?" — no GPT, data-driven ----
   if (
+    process.env.ENGINE_LIVE !== "on" && // JUDGMENT: the brain owns open coaching advice when live
     /\b(what should i do (next week|this week|differently|better)|any (suggestions?|advice|tips?) (for next week|for this week|going forward|to improve|coach)|what do you (think|recommend|suggest) (coach|k|next week|this week)?|coach.?k.{0,15}(what|how|should|suggest|recommend|advice|think)|how can i (do better|improve|get better|be better|be more consistent)|what.?s? (my |the )?(focus|priority|plan) (for |this |next )(week|week\?)?|what should i focus on|where should i focus|help me (plan|improve|get better|do better)|what would you (suggest|recommend)|what.?s? (next|the plan|my plan)|give me (advice|a suggestion|a tip)|any (tips?|pointers?) for me)\b/i.test(m) &&
     !/\b(eat|food|meal|protein|calories|gym|exercise|workout|steps|water|weight|sleep)\b/i.test(m)
   ) {
@@ -1515,7 +1516,7 @@ export async function handleLifecycle(ctx: {
   const isStressMsg =
     /\b(i.?m stressed|so stressed|very stressed|feeling stressed|work stress|life stress|stressed out|anxious|anxiety|overwhelmed|too much going on|can.?t cope|everything is too much|mental health|burnout|burned out|burnt out|exhausted mentally|emotionally drained)\b/i.test(m);
 
-  if (isStressMsg) {
+  if (process.env.ENGINE_LIVE !== "on" && isStressMsg) { // JUDGMENT/EMOTIONAL: the brain owns this when live (its low-mood guard keeps the SADAG net)
     const name = user.name ? ` ${user.name}` : "";
     const goal = user.goalType || "fat_loss";
     const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, or tinned tuna right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;

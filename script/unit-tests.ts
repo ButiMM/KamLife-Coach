@@ -954,6 +954,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
     assert.match(sched, /\*\/2 \* \* \* \*.*runMediaJobRecovery/, "the recovery sweep runs every 2 minutes");
   });
+  test("shadow-retire sweep: the last ungated judgment handlers now defer to the brain when live", () => {
+    const lc = readFileSync(join("server", "handlers", "lifecycle.ts"), "utf-8");
+    // Open coaching advice ("what should I focus on next week") — the brain's job when live.
+    assert.match(lc, /process\.env\.ENGINE_LIVE !== "on" && \/\/ JUDGMENT: the brain owns open coaching advice/, "COACHING_ADVICE is gated");
+    // Stress/overwhelm — emotional, the brain owns it (SADAG crisis net still runs first in the pipeline).
+    assert.match(lc, /if \(process\.env\.ENGINE_LIVE !== "on" && isStressMsg\)/, "STRESS is gated");
+  });
   test("code-level intent bouncer: strategy/emotional turns withhold action tools; logs keep them (review Q1)", async () => {
     const { isStrategyOrEmotional } = await import("../server/understanding/actions");
     // Strategy/emotional → tools withheld (can only converse, never dump a workout/log).
