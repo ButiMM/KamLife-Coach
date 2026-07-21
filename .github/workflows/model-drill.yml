@@ -1,0 +1,41 @@
+name: Model Drill
+
+# STOP SHIPPING BY SCREENSHOT (2026-07-21, three-reviewer adjudication). The offline suites
+# test where a message is ROUTED. This one tests what the MODEL actually SAYS — the "vague",
+# "generic", "off-programme exercise", "medical claim" failures the founder kept catching by
+# hand in production. It runs the same drill cases + runner as the nightly prod job
+# (server/drill-cases.ts), against the live model, and fails RED on a regression.
+#
+# Gated on the OPENAI_API_KEY secret: until it's added (repo → Settings → Secrets and
+# variables → Actions → New repository secret: OPENAI_API_KEY), the job SKIPS cleanly and
+# never blocks. Not on push — it calls the paid model, so nightly + on-demand only.
+
+on:
+  schedule:
+    - cron: "0 3 * * *" # 05:00 SAST, once daily (offset from the routing test suite at 02:00)
+  workflow_dispatch: {}
+
+concurrency:
+  group: model-drill-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  drill:
+    runs-on: ubuntu-latest
+    env:
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+      - run: npm ci
+      - name: Run the live model drill (skips if no key)
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "::notice::OPENAI_API_KEY not set — skipping the live model drill."
+            echo "Add it in Settings → Secrets and variables → Actions to enable nightly drift detection."
+            exit 0
+          fi
+          npx tsx script/drill-battery.ts
