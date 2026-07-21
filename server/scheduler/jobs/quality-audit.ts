@@ -248,7 +248,7 @@ export async function runQualityAudit(): Promise<void> {
         `Issue: ${worst.worst_issue}\n` +
         `CLIENT: "${truncate(worstExchange.messageIn, 160)}"\n` +
         `COACH: "${truncate(worstExchange.messageOut, 160)}"\n\n` +
-        `${weak.length} weak exchange${weak.length === 1 ? "" : "s"} auto-filed for fixing. Check recent prompt or data changes.`);
+        `${weak.length} weak exchange${weak.length === 1 ? "" : "s"} auto-filed for the tech team to fix. Nothing you need to do — I'll flag it if it doesn't recover.`);
     } else {
       await sendWhatsApp(to,
         `📋 *Coach K self-review* — scored ${scores.length} of yesterday's conversations: *${overall.toFixed(1)}/10*.\n` +
