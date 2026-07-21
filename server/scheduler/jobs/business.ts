@@ -6,6 +6,7 @@ import {
   getActiveClients, isPaused, loadState, saveState,
   deliveryStats, todaySAST, thisWeekUTC, FROM_NUMBER, PRICING, inArray,
 } from "../shared";
+import { gptCosts } from "../../../shared/schema";
 
 export async function runMonthEndBudget(): Promise<void> {
   console.log("[SCHEDULER] JOB: Month-end budget mode");
@@ -300,7 +301,30 @@ export async function runWeeklyKpiReport(): Promise<void> {
     // so a healthy week produces a short list (or none). Ordered most-urgent first.
     const deliveryTotal = deliveryStats.sent + deliveryStats.failed;
     const deliveryFailPct = deliveryTotal > 0 ? Math.round((deliveryStats.failed / deliveryTotal) * 100) : 0;
+
+    // AI COST, BY FEATURE (CFO view) — the cost was always logged per feature; now it's
+    // surfaced so the R199 margin is watched with data, not vibes. ~$11 = R199 revenue/client.
+    const weekAgoDate = new Date(now.getTime() - 7 * 86_400_000);
+    const costRows = await db.select({
+      feature: gptCosts.feature,
+      total: sql<string>`COALESCE(SUM(${gptCosts.costUsd}::numeric), 0)`,
+    }).from(gptCosts).where(gte(gptCosts.createdAt, weekAgoDate)).groupBy(gptCosts.feature).catch(() => [] as { feature: string | null; total: string }[]);
+    const weekCostTotal = costRows.reduce((s, r) => s + parseFloat(r.total || "0"), 0);
+    const costPerClientWk = totalClients > 0 ? weekCostTotal / totalClients : 0;
+    const monthlyPerClient = costPerClientWk * 4.3;
+    const topFeatures = costRows
+      .map(r => ({ f: r.feature || "other", c: parseFloat(r.total || "0") }))
+      .sort((a, b) => b.c - a.c).slice(0, 5)
+      .filter(r => r.c > 0)
+      .map(r => `  ${r.f}: $${r.c.toFixed(2)}`).join("\n");
+    const costSection = weekCostTotal > 0
+      ? `\n\n*AI cost (last 7d)*\nTotal: $${weekCostTotal.toFixed(2)} · ~$${monthlyPerClient.toFixed(2)}/client/month vs $11 revenue\n${topFeatures}`
+      : "";
+
     const actions: { p: number; text: string }[] = [];
+    // Margin guard: at R199 (~$11/client/mo), AI cost eating a third of that needs a look.
+    if (monthlyPerClient > 3.5 && totalClients >= 3)
+      actions.push({ p: 2, text: `🟠 AI cost ~$${monthlyPerClient.toFixed(2)}/client/month — watch it against the $11 margin. Biggest driver: ${(topFeatures.split("\n")[0] || "").trim() || "n/a"}.` });
     if ((escUrgentRow?.c || 0) > 0)
       actions.push({ p: 1, text: `🔴 ${escUrgentRow?.c} URGENT escalation${(escUrgentRow?.c || 0) > 1 ? "s" : ""} open — clear the dashboard inbox first.` });
     if (deliveryFailPct >= 15)
@@ -319,7 +343,7 @@ export async function runWeeklyKpiReport(): Promise<void> {
       ? `\n\n*🎯 Do this week* (priority order)\n${actions.sort((a, b) => a.p - b.p).map(a => a.text).join("\n")}`
       : `\n\n*🎯 Do this week*\n✅ No fires. Focus on growth — one new acquisition channel.`;
 
-    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} | SA scanner: ${scannerPct}% | GPT: ${fallbackPct}%${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}${actionSection}`;
+    const report = `*📊 KamLife Weekly Report*\n_${now.toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long", year: "numeric" })}_\n\n*Revenue*\nMRR: R${mrr.toLocaleString()} (${paying} paying)\nNew this week: ${newThisWeek}\n\n*Engagement*\nWorkouts: ${weekWorkouts?.c || 0}\nStep logs: ${weekSteps?.c || 0}\nFood logs: ${weekFoodLogsCount} | SA scanner: ${scannerPct}% | GPT: ${fallbackPct}%${foodSourceSection}\nMessages: ${weekMessages?.c || 0}\n\n*Health*\nTotal clients: ${totalClients}\nAt-risk (48h+ silent): ${atRisk}\nChurn risk (14d+): ${churned}${escSection}\n\n*Delivery*\nSent: ${deliveryStats.sent} | Failed: ${deliveryStats.failed}${abSection}${costSection}${actionSection}`;
     await sendWhatsApp(`whatsapp:${coachPhone}`, report);
     console.log(`[KPI] Weekly report sent to coach`);
   } catch (e) { console.error("[KPI] Weekly report error:", e); }

@@ -87,3 +87,54 @@ export async function cleanSATranscript(openai: OpenAI, raw: string, userId?: st
     return raw;
   }
 }
+
+const CONDENSE_SYSTEM = `You condense a LONG South African voice-note transcript into a short, clean first-person version a coach can act on. The speaker rambled; your job is to keep the SIGNAL and drop the noise.
+
+KEEP, exactly as said:
+- every food and its amount ("2 eggs and pap", "half a kota") — word-for-word, so it can be logged
+- every number: steps, weight in kg, reps, sets, litres, days
+- every exercise or training detail they mentioned
+- their ONE main question or request
+- if they clearly feel strongly (down, frustrated, proud), one short phrase saying so
+
+DROP: repetition, filler, side-stories, thinking-out-loud, greetings.
+
+Write it in the FIRST PERSON, plain, short (2-4 sentences). Do NOT answer, do NOT coach, do NOT add anything they didn't say. Return ONLY the condensed message.`;
+
+/**
+ * Condense a long, rambling voice transcript to its actionable core (mood, foods, numbers,
+ * the real question) — the "summariser wedge". Protects the brain from a wall of rambling AND
+ * the R199 margin from passing a 3-minute transcript to the big model. Only call this on a
+ * genuine ramble (the caller gates on length); short notes should pass through untouched so a
+ * quick food log is never reshaped. Fail-open: returns the raw transcript on any problem.
+ */
+export async function condenseVoiceRamble(openai: OpenAI, raw: string, userId?: string | null): Promise<string> {
+  const text = (raw || "").trim();
+  if (killswitchOff() || text.length < 200) return raw; // nothing to condense
+  try {
+    assertAiOnline("voice_condense");
+    const resp = await openai.chat.completions.create({
+      model: "gpt-4o-mini",
+      temperature: 0,
+      max_tokens: 220,
+      messages: [
+        { role: "system", content: CONDENSE_SYSTEM },
+        { role: "user", content: text.slice(0, 4000) },
+      ],
+    });
+    recordGptCost({
+      userId: userId ?? null,
+      model: "gpt-4o-mini",
+      feature: "voice_condense",
+      promptTokens: resp.usage?.prompt_tokens ?? 0,
+      completionTokens: resp.usage?.completion_tokens ?? 0,
+    });
+    const out = (resp.choices[0]?.message?.content || "").trim();
+    // Reject a bad condense (empty, a refusal, or somehow LONGER than the original) → keep raw.
+    if (!out || out.length >= text.length || looksLikeRefusal(out)) return raw;
+    return out;
+  } catch (e) {
+    if (!isAiOfflineError(e)) console.warn("[VOICE_CONDENSE] failed (using raw transcript):", (e as any)?.message || e);
+    return raw;
+  }
+}

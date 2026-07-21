@@ -21,7 +21,7 @@ import {
   logMediaFailure, logMediaSuccess, logChat,
 } from "./chat-log";
 import { askCoachK } from "../gpt";
-import { cleanSATranscript } from "../understanding/sa-transcript";
+import { cleanSATranscript, condenseVoiceRamble } from "../understanding/sa-transcript";
 import { looksLikeRefusal } from "../understanding/refusal";
 import { getStepResponse, getStepStreak } from "./steps";
 import { checkPerfectDay, checkFoodPatterns } from "./checks";
@@ -1418,10 +1418,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const transcribeMs = Date.now() - voiceStageStart;
       console.log(`[MEDIA][${mediaTrace}] transcribe_ok words=${wordCount} ms=${transcribeMs} lang=${whisperLang || "auto"}${languageNote ? " detected=" + languageNote.split(" ")[4] : ""}`);
 
+      // SUMMARISER WEDGE: a long ramble (>90 words) → its actionable core before the brain (comprehension + R199 margin). Short notes untouched; echo still shows the original. Fail-open.
+      const forBrain = wordCount > 90 ? await condenseVoiceRamble(openai, transcribedText, user.id) : transcribedText;
+
       voiceStage = "coach_reply";
       voiceStageStart = Date.now();
       const voiceReply = await withTimeout("voice_coach_reply", 20000, () =>
-        handleMessage(phone, transcribedText + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""))
+        handleMessage(phone, forBrain + (languageNote ? `\n\n[LANGUAGE NOTE: ${languageNote}]` : ""))
       );
       const coachReplyMs = Date.now() - voiceStageStart;
       const voiceTotalMs = Date.now() - voiceFlowStart;
@@ -1429,11 +1432,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       await logMediaSuccess(user.id, "voice", voiceTotalMs);
       await cleanupTmp();
       // Echo confirms transcription (never parrot a rant/profanity; trim at a WORD boundary).
-      let echoTrimmed = transcribedText;
-      if (transcribedText.length > 220) {
-        const cut = transcribedText.slice(0, 217);
-        echoTrimmed = cut.slice(0, Math.max(cut.lastIndexOf(" "), 150)) + " …";
-      }
+      const cut = transcribedText.length > 220 ? transcribedText.slice(0, 217) : "";
+      const echoTrimmed = cut ? cut.slice(0, Math.max(cut.lastIndexOf(" "), 150)) + " …" : transcribedText;
       const echoClean = echoTrimmed.replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
       return `🎤 I heard: "${echoClean}"\n\n${voiceReply}`;
 

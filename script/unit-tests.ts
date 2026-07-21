@@ -940,6 +940,23 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
     assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
   });
+  test("voice: long rambles get condensed to their actionable core before the brain (margin + clarity)", () => {
+    const wedge = readFileSync(join("server", "understanding", "sa-transcript.ts"), "utf-8");
+    assert.match(wedge, /export async function condenseVoiceRamble/, "the summariser wedge exists");
+    assert.match(wedge, /text\.length < 200\) return raw/, "short notes are never reshaped — a quick food log is safe");
+    assert.match(wedge, /feature: "voice_condense"/, "its cost is tagged so it shows in the CFO report");
+    assert.match(wedge, /out\.length >= text\.length \|\| looksLikeRefusal\(out\)\) return raw/, "fail-open: a bad condense keeps the raw transcript");
+    const media = readFileSync(join("server", "handlers", "media.ts"), "utf-8");
+    assert.match(media, /wordCount > 90 \? await condenseVoiceRamble/, "only a genuine ramble (>90 words) is condensed; short notes pass through");
+    assert.match(media, /const forBrain =/, "the condensed text feeds the brain");
+    assert.match(media, /echoTrimmed/, "the echo still shows what they actually said, not the condensed version");
+  });
+  test("CFO: the weekly report surfaces AI cost by feature and guards the R199 margin", () => {
+    const biz = readFileSync(join("server", "scheduler", "jobs", "business.ts"), "utf-8");
+    assert.match(biz, /AI cost \(last 7d\)/, "the founder can see AI spend");
+    assert.match(biz, /groupBy\(gptCosts\.feature\)/, "broken down by feature — the data was always there, now surfaced");
+    assert.match(biz, /monthlyPerClient > 3\.5/, "a margin guard flags cost eating into the R199");
+  });
   test("voice: a bullet-dump coaching reply is reflowed into coach prose (IMG_6144), short lists left alone", async () => {
     const { collapseBulletDump } = await import("../server/handlers/food-scanner");
     const dump = "Got it. To add running:\n- *Start Slow*: begin with short easy runs\n• *Balance with Gym*: run on non-lifting days\n• *Fuel Up*: eat enough for both";
