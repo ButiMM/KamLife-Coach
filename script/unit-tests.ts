@@ -19,6 +19,7 @@ import { classifyWorkoutFeedback } from "../server/workout-feedback";
 import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
+import { getGoalProfile, usesMacroTargets, GOAL_KEYS } from "../server/goal-profiles";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -2759,6 +2760,47 @@ const DAY = 86_400_000;
 const T = (hoursAgo: number): Date => new Date(Date.now() - hoursAgo * 3_600_000);
 const meal = (over: Partial<CopyableMeal>): CopyableMeal =>
   ({ kcalInt: 500, loggedAt: T(2), rawMessage: "some food", mealLabel: null, ...over });
+
+// GOAL PROFILES — the semantic spine (2026-07-21 three-reviewer adjudication). One source of
+// truth so the ~50 scattered goalType checks stop meaning different things. Slice 1: the
+// registry itself changes NOTHING; these tests lock its meaning before consumers migrate.
+test("goal-profiles: body-composition goals push macros; health-led goals never do", () => {
+  // The three body-comp goals are unchanged — they still drive calorie/protein numbers.
+  for (const g of ["fat_loss", "muscle_gain", "recomposition"]) {
+    assert.strictEqual(usesMacroTargets(g), true, `${g} still uses macro targets (no regression)`);
+    assert.strictEqual(getGoalProfile(g).scopeBoundary, false, `${g} has no doctor scope boundary`);
+  }
+  // The health-led goals are SAFE BY CONSTRUCTION — no macro pressure, not chasing the scale.
+  for (const g of ["general", "health_condition"]) {
+    assert.strictEqual(usesMacroTargets(g), false, `${g} never pushes a protein/calorie quota (the gogo fix)`);
+    assert.strictEqual(getGoalProfile(g).weightIsGoal, false, `${g} does not chase a scale number`);
+    assert.strictEqual(getGoalProfile(g).energyStance, "maintenance", `${g} is coached around maintenance, never a deficit`);
+    assert.strictEqual(getGoalProfile(g).dailyWin, "consistency_and_movement", `${g} wins on consistency, not macros`);
+  }
+});
+
+test("goal-profiles: only 'I have a condition' triggers the doctor scope boundary (liability line)", () => {
+  assert.strictEqual(getGoalProfile("health_condition").scopeBoundary, true, "coach the person, not the condition");
+  assert.strictEqual(getGoalProfile("general").scopeBoundary, false);
+  assert.strictEqual(getGoalProfile("fat_loss").scopeBoundary, false);
+});
+
+test("goal-profiles: unknown/blank/aliased goals resolve safely (never undefined, never a crash)", () => {
+  assert.strictEqual(getGoalProfile(null).key, "fat_loss", "blank falls back to the historical default");
+  assert.strictEqual(getGoalProfile(undefined).key, "fat_loss");
+  assert.strictEqual(getGoalProfile("").key, "fat_loss");
+  assert.strictEqual(getGoalProfile("garbage-string").key, "fat_loss");
+  // Real aliases the onboarding/normalizer/older rows actually store.
+  assert.strictEqual(getGoalProfile("general_wellness").key, "general");
+  assert.strictEqual(getGoalProfile("wellness").key, "general");
+  assert.strictEqual(getGoalProfile("weight_loss").key, "fat_loss");
+  assert.strictEqual(getGoalProfile("RECOMP").key, "recomposition", "case-insensitive");
+  // Every canonical key returns a fully-formed profile (no missing fields).
+  for (const k of GOAL_KEYS) {
+    const p = getGoalProfile(k);
+    assert.ok(p.label && p.energyStance && p.proteinPriority && p.dailyWin && Array.isArray(p.tracks), `${k} profile is complete`);
+  }
+});
 
 // PARSE MEAL-REPEAT TARGET (2026-07-21 live: client logged a fish lunch, typed "My dinner
 // will be the same. Log it", and the bot read "dinner" as the SOURCE to search for, found
