@@ -940,6 +940,16 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
     assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
   });
+  test("voice: a bullet-dump coaching reply is reflowed into coach prose (IMG_6144), short lists left alone", async () => {
+    const { collapseBulletDump } = await import("../server/handlers/food-scanner");
+    const dump = "Got it. To add running:\n- *Start Slow*: begin with short easy runs\n• *Balance with Gym*: run on non-lifting days\n• *Fuel Up*: eat enough for both";
+    const out = collapseBulletDump(dump);
+    assert.ok(!/\n[•\-]/.test(out), "no bullet lines survive");
+    assert.match(out, /Start Slow — begin/, "labels become inline prose");
+    assert.match(out, /Balance with Gym — run/, "every point is kept, just reflowed");
+    const shortList = "Two options:\n• eggs\n• pilchards";
+    assert.equal(collapseBulletDump(shortList), shortList, "a 2-item list is fine on WhatsApp — left alone");
+  });
   test("street food: coaches the real SA way of eating — taxi rank, kota, shisa nyama, livers", async () => {
     const { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } = await import("../server/street-food");
     assert.ok(matchStreetDish("should I get a kota"), "knows a kota");

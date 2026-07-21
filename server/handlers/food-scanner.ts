@@ -471,6 +471,25 @@ export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories
   return null;
 }
 
+/** Reflow a 3+ item bullet/numbered dump into flowing coach prose (WhatsApp, not an app UI). */
+export function collapseBulletDump(text: string): string {
+  const lines = text.split("\n");
+  const bulletCount = lines.filter((l) => /^\s*([-•*–]|\d+[.)])\s+\S/.test(l)).length;
+  if (bulletCount < 3) return text; // a short list is fine — only collapse a real dump
+  const out: string[] = [];
+  for (const line of lines) {
+    const b = line.match(/^\s*(?:[-•*–]|\d+[.)])\s+(.*)$/);
+    if (b) {
+      // "*Start Slow*: begin easy" → "Start slow — begin easy"
+      let seg = b[1].replace(/^\*([^*]+)\*\s*:?\s*/, "$1 — ").replace(/\*/g, "").trim();
+      if (seg) out.push(/[.!?…]$/.test(seg) ? seg : seg + ".");
+    } else if (line.trim()) {
+      out.push(line.trim());
+    }
+  }
+  return out.join(" ").replace(/\s{2,}/g, " ").trim();
+}
+
 export function sanitizeCoachReply(reply: string, userMessage: string, budgetTier?: string | null, injuries?: string | null): string {
   let trimmed = (reply || "").trim();
   const umLower = userMessage.toLowerCase();
@@ -490,6 +509,13 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     .replace(/\s*\bYou'?ve got this[.!]*/gi, "")
     .replace(/\s*\bHow does that sound\??/gi, "")
     .trim();
+
+  // BULLET-DUMP COLLAPSE (2026-07-21, IMG_6144: a good running answer still came out as a
+  // "*Start Slow*: … / *Balance*: … / *Fuel Up*: …" list — reads like an app, not like Kam).
+  // The brain prompt bans bullet dumps but the model does it anyway, so we enforce it in code:
+  // 3+ bullet/numbered lines are reflowed into flowing coach prose. A short 1–2 item list is
+  // left alone (that's fine on WhatsApp); deterministic programmes/lists never pass through here.
+  trimmed = collapseBulletDump(trimmed);
 
   // "have" alone is too broad — "does chicken have protein?" contains "have" but is a question.
   // Only use eating-specific verbs: had/ate/having/eating/just had/just ate/meal labels.
