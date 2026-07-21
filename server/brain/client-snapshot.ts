@@ -34,6 +34,18 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     });
     lines.push(`Time now: ${saNow} (SA). The day is IN PROGRESS — today's numbers below are a running count so far, not a finished day.`);
 
+    // ── ENVIRONMENT: the client's real week, so the brain coaches their LIFE, not a spreadsheet.
+    // SA-specific rhythms — weekend takeaway pull, month-end tight budget then payday temptation.
+    const saDom = parseInt(new Date(now).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", day: "numeric" }), 10);
+    const saWeekday = new Date(now).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", weekday: "long" });
+    const saHour = parseInt(new Date(now).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", hour12: false }), 10);
+    const env: string[] = [];
+    const isWeekend = /Saturday|Sunday/.test(saWeekday);
+    if (/Friday/.test(saWeekday) && saHour >= 15) env.push("it's Friday evening — the takeaway/braai/drinks pull is real; meet it with a plan, not a lecture");
+    else if (isWeekend) env.push("it's the weekend — routine is looser and social eating is likely; keep it realistic, protein-first, no guilt");
+    if (saDom >= 25 || saDom <= 2) env.push(saDom >= 25 ? "it's MONTH-END — money is tight for most SA clients; lead with the cheapest real foods (eggs, pilchards, sugar beans, oats, pap), never premium suggestions unless they raise budget" : "it's just after month-end/payday — a common splurge window; steer the payday treat into a smart choice rather than banning it");
+    if (env.length) lines.push(`Environment: ${env.join("; ")}. Use this to sound like you live in their world — only when it's relevant, never force it.`);
+
     const goal = String(user.goalType || "fat_loss").replace(/_/g, " ");
     lines.push(`Goal: ${goal}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`);
 
