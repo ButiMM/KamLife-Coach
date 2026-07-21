@@ -70,6 +70,15 @@ export function isObviouslyInDomain(message: string): boolean {
   // breach (2026-07-21 live miss). Count real words, ignoring emoji/punctuation.
   const words = (t.toLowerCase().match(/[a-z']+/g) || []);
   if (words.length <= 2) return true;
+  // A CONVERSATIONAL CONTINUATION is never off-topic in an active coaching chat. A message that
+  // refers back to something already discussed (them/it/that/those/these) or is a follow-up aimed
+  // at the coach ("do better", "tell me more", "like what", "what about", "how should I take
+  // them") is part of the ongoing conversation, not a fresh request. Redirecting these with the
+  // cold "I'm Coach K" brochure is the worst kind of miss (2026-07-21 live: "how should I take
+  // them? tell me!" got the redirect mid-snack-conversation). Pronoun-reference in a short message
+  // = a continuation; fail-open to answering, per the whole guard's posture.
+  if (words.length <= 12 && /\b(them|those|these)\b/i.test(t)) return true;
+  if (/^(do better|tell me( more)?|like what|such as|what about|and then|then what|give me (more|another|other)|more (options|ideas|examples|of them)|any (others?|more)|how (do|should|can) i (take|have|eat|use|do) (them|it|that|those|these))\b/i.test(t)) return true;
   return IN_DOMAIN_RE.test(t);
 }
 

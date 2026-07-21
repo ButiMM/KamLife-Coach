@@ -20,7 +20,11 @@ const cases: Case[] = [
     name: "removes premium food on low budget",
     input: "Try Greek yogurt for snack protein.",
     context: { userMessage: "i am broke", budgetTier: "under_100", injuries: "none" },
-    expectIncludes: ["eggs or pilchards", "budget"],
+    // The premium item is swapped for a cheap protein (silent protection). We no longer append a
+    // canned "for your budget…" lecture — it's tone-deaf on snacks and the brain echoed it every
+    // message (2026-07-21). Assert the swap happened and the premium food is gone.
+    expectIncludes: ["eggs or pilchards"],
+    expectExcludes: ["Greek yogurt", "priority proteins"],
   },
   {
     name: "adds injury safety line",

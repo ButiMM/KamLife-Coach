@@ -81,7 +81,11 @@ export function enforceCoachGuardrails(input: string, context: GuardrailContext)
   const lowBudget = budget === "under_100" || budget === "under_50" || budget === "50_100";
   if (lowBudget && PREMIUM_FOOD_RE.test(reply)) {
     violations.push("BUDGET_MISMATCH");
-    reply = `${reply.replace(PREMIUM_FOOD_RE_ALL, "eggs or pilchards")} For your budget, eggs, pilchards, and sugar beans are priority proteins.`;
+    // Swap the genuinely-premium item for a cheap protein — silent protection. We DON'T append a
+    // canned "for your budget, sugar beans are priority proteins" lecture: it's tone-deaf on a
+    // SNACK reply, and the brain echoes it from history so it repeats every message (2026-07-21
+    // live: a broke client got "sugar beans and pilchards are priority proteins" three times).
+    reply = reply.replace(PREMIUM_FOOD_RE_ALL, "eggs or pilchards");
   }
 
   const hasKnownInjury = injuries && injuries !== "none";

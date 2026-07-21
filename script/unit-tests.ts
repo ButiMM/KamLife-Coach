@@ -3969,6 +3969,15 @@ test("domain-guard: a 1-2 word reaction is always in-domain, never cold-redirect
   }
 });
 
+// A conversational CONTINUATION referring back to what was discussed must never be redirected
+// (2026-07-21 live: "How should I take them? Tell me!" got the cold "I'm Coach K" brochure
+// mid-snack-conversation, forcing the client to rephrase to get an answer).
+test("domain-guard: a follow-up that refers back to the conversation stays in-domain", () => {
+  for (const m of ["How should I take them? Tell me!", "do better", "tell me more", "like what?", "what about them", "give me more options", "how should I have them"]) {
+    assert.ok(isObviouslyInDomain(m), `continuation must stay in-domain: "${m}"`);
+  }
+});
+
 // A REQUEST for meal ideas is not a food LOG (2026-07-21 live miss: a voice note "give me meal
 // suggestions for lunch and dinner" was answered with "I didn't catch what food that was").
 test("food-context: a meal-suggestion request is never treated as a food log", () => {
