@@ -4,6 +4,8 @@
 // Gender, age, height all factor in — no more one-size-fits-all
 // ============================================================
 
+import { getGoalProfile } from "./goal-profiles";
+
 // ── MAINTENANCE (TDEE before the goal adjustment) ──
 // Mifflin-St Jeor BMR × activity multiplier + the training-calorie spread. This is the
 // break-even: eat exactly this and hold weight. The calorie TARGET is this ± the goal
@@ -420,6 +422,10 @@ export function getDailyStepContext(
 export function energyFrameLine(goalType: string | null | undefined, calorieTarget: number | null | undefined): string | null {
   const target = Number(calorieTarget) || 0;
   if (target <= 0) return null;
+  // Health-led goals (general wellness / has-a-condition) never get a calorie or
+  // deficit/surplus frame — they're coached on habits and how they feel, not numbers
+  // (goal-profiles: usesMacros=false). This is what stops a gogo being handed a kcal plan.
+  if (!getGoalProfile(goalType).usesMacros) return null;
   if (goalType === "muscle_gain") {
     return `Energy frame: maintenance ≈ ${target - 400} kcal (estimate). The ${target} kcal target ALREADY includes the muscle-gain surplus (~300–500 above maintenance) — if asked what their surplus should be: it is built into the target; eating to ${target} IS the surplus. Surplus/deficit describe a FULL day vs maintenance, never the gap left mid-day.`;
   }

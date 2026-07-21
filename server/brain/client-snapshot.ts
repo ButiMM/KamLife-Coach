@@ -19,6 +19,7 @@ import { getPhaseNames } from "../programme";
 import { energyFrameLine, waterTargetLitres } from "../targets";
 import { sastToday, sastDayStart } from "../utils";
 import { liftsForLaggingAreas } from "../physique-analysis";
+import { getGoalProfile } from "../goal-profiles";
 
 const DAY = 86_400_000;
 
@@ -47,8 +48,20 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     if (saDom >= 25 || saDom <= 2) env.push(saDom >= 25 ? "it's MONTH-END — money is tight for most SA clients; lead with the cheapest real foods (eggs, pilchards, sugar beans, oats, pap), never premium suggestions unless they raise budget" : "it's just after month-end/payday — a common splurge window; steer the payday treat into a smart choice rather than banning it");
     if (env.length) lines.push(`Environment: ${env.join("; ")}. Use this to sound like you live in their world — only when it's relevant, never force it.`);
 
-    const goal = String(user.goalType || "fat_loss").replace(/_/g, " ");
-    lines.push(`Goal: ${goal}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`);
+    // GOAL FRAMING via the semantic profile (2026-07-21 spine surgery). Body-comp goals get
+    // their kcal/protein targets exactly as before; health-led goals (wellness / a condition)
+    // get NO quota — the coach works habits, movement and how they feel, never numbers, so a
+    // gogo is never handed a 185g protein target. "A condition" adds the doctor scope boundary.
+    const profile = getGoalProfile(user.goalType);
+    if (profile.usesMacros) {
+      const goal = String(user.goalType || "fat_loss").replace(/_/g, " ");
+      lines.push(`Goal: ${goal}. Daily targets: ${user.calorieTarget ?? "?"} kcal, ${user.proteinTarget ?? "?"}g protein.`);
+    } else {
+      const boundary = profile.scopeBoundary
+        ? ` This client told us they have a health condition — you coach the PERSON, never the condition: never prescribe medication, doses, or clinical timing; if it comes up, warmly remind them to follow their doctor for the condition while you handle food, movement and habits.`
+        : "";
+      lines.push(`Goal: ${profile.label} — this client is NOT chasing calorie/protein numbers or a scale figure. Coach consistency, everyday movement, energy and how they FEEL. Never push a kcal or protein target at them, never talk deficits/surplus, never nag a number.${boundary}`);
+    }
 
     // ── Energy frame — shared with the GPT fallback (targets.ts) so both mouths
     // state the same maintenance/surplus truth (2026-07-06 audit).

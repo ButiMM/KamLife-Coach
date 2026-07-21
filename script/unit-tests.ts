@@ -3139,6 +3139,17 @@ test("energy frame: no target → null (never invent numbers)", () => {
   assert.equal(energyFrameLine("muscle_gain", 0), null);
 });
 
+// SPINE SURGERY slice 2 (2026-07-21): health-led goals get NO deficit/surplus/kcal frame.
+test("energy frame: health-led goals get no calorie/deficit frame; body-comp goals unchanged", () => {
+  // The gogo fix — wellness and has-a-condition never see a kcal energy frame.
+  assert.equal(energyFrameLine("general", 2000), null, "general wellness → no kcal frame");
+  assert.equal(energyFrameLine("health_condition", 2000), null, "has-a-condition → no kcal frame");
+  // The three body-comp goals still build their frame exactly as before (no regression).
+  assert.ok(energyFrameLine("fat_loss", 1900)!.includes("deficit"));
+  assert.ok(energyFrameLine("muscle_gain", 2996)!.includes("surplus"));
+  assert.ok(energyFrameLine("recomposition", 2100), "recomposition still gets its frame");
+});
+
 // ============================================================
 // buildWeekCard — the shareable week artifact (pure, no DB)
 // ============================================================
