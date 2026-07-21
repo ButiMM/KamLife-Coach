@@ -22,7 +22,7 @@ import { selectMealToCopy, type CopyableMeal } from "../server/meal-select";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
-import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt } from "../server/physique-analysis";
+import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
@@ -3864,6 +3864,22 @@ test("progress comparison prompt: one set, like-for-like angles, honest, on-prog
   assert.ok(/do NOT write a general-advice essay/i.test(p.user), "must forbid the 'general approach' non-answer");
   assert.ok(/never invent progress/i.test(p.user), "must stay honest when nothing changed");
   assert.ok(/never a greeting/i.test(p.system), "no 'Hello Kam! Let's take a look' openers");
+});
+
+// SPECIFIC LIFT, NOT THE MUSCLE (2026-07-21, Kam: "'your back lifts' means nothing to a
+// gogo — name the machine"). The lagging muscles must resolve to the exact programme lifts.
+test("lagging areas resolve to the SPECIFIC programme lifts (not just muscle names)", () => {
+  assert.match(liftsForLaggingAreas("back,core"), /back → your Lat Pulldown or Seated Row/);
+  assert.match(liftsForLaggingAreas("back,core"), /core → your Cable Crunch/);
+  assert.match(liftsForLaggingAreas("glutes"), /glutes → your Hip Thrust/);
+  assert.match(liftsForLaggingAreas("hamstrings, shoulders"), /hamstrings → your Leg Curl/);
+  assert.match(liftsForLaggingAreas("hamstrings, shoulders"), /shoulders → your Shoulder Press or Lateral Raise/);
+  // Robust to junk / unknown groups / blanks — never throws, drops what doesn't map.
+  assert.strictEqual(liftsForLaggingAreas(""), "");
+  assert.strictEqual(liftsForLaggingAreas("nonsense, xyz"), "");
+  assert.strictEqual(liftsForLaggingAreas(null), "");
+  // De-dupes a repeated group.
+  assert.strictEqual((liftsForLaggingAreas("back, back").match(/Lat Pulldown/g) || []).length, 1);
 });
 
 test("physique: prompt is gender + goal aware, focus line names lagging and a strong point", () => {

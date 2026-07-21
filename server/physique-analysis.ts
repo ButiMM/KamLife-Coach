@@ -86,6 +86,43 @@ export function recommendGoalFromRead(bodyState: BodyState, chosenGoal: string |
   }
 }
 
+// SPECIFIC LIFT per muscle group (2026-07-21, Kam: "'your back and core lifts' means
+// nothing to a gogo — name the ACTUAL machine she already does"). Maps each canonical
+// muscle to the real exercise(s) in the KamLife programme, so the coach can say "add a set
+// to your Lat Pulldown", not "your back lifts". Naming the muscle isn't enough — name the
+// move. These are all lifts that exist in server/programme.ts (verified against it).
+const LIFT_FOR_GROUP: Record<MuscleGroup, string[]> = {
+  chest: ["Chest Press", "Chest Fly"],
+  back: ["Lat Pulldown", "Seated Row"],
+  shoulders: ["Shoulder Press", "Lateral Raise"],
+  arms: ["Bicep Curl", "Tricep Pushdown"],
+  core: ["Cable Crunch"],
+  glutes: ["Hip Thrust"],
+  quads: ["Leg Press", "Leg Extension"],
+  hamstrings: ["Leg Curl"],
+  calves: ["Calf Raise"],
+};
+
+/**
+ * For the lagging muscles, the EXACT lifts in the client's programme that hit them — so the
+ * coach names the machine, not the muscle. Returns e.g. "back → your Lat Pulldown or Seated
+ * Row; core → your Cable Crunch". Empty string when nothing maps (never throws). Pure/tested.
+ */
+export function liftsForLaggingAreas(laggingCsv: string | null | undefined): string {
+  const groups = String(laggingCsv || "")
+    .toLowerCase().split(/[,;/]+/).map(s => s.trim()).filter(Boolean)
+    .filter((g): g is MuscleGroup => (MUSCLE_GROUPS as readonly string[]).includes(g));
+  const seen = new Set<MuscleGroup>();
+  const parts: string[] = [];
+  for (const g of groups) {
+    if (seen.has(g)) continue;
+    seen.add(g);
+    const lifts = LIFT_FOR_GROUP[g];
+    if (lifts?.length) parts.push(`${g} → your ${lifts.join(" or ")}`);
+  }
+  return parts.join("; ");
+}
+
 // Gender-aware fallback: what to prioritise when the photo read is inconclusive. A
 // PRIOR only — it never overrides what the model actually saw, just fills a blank.
 export function genderLaggingPriors(gender: string | null | undefined): MuscleGroup[] {

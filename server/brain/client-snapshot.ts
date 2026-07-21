@@ -18,6 +18,7 @@ import { weeklyTrendSlopeKg } from "../handlers/weight";
 import { getPhaseNames } from "../programme";
 import { energyFrameLine, waterTargetLitres } from "../targets";
 import { sastToday, sastDayStart } from "../utils";
+import { liftsForLaggingAreas } from "../physique-analysis";
 
 const DAY = 86_400_000;
 
@@ -75,7 +76,12 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     // can't judge on themselves. Drives targeted volume, never "variety".
     if (user.laggingAreas) {
       const dom = user.dominantAreas ? ` Already strong: ${String(user.dominantAreas).replace(/,/g, ", ")}.` : "";
-      lines.push(`Physique read (from progress photos): LAGGING muscles to prioritise with extra targeted volume — ${String(user.laggingAreas).replace(/,/g, ", ")}.${dom}`);
+      // The SPECIFIC lifts, not just the muscle names (2026-07-21, Kam: "'your back lifts'
+      // means nothing — name the machine she already does"). So "where can I improve?" gets
+      // "add a set to your Lat Pulldown", not "your back lifts".
+      const lifts = liftsForLaggingAreas(String(user.laggingAreas));
+      const liftLine = lifts ? ` When you tell them how to bring these up, NAME THE EXACT LIFT from their programme — ${lifts} — add a couple of sets there and keep adding weight/reps on the core lifts. NEVER just say "your back lifts" or invent a new exercise.` : "";
+      lines.push(`Physique read (from progress photos): LAGGING muscles to prioritise with extra targeted volume — ${String(user.laggingAreas).replace(/,/g, ", ")}.${dom}${liftLine}`);
     }
 
     // ── Food TODAY so far — running count, labelled meals, space left. "Remaining"
