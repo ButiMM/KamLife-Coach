@@ -153,6 +153,30 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
     db.update(users).set({ goalType: "muscle_gain" }).where(eq(users.phoneNumber, phone)).catch(() => {});
     db.insert(escalations).values({ userId: u.id, reason: "underweight_fatloss_request", triggerMessage: `BMI ${bmiGate.toFixed(1)} (${actualWeight}kg/${heightCm}cm) requested fat loss — auto-flipped to muscle_gain at onboarding`, priority: "high", slaDeadline: escalationSLA("high") }).catch((e) => console.error("[UNDERWEIGHT_GATE]", e));
   }
+  // GOAL-REALITY GATE — the mirror of the underweight gate (Mahle masterclass, made
+  // deterministic): catch a goal that fights the body's reality so we never set someone up to
+  // fail from day one. Overweight/obese choosing to BULK just piles on more fat; an experienced
+  // client wanting RECOMP while carrying fat is the slow road — a focused cut wins. We steer to
+  // the honest goal, explain warmly and firmly, flag the coach, and tell them how to override.
+  const _reFirst = u.name?.split(" ")[0] || "";
+  const _reExp = exp || u.trainingExperience || "beginner";
+  let goalRealityNote = "";
+  const _reGoal = u.goalType || "fat_loss";
+  if (bmiGate >= 30 && _reGoal === "muscle_gain") {
+    u.goalType = "fat_loss";
+    goalRealityNote = `${_reFirst ? _reFirst + ", one" : "One"} honest thing before we start: at ${actualWeight}kg a straight "bulk" would add *more* fat on top of what's already there — the opposite of what you want. We get you lean and strong *first*, then build on a clean base — you'll see and feel it far faster this way. (If you're certain you only want to focus on building, reply *change my goal to muscle gain* and I'll switch it.)\n\n---\n\n`;
+    db.update(users).set({ goalType: "fat_loss" }).where(eq(users.phoneNumber, phone)).catch(() => {});
+    db.insert(escalations).values({ userId: u.id, reason: "overweight_bulk_request", triggerMessage: `BMI ${bmiGate.toFixed(1)} requested muscle_gain — steered to fat_loss at onboarding`, priority: "medium", slaDeadline: escalationSLA("medium") }).catch(() => {});
+  } else if (bmiGate >= 27.5 && _reGoal === "muscle_gain") {
+    u.goalType = "recomposition";
+    goalRealityNote = `${_reFirst ? _reFirst + ", quick" : "Quick"} note before we start: at your weight the smartest play isn't a straight bulk — it's *recomposition*: build muscle while the extra fat comes off at the same time. Your body has the fuel to do both, and that's what I've set you up for. (Want a pure building focus instead? Reply *change my goal to muscle gain*.)\n\n---\n\n`;
+    db.update(users).set({ goalType: "recomposition" }).where(eq(users.phoneNumber, phone)).catch(() => {});
+  } else if (bmiGate >= 27 && _reGoal === "recomposition" && /(advanced|experienced|intermediate)/i.test(_reExp)) {
+    u.goalType = "fat_loss";
+    goalRealityNote = `${_reFirst ? _reFirst + ", real" : "Real"} talk before we start: recomp works best for beginners. Someone who's trained a while *and* is carrying some extra fat gets further, faster with a focused *cut* — lean out first, then build with a clean base and real shape. That's the plan I've set. (If you'd rather run recomp, reply *change my goal to recomposition*.)\n\n---\n\n`;
+    db.update(users).set({ goalType: "fat_loss" }).where(eq(users.phoneNumber, phone)).catch(() => {});
+  }
+
   const defaultGoal = u.goalType || "fat_loss";
 
   const trainingDays = u.trainingDaysPerWeek || ((isYouth || isElderly) ? 3 : 4);
@@ -283,7 +307,7 @@ async function completeOnboarding(phone: string, u: any, budget: string, budgetL
   // habit in the first five minutes.
   const activationBrief = buildActivationBrief(u.name?.split(" ")[0]);
   const msg4 = `${activationBrief}\n\n📸 *Right now, take one photo of your next meal or snack and send it.* That single act is your first win — and the whole habit in one move.\n\n_I keep it simple and plain — no confusing numbers. Love the detail? Just say *"show me the numbers"* anytime._`;
-  return `${underweightNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
+  return `${underweightNote}${goalRealityNote}${msg1}\n\n---\n\n${msg1b}\n\n---\n\n${msg2}\n\n---\n\n${msg3}\n\n---\n\n${msg4}`;
 }
 
 // ============================================================

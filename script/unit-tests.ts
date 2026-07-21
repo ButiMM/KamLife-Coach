@@ -954,6 +954,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
     assert.match(sched, /\*\/2 \* \* \* \*.*runMediaJobRecovery/, "the recovery sweep runs every 2 minutes");
   });
+  test("goal-reality gate: a goal that fights the body's reality is steered honestly at onboarding (mirror of the underweight gate)", () => {
+    const ob = readFileSync(join("server", "onboarding.ts"), "utf-8");
+    assert.match(ob, /GOAL-REALITY GATE/, "the gate exists");
+    // Obese wanting to bulk → cut first (health + results), flagged to the coach.
+    assert.match(ob, /bmiGate >= 30 && _reGoal === "muscle_gain"/, "obese + bulk is caught");
+    assert.match(ob, /overweight_bulk_request/, "and escalated to the coach");
+    // Overweight wanting to bulk → recomposition (build while fat comes off).
+    assert.match(ob, /bmiGate >= 27\.5 && _reGoal === "muscle_gain"/, "overweight + bulk → recomp");
+    assert.match(ob, /u\.goalType = "recomposition"/, "steered to recomposition");
+    // Experienced client carrying fat wanting recomp → cut first.
+    assert.match(ob, /_reGoal === "recomposition" && \/\(advanced\|experienced\|intermediate\)\//, "trained + recomp + fat → cut first");
+    // Autonomy preserved: every steer tells them how to override.
+    assert.match(ob, /change my goal to muscle gain/, "the client can always override the steer");
+    assert.match(ob, /\$\{goalRealityNote\}/, "the note is delivered in the welcome");
+  });
   test("shadow-retire sweep: the last ungated judgment handlers now defer to the brain when live", () => {
     const lc = readFileSync(join("server", "handlers", "lifecycle.ts"), "utf-8");
     // Open coaching advice ("what should I focus on next week") — the brain's job when live.
