@@ -1325,6 +1325,8 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const rpBase = (user.profileNotes || "").replace(/\s*\|?\s*back_on:\d{4}-\d{2}-\d{2}/g, "").trim();
     const rpNotes = `${rpBase ? rpBase + " | " : ""}back_on:${rpDate}`;
     db.update(users).set({ profileNotes: rpNotes }).where(eq(users.id, user.id)).then(() => { user.profileNotes = rpNotes; }).catch((e: any) => console.error("[RETURN_PLAN] persist failed:", e));
+    // TEMPORAL LOOP: nudge them the evening before they said they'd be back, so we never go silent.
+    import("../reminders").then(({ scheduleReturnNudge }) => scheduleReturnNudge(user.id, phone, rpDate, "away")).catch((e: any) => console.error("[RETURN_PLAN] nudge failed:", e));
   }
   if (process.env.ENGINE_LIVE !== "on" && isReturnPlanning) {
     const dayMatch = m.match(/\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next week)\b/i);

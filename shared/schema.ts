@@ -618,6 +618,7 @@ export const reminders = pgTable(
     phoneNumber: text("phone_number").notNull(),
     body: text("body").notNull(),                 // what to remind them, phrased as the nudge text
     fireAt: timestamp("fire_at").notNull(),        // when to send (real UTC)
+    kind: text("kind").notNull().default("user"),  // 'user' (client-set) | 'return' (auto night-before-return nudge)
     status: text("status").notNull().default("pending"), // 'pending' | 'sent' | 'cancelled'
     createdAt: timestamp("created_at").defaultNow().notNull(),
     sentAt: timestamp("sent_at"),

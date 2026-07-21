@@ -396,6 +396,7 @@ async function runMigrations(): Promise<void> {
       phone_number TEXT NOT NULL,
       body         TEXT NOT NULL,
       fire_at      TIMESTAMP NOT NULL,
+      kind         TEXT NOT NULL DEFAULT 'user',
       status       TEXT NOT NULL DEFAULT 'pending',
       created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
       sent_at      TIMESTAMP
@@ -419,6 +420,8 @@ async function runMigrations(): Promise<void> {
   const migrations = [
     // Email (optional, collected during onboarding)
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
+    // reminders.kind — added after the table shipped, so ensure it on existing instances.
+    `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'user'`,
     // POPIA consent columns
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent BOOLEAN DEFAULT false`,
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS popi_consent_at TIMESTAMP`,

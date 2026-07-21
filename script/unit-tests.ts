@@ -909,6 +909,26 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(brain, /OVER-TRAINING \(5\+/, "brain carries the over-training masterclass");
   });
 
+  test("temporal loop: a captured return date schedules a nudge at 7pm SAST the evening before (never go silent on a sick/away client)", async () => {
+    const { returnNudgeTime } = await import("../server/reminders-parse");
+    // Anchor 'now' to a fixed morning so the test is deterministic.
+    const now = new Date("2026-05-15T06:00:00+02:00").getTime(); // Fri 15 May, 6am SAST
+    const nudge = returnNudgeTime("2026-05-18", now);            // return Mon 18 May
+    assert.ok(nudge, "a future return date schedules a nudge");
+    if (nudge) {
+      const sast = new Date(nudge.getTime() + 2 * 3_600_000);
+      assert.equal(sast.getUTCHours(), 19, "fires at 19:00 SAST");
+      assert.equal(sast.getUTCDate(), 17, "the evening BEFORE the 18th — i.e. Sunday the 17th");
+    }
+    assert.equal(returnNudgeTime("not-a-date", now), null, "a malformed date schedules nothing");
+    assert.equal(returnNudgeTime("2020-01-01", now), null, "a past date schedules nothing");
+    // The loop must be wired at BOTH capture points, and stand down on early recovery.
+    const sick = readFileSync(join("server", "handlers", "sick-flow.ts"), "utf-8");
+    assert.match(sick, /scheduleReturnNudge\(user\.id, user\.phoneNumber, sickUntil, "sick"\)/, "sick_until schedules the nudge");
+    assert.match(sick, /cancelReturnNudges\(user\.id\)/, "recovery cancels the pending nudge");
+    const early = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
+    assert.match(early, /scheduleReturnNudge\(user\.id, phone, rpDate, "away"\)/, "back_on schedules the nudge");
+  });
   test("intent bouncer: a STRATEGY message about training never dumps the programme (the running voice-note miss, 2026-07-21)", () => {
     // The exact live failure: a voice note discussing running got the full Week-1 workout dumped.
     assert.equal(looksLikeWorkoutRequest("let's talk about running, incorporating it into my program, without killing my progress in the gym"), false, "the exact screenshot miss must NOT fire the programme");

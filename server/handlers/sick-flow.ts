@@ -9,6 +9,7 @@ import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { logChat } from "./chat-log";
 import { parseSickDays, isReturnFromSicknessQuestion } from "../utils";
+import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
 
 // ── Precision guards (2026-07-13, cross-intent sweep) ─────────────────────────
 // Word PRESENCE is not a sickness report. "Sick of pap" is frustration. "Flu shot"
@@ -72,6 +73,8 @@ async function recordSickState(user: any, notes: string, m: string): Promise<{ s
     const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|sick_until):\d{4}-\d{2}-\d{2}/g, "").trim();
     const updatedNotes = `${cleaned ? cleaned + " | " : ""}sick_until:${sickUntil} | paused_until:${sickUntil}`;
     await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, user.id));
+    // TEMPORAL LOOP: don't go silent on a sick client — nudge them the evening before they're due back.
+    if (user.phoneNumber) scheduleReturnNudge(user.id, user.phoneNumber, sickUntil, "sick").catch((e) => console.error("[SICK] return nudge failed:", e));
     return { sickDays, sickUntil };
   } catch (e) {
     console.error("[SICK] failed to persist sick state:", e);
@@ -202,6 +205,8 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
     try {
       const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until):\d{4}-\d{2}-\d{2}/g, "").trim();
       await db.update(users).set({ profileNotes: cleaned || null }).where(eq(users.id, user.id));
+      // Already back — cancel the pending night-before nudge so we don't ping someone who returned early.
+      await cancelReturnNudges(user.id).catch((e) => console.error("[SICK] cancel return nudge failed:", e));
     } catch (e) { console.error("[SICK] failed to clear sick state:", e); }
     const backReply = `Welcome back${capName ? ", " + capName : ""} — that's what I like to see. 💪\n\n*First session back: ~70%.* Lighter weights, fewer sets, feel it out. Session two, we're back to full speed. Nothing reset while you were out.\n\n[BUTTONS:Today's workout|Log food]`;
     await logChat(user.id, message, backReply, "SICK_RECOVERED");

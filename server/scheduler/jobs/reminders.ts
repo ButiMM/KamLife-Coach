@@ -24,9 +24,10 @@ export async function runDueReminders(): Promise<void> {
     try {
       // Mark sent FIRST so a mid-send crash can't double-fire the same reminder.
       await markReminderSent(r.id);
-      const msg = `⏰ Reminder: ${r.body}`;
+      // Client-set reminders get the ⏰ prefix; auto 'return' nudges are self-contained coach talk.
+      const msg = (r as any).kind === "return" ? r.body : `⏰ Reminder: ${r.body}`;
       await sendWhatsApp(r.phoneNumber, msg);
-      await logChat(r.userId, "[reminder]", msg, "REMINDER_FIRED");
+      await logChat(r.userId, "[reminder]", msg, (r as any).kind === "return" ? "RETURN_NUDGE_FIRED" : "REMINDER_FIRED");
     } catch (err) {
       console.error(`[SCHEDULER] reminder ${r.id} send failed:`, err);
     }

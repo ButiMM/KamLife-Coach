@@ -132,6 +132,19 @@ export function parseReminderRequest(message: string): ParsedReminder {
   return { kind: "set", body: body.slice(0, 240), fireAt: fireAt! };
 }
 
+/**
+ * 19:00 SAST the EVENING BEFORE a YYYY-MM-DD return date — the moment to nudge a sick/away
+ * client so they're never met with silence. Returns null if the date is malformed or the
+ * evening-before is already past. Pure so the temporal loop is unit-testable.
+ */
+export function returnNudgeTime(dateStr: string, now: number = Date.now()): Date | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return null;
+  const returnMidnight = new Date(`${dateStr}T00:00:00+02:00`); // 00:00 SAST on the return day
+  const t = returnMidnight.getTime() - 5 * 3_600_000;           // minus 5h = 19:00 SAST the day before
+  if (!Number.isFinite(t) || t <= now) return null;
+  return new Date(t);
+}
+
 /** Human "today at 8:00pm" / "tomorrow at 7:00am" / "Mon 20 Jul at 6:00am" — SAST. */
 export function describeFireTime(fireAt: Date): string {
   const sast = new Date(fireAt.getTime() + SAST_OFFSET_MS);
