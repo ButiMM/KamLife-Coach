@@ -2944,6 +2944,17 @@ test("engine runs the reply verifier on its own mouth (self-correcting loop wire
   assert.match(eng, /return null; \/\/ fail-open on rewrite error/, "a second violation fails open to the deterministic pipeline");
 });
 
+// DEPLOY VISIBILITY (2026-07-21): a non-technical founder can't watch a deploy, so "is the
+// fix even live?" becomes "nothing works". The coach can text *version* to the live bot and
+// get the running commit + a self-test where the code proves the exact broken reply is now
+// blocked. Source-guarded so the diagnostic can never silently disappear.
+test("coach 'version' command exists and self-tests the live guard", () => {
+  const routes = readFileSync(join("server", "routes.ts"), "utf-8");
+  assert.match(routes, /\^\(version\|deploy/, "the version command is wired for the coach");
+  assert.match(routes, /verifyBrainReply\("To improve, incorporate exercises like rows and planks\."/, "it self-tests the exact freelance reply live");
+  assert.match(routes, /RAILWAY_GIT_COMMIT_SHA/, "it reports the running commit so the deploy is verifiable");
+});
+
 // ============================================================
 // hasGoalChangeVocabulary — the normalizer's GOAL_CHANGE brake. A goal flip is
 // the most destructive rewrite; only honour it when the client actually asked.

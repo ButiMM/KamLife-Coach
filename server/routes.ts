@@ -28,6 +28,7 @@ import { runSafetyGuards } from "./handlers/safety";
 import { handleFoodLogMgmt } from "./handlers/food-log-mgmt";
 import { bumpNumericFluency } from "./handlers/numbers-literacy";
 import { handleOnboardingBodyPhotos } from "./onboarding-physique";
+import { verifyBrainReply } from "./brain/reply-verifier";
 import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
 import { handleProgressCheck } from "./handlers/progress";
@@ -181,6 +182,20 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // No shell for a non-technical founder: text "replay" (optionally "replay 50") and the
   // Meaning Engine is dry-run over real history, scored vs production, results sent here.
   if (isCoach) {
+    // COACH COMMAND "version" → PROVE what's LIVE. A founder can't watch a deploy, so "is the
+    // fix even running?" becomes "nothing works". Text the live bot → running commit + a self-
+    // test where the code proves the EXACT broken reply is now blocked. Trust you can check.
+    if (/^(version|deploy(?:ed)?|what.?version|whatami|running|self.?test|is it live)$/i.test(m.trim())) {
+      const sha = (process.env.RAILWAY_GIT_COMMIT_SHA || "").slice(0, 7) || "unknown";
+      const bootAt = new Date(Date.now() - process.uptime() * 1000).toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false });
+      const engine = process.env.ENGINE_LIVE === "on" ? "on" : "off";
+      // The live self-test: the running code checks the exact replies from the screenshots.
+      const freelance = !verifyBrainReply("To improve, incorporate exercises like rows and planks.", {}).ok;
+      const myth = !verifyBrainReply("We'll shock the muscle with new movements to confuse it.", {}).ok;
+      const mark = (ok: boolean) => ok ? "✅ BLOCKED" : "❌ SLIPS THROUGH";
+      return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n\n${freelance && myth ? "The fix is LIVE — those replies can't reach a client." : "⚠️ Fix NOT live yet — the deploy hasn't landed. Give Railway a minute and send *version* again."}`;
+    }
+
     const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
     if (rc) {
       const limit = Math.max(10, Math.min(200, parseInt(rc[1] || "60", 10) || 60));
