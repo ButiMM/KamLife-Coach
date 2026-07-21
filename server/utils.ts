@@ -737,6 +737,13 @@ export function looksLikeWorkoutRequest(m: string): boolean {
   // and "See every move" typed as text got circular navigation instructions — the
   // deterministic serving carries the real link, so serving it IS the answer).
   if (/^\s*(workout|my workout|today'?s?\s+workout|my programme|programme|my program|program|see every move)\W*$/i.test(s)) return true;
+  // INTENT BOUNCER (2026-07-21 voice-note miss: "let's talk about running, incorporating it
+  // into my program without killing my gym progress" DUMPED the full programme because it says
+  // "my program"). A message DISCUSSING or MODIFYING training — cardio, running, combining,
+  // "without losing gains" — is JUDGMENT for the coach, never a request to re-send the plan.
+  if (/\b(let'?s talk|talk(ing)? about|thoughts?\b|what do you think|without (killing|losing|hurting|ruining|sacrific\w*)|incorporat\w*|combin\w*|mix (in|into|it)|too much cardio|can i still|do i still need|instead of my)\b/i.test(s)) return false;
+  if (/\b(how (do|can|should) i|should i)\b[^.!?]{0,20}\b(add|includ\w*|incorporat\w*|combin\w*|balanc\w*|fit in|start (running|cardio|swimming))\b/i.test(s)) return false;
+  if (/\badd\w*\b[^.!?]{0,22}\b(to my|into my|my program|my routine|running|cardio|swimming)\b/i.test(s)) return false;
   // Not a request: done-reports, feedback, scheduling, and how-long/how-many questions.
   if (/\b(did|done|finished|completed|smashed|crushed|skipped|felt|was (easy|hard|tough)|cancel|skip|move|reschedule|postpone)\b/i.test(s)) return false;
   if (/\bhow (long|many|often|much)\b/i.test(s)) return false;

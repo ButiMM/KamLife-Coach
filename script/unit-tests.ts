@@ -909,6 +909,17 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.match(brain, /OVER-TRAINING \(5\+/, "brain carries the over-training masterclass");
   });
 
+  test("intent bouncer: a STRATEGY message about training never dumps the programme (the running voice-note miss, 2026-07-21)", () => {
+    // The exact live failure: a voice note discussing running got the full Week-1 workout dumped.
+    assert.equal(looksLikeWorkoutRequest("let's talk about running, incorporating it into my program, without killing my progress in the gym"), false, "the exact screenshot miss must NOT fire the programme");
+    assert.equal(looksLikeWorkoutRequest("how do I add running to my program without losing gains"), false, "a how-to strategy question is judgment for the coach");
+    assert.equal(looksLikeWorkoutRequest("can I still do cardio on this plan"), false, "a can-I-still question is a conversation");
+    assert.equal(looksLikeWorkoutRequest("thoughts on adding swimming"), false, "asking for thoughts is a conversation");
+    // But genuine delivery requests must STILL be served deterministically.
+    assert.equal(looksLikeWorkoutRequest("workout"), true, "the bare command still delivers");
+    assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
+    assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
+  });
   test("restaurants: goal-aware smart order with deterministic macros (the MenuFit service)", async () => {
     const { matchRestaurant, formatRestaurantGuide, listRestaurantNames } = await import("../server/restaurants");
     assert.ok(listRestaurantNames().length >= 15, "comprehensive SA chain coverage");
