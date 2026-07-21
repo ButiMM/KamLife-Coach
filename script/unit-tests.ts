@@ -3961,6 +3961,16 @@ test("domain-guard: clearly off-topic messages are NOT fast-pathed (defer to cla
   for (const m of ambiguous) assert.ok(!isObviouslyInDomain(m), `must NOT fast-path off-topic: "${m}"`);
 });
 
+// META-SAFETY: the domain decline must live in the PROMPT too (belt-and-suspenders) so every
+// path — engine, gpt-block fallback, old brain — refuses code/politics/essays, not just the
+// live-engine classifier. A fitness bot that writes Python for a reviewer is a compliance risk.
+test("domain-guard: the coach prompt itself refuses off-topic requests and bridges back", () => {
+  const prompt = readFileSync(join("server", "coach-prompt.ts"), "utf-8");
+  assert.match(prompt, /STAY IN YOUR LANE/, "the explicit off-topic guard is in the prompt");
+  assert.match(prompt, /write code, an essay, a poem or homework/, "names the classic off-topic asks");
+  assert.match(prompt, /life event they raise.*IS in your lane/, "but life events (stress/money/funeral) stay in-lane");
+});
+
 // ============================================================
 // THE INVERSION — actions stay deterministic; conversation goes to Coach K.
 // A false "goes to engine" could drop a food/step log — unforgivable — so the
