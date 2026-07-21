@@ -27,6 +27,7 @@ import { type UnderstandingState } from "./state";
 import { compileStateBlurb, compileKeyFacts } from "./compiler";
 import { runPerception } from "./perception";
 import { COACH_ACTION_TOOLS, ACTION_DIRECTIVE, validateAction, isMemoryGrievance, isSickReaffirmation, type CoachAction } from "./actions";
+import { verifyBrainReply } from "../brain/reply-verifier";
 
 // COACH K'S CONSTITUTION (final review): the immutable laws every reply obeys. These sit
 // ABOVE everything — the one identity, expressed as principles, so the engine behaves the
@@ -190,7 +191,46 @@ export async function runMeaningEngine(input: MeaningInput): Promise<MeaningResu
     const reply = (msg?.content || "").trim();
     // Nothing to say AND nothing to do → fail-open to the existing pipeline.
     if (!reply && action.type === "JUST_REPLY") return null;
-    return { reply, state, model, action };
+
+    // SELF-CORRECTING LOOP — the same deterministic verifier the brain path has always
+    // trusted, now on the ENGINE too. This was the systemic hole (2026-07-21): the live
+    // "new engine" was the ONE reply path with NO verifier on its mouth, so it freelanced
+    // off-programme exercises ("incorporate rows and planks"), fitness myths, and goal
+    // contradictions completely unchecked. Only a FREEFORM reply is verified — a structured
+    // action was validated above. On a violation the model gets ONE rewrite pass with the
+    // fault named; a second violation fails open to the deterministic pipeline (never sends
+    // a reply we know is wrong).
+    let finalReply = reply;
+    if (finalReply && action.type === "JUST_REPLY") {
+      const verdict = verifyBrainReply(finalReply, { goalType: user?.goalType });
+      if (!verdict.ok) {
+        console.log(`[MEANING_ENGINE] verifier violation — self-correcting: ${(verdict.violation || "").slice(0, 90)}`);
+        try {
+          const fix = await openai.chat.completions.create({
+            model, temperature: 0.4, max_tokens: 400,
+            messages: [
+              ...messages,
+              { role: "assistant", content: finalReply },
+              { role: "system", content: `Your draft broke a hard rule — ${verdict.violation} Rewrite the reply now without the violation. Short, Coach K voice, no apology tour, no new exercises.` },
+            ],
+          });
+          recordGptCost({
+            userId: user?.id ?? null, model, feature: "meaning_engine_rewrite",
+            promptTokens: fix.usage?.prompt_tokens ?? 0, completionTokens: fix.usage?.completion_tokens ?? 0,
+          });
+          const rewritten = (fix.choices[0]?.message?.content || "").trim();
+          if (rewritten && verifyBrainReply(rewritten, { goalType: user?.goalType }).ok) {
+            finalReply = rewritten;
+          } else {
+            console.warn("[MEANING_ENGINE] verifier failed after rewrite — deferring (fail open)");
+            return null;
+          }
+        } catch {
+          return null; // fail-open on rewrite error
+        }
+      }
+    }
+    return { reply: finalReply, state, model, action };
   } catch (e) {
     if (!isAiOfflineError(e)) console.warn("[MEANING_ENGINE] failed (deferring):", (e as any)?.message || e);
     return null; // fail-open

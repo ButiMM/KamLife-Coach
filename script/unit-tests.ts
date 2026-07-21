@@ -2911,6 +2911,39 @@ test("verifier ALLOWS correctly debunking a myth (not blocked for naming it)", (
   assert.ok(verifyBrainReply("Your chest is lagging? Add 2-3 sets to your press. That's how you bring it up.", {}).ok);
 });
 
+// PROGRAMME SOVEREIGNTY (2026-07-21 live: asked "where can I improve?", the front-door
+// engine freelanced a workout menu — "incorporate exercises like rows and planks… squats
+// and lunges" — inventing movements that aren't in the client's FIXED machine programme.
+// The prompt already forbade it; nothing enforced it. Now the verifier catches it in code.
+test("verifier blocks the brain freelancing off-programme exercises", () => {
+  assert.ok(!verifyBrainReply("To improve, incorporate exercises like rows and planks for your back and core.", {}).ok);
+  assert.ok(!verifyBrainReply("Try adding exercises such as lunges and deadlifts to build your legs.", {}).ok);
+  assert.ok(!verifyBrainReply("Incorporate squats and planks to strengthen your lower body.", {}).ok);
+  assert.ok(!verifyBrainReply("Back & Core: incorporate exercises like rows. Legs: squats and lunges.", {}).ok);
+});
+
+test("verifier ALLOWS the CORRECT improvement answer (overload on existing lifts, no new moves)", () => {
+  // Progressive overload / targeted volume on the EXISTING plan is the right answer, never blocked.
+  assert.ok(verifyBrainReply("Add 2.5kg to your chest press and push your leg press up a rep next session.", {}).ok);
+  assert.ok(verifyBrainReply("Your glutes are lagging — add 2 sets to your hip thrust. That brings them up.", {}).ok);
+  assert.ok(verifyBrainReply("Want the full plan? Send *programme* and I'll lay out every session.", {}).ok);
+  // And it must still allow correctly REFUSING to freelance ("we don't add random exercises").
+  assert.ok(verifyBrainReply("We don't add random squats and lunges — your plan is machines, on purpose.", {}).ok);
+});
+
+// THE SYSTEMIC HOLE (2026-07-21): the live "new engine" was the ONE reply path with no
+// verifier on its mouth — it only sanitised, then shipped. So myths, off-programme
+// exercises, and goal contradictions went to the client unchecked. This locks the wire in:
+// the meaning engine MUST run verifyBrainReply on a freeform reply and rewrite/defer on a
+// violation, exactly like the brain path. Source-guarded because the path needs a model.
+test("engine runs the reply verifier on its own mouth (self-correcting loop wired in)", () => {
+  const eng = readFileSync(join("server", "understanding", "meaning-engine.ts"), "utf-8");
+  assert.match(eng, /import \{ verifyBrainReply \} from "\.\.\/brain\/reply-verifier"/, "engine imports the verifier");
+  assert.match(eng, /verifyBrainReply\(finalReply, \{ goalType: user\?\.goalType \}\)/, "engine verifies the freeform reply");
+  assert.match(eng, /verifyBrainReply\(rewritten, \{ goalType: user\?\.goalType \}\)\.ok/, "a rewrite is re-verified before it can be sent");
+  assert.match(eng, /return null; \/\/ fail-open on rewrite error/, "a second violation fails open to the deterministic pipeline");
+});
+
 // ============================================================
 // hasGoalChangeVocabulary — the normalizer's GOAL_CHANGE brake. A goal flip is
 // the most destructive rewrite; only honour it when the client actually asked.

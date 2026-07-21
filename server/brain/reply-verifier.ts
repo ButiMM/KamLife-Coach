@@ -54,11 +54,31 @@ const MYTH_DEBUNK_RE =
   /\b(myth|no such thing|not (?:a )?real|isn'?t real|not (?:a )?thing|can'?t|cannot|doesn'?t work|false|nonsense|ignore that)\b/i
 ;
 
+// PROGRAMME SOVEREIGNTY (2026-07-21 live: asked "where can I improve?", the front-door
+// engine freelanced a workout menu — "incorporate exercises like rows and planks… squats
+// and lunges" — inventing movements that AREN'T in the client's FIXED machine programme.
+// The programme is fixed and delivered deterministically (the *programme* command); a
+// conversational reply must NEVER prescribe a menu of exercises. Improving a body part =
+// targeted volume + progressive overload on the lifts they ALREADY have, plus the lagging
+// muscle from their photo read. The prompt already says this (BRAIN_SYSTEM training
+// philosophy) — but a prompt line the model can ignore is exactly what let this through,
+// so it is enforced HERE in code. High precision: the giveaway is "exercises like/such as"
+// (introducing examples of a category = freelancing) or a prescription verb naming a fresh
+// movement. Progressive-overload phrasing ("add 2.5kg", "add a rep/set to your press")
+// never matches — those are the CORRECT answer, not a violation.
+const PROGRAMME_FREELANCE_RE =
+  /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|try (?:doing |adding |some ))\b[^.!?]{0,20}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?)\b/i
+;
+
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
   const r = reply || "";
 
   if (FITNESS_MYTH_RE.test(r) && !MYTH_DEBUNK_RE.test(r)) {
     return { ok: false, violation: "Your reply invokes a fitness MYTH (muscle confusion / shocking the muscle / spot reduction / muscle-turns-to-fat). None of these are real — never tell a client to 'confuse' or 'shock' a muscle. Rewrite with the correct principle: progressive overload on the core lifts, and for a lagging body part, TARGETED VOLUME (a couple more sets, or one focused accessory) on that muscle." };
+  }
+
+  if (PROGRAMME_FREELANCE_RE.test(r)) {
+    return { ok: false, violation: "You prescribed exercises as if writing a workout ('exercises like…', 'incorporate squats and lunges'). The client's programme is FIXED and machine-based — you must NEVER invent, list, or suggest movements in a chat reply. To bring up a body part the answer is ALWAYS: targeted volume + progressive overload on the lifts they ALREADY have (add a rep or 2.5kg), plus the lagging muscle from their photo read in the numbers above — name the SPECIFIC weak part and one concrete number. If they want the actual plan, tell them to send *programme*. Rewrite now with no new exercises." };
   }
 
   if (FORBIDDEN_ACTION_RE.test(r)) {
