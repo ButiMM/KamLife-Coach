@@ -24,6 +24,7 @@ import { handleSickFlow, looksSickMention } from "./sick-flow";
 import { handleNumbersLiteracy, handleToneSignal, handleSurplusDeficitQuestion } from "./numbers-literacy";
 import { answerSwapAsk } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
+import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
 
 // In-memory maps for holiday/travel equipment mode — module-level so they
 // persist across requests (same process lifetime as the original routes.ts).
@@ -753,6 +754,17 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     const guide = formatRestaurantGuide(restaurantHit, user.goalType || "fat_loss");
     await logChat(user.id, message, guide, "RESTAURANT_GUIDE");
     return guide;
+  }
+
+  // ---- STREET / INFORMAL EATING — taxi rank, spaza, vendor, shisa nyama (server/street-food.ts).
+  // ADVICE only: a past-tense log ("I had a kota") stays with the scanner; this fires on
+  // "what should I get" / "I'm at the rank" / "is a kota ok".
+  if (!/\b(i had|i ate|i just (had|ate)|ate a|had a|just had|logged|i'?m eating a)\b/i.test(m)
+      && /\b(order|eat|eating|get|getting|should|what|which|is (it|a|this)|good|healthy|instead|best|ok\b|okay|advice|help)\b/i.test(m)) {
+    const streetHit = matchStreetDish(m);
+    const g = streetHit ? formatStreetDish(streetHit, user.goalType || "fat_loss")
+      : isStreetContext(m) ? streetGuide(user.goalType || "fat_loss") : null;
+    if (g) { await logChat(user.id, message, g, "STREET_FOOD_GUIDE"); return g; }
   }
 
   // ---- ALCOHOL AWARENESS — "had 3 beers", "wine tonight", "drinks at the braai" ----

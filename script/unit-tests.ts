@@ -940,6 +940,22 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
     assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
   });
+  test("street food: coaches the real SA way of eating — taxi rank, kota, shisa nyama, livers", async () => {
+    const { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } = await import("../server/street-food");
+    assert.ok(matchStreetDish("should I get a kota"), "knows a kota");
+    assert.ok(matchStreetDish("chicken livers on the corner"), "knows chicken livers");
+    assert.equal(matchStreetDish("I ate a chicken breast"), null, "not every food is street food");
+    assert.ok(isStreetContext("I'm at the taxi rank what should I eat"), "reads the taxi-rank context");
+    assert.ok(isStreetContext("eating shisa nyama tonight"), "reads shisa nyama context");
+    const livers = matchStreetDish("livers");
+    if (livers) {
+      const out = formatStreetDish(livers, "fat_loss");
+      assert.match(out, /Good choice/, "chicken livers are coached as a win, never shamed");
+      assert.match(out, /protein/, "gives the honest protein number");
+    }
+    assert.match(streetGuide("fat_loss"), /Chicken livers/, "the rank guide leads with the cheap high-protein wins");
+    assert.match(streetGuide("muscle_gain"), /protein in every plate/, "the one real rule holds for both goals");
+  });
   test("restaurants: goal-aware smart order with deterministic macros (the MenuFit service)", async () => {
     const { matchRestaurant, formatRestaurantGuide, listRestaurantNames } = await import("../server/restaurants");
     assert.ok(listRestaurantNames().length >= 15, "comprehensive SA chain coverage");
