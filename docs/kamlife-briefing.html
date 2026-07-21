@@ -1,0 +1,299 @@
+<title>KamLife Coach — State, Architecture & Direction</title>
+<style>
+  :root{
+    --paper:#F4F6F3; --card:#FBFCFA; --ink:#151E1A; --ink-soft:#3A473F;
+    --muted:#5E6B62; --line:#DDE4DE; --accent:#1F6E52; --accent-ink:#12503A;
+    --built:#2F7D5B; --built-bg:#E6F1EA; --take:#9C6A15; --take-bg:#F4EBD8;
+    --risk:#A8442C; --risk-bg:#F3E2DC;
+    --thesis-bg:#EAF1EC;
+    --maxw:70ch;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --paper:#0F1512; --card:#161F1B; --ink:#EBEFEA; --ink-soft:#C2CCC5;
+      --muted:#8C978F; --line:#25302A; --accent:#4FB78A; --accent-ink:#7FD3AD;
+      --built:#5FC495; --built-bg:#16281F; --take:#D6A24C; --take-bg:#2A2314;
+      --risk:#E08163; --risk-bg:#2C1A14; --thesis-bg:#152019;
+    }
+  }
+  :root[data-theme="dark"]{
+    --paper:#0F1512; --card:#161F1B; --ink:#EBEFEA; --ink-soft:#C2CCC5;
+    --muted:#8C978F; --line:#25302A; --accent:#4FB78A; --accent-ink:#7FD3AD;
+    --built:#5FC495; --built-bg:#16281F; --take:#D6A24C; --take-bg:#2A2314;
+    --risk:#E08163; --risk-bg:#2C1A14; --thesis-bg:#152019;
+  }
+  :root[data-theme="light"]{
+    --paper:#F4F6F3; --card:#FBFCFA; --ink:#151E1A; --ink-soft:#3A473F;
+    --muted:#5E6B62; --line:#DDE4DE; --accent:#1F6E52; --accent-ink:#12503A;
+    --built:#2F7D5B; --built-bg:#E6F1EA; --take:#9C6A15; --take-bg:#F4EBD8;
+    --risk:#A8442C; --risk-bg:#F3E2DC; --thesis-bg:#EAF1EC;
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;background:var(--paper);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;
+    line-height:1.62;font-size:17px;-webkit-font-smoothing:antialiased;}
+  .wrap{max-width:var(--maxw);margin:0 auto;padding:clamp(28px,5vw,72px) clamp(20px,5vw,40px) 96px;}
+  .full{max-width:none;}
+  /* Masthead */
+  .mast{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:14px;}
+  .kicker{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);
+    font-weight:600;margin:0 0 14px;}
+  h1{font-family:Georgia,"Iowan Old Style","Times New Roman",serif;
+    font-weight:600;font-size:clamp(30px,5.5vw,46px);line-height:1.08;
+    letter-spacing:-.015em;text-wrap:balance;margin:0 0 6px;}
+  .sub{color:var(--muted);font-size:18px;margin:2px 0 0;font-style:italic;
+    font-family:Georgia,serif;}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 22px;margin:20px 0 0;
+    font-family:ui-monospace,Menlo,monospace;font-size:12.5px;color:var(--ink-soft);}
+  .meta b{color:var(--accent-ink);font-weight:600;}
+  .meta span{white-space:nowrap;}
+  /* Sections */
+  section{margin-top:52px;}
+  h2{font-size:15px;font-weight:700;letter-spacing:.02em;margin:0 0 18px;
+    padding-bottom:10px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:baseline;}
+  h2 .num{font-family:ui-monospace,Menlo,monospace;color:var(--accent);
+    font-size:13px;font-weight:600;flex:none;}
+  h2 .txt{text-transform:uppercase;letter-spacing:.09em;font-size:13.5px;color:var(--ink);}
+  h3{font-size:18px;font-weight:650;margin:30px 0 8px;letter-spacing:-.01em;}
+  p{margin:0 0 15px;}
+  a{color:var(--accent-ink);}
+  strong{font-weight:650;color:var(--ink);}
+  em{color:var(--ink-soft);}
+  ul,ol{margin:0 0 16px;padding-left:22px;}
+  li{margin:0 0 9px;}
+  .lead{font-size:18.5px;color:var(--ink-soft);}
+  code,.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    font-size:.86em;background:var(--card);border:1px solid var(--line);
+    border-radius:5px;padding:1px 6px;color:var(--accent-ink);}
+  /* Thesis / callouts */
+  .thesis{background:var(--thesis-bg);border-left:3px solid var(--accent);
+    border-radius:0 8px 8px 0;padding:18px 22px;margin:22px 0;}
+  .thesis p{font-family:Georgia,serif;font-size:19px;font-style:italic;
+    color:var(--ink);margin:0 0 8px;line-height:1.5;}
+  .thesis p:last-child{margin:0;}
+  .note{border:1px solid var(--line);border-left:3px solid var(--take);
+    background:var(--card);border-radius:0 8px 8px 0;padding:14px 18px;margin:20px 0;
+    font-size:15.5px;color:var(--ink-soft);}
+  .note b{color:var(--take);text-transform:uppercase;letter-spacing:.05em;font-size:12px;
+    font-family:ui-monospace,monospace;display:block;margin-bottom:4px;}
+  /* Pipeline diagram */
+  .diagram{background:var(--card);border:1px solid var(--line);border-radius:10px;
+    padding:18px 20px;margin:20px 0;overflow-x:auto;
+    font-family:ui-monospace,Menlo,monospace;font-size:13px;line-height:1.85;color:var(--ink-soft);}
+  .diagram .hl{color:var(--accent-ink);font-weight:600;background:var(--built-bg);
+    padding:1px 5px;border-radius:4px;}
+  /* Tables */
+  .tablewrap{overflow-x:auto;margin:18px 0;border:1px solid var(--line);border-radius:10px;}
+  table{border-collapse:collapse;width:100%;font-size:15px;min-width:520px;}
+  th,td{text-align:left;padding:11px 16px;border-bottom:1px solid var(--line);vertical-align:top;}
+  th{background:var(--card);font-size:12px;text-transform:uppercase;letter-spacing:.06em;
+    color:var(--muted);font-weight:600;}
+  tr:last-child td{border-bottom:none;}
+  td:first-child{color:var(--ink);font-weight:500;}
+  .pill{display:inline-block;font-family:ui-monospace,monospace;font-size:11px;font-weight:600;
+    letter-spacing:.03em;padding:2px 9px;border-radius:20px;white-space:nowrap;}
+  .p-built{background:var(--built-bg);color:var(--built);}
+  .p-take{background:var(--take-bg);color:var(--take);}
+  .p-risk{background:var(--risk-bg);color:var(--risk);}
+  /* Question list */
+  .q{counter-reset:q;list-style:none;padding:0;margin:18px 0;}
+  .q li{position:relative;padding:16px 0 16px 52px;border-top:1px solid var(--line);margin:0;}
+  .q li:before{counter-increment:q;content:"Q" counter(q);position:absolute;left:0;top:16px;
+    font-family:ui-monospace,monospace;font-size:13px;font-weight:700;color:var(--accent);}
+  /* Final */
+  .closer{margin-top:52px;background:var(--ink);color:var(--paper);border-radius:12px;
+    padding:26px 28px;}
+  .closer h2{border:none;color:var(--paper);margin-bottom:12px;}
+  .closer h2 .txt{color:var(--paper);}
+  .closer h2 .num{color:var(--accent);}
+  .closer p{font-family:Georgia,serif;font-size:18px;line-height:1.55;margin:0;color:#DCE6DF;}
+  .foot{margin-top:40px;padding-top:18px;border-top:1px solid var(--line);
+    font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);}
+  @media (max-width:560px){ body{font-size:16px;} .wrap{padding-left:18px;padding-right:18px;} }
+</style>
+
+<div class="wrap">
+  <header class="mast">
+    <p class="kicker">Briefing for external technical &amp; product review</p>
+    <h1>KamLife Coach</h1>
+    <p class="sub">State, architecture &amp; direction — an honest internal briefing</p>
+    <div class="meta">
+      <span><b>Prepared</b> 2026-07-21</span>
+      <span><b>Stage</b> Pre-launch · private beta</span>
+      <span><b>Platform</b> WhatsApp / Twilio</span>
+      <span><b>Stack</b> Node · TS · Postgres · Railway</span>
+    </div>
+  </header>
+
+  <p class="lead">This is an honest internal briefing, not a pitch. It states what is genuinely built and working, what is half-built, and what is missing — so a reviewer can pressure-test our decisions before we commit the launch sprint.</p>
+  <p>A second-party “Master Directive” was recently drafted for us (Redis UCSO, BullMQ, vector memory, Stokvel squads, self-hosted TTS, “delete 210 templates”). <strong>§8 is our line-by-line engineering response</strong>: what we already built, what’s worth taking, what we believe is premature or risky for our stage. We most want the reviewer to adjudicate §8 and answer the seven questions in §9.</p>
+
+  <section>
+    <h2><span class="num">01</span><span class="txt">What KamLife is</span></h2>
+    <p>A <strong>WhatsApp-native AI fitness &amp; nutrition coach for the South African mass market</strong> — low-to-middle income, often low-literacy, price-sensitive users on R199/month. It isn’t an app you download; it’s a coach you text, voice-note, or send a photo. The whole product lives inside a WhatsApp thread.</p>
+    <p><strong>Who it’s for.</strong> People underserved by global fitness apps: someone eating pap and morogo on a R100/week budget, training at a commercial gym or at home with nothing, sending a voice note in mixed English/isiZulu — who will churn the moment the coach feels robotic, shaming, or absent.</p>
+    <h3>What makes it different — the moat</h3>
+    <ul>
+      <li><strong>Deeply South African.</strong> Understands SA foods (pap, samp, vetkoek, chakalaka, amagwinya), SA restaurant chains, and SA life (load-shedding, month-end, taxi commutes, funerals, stokvels) — and coaches within a real budget.</li>
+      <li><strong>Coach, not calculator.</strong> No calorie homework, no food scales. The client says what they ate; the system does the numbers silently. Hand-portion method, not grams.</li>
+      <li><strong>Judgment + empathy, not templates.</strong> The AI (“Coach K”) is the front door; it reads the client’s real situation and responds like a human coach who remembers them.</li>
+    </ul>
+    <p><strong>What we wanted it to be</strong> — and are converging on — is a coach that is <em>smart, warm, proactive, and never amnesiac</em>: it remembers you’re sick until Monday, nudges you the night before, never tells a grieving or ill client to “hit their steps,” and answers what you actually asked rather than firing the nearest template.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">02</span><span class="txt">Where we are — launch readiness</span></h2>
+    <p><strong>Live and working</strong> (deployed on Railway, in private beta with real testers):</p>
+    <ul>
+      <li>Onboarding → profile → goal-aware targets (Mifflin-St Jeor, gender-aware safety floors).</li>
+      <li>Food logging via SA food database, GPT fallback, and photo vision — numbers computed <strong>deterministically, never guessed by the LLM</strong>.</li>
+      <li>Deterministic workout programme with progressive overload, form cues, and exercise media.</li>
+      <li>Step / water / weight logging, weekly weigh-in ritual, 3-week auto-calorie-adjust with safety floors.</li>
+      <li>Progress photos + physique analysis (lagging body-part read), form-check from video/photo.</li>
+      <li>Proactive scheduler: morning brief, evening accountability, comeback protocol, streak-at-risk, retention interventions, idempotent referral rewards, Monday rituals.</li>
+      <li>Safety: crisis/medical hard-stop (SADAG, chest-pain, emergency) that <strong>bypasses the LLM entirely and runs first</strong>; POPIA consent captured conversationally and logged.</li>
+      <li>Billing: PayFast subscription + SMS critical-alert fallback.</li>
+    </ul>
+    <div class="note"><b>The honest read</b>The capability surface is broad and largely built. The remaining work is <strong>not more features — it is reliability of judgment</strong>: making sure the right brain answers the right message every time. That “final few percent” is what recent testing exposed (§7).</div>
+  </section>
+
+  <section>
+    <h2><span class="num">03</span><span class="txt">The core architecture — “The Inversion”</span></h2>
+    <p>The original system decided <em>what to do</em> (keyword → template) <strong>before</strong> it understood <em>what the user meant</em>. That produced the failure the founder rightly hates: a keyword hijacks the message and the coach answers something the client never asked. We inverted it.</p>
+    <div class="thesis">
+      <p>The AI (Coach K) owns judgment, empathy, context, strategy — it is the front door.</p>
+      <p>Deterministic code owns actions, safety, transactions, logging — the exact, auditable rails.</p>
+    </div>
+    <h3>3.1 · The pipeline (request → reply)</h3>
+    <div class="diagram">
+Safety / crisis guards → Onboarding → POPIA → Subscription<br>
+&nbsp;&nbsp;→ Normalizer <span class="hl">(gpt-4o-mini rewrites messy phrasing)</span><br>
+&nbsp;&nbsp;→ Reminders → Early-commands <span class="hl">(deterministic keyword wall)</span><br>
+&nbsp;&nbsp;→ Media (image / audio) → <span class="hl">ENGINE FRONT DOOR (Coach K)</span><br>
+&nbsp;&nbsp;→ Misc / Lifecycle → Engine tail → GPT fallback
+    </div>
+    <p>The load-bearing idea: <code>mustStayDeterministic(m)</code> is the boundary. Transactions and exact commands (logging a meal, a weight number, <code>workout</code>, billing, safety) stay on deterministic rails so a log can never be lost to an improvising LLM. <strong>Everything else — genuine conversation, questions, feelings, strategy — flows to the brain.</strong></p>
+    <h3>3.2 · Why not “delete all templates, let the brain do everything”?</h3>
+    <p>We tried brain-first-for-<em>everything</em> on 2026-07-13 and <strong>reverted it</strong>: the model improvised over real commands (a bare “Workout” got a hallucinated session instead of the client’s actual programme). The hard-won model is:</p>
+    <ul>
+      <li><strong>Deterministic owns:</strong> exact commands, mechanical state, and <strong>facts that must be accurate</strong> — calorie numbers, the client’s real programme, restaurant macros. An LLM guessing “520 kcal” is worse than useless.</li>
+      <li><strong>The brain owns:</strong> judgment — advice, empathy, strategy, “what should I do about X.”</li>
+    </ul>
+    <p>The disease is not “templates exist”; it is <strong>judgment handlers living in the deterministic layer, firing on keywords</strong>. Our ongoing work shrinks those — gating judgment behind the engine while keeping the mechanical/factual ones deterministic. <em>This nuance is decisive for §8’s “delete 210 templates” recommendation.</em></p>
+    <h3>3.3 · Feature flags (all reversible in Railway)</h3>
+    <p><code>ENGINE_LIVE</code>, <code>ENGINE_ACTIONS</code> (off/shadow/on), <code>SHADOW_ENGINE</code>, <code>NORMALIZER</code>, <code>PROACTIVE_PAUSED</code> (global killswitch), <code>MODEL_BRAIN</code>. Every risky change is flag-gated and instantly revertible.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">04</span><span class="txt">Memory &amp; state — the anti-amnesia layer</span></h2>
+    <p>The second party correctly identified <strong>amnesia</strong> as the root cause of bad empathy. We address it with concrete stores injected into the coach’s context:</p>
+    <ul>
+      <li><strong>Client snapshot</strong> — assembled per turn: goal, targets, recent logs, streaks, and a <strong>Remembered Dates</strong> block (<code>back_on:</code>, <code>sick_until:</code>, <code>paused_until:</code>) that tells the brain to reference those dates, never re-ask, and never push training before them.</li>
+      <li><strong>Client Intelligence Profile</strong> — a durable narrative (“what you’ve learned about this client over time”), now wired into the live engine.</li>
+      <li><strong>Client understanding</strong> — the engine’s cross-session cortex.</li>
+      <li><strong>Structured logs</strong> — meals, steps, weight, workouts as numeric columns, not regex over chat text.</li>
+    </ul>
+    <h3>4.1 · Reminders &amp; temporal memory (built this session)</h3>
+    <p>The founder’s sharpest demand: <em>when a sick client says “the doctor says I can go back Monday,” anchor that to a real date and <strong>remind them the night before</strong> — so we never go silent and lose them.</em></p>
+    <ul>
+      <li>A <strong>user-set reminder system</strong>, end-to-end: a deterministic SAST time-parser (“at 8pm”, “tomorrow”, “in 2 hours”, “Monday”), a <code>reminders</code> table, a <strong>per-minute scheduler</strong> that fires due reminders, plus set / list / cancel and a brain <code>SET_REMINDER</code> action.</li>
+      <li>Return dates are already captured (<code>back_on:</code>) and honoured by the brain.</li>
+    </ul>
+    <div class="note"><b>Named gap</b>The loop isn’t fully closed: capturing “back on Monday” does not <em>yet</em> auto-schedule the night-before proactive nudge. The infrastructure now exists to close it in one wiring step — it is the top of the next-work list.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">05</span><span class="txt">Deterministic action execution — the “hands”</span></h2>
+    <p>When the brain decides to <em>do</em> something it emits a typed <code>CoachAction</code>; a deterministic executor performs it. Safeguards live on the contract, not the LLM:</p>
+    <ul>
+      <li><strong>Confidence gate</strong> (<code>0.75</code>) — an uncertain state-write is confirmed, not silently written.</li>
+      <li><strong>Idempotency fingerprint</strong> — a retry / redelivery / replay can never double-write (or double-schedule a reminder).</li>
+      <li><strong>Law: the LLM never touches the database.</strong> It hands <em>text</em> (the food said); the deterministic scanner owns the numbers.</li>
+      <li><strong>Dry-run / shadow</strong> — the executor can decide + report without writing, so we score it against real history safely.</li>
+    </ul>
+  </section>
+
+  <section>
+    <h2><span class="num">06</span><span class="txt">Infrastructure &amp; engineering discipline</span></h2>
+    <ul>
+      <li><strong>Stack:</strong> TypeScript / Node / Express; PostgreSQL + Drizzle; Twilio WhatsApp; OpenAI (gpt-4o / 4o-mini); Railway. Migrations run idempotently on startup, so schema ships without manual steps.</li>
+      <li><strong>Test gates (every push):</strong> <code>tsc</code>; a per-file line-size budget (hard cap, never raised — forces extraction over bloat); ~500 unit tests; a routing audit (276 scenarios asserting each message reaches the right handler); plus <code>drill-battery</code> and <code>multilingual-battery</code> behavioural regression.</li>
+      <li><strong>Shadow evaluation</strong> — the new engine is scored against production replies before it’s trusted with a cohort.</li>
+    </ul>
+    <p>This discipline is real, and it’s why we can move fast without regressing.</p>
+  </section>
+
+  <section>
+    <h2><span class="num">07</span><span class="txt">Known gaps — “the final few percent”</span></h2>
+    <p>Surfaced by real testers. These are <strong>judgment-routing bugs, not missing features</strong>:</p>
+    <ol>
+      <li><strong>Tool over-firing (the #1 issue).</strong> A strategy question — <em>“let’s talk about incorporating running without killing my gym progress”</em> (a voice note) — was answered with a <strong>full Week-1 workout dump</strong>. The coach ignored the question and fired the nearest template. Same disease as <em>“I’m on vacation, adjust my groceries”</em> → a dumbbell workout. <strong>Fix: an “intent bouncer” that forbids a broad/strategic/emotional message from firing action templates.</strong> One instance (holiday→workout) is fixed and locked with a test; the <em>class</em> needs the general guard.</li>
+      <li><strong>The silence trap.</strong> Twilio webhooks time out ~15s; heavy vision/audio can exceed that → the client gets <em>nothing</em>. Silence is a churn event. Needs <strong>immediate acknowledgement + asynchronous processing</strong>.</li>
+      <li><strong>Temporal reminder loop not fully closed</strong> (§4.1) — capture the return date → schedule the night-before nudge.</li>
+      <li><strong>Margin exposure at scale.</strong> At R199/month, unmanaged API/voice costs threaten unit economics beyond ~10k users. We have a mini-model normalizer; not yet a formal cost-routing policy.</li>
+    </ol>
+  </section>
+
+  <section>
+    <h2><span class="num">08</span><span class="txt">Honest response to the “Master Directive”</span></h2>
+    <p>The directive is directionally strong and shares our core thesis. Our engineering assessment, for the reviewer to adjudicate:</p>
+
+    <h3>8.1 · Already built <span class="pill p-built">have it</span></h3>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Directive item</th><th>Our status</th></tr></thead>
+        <tbody>
+          <tr><td>The Inversion (AI = front door)</td><td><span class="pill p-built">Built</span> — <span class="mono">ENGINE_LIVE</span></td></tr>
+          <tr><td><span class="mono">mustStayDeterministic</span> boundary</td><td><span class="pill p-built">Built</span></td></tr>
+          <tr><td>Confidence gate (act if sure, else ask one)</td><td><span class="pill p-built">Built</span> at 0.75 (they say 0.85 — see Q3)</td></tr>
+          <tr><td>Action idempotency</td><td><span class="pill p-built">Built</span></td></tr>
+          <tr><td>Reminder tool (“kills the I-Can’t pattern”)</td><td><span class="pill p-built">Built this week</span></td></tr>
+          <tr><td>SA food / budget context (Spaza, R100/wk)</td><td><span class="pill p-built">Built</span> + restaurant engine this week</td></tr>
+          <tr><td>Resilience / comeback without shame</td><td><span class="pill p-built">Built</span></td></tr>
+          <tr><td>Medical hard-stop / SADAG / POPIA</td><td><span class="pill p-built">Built</span> — runs first, bypasses LLM</td></tr>
+          <tr><td>Temporal anchor (default to today)</td><td><span class="pill p-built">Built</span></td></tr>
+          <tr><td>Voice normalization / summarizer wedge</td><td><span class="pill p-take">Partial</span> — normalizer on 4o-mini</td></tr>
+          <tr><td>Auto-cal-adjust + gender floors + GLP-1 guard</td><td><span class="pill p-built">Built</span> (1200F / 1500M)</td></tr>
+          <tr><td>Shadow mode for retiring templates</td><td><span class="pill p-built">Built</span> — <span class="mono">SHADOW_ENGINE</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>8.2 · Worth taking <span class="pill p-take">build next</span></h3>
+    <ol>
+      <li><strong>The Intent Bouncer</strong> — directly fixes the live #1 bug. Cheap, high-value. <strong>Do first.</strong> Prompt-level vs a code-level guard that strips action tools for broad/emotional intents (we lean code-level — more reliable).</li>
+      <li><strong>Zero-silence async pattern</strong> — immediate ACK + background processing for media. Real fix for a real churn bug. Open: does this justify Redis/BullMQ now, or a lightweight job table on existing infra pre-launch?</li>
+      <li><strong>Formal cost-routing (“traffic-cop”)</strong> — we already classify on mini; formalize mini-vs-4o routing to protect the R199 margin. Before scale, not necessarily before launch.</li>
+      <li><strong>Lightweight reply-safety evaluator</strong> — a cheap check that a draft never tells a sick/grieving client to train. Valuable, but adds latency/cost — pilot on <em>risky</em> messages only, not all.</li>
+    </ol>
+
+    <h3>8.3 · Premature or risky for our stage <span class="pill p-risk">push back</span></h3>
+    <ul>
+      <li><strong>“Delete 210 templates immediately.”</strong> <span class="pill p-risk">Dangerous</span> Many of our “templates” are not filler — they are <strong>accurate data handlers</strong> (calorie math, the client’s real programme, restaurant macros, safety scripts). Mass-deleting them regresses accuracy and re-introduces the hallucination we reverted on 2026-07-13. Correct path: <strong>shadow + selective retirement of the <em>judgment</em> templates only</strong> — already underway. Keep every mechanical/factual/safety handler.</li>
+      <li><strong>Redis UCSO / full BullMQ / pgvector / Pinecone.</strong> The <em>idea</em> (inject unified state every call; async processing) is right; the <em>heavy infra</em> is premature at &lt;150k pre-launch. Postgres JSONB + in-memory covers UCSO today; a simple job table can cover async before we adopt Redis.</li>
+      <li><strong>Self-hosted TTS (XTTS/RunPod), EskomSePush, Stokvel squads.</strong> Genuinely good, but each adds a dependency or a large build. <strong>Post-launch</strong>, sequenced by retention ROI — not in the launch sprint.</li>
+    </ul>
+    <div class="note"><b>Our position</b>Take the <strong>Intent Bouncer</strong> and <strong>zero-silence</strong> patterns now; formalize <strong>cost-routing</strong> before scale; <strong>do not</strong> mass-delete handlers or adopt Redis/vector infra before launch.</div>
+  </section>
+
+  <section>
+    <h2><span class="num">09</span><span class="txt">Questions for the reviewer — to unblock this week</span></h2>
+    <ol class="q">
+      <li><strong>Intent Bouncer.</strong> For our failure modes (strategy/emotional message → template dump), is a <strong>code-level tool-stripping interceptor</strong> more reliable than a prompt-level rule, or do we need both? What’s the minimum that provably kills the running→workout-dump class?</li>
+      <li><strong>Zero-silence.</strong> On Twilio + Railway, pre-launch, what is the <strong>minimum viable</strong> async pattern (immediate ACK + background worker) that guarantees no silence <strong>without</strong> introducing Redis/BullMQ yet? At what user count does Redis/BullMQ become justified?</li>
+      <li><strong>Confidence gate.</strong> Is <strong>0.75</strong> right for a low-literacy audience that phrases things loosely, or does <strong>0.85</strong> (fewer wrong auto-actions, more clarifying questions) fit better? What’s the retention trade-off of an extra question vs a wrong action?</li>
+      <li><strong>Template strategy.</strong> Do you agree that mass template deletion is unsafe <strong>given that many of our templates are accurate data/safety handlers, not conversational filler</strong> — and that shadow-retiring <em>judgment</em> handlers only is correct?</li>
+      <li><strong>Margins.</strong> At R199/month and our message mix, what is the realistic per-user monthly API cost, and does a mini-vs-4o traffic-cop close it — or do we need voice caps / cheaper TTS before launch?</li>
+      <li><strong>Killer-feature sequencing.</strong> Of the SA-moat features (Spaza navigator, life-proof auto-pivot, resilience streak, Stokvel squads), which has the highest <strong>launch-window</strong> retention ROI, and which are safely post-launch?</li>
+      <li><strong>The temporal loop.</strong> Any risk in auto-scheduling a night-before “you’re back tomorrow” nudge off a captured return date (double-sends, timezone, the client who never confirms)?</li>
+    </ol>
+  </section>
+
+  <div class="closer">
+    <h2><span class="num">10</span><span class="txt">One-line summary</span></h2>
+    <p>The foundation is built and disciplined; the product is broad and South-African-deep. The remaining launch work is not features — it is guaranteeing the right brain answers the right message (the Intent Bouncer), never going silent (async), and never going amnesiac (closing the temporal-reminder loop). We want the review to stress-test §8 and answer §9 so we execute a focused sprint, not a sprawling one.</p>
+  </div>
+
+  <p class="foot">KamLife Coach · internal briefing · prepared for external review · 2026-07-21</p>
+</div>
