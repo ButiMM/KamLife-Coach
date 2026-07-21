@@ -403,6 +403,18 @@ async function runMigrations(): Promise<void> {
     )`,
     `CREATE INDEX IF NOT EXISTS reminders_due_idx ON reminders(status, fire_at)`,
     `CREATE INDEX IF NOT EXISTS reminders_user_idx ON reminders(user_id, status)`,
+    // Crash-safety net for async media processing — a stuck 'pending' row = a died-mid-process job.
+    `CREATE TABLE IF NOT EXISTS media_jobs (
+      id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+      source_message_id  TEXT NOT NULL UNIQUE,
+      phone_number       TEXT NOT NULL,
+      user_id            UUID,
+      media_type         TEXT,
+      status             TEXT NOT NULL DEFAULT 'pending',
+      created_at         TIMESTAMP NOT NULL DEFAULT NOW(),
+      completed_at       TIMESTAMP
+    )`,
+    `CREATE INDEX IF NOT EXISTS media_jobs_status_idx ON media_jobs(status, created_at)`,
   ];
 
   let created = 0;

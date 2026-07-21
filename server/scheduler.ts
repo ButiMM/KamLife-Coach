@@ -62,6 +62,7 @@ import { runTrialCountdown } from "./scheduler/jobs/trial";
 import { runBalanceCheck } from "./scheduler/jobs/balance-check";
 import { runMonthlyPhotoCheckin } from "./scheduler/jobs/progress-photo";
 import { runDueReminders } from "./scheduler/jobs/reminders";
+import { runMediaJobRecovery } from "./scheduler/jobs/media-recovery";
 
 // Re-export for routes.ts + index.ts consumers
 export { sendWhatsApp, sendWhatsAppTemplate, deliveryStats };
@@ -273,6 +274,9 @@ export async function initScheduler(): Promise<void> {
 
   // ── Every minute — fire user-set reminders whose time has come ─────────────
   cron.schedule("* * * * *",     () => safe("runDueReminders",       runDueReminders),             { timezone: "UTC" });
+
+  // ── Every 2 minutes — recover media jobs whose process died mid-flight (no silent loss) ──
+  cron.schedule("*/2 * * * *",   () => safe("runMediaJobRecovery",   runMediaJobRecovery),         { timezone: "UTC" });
 
   // ── Hourly ────────────────────────────────────────────────────────────────
   cron.schedule("0 * * * *",     () => safe("runBuddyAccountability", runBuddyAccountability),     { timezone: "UTC" });

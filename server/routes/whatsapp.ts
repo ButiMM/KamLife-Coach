@@ -7,6 +7,7 @@ import { db } from "../db";
 import { processedWebhooks, users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { captureQualitySignal } from "../quality-signals";
+import { recordMediaJob, completeMediaJob } from "../media-jobs";
 
 // COMEBACK RECOGNITION (2026-07-13 retention P0): when a client messages after ≥3 days
 // of silence, their FIRST reply back opens with a warm welcome — the return must feel
@@ -147,6 +148,9 @@ async function processTextAsync(
     // For image messages: resolve inflight so the buffer doesn't hang, then send the error.
     if (isImageMessage) await resolveImageInflight(phone, null).catch(() => {});
     await sendParts(phone, ["Eish, something went wrong on my side. Give me a second and try again."], null).catch(() => {});
+  } finally {
+    // Media crash-safety net: the client was replied to (or got a handled error) → close the job.
+    if (mediaUrl) await completeMediaJob(sourceMessageId).catch(() => {});
   }
 }
 
@@ -177,6 +181,8 @@ async function processVoiceAsync(
   } catch (err: any) {
     console.error("[VOICE_ASYNC] failed:", err?.message || err);
     await sendParts(phone, ["I got your voice note but had a moment — please send it again or type your message."], null).catch(() => {});
+  } finally {
+    await completeMediaJob(sourceMessageId).catch(() => {});
   }
 }
 
@@ -426,6 +432,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
         // No "I'll reply in a moment" — the coach must never sound like it might go
         // quiet or promise a future message (a real reply IS seconds away).
         sendParts(rawPhone, ["🎤 Coach K is listening…"], null).catch(() => {});
+        if (msgSid) recordMediaJob(msgSid, rawPhone, null, mediaType || "audio/ogg").catch(() => {}); // crash-safety net
         processVoiceAsync(rawPhone, message, mediaUrl, mediaType || "audio/ogg", handleMessage, msgSid || undefined).catch(() => {});
         return;
       }
@@ -445,6 +452,7 @@ export function registerWhatsAppRoutes(app: Express, deps: Pick<RouteDeps, "hand
           sendParts(rawPhone, ["📸 Got your photo, one sec…"], null).catch(() => {});
         }
       }
+      if (mediaUrl && msgSid) recordMediaJob(msgSid, rawPhone, null, mediaType).catch(() => {}); // crash-safety net for photo/video
       processTextAsync(rawPhone, message, mediaUrl, mediaType, allImageUrls, handleMessage, msgSid || undefined).catch(() => {});
     } catch (err: any) {
       console.error("[WHATSAPP] Webhook error:", err.message);

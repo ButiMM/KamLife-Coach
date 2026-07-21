@@ -940,6 +940,20 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(looksLikeWorkoutRequest("show me my gym program"), true, "a real 'show me' request still delivers");
     assert.equal(looksLikeWorkoutRequest("send me a home workout"), true, "a real workout request still delivers");
   });
+  test("media crash-safety net: a media job that dies mid-process is recovered, never silent (review Q2)", () => {
+    const jobs = readFileSync(join("server", "media-jobs.ts"), "utf-8");
+    assert.match(jobs, /export async function recordMediaJob/, "records a media message in-flight");
+    assert.match(jobs, /export async function completeMediaJob/, "marks it done when the reply sends");
+    assert.match(jobs, /export async function claimStuckMediaJobs/, "claims stuck jobs (died mid-process)");
+    assert.match(jobs, /onConflictDoNothing/, "a duplicate message id never double-records");
+    assert.match(jobs, /status: "recovered"/, "claim-then-return so a client is nudged exactly once");
+    const wa = readFileSync(join("server", "routes", "whatsapp.ts"), "utf-8");
+    assert.match(wa, /recordMediaJob\(msgSid, rawPhone/, "the webhook records voice + photo/video jobs");
+    assert.match(wa, /if \(mediaUrl\) await completeMediaJob\(sourceMessageId\)/, "text handler closes media jobs");
+    assert.match(wa, /await completeMediaJob\(sourceMessageId\)/, "voice handler closes its job in finally");
+    const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
+    assert.match(sched, /\*\/2 \* \* \* \*.*runMediaJobRecovery/, "the recovery sweep runs every 2 minutes");
+  });
   test("code-level intent bouncer: strategy/emotional turns withhold action tools; logs keep them (review Q1)", async () => {
     const { isStrategyOrEmotional } = await import("../server/understanding/actions");
     // Strategy/emotional → tools withheld (can only converse, never dump a workout/log).

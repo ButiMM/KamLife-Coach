@@ -631,6 +631,30 @@ export const reminders = pgTable(
   },
 );
 
+// MEDIA JOBS — crash-safety net for async media processing. The webhook ACKs instantly and
+// processes voice/photo/video in the background; if the PROCESS DIES mid-processing (OOM,
+// deploy, restart) the reply is lost with no trace and the client sits in silence. Each media
+// message records a 'pending' row here; the handler marks it 'done' when the reply is sent. A
+// scheduler sweep finds rows stuck 'pending' past a few minutes (= a crashed job) and nudges the
+// client to resend — so a dead process can never swallow a photo silently. No Redis, no worker.
+export const mediaJobs = pgTable(
+  "media_jobs",
+  {
+    id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+    sourceMessageId: text("source_message_id").notNull().unique(),
+    phoneNumber: text("phone_number").notNull(),
+    userId: uuid("user_id"),
+    mediaType: text("media_type"),
+    status: text("status").notNull().default("pending"), // 'pending' | 'done' | 'recovered'
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    completedAt: timestamp("completed_at"),
+  },
+  (table) => {
+    return { statusIdx: index("media_jobs_status_idx").on(table.status, table.createdAt) };
+  },
+);
+export type MediaJob = typeof mediaJobs.$inferSelect;
+
 export const clientActionsRelations = relations(clientActions, ({ one }) => ({
   user: one(users, { fields: [clientActions.userId], references: [users.id] }),
 }));
