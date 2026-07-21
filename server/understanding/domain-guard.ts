@@ -48,6 +48,9 @@ const IN_DOMAIN_RE = new RegExp(
     "weight|\\bkg\\b|scale|\\bbody\\b|\\bfat\\b|muscle|slim|belly|tummy|health|healthy|sick|\\bill\\b|\\bflu\\b|fever|exhaust|energy|sleep|stress|anxious|anxiety|mood|motivat|discourag|struggl|progress|result|goal|habit|consistent|consistency|streak|check.?in|measure|recomp",
     // coaching relationship / commands / journey pleasantries
     "coach\\b|how am i doing|how do i|feeling (?:down|low|sick|tired|good|great|better|worse|off)|hi\\b|hello|\\bhey\\b|yebo|sawubona|molo|dumela|avuxeni|thank|ngiyabonga|enkosi|dankie|good morning|log\\b|track\\b|\\bpay\\b|subscri|price|plan\\b|schedule|remind|programme",
+    // budget / life situation (affects food + training, so always in-domain — a broke client's
+    // money worry must never be cold-redirected: 2026-07-21 'I'm broke and I live in a township')
+    "broke|township|\\bkasi\\b|ekasi|no money|can'?t afford|cannot afford|month.?end|payday|tight (?:on )?(?:money|budget)|shisa ?nyama|taxi rank|spaza",
     // corrections / pushback about the CONVERSATION ITSELF — always in-domain (2026-07-16:
     // 'No, reverse that — look at the picture again' was bounced as off-topic mid-repair)
     "\\breverse\\b|\\bundo\\b|\\bwrong\\b|not what i (?:said|meant|asked|am saying)|look at (?:the|that|my) (?:picture|photo|image)|you (?:just|already|didn'?t)|that'?s not what|\\bno,? no\\b|switch me|change (?:it|that) back|\\bmistake\\b|misunderstood|\\bfix (?:it|that)\\b",
