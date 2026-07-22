@@ -8,6 +8,8 @@ import { calculateTargets } from "./targets";
 import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils";
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
+import { verifyBrainReply } from "./brain/reply-verifier";
+import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
 import type { VoiceEmotion } from "./elevenlabs";
@@ -341,10 +343,8 @@ export async function buildPatternSummary(user: any): Promise<string> {
         .catch(() => [] as { day: string; total: number }[]),
     ]);
 
-    // Count only days the CLIENT actually spoke (messageIn present). Outbound-only
-    // rows (proactive sends, intent=PROACTIVE) have a null messageIn and must NOT
-    // count as engagement — otherwise a silent client who merely receives daily
-    // nudges looks fully active and silence detection never fires.
+    // Count only days the CLIENT actually spoke (messageIn present) — outbound-only proactive rows
+    // have a null messageIn and must NOT count, else a silent client looks active and silence never fires.
     const daysWithLogs = new Set(
       recentChats.filter(c => (c.messageIn || "").trim()).map(c => new Date(new Date(c.createdAt || "").getTime() + 2 * 3_600_000).toLocaleDateString("en-ZA"))
     ).size;
@@ -555,10 +555,7 @@ export function selectModel(instruction: string, userMessage: string): { model: 
     return { model: "gpt-4o", maxTokens: 400, reason: "crisis" };
   }
 
-  // gpt-4o is reserved for topics where a WRONG answer is unsafe: injuries/pain,
-  // diagnosed medical conditions, pregnancy, safety-of-use questions. Routine
-  // coaching topics (supplements, plateaus, recomp, programme tweaks) answer just
-  // as well on mini with the full prompt — at ~1/17th the input cost.
+  // gpt-4o reserved for topics where a WRONG answer is unsafe (injuries/pain, medical, pregnancy); routine coaching answers as well on mini (~1/17th cost).
   const COMPLEX_SIGNALS = [
     "injury", "hurt my", "pain in", "hurts when", "sore knee", "sore shoulder", "sore back",
     "is it safe to",
@@ -799,11 +796,9 @@ Be precise — never round to nearest 100. Always use SA food names (pap not pol
 
     if (allFoods.length === 0) return null;
 
-    // ANTI-FABRICATION GUARD — the model sometimes merges a listed carb with an
-    // UNLISTED protein ("rice" → "rice and chicken"), inventing protein the client
-    // never reported. Drop those phantom composites BEFORE totalling so a wrong,
-    // inflated number is never logged or shown as "target hit". The caller surfaces
-    // `dropped` so the client can re-send what was left out.
+    // ANTI-FABRICATION GUARD — the model sometimes merges a listed carb with an UNLISTED protein
+    // ("rice" → "rice and chicken"), inventing protein. Drop phantom composites before totalling so
+    // an inflated number is never logged; the caller surfaces `dropped` to re-send what was left out.
     const dropped = findFabricatedComposites(message, allFoods);
     const foods = dropped.length > 0 ? allFoods.filter(f => !dropped.includes(f.name)) : allFoods;
     if (foods.length === 0) return null; // whole "meal" was a single fabricated composite
@@ -1110,13 +1105,8 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   const { model, maxTokens } = selectModel(instruction, userMessage);
 
   const cappedMemory = winMemory.length > 2000 ? winMemory.slice(0, 2000) + "\n[Memory truncated — older entries omitted]" : winMemory;
-
-  // Prompt layout for OpenAI prefix-caching: [STATIC_HOT_BRAIN + staticGuide] is
-  // byte-identical across calls (cached at ~50%); everything per-client/per-minute
-  // lives in the tail. The old layout put the 16.7k-char scenario guide in the tail —
-  // billed full-price on EVERY call — and its size forced the trim to cut the brain
-  // to ~5k chars, silently dropping the goal-aware food logic on the main coach path.
-  // Client data is never truncated (memory capped at 2k, journey narrative at 6k).
+  // Prompt layout for OpenAI prefix-caching: static brain byte-identical across calls (cached ~50%),
+  // per-client data in the tail. Client data never truncated (memory 2k, narrative 6k).
   const cipBlock = cipNarrative
     ? `\n\nCLIENT JOURNEY MEMORY (full history — use this to reference specific past achievements, patterns, and progress. Be precise: if they lost 4kg, say 4kg. Never fabricate):\n${cipNarrative.slice(0, 6000)}`
     : "";
@@ -1178,7 +1168,25 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
       recordGptCost({ userId: user.id, model, feature: "coach", promptTokens: inputTokens, completionTokens: outputTokens });
     }
 
-    return response.choices[0]?.message?.content?.trim() || "Sorry, I missed that one — send it to me again?";
+    const rawReply = response.choices[0]?.message?.content?.trim() || "Sorry, I missed that one — send it to me again?";
+    // ANTI-HALLUCINATION NET (2026-07-22): every askCoachK reply passes the SAME verifier the engine uses; on violation one rewrite, else a safe line — never ship the hallucination.
+    const verdict = verifyBrainReply(rawReply, { goalType: user?.goalType });
+    if (verdict.ok) return rawReply;
+    console.warn(`[askCoachK] hallucination guard tripped: ${verdict.violation?.slice(0, 90)}`);
+    captureQualitySignal("verifier_violation", { userId: user.id, messageIn: userMessage, messageOut: rawReply, detail: verdict.violation });
+    try {
+      const fixResp = await withOpenAIRetry(() => openai.chat.completions.create({
+        model: "gpt-4o-mini", temperature: 0.3, max_tokens: 220,
+        messages: [
+          { role: "system", content: `You are Coach K. Your previous reply broke a rule and must be rewritten. RULE BROKEN: ${verdict.violation} Keep the warmth and brevity (max 3 sentences), fix the fault, and NEVER repeat the rule-breaking content.` },
+          { role: "user", content: `Client said: "${userMessage}"\nYour reply to rewrite: "${rawReply}"` },
+        ],
+      }));
+      const fixed = fixResp.choices[0]?.message?.content?.trim();
+      if (fixed && verifyBrainReply(fixed, { goalType: user?.goalType }).ok) return fixed;
+    } catch (e) { console.warn("[askCoachK] rewrite failed:", (e as any)?.message || e); }
+    const nm = user?.name ? user.name.split(" ")[0] + ", " : "";
+    return `${nm}let's keep it simple — tell me what you ate or what you trained today, and I'll take it from there.`;
   } catch (err: any) {
     if (isAiOfflineError(err)) return "Eish Coach K had a moment. Try that again.";
     const status = err?.status ?? err?.statusCode ?? 0;
@@ -1333,10 +1341,8 @@ const INTENT_FAST_PATHS: Array<[RegExp, ClassifiedIntent]> = [
   [/^(done|finished|completed|session done|workout done|trained today|went to gym|gym done|just finished|just trained)[\s!.]*$/i, "WORKOUT_LOG"],
   // Programme requests — asking TO SEE the plan, never a completion report.
   // Must be caught BEFORE the GPT classifier, which treats "today's workout" as ambiguous
-  // and guesses WORKOUT_LOG, causing the completion handler to fire and log a fake session.
-  // Tolerates up to 3 leading filler words — voice transcripts arrive as
-  // "Meet today's workout." (Whisper mishearing "what's"). Completion verbs,
-  // schedule words, and change requests are excluded by the lookahead.
+  // and guesses WORKOUT_LOG, causing a fake session log. Tolerates up to 3 leading filler words
+  // ("Meet today's workout." — Whisper mishearing "what's"); completion/schedule/change verbs excluded.
   [/^(?!.*\b(?:done|did|finished|complete[d]?|smashed|crushed|logged|next|tomorrow|yesterday|change|switch|swap|cancel|skip|new|different|another)\b)(?:[\w'’]+\s+){0,3}(?:today.?s?|my|the)?\s*(?:workout|session|training|programme?)(?:\s+(?:for\s+)?(?:today|now|please|pls))?[\s?!.]*$/i, "OTHER"],
 ];
 
