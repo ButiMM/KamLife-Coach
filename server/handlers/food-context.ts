@@ -1006,9 +1006,26 @@ export async function handleFoodContext(ctx: {
     // GPT-supplemented items) to the correct meal in the breakdown, not just the total.
     const segmentBuckets: { label: string; text: string; foods: AdjFood[] }[] = [];
 
+    // PLANNED-SEGMENT GUARD (2026-07-22, Kam's day-dump screenshot: a client reports the
+    // whole day in one message — "Lunch: apple, couscous, wings... Dinner is going to be
+    // stir fry fish"). The lunch was eaten; the dinner is a PLAN. Logging the planned
+    // dinner as eaten inflates the day. Detect future/planned segments, DON'T log them,
+    // and surface them as "not logged yet — reply 'ate it' when you've had it".
+    const FUTURE_SEG_RE = /\b(going to be|gonna be|will be|is going to|are going to|i'?ll have|i will have|gonna have|going to have|planning to (?:eat|have|cook|make)|plan(?:ning)? to have|still to (?:have|eat|make|cook|come)|yet to (?:have|eat|make|cook)|about to (?:have|eat|make|cook)|for (?:tonight|later)|(?:will|going to) (?:eat|make|cook)|haven'?t (?:had|eaten) (?:yet|dinner|lunch|supper|breakfast))\b/i;
+    const plannedSegs: string[] = [];
+
     for (const seg of mealSegments) {
       const segFoods = scanForSAFoods(seg.text);
       const adjusted = segFoods.length > 0 ? adjustFoodsForSegment(segFoods, seg.text, await getPortionMemory(user.id)) : [];
+      // A future/planned meal inside a multi-meal dump is captured, not counted. (Single
+      // non-multi segments keep the old behaviour so a plain "dinner chicken and rice"
+      // still logs — only fire the guard when the segment actually reads as future.)
+      if (adjusted.length > 0 && FUTURE_SEG_RE.test(seg.text)) {
+        const nm = adjusted.map(f => f.name).join(", ");
+        plannedSegs.push(`${seg.label || "Later"}: ${nm}`);
+        segmentBuckets.push({ label: seg.label, text: seg.text, foods: [] });
+        continue;
+      }
       segmentBuckets.push({ label: seg.label, text: seg.text, foods: adjusted });
       allAdjustedFoods.push(...adjusted);
     }
@@ -1271,8 +1288,20 @@ export async function handleFoodContext(ctx: {
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
       const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined });
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
+      // Day-dump: a planned meal the client mentioned but hasn't eaten yet — captured, not counted.
+      const plannedNote = plannedSegs.length > 0
+        ? `\n\n📋 Not logged yet (still coming): *${plannedSegs.join("; ")}*. Reply *ate it* once you've had it and I'll add it.`
+        : "";
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
+    }
+
+    // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")
+    // — don't fall through to the GPT fallback, which would log the plan as eaten.
+    if (allAdjustedFoods.length === 0 && plannedSegs.length > 0) {
+      const plannedReply = `Got it — *${plannedSegs.join("; ")}* coming up. Not logged yet.\n\nReply *ate it* once you've had it and I'll add the numbers.`;
+      await logChat(user.id, message, plannedReply, "FOOD_PLANNED");
+      return plannedReply;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----

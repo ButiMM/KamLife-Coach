@@ -22,6 +22,7 @@ import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../s
 import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
+import { weightInContextLine } from "../server/weight-context";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4705,6 +4706,84 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(!looksLikeWorkoutRequest(m), `must NOT hijack: "${m}"`);
   }
 });
+
+// ============================================================
+// WEIGHT-IN-CONTEXT ENGINE (2026-07-22, Kam: "it's not intelligent enough — it
+// keeps saying I'm gaining but that was the surplus/training weeks; THIS week,
+// sick and under-eating, I haven't gained. It just repeats empathy.")
+// ============================================================
+{
+  const day = 86_400_000;
+  const now = Date.now();
+  // A muscle-gain client who gained 1.3kg over the month during training/surplus, then
+  // went sick and held steady this week. The engine must attribute the gain to the EARLIER
+  // period and say the sick week held — NEVER say they're gaining now.
+  const restingHeld = weightInContextLine({
+    goalType: "muscle_gain",
+    resting: true,
+    weighIns: [
+      { weight: 84.3, at: new Date(now - 1 * day) },   // this week
+      { weight: 84.4, at: new Date(now - 7 * day) },   // ~a week ago (flat since)
+      { weight: 83.6, at: new Date(now - 20 * day) },  // earlier, mid-build
+      { weight: 83.0, at: new Date(now - 27 * day) },  // start of window
+    ],
+  });
+  test("weight-context: sick + flat week attributes the gain to the earlier build, not now", () => {
+    assert.ok(/hold|steady/i.test(restingHeld), `should say holding steady: ${restingHeld}`);
+    assert.ok(/earlier|build|surplus|training/i.test(restingHeld), `should attribute to earlier phase: ${restingHeld}`);
+    assert.ok(/do not tell them they're gaining|not this week/i.test(restingHeld), `should block "you're gaining": ${restingHeld}`);
+  });
+
+  // Resting + scale ticked up: must be read as water/food, not fat — no panic.
+  const restingUp = weightInContextLine({
+    goalType: "fat_loss",
+    resting: true,
+    weighIns: [
+      { weight: 80.9, at: new Date(now - 1 * day) },
+      { weight: 80.0, at: new Date(now - 7 * day) },
+    ],
+  });
+  test("weight-context: sick + up reads as water/food, not fat", () => {
+    assert.ok(/water|food/i.test(restingUp) && /not fat/i.test(restingUp), `should say water/food not fat: ${restingUp}`);
+  });
+
+  // Normal training week, fat-loss goal, weight down → the deficit is working.
+  const lossWorking = weightInContextLine({
+    goalType: "fat_loss",
+    resting: false,
+    weighIns: [
+      { weight: 79.2, at: new Date(now - 1 * day) },
+      { weight: 80.0, at: new Date(now - 7 * day) },
+    ],
+  });
+  test("weight-context: training + fat-loss + down = deficit working", () => {
+    assert.ok(/down 0\.8kg/i.test(lossWorking) && /deficit|fat loss/i.test(lossWorking), `should read as progress: ${lossWorking}`);
+  });
+
+  test("weight-context: no data returns empty (caller keeps its fallback)", () => {
+    assert.equal(weightInContextLine({ goalType: "fat_loss", weighIns: [] }), "");
+  });
+}
+
+// ============================================================
+// DAY-DUMP PLANNED-SEGMENT GUARD (2026-07-22, Kam's screenshot: manual clients report
+// the whole day in one message — "Lunch: apple, couscous, wings... Dinner is going to be
+// stir fry fish". Lunch was eaten; dinner is a PLAN and must NOT be logged as eaten.)
+// Mirrors FUTURE_SEG_RE in server/handlers/food-context.ts — keep the two in sync.
+// ============================================================
+{
+  const FUTURE_SEG_RE = /\b(going to be|gonna be|will be|is going to|are going to|i'?ll have|i will have|gonna have|going to have|planning to (?:eat|have|cook|make)|plan(?:ning)? to have|still to (?:have|eat|make|cook|come)|yet to (?:have|eat|make|cook)|about to (?:have|eat|make|cook)|for (?:tonight|later)|(?:will|going to) (?:eat|make|cook)|haven'?t (?:had|eaten) (?:yet|dinner|lunch|supper|breakfast))\b/i;
+  test("day-dump: planned dinner segments are recognised as future (not logged as eaten)", () => {
+    for (const s of ["dinner is going to be stir fry veggies with fish", "supper will be chicken and rice", "I'll have oats later", "still to have my dinner", "for tonight I'm making pasta"]) {
+      assert.ok(FUTURE_SEG_RE.test(s), `should read as planned: "${s}"`);
+    }
+  });
+  test("day-dump: eaten meals are NOT mistaken for planned", () => {
+    for (const s of ["one large apple", "couscous with 2 wings", "had a handful of blueberries", "lunch was chicken and pap", "naartjie"]) {
+      assert.ok(!FUTURE_SEG_RE.test(s), `should read as eaten: "${s}"`);
+    }
+  });
+}
 
 // ============================================================
 // Results

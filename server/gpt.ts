@@ -9,6 +9,7 @@ import { getDisplayName, sastDayStart, findFabricatedComposites } from "./utils"
 import { patternCache, PATTERN_CACHE_TTL_MS } from "./cache";
 import { getClientNarrative } from "./intelligence/profile";
 import { verifyBrainReply } from "./brain/reply-verifier";
+import { weightInContextLine } from "./weight-context";
 import { captureQualitySignal } from "./quality-signals";
 import { verifyMealEstimate } from "./verifiers/meal-verifier";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
@@ -303,11 +304,10 @@ export async function buildPatternSummary(user: any): Promise<string> {
   // must stay raw/UTC since it also feeds sastDayStart(), which applies its own +2h shift.
   const todaySAST = new Date(today.getTime() + 2 * 3_600_000);
   const sevenDaysAgo = sastDayStart(new Date(today.getTime() - 7 * 86_400_000));
-  const fourteenDaysAgo = new Date(today.getTime() - 14 * 86_400_000);
   const twentyEightDaysAgo = new Date(today.getTime() - 28 * 86_400_000);
 
   try {
-    const [recentChats, recentWeights, olderWeights, recentSteps, monthWorkouts, monthProtein] = await Promise.all([
+    const [recentChats, recentWeights, monthWeights, recentSteps, monthWorkouts, monthProtein] = await Promise.all([
       db.select().from(chatHistory)
         .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, sevenDaysAgo)))
         .orderBy(desc(chatHistory.createdAt))
@@ -319,11 +319,10 @@ export async function buildPatternSummary(user: any): Promise<string> {
       db.select().from(weightLogs)
         .where(and(
           eq(weightLogs.userId, user.id),
-          gte(weightLogs.loggedAt, fourteenDaysAgo),
-          lt(weightLogs.loggedAt, sevenDaysAgo)
+          gte(weightLogs.loggedAt, twentyEightDaysAgo)
         ))
         .orderBy(desc(weightLogs.loggedAt))
-        .limit(1),
+        .limit(12),
       db.select().from(stepLogs)
         .where(and(eq(stepLogs.userId, user.id), gte(stepLogs.loggedAt, sevenDaysAgo)))
         .orderBy(desc(stepLogs.loggedAt))
@@ -391,19 +390,19 @@ export async function buildPatternSummary(user: any): Promise<string> {
       ? Math.floor((Date.now() - new Date(lastTraining.createdAt).getTime()) / 86_400_000)
       : null;
 
-    let weightTrend = "No weight data this week.";
-    if (recentWeights.length > 0 && olderWeights.length > 0) {
-      const recent = parseFloat(String(recentWeights[0].weight));
-      const older = parseFloat(String(olderWeights[0].weight));
-      const diff = recent - older;
-      if (Math.abs(diff) < 0.3) weightTrend = "Weight unchanged week-on-week.";
-      else if (diff > 0) weightTrend = `Weight up ${diff.toFixed(1)}kg this week.`;
-      else weightTrend = `Weight down ${Math.abs(diff).toFixed(1)}kg this week.`;
-    } else if (recentWeights.length > 0) {
-      const daysAgo = Math.floor((Date.now() - new Date(recentWeights[0].loggedAt || "").getTime()) / 86_400_000);
-      weightTrend = daysAgo <= 1
-        ? `Weight logged: ${recentWeights[0].weight}kg.`
-        : `Weight unchanged for ${daysAgo} days.`;
+    // WEIGHT IN CONTEXT (2026-07-22): bare "up 1.3kg this week" was the intelligence gap —
+    // no attribution to WHEN the weight moved or the client's STATE. Engine in weight-context.ts.
+    const suMatch = (user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
+    const restingNow = !!suMatch && suMatch[1] >= new Date().toISOString().slice(0, 10);
+    let weightTrend = weightInContextLine({
+      goalType: user.goalType,
+      weighIns: (monthWeights as any[]).map((w) => ({ weight: parseFloat(String(w.weight)), at: w.loggedAt })),
+      resting: restingNow,
+    });
+    if (!weightTrend) {
+      weightTrend = recentWeights.length > 0
+        ? `Weight logged: ${recentWeights[0].weight}kg — no trend yet.`
+        : "No weight data this week.";
     }
 
     const parts: string[] = [

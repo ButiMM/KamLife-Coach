@@ -66,16 +66,26 @@ export function looksSickMention(m: string): boolean {
 
 // One write holds the whole proactive machine (isPaused is checked by every job)
 // and remembers the sickness for the brain snapshot + repeat suppression.
-async function recordSickState(user: any, notes: string, m: string): Promise<{ sickDays: number; sickUntil: string } | null> {
-  const sickDays = parseSickDays(m);
+async function recordSickState(user: any, notes: string, m: string, minDays = 0): Promise<{ sickDays: number; sickUntil: string; daysSick: number } | null> {
+  // minDays floors the hold so a bare "still sick" check-in always EXTENDS the pause a few
+  // more days — otherwise paused_until expires after the first estimate and the proactive
+  // machine resumes nagging someone who's still in bed (2026-07-22, Kam: "for two weeks
+  // I've been telling it I'm sick" and it kept pinging).
+  const sickDays = Math.max(parseSickDays(m), minDays);
   const sickUntil = new Date(Date.now() + sickDays * 86_400_000).toISOString().slice(0, 10);
+  const today = new Date().toISOString().slice(0, 10);
+  // sick_since = the FIRST day they reported this illness. Set once, preserved across every
+  // repeat mention, so we can see how long it's dragged on (prolonged-illness care).
+  const sinceMatch = notes.match(/sick_since:(\d{4}-\d{2}-\d{2})/);
+  const sickSince = sinceMatch ? sinceMatch[1] : today;
+  const daysSick = Math.max(0, Math.round((Date.parse(today) - Date.parse(sickSince)) / 86_400_000));
   try {
-    const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|sick_until):\d{4}-\d{2}-\d{2}/g, "").trim();
-    const updatedNotes = `${cleaned ? cleaned + " | " : ""}sick_until:${sickUntil} | paused_until:${sickUntil}`;
+    const cleaned = notes.replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
+    const updatedNotes = `${cleaned ? cleaned + " | " : ""}sick_since:${sickSince} | sick_until:${sickUntil} | paused_until:${sickUntil}`;
     await db.update(users).set({ profileNotes: updatedNotes }).where(eq(users.id, user.id));
     // TEMPORAL LOOP: don't go silent on a sick client — nudge them the evening before they're due back.
     if (user.phoneNumber) scheduleReturnNudge(user.id, user.phoneNumber, sickUntil, "sick").catch((e) => console.error("[SICK] return nudge failed:", e));
-    return { sickDays, sickUntil };
+    return { sickDays, sickUntil, daysSick };
   } catch (e) {
     console.error("[SICK] failed to persist sick state:", e);
     return null;
@@ -164,16 +174,26 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
       // holds the rest line AND answers what they actually said). Firing the template at a
       // real share, verbatim, was the failure. Fall through for anything not bare.
       if (!isBareSickCheckin(m)) return null;
+      // EXTEND the hold on every bare check-in so the pause never lapses back into nagging
+      // while they're clearly still unwell. daysSick tells us how long it's dragged on.
+      const held = await recordSickState(user, user.profileNotes || "", m, 3);
+      const daysSick = held?.daysSick ?? 0;
+      const name = capName ? ", " + capName : "";
+      // PROLONGED ILLNESS (2026-07-22): after ~a week of being sick, stop with the same
+      // holding lines and show real concern — gently point them to a doctor, without
+      // pretending to be one. A week-plus of illness is genuinely worth a check-up.
+      const concern = daysSick >= 6
+        ? `You've been under the weather for over a week now${name} — that's longer than a normal bug. I'm keeping everything paused, no pressure at all. But please get to a clinic or see a doctor if you haven't yet; a week-plus of feeling sick deserves a proper check. 💛\n\n`
+        : "";
       // Even bare check-ins must NOT repeat verbatim (the screenshot showed the identical
       // words twice, 60s apart). Rotate holding lines; every variant holds the rest line
       // and keeps the recovery cues, so the repeat-mention drill still passes.
-      const name = capName ? ", " + capName : "";
       const stillSickVariants = [
         `Still resting — that's exactly right${name}. 💛 Fluids, sleep, small meals when you can.\n\nWant the plan for when you're back? Just ask *"what do I do when I'm better?"* — otherwise rest easy, I'm holding everything for you.`,
         `Rest is still the job${name}. 💛 Keep the fluids up, sleep as much as you can, eat what you can keep down.\n\nEverything's paused and waiting — no catch-up, no pressure. Say *I'm back* when you've turned the corner.`,
         `Noted — still holding everything for you${name}. 💛 Water, soup, sleep. Small meals when your appetite allows.\n\nNo rush back. When you're better, just tell me and we pick up exactly where we left off.`,
       ];
-      const stillSickReply = stillSickVariants[Math.floor(Date.now() / 1000) % stillSickVariants.length];
+      const stillSickReply = concern + stillSickVariants[Math.floor(Date.now() / 1000) % stillSickVariants.length];
       await logChat(user.id, message, stillSickReply, "SICK_STILL");
       return stillSickReply;
     }
@@ -203,7 +223,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
       && /\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu)\b/i.test(m)
       && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
     try {
-      const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until):\d{4}-\d{2}-\d{2}/g, "").trim();
+      const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
       await db.update(users).set({ profileNotes: cleaned || null }).where(eq(users.id, user.id));
       // Already back — cancel the pending night-before nudge so we don't ping someone who returned early.
       await cancelReturnNudges(user.id).catch((e) => console.error("[SICK] cancel return nudge failed:", e));
