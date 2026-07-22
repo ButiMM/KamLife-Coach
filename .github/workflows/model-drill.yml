@@ -6,9 +6,10 @@ name: Model Drill
 # hand in production. It runs the same drill cases + runner as the nightly prod job
 # (server/drill-cases.ts), against the live model, and fails RED on a regression.
 #
-# Gated on the OPENAI_API_KEY secret: until it's added (repo → Settings → Secrets and
-# variables → Actions → New repository secret: OPENAI_API_KEY), the job SKIPS cleanly and
-# never blocks. Not on push — it calls the paid model, so nightly + on-demand only.
+# Gated on the OpenAI key secret. The founder added it as AI_INTEGRATIONS_OPENAI_API_KEY
+# (2026-07-22), so we read that first and fall back to a plain OPENAI_API_KEY — whichever
+# exists is mapped to the OPENAI_API_KEY env var the code reads. Until one is present the job
+# SKIPS cleanly and never blocks. Not on push — it calls the paid model, so nightly + on-demand.
 
 on:
   schedule:
@@ -23,7 +24,7 @@ jobs:
   drill:
     runs-on: ubuntu-latest
     env:
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.AI_INTEGRATIONS_OPENAI_API_KEY || secrets.OPENAI_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

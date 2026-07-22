@@ -46,6 +46,7 @@ import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
+import { macroCardMarker } from "../macro-card-attach";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
@@ -1137,8 +1138,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
-          // Numbers-on uses the SHARED goal-aware status (education.goalStatusLine) —
-          // one brain for every food footer. Number-free keeps words, same three states.
+          // Numbers-on uses the SHARED goal-aware status (education.goalStatusLine); number-free keeps words.
           photoDailyTotal = photoNumbersLow
             ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : remaining >= -100 ? "That's your food for today — nicely done. ✅" : "That's past today's food — kitchen closed. Protein + veg if you must, a 20-minute walk helps, tomorrow resets. One day never breaks a programme."}_`
             : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein. ${goalStatusLine(user.goalType, remaining)}_`;
@@ -1150,8 +1150,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         }).where(eq(users.id, user.id)).catch(e => console.warn("[photo todayCalories sync]", e));
       } catch (e) { console.warn("[non-fatal]", e); }
 
-      // Format extra-photo replies compactly. Step responses are already well-formatted
-      // paragraphs; food lines are compact "Item: ~X kcal | Yg protein" from the new prompt.
+      // Format extra-photo replies compactly (steps are pre-formatted; food lines are compact).
       const extraSection = extraReplies.length > 0
         ? "\n" + extraReplies.map(r => r.startsWith("📸") || /\d+,?\d* steps/i.test(r) ? `\n${r}` : `• ${r}`).join("\n")
         : "";
@@ -1165,9 +1164,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
 
-      // Honest coaching nudge for high-cal meals on fat-loss / recomp goals.
-      // Fires only when a single meal eats >38% of the daily calorie budget.
-      // Muscle-gain clients need the calories — no nudge for them.
+      // Honest nudge when a single meal eats >38% of budget (fat-loss/recomp only; bulkers need it).
       let photoCoachNudge = "";
       if (totalPhotoKcal > 0 && (goal === "fat_loss" || goal === "recomposition")) {
         const calTarget = user.calorieTarget || 1800;
@@ -1182,7 +1179,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       // numbers:low → scrub leaked figures; then the once-only first-win celebration.
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
-      return `${photoReply}${await firstActionCelebration(user, phone, "meal")}`;
+      // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: a photo-logged drink got the text total but NO card — the last path that missed it). Same contract as text.
+      const cardTitle = (visionDisplay || "Meal").replace(/[*_`#]/g, "").split("\n")[0].replace(/\blogged\b.*$/i, "").trim().slice(0, 42) || "Meal";
+      const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal }) : "";
+      return `${photoReply}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
