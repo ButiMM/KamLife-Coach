@@ -14,6 +14,11 @@ import { scanForSAFoods, recomputeTodayFoodTotals, invalidateFoodTotalsCache } f
 import { logChat, withTimeout } from "./chat-log";
 import { tryLogWater } from "./water";
 import { getMenuText, getOnboardingMealPlan } from "../onboarding";
+import { replyWithButtons } from "../twilio-interactive";
+
+// The 3 quick actions on the menu (WhatsApp caps quick-reply buttons at 3). Tapping one sends its
+// exact label as a message, which the deterministic handlers already understand.
+const MENU_BUTTONS = ["Log food", "Today's workout", "My progress"];
 import { getPrimaryWorkoutGifUrl } from "../exercise-media";
 import { getProgressiveOverloadContext } from "./checks";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, nextDayDate } from "../utils";
@@ -665,11 +670,13 @@ export async function handleEarlyCommands(ctx: {
     .trim()
     .replace(/\s+(coach k|coach|there|guys|team)$/i, "")
     .trim();
+  // MENU — always reachable: "menu", "help", or "#" (Self-Cav pattern), plus a greeting. Returns
+  // tappable quick-action buttons (2026-07-22 founder: interactive buttons, menu always reachable).
   if (greetings.includes(mGreet)) {
-    return await getMenuText(user);
+    return replyWithButtons(await getMenuText(user), MENU_BUTTONS);
   }
-  if (m === "menu" || m === "help") {
-    return await getMenuText(user, { showCommands: true });
+  if (m === "menu" || m === "help" || m.trim() === "#") {
+    return replyWithButtons(await getMenuText(user, { showCommands: true }), MENU_BUTTONS);
   }
 
   // ---- SHOPPING LIST command ----
