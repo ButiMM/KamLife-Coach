@@ -14,6 +14,7 @@
 
 import OpenAI from "openai";
 import { assertAiOnline } from "./ai-offline";
+import { getGoalProfile } from "./goal-profiles";
 import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused, claimProactive } from "./scheduler/shared";
@@ -181,14 +182,25 @@ export async function generateRecapScript(data: ClientWeekData): Promise<string>
   const stepsTarget = data.stepsTarget ?? 8500;
   const trainingTarget = data.trainingDaysPerWeek;
 
+  // GOAL-AWARE FRAMING (2026-07-22, reviewer verification: the recap hardcoded "fat loss" and
+  // framed every client around weight change + a deficit — so a wellness / has-a-condition client
+  // got a body-comp recap they never signed up for). Read the profile: macro goals keep the
+  // weight-and-progress frame; health-led goals (weightIsGoal=false) are coached on consistency
+  // and how they feel, and the scale line is dropped so a gogo is never chased on a number.
+  const profile = getGoalProfile(data.goalType);
+  const goalLabel = profile.label;
+  const framesOnWeight = profile.weightIsGoal;
+
   const context = [
     `Name: ${firstName}`,
-    `Goal: ${data.goalType || "fat loss"}`,
+    `Goal: ${goalLabel}`,
     `Workouts this week: ${data.workoutsThisWeek} / ${trainingTarget} target`,
     `Average steps: ${data.avgStepsThisWeek.toLocaleString()} / ${stepsTarget.toLocaleString()} target`,
-    data.weightChange !== null
-      ? `Weight change (last 2 weeks): ${data.weightChange > 0 ? "+" : ""}${data.weightChange}kg`
-      : "Weight: not logged this week",
+    framesOnWeight
+      ? (data.weightChange !== null
+          ? `Weight change (last 2 weeks): ${data.weightChange > 0 ? "+" : ""}${data.weightChange}kg`
+          : "Weight: not logged this week")
+      : "", // health-led: the scale is NOT their goal — never frame the week on it
     `Meals logged: ${data.mealsLoggedDays} / 7 days`,
     data.workoutStreak > 3 ? `Workout streak: ${data.workoutStreak} days` : "",
   ].filter(Boolean).join("\n");
@@ -215,8 +227,8 @@ export async function generateRecapScript(data: ClientWeekData): Promise<string>
 - End with one warm, specific invitation to restart — no pressure, no urgency.`
     : `TONE: Direct South African coach talking to a mate on a voice note — warm, personal, spoken. NOT a report card read aloud.
 STRUCTURE (follow this exactly):
-1. Say ONE specific, human thing that proves you actually watched THEIR week — name a food they logged, their training streak, or their weight move. Real detail, not a stat dump. This is what makes it feel personal.
-2. Tell them what it MEANS for their ${data.goalType || "fat loss"} goal in plain words — cause and effect, one sentence.
+1. Say ONE specific, human thing that proves you actually watched THEIR week — name a food they logged, their training streak${framesOnWeight ? ", or their weight move" : ", or how consistent they were"}. Real detail, not a stat dump. This is what makes it feel personal.
+2. Tell them what it MEANS for their ${goalLabel} goal in plain words — cause and effect, one sentence.${framesOnWeight ? "" : " This client is NOT chasing the scale — frame it around energy, consistency and feeling better, never weight lost."}
 3. ONE specific thing to do next week. Tied to their goal. Concrete, not vague.
 
 DO NOT recite the numbers like a scorecard (they already got the written report card — repeating it is what makes the voice note feel generic). Pick ONE detail and talk about it like a human. Max ONE number in the whole script.

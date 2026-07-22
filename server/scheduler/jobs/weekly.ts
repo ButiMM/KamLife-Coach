@@ -6,6 +6,7 @@ import {
   todaySAST, thisWeekUTC,
 } from "../shared";
 import { getShoppingList, formatShoppingList } from "../../shopping-lists";
+import { getGoalProfile } from "../../goal-profiles";
 import { getGroceryPersonalization } from "../../grocery-personalize";
 import { suggestStepTargetAdjustment } from "../../targets";
 import { getTrajectoryForUser } from "../../trajectory-report";
@@ -416,7 +417,10 @@ export async function runSundayMealPlan(): Promise<void> {
         firstName: name,
       });
 
-      const goalLabel = client.goalType === "muscle_gain" ? "muscle gain" : client.goalType === "recomposition" ? "recomposition" : "fat loss";
+      // Goal-aware label (2026-07-22 reviewer verification): was hardcoded to "fat loss" for any
+      // non-body-comp goal, so a wellness / has-a-condition client was told the plan was for "fat
+      // loss". getGoalProfile gives the honest client-facing label for all five goals.
+      const goalLabel = getGoalProfile(client.goalType).label.toLowerCase();
       const intro = `*${name} — your 3-day plan for the week ahead:*\n\nBuilt for your ${goalLabel} goal. Screenshot it, save it, use it. Prep protein on Sunday and your whole week is easier.\n\n---\n\n`;
       await sendWhatsApp(client.phoneNumber, intro + plan);
       sent++;
