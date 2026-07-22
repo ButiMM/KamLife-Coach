@@ -70,8 +70,31 @@ const PROGRAMME_FREELANCE_RE =
   /\bexercises?\s+(?:like|such as|including)\b|\b(?:incorporate|throw in|mix in|start doing|add in|try (?:doing |adding |some ))\b[^.!?]{0,24}?\b(?:squats?|lunges?|deadlifts?|burpees?|crunches|sit[- ]?ups?|planks?|pull[- ]?ups?|chin[- ]?ups?|dips|mountain climbers?|kettlebell\w*|box jumps?|jumping jacks?|russian twists?|leg raises?|jump squats?|snatch\w*|clean(?:s| and jerks?)?)\b/i
 ;
 
+// MEDICAL CLAIMS — the Meta / WhatsApp compliance line (2026-07-22, three-reviewer note: a health
+// bot is rejected — or worse, liable — the moment it acts like a doctor). KamLife is a WELLNESS
+// coach: it coaches habits and defers the condition to the client's doctor (the health_condition
+// scope boundary). Two acts must NEVER leave the bot's mouth, and no disclaimer redeems them:
+//   1. Claiming to cure / reverse / heal a named disease.
+//   2. Directing a change to prescribed medication (stop / adjust / skip / come off / double).
+// High precision on purpose: "manage your blood pressure with walking" (manage = the approved
+// word) and "keep taking your meds as your doctor said" never match — only the dangerous acts do.
+const MEDICAL_CURE_RE =
+  /\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i
+;
+const MEDICATION_CHANGE_RE =
+  /\b(?:stop|start|adjust|change|increase|reduce|lower|skip|come off|go off|wean off|double|halve|cut)\s+(?:your |his |her |the |taking )?(?:[a-z][\w-]*\s+){0,3}?(?:insulin|medication|meds|medicine|dose|dosage|tablets|pills|metformin|statins?|treatment|prescription)\b/i
+;
+
 export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierResult {
   const r = reply || "";
+
+  // Compliance first — a medical claim is the highest-stakes thing the bot can say.
+  if (MEDICAL_CURE_RE.test(r)) {
+    return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
+  }
+  if (MEDICATION_CHANGE_RE.test(r)) {
+    return { ok: false, violation: "Your reply directs a change to the client's MEDICATION (stopping / adjusting / skipping a dose). You must NEVER touch medication — it is dangerous and outside a coach's scope. Rewrite: tell them only their doctor decides anything about their medication, and steer back to the habits you DO coach (food, movement, sleep). Remove any instruction about medicine, insulin or dose." };
+  }
 
   if (FITNESS_MYTH_RE.test(r) && !MYTH_DEBUNK_RE.test(r)) {
     return { ok: false, violation: "Your reply invokes a fitness MYTH (muscle confusion / shocking the muscle / spot reduction / muscle-turns-to-fat). None of these are real — never tell a client to 'confuse' or 'shock' a muscle. Rewrite with the correct principle: progressive overload on the core lifts, and for a lagging body part, TARGETED VOLUME (a couple more sets, or one focused accessory) on that muscle." };

@@ -3130,6 +3130,24 @@ test("verifier passes normal coaching, corrections, and same-direction talk", ()
   assert.ok(verifyBrainReply("If you want the goal changed, say 'change my goal to fat loss' and I'll get it confirmed properly.", { goalType: "muscle_gain" }).ok);
 });
 
+// MEDICAL-CLAIM COMPLIANCE (2026-07-22) — the Meta / liability line. The bot must NEVER claim to
+// cure/reverse a disease or touch medication. A rejection risk AND a real-world safety risk.
+test("verifier blocks claims to cure/reverse a medical condition", () => {
+  assert.ok(!verifyBrainReply("Stick with me and we'll reverse your diabetes in a few months.", { goalType: "health_condition" }).ok);
+  assert.ok(!verifyBrainReply("This plan will cure your high blood pressure.", { goalType: "general" }).ok);
+  assert.ok(!verifyBrainReply("Walking every day can get rid of your condition for good.", {}).ok);
+});
+test("verifier blocks any instruction to change medication", () => {
+  assert.ok(!verifyBrainReply("Once the weight drops you can come off your metformin.", { goalType: "health_condition" }).ok);
+  assert.ok(!verifyBrainReply("Try to reduce your insulin on training days.", {}).ok);
+  assert.ok(!verifyBrainReply("You can skip your blood pressure tablets if you feel fine.", {}).ok);
+});
+test("verifier PASSES compliant wellness language (manage, defer to doctor, keep taking meds)", () => {
+  assert.ok(verifyBrainReply("Daily walking and less salt can help you manage your blood pressure — but your doctor guides the condition, not me.", { goalType: "health_condition" }).ok);
+  assert.ok(verifyBrainReply("Keep taking your medication exactly as your doctor prescribed. I'll help with the food and movement side.", { goalType: "health_condition" }).ok);
+  assert.ok(verifyBrainReply("I'm your coach, not your doctor — for anything about your diabetes, check with your doctor. Let's focus on protein and steps.", { goalType: "health_condition" }).ok);
+});
+
 // FITNESS MYTH CATCHER (2026-07-09) — the bot must NEVER ship broscience. Caught in
 // code so a prompt line the model ignores can't let "confuse that focus" through again.
 test("verifier blocks fitness myths (muscle confusion, shock, spot reduction)", () => {
