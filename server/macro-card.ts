@@ -12,9 +12,24 @@
  * clients keep their plain, no-numbers reply).
  */
 
-import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
+import { createCanvas, GlobalFonts, type SKRSContext2D } from "@napi-rs/canvas";
+import { existsSync } from "fs";
+import { join } from "path";
 
-const FONT = "Liberation Sans"; // present on the Railway image; Helvetica/Arial-metric, clean.
+// BUNDLE THE FONT (2026-07-22): the Railway container has NO system fonts — the first live
+// card came out with shapes but no text. Liberation Sans (OFL-licensed) is committed under
+// server/assets and registered here at load, so text renders on ANY host. Family name is
+// unique so it can only resolve via this registration, never a coincidental system font.
+const FONT = "KamLife Sans";
+(() => {
+  try {
+    const dir = join(process.cwd(), "server", "assets");
+    const reg = join(dir, "LiberationSans-Regular.ttf");
+    const bold = join(dir, "LiberationSans-Bold.ttf");
+    if (existsSync(reg)) GlobalFonts.registerFromPath(reg, FONT);
+    if (existsSync(bold)) GlobalFonts.registerFromPath(bold, FONT);
+  } catch { /* fall back to any system font — never crash the render */ }
+})();
 const ORANGE = "#f2681f";
 const ORANGE_LT = "#ff8a3d";
 const INK = "#14151a";

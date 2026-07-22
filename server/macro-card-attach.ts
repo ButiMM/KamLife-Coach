@@ -23,7 +23,12 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
   try {
     // Only macro goals get a card; wellness/has-a-condition keep the plain reply.
     if (!getGoalProfile(user?.goalType).usesMacros) return "";
-    const base = (process.env.APP_URL || "").replace(/\/$/, "");
+    // APP_URL may be stored without a scheme (it was — the first live marker came out as
+    // "kamlife-…railway.app/…" with no https://, so the strip-regex missed it and the raw
+    // URL leaked as TEXT instead of an image). Force https:// so the marker is a valid media
+    // URL that Twilio fetches and WhatsApp shows inline — the client never sees a link.
+    let base = (process.env.APP_URL || "").trim().replace(/\/$/, "");
+    if (base && !/^https?:\/\//i.test(base)) base = "https://" + base;
     if (!base) return ""; // no public URL to serve the image from → skip gracefully
     const calTarget = Number(user?.calorieTarget) || 0;
     const protTarget = Number(user?.proteinTarget) || 0;
