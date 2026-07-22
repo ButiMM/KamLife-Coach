@@ -5,6 +5,7 @@ import {
   getActiveClients, isPaused, loadState, saveState,
   todaySAST, thisWeekUTC, claimProactive, claimDailySlot,
 } from "../shared";
+import { getGoalProfile } from "../../goal-profiles";
 
 export async function runPhaseAdvancement(): Promise<void> {
   console.log("[SCHEDULER] JOB: Phase advancement check");
@@ -49,9 +50,10 @@ export async function runGoalCheck(): Promise<void> {
       const name = client.name || "there";
       const total = client.totalWorkoutsCompleted || 0;
       const goal = client.goalType || "fat_loss";
-      const goalLabel: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition", general: "general fitness" };
+      // Goal-aware label for all five goals (was a map missing health_condition → raw enum leaked).
+      const goalLabelStr = getGoalProfile(goal).label.toLowerCase();
       let goalMsg = "";
-      if (currentWeek === 4) goalMsg = `${name}, you have completed Week 4 — ${total} sessions done. Time for a quick check-in.\n\nThree questions:\n1. Is your goal still *${goalLabel[goal] || goal}*?\n2. Has anything changed — injury, schedule, budget, life?\n3. How is your energy this week compared to Week 1?\n\nReply to any of these and I will adjust your programme if needed.`;
+      if (currentWeek === 4) goalMsg = `${name}, you have completed Week 4 — ${total} sessions done. Time for a quick check-in.\n\nThree questions:\n1. Is your goal still *${goalLabelStr}*?\n2. Has anything changed — injury, schedule, budget, life?\n3. How is your energy this week compared to Week 1?\n\nReply to any of these and I will adjust your programme if needed.`;
       else if (currentWeek === 8) {
         goalMsg = `${name}, 8 weeks done. ${total} sessions. This is where most people quit — you didn't.\n\nWeek 9 starts now. You have two directions:\n\n*1 — Maintenance* — 3 days/week, hold your gains, sustainable forever\n*2 — Advanced* — 5 days/week, harder sessions, new exercises, next level\n\nReply *1* or *2* and I will set your programme for the next 8 weeks.`;
         await sendWhatsApp(client.phoneNumber, goalMsg);
@@ -59,7 +61,7 @@ export async function runGoalCheck(): Promise<void> {
         continue;
       }
       else if (currentWeek === 12) goalMsg = `${name}, 12 weeks with Coach K. ${total} sessions. One quarter of a year of work.\n\nTime for a full review. Tell me:\n1. What is working?\n2. What is not?\n3. What has changed in your body or your life?\n\nYour programme evolves with you. Let me know what to adjust.`;
-      else goalMsg = `${name}, Week ${currentWeek} checkpoint — ${total} sessions done. Is your goal still *${goalLabel[goal] || goal}*? Anything in your life or training that needs to change? Reply and we adjust.`;
+      else goalMsg = `${name}, Week ${currentWeek} checkpoint — ${total} sessions done. Is your goal still *${goalLabelStr}*? Anything in your life or training that needs to change? Reply and we adjust.`;
       await sendWhatsApp(client.phoneNumber, goalMsg);
       await db.update(users).set({ lastGoalCheckWeek: currentWeek }).where(eq(users.phoneNumber, client.phoneNumber));
     } catch (err) { console.error(`[SCHEDULER] Goal check error — ${client.phoneNumber}:`, err); }
@@ -88,7 +90,7 @@ export async function runWeeklyMondayCheckin(): Promise<void> {
       else if (week === 4) msg = `${name}, Week 4 — one full month in. ${sessions} sessions. This is where it starts to show.\n\nExpect: clothes fitting slightly differently, energy more consistent, strength up on at least one exercise. This week: push harder — more reps or more weight on every exercise. You built the foundation. Now use it.`;
       else if (week <= 8) msg = `${name}, Week ${week} — ${sessions} sessions in the bank. Target for this week: ${planned} sessions and ${sessions + planned} total. ${streak >= 3 ? `You are on a ${streak}-session streak — do not break it.` : "Get the streak going."}`;
       else if (week <= 12) {
-        const goalMsg = goal === "fat_loss" ? "Fat loss compounds from here — the early weeks built the foundation." : goal === "muscle_gain" ? "Muscle building accelerates after week 8 — progressive overload is everything now." : "Your body is recomposing — fat down, muscle up. The scale may not move much but the mirror will.";
+        const goalMsg = goal === "fat_loss" ? "Fat loss compounds from here — the early weeks built the foundation." : goal === "muscle_gain" ? "Muscle building accelerates after week 8 — progressive overload is everything now." : !getGoalProfile(goal).weightIsGoal ? "This is where the habit becomes who you are — steadier energy, better sleep, movement that just happens. Keep showing up." : "Your body is recomposing — fat down, muscle up. The scale may not move much but the mirror will.";
         msg = `${name}, Week ${week} — ${sessions} total sessions. ${goalMsg} One focus this week: log your lifts and add weight or reps to every exercise.`;
       } else {
         msg = `${name}, Week ${week} — ${sessions} sessions. You are in the top 5% of people who stick with a programme this long. What is your goal for this week? One specific thing.`;

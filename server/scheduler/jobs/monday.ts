@@ -5,6 +5,7 @@ import {
   getActiveClients, isPaused, loadState, saveState,
   todaySAST, thisWeekUTC, isProactivePaused,
 } from "../shared";
+import { getGoalProfile } from "../../goal-profiles";
 
 export async function runWeightReminder(): Promise<void> {
   console.log("[SCHEDULER] Running weight check-in reminder...");
@@ -136,7 +137,7 @@ export async function runMondayGroceries(): Promise<void> {
         : `☐ Oats 1kg — R25\n☐ Sweet potato 500g — R12\n☐ ${isLowBudget ? "Pap 2kg — R15" : "Brown rice 1kg — R22"}`;
       const vegItems = `☐ Spinach bunch — R8\n☐ Cabbage head — R10\n☐ Tomatoes — R15\n☐ Onions 1kg — R12`;
       const tip = isLowBudget ? `_Shoprite or Boxer first — best protein-per-rand. Batch cook this weekend._` : `_Prep protein on Sunday — cook in bulk so weekdays are easy._`;
-      const msg = `*${name}'s Weekly Shopping List* 🛒\n_${goal === "fat_loss" ? "Fat loss" : goal === "muscle_gain" ? "Muscle gain" : "Recomposition"} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
+      const msg = `*${name}'s Weekly Shopping List* 🛒\n_${getGoalProfile(goal).label} plan_\n\n*Proteins (buy first):*\n${proteinItems}\n\n*Carbs:*\n${carbItems}\n\n*Vegetables:*\n${vegItems}\n\n${tip}\n\n_Have your own list? Send it and I'll adjust it for your goals._`;
       await sendWhatsApp(client.phoneNumber, msg);
       sent++;
     } catch { continue; }

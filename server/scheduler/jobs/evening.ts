@@ -6,6 +6,7 @@ import {
   TRAINING_SCHEDULES, isSickOrInjuredToday,
 } from "../shared";
 import { sendWhatsAppButtons } from "../../twilio-interactive";
+import { usesMacroTargets } from "../../goal-profiles";
 import { proteinOptions } from "../../utils";
 
 export async function runEveningAccountability(): Promise<void> {
@@ -89,7 +90,10 @@ export async function runEveningAccountability(): Promise<void> {
       if (noDinnerYet && hasBeenActive && !sick && !calorieCeilingHit && await claimDailySlot(client.id, "evening")) {
         const protGap = protTarget - todayProt;
         let dinnerSuggestion: string;
-        if (goal === "muscle_gain") {
+        if (!usesMacroTargets(goal)) {
+          // Wellness / has-a-condition client — no protein-gram maths, just a warm plate nudge.
+          dinnerSuggestion = `${name}, dinner time. Keep it simple and balanced — some protein, some veg, and you're sorted. What do you have at home tonight?`;
+        } else if (goal === "muscle_gain") {
           const mealOption = protGap > 40 ? "rice + chicken, or pap + mince + veg" : `eggs + toast, or ${proteinOptions(client).split(",")[0]} on bread`;
           dinnerSuggestion = `${name}, dinner time. Still need ${protGap > 0 ? `${protGap}g protein` : "a solid meal"}. Options: ${mealOption}. What are you working with tonight?`;
         } else {
