@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { dailyMacroCardMarker } from "../macro-card-attach";
+import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
@@ -101,6 +102,24 @@ export async function handleEarlyCommands(ctx: {
   if (swapAnswer !== null) { await logChat(user.id, message, swapAnswer, "SWAP_ASK"); return swapAnswer; }
 
   // ---- INSTANT ANSWERS — cached from DB, zero GPT cost ----
+  // ---- WEEKLY / MONTHLY REPORT CARD (2026-07-22) — the shareable scorecard. Matched BEFORE the
+  // calorie block so "my week"/"my month" don't get read as a calorie query. Question-safe: it's a
+  // read-only summary, so it fires even when the classifier flags a question.
+  if (
+    /\b(my week|weekly (report|scorecard|card|summary|recap)|week (report|card|scorecard)|this week.?s? (report|card|scorecard|summary))\b/i.test(m) ||
+    /\b(my month|monthly (report|scorecard|card|summary|recap)|month (report|card|scorecard)|report card|scorecard|my (monthly )?scorecard)\b/i.test(m)
+  ) {
+    const isMonth = /\bmonth|report card\b/i.test(m);
+    const first = user.name ? `${user.name.split(" ")[0]}, ` : "";
+    const marker = await reportCardMarker(user, isMonth ? "month" : "week");
+    const period = isMonth ? "month" : "week";
+    const reply = marker
+      ? `${first}here's your ${period} 👇 Save it, share it — this is your progress.${marker}`
+      : `${first}nothing to report for the ${period} yet — log a few meals and workouts and your ${period} scorecard will fill up. 💪`;
+    await logChat(user.id, message, reply.replace(/\s*\[MEDIA:[^\]]+\]/g, ""), isMonth ? "MONTHLY_REPORT" : "WEEKLY_REPORT");
+    return reply;
+  }
+
   if (
     /\b(daily calories|calorie target|calories target|my calories|my calorie|kcal target|daily kcal)\b/i.test(m) ||
     /\b(calorie|calories|kcal)\b.*\b(target|goal|limit|daily|mine|my|remaining|left|still|remain)\b/i.test(m) ||

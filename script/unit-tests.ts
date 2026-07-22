@@ -4480,6 +4480,40 @@ test("renderMacroCard: produces a valid PNG image", () => {
 // A LONG meal title must not run under the pill (2026-07-22 live: "…Pomegranate" overlapped
 // "+0 cal"). We can't diff pixels here, but a very long title must still render a valid PNG
 // without throwing — the truncation path is exercised. Premium = no overlap, ever.
+// WEEKLY / MONTHLY REPORT CARD (2026-07-22) — shareable scorecard, goal-aware, not overwhelming.
+test("report-card: renderReportCard produces a valid PNG", async () => {
+  const { renderReportCard } = await import("../server/macro-card");
+  const png = renderReportCard({
+    title: "Koketso's month", subtitle: "July so far", pill: "30 days",
+    stats: [
+      { label: "Avg calories / day", value: "1980", sub: "target 2100" },
+      { label: "Avg protein / day", value: "138g", sub: "target 150g", tone: "good" },
+      { label: "Workouts", value: "14", sub: "target ~13", tone: "good" },
+      { label: "Avg steps / day", value: "8,200", sub: "target 8,500" },
+      { label: "Days on track", value: "24", sub: "of 30", tone: "good" },
+      { label: "Weight change", value: "-2.1kg", tone: "good" },
+    ],
+    hint: "Down 2.1kg this month — the plan's working. Keep it steady.",
+  });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000);
+  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
+});
+test("report-card: stats are goal-aware — wellness gets habits, not macros", async () => {
+  const { buildReportStats } = await import("../server/report-card");
+  const data = { days: 7, distinctDaysLogged: 5, avgKcal: 0, avgProtein: 0, workouts: 3, avgSteps: 7000, totalMeals: 12, weightChange: null };
+  const wellness = buildReportStats({ goalType: "general", stepsTarget: 8000, trainingDaysPerWeek: 3 }, data as any);
+  assert.ok(wellness.some(s => /showed up|meals/i.test(s.label)), "wellness = habit tiles");
+  assert.ok(!wellness.some(s => /protein/i.test(s.label)), "no protein target pushed at wellness");
+  const macro = buildReportStats({ goalType: "fat_loss", calorieTarget: 2000, proteinTarget: 150, stepsTarget: 8000, trainingDaysPerWeek: 3 }, { ...data, avgKcal: 1900, avgProtein: 140 } as any);
+  assert.ok(macro.some(s => /protein/i.test(s.label)), "macro goal shows protein");
+});
+test("report-card: coaching line leads with the strongest thing, one plain sentence", async () => {
+  const { reportCoachingLine } = await import("../server/report-card");
+  const line = reportCoachingLine({ goalType: "fat_loss", proteinTarget: 150, stepsTarget: 8000, trainingDaysPerWeek: 3, weightIsGoal: true },
+    { days: 7, distinctDaysLogged: 6, avgKcal: 1900, avgProtein: 140, workouts: 3, avgSteps: 9000, totalMeals: 18, weightChange: -0.8 } as any, "week");
+  assert.match(line, /down 0\.8kg|working/i);
+  assert.ok(line.length < 140, "not overwhelming");
+});
 test("renderMacroCard: a long title + pill still renders cleanly (truncation path)", () => {
   const png = renderMacroCard({
     title: "This is a Switch Cranberry & Pomegranate + Zinc sugar-free drink", pill: "+0 cal",

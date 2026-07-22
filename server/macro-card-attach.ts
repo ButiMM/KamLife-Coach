@@ -16,6 +16,7 @@ import { sastDayStart } from "./utils";
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard } from "./macro-card";
 import { putCard } from "./card-store";
+import { waterTargetLitres } from "./targets";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -26,12 +27,14 @@ function cardBaseUrl(): string {
   return base;
 }
 
-type Row = { label: string; current: number; target: number; unit: string; overIsBad?: boolean };
+type Row = { label: string; current: number; target: number; unit: string; overIsBad?: boolean; decimals?: number };
 
 // Shared: today's macro rows for a macro-goal client, or null when a card doesn't apply.
 // `overIsBad` marks the macros where GOING OVER is a warning (carbs, fat, and calories on a
 // cut) so the card reddens them; protein (and calories on a bulk) never red — more is fine.
-async function todayRows(user: any): Promise<{ rows: Row[]; isBulk: boolean } | null> {
+// includeWater adds today's water as a final row — the DAILY scorecard shows it (founder:
+// "add total water to the daily scorecard"), the per-meal card stays the 4 macros.
+async function todayRows(user: any, includeWater = false): Promise<{ rows: Row[]; isBulk: boolean } | null> {
   const profile = getGoalProfile(user?.goalType);
   if (!profile.usesMacros) return null; // wellness → no card
   const calTarget = Number(user?.calorieTarget) || 0;
@@ -46,15 +49,18 @@ async function todayRows(user: any): Promise<{ rows: Row[]; isBulk: boolean } | 
   }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())));
   const fatTarget = Math.max(1, Math.round((calTarget * 0.27) / 9));
   const carbTarget = Math.max(1, Math.round((calTarget - protTarget * 4 - fatTarget * 9) / 4));
-  return {
-    isBulk,
-    rows: [
-      { label: "Calories", current: sum?.kcal || 0, target: calTarget, unit: "", overIsBad: !isBulk },
-      { label: "Protein", current: sum?.protein || 0, target: protTarget, unit: "g", overIsBad: false },
-      { label: "Carbs", current: sum?.carbs || 0, target: carbTarget, unit: "g", overIsBad: true },
-      { label: "Fat", current: sum?.fat || 0, target: fatTarget, unit: "g", overIsBad: true },
-    ],
-  };
+  const rows: Row[] = [
+    { label: "Calories", current: sum?.kcal || 0, target: calTarget, unit: "", overIsBad: !isBulk },
+    { label: "Protein", current: sum?.protein || 0, target: protTarget, unit: "g", overIsBad: false },
+    { label: "Carbs", current: sum?.carbs || 0, target: carbTarget, unit: "g", overIsBad: true },
+    { label: "Fat", current: sum?.fat || 0, target: fatTarget, unit: "g", overIsBad: true },
+  ];
+  if (includeWater) {
+    const wTarget = waterTargetLitres(user?.currentWeight);
+    const wNow = Math.round((parseFloat(String(user?.todayWater || "0")) || 0) * 10) / 10;
+    rows.push({ label: "Water", current: wNow, target: wTarget, unit: "L", overIsBad: false, decimals: 1 });
+  }
+  return { rows, isBulk };
 }
 
 // MEAL SUMMARY for the card title (2026-07-22, founder: "the card must summarise the MEAL —
@@ -132,7 +138,7 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
   try {
     const base = cardBaseUrl();
     if (!base) return "";
-    const t = await todayRows(user);
+    const t = await todayRows(user, true); // daily scorecard includes today's water
     if (!t) return "";
     const kcal = t.rows[0]?.current || 0;
     const png = renderMacroCard({
