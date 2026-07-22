@@ -152,15 +152,31 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   y += headerH;
 
   // ── Title line: meal (or "Your day so far") + optional pill ──
-  ctx.fillStyle = INK;
-  ctx.font = `600 38px "${FONT}"`;
-  ctx.fillText(d.title, x, y + 44);
+  // Measure the pill FIRST and reserve its width, so a long meal title is truncated with an
+  // ellipsis instead of running UNDER the pill (2026-07-22 live: "…Pomegranate" collided with
+  // "+0 cal"). Premium = never let two elements overlap; the title always yields to the pill.
   const pillTxt = (d.pill || "").trim();
+  const pillH = 60;
+  let pillW = 0;
   if (pillTxt) {
     ctx.font = `bold 32px "${FONT}"`;
-    const pillW = ctx.measureText(pillTxt).width + 56;
-    const pillH = 60;
+    pillW = ctx.measureText(pillTxt).width + 56;
+  }
+  const titleGap = 28;                                   // clear breathing room before the pill
+  const titleMaxW = innerW - (pillTxt ? pillW + titleGap : 0);
+  ctx.fillStyle = INK;
+  ctx.font = `600 38px "${FONT}"`;
+  let titleTxt = d.title || "";
+  if (ctx.measureText(titleTxt).width > titleMaxW) {
+    while (titleTxt.length > 1 && ctx.measureText(titleTxt + "…").width > titleMaxW) {
+      titleTxt = titleTxt.slice(0, -1);
+    }
+    titleTxt = titleTxt.replace(/[\s,–-]+$/, "") + "…";  // trim trailing punctuation before the ellipsis
+  }
+  ctx.fillText(titleTxt, x, y + 44);
+  if (pillTxt) {
     const pillX = x + innerW - pillW;
+    ctx.font = `bold 32px "${FONT}"`;
     ctx.fillStyle = "rgba(242,104,31,0.10)";
     roundRect(ctx, pillX, y + 6, pillW, pillH, pillH / 2);
     ctx.fill();

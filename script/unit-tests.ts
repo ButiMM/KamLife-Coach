@@ -4468,6 +4468,18 @@ test("renderMacroCard: produces a valid PNG image", () => {
   assert.strictEqual(png[0], 0x89, "PNG magic byte 1");
   assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG", "PNG signature");
 });
+// A LONG meal title must not run under the pill (2026-07-22 live: "…Pomegranate" overlapped
+// "+0 cal"). We can't diff pixels here, but a very long title must still render a valid PNG
+// without throwing — the truncation path is exercised. Premium = no overlap, ever.
+test("renderMacroCard: a long title + pill still renders cleanly (truncation path)", () => {
+  const png = renderMacroCard({
+    title: "This is a Switch Cranberry & Pomegranate + Zinc sugar-free drink", pill: "+0 cal",
+    rows: [{ label: "Calories", current: 918, target: 2862, unit: "" }, { label: "Protein", current: 47, target: 185, unit: "g" }],
+    hint: "Under your building fuel — eat more, muscle needs it.",
+  });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "valid PNG even with a very long title");
+  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
+});
 
 // COACHING CARD (2026-07-22, founder: the card must TEACH, not just count — plain language,
 // every goal, over or under). The bottom line adapts to the day's state.
