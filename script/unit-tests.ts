@@ -2324,6 +2324,54 @@ test("friction: signal kinds map to friction_* and cover all four", async () => 
   assert.ok(FRICTION_SIGNAL_KINDS.every((k: string) => k.startsWith("friction_")));
 });
 
+// HOME / TRAVEL WORKOUT BUILDER — Kam's manual-coaching chats: a client photographs their kit
+// ("this is what he has" — dumbbells + barbell) or is on holiday. The bot must read the kit and
+// hand back a real session, no "reply dumbbells/bands/mix" friction.
+test("home-workout: parseEquipment reads a mixed kit and always includes bodyweight", async () => {
+  const { parseEquipment } = await import("../server/home-workout");
+  const items = parseEquipment("dumbbells, a barbell and a resistance band");
+  assert.ok(items.includes("dumbbells") && items.includes("barbell") && items.includes("bands"));
+  assert.ok(items.includes("bodyweight"), "bodyweight is always available");
+});
+test("home-workout: parseEquipment on an empty room falls back to bodyweight only", async () => {
+  const { parseEquipment } = await import("../server/home-workout");
+  assert.deepEqual(parseEquipment("just a yoga mat"), ["bodyweight"]);
+});
+test("home-workout: dumbbells+barbell fat-loss session is loaded, educates, and has NO reply-menu", async () => {
+  const { buildHomeSession } = await import("../server/home-workout");
+  const s = buildHomeSession(["dumbbells", "barbell", "bodyweight"], { goalType: "fat_loss", name: "Puntsa" });
+  assert.match(s, /Goblet squat/i, "uses the loaded squat when weights are present");
+  assert.match(s, /Romanian deadlift|RDL/i);
+  assert.match(s, /don't need a full gym/i, "teaches that a home setup is enough");
+  assert.doesNotMatch(s, /reply \*dumbbells\*|reply dumbbells|type \*mix\*/i, "no clunky menu");
+  assert.match(s, /Puntsa/, "greets by first name");
+});
+test("home-workout: bodyweight-only session still gives real movements", async () => {
+  const { buildHomeSession } = await import("../server/home-workout");
+  const s = buildHomeSession(["bodyweight"], { goalType: "general" });
+  assert.match(s, /Push-up/i);
+  assert.match(s, /Bodyweight squat/i);
+  assert.match(s, /bodyweight builds real strength/i);
+});
+test("home-workout: muscle-gain runs straight sets (4 rounds, 8–12), fat-loss adds a walk", async () => {
+  const { buildHomeSession } = await import("../server/home-workout");
+  const bulk = buildHomeSession(["dumbbells", "bodyweight"], { goalType: "muscle_gain" });
+  assert.match(bulk, /4 rounds.*8[–-]12/i);
+  const cut = buildHomeSession(["dumbbells", "bodyweight"], { goalType: "fat_loss" });
+  assert.match(cut, /walk/i, "fat loss finishes with a walk for extra burn");
+});
+test("home-workout: bench + dumbbells unlocks a bench press", async () => {
+  const { buildHomeSession } = await import("../server/home-workout");
+  const s = buildHomeSession(["dumbbells", "bench", "bodyweight"], { goalType: "recomposition" });
+  assert.match(s, /bench press/i);
+});
+test("home-workout: inventory vision prompt asks for the specific equipment words only", async () => {
+  const { buildEquipmentInventoryPrompt } = await import("../server/home-workout");
+  const p = buildEquipmentInventoryPrompt();
+  assert.match(p, /dumbbells, barbell, kettlebell, bands, bench, pull-up bar/);
+  assert.match(p, /bodyweight/);
+});
+
 // ============================================================
 // Workout difficulty feedback classifier (pure)
 // ============================================================

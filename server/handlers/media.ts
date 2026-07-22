@@ -45,7 +45,7 @@ import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
-import { coachGymMachineFromPhoto } from "./equipment-vision";
+import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
@@ -296,12 +296,12 @@ export async function handleMediaMessage(ctx: {
             return exFallback;
           }
           if ((uncaptionedType as any) === "equipment") {
-            // Only treat as a HOME-EQUIPMENT DECLARATION when the caption clearly says
-            // "this is my kit" — never swallow a question like "how do I use this machine".
-            const hasEquipCaption = /\b(i have (this|these|a set|dumbbell|band|kettlebell|barbell)|my (own )?(equipment|kit|gym|setup|weights)|i (just )?(got|bought) (this|these|a|some|new)|these are my|this is my (equipment|kit|gym|setup|home))\b/i.test(message || "");
+            // HOME / TRAVEL KIT DECLARATION ("this is my kit", "at home", "on holiday") → read the
+            // kit shown and hand back a full adapted session (home-workout.ts), no menu friction.
+            const hasEquipCaption = /\b(i have (this|these|a set|dumbbell|band|kettlebell|barbell)|my (own )?(equipment|kit|gym|setup|weights)|i (just )?(got|bought) (this|these|a|some|new)|these are my|this is (my|what) (equipment|kit|gym|setup|home|i have|he has|she has)|at home|on holiday|travel(?:ling|ing)?|away (?:for|on)|hotel (?:gym|room))\b/i.test(message || "");
             if (hasEquipCaption) {
-              const equipReply = `I can see your equipment. To update your programme, tell me what you have — reply:\n\n*dumbbells* — if you have dumbbells\n*bands* — if you have resistance bands\n*mix* — if you have both\n\nOr just describe it and I will update your profile.`;
-              await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_PHOTO");
+              const equipReply = await coachHomeEquipmentFromPhoto(openai, user, base64, contentType, message);
+              await logChat(user.id, "[Equipment Photo]", equipReply, "HOME_WORKOUT");
               return equipReply;
             }
 
