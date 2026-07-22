@@ -7,6 +7,7 @@ import { sql } from "drizzle-orm";
 import twilio from "twilio";
 import { requireAdminKey } from "./auth";
 import { computeClientRisk, sortByRisk } from "../client-triage";
+import { frictionCountsLast7 } from "../friction";
 import type { RouteDeps } from "./types";
 import { sendWhatsApp } from "../scheduler";
 import { generateVoiceNote } from "../tts";
@@ -103,7 +104,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       const now = Date.now();
       const sevenDaysAgo = new Date(now - 7 * 86400000);
 
-      const [clients, lastChats, recentWorkouts, openEsc] = await Promise.all([
+      const [clients, lastChats, recentWorkouts, openEsc, frictionMap] = await Promise.all([
         db.select({
           id: users.id, name: users.name, phoneNumber: users.phoneNumber,
           subscriptionStatus: users.subscriptionStatus, createdAt: users.createdAt,
@@ -115,6 +116,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
           .from(workoutLogs).where(gte(workoutLogs.loggedAt, sevenDaysAgo)).groupBy(workoutLogs.userId),
         db.select({ userId: escalations.userId })
           .from(escalations).where(and(eq(escalations.status, "open"), inArray(escalations.priority, ["urgent", "high"]))),
+        frictionCountsLast7(),  // per-client "fighting the bot" count (see friction.ts)
       ]);
 
       const lastChatMap = new Map(lastChats.map(r => [r.userId, r.last ? new Date(r.last).getTime() : null]));
@@ -126,6 +128,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
         const lastChat = lastChatMap.get(c.id) ?? null;
         const daysSinceActive = lastChat !== null ? daysBetween(lastChat) : null;
         const daysSinceSignup = c.createdAt ? daysBetween(new Date(c.createdAt).getTime()) : 999;
+        const frictionLast7 = frictionMap.get(c.id) || 0;
         const triage = computeClientRisk({
           daysSinceActive,
           daysSinceSignup,
@@ -133,6 +136,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
           subscriptionStatus: c.subscriptionStatus || "inactive",
           plannedSessionsPerWeek: c.trainingDaysPerWeek || 0,
           workoutsLast7: workoutMap.get(c.id) || 0,
+          frictionLast7,
         });
         return {
           id: c.id,
@@ -142,6 +146,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
           subscriptionStatus: c.subscriptionStatus,
           daysSinceActive,
           workoutsLast7: workoutMap.get(c.id) || 0,
+          frictionLast7,
           level: triage.level,
           reason: triage.reason,
           nextAction: triage.nextAction,
@@ -587,8 +592,10 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
     summary.innerHTML='<span class="pill red">🔴 '+s.red+' red</span><span class="pill yellow">🟡 '+s.yellow+' yellow</span><span class="pill green">🟢 '+s.green+' green</span>';
     var rows=(data.clients||[]);
     if(!rows.length){ content.innerHTML='<div class="empty">No clients in coaching yet.</div>'; return; }
-    var html='<table><thead><tr><th>Status</th><th>Client</th><th>Why</th><th>Next action</th><th>Last seen</th><th>Sessions/7d</th><th></th></tr></thead><tbody>';
+    var html='<table><thead><tr><th>Status</th><th>Client</th><th>Why</th><th>Next action</th><th>Last seen</th><th>Sessions/7d</th><th>Rough/7d</th><th></th></tr></thead><tbody>';
     rows.forEach(function(c){
+      var f=c.frictionLast7||0;
+      var fCell=f>0?'<span style="color:'+(f>=4?'var(--red)':'var(--yellow)')+';font-weight:600">'+f+'</span>':'<span class="muted">0</span>';
       html+='<tr>'
         +'<td><span class="dot '+esc(c.level)+'"></span>'+esc(c.level)+'</td>'
         +'<td><span class="who">'+esc(c.name)+'</span><br><span class="muted">'+esc(c.phone)+'</span></td>'
@@ -596,6 +603,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
         +'<td>'+esc(c.nextAction)+'</td>'
         +'<td class="muted">'+silentLabel(c.daysSinceActive)+'</td>'
         +'<td class="muted">'+esc(c.workoutsLast7)+'</td>'
+        +'<td>'+fCell+'</td>'
         +'<td><a class="wa" href="'+esc(c.waLink)+'" target="_blank" rel="noopener">WhatsApp →</a></td>'
         +'</tr>';
     });

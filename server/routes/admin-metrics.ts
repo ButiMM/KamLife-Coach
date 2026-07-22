@@ -41,7 +41,9 @@ export function registerAdminMetrics(app: Express) {
         `),
         db.execute(sql`
           SELECT kind, COUNT(*)::int AS n, COUNT(*) FILTER (WHERE reviewed)::int AS reviewed
-          FROM quality_signals WHERE created_at >= NOW() - INTERVAL '7 days' GROUP BY kind
+          FROM quality_signals
+          WHERE created_at >= NOW() - INTERVAL '7 days' AND kind NOT LIKE 'friction_%'
+          GROUP BY kind
         `),
       ]);
 

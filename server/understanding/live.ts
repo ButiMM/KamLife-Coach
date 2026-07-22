@@ -25,6 +25,7 @@ import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
 import { runMeaningEngine } from "./meaning-engine";
 import { classifyDomain } from "./domain-guard";
+import { captureFriction } from "../friction";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
@@ -141,6 +142,7 @@ export async function runMeaningEngineLive(ctx: {
     const domain = await classifyDomain(openai, message);
     if (domain.classification === "out-of-domain" && domain.redirectMessage) {
       await logChat(user.id, message, domain.redirectMessage, "DOMAIN_REDIRECT").catch(() => {});
+      captureFriction("redirect", { userId: user.id, messageIn: message, detail: "cold domain redirect" });
       return domain.redirectMessage;
     }
     const bridgeNote = domain.classification === "partially-related"

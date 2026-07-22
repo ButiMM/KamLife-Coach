@@ -2291,6 +2291,38 @@ test("triage: sortByRisk puts red first, then most-silent within a level", () =>
   assert.equal(sorted[0].daysSinceActive, 8, "most-silent red comes before less-silent red");
   assert.equal(sorted[3].triage.level, "green");
 });
+// Friction Monitor — a client can be active every day yet fighting the bot; the queue must see it.
+test("triage: active-but-fighting-the-bot (4+ friction) is RED even with 0 days silent", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 5 });
+  assert.equal(t.level, "red");
+  assert.match(t.reason, /fighting the bot/i);
+});
+test("triage: mild friction (2-3) on an otherwise-green client is yellow", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 2 });
+  assert.equal(t.level, "yellow");
+  assert.match(t.reason, /rough moments/i);
+});
+test("triage: a stray single correction (friction 1) does NOT flag — stays green", () => {
+  assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 1 }).level, "green");
+});
+test("triage: safety still beats heavy friction", () => {
+  const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 9, hasOpenUrgentEscalation: true });
+  assert.match(t.reason, /escalation/i);
+});
+test("friction: frictionFlag thresholds (pure)", async () => {
+  const { frictionFlag } = await import("../server/friction");
+  assert.equal(frictionFlag(0), null);
+  assert.equal(frictionFlag(1), null);
+  assert.equal(frictionFlag(2)?.level, "yellow");
+  assert.equal(frictionFlag(4)?.level, "red");
+  assert.equal(frictionFlag(10)?.level, "red");
+});
+test("friction: signal kinds map to friction_* and cover all four", async () => {
+  const { frictionSignalKind, FRICTION_SIGNAL_KINDS } = await import("../server/friction");
+  assert.equal(frictionSignalKind("correction"), "friction_correction");
+  assert.equal(FRICTION_SIGNAL_KINDS.length, 4);
+  assert.ok(FRICTION_SIGNAL_KINDS.every((k: string) => k.startsWith("friction_")));
+});
 
 // ============================================================
 // Workout difficulty feedback classifier (pure)

@@ -25,6 +25,9 @@ export interface ClientTriageInput {
   plannedSessionsPerWeek: number;
   /** Workouts logged in the last 7 days. */
   workoutsLast7: number;
+  /** Friction moments (corrections/rejections/redirects/venting) in the last 7 days.
+   *  Optional — defaults to 0 so existing callers/tests are unaffected. See friction.ts. */
+  frictionLast7?: number;
 }
 
 export interface ClientTriage {
@@ -60,9 +63,23 @@ export function computeClientRisk(inp: ClientTriageInput): ClientTriage {
     return { level: "red", reason: `Silent ${inp.daysSinceActive} days`, nextAction: "Win-back check-in today" };
   }
 
+  // 3.5 FIGHTING THE BOT — a client can message every day (so never "silent") yet correct,
+  // reject, get redirected, or vent repeatedly. Pure-activity triage calls them healthy; this
+  // makes their rough week visible BEFORE they churn in silence (2026-07-22, Kam: "people can't
+  // be fighting with the bot all the time"). Severe friction is red; it beats short silence.
+  const friction = inp.frictionLast7 ?? 0;
+  if (friction >= 4) {
+    return { level: "red", reason: `Fighting the bot — ${friction} rough moments this week`, nextAction: "Read their chat; the bot is failing them" };
+  }
+
   // 4. Short silence — 2–4 days quiet warrants a light nudge.
   if (inp.daysSinceActive >= 2) {
     return { level: "yellow", reason: `Quiet ${inp.daysSinceActive} days`, nextAction: "Light check-in" };
+  }
+
+  // 4.5 Mild friction — 2–3 rough moments while active. Something's misfiring; look before it grows.
+  if (friction >= 2) {
+    return { level: "yellow", reason: `${friction} rough moments with the bot this week`, nextAction: "Check what's misfiring in their chats" };
   }
 
   // 5. Training accountability — active and talking, but missing sessions.

@@ -24,7 +24,14 @@ export type QualitySignalKind =
   | "media_unreadable"    // a photo/video couldn't be processed → fallback ask
   | "low_confidence"      // a handler served but flagged its own uncertainty
   | "shadow_review"       // shadow Meaning Engine scored low or tied vs production → human look
-  | "daily_review";       // nightly self-audit graded a LIVE exchange weak → auto-filed for fixing
+  | "daily_review"        // nightly self-audit graded a LIVE exchange weak → auto-filed for fixing
+  // FRICTION kinds (see friction.ts) — a client fighting the bot, not a bot fumble. Stored in
+  // the same table (no migration) but excluded from the north-star "fumbles" count so the two
+  // signals don't conflate. Written via captureFriction, never captureQualitySignal directly.
+  | "friction_correction"
+  | "friction_rejection"
+  | "friction_redirect"
+  | "friction_frustration";
 
 const clip = (s: string | null | undefined, n = 500): string | null => {
   if (s == null) return null;

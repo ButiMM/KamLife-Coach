@@ -22,6 +22,7 @@ import { generateVoiceNote, getVoiceFilePath, voiceFileExists } from "./tts";
 import { sendWhatsApp } from "./scheduler";
 import { recordConversion } from "./ab";
 import { getStepStreak, getStepResponse as _getStepResponse } from "./handlers/steps";
+import { captureFriction } from "./friction";
 import { getSleepResponse } from "./handlers/sleep";
 import { handleMediaMessage, bumpVoiceFailure, clearVoiceFailure } from "./handlers/media";
 import { runSafetyGuards } from "./handlers/safety";
@@ -468,6 +469,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // wrong response. Catch these early and return a short deterministic reply instead.
   const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
   if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
+    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
     const _bfName = user.name?.split(" ")[0] || "";
     const _bfReply = `${_bfName ? `${_bfName}, ` : ""}what specifically didn't work? Tell me and I'll fix it.\n\nOr type *menu* to see your options.`;
     await logChat(user.id, message, _bfReply, "BRIEF_FRUSTRATION");
@@ -475,16 +477,11 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   }
 
   // ---- SEVERE FRUSTRATION EARLY-INTERCEPT — before ANY coaching/workout/food handlers ----
-  // Catches frustration messages so the bot does NOT respond with a workout programme or payment link.
-  // A single STRONG signal is enough to intercept — waiting for 2 signals caused the
-  // "I'm not paying for this nonsense" → payment link bug (only 1 signal counted, fell through to payment handler).
-  // HAS_CLEAR_ACTION guard: when the client pairs frustration with an explicit request
-  // ("Today's workout omg it's not working"), the action must win — frustration handler skips.
-  // NOTE: "broken" / "doesn't work" / "nothing works" are NOT single-signal triggers —
-  // they describe things ("my knee is broken", "nothing works for my belly fat", "the
-  // treadmill is broken") as often as the product. Alone they'd route an injury report
-  // to the frustration prompt. They count in the 2-signal list below instead; genuine
-  // product complaints ("it doesn't work") still land in gpt-block's frustration path.
+  // Stops the bot replying to frustration with a workout programme or payment link. A single
+  // STRONG signal intercepts (waiting for 2 caused "I'm not paying for this nonsense" → payment
+  // link). HAS_CLEAR_ACTION guard: frustration + explicit request ("Today's workout omg it's not
+  // working") → action wins. "broken"/"doesn't work"/"nothing works" are NOT single-signal (they
+  // describe things — "my knee is broken") — they count in the 2-signal list below instead.
   const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
@@ -499,6 +496,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // understand-first + "reduce shame" Constitution beats this ad-hoc prompt (the scorecard
   // won big here: "Okay no problem" 2.3→9.0). Deterministic frustration stays the fallback.
   if (!engineLive() && (STRONG_FRUSTRATION || frustrationSignalCount >= 2) && !HAS_CLEAR_ACTION) {
+    captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "strong frustration / bot complaint" });
     const firstName = user.name?.split(" ")[0] || "";
     const lastBotMsgs = await db.select({ messageOut: chatHistory.messageOut, intent: chatHistory.intent })
       .from(chatHistory)

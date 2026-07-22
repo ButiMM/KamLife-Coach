@@ -17,6 +17,7 @@ import {
   invalidateFoodTotalsCache,
 } from "./food-scanner";
 import { macroCardMarker } from "../macro-card-attach";
+import { captureFriction } from "../friction";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
@@ -356,6 +357,7 @@ export async function handleFoodContext(ctx: {
   const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
 
   if (isFoodCorrection || isReferenceCorrection) {
+    captureFriction("correction", { userId: user.id, phone, messageIn: message, detail: "food re-identification / correction" });
     if (isReferenceCorrection && !hasCorrectionPrefix) {
       const gptRef = await withTimeout("gpt_food_ref", 20000, () => askCoachK(message, user, "The user is referencing or correcting a previous food log. Use chat history to understand what they mean and respond helpfully. Do NOT log new food."));
       await logChat(user.id, message, gptRef, "FOOD_CORRECTION_REF");
@@ -442,6 +444,7 @@ export async function handleFoodContext(ctx: {
         .orderBy(desc(chatHistory.createdAt))
         .limit(1);
       if (lastEntry[0]?.intent === "FOOD_LOG" || lastEntry[0]?.intent === "SHORT_REPLY") {
+        captureFriction("rejection", { userId: user.id, phone, messageIn: message, detail: "rejected a food log" });
         const reply = `What was it actually? Just tell me (e.g. "Monster Zero Sugar") and I'll fix the log.`;
         await logChat(user.id, message, reply, "FOOD_CORRECTION_PROMPT");
         return reply;
