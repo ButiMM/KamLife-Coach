@@ -566,7 +566,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
 </style></head>
 <body>
 <header><h1>🚦 Triage — who needs help today</h1>
-  <div class="muted"><span id="meta">Loading…</span> · <button id="refresh">refresh</button> · <button id="logout">logout</button></div>
+  <div class="muted"><a href="/admin/cost" style="color:#f2681f;text-decoration:none">🐋 Cost to serve</a> · <span id="meta">Loading…</span> · <button id="refresh">refresh</button> · <button id="logout">logout</button></div>
 </header>
 <div class="summary" id="summary"></div>
 <div id="content"><div class="empty">Loading…</div></div>

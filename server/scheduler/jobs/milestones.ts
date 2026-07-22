@@ -124,7 +124,7 @@ export async function runMilestoneCelebrations(): Promise<void> {
           // cliff beats a text template (text always sends as the body regardless).
           let dayVoiceUrl: string | null = null;
           if (days === 3 && msg) {
-            dayVoiceUrl = await generateVoiceNote(msg.replace(/[*_]/g, ""), "warm").catch(() => null);
+            dayVoiceUrl = await generateVoiceNote(msg.replace(/[*_]/g, ""), "warm", client.id).catch(() => null);
           }
           if (msg) await sendWhatsApp(client.phoneNumber, msg, dayVoiceUrl || undefined);
         }
@@ -139,10 +139,10 @@ export async function runMilestoneCelebrations(): Promise<void> {
         if ([25, 50, 100].includes(workouts)) {
           try {
             const { script, emotion } = await generateMilestoneVoiceScript(client, "workout_sessions", { sessions: workouts });
-            voiceUrl = await generateVoiceNote(script, emotion);
+            voiceUrl = await generateVoiceNote(script, emotion, client.id);
           } catch (voiceErr) {
             console.warn("[MILESTONE] Voice script failed, using text:", voiceErr);
-            voiceUrl = await generateVoiceNote(text, "celebratory").catch(() => null);
+            voiceUrl = await generateVoiceNote(text, "celebratory", client.id).catch(() => null);
           }
         }
         await sendWhatsApp(client.phoneNumber, text, voiceUrl || undefined);

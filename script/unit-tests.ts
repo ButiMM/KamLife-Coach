@@ -4565,6 +4565,29 @@ test("nutrition-guardrails: sweets stacking up gets a balanced 'one is fine, ski
   assert.strictEqual(assessNutritionStandards({ todayFoods: ["apple", "banana", "orange"], goalType: "general" }), null);
 });
 
+// COST-TO-SERVE + WHALE ALERT (2026-07-22) — turn the R199-vs-unbounded-usage risk into a number.
+test("cost-tracking: memberCostRow sums AI + WhatsApp into rand and computes margin", async () => {
+  const { memberCostRow, USD_ZAR, PRICE_ZAR } = await import("../server/cost-tracking");
+  const r = memberCostRow("u1", 2, 40); // $2 AI (~R37) + 40 msgs (~R12)
+  assert.strictEqual(r.aiZar, Math.round(2 * USD_ZAR * 100) / 100);
+  assert.ok(r.whatsappZar > 0);
+  assert.strictEqual(r.totalZar, Math.round((r.aiZar + r.whatsappZar) * 100) / 100);
+  assert.strictEqual(r.marginZar, Math.round((PRICE_ZAR - r.totalZar) * 100) / 100);
+});
+test("cost-tracking: a heavy member trips the whale flag; a light one doesn't", async () => {
+  const { memberCostRow, WHALE_THRESHOLD_ZAR } = await import("../server/cost-tracking");
+  assert.strictEqual(memberCostRow("light", 0.5, 30).whale, false, "cheap member is not a whale");
+  const heavy = memberCostRow("heavy", 8, 200); // ~R148 AI + ~R60 WA = well over half the fee
+  assert.strictEqual(heavy.whale, true);
+  assert.ok(heavy.totalZar > WHALE_THRESHOLD_ZAR);
+});
+test("cost-tracking: voiceCostUsd scales with characters and never goes negative", async () => {
+  const { voiceCostUsd } = await import("../server/cost-tracking");
+  assert.ok(voiceCostUsd(1000) > 0);
+  assert.ok(voiceCostUsd(2000) > voiceCostUsd(1000));
+  assert.strictEqual(voiceCostUsd(-5), 0);
+});
+
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
   assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");

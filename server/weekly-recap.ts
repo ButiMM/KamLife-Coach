@@ -19,6 +19,7 @@ import { pool } from "./db";
 import { sendWhatsApp } from "./scheduler";
 import { isProactivePaused, claimProactive } from "./scheduler/shared";
 import { textToSpeech, isElevenLabsConfigured } from "./elevenlabs";
+import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -364,6 +365,7 @@ export async function runWeeklyRecaps(opts?: { force?: boolean }): Promise<{ sen
 
       const script = await generateRecapScript(data);
       const audio = elevenLabsReady ? await textToSpeech(script) : null;
+      if (audio) recordServiceCost({ userId: id, feature: "voice", costUsd: voiceCostUsd(script.length) }); // whale tracking
       console.log(`[RECAP] ${data.name ?? id.slice(-6)} — audio: ${audio ? `${audio.length} bytes` : "null"}, mediaUrl will be: ${(audio && appUrlIsPublicHttps) ? "set" : "none (text fallback)"}`);
 
       const recapId = await storeRecapAudio(id, weekStart, script, audio);

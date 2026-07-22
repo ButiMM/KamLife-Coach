@@ -11,6 +11,7 @@ import { existsSync } from "fs";
 import { join } from "path";
 import { randomUUID } from "crypto";
 import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured, type VoiceEmotion } from "./elevenlabs";
+import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -27,7 +28,7 @@ mkdir(VOICE_DIR, { recursive: true }).catch(() => {});
  * `emotion` selects the ElevenLabs delivery register (default "warm").
  * Returns the public HTTPS URL for the audio file, or null if APP_BASE_URL is not set.
  */
-export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "warm"): Promise<string | null> {
+export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "warm", userId?: string | null): Promise<string | null> {
   // COST CIRCUIT-BREAKER (external review Q5): TTS is already reserved for milestone/emotional
   // moments (never routine logs), but ElevenLabs is the one line item that can spike the R199
   // margin. TTS=off kills all voice generation instantly from Railway — replies fall back to
@@ -50,6 +51,7 @@ export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "w
       const elevenBuf = await elevenLabsTTS(text, emotion);
       if (elevenBuf) {
         await writeFile(filePath, elevenBuf);
+        recordServiceCost({ userId, feature: "voice", costUsd: voiceCostUsd(text.length) }); // whale tracking
         const url = `${appUrl}/voice/${id}.mp3`;
         console.log(`[TTS] Generated voice note (ElevenLabs Coach K): ${url}`);
         return url;

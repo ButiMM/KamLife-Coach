@@ -193,7 +193,7 @@ export async function handleWeightLog(
         await storeMemory(phone, `Weight loss milestone: lost ${milestone}kg total — started at ${startKg}kg, now at ${newKg}kg`, "milestone");
         milestoneCelebration = MILESTONE_MESSAGES[milestone] || "";
         generateMilestoneVoiceScript(user, "weight_loss", { kgLost: milestone, currentKg: newKg, startKg })
-          .then(({ script, emotion }) => generateVoiceNote(script, emotion))
+          .then(({ script, emotion }) => generateVoiceNote(script, emotion, user.id))
           .then(url => { if (url) return sendWhatsApp(phone, "", url); })
           .catch(err => console.warn("[TTS] Milestone voice failed:", err));
         break;
@@ -242,7 +242,7 @@ export async function handleWeightLog(
       // or the voice note tells the client they "started at" a weight from days ago.
       const kgLostTotal = journeyStartKg - newKg;
       generateMilestoneVoiceScript(user, goalMilestone, { currentKg: newKg, startKg: journeyStartKg, kgLost: Math.max(0, kgLostTotal) })
-        .then(({ script, emotion }) => generateVoiceNote(script, emotion))
+        .then(({ script, emotion }) => generateVoiceNote(script, emotion, user.id))
         .then(url => { if (url) return sendWhatsApp(phone, "", url); })
         .catch(err => console.warn("[TTS] Goal voice failed:", err));
       return `🏆 *GOAL REACHED.*\n\nWeight logged: *${newKg}kg.*${changeNote}\n\n${firstName}, you hit your target of ${targetKg}kg. This is real — you did the work.\n\nNow we need a new direction. Reply with a number:\n\n*1* — Maintain this weight\n*2* — Build muscle\n*3* — Recomposition (hold weight, swap fat for muscle)\n\nWhat's next?`;

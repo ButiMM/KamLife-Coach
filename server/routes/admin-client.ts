@@ -20,6 +20,7 @@ import { eq, and, gte, desc, sql, inArray } from "drizzle-orm";
 import { requireAdminKey } from "./auth";
 import { getGoalProfile } from "../goal-profiles";
 import { FRICTION_SIGNAL_KINDS } from "../friction";
+import { costToServeThisMonth, memberCostThisMonth, WHALE_THRESHOLD_ZAR, PRICE_ZAR } from "../cost-tracking";
 
 const esc = (s: unknown) => String(s == null ? "" : s)
   .replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;")
@@ -64,6 +65,7 @@ export function registerAdminClient(app: Express) {
         db.select({ weight: weightLogs.weight, loggedAt: weightLogs.loggedAt }).from(weightLogs).where(eq(weightLogs.userId, id)).orderBy(desc(weightLogs.loggedAt)).limit(2),
         db.select({ n: sql<number>`COUNT(*)::int` }).from(escalations).where(and(eq(escalations.userId, id), eq(escalations.status, "open"))),
       ]);
+      const cost = await memberCostThisMonth(id);
 
       const byKind: Record<string, number> = { correction: 0, rejection: 0, redirect: 0, frustration: 0 };
       for (const r of frictionRows) { const k = r.kind.replace("friction_", ""); if (k in byKind) byKind[k]++; }
@@ -91,6 +93,8 @@ export function registerAdminClient(app: Express) {
           weightLatest: weightRows[0]?.weight ?? null,
           weightPrev: weightRows[1]?.weight ?? null,
         },
+        cost, // month-to-date cost-to-serve (rand) + whale flag, or null
+        priceZar: PRICE_ZAR,
         meals: meals.map(m => ({ when: sastTime(m.loggedAt), label: m.label || "", kcal: m.kcal, protein: m.protein, foods: foodsOf(m) })),
         conversation: chats.reverse().map(c => ({ when: sastTime(c.createdAt), inMsg: c.inMsg || "", outMsg: c.outMsg || "", intent: c.intent || "" })),
       });
@@ -98,6 +102,93 @@ export function registerAdminClient(app: Express) {
       console.error("[ADMIN_CLIENT]", err);
       res.status(500).json({ message: "Failed to load client" });
     }
+  });
+
+  // ── Cost-to-serve leaderboard + whale alert (all paying members, month-to-date) ──
+  app.get("/api/admin/cost", requireAdminKey, async (_req, res) => {
+    try {
+      const costs = await costToServeThisMonth();
+      const ids = [...costs.keys()];
+      const names = ids.length
+        ? await db.select({ id: users.id, name: users.name, phone: users.phoneNumber, sub: users.subscriptionStatus }).from(users).where(inArray(users.id, ids))
+        : [];
+      const nameMap = new Map(names.map(n => [n.id, n]));
+      const rows = ids.map(id => {
+        const c = costs.get(id)!; const u = nameMap.get(id);
+        return { id, name: u?.name || "(no name)", phone: u?.phone || "", subscription: u?.sub || "", ...c };
+      }).sort((a, b) => b.totalZar - a.totalZar);
+      const whales = rows.filter(r => r.whale).length;
+      const avg = rows.length ? Math.round(rows.reduce((s, r) => s + r.totalZar, 0) / rows.length * 100) / 100 : 0;
+      res.json({ priceZar: PRICE_ZAR, whaleThresholdZar: WHALE_THRESHOLD_ZAR, whales, avgCostZar: avg, members: rows });
+    } catch (err) {
+      console.error("[ADMIN_COST]", err);
+      res.status(500).json({ message: "Failed to compute cost-to-serve" });
+    }
+  });
+
+  app.get("/admin/cost", (_req, res) => {
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(`<!doctype html>
+<html lang="en"><head><meta charset="utf-8" /><title>KamLife — Cost to serve</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root{--bg:#0b0d10;--fg:#e8e8e8;--muted:#8a8f98;--card:#14171c;--row:#1a1e25;--line:#22262c;--accent:#f2681f;--red:#e5484d;--yellow:#f0a500;--green:#31d0aa}
+  *{box-sizing:border-box}body{background:var(--bg);color:var(--fg);margin:0;font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+  header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  a{color:var(--accent);text-decoration:none}.back{color:var(--muted)}
+  h1{font-size:16px;margin:0}
+  .summary{display:flex;gap:8px;padding:12px 20px;border-bottom:1px solid var(--line);background:var(--card);flex-wrap:wrap}
+  .pill{border-radius:999px;padding:4px 12px;font-size:12px;font-weight:600;background:var(--row)}
+  .pill.red{color:var(--red)}.pill.green{color:var(--green)}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{text-align:right;padding:10px 12px;border-bottom:1px solid #1d2026;font-variant-numeric:tabular-nums}
+  th:first-child,td:first-child,td:nth-child(2),th:nth-child(2){text-align:left}
+  th{color:var(--muted);font-weight:500;font-size:11px;letter-spacing:.05em;text-transform:uppercase}
+  tr:hover td{background:var(--row)}
+  .whale{color:var(--red);font-weight:600}.neg{color:var(--red)}.ok{color:var(--green)}
+  .note{color:var(--muted);font-size:12px;padding:14px 20px}
+  .empty,.error{padding:36px;text-align:center;color:var(--muted)}.error{color:var(--red)}
+  button{background:transparent;color:var(--muted);border:1px solid #2a2f37;border-radius:6px;padding:4px 10px;cursor:pointer;font:inherit}
+</style></head>
+<body>
+<header><a class="back" href="/admin/triage">← Triage</a><h1>🐋 Cost to serve — who's eating the margin</h1>
+  <span style="flex:1"></span><button id="refresh">refresh</button></header>
+<div class="summary" id="summary"></div>
+<div id="content"><div class="empty">Loading…</div></div>
+<div class="note">Cost-to-serve = OpenAI + voice + WhatsApp, month-to-date, against the R199 fee. Rates are estimates until real invoices land. A 🐋 whale costs more than half their fee to serve — usually voice or vision. Killswitches: <b>TTS=off</b>, model routing.</div>
+<script>
+(function(){
+  var KEY="kamlife-dashboard-key";
+  function getKey(){var k=sessionStorage.getItem(KEY);if(!k){k=prompt("Dashboard key:");if(k)sessionStorage.setItem(KEY,k);}return k;}
+  function esc(s){return String(s==null?"":s).replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");}
+  var content=document.getElementById("content"),summary=document.getElementById("summary");
+  async function load(){
+    var key=getKey();if(!key){content.innerHTML='<div class="error">No key.</div>';return;}
+    try{
+      var r=await fetch("/api/admin/cost",{headers:{"x-dashboard-key":key}});
+      if(r.status===401){sessionStorage.removeItem(KEY);content.innerHTML='<div class="error">Unauthorized — refresh.</div>';return;}
+      if(!r.ok){content.innerHTML='<div class="error">HTTP '+r.status+'</div>';return;}
+      render(await r.json());
+    }catch(e){content.innerHTML='<div class="error">Error: '+esc(e.message||e)+'</div>';}
+  }
+  function render(d){
+    summary.innerHTML='<span class="pill red">🐋 '+d.whales+' whales</span><span class="pill">Avg cost R'+d.avgCostZar.toFixed(0)+'</span><span class="pill">Fee R'+d.priceZar+'</span><span class="pill">Whale line R'+d.whaleThresholdZar.toFixed(0)+'</span>';
+    var m=d.members||[];
+    if(!m.length){content.innerHTML='<div class="empty">No usage recorded this month yet.</div>';return;}
+    var h='<table><thead><tr><th></th><th>Member</th><th>Cost to serve</th><th>Margin left</th><th>AI + voice</th><th>WhatsApp</th></tr></thead><tbody>';
+    m.forEach(function(r){
+      h+='<tr><td>'+(r.whale?'🐋':'')+'</td>'
+        +'<td><a href="/admin/client/'+encodeURIComponent(r.id)+'" style="color:inherit">'+esc(r.name)+'</a><br><span style="color:var(--muted)">'+esc(r.phone)+'</span></td>'
+        +'<td class="'+(r.whale?'whale':'')+'">R'+r.totalZar.toFixed(0)+'</td>'
+        +'<td class="'+(r.marginZar<0?'neg':'ok')+'">R'+r.marginZar.toFixed(0)+'</td>'
+        +'<td>R'+r.aiZar.toFixed(0)+'</td><td>R'+r.whatsappZar.toFixed(0)+'</td></tr>';
+    });
+    content.innerHTML=h+'</tbody></table>';
+  }
+  document.getElementById("refresh").onclick=load;load();
+})();
+</script>
+</body></html>`);
   });
 
   // ── The client file — an HTML page that reads like a coach's notes ──
@@ -202,6 +293,14 @@ export function registerAdminClient(app: Express) {
       +chip("","Avg steps 7d",st.stepsAvg7.toLocaleString())+chip("","Meals 14d",st.mealsLogged14)
       +(st.weightLatest!=null?chip("","Weight",st.weightLatest+"kg"+(wChange?" ("+wChange+")":"")):"")
       +'</div></div>';
+    // cost to serve
+    if(d.cost){var c=d.cost;var cCls=c.whale?"red":c.marginZar<(d.priceZar*0.35)?"yellow":"green";
+      html+='<div class="card"><h2>Cost to serve · this month'+(c.whale?' · ⚠ WHALE':'')+'</h2><div class="chips">'
+        +chip(cCls,"Cost to serve","R"+c.totalZar.toFixed(0))
+        +chip(cCls,"Margin left","R"+c.marginZar.toFixed(0))
+        +chip("","AI (OpenAI+voice)","R"+c.aiZar.toFixed(0))
+        +chip("","WhatsApp","R"+c.whatsappZar.toFixed(0))
+        +'</div><div style="color:var(--muted);font-size:12px;margin-top:8px">Of the R'+d.priceZar+' fee. Estimate rates until real invoices land.'+(c.whale?' This member costs more than half their fee to serve — check voice/vision usage.':'')+'</div></div>';}
     // food log
     html+='<div class="card"><h2>Food log — what they actually ate</h2>';
     if(d.meals.length){var lastDay="";d.meals.forEach(function(m){var day=m.when.slice(0,5);if(day!==lastDay){html+='<div class="day">'+esc(day)+'</div>';lastDay=day;}html+='<div class="meal"><div><span class="f">'+esc(m.foods)+'</span> '+(m.label?'<span class="m">· '+esc(m.label)+'</span>':'')+'</div><div class="kv">'+m.kcal+' kcal · '+m.protein+'g</div></div>';});}
