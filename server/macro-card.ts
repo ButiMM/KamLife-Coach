@@ -21,14 +21,27 @@ import { join } from "path";
 // server/assets and registered here at load, so text renders on ANY host. Family name is
 // unique so it can only resolve via this registration, never a coincidental system font.
 const FONT = "KamLife Sans";
+/** True once the bundled font is registered — surfaced by the `version` command so the
+ *  coach can confirm on the LIVE server that cards will have text, not take it on faith. */
+export let cardFontLoaded = false;
 (() => {
-  try {
-    const dir = join(process.cwd(), "server", "assets");
-    const reg = join(dir, "LiberationSans-Regular.ttf");
-    const bold = join(dir, "LiberationSans-Bold.ttf");
-    if (existsSync(reg)) GlobalFonts.registerFromPath(reg, FONT);
-    if (existsSync(bold)) GlobalFonts.registerFromPath(bold, FONT);
-  } catch { /* fall back to any system font — never crash the render */ }
+  // Try several roots so it resolves whichever way the process is started (repo-root cwd,
+  // or the bundled file under dist/). typeof guard: __dirname is undefined under ESM/tsx.
+  const dirs = [join(process.cwd(), "server", "assets")];
+  if (typeof __dirname !== "undefined") {
+    dirs.push(join(__dirname, "..", "server", "assets"), join(__dirname, "server", "assets"));
+  }
+  for (const dir of dirs) {
+    try {
+      const reg = join(dir, "LiberationSans-Regular.ttf");
+      if (!existsSync(reg)) continue;
+      GlobalFonts.registerFromPath(reg, FONT);
+      const bold = join(dir, "LiberationSans-Bold.ttf");
+      if (existsSync(bold)) GlobalFonts.registerFromPath(bold, FONT);
+      cardFontLoaded = true;
+      break;
+    } catch { /* try the next candidate; never crash the render */ }
+  }
 })();
 const ORANGE = "#f2681f";
 const ORANGE_LT = "#ff8a3d";
