@@ -1268,7 +1268,7 @@ export async function handleFoodContext(ctx: {
       // image on the log (marker stripped + sent as media downstream). Wellness clients get
       // "" — no card forced on them. Fail-open — a card never blocks the text reply.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
-      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals });
+      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined });
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
 
       return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
@@ -1323,7 +1323,7 @@ export async function handleFoodContext(ctx: {
           ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
           : "";
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal });
+        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined });
         return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${fbCard}`;
       }
     }
@@ -1400,7 +1400,7 @@ export async function handleFoodContext(ctx: {
         ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
         : "";
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal });
+      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined });
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${fb2Card}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),

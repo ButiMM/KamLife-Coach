@@ -11,8 +11,20 @@
 
 import { db } from "./db";
 import { mealLogs } from "../shared/schema";
-import { eq, and, gte, sql } from "drizzle-orm";
+import { eq, and, gte, lt, sql } from "drizzle-orm";
 import { sastDayStart } from "./utils";
+
+// SAST midnight of the day containing `d` (UTC+2). Lets the card sum a SPECIFIC day, so a
+// retroactive log ("4 slices of pizza to yesterday") shows YESTERDAY'S totals, not today's.
+function sastDayStartOf(d: Date): Date {
+  const sast = new Date(d.getTime() + 2 * 3_600_000);
+  sast.setUTCHours(0, 0, 0, 0);
+  return new Date(sast.getTime() - 2 * 3_600_000);
+}
+/** True when `d` falls on an earlier SAST day than now — i.e. a retro (past-day) log. */
+function isPastDay(d: Date): boolean {
+  return sastDayStartOf(d).getTime() < sastDayStart().getTime();
+}
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard } from "./macro-card";
 import { putCard } from "./card-store";
@@ -34,19 +46,22 @@ type Row = { label: string; current: number; target: number; unit: string; overI
 // cut) so the card reddens them; protein (and calories on a bulk) never red — more is fine.
 // includeWater adds today's water as a final row — the DAILY scorecard shows it (founder:
 // "add total water to the daily scorecard"), the per-meal card stays the 4 macros.
-async function todayRows(user: any, includeWater = false): Promise<{ rows: Row[]; isBulk: boolean } | null> {
+async function todayRows(user: any, includeWater = false, forDate?: Date): Promise<{ rows: Row[]; isBulk: boolean } | null> {
   const profile = getGoalProfile(user?.goalType);
   if (!profile.usesMacros) return null; // wellness → no card
   const calTarget = Number(user?.calorieTarget) || 0;
   const protTarget = Number(user?.proteinTarget) || 0;
   if (!(calTarget > 0) || !(protTarget > 0)) return null;
   const isBulk = profile.energyStance === "surplus";
+  // Sum the RIGHT day: the meal's day for a retro log, else today.
+  const dayStart = forDate ? sastDayStartOf(forDate) : sastDayStart();
+  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
   const [sum] = await db.select({
     kcal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}),0)::int`,
     protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}),0)::int`,
     carbs: sql<number>`COALESCE(SUM(${mealLogs.carbsInt}),0)::int`,
     fat: sql<number>`COALESCE(SUM(${mealLogs.fatInt}),0)::int`,
-  }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())));
+  }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)));
   const fatTarget = Math.max(1, Math.round((calTarget * 0.27) / 9));
   const carbTarget = Math.max(1, Math.round((calTarget - protTarget * 4 - fatTarget * 9) / 4));
   const rows: Row[] = [
@@ -55,7 +70,7 @@ async function todayRows(user: any, includeWater = false): Promise<{ rows: Row[]
     { label: "Carbs", current: sum?.carbs || 0, target: carbTarget, unit: "g", overIsBad: true },
     { label: "Fat", current: sum?.fat || 0, target: fatTarget, unit: "g", overIsBad: true },
   ];
-  if (includeWater) {
+  if (includeWater && !forDate) { // water is only tracked for TODAY (no historical litres)
     const wTarget = waterTargetLitres(user?.currentWeight);
     const wNow = Math.round((parseFloat(String(user?.todayWater || "0")) || 0) * 10) / 10;
     rows.push({ label: "Water", current: wNow, target: wTarget, unit: "L", overIsBad: false, decimals: 1 });
@@ -112,16 +127,19 @@ export function coachingHint(rows: Row[], isBulk: boolean): string {
   return pick(["One good choice at a time.", "Small steady choices — that's the whole game.", "Consistency beats perfection. Keep logging."]);
 }
 
-/** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". */
-export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number }): Promise<string> {
+/** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
+ *  logged-at date) makes a RETRO log show that DAY'S totals — e.g. yesterday's card with the
+ *  new pizza slices added — instead of today's. */
+export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date }): Promise<string> {
   try {
     const base = cardBaseUrl();
     if (!base) return "";
-    const t = await todayRows(opts.user);
+    const retro = opts.forDate ? isPastDay(opts.forDate) : false;
+    const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
     const png = renderMacroCard({
       title: (opts.mealName || "Meal").slice(0, 42),
-      subtitle: "Meal logged",
+      subtitle: retro ? "Logged to yesterday" : "Meal logged",
       pill: `+${Math.max(0, Math.round(opts.mealKcal || 0))} cal`,
       rows: t.rows,
       hint: coachingHint(t.rows, t.isBulk),

@@ -1180,7 +1180,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
       // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: photo-logged drink missed it). Same contract as text; title = FOODS logged, not the model's preamble.
       const cardTitle = mealTitleFromReply(visionDisplay);
-      const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal }) : "";
+      const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal, forDate: photoIsRetro ? photoLoggedAt : undefined }) : "";
       const photoGuardrail = await nutritionGuardrailNudge(user); // "too much of something" nudge
       return `${photoReply}${photoGuardrail}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
     } catch (err) {
