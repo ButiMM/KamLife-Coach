@@ -4245,6 +4245,18 @@ test("domain-guard: the coach prompt itself refuses off-topic requests and bridg
   assert.match(prompt, /life event they raise.*IS in your lane/, "but life events (stress/money/funeral) stay in-lane");
 });
 
+// BODY-COMPOSITION FEARS — from Kam's real manual-coaching chats (2026-07-22): the fit-but-fearful
+// client ("I don't want a deficit, my arms are already thin", "lose the belly but grow everywhere",
+// "weights make me bulky"). The bot must coach these the way a human coach does, EVERY time — so
+// the non-negotiable positions are locked in the prompt and guarded here (can't be silently dropped).
+test("coach-prompt: locks in the body-composition fear positions (deficit fear / one goal at a time / bulky)", () => {
+  const prompt = readFileSync(join("server", "coach-prompt.ts"), "utf-8");
+  assert.match(prompt, /LOSING FAT DOES NOT MEAN LOSING YOUR SHAPE/, "deficit-fear / lose-my-shape position present");
+  assert.match(prompt, /ONE GOAL AT A TIME/, "can't-build-and-cut-at-once position present");
+  assert.match(prompt, /LIFTING DOES NOT MAKE WOMEN BULKY/, "bulky myth position present");
+  assert.match(prompt, /thin arms\/legs are a MUSCLE problem/i, "reframes thinness as a muscle (not fat) problem");
+});
+
 // ============================================================
 // THE INVERSION — actions stay deterministic; conversation goes to Coach K.
 // A false "goes to engine" could drop a food/step log — unforgivable — so the
