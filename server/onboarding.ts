@@ -12,7 +12,7 @@ import { looksLikeGoalAnswer, classifyGoalFromText } from "./goal-profiles";
 import { replyWithButtons } from "./twilio-interactive";
 import { askCoachK } from "./gpt";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
-import { getDisplayName, sastDayStart } from "./utils";
+import { getDisplayName, sastDayStart, timeGreeting } from "./utils";
 import { getTodayWorkoutState } from "./workout-state";
 import { parseFirstName } from "./onboarding-name";
 import { bodyPhotoAsk, MEDICAL_QUESTION } from "./onboarding-physique";
@@ -42,7 +42,8 @@ export const ONBOARDING_STATES = new Set<string>([
 
 export async function getMenuText(user: any, opts?: { showCommands?: boolean }): Promise<string> {
   const name = getDisplayName(user);
-  const hey = name ? `Hey ${name} 👋` : `Hey 👋`;
+  // Time-aware, human greeting — "Good morning Kam 👋" / "Good afternoon" / "Good evening".
+  const hey = name ? `${timeGreeting()} ${name} 👋` : `${timeGreeting()} 👋`;
   const mode = user.trainingMode || "home";
   const stepsTarget = user.stepsTarget || 8000;
 

@@ -539,6 +539,17 @@ export function isBareGreeting(m: string): boolean {
   return s.length > 0 && GREETING_WORDS.has(s);
 }
 
+// TIME-OF-DAY GREETING in SAST (2026-07-22, founder: "it should say good morning/afternoon/
+// evening — the coaching must feel more human, like a person"). Neutral in the small hours so
+// we never say "Good morning" at 2am. Pure — takes an optional hour for testability.
+export function timeGreeting(hour?: number): string {
+  const h = hour ?? parseInt(new Date().toLocaleString("en-ZA", { timeZone: "Africa/Johannesburg", hour: "2-digit", hour12: false }), 10);
+  if (h >= 5 && h < 12) return "Good morning";
+  if (h >= 12 && h < 17) return "Good afternoon";
+  if (h >= 17 && h < 22) return "Good evening";
+  return "Hey"; // late night / pre-dawn — a time-of-day greeting would read wrong
+}
+
 // A request to CHANGE the steps target — must reach the deterministic updater in
 // early-commands, never the brain. 2026-07-10: a client "had a discussion" with the
 // brain about moving to 10,000 steps; the brain agreed in words, persisted nothing,

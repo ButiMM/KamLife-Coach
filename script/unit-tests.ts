@@ -16,7 +16,7 @@ import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodP
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
 import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
@@ -2776,6 +2776,19 @@ const DAY = 86_400_000;
 const T = (hoursAgo: number): Date => new Date(Date.now() - hoursAgo * 3_600_000);
 const meal = (over: Partial<CopyableMeal>): CopyableMeal =>
   ({ kcalInt: 500, loggedAt: T(2), rawMessage: "some food", mealLabel: null, ...over });
+
+// TIME-AWARE GREETING (2026-07-22, founder: the coaching must feel human — greet by time of
+// day). Never "Good morning" at 2am.
+test("timeGreeting: greets by SAST time of day, neutral in the small hours", () => {
+  assert.strictEqual(timeGreeting(8), "Good morning");
+  assert.strictEqual(timeGreeting(11), "Good morning");
+  assert.strictEqual(timeGreeting(12), "Good afternoon");
+  assert.strictEqual(timeGreeting(16), "Good afternoon");
+  assert.strictEqual(timeGreeting(17), "Good evening");
+  assert.strictEqual(timeGreeting(21), "Good evening");
+  assert.strictEqual(timeGreeting(2), "Hey", "no 'Good morning' at 2am");
+  assert.strictEqual(timeGreeting(23), "Hey");
+});
 
 // GOAL PROFILES — the semantic spine (2026-07-21 three-reviewer adjudication). One source of
 // truth so the ~50 scattered goalType checks stop meaning different things. Slice 1: the
