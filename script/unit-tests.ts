@@ -16,7 +16,7 @@ import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodP
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting, slotFromCaptionTime } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
 import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
@@ -4818,6 +4818,28 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(link.startsWith("https://wa.me/27600000000?text="));
     // Round-trip: the prefill it encodes must parse back to the same tag.
     assert.equal(parseSignupSource(buildJoinPrefill("gyma")), "gyma");
+  });
+}
+
+// ============================================================
+// PHOTO DIARY — CAPTION TIME SETS THE MEAL SLOT (2026-07-22, Puntsa's screenshots: she
+// photographs each meal but batch-sends the whole day in the evening. "11:00" breakfast
+// arriving at 19:49 must NOT be labelled dinner from the send-clock.)
+// ============================================================
+{
+  test("caption-time: a time in the caption maps to the right slot", () => {
+    assert.equal(slotFromCaptionTime("11:00"), "breakfast");
+    assert.equal(slotFromCaptionTime("8am tea and eggs"), "breakfast");
+    assert.equal(slotFromCaptionTime("had this at 1pm"), "lunch");
+    assert.equal(slotFromCaptionTime("2:30pm snack"), "lunch");
+    assert.equal(slotFromCaptionTime("dinner at 19:30"), "dinner");
+    assert.equal(slotFromCaptionTime("supper 8pm"), "dinner");
+  });
+  test("caption-time: quantities and plain text are NOT read as times", () => {
+    assert.equal(slotFromCaptionTime("2 eggs and toast"), null);
+    assert.equal(slotFromCaptionTime("500ml water"), null);
+    assert.equal(slotFromCaptionTime("Lunch time"), null); // no clock — the keyword path handles this
+    assert.equal(slotFromCaptionTime(""), null);
   });
 }
 

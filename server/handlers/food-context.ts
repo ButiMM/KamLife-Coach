@@ -22,7 +22,7 @@ import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, isNightWorker, looksLikeDeepEmotionalShare } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
@@ -42,14 +42,16 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
   if (/\blunch\b/i.test(lo)) return "lunch";
   if (/\b(?:dinner|supper)\b/i.test(lo)) return "dinner";
   if (/\bbreakfast\b/i.test(lo)) return "breakfast";
-  // A light, low-protein log with no meal keyword (fruit, a drink, a biscuit) is a SNACK.
-  // Clock-slotting it as breakfast/lunch steals the meal slot, and a later "same breakfast
-  // as yesterday" then copies the snack as a meal (production bug, 2026-07-01).
+  // A light, low-protein log with no meal keyword (fruit, drink, biscuit) is a SNACK — clock-
+  // slotting it as a meal steals the slot and lets "same breakfast" later copy it (bug 2026-07-01).
   if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";
-  // Time-of-day fallback — no keyword. Night-shift clients (and any substantial late
-  // plate) get "night meal", never a demoted "snack". Then the LEARNED layer: this
-  // client's own hour-pattern beats the clock, and a light second meal on an already-
-  // used main slot demotes to snack (Review #7, built 2026-07-17). Never returns null.
+  // CAPTION TIME wins over the send-clock (Puntsa's photo diary: shot at "11:00", batch-sent
+  // at 19:49 — the clock mislabelled it dinner). See slotFromCaptionTime in utils.
+  const captionSlot = slotFromCaptionTime(msg);
+  if (captionSlot) return captionSlot;
+  // Time-of-day fallback — no keyword. Night-shift/substantial late plate → "night meal",
+  // never a demoted "snack". LEARNED layer: the client's own hour-pattern beats the clock,
+  // and a light second meal on a used main slot demotes to snack (Review #7, 2026-07-17).
   const fallback = slotFromSastHour(atDate, { nightWorker: isNightWorker(user), substantial: (macros?.kcal ?? 0) >= 300 });
   const sastHour = new Date((atDate ? atDate.getTime() : Date.now()) + 2 * 3_600_000).getUTCHours();
   return resolveInferredSlot(fallback, sastHour, slotCtx, macros?.kcal);
@@ -865,11 +867,9 @@ export async function handleFoodContext(ctx: {
   }
 
   // ---- MULTI-DAY CATCH-UP LOGGING ----
-  // Fires when client logs food for 2+ different days in one message:
-  //   "Had chicken Wednesday, oats Thursday morning, pap Friday dinner"
-  // Without this, parseMealDate picks the first day found and all foods land
-  // on the same wrong date. Each day now gets its own DB entry at the correct
-  // historical loggedAt.
+  // Fires when a client logs food for 2+ days in one message ("chicken Wednesday, oats
+  // Thursday, pap Friday dinner"). Without it parseMealDate picks the first day and all foods
+  // land on the wrong date; here each day gets its own DB entry at the correct loggedAt.
   const MDAY_NAME_RE = /\b(monday|tuesday|wednesday|thursday|friday|saturday|sunday|yesterday|today)\b/gi;
   const mDayMatches: Array<{ name: string; idx: number }> = [];
   {

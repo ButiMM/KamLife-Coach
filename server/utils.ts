@@ -54,6 +54,31 @@ export function slotFromSastHour(date: Date = new Date(), opts?: { nightWorker?:
   return "snack";
 }
 
+// A clock time written in a caption tells us the meal SLOT even when the photo is batch-sent
+// hours later (2026-07-22, Puntsa's photo diary: shot at "11:00", the whole day sent at 19:49
+// — the send-clock mislabelled it dinner). Requires a colon-time or am/pm so it never fires on
+// a quantity ("2 eggs", "500ml"). Returns null when there's no time to read.
+export function slotFromCaptionTime(msg: string): "breakfast" | "lunch" | "dinner" | "snack" | null {
+  const lo = (msg || "").toLowerCase();
+  let hour: number | null = null;
+  const hm = lo.match(/\b(\d{1,2}):(\d{2})\s*(am|pm)?\b/);
+  const ap = lo.match(/\b(\d{1,2})\s*(am|pm)\b/);
+  if (hm) {
+    hour = parseInt(hm[1], 10);
+    if (hm[3] === "pm" && hour < 12) hour += 12;
+    if (hm[3] === "am" && hour === 12) hour = 0;
+  } else if (ap) {
+    hour = parseInt(ap[1], 10);
+    if (ap[2] === "pm" && hour < 12) hour += 12;
+    if (ap[2] === "am" && hour === 12) hour = 0;
+  }
+  if (hour === null || hour < 0 || hour > 23) return null;
+  if (hour <= 11) return "breakfast"; // includes late-morning brunch (11:00 eggs)
+  if (hour <= 15) return "lunch";
+  if (hour <= 16) return "snack";
+  return "dinner";
+}
+
 // Does this client work nights? Read from the onboarding answers we already hold —
 // the same data that steers their programme timing.
 export function isNightWorker(user: any): boolean {
