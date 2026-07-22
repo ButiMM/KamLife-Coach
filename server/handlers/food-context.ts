@@ -338,11 +338,20 @@ export async function handleFoodContext(ctx: {
 
   // ---- CORRECTION DETECTION — "no I had a burger", "actually it was chicken" ----
   const CORRECTION_PREFIX = /^(no[,!\s]+|actually[,\s]+|i meant[,\s]+|not that[,\s]+|wait[,\s]+|no wait[,\s]+|correction[,\s]*)/i;
-  const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").trim();
-  const hasCorrectionPrefix = CORRECTION_PREFIX.test(m);
+  // RE-IDENTIFICATION corrections: the client fixing a MIS-READ food, phrased "it's X / it is
+  // not X / that's actually Y" (2026-07-22 live: "It is not vetkoek" was domain-redirected and
+  // "It is stew wors" logged as a NEW snack instead of fixing the last meal — client fighting it).
+  const ID_CORRECTION_PREFIX = /^(it'?s|it is|that'?s|that is|it was|this is|its)\s+/i;
+  const hasCorrectionPrefix = CORRECTION_PREFIX.test(m) || ID_CORRECTION_PREFIX.test(m);
+  const correctedMsgCandidate = m.replace(CORRECTION_PREFIX, "").replace(ID_CORRECTION_PREFIX, "").trim();
+  // Food detection uses the candidate with "not X" STRIPPED, so "it is not vetkoek" doesn't
+  // look like a request to log vetkoek. A pure negation (no replacement food) must NOT re-log —
+  // it routes to the "what was it?" ask below.
+  const candidateSansNot = correctedMsgCandidate.replace(/\bnot\s+[\w'-]+/gi, " ").replace(/\s+/g, " ").trim();
+  const idNegationOnly = ID_CORRECTION_PREFIX.test(m) && /\bnot\b/i.test(m) && scanForSAFoods(candidateSansNot).length === 0;
   const hasFoodTriggerAfterPrefix = /\b(had|ate|eaten|eating|breakfast|lunch|dinner|supper|meal|it was|was a|i had|i said|the above|mentioned|i'll have|i will have)\b/i.test(m);
-  const hasFoodAfterPrefix = hasCorrectionPrefix && correctedMsgCandidate.length > 2 && scanForSAFoods(correctedMsgCandidate).length > 0;
-  const isFoodCorrection = hasCorrectionPrefix && (hasFoodTriggerAfterPrefix || hasFoodAfterPrefix);
+  const hasFoodAfterPrefix = hasCorrectionPrefix && !idNegationOnly && candidateSansNot.length > 2 && scanForSAFoods(candidateSansNot).length > 0;
+  const isFoodCorrection = hasCorrectionPrefix && !idNegationOnly && (hasFoodTriggerAfterPrefix || hasFoodAfterPrefix);
 
   const isReferenceCorrection = /\b(go with|goes with|part of|was correcting|was part|belongs to|same meal|together with|included in|go together|read it again|read that again|i was correcting|that.?s the same|the above mentioned|above mentioned|i said i had|i said for lunch|i said for dinner|i said for breakfast)\b/i.test(m);
 
@@ -424,7 +433,7 @@ export async function handleFoodContext(ctx: {
 
   // ---- FOOD LOG REJECTION — "no", "no no no", "wrong" immediately after a food log ----
   // Catches cases where the bot misidentified the food and the user is pushing back
-  const isSimpleRejection = /^(no[\s!.?]*)+$/i.test(m) || /^(wrong|incorrect|not right|that.?s wrong|not that)[.!?]*$/i.test(m);
+  const isSimpleRejection = /^(no[\s!.?]*)+$/i.test(m) || /^(wrong|incorrect|not right|that.?s wrong|not that)[.!?]*$/i.test(m) || idNegationOnly;
   if (isSimpleRejection) {
     try {
       const lastEntry = await db.select({ intent: chatHistory.intent, messageOut: chatHistory.messageOut })
