@@ -379,7 +379,13 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     // Simple greeting or "yes" → standard pitch
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nSend me a photo of your plate, I tell you if it's on track. I check in with you every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* and I'll build your plan.`;
+    // Meta-parity consent gate (2026-07-22): age 18+, AI disclosure, a human-coach check-in path,
+    // POPIA + data deletion, and Terms/Privacy links — mirrors the pattern the SA gov health bot
+    // used to pass Meta. Tapping "Yes, I agree" (or typing yes/agree) consents; "No thanks" deletes.
+    return replyWithButtons(
+      `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nSend me a photo of your plate, I tell you if it's on track. I check in every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n*Before we start:*\n✅ You're 18 or older.\n✅ I'm an AI coach, not a doctor — for any medical condition, follow your doctor.\n🤝 A real coach may check in on you if a message suggests you need extra support.\n🔒 Your info is stored under POPIA — only for your coaching, never sold. Reply *delete my data* anytime.\nTerms: kamlifecoach.co.za/terms · Privacy: kamlifecoach.co.za/privacy\n\nTap *Yes, I agree* and I'll build your plan.`,
+      ["Yes, I agree", "No thanks"],
+    );
   }
 
   // ---- ASK_POPIA ----

@@ -4354,7 +4354,12 @@ test("onboarding: signup pitch is outcome-led (not feature-speak) and keeps the 
   assert.match(src, /lose weight and get fit using the food you already eat/i, "leads with the outcome");
   assert.match(src, /photo of your plate, I tell you if it's on track/i, "concrete, no jargon");
   assert.doesNotMatch(src, /personalised programme, food guidance, daily accountability/i, "old feature-speak is gone");
-  assert.match(src, /I'm AI, not a human coach or doctor[\s\S]{0,200}POPIA/i, "wellness + POPIA disclaimer preserved");
+  // Meta-parity consent gate: age 18+, AI disclosure, human check-in path, POPIA, ToU/Privacy links.
+  assert.match(src, /You're 18 or older/i, "age gate present");
+  assert.match(src, /an AI coach, not a doctor/i, "AI + medical disclosure");
+  assert.match(src, /A real coach may check in on you/i, "human handoff line (the Meta-safe pattern)");
+  assert.match(src, /POPIA[\s\S]{0,120}delete my data/i, "POPIA + data deletion preserved");
+  assert.match(src, /kamlife.*\/terms[\s\S]{0,40}\/privacy/i, "Terms + Privacy links present");
 });
 test("coach-prompt: locks in the body-composition fear positions (deficit fear / one goal at a time / bulky)", () => {
   const prompt = readFileSync(join("server", "coach-prompt.ts"), "utf-8");
