@@ -37,6 +37,7 @@ import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
 import { goalStatusLine, progressBar, macroBarsBlock } from "../server/education";
+import { renderMacroCard } from "../server/macro-card";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -4280,6 +4281,24 @@ test("goalStatus: muscle_gain way over gets the flood warning; under gets fuel p
 
 // MACRO PROGRESS BARS (2026-07-21, founder wants the marketing graphic on the real log).
 // The bar logic is shared by the image-card renderer and the emoji-text fallback — lock it.
+// MACRO CARD IMAGE (2026-07-21): the crisp branded card the bot sends on a meal log renders
+// to a real PNG — the marketing graphic, delivered. Smoke test: valid, non-trivial PNG out.
+test("renderMacroCard: produces a valid PNG image", () => {
+  const png = renderMacroCard({
+    mealName: "Pilchards + pap", mealKcal: 420,
+    rows: [
+      { label: "Calories", current: 847, target: 2100, unit: "" },
+      { label: "Protein", current: 98, target: 150, unit: "g" },
+      { label: "Carbs", current: 142, target: 200, unit: "g" },
+      { label: "Fat", current: 41, target: 70, unit: "g" },
+    ],
+    hint: "Protein first",
+  });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000, "a real PNG buffer of reasonable size");
+  assert.strictEqual(png[0], 0x89, "PNG magic byte 1");
+  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG", "PNG signature");
+});
+
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
   assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");
