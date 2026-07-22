@@ -4327,6 +4327,24 @@ test("renderMacroCard: produces a valid PNG image", () => {
   assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG", "PNG signature");
 });
 
+// COACHING CARD (2026-07-22, founder: the card must TEACH, not just count — plain language,
+// every goal, over or under). The bottom line adapts to the day's state.
+test("coachingHint: plain-language, goal-aware over/under coaching", async () => {
+  const { coachingHint } = await import("../server/macro-card-attach");
+  const rows = (o: any) => [
+    { label: "Calories", current: o.cal ?? 1000, target: 2000, unit: "", overIsBad: true },
+    { label: "Protein", current: o.prot ?? 100, target: 150, unit: "g", overIsBad: false },
+    { label: "Carbs", current: o.carb ?? 100, target: 200, unit: "g", overIsBad: true },
+    { label: "Fat", current: o.fat ?? 30, target: 60, unit: "g", overIsBad: true },
+  ];
+  assert.match(coachingHint(rows({ fat: 80 }), false), /Fat ran high/);
+  assert.match(coachingHint(rows({ carb: 260 }), false), /Carbs are maxed/);
+  assert.match(coachingHint(rows({ cal: 2200 }), false), /Over your food/);
+  assert.match(coachingHint(rows({ prot: 160 }), false), /Protein hit/);
+  assert.match(coachingHint(rows({ cal: 400 }), false), /Plenty of room/);
+  assert.match(coachingHint(rows({ cal: 800 }), true), /building fuel/, "muscle-gain under-eating");
+});
+
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
   assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");

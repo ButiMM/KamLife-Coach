@@ -49,8 +49,13 @@ const INK = "#14151a";
 const MUTED = "#8a8f9a";
 const TRACK = "#eef0f2";
 const GREEN = "#22b04b";
+const GREEN_LT = "#3ccb63";
+const RED = "#e0533a";
+const RED_LT = "#ff7a5c";
 
-export interface MacroRow { label: string; current: number; target: number; unit: string }
+// overIsBad: going over is a WARNING (calories on a deficit, carbs, fat) → the bar goes red.
+// For protein (and calories on a bulk) more is fine → it never reds, just greens when hit.
+export interface MacroRow { label: string; current: number; target: number; unit: string; overIsBad?: boolean }
 export interface MacroCardData {
   title: string;       // big line: the meal ("Pilchards + pap") or "Your day so far"
   subtitle?: string;   // under Coach K — default "Meal logged"; e.g. "Today so far" on demand
@@ -169,14 +174,22 @@ export function renderMacroCard(d: MacroCardData): Buffer {
 
   // ── Macro rows: label, value, bar (track + orange fill, rounded) ──
   for (const r of d.rows) {
-    const pct = r.target > 0 ? Math.max(0, Math.min(1, r.current / r.target)) : 0;
+    const raw = r.target > 0 ? r.current / r.target : 0;
+    const pct = Math.max(0, Math.min(1, raw));
+    // COACHING COLOUR: red when you've gone over a limit that matters (fat/carbs/calories on
+    // a cut); green when you've hit the target (or any protein win); orange while filling.
+    const over = raw > 1.05 && !!r.overIsBad;
+    const hit = raw >= 0.95;
+    const c1 = over ? RED : hit ? GREEN : ORANGE;
+    const c2 = over ? RED_LT : hit ? GREEN_LT : ORANGE_LT;
+
     ctx.fillStyle = INK;
     ctx.font = `bold 34px "${FONT}"`;
     ctx.fillText(r.label, x, y + 34);
 
     const valTxt = `${Math.round(r.current)} / ${Math.round(r.target)}${r.unit}`;
     ctx.font = `600 30px "${FONT}"`;
-    ctx.fillStyle = MUTED;
+    ctx.fillStyle = over ? RED : hit ? GREEN : MUTED;
     ctx.textAlign = "right";
     ctx.fillText(valTxt, x + innerW, y + 34);
     ctx.textAlign = "left";
@@ -188,8 +201,8 @@ export function renderMacroCard(d: MacroCardData): Buffer {
     if (pct > 0) {
       const fillW = Math.max(barH, innerW * pct);
       const fg = ctx.createLinearGradient(x, 0, x + fillW, 0);
-      fg.addColorStop(0, ORANGE);
-      fg.addColorStop(1, ORANGE_LT);
+      fg.addColorStop(0, c1);
+      fg.addColorStop(1, c2);
       ctx.fillStyle = fg;
       roundRect(ctx, x, barY, fillW, barH, barH / 2);
       ctx.fill();
