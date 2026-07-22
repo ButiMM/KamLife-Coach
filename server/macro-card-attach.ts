@@ -26,7 +26,7 @@ function isPastDay(d: Date): boolean {
   return sastDayStartOf(d).getTime() < sastDayStart().getTime();
 }
 import { getGoalProfile } from "./goal-profiles";
-import { renderMacroCard } from "./macro-card";
+import { renderMacroCard, renderWelcomeCard } from "./macro-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 
@@ -169,6 +169,26 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
     console.warn("[DAILY_CARD] skipped:", (e as any)?.message || e);
+    return "";
+  }
+}
+
+/**
+ * COACH K WELCOME AVATAR marker (2026-07-22, founder: a branded face that pops up with the menu,
+ * like the government health bot). Real illustrated character art takes over AUTOMATICALLY once
+ * COACH_AVATAR_URL is set in Railway — until then, a premium branded Coach K card is rendered and
+ * self-served. Returns " [MEDIA:…]" or "" (fail-open — never block the menu).
+ */
+export function welcomeAvatarMarker(): string {
+  try {
+    const artUrl = (process.env.COACH_AVATAR_URL || "").trim();
+    if (artUrl) return ` [MEDIA:${/^https?:\/\//i.test(artUrl) ? artUrl : "https://" + artUrl}]`;
+    const base = cardBaseUrl();
+    if (!base) return "";
+    const png = renderWelcomeCard({ name: "Coach K", tagline: "Your fitness coach — right here on WhatsApp" });
+    return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
+  } catch (e) {
+    console.warn("[WELCOME_CARD] skipped:", (e as any)?.message || e);
     return "";
   }
 }

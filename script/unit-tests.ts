@@ -4481,6 +4481,12 @@ test("renderMacroCard: produces a valid PNG image", () => {
 // "+0 cal"). We can't diff pixels here, but a very long title must still render a valid PNG
 // without throwing — the truncation path is exercised. Premium = no overlap, ever.
 // WEEKLY / MONTHLY REPORT CARD (2026-07-22) — shareable scorecard, goal-aware, not overwhelming.
+test("welcome-card: renderWelcomeCard produces a valid branded PNG", async () => {
+  const { renderWelcomeCard } = await import("../server/macro-card");
+  const png = renderWelcomeCard({ name: "Coach K", tagline: "Your fitness coach on WhatsApp" });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000);
+  assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
+});
 test("report-card: renderReportCard produces a valid PNG", async () => {
   const { renderReportCard } = await import("../server/macro-card");
   const png = renderReportCard({

@@ -253,6 +253,47 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   return canvas.toBuffer("image/png");
 }
 
+// ── COACH K WELCOME / AVATAR CARD (2026-07-22, founder: a branded character that pops up with the
+// menu, like the government health bot's faces). A premium branded card (NOT a photorealistic
+// face — that's an illustration asset dropped in via COACH_AVATAR_URL when ready). Clean, HD. ──
+export function renderWelcomeCard(opts: { name?: string; tagline?: string } = {}): Buffer {
+  const W = 1080, H = 720, M = 40, cardX = M, cardW = W - M * 2, cardH = H - M * 2;
+  const canvas = createCanvas(W, H);
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#0c0c0f"; ctx.fillRect(0, 0, W, H);
+  const glow = ctx.createRadialGradient(W / 2, 80, 0, W / 2, 80, W * 0.9);
+  glow.addColorStop(0, "rgba(242,104,31,0.30)"); glow.addColorStop(1, "rgba(242,104,31,0)");
+  ctx.fillStyle = glow; ctx.fillRect(0, 0, W, H);
+  ctx.save();
+  ctx.shadowColor = "rgba(0,0,0,0.45)"; ctx.shadowBlur = 70; ctx.shadowOffsetY = 28;
+  ctx.fillStyle = "#ffffff"; roundRect(ctx, cardX, M, cardW, cardH, 52); ctx.fill();
+  ctx.restore();
+
+  // Big avatar badge — the K, in a fitness-orange gradient ring with a subtle "dumbbell" accent.
+  const cx = W / 2, avY = M + 120, av = 200;
+  const ring = ctx.createLinearGradient(cx - av / 2, avY, cx + av / 2, avY + av);
+  ring.addColorStop(0, ORANGE_LT); ring.addColorStop(1, ORANGE);
+  ctx.fillStyle = ring; ctx.beginPath(); ctx.arc(cx, avY + av / 2, av / 2, 0, Math.PI * 2); ctx.fill();
+  // subtle inner highlight
+  ctx.fillStyle = "rgba(255,255,255,0.14)"; ctx.beginPath(); ctx.arc(cx, avY + av / 2 - 18, av / 2 - 26, Math.PI, 0); ctx.fill();
+  ctx.fillStyle = "#fff"; ctx.font = `bold 120px "${FONT}"`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("K", cx, avY + av / 2 + 6);
+
+  ctx.fillStyle = INK; ctx.font = `bold 62px "${FONT}"`;
+  ctx.fillText(opts.name || "Coach K", cx, avY + av + 78);
+  ctx.fillStyle = MUTED; ctx.font = `500 34px "${FONT}"`;
+  ctx.fillText(opts.tagline || "Your fitness coach — right here on WhatsApp", cx, avY + av + 138);
+
+  // KamLife wordmark, centered near the bottom.
+  ctx.font = `bold 40px "${FONT}"`;
+  const kamW = ctx.measureText("KAM").width, lifeW = ctx.measureText("LIFE").width;
+  const startX = cx - (kamW + lifeW) / 2, wy = M + cardH - 56;
+  ctx.textAlign = "left"; ctx.fillStyle = INK; ctx.fillText("KAM", startX, wy);
+  ctx.fillStyle = ORANGE; ctx.fillText("LIFE", startX + kamW, wy);
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic";
+  return canvas.toBuffer("image/png");
+}
+
 // ── WEEKLY / MONTHLY REPORT CARD (2026-07-22, founder: "a weekly and a monthly scorecard — the
 // monthly is the shareable overall report card, accurate macros, everything for the month, without
 // overwhelming, plus a small coaching line"). Same premium visual language as the meal card, but a
