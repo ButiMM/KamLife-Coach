@@ -4491,12 +4491,35 @@ test("coachingHint: plain-language, goal-aware over/under coaching", async () =>
     { label: "Carbs", current: o.carb ?? 100, target: 200, unit: "g", overIsBad: true },
     { label: "Fat", current: o.fat ?? 30, target: 60, unit: "g", overIsBad: true },
   ];
-  assert.match(coachingHint(rows({ fat: 80 }), false), /Fat ran high/);
-  assert.match(coachingHint(rows({ carb: 260 }), false), /Carbs are maxed/);
-  assert.match(coachingHint(rows({ cal: 2200 }), false), /Over your food/);
-  assert.match(coachingHint(rows({ prot: 160 }), false), /Protein hit/);
-  assert.match(coachingHint(rows({ cal: 400 }), false), /Plenty of room/);
-  assert.match(coachingHint(rows({ cal: 800 }), true), /building fuel/, "muscle-gain under-eating");
+  // Variety: a couple of educational variants per state — assert on the state keyword, run a few
+  // times so a bad variant can't sneak through, and confirm the cue actually changes across calls.
+  const many = (fn: () => string) => new Set(Array.from({ length: 40 }, fn));
+  for (const h of many(() => coachingHint(rows({ fat: 80 }), false))) assert.match(h, /fat/i);
+  for (const h of many(() => coachingHint(rows({ carb: 260 }), false))) assert.match(h, /carb|starch/i);
+  for (const h of many(() => coachingHint(rows({ cal: 2200 }), false))) assert.match(h, /over|past|light|lean/i);
+  for (const h of many(() => coachingHint(rows({ prot: 160, cal: 1200 }), false))) assert.match(h, /protein|nail|textbook/i);
+  for (const h of many(() => coachingHint(rows({ cal: 400, prot: 40 }), false))) assert.match(h, /room|day left|protein/i);
+  for (const h of many(() => coachingHint(rows({ cal: 800, prot: 40 }), true))) assert.match(h, /build|fuel|muscle/i);
+  assert.ok(many(() => coachingHint(rows({ cal: 900, prot: 40 }), false)).size >= 2, "the default cue varies across logs");
+});
+
+// CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,
+// Rice, Mixed veggies' — never the model's 'Based on what you mentioned…' preamble).
+test("mealTitleFromReply: summarises the foods from the bullet lines", async () => {
+  const { mealTitleFromReply } = await import("../server/macro-card-attach");
+  const reply = `Based on what you mentioned, it looks like you had a full container. Let's log that:\n\n• Tin fish (~100g): 208 kcal, 25g protein\n• Rice (~200g cooked): 260 kcal\n• Mixed veggies (~100g): 80 kcal\n\nNicely done! That's all logged for you.`;
+  assert.strictEqual(mealTitleFromReply(reply), "Tin fish, Rice, Mixed veggies");
+});
+test("mealTitleFromReply: strips the 'Based on what you mentioned' preamble when there are no bullets", async () => {
+  const { mealTitleFromReply } = await import("../server/macro-card-attach");
+  assert.match(mealTitleFromReply("Based on what you mentioned, it looks like a chicken wrap. Logged!"), /^chicken wrap/i);
+  assert.doesNotMatch(mealTitleFromReply("This is a Switch drink. Logged."), /^This is/i);
+});
+test("mealTitleFromReply: caps at three foods and never returns empty", async () => {
+  const { mealTitleFromReply } = await import("../server/macro-card-attach");
+  const four = "• Eggs\n• Toast\n• Bacon\n• Avo";
+  assert.strictEqual(mealTitleFromReply(four).split(", ").length, 3);
+  assert.strictEqual(mealTitleFromReply(""), "Meal");
 });
 
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {

@@ -46,7 +46,7 @@ import { remainingInMeals, goalStatusLine } from "../education";
 import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
-import { macroCardMarker } from "../macro-card-attach";
+import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
@@ -1180,7 +1180,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       // numbers:low → scrub leaked figures; then the once-only first-win celebration.
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
       // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: a photo-logged drink got the text total but NO card — the last path that missed it). Same contract as text.
-      const cardTitle = (visionDisplay || "Meal").replace(/[*_`#]/g, "").split("\n")[0].replace(/\.\s.*$/, "").replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|looks like|got it[,:]?)\s+(?:a |an |the )?/i, "").replace(/\blogged\b.*$/i, "").trim().slice(0, 42) || "Meal";
+      const cardTitle = mealTitleFromReply(visionDisplay);   // the FOODS logged, not the model's preamble
       const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal }) : "";
       return `${photoReply}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
     } catch (err) {

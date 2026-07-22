@@ -57,20 +57,53 @@ async function todayRows(user: any): Promise<{ rows: Row[]; isBulk: boolean } | 
   };
 }
 
-// PLAIN-LANGUAGE COACHING on the card (2026-07-22, founder: "what does the coach TEACH when
-// calories/macros are too high — for all goals, over or under?"). No jargon, no emoji (the
-// card font can't render it). One cue, the most important thing for THIS day's state.
+// MEAL SUMMARY for the card title (2026-07-22, founder: "the card must summarise the MEAL —
+// tin fish, rice, veggies — not the bot's 'Based on what you mentioned…' preamble"). Pull the
+// FOODS out of a food-log reply: the bulleted item lines are the source of truth. Falls back to
+// a filler-stripped first line only when there are no bullets. Shared by every log path so the
+// title reads the same across the board — text log, photo log, on-demand.
+export function mealTitleFromReply(text: string): string {
+  const names: string[] = [];
+  for (const raw of (text || "").split("\n")) {
+    const m = raw.match(/^\s*[•·\-\*]\s*(.+)/);           // bulleted item line
+    if (!m) continue;
+    const name = m[1].split(/[(:]/)[0].replace(/[*_`#]/g, "").replace(/^\d+\s*x\s*/i, "").trim();
+    if (name && name.length >= 2 && name.length <= 40 && !/^\d/.test(name)) names.push(name);
+    if (names.length >= 3) break;
+  }
+  if (names.length) return names.join(", ").slice(0, 46);
+  const firstLine = (text || "Meal").replace(/[*_`#]/g, "").split("\n").find(l => l.trim().length > 3) || "Meal";
+  const cleaned = firstLine
+    .replace(/\.\s.*$/, "")                                                       // keep just the first sentence
+    .replace(/^\s*based on\b.*?\b(?:looks?|seems?)\b\s*(?:like|as though|to be)?\s*/i, "") // "Based on…, it looks like "
+    .replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|looks like|got it)[,:]?\s*/i, "")
+    .replace(/^(a|an|the)\s+/i, "")                                               // leading article
+    .replace(/\blogged\b.*$/i, "").replace(/[,:]\s*$/, "").trim().slice(0, 46);
+  return cleaned || "Meal";
+}
+
+// PLAIN-LANGUAGE COACHING on the card (2026-07-22, founder: the card must TEACH, and it must
+// KEEP CHANGING — a fresh, indirectly-educational cue for THIS day's state, celebrating a goal
+// reached and flagging anything out of the ordinary). No jargon, no emoji (the card font can't
+// render it). One short line, most-important-first; a couple of variants per state so it varies.
 export function coachingHint(rows: Row[], isBulk: boolean): string {
   const r = (label: string) => rows.find(x => x.label === label);
   const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
   const cal = r("Calories"), prot = r("Protein"), carb = r("Carbs"), fat = r("Fat");
-  if (ratio(fat) > 1.1) return "Fat ran high today — keep the rest lean. Grilled, not fried.";
-  if (ratio(carb) > 1.1) return "Carbs are maxed — protein and veg from here, ease the starch.";
-  if (!isBulk && ratio(cal) > 1.05) return "Over your food for today — go light and lean next meal.";
-  if (isBulk && ratio(cal) < 0.6) return "Under your building fuel — eat more, muscle needs it.";
-  if (prot && prot.current >= prot.target) return "Protein hit — the one that matters most. Well done.";
-  if (ratio(cal) < 0.5) return "Plenty of room left — protein first at your next meal.";
-  return "One good choice at a time.";
+  const pick = (arr: string[]) => arr[Math.floor(Math.random() * arr.length)];
+  const proteinHit = !!(prot && prot.current >= prot.target);
+  // Out of the ordinary — a big overshoot on a limiting macro. Teach WHY, kindly, not just "over".
+  if (ratio(fat) > 1.25) return pick(["Fat ran high — it's the densest fuel, so it adds up fast. Keep it grilled from here.", "Lots of fat today — nothing wrong, just filling. Lean protein and veg next."]);
+  if (ratio(fat) > 1.1) return pick(["Fat ran a bit high — keep the rest lean. Grilled, not fried.", "Watch the fat from here — small change, big calorie saving."]);
+  if (ratio(carb) > 1.1) return pick(["Carbs are maxed — protein and veg from here, ease the starch.", "Plenty of starch in today — lean on protein and veg next."]);
+  if (!isBulk && ratio(cal) > 1.25) return pick(["Over for today — no drama, one meal never undoes a week. Light and lean tomorrow.", "Past your food today. It happens — a walk helps, and tomorrow resets clean."]);
+  if (!isBulk && ratio(cal) > 1.05) return pick(["Over your food for today — go light and lean next meal.", "Just past target — keep the next one small and protein-first."]);
+  if (isBulk && ratio(cal) < 0.6) return pick(["Under your building fuel — eat more, muscle needs it.", "Still room to build — add a proper meal, that's where growth comes from."]);
+  // Goal reached — celebrate AND teach why it matters.
+  if (proteinHit && !isBulk && ratio(cal) >= 0.9 && ratio(cal) <= 1.05) return pick(["Textbook day — protein in, calories on point. This is exactly it.", "Nailed it: enough protein, right calories. Repeat this and results follow."]);
+  if (proteinHit) return pick(["Protein hit — the one that matters most. It protects muscle while you lean out.", "Protein's in — that's the win that keeps you full and strong."]);
+  if (ratio(cal) < 0.5) return pick(["Plenty of room left — protein first at your next meal.", "Lots of day left — lead with protein and you'll stay full."]);
+  return pick(["One good choice at a time.", "Small steady choices — that's the whole game.", "Consistency beats perfection. Keep logging."]);
 }
 
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". */
