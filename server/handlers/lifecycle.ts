@@ -21,6 +21,7 @@ import {
 } from "../programme";
 import { withTimeout, logChat } from "./chat-log";
 import { goalStatusLine } from "../education";
+import { dailyMacroCardMarker } from "../macro-card-attach";
 import { calculateTargets, waterTargetLitres } from "../targets";
 import { getSleepResponse } from "./sleep";
 import { getShoppingList, formatShoppingList } from "../shopping-lists";
@@ -1289,7 +1290,8 @@ export async function handleLifecycle(ctx: {
     const weekLine = await weeklyNetLine(user);
     const diaryReply = diaryLines.join("\n") + (weekLine ? `\n\n${weekLine}` : "") + diaryCoachNote;
     await logChat(user.id, message, diaryReply, "FOOD_DIARY");
-    return diaryReply;
+    const diaryCard = await dailyMacroCardMarker(user); // "today's meals" gets the scorecard too (founder: every view shows the card)
+    return `${diaryReply}${diaryCard}`;
   }
 
   // ---- SHOPPING LIST GENERATOR — unified with shopping-lists.ts templates ----

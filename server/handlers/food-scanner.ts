@@ -761,6 +761,8 @@ export function buildFoodLogReply(p: {
   user: any;
   todaySteps?: number;
   userMessage?: string;
+  /** the meal was logged to a PAST day (retro) — it must NOT touch TODAY's running total. */
+  isRetro?: boolean;
 }): string {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
@@ -768,6 +770,12 @@ export function buildFoodLogReply(p: {
     prevCals, junkNoteText, hasGoodProteins, hasCarbs, junkDominant,
     coachNoteOverride, user,
   } = p;
+
+  // RETRO LOG (2026-07-22 live: logging pizza "to yesterday" showed "Running total TODAY" — framing
+  // a past-day meal as today's, contradicting the day-aware card). Confirm plainly; card has the day.
+  if (p.isRetro) {
+    return `${foodLines}\n\n✅ Logged to *yesterday* — *+${Math.round(totalMealCals)} kcal · ${Math.round(totalMealProtein)}g protein*.\n_Today's total is untouched — the card shows yesterday's full day._`;
+  }
 
   // WELLNESS / NO-NUMBERS CLIENT (usesMacros=false, "just get healthier"). The block below coaches
   // in calories and protein grams — to this client a wall of maths they don't think in (tester: "it
@@ -1147,22 +1155,15 @@ export function buildFoodLogReply(p: {
     }
   }
 
-  // ONE add-on per reply (2026-07-10 friction audit): this bubble used to stack coach
-  // note + junk note + swap + protein tip + edu note + reinforcement + floor warning —
-  // all correct, together heavy. The numbers are the product; ONE note rides along,
-  // picked by priority: health warning > junk > coach remark > shelf swap > protein
-  // gap > education > reinforcement. Everything else waits for its own moment.
-  // proteinTip outranks the generic coach remark because it owns the "target hit ✅"
-  // verdict (a milestone, i.e. data) — but a photo-path override remark stays on top.
+  // ONE add-on per reply (2026-07-10 friction audit): don't stack coach note + junk + swap + protein
+  // tip + edu + reinforcement. ONE rides along, by priority: health warning > junk > coach remark >
+  // swap > protein gap > education > reinforcement. proteinTip outranks the remark (it owns "hit ✅").
   const addOn = [calorieFloorNote, junkNote, coachNoteOverride ? coachNote : "", proteinTip, coachNote, swapNote, eduNote, variableReinforcement]
     .find(s => s && s.trim()) || "";
 
-  // PLAIN LEADS, NUMBERS SUPPORT (2026-07-14, the delivery decision): every food
-  // reply now opens with a one-line, NUMBER-FREE human verdict — the thing a
-  // grandmother or a 13-year-old reads and instantly gets — and the kcal/protein
-  // detail sits below for the clients who want it (the Cal-AI crowd). One message,
-  // three literacy levels, nobody asked or split. Number-free by design so it never
-  // disturbs the kcal extractor or the low-numeracy reader.
+  // PLAIN LEADS, NUMBERS SUPPORT (2026-07-14): every food reply opens with a one-line NUMBER-FREE
+  // human verdict (a grandmother or a 13-year-old gets it instantly); the kcal/protein detail sits
+  // below for the Cal-AI crowd. Number-free by design so it never disturbs the kcal extractor.
   const verdictHeadline = (prevCals > 0 && runningTotalSane)
     ? (effectiveRemaining <= -100
         ? (isMuscleGain
@@ -1181,11 +1182,9 @@ export function buildFoodLogReply(p: {
     : "";
   const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
 
-  // ADAPTIVE DELIVERY (2026-07-14): a client the bot has learned can't read numbers
-  // gets a fully number-free reply — plain verdict + the food names + a words-only
-  // protein nudge. No kcal, no gram figures, nothing to work out. The numbers still
-  // exist (logged, on the dashboard, in the totals the bot reasons over) — they're
-  // just not put in front of a person who told us they don't understand them.
+  // ADAPTIVE DELIVERY (2026-07-14): a client the bot learned can't read numbers gets a fully
+  // number-free reply — plain verdict + food names + a words-only protein nudge. Numbers still
+  // exist (logged, on the dashboard) — just not put in front of someone who can't read them.
   if (getNumbersMode(user) === "low") {
     const plainHead = verdictHeadline || "🟢 Logged — nice one.";
     // Never praise "Good protein 👍" on a takeaway — the burger's protein doesn't make

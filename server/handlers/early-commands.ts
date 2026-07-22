@@ -1,5 +1,5 @@
 import { db } from "../db";
-import { dailyMacroCardMarker, welcomeAvatarMarker } from "../macro-card-attach";
+import { dailyMacroCardMarker } from "../macro-card-attach";
 import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
@@ -671,12 +671,13 @@ export async function handleEarlyCommands(ctx: {
     .replace(/\s+(coach k|coach|there|guys|team)$/i, "")
     .trim();
   // MENU — always reachable: "menu", "help", or "#" (Self-Cav pattern), plus a greeting. Returns
-  // tappable quick-action buttons (2026-07-22 founder: interactive buttons, menu always reachable).
+  // tappable quick-action buttons. NO avatar image here (2026-07-22: firing the welcome card on
+  // every "hello" was spammy) — the branded card belongs on the FIRST welcome only (onboarding).
   if (greetings.includes(mGreet)) {
-    return replyWithButtons(await getMenuText(user), MENU_BUTTONS) + welcomeAvatarMarker();
+    return replyWithButtons(await getMenuText(user), MENU_BUTTONS);
   }
   if (m === "menu" || m === "help" || m.trim() === "#") {
-    return replyWithButtons(await getMenuText(user, { showCommands: true }), MENU_BUTTONS) + welcomeAvatarMarker();
+    return replyWithButtons(await getMenuText(user, { showCommands: true }), MENU_BUTTONS);
   }
 
   // ---- SHOPPING LIST command ----

@@ -1237,6 +1237,7 @@ export async function handleFoodContext(ctx: {
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
         coachNoteOverride: denseFoodCoachNote,
         user, todaySteps: todayStepCount, userMessage: message,
+        isRetro: scannerIsRetro,
       });
 
       const scannerRetroNote = scannerIsRetro ? `\n_Logged to ${mealDateLabel(scannerLoggedAt)}._` : "";
@@ -1310,7 +1311,7 @@ export async function handleFoodContext(ctx: {
           coachNoteOverride: gptFallbackResult.coachNote || undefined,
           hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
           hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),
-          user,
+          user, isRetro: gptIsRetro,
         });
         await logChat(user.id, message, fallbackReply, "FOOD_LOG");
         const [fbPattern, fbDay, fbStreak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120), computeFoodLogStreak(user.id)]);
@@ -1387,7 +1388,7 @@ export async function handleFoodContext(ctx: {
         coachNoteOverride: gptFallbackResult.coachNote || undefined,
         hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
         hasCarbs: gptFallbackResult.foods.some((f: any) => f.category === "carb"),
-        user,
+        user, isRetro: fb2IsRetro,
       });
       await logChat(user.id, message, fallbackReply, "FOOD_LOG");
       const [fbPattern, fbDay, fb2Streak] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120), computeFoodLogStreak(user.id)]);
