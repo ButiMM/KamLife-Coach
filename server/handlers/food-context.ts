@@ -16,6 +16,7 @@ import {
   hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
+import { macroCardMarker } from "../macro-card-attach";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
@@ -1250,7 +1251,13 @@ export async function handleFoodContext(ctx: {
       const guiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       const activationNote = await firstActionCelebration(user, phone, "meal");
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}`;
+      // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar
+      // image on the log (marker stripped + sent as media downstream). Wellness clients get
+      // "" — no card forced on them. Fail-open — a card never blocks the text reply.
+      const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
+      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals });
+
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}${macroCard}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----
@@ -1301,7 +1308,9 @@ export async function handleFoodContext(ctx: {
         const fbDroppedNote = (gptFallbackResult.dropped && gptFallbackResult.dropped.length > 0)
           ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
           : "";
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}`;
+        const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
+        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal });
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${fbCard}`;
       }
     }
   }
@@ -1376,7 +1385,9 @@ export async function handleFoodContext(ctx: {
       const fb2DroppedNote = (gptFallbackResult.dropped && gptFallbackResult.dropped.length > 0)
         ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
         : "";
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}`;
+      const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
+      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal });
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${fb2Card}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),
     // ask them to clarify rather than silently dropping. But if we only got here on the loose

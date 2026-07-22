@@ -1164,6 +1164,9 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   // Deps that route modules need from this file
   const routeDeps = { handleMessage, logChat, checkRateLimit };
 
+  // Macro-card image route (2026-07-21): Twilio fetches a meal-log card PNG as media.
+  (await import("./card-store")).registerCardRoute(app);
+
   // Register all modular routes
   registerAuthRoutes(app);
   registerHealthRoutes(app);
