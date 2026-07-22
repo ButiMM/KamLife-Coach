@@ -579,20 +579,34 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
 // shared food words (4+ chars) with a meal already logged TODAY means the same dish.
 // Fail-open: any error returns null and the meal logs normally (never block a log).
 const MEAL_STOP_WORDS = new Set(["with", "and", "some", "the", "this", "that", "today", "lunch", "dinner", "breakfast", "supper", "snack", "meal", "food", "cooked", "portion", "plate", "small", "large", "cups", "photo"]);
+const mealWords = (s: string) => new Set((s.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !MEAL_STOP_WORDS.has(w)));
+
+/**
+ * Do two meal descriptions look like the SAME dish? (pure/tested). Two shared words was too
+ * loose — two DIFFERENT breakfasts both containing "boiled eggs" were flagged as a duplicate,
+ * and the genuinely-new meal never got logged (2026-07-22 live). Now the shared words must be
+ * a real PROPORTION of the smaller meal (a re-logged plate overlaps ~fully; two meals that
+ * merely share eggs overlap ~a third). Preserves the original fix (a photo of a just-logged
+ * plate) while never blocking a genuinely different meal.
+ */
+export function looksLikeSameMeal(a: string, b: string): boolean {
+  const A = mealWords(a), B = mealWords(b);
+  if (A.size < 2 || B.size < 2) return false;
+  let shared = 0;
+  for (const w of A) if (B.has(w)) shared++;
+  if (shared < 2) return false;
+  return shared / Math.min(A.size, B.size) >= 0.6;
+}
+
 export async function findDuplicateMealToday(userId: string, desc: string): Promise<{ desc: string; slot: string } | null> {
-  const words = (s: string) => new Set((s.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !MEAL_STOP_WORDS.has(w)));
-  const target = words(desc);
-  if (target.size < 2) return null; // too little signal to judge — log normally
+  if (mealWords(desc).size < 2) return null; // too little signal to judge — log normally
   try {
     const rows = await db.select({ rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel })
       .from(mealLogs)
       .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, sastDayStart())))
       .limit(20);
     for (const r of rows) {
-      const logged = words(r.rawMessage || "");
-      let shared = 0;
-      for (const t of target) if (logged.has(t)) shared++;
-      if (shared >= 2) {
+      if (looksLikeSameMeal(desc, r.rawMessage || "")) {
         return {
           desc: (r.rawMessage || "that meal").replace(/\s+/g, " ").trim().slice(0, 70),
           slot: (r.mealLabel || "lunch").toString(),

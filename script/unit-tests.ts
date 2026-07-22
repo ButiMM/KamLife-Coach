@@ -1046,6 +1046,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // A normal reply is untouched (the guard only fires on the capability disclaimer).
     assert.match(sanitizeCoachReply("Focus on hitting your protein target today.", "how am i doing"), /Focus on hitting your protein/);
   });
+  // DUPLICATE-MEAL GUARD (2026-07-22 live: a granola/yogurt/grapefruit breakfast photo was
+  // refused as a duplicate of a bread/fish-fingers breakfast — both had "boiled eggs", so 2
+  // shared words wrongly flagged them as the same dish, and the new meal never logged).
+  test("looksLikeSameMeal: needs a real proportion of overlap, not just two common words", async () => {
+    const { looksLikeSameMeal } = await import("../server/handlers/food-scanner");
+    // THE BUG: two different breakfasts that merely share "boiled eggs" are NOT the same meal.
+    assert.strictEqual(
+      looksLikeSameMeal("granola greek yogurt blueberries boiled eggs grapefruit", "3 slices of bread, 3 boiled eggs and 3 fish fingers"),
+      false, "different meals sharing only boiled eggs must NOT be a duplicate");
+    // The original guard still works: a photo of a just-logged plate (high overlap) IS a dup.
+    assert.strictEqual(looksLikeSameMeal("bread, boiled eggs, fish fingers", "3 slices of bread, 3 boiled eggs and 3 fish fingers"), true);
+    assert.strictEqual(looksLikeSameMeal("chicken rice broccoli", "chicken rice broccoli"), true);
+    // Totally different meals are never duplicates.
+    assert.strictEqual(looksLikeSameMeal("chicken rice broccoli", "beef pasta salad"), false);
+  });
   test("voice: a bullet-dump coaching reply is reflowed into coach prose (IMG_6144), short lists left alone", async () => {
     const { collapseBulletDump } = await import("../server/handlers/food-scanner");
     const dump = "Got it. To add running:\n- *Start Slow*: begin with short easy runs\n• *Balance with Gym*: run on non-lifting days\n• *Fuel Up*: eat enough for both";
