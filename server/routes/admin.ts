@@ -598,7 +598,7 @@ export function registerAdminRoutes(app: Express, deps: Pick<RouteDeps, "handleM
       var fCell=f>0?'<span style="color:'+(f>=4?'var(--red)':'var(--yellow)')+';font-weight:600">'+f+'</span>':'<span class="muted">0</span>';
       html+='<tr>'
         +'<td><span class="dot '+esc(c.level)+'"></span>'+esc(c.level)+'</td>'
-        +'<td><span class="who">'+esc(c.name)+'</span><br><span class="muted">'+esc(c.phone)+'</span></td>'
+        +'<td><a class="who" style="color:inherit;text-decoration:underline;text-decoration-color:#2a2f37" href="/admin/client/'+encodeURIComponent(c.id)+'">'+esc(c.name)+'</a><br><span class="muted">'+esc(c.phone)+'</span></td>'
         +'<td>'+esc(c.reason)+'</td>'
         +'<td>'+esc(c.nextAction)+'</td>'
         +'<td class="muted">'+silentLabel(c.daysSinceActive)+'</td>'

@@ -4557,6 +4557,13 @@ test("nutrition-guardrails: alcohol on a cut gets an honest, non-shaming note", 
   const n = assessNutritionStandards({ todayFoods: ["chicken salad", "2 beers"], goalType: "fat_loss" });
   assert.ok(n && /no judgment|fat-burning|alcohol/i.test(n));
 });
+test("nutrition-guardrails: sweets stacking up gets a balanced 'one is fine, skip the next' nudge", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["chocolate", "cake", "ice cream", "chicken and rice"], goalType: "general" });
+  assert.ok(n && /one now and then|balance|treat/i.test(n), "kind, non-shaming");
+  // whole fruit is real food, never flagged as a sweet
+  assert.strictEqual(assessNutritionStandards({ todayFoods: ["apple", "banana", "orange"], goalType: "general" }), null);
+});
 
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");

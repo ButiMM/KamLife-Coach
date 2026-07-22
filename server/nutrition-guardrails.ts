@@ -30,6 +30,9 @@ const NO_SUGAR_RE = /\b(zero|diet|sugar[\s-]?free|no[\s-]?sugar|light|lite)\b/i;
 const FRIED_TAKEAWAY_RE = /\b(burgers?|cheeseburgers?|kfc|mcdonald|macdonald|nando|steers|hungry lion|chicken licken|debonairs|fried chicken|deep[\s-]?fried|slap chips|hot chips|fries|russians?|vetkoek|fat ?cakes?|magwinya|kotas?|bunny chow|gatsby|fried|takeaways?|take[\s-]?out|pizzas?|deep fry)\b/i;
 const ALCOHOL_RE = /\b(beers?|wines?|brandy|whisk(?:e)?y|vodka|gin|rum|tequila|ciders?|savanna|hunters?|castle|black label|heineken|amstel|corona|shots?|cocktails?|champagne|spirits?|liquor|hennessy|klipdrift|smirnoff)\b/i;
 const PROCESSED_MEAT_RE = /\b(polony|vienna|viennas|russian sausage|bacon|salami|\bham\b|processed meat|hot ?dog|cold meat|nugget|nuggets)\b/i;
+// Sweets / chocolate / crisps — the "one now and then is fine, six is a pattern" case. Whole fruit
+// is NOT here (it's real food); this is confectionery and packet snacks only.
+const SWEETS_RE = /\b(chocolate|choc\b|slab|bar[\s-]?one|kit[\s-]?kat|lunch bar|tex\b|aero|smarties|sweets|candy|cake|cupcake|biscuit|cookie|doughnut|donut|ice[\s-]?cream|lollipop|gummy|jelly babies|marshmallow|crisps|simba|lays|doritos|nik naks|chips packet|chocolate bar|milkshake|donuts)\b/i;
 // A "real meal" has actual food in it — used to catch drinks-instead-of-food.
 const MEAL_WORD_RE = /\b(chicken|beef|mince|fish|pilchard|egg|eggs|pap|rice|bread|samp|maize|meat|veg|vegetable|salad|potato|sweet potato|oats|beans|lentil|wrap|sandwich|burger|chips|stew|curry|pasta|noodle|morogo|spinach|butternut|wors|steak|tuna|yoghurt|fruit|apple|banana|avo|avocado|nuts|peanut)\b/i;
 
@@ -56,6 +59,7 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
   const fried = count(FRIED_TAKEAWAY_RE);
   const alcohol = count(ALCOHOL_RE);
   const procMeat = count(PROCESSED_MEAT_RE);
+  const sweets = count(SWEETS_RE);
   const realMeals = foods.filter(f => has(f, MEAL_WORD_RE)).length;
   const isCut = getGoalProfile(input.goalType).energyStance === "deficit";
 
@@ -90,6 +94,11 @@ export function assessNutritionStandards(input: NutritionDayInput): string | nul
   // 6. Processed meat repeating. WHO/IARC flags daily processed meat — keep it gentle and cultural.
   if (procMeat === 3) {
     return "_Lots of processed meat today (polony, viennas, that kind) — fine now and then, but they're high in salt and preservatives. Fresh chicken, eggs, fish or beans give you more protein for less of the bad stuff._";
+  }
+  // 7. Sweets / chocolate / crisps stacking up. WHO free sugars — one treat is fine, a handful
+  //    across the day is where it adds up. Founder: "two instead of six, one chocolate now and then."
+  if (sweets === 3) {
+    return "_A few sweet treats today — and honestly, one now and then is completely fine, that's balance. It's when they stack up that the sugar quietly adds up. Enjoy the one, skip the next, and you're golden._";
   }
   return null;
 }
