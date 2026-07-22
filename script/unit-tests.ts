@@ -4285,7 +4285,7 @@ test("goalStatus: muscle_gain way over gets the flood warning; under gets fuel p
 // to a real PNG — the marketing graphic, delivered. Smoke test: valid, non-trivial PNG out.
 test("renderMacroCard: produces a valid PNG image", () => {
   const png = renderMacroCard({
-    mealName: "Pilchards + pap", mealKcal: 420,
+    title: "Pilchards + pap", subtitle: "Meal logged", pill: "+420 cal",
     rows: [
       { label: "Calories", current: 847, target: 2100, unit: "" },
       { label: "Protein", current: 98, target: 150, unit: "g" },

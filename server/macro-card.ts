@@ -52,10 +52,11 @@ const GREEN = "#22b04b";
 
 export interface MacroRow { label: string; current: number; target: number; unit: string }
 export interface MacroCardData {
-  mealName: string;   // "Pilchards + pap"
-  mealKcal: number;   // this meal's calories
-  rows: MacroRow[];   // Calories / Protein / Carbs / Fat (each with today's total vs target)
-  hint?: string;      // one short line, e.g. "Protein first — you've got this today"
+  title: string;       // big line: the meal ("Pilchards + pap") or "Your day so far"
+  subtitle?: string;   // under Coach K — default "Meal logged"; e.g. "Today so far" on demand
+  pill?: string;       // right-side pill, e.g. "+420 cal" or "721 cal so far"; omit to hide
+  rows: MacroRow[];    // Calories / Protein / Carbs / Fat (each with today's total vs target)
+  hint?: string;       // one short line, e.g. "Protein first — you've got this today"
 }
 
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -141,26 +142,28 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   ctx.stroke();
   ctx.fillStyle = GREEN;
   ctx.font = `bold 30px "${FONT}"`;
-  ctx.fillText("Meal logged", tickX + 46, y + 88);
+  ctx.fillText(d.subtitle || "Meal logged", tickX + 46, y + 88);
 
   y += headerH;
 
-  // ── Meal line: name + calorie pill ──
+  // ── Title line: meal (or "Your day so far") + optional pill ──
   ctx.fillStyle = INK;
   ctx.font = `600 38px "${FONT}"`;
-  ctx.fillText(d.mealName, x, y + 44);
-  const kcalTxt = `+${Math.round(d.mealKcal)} cal`;
-  ctx.font = `bold 32px "${FONT}"`;
-  const pillW = ctx.measureText(kcalTxt).width + 56;
-  const pillH = 60;
-  const pillX = x + innerW - pillW;
-  ctx.fillStyle = "rgba(242,104,31,0.10)";
-  roundRect(ctx, pillX, y + 6, pillW, pillH, pillH / 2);
-  ctx.fill();
-  ctx.fillStyle = ORANGE;
-  ctx.textAlign = "center";
-  ctx.fillText(kcalTxt, pillX + pillW / 2, y + 6 + pillH / 2 + 11);
-  ctx.textAlign = "left";
+  ctx.fillText(d.title, x, y + 44);
+  const pillTxt = (d.pill || "").trim();
+  if (pillTxt) {
+    ctx.font = `bold 32px "${FONT}"`;
+    const pillW = ctx.measureText(pillTxt).width + 56;
+    const pillH = 60;
+    const pillX = x + innerW - pillW;
+    ctx.fillStyle = "rgba(242,104,31,0.10)";
+    roundRect(ctx, pillX, y + 6, pillW, pillH, pillH / 2);
+    ctx.fill();
+    ctx.fillStyle = ORANGE;
+    ctx.textAlign = "center";
+    ctx.fillText(pillTxt, pillX + pillW / 2, y + 6 + pillH / 2 + 11);
+    ctx.textAlign = "left";
+  }
 
   y += mealH;
 

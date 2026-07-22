@@ -1,4 +1,5 @@
 import { db } from "../db";
+import { dailyMacroCardMarker } from "../macro-card-attach";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
 import { SA_FOODS_SEED } from "../foods";
@@ -125,7 +126,9 @@ export async function handleEarlyCommands(ctx: {
         const actionLine = calDone ? "" : `\n\nHit protein first — everything else follows.`;
         const inMeals = remaining > 0 ? remainingInMeals(remaining) : "";
         const eduNote = educationNote(user, { event: "totals", calorieTarget: cal, proteinTarget: prot, overBy: remaining < 0 ? -remaining : 0 });
-        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
+        // "Show me my daily calories" → the branded card too (macro goals; "" for wellness).
+        const dailyCard = await dailyMacroCardMarker(user);
+        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}${dailyCard}`;
       }
       return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
     } catch (err) {
