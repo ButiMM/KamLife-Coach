@@ -48,6 +48,8 @@ import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
+import { recordServiceCost } from "../cost-tracking";
+import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
@@ -686,9 +688,8 @@ export async function handleMediaMessage(ctx: {
         return `${progressCountLabel} ✅ — send the rest of the set if there's more. Breakdown coming in a moment 📸`;
       }
 
-      // ---- EQUIPMENT DECLARATION WITH CAPTION ---- Client sends "I have this set" / "these are my weights" + equipment photo → update profile. TWO hard guards (2026-07-16 live
-      // incident: "Can I have this?" on a DRINK CAN silently rewrote the programme to home training): 1. A QUESTION is never a declaration — "can/should I have this"
-      // is asking. 2. The profile is written ONLY when the vision actually sees gym equipment; "other" (a can, a laptop, keys) falls through to the food/photo pipeline.
+      // ---- EQUIPMENT DECLARATION WITH CAPTION ---- "I have this set" + photo → update profile. Guards
+      // (2026-07-16 "Can I have this?" on a can rewrote it): a question isn't a declaration; writes only when vision sees gym equipment.
       const equipIsQuestion = isAskingNotReporting(message || "") || /\b(can|could|may|should|must|do)\s+i\b/i.test(message || "");
       const isEquipCaption = !equipIsQuestion
         && /\b(i have (this|these|this set|a set|dumbbells?|bands?|weights?|kettlebell|barbell)|these are my (weights?|equipment|kit|dumbbells?)|this is my (equipment|kit|set)|i (use|got|bought) (this|these|dumbbells?|bands?|weights?)|my (home )?equipment|i train with (these|this|dumbbells?|bands?))\b/i.test(message || "");
@@ -791,6 +792,10 @@ export async function handleMediaMessage(ctx: {
       if (!foodVisionDecision.allowed) {
         return `${clientName}, your subscription is not currently active. Reactivate at kamlife.co.za to get your meals analysed — or type what you ate and I'll give you an estimate: e.g. "pap, chicken, spinach".`;
       }
+      // AUTOMATIC DAILY VISION CAP — past today's photo budget → ask them to type it (margin-safe; normal use never hits it, a spammer does).
+      if (!(await allowExpensiveOp(user.id, "vision"))) {
+        return `${clientName}, I've read a lot of your photos today already 📸 — just type what this was (e.g. *chicken and rice*) and I'll log it. Photos reset tomorrow.`;
+      }
       console.log(`[VISION][${mediaTrace}] food model=${foodVisionDecision.model} tier=${user.subscriptionStatus}`);
       const foodVisionStart = Date.now();
       const visionResponse = await withTimeout("food_vision", 22000, () => openai.chat.completions.create({
@@ -816,6 +821,7 @@ export async function handleMediaMessage(ctx: {
       const foodVisionTokens = visionResponse.usage?.completion_tokens || 0;
       const foodVisionMs = Date.now() - foodVisionStart;
       console.log(`[COST][${mediaTrace}] food_vision ~$${estimateVisionCostUSD(foodVisionDecision, foodVisionTokens).toFixed(5)} ms=${foodVisionMs} (${foodVisionDecision.reason})`);
+      recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
       const visionReply = visionResponse.choices[0]?.message?.content?.trim();
       // If the photo is unreadable or misclassified but the caption names real food,
@@ -868,8 +874,7 @@ export async function handleMediaMessage(ctx: {
           return handleMessage(phone, message);
         }
         // Misclassified gym photo? The first classifier didn't route it to equipment and
-        // food vision says it isn't food — try machine coaching before giving up, so a gym
-        // machine never dead-ends on "send a photo of your plate".
+        // food vision says it isn't food — try machine coaching before giving up (gym machine never dead-ends on "send a photo of your plate").
         if (noCaption) {
           const machineReply = await coachGymMachineFromPhoto(openai, user, base64, contentType);
           if (machineReply) {
@@ -997,18 +1002,13 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return notFoodReply;
       }
 
-      // "Can I eat this?" — a PRE-PURCHASE/permission question, not a food report.
-      // Answer with the verdict and numbers but NEVER write a meal log: the client is
-      // deciding (often in the shop aisle). If they go ahead, "log it" counts it from
-      // the verdict's TOTAL line (food-context smart-log picks up FOOD_VERDICT rows).
+      // "Can I eat this?" — a PRE-PURCHASE question, not a food report. Give the verdict but NEVER
+      // log (they're deciding, often in the aisle); "log it" later counts it from the TOTAL line.
       if (isApprovalCaption) {
-        // Nothing was logged — this is a deciding question. Scrub any stray "Logged"
-        // claim the model wrote so it can't contradict the "reply log it" line below.
+        // Scrub any stray "Logged" claim so it can't contradict the "reply log it" line below.
         const verdict = stripFoodLoggedClaim(visionDisplay);
-        // DETERMINISTIC TODAY-VERDICT (2026-07-16: the model identified the can and gave
-        // NO verdict at all — "let's assume the usual values"). The education must not
-        // depend on model manners: CODE computes "does today allow this?" from the parsed
-        // TOTAL + the client's real remaining budget and appends it, every single time.
+        // DETERMINISTIC TODAY-VERDICT (2026-07-16): CODE computes "does today allow this?" from the
+        // parsed TOTAL + real remaining budget, so the education never depends on model manners.
         let todayLine = "";
         const parsedItem = parseFoodLogTotalsFromMessageOut(visionReply || visionDisplay);
         if (typeof remainingToday === "number") {

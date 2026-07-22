@@ -12,6 +12,7 @@ import { join } from "path";
 import { randomUUID } from "crypto";
 import { textToSpeech as elevenLabsTTS, isElevenLabsConfigured, type VoiceEmotion } from "./elevenlabs";
 import { recordServiceCost, voiceCostUsd } from "./cost-tracking";
+import { allowExpensiveOp } from "./usage-governor";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -34,6 +35,9 @@ export async function generateVoiceNote(text: string, emotion: VoiceEmotion = "w
   // margin. TTS=off kills all voice generation instantly from Railway — replies fall back to
   // text, nothing breaks — so a cost spike is a one-env-var fix, not a deploy.
   if (process.env.TTS === "off") { console.log("[TTS] disabled via killswitch (TTS=off) — text only"); return null; }
+  // AUTOMATIC DAILY CAP: past today's voice budget → return null so the caller sends TEXT instead.
+  // Protects margin against a runaway loop without a human watching; normal use never hits it.
+  if (!(await allowExpensiveOp(userId, "voice"))) return null;
   let appUrl = (process.env.APP_BASE_URL || process.env.APP_URL || "").replace(/\/$/, "");
   if (!appUrl) {
     console.warn("[TTS] APP_BASE_URL / APP_URL not set — voice notes disabled");

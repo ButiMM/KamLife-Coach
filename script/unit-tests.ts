@@ -4588,6 +4588,15 @@ test("cost-tracking: voiceCostUsd scales with characters and never goes negative
   assert.strictEqual(voiceCostUsd(-5), 0);
 });
 
+// USAGE GOVERNOR (2026-07-22) — automatic daily caps that protect margin, degrade gracefully.
+test("usage-governor: allows under the cap, blocks at/over it", async () => {
+  const { isWithinCap } = await import("../server/usage-governor");
+  assert.strictEqual(isWithinCap(0, 3), true, "first use allowed");
+  assert.strictEqual(isWithinCap(2, 3), true, "3rd use (count 2) allowed");
+  assert.strictEqual(isWithinCap(3, 3), false, "cap reached → blocked");
+  assert.strictEqual(isWithinCap(50, 15), false, "spammer well over vision cap → blocked");
+});
+
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
   assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");
