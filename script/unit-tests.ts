@@ -4363,6 +4363,14 @@ test("coach-prompt: locks in the body-composition fear positions (deficit fear /
   assert.match(prompt, /LIFTING DOES NOT MAKE WOMEN BULKY/, "bulky myth position present");
   assert.match(prompt, /thin arms\/legs are a MUSCLE problem/i, "reframes thinness as a muscle (not fat) problem");
 });
+// ENGAGING VOICE (2026-07-22, founder admired Self-Cav: clear answers that end with a forward
+// question, keeping it a live conversation). Discovery replies end with one forward-moving question.
+test("coach-prompt: exploring clients get a forward-moving question, not a dead-end", () => {
+  const prompt = readFileSync(join("server", "coach-prompt.ts"), "utf-8");
+  assert.match(prompt, /forward-moving question/i, "the engaging discovery style is in the voice");
+  assert.match(prompt, /keeps it a real conversation, not a lecture/i);
+  assert.doesNotMatch(prompt, /Never end with a question AND a statement — pick one/, "the old blanket ban is gone");
+});
 
 // ============================================================
 // THE INVERSION — actions stay deterministic; conversation goes to Coach K.
