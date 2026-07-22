@@ -33,6 +33,8 @@ import { verifyBrainReply } from "./brain/reply-verifier";
 import { cardFontLoaded } from "./macro-card";
 import { handleWater, tryLogWater } from "./handlers/water";
 import { handleFoodContext } from "./handlers/food-context";
+import { stripSignupSource } from "./signup-source";
+import { captureSignupSource } from "./signup-capture";
 import { handleProgressCheck } from "./handlers/progress";
 import { JUNK_WORDS as _JUNK_WORDS, checkFoodPatterns, getDamageControlNote, getProgressiveOverloadContext, checkPerfectDay } from "./handlers/checks";
 import { scanForSAFoods, parseFoodLogTotalsFromMessageOut, sanitizeCoachReply, recomputeTodayFoodTotals } from "./handlers/food-scanner";
@@ -124,6 +126,12 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   if (safetyResult !== null) return safetyResult;
 
   const user = await getOrCreateUser(phone);
+
+  // QR ACQUISITION SOURCE — a scanned join-QR prefills "(ref: gymA)"; capture once, then strip.
+  if (!user.signupSource && !mediaUrl && message && (await captureSignupSource(user, phone, message))) {
+    message = stripSignupSource(message);
+    m = message.toLowerCase().trim().replace(/[‘’“”]/g, "'").replace(/\s+/g, " ");
+  }
 
   // Page coach on crisis/injury signals immediately — fires even if onboarding/POPIA returns early
   if (message && message.length > 2) checkEscalation(user.id, message).catch(e => console.error("[ESCALATION_CHECK]", e?.message || e));
@@ -866,20 +874,16 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
     ? m.match(/\b(one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|\d+)\s+(and\s+a\s+half\s+)?thousand\s*(?:steps?|staps?)\b/i)
     : null;
   let stepReplyPart = ""; // stored so we can combine with food reply if needed
-  // A step QUESTION ("Does going over 10,000 steps affect my goals?", "is 8000 enough?")
-  // must reach GPT, not the logger. But an explicit step LOG ("walked 8000 steps",
-  // "Fitbit 8500", "12k steps") is unambiguous even when the SAME message also ends in a
-  // SEPARATE question ("...and how's my protein?") — those used to be silently dropped by
-  // the bare "?" check, losing the step data. Split the two so explicit logs survive a
-  // trailing question while genuine step-questions still route to GPT.
+  // A step QUESTION ("is 8000 enough?") must reach GPT; an explicit step LOG ("walked 8000
+  // steps", "12k steps") is unambiguous even with a trailing SEPARATE question. Split the two
+  // so explicit logs survive a trailing "?" while genuine step-questions still route to GPT.
   const stepQuestionForm = /^(does|doesn.?t|do|don.?t|will|would|should|shouldn.?t|can|could|is|isn.?t|are|aren.?t|what|why|how|when|which)\b/i.test(m.trim())
     || /\b(affect|matter|enough|too\s+(?:much|many|few|little)|should\s+i|do\s+i\s+need|is\s+it\s+(?:ok|okay|bad|good|fine))\b/i.test(m);
   const stepIsQuestion = m.includes("?") || stepQuestionForm;
   const stepIsExplicitLog = !!(stepNumMatch || deviceStepMatch || hasKmWalk || wordThousandMatch);
   // Explicit logs ignore a trailing "?"; duration-only walks keep the strict guard.
   const stepIsLoggable = stepIsExplicitLog ? !stepQuestionForm : !stepIsQuestion;
-  // Future-intent guard: "I'll walk 10k tomorrow" / "going to do 8000 steps later"
-  // starts with "i'll" so it slips past the question check — must not log as done today.
+  // Future-intent guard: "I'll walk 10k tomorrow" slips past the question check — must not log today.
   if (stepIsLoggable && !isFutureIntent(m) && !normalizedQuestion && !mentionsNotDone(m) && (stepNumMatch || hasKmWalk || hasDurationWalk || deviceStepMatch || wordThousandMatch)) {
     let steps = 0;
     if (wordThousandMatch) {
@@ -900,9 +904,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       if (unit.startsWith("h")) minutes *= 60;
       steps = Math.round(minutes * 100);
     }
-    // "Give me 5 steps to lose belly fat" — a small bare "N steps" with no movement
-    // signal is the NOUN steps, not a pedometer count. Only nag about a low count when
-    // something says they actually moved; otherwise fall through to the coaching brain.
+    // "Give me 5 steps to lose belly fat" — a bare "N steps" with no movement signal is the
+    // NOUN steps, not a pedometer count. Only nag about a low count when they actually moved.
     const stepHasMovementSignal = !!(deviceStepMatch || wordThousandMatch || hasKmWalk || hasDurationWalk || stepIsKShorthand
       || /\b(walk(?:ed|ing)?|did|done|logged|hit|managed|got|reached|clocked)\b/i.test(m));
     if (!isNaN(steps) && steps > 0 && steps <= 100 && stepHasMovementSignal) {
@@ -973,9 +976,8 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       const stepRetroNote = stepIsRetro ? `\n_Logged to ${mealDateLabel(stepLoggedAt)}._` : "";
       stepReplyPart = (isStepCorrection ? `Fixed ✅ — step count updated to *${steps.toLocaleString()}*.\n\n` : "") + stepReply + stepRetroNote + (perfectDay || "");
 
-      // COMPOUND: if the message ALSO carries food or water, don't return — the client
-      // told us several things in one breath (voice notes especially) and every one of
-      // them must log. Steps ride along as stepReplyPart; water/food handlers append.
+      // COMPOUND: if the message ALSO carries food or water, don't return — every thing the
+      // client told us in one breath must log. Steps ride along; water/food handlers append.
       const alsoHasFood = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|eggs?|bread|toast|rice|chicken|pap|porridge|oats|milk|fish|pilchard|vienna|polony|cheese|yoghurt|banana|apple|mango|potato|beans|lentil|coffee|tea|juice|cereal|muesli|sandwich)\b/i.test(m);
       const alsoHasWater = looksLikeWaterReport(m);
       if (!alsoHasFood && !alsoHasWater) {
@@ -988,10 +990,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- WATER LOGGING HANDLER (compound-aware) ----
-  // "Just had an apple and a pear, and one litre of water" (2026-07-16 tester voice note)
-  // must log BOTH: the water logs here, but if the message also carries real food, we
-  // carry the water confirmation as a reply part and let the food pipeline log the meal —
-  // never return early and drop half of what the client told us.
+  // "an apple and a pear, and one litre of water" must log BOTH: water logs here, but if the
+  // message also carries food, carry the water confirmation and let the food pipeline log the
+  // meal — never return early and drop half of what the client told us.
   const waterHasFoodToo = scanForSAFoods(m).some(f => !/^water$/i.test(f.name));
   if (waterHasFoodToo) {
     const waterPart = await tryLogWater({ phone, message, m, user });
@@ -1158,6 +1159,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   const { registerAdminMetrics } = await import("./routes/admin-metrics");
   const { registerAdminOutcomes } = await import("./routes/admin-outcomes");
   const { registerAdminClient } = await import("./routes/admin-client");
+  const { registerAdminQr } = await import("./routes/admin-qr");
 
   // Deps that route modules need from this file
   const routeDeps = { handleMessage, logChat, checkRateLimit };
@@ -1172,6 +1174,7 @@ export async function registerRoutes(server: Server, app: Express): Promise<void
   registerAdminMetrics(app);
   registerAdminOutcomes(app);
   registerAdminClient(app);
+  registerAdminQr(app);
   registerWhatsAppRoutes(app, routeDeps);
   registerDashboardRoutes(app, routeDeps);
   registerFinanceRoutes(app);

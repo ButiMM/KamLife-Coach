@@ -51,6 +51,7 @@ export const users = pgTable(
     carbPortionLevel: integer("carb_portion_level"), // 1, 2, 3
     referralCode: text("referral_code"),
     referredBy: text("referred_by"),
+    signupSource: text("signup_source"), // QR/marketing acquisition tag (gym, flyer, ig) — captured from the prefilled join message
     injuries: text("injuries"),
     programmePhase: integer("programme_phase").default(1),
     programmeWeek: integer("programme_week").default(1),

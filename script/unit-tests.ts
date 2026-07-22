@@ -23,6 +23,7 @@ import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, class
 import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { weightInContextLine } from "../server/weight-context";
+import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4782,6 +4783,41 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     for (const s of ["one large apple", "couscous with 2 wings", "had a handful of blueberries", "lunch was chicken and pap", "naartjie"]) {
       assert.ok(!FUTURE_SEG_RE.test(s), `should read as eaten: "${s}"`);
     }
+  });
+}
+
+// ============================================================
+// QR SIGN-UP SOURCE ATTRIBUTION (2026-07-22, Kam: "QR codes — simpler to share, like the
+// government app. The explanation + the code to join.") A scanned join-QR sends a prefilled
+// message carrying a source tag; the bot must capture it, strip it, and build the right link.
+// ============================================================
+{
+  test("signup-source: parses the prefilled join message's ref tag", () => {
+    assert.equal(parseSignupSource("Hi! I'd like to start with KamLife Coach 💪 (ref: gym-sandton)"), "gym-sandton");
+    assert.equal(parseSignupSource("ref:flyer1"), "flyer1");
+    assert.equal(parseSignupSource("joining via instagram"), "instagram");
+    assert.equal(parseSignupSource("code=spring24"), "spring24");
+  });
+  test("signup-source: plain messages have no tag", () => {
+    assert.equal(parseSignupSource("Hi, I want to start"), null);
+    assert.equal(parseSignupSource("I had chicken and rice for lunch"), null);
+    assert.equal(parseSignupSource(""), null);
+  });
+  test("signup-source: strips the tag so onboarding sees clean text", () => {
+    assert.equal(stripSignupSource("Hi! I'd like to start with KamLife Coach (ref: gyma)"), "Hi! I'd like to start with KamLife Coach");
+    assert.ok(!/ref/i.test(stripSignupSource("start me ref:flyer1 please")));
+  });
+  test("signup-source: sanitises tags to safe, predictable form", () => {
+    assert.equal(sanitiseSourceTag("Gym Sandton!!"), "gym-sandton");
+    assert.equal(sanitiseSourceTag("  IG_Bio  "), "ig_bio");
+    assert.equal(sanitiseSourceTag("a".repeat(40)).length, 24);
+  });
+  test("signup-source: join link carries the number and a parseable prefill", () => {
+    process.env.TWILIO_WHATSAPP_NUMBER = "whatsapp:+27600000000";
+    const link = buildJoinLink("gyma");
+    assert.ok(link.startsWith("https://wa.me/27600000000?text="));
+    // Round-trip: the prefill it encodes must parse back to the same tag.
+    assert.equal(parseSignupSource(buildJoinPrefill("gyma")), "gyma");
   });
 }
 

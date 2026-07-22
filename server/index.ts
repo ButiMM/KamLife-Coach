@@ -75,6 +75,7 @@ async function runMigrations(): Promise<void> {
       carb_portion_level INTEGER,
       referral_code TEXT,
       referred_by TEXT,
+      signup_source TEXT,
       injuries TEXT,
       programme_phase INTEGER DEFAULT 1,
       programme_week INTEGER DEFAULT 1,
@@ -432,6 +433,8 @@ async function runMigrations(): Promise<void> {
   const migrations = [
     // Email (optional, collected during onboarding)
     `ALTER TABLE users ADD COLUMN IF NOT EXISTS email TEXT`,
+    // QR / marketing acquisition source, captured from the prefilled join-QR message.
+    `ALTER TABLE users ADD COLUMN IF NOT EXISTS signup_source TEXT`,
     // reminders.kind — added after the table shipped, so ensure it on existing instances.
     `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS kind TEXT NOT NULL DEFAULT 'user'`,
     `ALTER TABLE reminders ADD COLUMN IF NOT EXISTS recurrence TEXT`,

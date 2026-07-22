@@ -79,6 +79,7 @@ export function registerAdminClient(app: Express) {
           calorieTarget: u.calorieTarget, proteinTarget: u.proteinTarget, stepsTarget: u.stepsTarget,
           subscription: u.subscriptionStatus, lastActive: u.lastActiveAt,
           startWeight: u.currentWeight, medical: u.medicalConditions || "",
+          source: u.signupSource || "",
         },
         struggles: {
           total: frictionRows.length, byKind,
@@ -271,7 +272,8 @@ export function registerAdminClient(app: Express) {
     html+='<div class="card"><div class="who"><div>'
       +'<div class="facts"><span><b>'+esc(p.goal)+'</b></span>'
       +(p.usesMacros&&p.calorieTarget?'<span><b>'+p.calorieTarget+'</b> kcal</span><span><b>'+p.proteinTarget+'</b>g protein</span>':'<span>habit-led · no macro targets</span>')
-      +'<span><b>'+(p.stepsTarget||0)+'</b> steps</span><span>Status: <b>'+esc(p.subscription||"—")+'</b></span></div>'
+      +'<span><b>'+(p.stepsTarget||0)+'</b> steps</span><span>Status: <b>'+esc(p.subscription||"—")+'</b></span>'
+      +(p.source?'<span>Source: <b>'+esc(p.source)+'</b></span>':'')+'</div>'
       +(p.medical?'<div class="facts" style="margin-top:6px;color:var(--yellow)">⚕ '+esc(p.medical)+'</div>':'')
       +'</div></div></div>';
     // struggles
