@@ -610,22 +610,15 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
           canon = canon.replace(/\b(i.?m\s+)?(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|will\s+be\s+(?:eating|having))\b/gi, "i had");
         }
       }
-      // GOAL_CHANGE keyword brake: rewriting a message into "change my goal to X"
-      // flips the client's ENTIRE programme + targets — the single most destructive
-      // normalizer output, and the number-only brake below can't catch it (no digits).
-      // On 2026-07-07 "I really only want to be doing 10,000 steps now, nothing more"
-      // (a STEPS preference) was rewritten to "change my goal to fat loss" and the
-      // coach flipped the goal + claimed "I'll adjust your targets now". Only honour a
-      // GOAL_CHANGE canonical when the ORIGINAL actually contains goal vocabulary;
-      // otherwise drop it → a conversational reply that can ASK, never a silent flip.
+      // GOAL_CHANGE keyword brake: rewriting into "change my goal to X" flips the ENTIRE programme +
+      // targets — the most destructive normalizer output (2026-07-07 "10,000 steps now" became
+      // "change my goal to fat loss"). Only honour it when the ORIGINAL has goal vocabulary; else drop.
       if (pre.intent === "GOAL_CHANGE" && !hasGoalChangeVocabulary(originalMBeforeNorm)) {
         console.log(`[NORMALIZER] GOAL_CHANGE brake — no goal vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
         canon = "";
       }
-      // TOTALS_QUERY brake (2026-07-16 live, twice): "how do my calories ADJUST when I'm
-      // sick?" is a coaching QUESTION, not a totals lookup — rewriting it to "today's
-      // calories" served the canned totals card at a nuanced question. Only a bare
-      // lookup gets the rewrite; any reasoning vocabulary keeps the original message.
+      // TOTALS_QUERY brake (2026-07-16 live): "how do my calories ADJUST when I'm sick?" is a
+      // coaching QUESTION, not a totals lookup — reasoning vocabulary keeps the original message.
       if (pre.intent === "TOTALS_QUERY" && /\b(adjust|change|why|what happens|should|if i|when i.?m|sick|ill|holiday|rest|not (walking|training)|stay the same|missing the point)\b/i.test(originalMBeforeNorm)) {
         console.log(`[NORMALIZER] TOTALS brake — reasoning vocabulary in "${originalMBeforeNorm.slice(0, 60)}" — dropping canonical`);
         canon = "";
@@ -633,12 +626,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
       if (ACTION_INTENTS.has(pre.intent) && pre.confidence >= 0.75 && canon.length >= 3 && canon.length <= message.length * 2.5 + 20) {
         const canonLower = canon.toLowerCase();
         if (canonLower !== m) {
-          // Hallucination brake: every number in the canonical must exist in the original.
-          // Number-words whitelist ONLY their own values — the old blanket escape hatch
-          // ("any number-word present → skip the brake") let "a couple thousand steps"
-          // become an invented "2000 steps". Singles, pairs ("twenty five", "ten thousand")
-          // and word+thousand compounds ("twenty five thousand") are derived; anything
-          // else fails closed to the original message (normalizer skip, never data loss).
+          // Hallucination brake: every number in the canonical must exist in the original. Number-
+          // words whitelist ONLY their own derived values (singles, pairs, word+thousand compounds);
+          // anything else fails closed to the original message (never invent a number, never lose data).
           const digitGroups = canonLower.match(/\d+/g) || [];
           const mStripped = m.replace(/[.,\s]/g, "");
           const WORD_VALS: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90, hundred: 100, thousand: 1000 };
@@ -653,12 +643,19 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
             }
           });
           const inventsNumbers = digitGroups.some(d => !mStripped.includes(d) && !allowedNums.has(String(parseInt(d, 10))));
-          // Retro-date brake: if the classifier adds "yesterday" to a WORKOUT_LOG canonical
-          // but the original message has no temporal reference, the workout handler would
-          // fire isRetroDone on a same-day lift note ("25kg squats, 6 reps") and reply
-          // "already got yesterday's workout logged" when the user was sharing a PB.
-          // Strip any invented "yesterday" before passing to handlers. (pure helper, unit-tested)
-          if (!inventsNumbers) {
+          // Retro-date brake: strip an invented "yesterday" the classifier added to a WORKOUT_LOG
+          // canonical when the original had no temporal reference (else a same-day PB reads as retro).
+          // NEW-FOOD vs REPEAT brake (2026-07-22 live): "...4 slices of pizza, add to yesterday" is
+          // a NEW food to log — the normalizer rewrote it to a repeat, which copied the last meal
+          // (tin fish) and needed shouting. Original names a quantified food + canon is a repeat →
+          // drop canon, let the real logger parse the actual food (with its date + card).
+          const origHasQuantifiedFood = /\b\d+\s*(?:slices?|pieces?|plates?|cups?|scoops?|tins?|cans?|bowls?|bars?|packets?|servings?)\b/i.test(originalMBeforeNorm);
+          const canonIsRepeat = /\b(same|again|repeat|copy)\b/i.test(canon.toLowerCase());
+          if (origHasQuantifiedFood && canonIsRepeat) {
+            console.log(`[NORMALIZER] new-food brake — original names a quantified food but canon is a repeat — dropping "${canon.slice(0, 60)}"`);
+            canon = "";
+          }
+          if (!inventsNumbers && canon) {
             if (pre.intent === "WORKOUT_LOG") {
               canon = stripInventedRetroDate(canon, originalMBeforeNorm);
             }

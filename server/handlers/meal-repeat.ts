@@ -18,6 +18,7 @@ import { sastDayStart } from "../utils";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
+import { dailyMacroCardMarker } from "../macro-card-attach";
 
 export async function handleMealRepeat(ctx: {
   phone: string;
@@ -173,7 +174,8 @@ export async function handleMealRepeat(ctx: {
 
     const sameReply = `✅ *${labelDisplay} logged* (${fromNote})\n${rawLabel}\n*+${match.kcalInt} kcal · +${match.proteinInt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining.` : "Calorie target hit. ✅"} ${protGap > 0 ? `${protGap}g protein left.` : "Protein hit. ✅"}`;
     await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
-    return sameReply;
+    const card = await dailyMacroCardMarker(user); // scorecard on a repeat-log too (founder: every log gets the card)
+    return `${sameReply}${card}`;
   } catch (err) {
     console.error("[SAME_AS]", err);
     return `Could not find that meal. Tell me what you ate and I'll log it now.`;
