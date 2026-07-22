@@ -346,6 +346,7 @@ export async function handleOnboarding(user: any, message: string, phone: string
     const continuationCtx = `You are Coach K — a direct, warm South African fitness coach on WhatsApp. A potential new client is asking questions before signing up. Reply in 1-2 sentences only. Be specific and helpful. End EVERY response on a new line with exactly: "Reply *yes* when you're ready to build your programme."
 
 Banned: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome"
+DON'T MAKE THEM THINK: lead with the OUTCOME they want in plain words ("lose weight eating your own food", "a coach that checks in every day"), never product-speak like "programme", "accountability", "guidance". Say what they GET.
 SA voice — direct, short, practical. No fluff. No price mentions.`;
     const preReply = await askCoachK(message, user, continuationCtx);
     return preReply;
@@ -368,6 +369,7 @@ A new potential client has just messaged you for the FIRST TIME. Reply in exactl
 Then on a NEW LINE add: "Reply *yes* when you're ready and I'll build your personalised programme."
 
 Rules: Short sentences. No lists. No bullet points. SA voice — warm, direct, no corporate speak.
+DON'T MAKE THEM THINK: name the OUTCOME plainly (get fit eating the food they already eat, a coach in their pocket), never jargon like "programme" or "accountability".
 Banned words: "I understand", "I hear you", "journey", "wellness", "reach out", "feel free", "awesome", "amazing", "fantastic"
 Do NOT mention price. Do NOT mention R199. Just be a helpful coach.
 If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one word is enough.`;
@@ -377,7 +379,7 @@ If they mention a referral (e.g. "from Donda"), acknowledge it warmly — one wo
 
     // Simple greeting or "yes" → standard pitch
     await db.update(users).set({ onboardingState: "ASK_POPIA" }).where(eq(users.phoneNumber, phone));
-    return `Coach K here. Real SA fitness coaching — personalised programme, food guidance, daily accountability. All on WhatsApp. No app to download.\n\nR199/month — R6.63/day. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* to build your programme.`;
+    return `I'm Coach K. I help you lose weight and get fit using the food you already eat — right here on WhatsApp. No gym. No app. No expensive diet.\n\nSend me a photo of your plate, I tell you if it's on track. I check in with you every day so you actually stick to it.\n\nR199/month — R6.63 a day, less than a coffee. Cancel anytime.\n\n_I'm AI, not a human coach or doctor. If you have any health conditions, check with your doctor before starting. Your info is stored under POPIA — only used for your coaching, never sold. Reply *delete my data* anytime._\n\nReply *yes* and I'll build your plan.`;
   }
 
   // ---- ASK_POPIA ----

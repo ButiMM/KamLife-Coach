@@ -4347,6 +4347,15 @@ test("domain-guard: the coach prompt itself refuses off-topic requests and bridg
 // client ("I don't want a deficit, my arms are already thin", "lose the belly but grow everywhere",
 // "weights make me bulky"). The bot must coach these the way a human coach does, EVERY time — so
 // the non-negotiable positions are locked in the prompt and guarded here (can't be silently dropped).
+// DON'T MAKE THEM THINK (2026-07-22, StoryBrand applied): the signup pitch leads with the OUTCOME,
+// not features — and the compliance disclaimer must survive the copy rewrite.
+test("onboarding: signup pitch is outcome-led (not feature-speak) and keeps the disclaimer", () => {
+  const src = readFileSync(join("server", "onboarding.ts"), "utf-8");
+  assert.match(src, /lose weight and get fit using the food you already eat/i, "leads with the outcome");
+  assert.match(src, /photo of your plate, I tell you if it's on track/i, "concrete, no jargon");
+  assert.doesNotMatch(src, /personalised programme, food guidance, daily accountability/i, "old feature-speak is gone");
+  assert.match(src, /I'm AI, not a human coach or doctor[\s\S]{0,200}POPIA/i, "wellness + POPIA disclaimer preserved");
+});
 test("coach-prompt: locks in the body-composition fear positions (deficit fear / one goal at a time / bulky)", () => {
   const prompt = readFileSync(join("server", "coach-prompt.ts"), "utf-8");
   assert.match(prompt, /LOSING FAT DOES NOT MEAN LOSING YOUR SHAPE/, "deficit-fear / lose-my-shape position present");
