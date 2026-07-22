@@ -36,7 +36,7 @@ import { isObviouslyInDomain } from "../server/understanding/domain-guard";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { decayObservations } from "../server/understanding/state";
 import { digitizeSpokenAmounts } from "../server/utils";
-import { goalStatusLine } from "../server/education";
+import { goalStatusLine, progressBar, macroBarsBlock } from "../server/education";
 
 // Some pure helpers live in modules that also import db.ts (e.g. activation.ts) — the
 // stub keeps those imports from demanding a real DATABASE_URL. Set before any dynamic
@@ -4276,6 +4276,22 @@ test("goalStatus: muscle_gain slightly over is NOT scolded — surplus is the pl
 test("goalStatus: muscle_gain way over gets the flood warning; under gets fuel push", () => {
   assert.ok(/flood builds fat/i.test(goalStatusLine("muscle_gain", -600)), "big overshoot warned");
   assert.ok(/don'?t leave it on the table|still to eat/i.test(goalStatusLine("muscle_gain", 400)), "under-eating a surplus is called out");
+});
+
+// MACRO PROGRESS BARS (2026-07-21, founder wants the marketing graphic on the real log).
+// The bar logic is shared by the image-card renderer and the emoji-text fallback — lock it.
+test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
+  assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
+  assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");
+  assert.strictEqual(progressBar(200, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "over caps at full, never overflows");
+  assert.strictEqual(progressBar(50, 100), "🟧🟧🟧🟧🟧⬜⬜⬜⬜⬜", "half");
+  assert.strictEqual(progressBar(50, 0), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "no target → empty, never divides by zero");
+  const block = macroBarsBlock([
+    { label: "Protein", current: 98, target: 150, unit: "g" },
+    { label: "Carbs", current: 0, target: 0, unit: "g" }, // dropped — no target
+  ]);
+  assert.ok(/Protein .*🟧.*98\/150g/.test(block), "protein row rendered with value");
+  assert.ok(!/Carbs/.test(block), "target-less row dropped so a bar never lies");
 });
 
 test("goalStatus: on-target and room-left read right for fat_loss", () => {

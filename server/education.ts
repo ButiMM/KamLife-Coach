@@ -145,6 +145,25 @@ export function weeklyNetWording(opts: { loggedDays: number; netKcal: number; bu
  * enough not to overwhelm. Single source of truth for every food status footer (meal
  * lists, photo path, text path) so the coaching can never drift apart again.
  */
+/**
+ * ORANGE PROGRESS BARS (2026-07-21, founder wants the graphic from the marketing on the
+ * real log — "those orange things… protein, carbs, fats"). WhatsApp has no bar UI, but it
+ * renders emoji: brand-orange 🟧 fill on a ⬜ track reads as a real progress bar, no image
+ * needed. Pure. Rows with no target are dropped so a bar never lies. Fill caps at 100%.
+ */
+export function progressBar(current: number, target: number, segments = 10): string {
+  const pct = target > 0 ? Math.max(0, Math.min(1, current / target)) : 0;
+  const filled = Math.round(pct * segments);
+  return "🟧".repeat(filled) + "⬜".repeat(segments - filled);
+}
+export function macroBarsBlock(rows: Array<{ label: string; current: number; target: number; unit?: string }>): string {
+  const valid = rows.filter(r => r.target > 0);
+  if (valid.length === 0) return "";
+  return valid
+    .map(r => `${r.label} ${progressBar(r.current, r.target)} ${Math.round(r.current)}/${Math.round(r.target)}${r.unit || ""}`)
+    .join("\n");
+}
+
 export function goalStatusLine(goalType: string | null | undefined, calRemaining: number): string {
   // HEALTH-LED goals (general wellness / has-a-condition) never get a kcal/deficit footer
   // (2026-07-21 spine surgery, founder: "even if we don't overpay somebody with numbers…
