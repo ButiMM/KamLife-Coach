@@ -797,8 +797,7 @@ export function buildFoodLogReply(p: {
   const stepsNote = extraStepsBurned > 0 && calRemaining < 0
     ? ` · ${todaySteps.toLocaleString()} steps burned ~${extraStepsBurned} extra kcal`
     : "";
-  // Suppress running total if it exceeds what's plausible for the time of day —
-  // guards against inflated counts caused by duplicate entries from retried requests.
+  // Suppress running total if it exceeds what's plausible for the time of day (dup-entry guard).
   const sastHourNow = new Date(Date.now() + 2 * 3_600_000).getUTCHours();
   const maxReasonableCals = calorieTarget * (
     sastHourNow < 11 ? 0.65 :
@@ -807,16 +806,9 @@ export function buildFoodLogReply(p: {
     1.5
   );
   const runningTotalSane = runningCals <= maxReasonableCals;
-  // When the running total is implausible for the time of day, SAY SO — the old
-  // silent "Remaining today: ~0 kcal" hid a duplicate-inflated day from the client
-  // instead of helping them fix it (2026-07-06: four copies of one dinner sailed
-  // past this guard unremarked).
-  // PLAIN LANGUAGE (2026-07-14, a tester: "it talks in calories and I don't
-  // understand calories"). A number never travels alone — every "X remaining" is
-  // paired with what it means as FOOD ("a light meal or a good snack"), the unit
-  // this market actually thinks in. remainingInMeals already existed for the
-  // day-3 summary; surface it on every log, for every client, forever — not just
-  // the first weeks.
+  // When the running total is implausible for the time of day, SAY SO rather than hiding a
+  // duplicate-inflated day (2026-07-06). PLAIN LANGUAGE (2026-07-14 tester: "I don't understand
+  // calories"): every "X remaining" is paired with what it means as FOOD via remainingInMeals.
   const mealsLeft = effectiveRemaining > 0 ? remainingInMeals(effectiveRemaining) : "";
   const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} to go${mealsLeft ? ` — ${mealsLeft}` : ""}${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
@@ -913,7 +905,15 @@ export function buildFoodLogReply(p: {
   // Threshold <= 5 kcal catches rounding artefacts (Coke Zero stored as 1 kcal).
   const isZeroCalDrink = totalMealCals <= 5 && totalMealProtein === 0;
   if (isZeroCalDrink) {
-    const zeroCalLines = isMuscleGain
+    // A sugar-free ENERGY DRINK is zero calories but it's caffeine — never tell a client to keep
+    // those "flowing" (2026-07-22 founder); the day-count nudge comes from nutrition-guardrails.
+    const isEnergyDrink = /\b(monster|red\s?bull|redbull|score energy|dragon energy|play energy|switch energy|rockstar|energy drink)\b/i.test(foodLines);
+    const zeroCalLines = isEnergyDrink
+      ? [
+          "Zero sugar — good that it's not the full-sugar one. Just remember it's still caffeine, not fuel: have a glass of water with it, and real food is what actually lifts your energy.",
+          "Sugar-free, logged. But it's a caffeine hit, not a meal — pair it with water, and make sure you're eating properly today too.",
+        ]
+      : isMuscleGain
       ? [
           "Zero cal — hydration sorted. Don't let drinks crowd out the food you need to hit your calorie target.",
           "Logged. Zero cal. Keep the food coming — drinks don't build muscle.",

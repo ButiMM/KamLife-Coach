@@ -4522,6 +4522,42 @@ test("mealTitleFromReply: caps at three foods and never returns empty", async ()
   assert.strictEqual(mealTitleFromReply(""), "Meal");
 });
 
+// NUTRITION GUARDRAILS (2026-07-22, founder: "3 energy drinks and no food isn't 'good' — lead them
+// to the right path per health standards, without shaming"). Cross-day, standards-grounded nudges.
+test("nutrition-guardrails: energy drinks with no food nudge toward fuel + water", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["Monster Zero", "Monster Zero"], goalType: "fat_loss" });
+  assert.ok(n && /caffeine, not fuel|real meal/i.test(n), "flags caffeine-instead-of-food");
+});
+test("nutrition-guardrails: 3rd caffeine hit cites the daily limit", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["Red Bull", "coffee and eggs", "Monster energy"], goalType: "general" });
+  assert.ok(n && /daily limit|400mg|caffeine/i.test(n));
+});
+test("nutrition-guardrails: does NOT flag a normal balanced day", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  assert.strictEqual(assessNutritionStandards({ todayFoods: ["chicken and rice", "pap and morogo", "yoghurt and fruit"], goalType: "fat_loss" }), null);
+});
+test("nutrition-guardrails: a sugar-FREE drink is not treated as added sugar", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  assert.strictEqual(assessNutritionStandards({ todayFoods: ["Coke Zero", "Coke Zero", "chicken salad"], goalType: "fat_loss" }), null);
+});
+test("nutrition-guardrails: two full-sugar drinks nudge toward the zero version", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["Coke 500ml", "Fanta", "chicken and rice"], goalType: "fat_loss" });
+  assert.ok(n && /sugar|zero|sugar-free/i.test(n));
+});
+test("nutrition-guardrails: three fried/takeaway meals get a no-shame balance nudge", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["burger and chips", "KFC", "pizza"], goalType: "general" });
+  assert.ok(n && /fried|takeaway|home plate|no guilt/i.test(n));
+});
+test("nutrition-guardrails: alcohol on a cut gets an honest, non-shaming note", async () => {
+  const { assessNutritionStandards } = await import("../server/nutrition-guardrails");
+  const n = assessNutritionStandards({ todayFoods: ["chicken salad", "2 beers"], goalType: "fat_loss" });
+  assert.ok(n && /no judgment|fat-burning|alcohol/i.test(n));
+});
+
 test("progressBar/macroBarsBlock: fills proportionally, caps at 100%, drops target-less rows", () => {
   assert.strictEqual(progressBar(0, 100), "⬜⬜⬜⬜⬜⬜⬜⬜⬜⬜", "empty");
   assert.strictEqual(progressBar(100, 100), "🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧", "full");

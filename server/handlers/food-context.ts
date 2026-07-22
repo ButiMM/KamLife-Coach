@@ -18,6 +18,7 @@ import {
 } from "./food-scanner";
 import { macroCardMarker } from "../macro-card-attach";
 import { captureFriction } from "../friction";
+import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
@@ -1268,8 +1269,9 @@ export async function handleFoodContext(ctx: {
       // "" — no card forced on them. Fail-open — a card never blocks the text reply.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
       const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals });
+      const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}${macroCard}`;
+      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
     }
 
     // ---- GPT FOOD FALLBACK (SA scanner had food keywords but 0 adjusted matches) ----

@@ -47,6 +47,7 @@ import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
+import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { scribeTranscribe } from "../elevenlabs";
 import { extractVideoFrames } from "../video-frames";
 import { assertSafeMediaUrl } from "../net-guard";
@@ -1138,7 +1139,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {
           const remaining = calTarget - totals.calories;
-          // Numbers-on uses the SHARED goal-aware status (education.goalStatusLine); number-free keeps words.
           photoDailyTotal = photoNumbersLow
             ? `\n\n_${remaining > 100 ? `Still room for ${remainingInMeals(remaining) || "a bit more"} today.` : remaining >= -100 ? "That's your food for today — nicely done. ✅" : "That's past today's food — kitchen closed. Protein + veg if you must, a 20-minute walk helps, tomorrow resets. One day never breaks a programme."}_`
             : `\n\n_Today so far: ~${totals.calories} kcal | ${totals.protein}g protein. Target: ${calTarget} kcal | ${protTarget}g protein. ${goalStatusLine(user.goalType, remaining)}_`;
@@ -1164,8 +1164,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         : "";
       const retroNote = photoIsRetro ? `\n_Logged to ${mealDateLabel(photoLoggedAt)}._` : "";
 
-      // Honest nudge when a single meal eats >38% of budget (fat-loss/recomp only; bulkers need it).
-      let photoCoachNudge = "";
+      let photoCoachNudge = ""; // honest nudge when a single meal eats >38% of budget (cut/recomp only)
       if (totalPhotoKcal > 0 && (goal === "fat_loss" || goal === "recomposition")) {
         const calTarget = user.calorieTarget || 1800;
         if (totalPhotoKcal > Math.round(calTarget * 0.38)) {
@@ -1179,10 +1178,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
       // numbers:low → scrub leaked figures; then the once-only first-win celebration.
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
-      // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: a photo-logged drink got the text total but NO card — the last path that missed it). Same contract as text.
-      const cardTitle = mealTitleFromReply(visionDisplay);   // the FOODS logged, not the model's preamble
+      // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: photo-logged drink missed it). Same contract as text; title = FOODS logged, not the model's preamble.
+      const cardTitle = mealTitleFromReply(visionDisplay);
       const photoCard = (!photoNumbersLow && photoDailyTotal) ? await macroCardMarker({ user, mealName: cardTitle, mealKcal: totalPhotoKcal }) : "";
-      return `${photoReply}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
+      const photoGuardrail = await nutritionGuardrailNudge(user); // "too much of something" nudge
+      return `${photoReply}${photoGuardrail}${await firstActionCelebration(user, phone, "meal")}${photoCard}`;
     } catch (err) {
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
