@@ -2372,6 +2372,38 @@ test("home-workout: inventory vision prompt asks for the specific equipment word
   assert.match(p, /bodyweight/);
 });
 
+// WELLNESS FOOD-LOG REPLY — the no-numbers client ("just get healthier") must be coached in
+// habits and plain language, never calories/grams (2026-07-22 reviewer: "teach even the no-numbers
+// user"; tester: "it talks in calories and I don't understand calories").
+test("food-log: a wellness client's reply carries NO calorie/gram numbers, coaches the habit", async () => {
+  const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+  const reply = buildFoodLogReply({
+    foodLines: "🍗 Chicken and pap", mealLabel: "lunch", totalMealCals: 600, totalMealProtein: 35,
+    runningCals: 1200, runningProtein: 60, calorieTarget: 0, proteinTarget: 0, prevCals: 600,
+    user: { goalType: "general", name: "Lerato" },
+  });
+  assert.doesNotMatch(reply, /\bkcal\b|calorie|\d+\s*g\b|target/i, "no numbers for the no-numbers client");
+  assert.match(reply, /protein/i, "still gives a plain quality nudge");
+  assert.match(reply, /Lerato/);
+  assert.match(reply, /✅/, "reinforces the habit");
+});
+test("food-log: a fat-loss client does NOT take the wellness branch (macro path unchanged)", async () => {
+  const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+  const reply = buildFoodLogReply({
+    foodLines: "🍗 Chicken and pap", mealLabel: "lunch", totalMealCals: 600, totalMealProtein: 35,
+    runningCals: 1200, runningProtein: 60, calorieTarget: 1900, proteinTarget: 150, prevCals: 600,
+    user: { goalType: "fat_loss", name: "Sipho" },
+  });
+  // The wellness reply is identified by its habit signature — a macro-goal reply must never show it.
+  assert.doesNotMatch(reply, /Showing up like this every day|winning move is just being consistent|Small steady habits like this/, "fat-loss keeps the numeric macro path, not the no-numbers wellness reply");
+});
+test("food-log: wellness junk meal gets a no-guilt treat nudge, not a calorie warning", async () => {
+  const { wellnessFoodLogReply } = await import("../server/handlers/food-scanner");
+  const reply = wellnessFoodLogReply({ foodLines: "🍔 Burger and chips", totalMealProtein: 15, junkDominant: true, user: { goalType: "health_condition" } });
+  assert.match(reply, /treat/i);
+  assert.doesNotMatch(reply, /kcal|calorie|\d+\s*g\b/i);
+});
+
 // ============================================================
 // Workout difficulty feedback classifier (pure)
 // ============================================================

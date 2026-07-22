@@ -4,6 +4,7 @@ import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote, remainingInMeals, weeklyNetWording } from "../education";
 import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
 import { stepBurnKcal } from "../targets";
+import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, sql, desc } from "drizzle-orm";
@@ -703,6 +704,43 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
   return legacyResult;
 }
 
+/**
+ * WELLNESS FOOD-LOG REPLY — the no-numbers version for a "just get healthier" client.
+ * Warm, plain, habit-first: what they ate, ONE quality nudge (no grams, no calories), and the
+ * reinforcement that logging daily is the win. Pure and deterministic so it's fully unit-tested.
+ */
+export function wellnessFoodLogReply(p: {
+  foodLines: string; totalMealProtein: number; hasGoodProteins?: boolean; junkDominant?: boolean; user: any;
+}): string {
+  const { foodLines, totalMealProtein, hasGoodProteins, junkDominant, user } = p;
+  const first = user?.name ? String(user.name).split(" ")[0] : "";
+  const pick = <T>(a: T[]): T => a[Math.floor(Math.random() * a.length)];
+
+  let nudge: string;
+  if (junkDominant) {
+    nudge = pick([
+      "That one's a treat — enjoy it, no guilt. Just make the next meal a proper one with some protein and veg.",
+      "Treat meal — all good, it's logged. Back to your normal plate next time and you're on track.",
+    ]);
+  } else if (totalMealProtein >= 20 || hasGoodProteins) {
+    nudge = pick([
+      "Nice — there's good protein in there. That's the thing that keeps you full and strong.",
+      "Solid plate. The protein in that is exactly what your body wants.",
+    ]);
+  } else {
+    nudge = pick([
+      "Good log. Next time try to add a protein — eggs, chicken, fish or beans — it keeps you fuller for longer.",
+      "Logged. One tip: a bit of protein with this would round it out and keep the hunger away.",
+    ]);
+  }
+  const habit = pick([
+    "Logged ✅ Showing up like this every day is what actually changes things.",
+    "Got it ✅ The winning move is just being consistent — and you are.",
+    "Done ✅ Small steady habits like this beat any crash diet. Keep going.",
+  ]);
+  return `${foodLines}\n\n${first ? `${first}, ` : ""}${nudge}\n\n${habit}`;
+}
+
 export function buildFoodLogReply(p: {
   foodLines: string;
   mealLabel: string;
@@ -730,6 +768,13 @@ export function buildFoodLogReply(p: {
     prevCals, junkNoteText, hasGoodProteins, hasCarbs, junkDominant,
     coachNoteOverride, user,
   } = p;
+
+  // WELLNESS / NO-NUMBERS CLIENT (usesMacros=false, "just get healthier"). The block below coaches
+  // in calories and protein grams — to this client a wall of maths they don't think in (tester: "it
+  // talks in calories and I don't understand calories"). Warm, plain, HABIT-first reply instead.
+  if (!usesMacroTargets(user?.goalType)) {
+    return wellnessFoodLogReply({ foodLines, totalMealProtein, hasGoodProteins, junkDominant, user });
+  }
 
   const calRemaining = calorieTarget - runningCals;
   const proteinRemaining = proteinTarget - runningProtein;
