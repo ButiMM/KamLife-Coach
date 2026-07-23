@@ -48,7 +48,7 @@ import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
-import { estimateCarbsFat } from "../macro-estimate";
+import { commitFoodLog } from "./food-context";
 import { recordServiceCost } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
@@ -1104,6 +1104,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       const photoLoggedAt = parseMealDate(message || "");
       const photoIsRetro = isRetroactiveMeal(message || "");
+      let photoCommit: Awaited<ReturnType<typeof commitFoodLog>> | null = null;
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
         // Readable description: caption wins, else vision's first real line. (kcal dedup banned.)
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
@@ -1116,27 +1117,22 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
           return dupeReply;
         }
-        // Vision gives kcal + protein but not carbs/fat — estimate so the card isn't zero-dragged.
-        const photoMacros = estimateCarbsFat(totalPhotoKcal, totalPhotoProt);
-        await db.insert(mealLogs).values({
-          userId: user.id,
-          rawMessage: photoDesc,
-          source: "photo",
-          kcalInt: totalPhotoKcal,
-          proteinInt: totalPhotoProt,
-          carbsInt: photoMacros.carbs,
-          fatInt: photoMacros.fat,
-          loggedAt: photoLoggedAt,
-          // CAPTION WINS over the clock: "Breakfast" captioned at 1pm stays breakfast.
-          mealLabel: extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt),
-        }).catch(e => console.warn("[photo mealLogs write]", e));
-        invalidateFoodTotalsCache(user.id);
+        // ONE WRITE DOOR (Box 2): commitFoodLog inserts, dedups, updates the day, and
+        // GUARANTEES complete macros (fills carbs/fat from kcal+protein) — so a photo meal
+        // can never zero-drag the card again. CAPTION WINS over the clock for the slot.
+        const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+        photoCommit = await commitFoodLog({
+          userId: user.id, phone, rawMessage: photoDesc, source: "photo",
+          kcalInt: totalPhotoKcal, proteinInt: totalPhotoProt, carbsInt: 0, fatInt: 0,
+          items: [], mealLabel: photoLabel, loggedAt: photoLoggedAt,
+        });
       }
 
       const [photoPattern, photoDay] = await Promise.all([checkFoodPatterns(user.id), checkPerfectDay(user.id, user.proteinTarget || 120)]);
       let photoDailyTotal = "";
       try {
-        const totals = await recomputeTodayFoodTotals(user.id);
+        // Totals come from the one write door's result (already recomputed) — no second query.
+        const totals = photoCommit ? { calories: photoCommit.runningCals, protein: photoCommit.runningProtein } : await recomputeTodayFoodTotals(user.id);
         const calTarget = user.calorieTarget || 1800;
         const protTarget = user.proteinTarget || 120;
         if (totals.calories > 0) {

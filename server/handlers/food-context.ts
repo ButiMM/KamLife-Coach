@@ -141,9 +141,17 @@ interface CommitFoodLogResult {
   runningProtein: number;
 }
 
-// Single chokepoint for every food-log write. All three scanner paths funnel through here so
-// any future guard (fabrication check, duplicate detector, verifier) is applied everywhere.
-async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
+// THE single chokepoint for every food-log write (Box 2) — guarantees live in ONE place.
+// GUARANTEE: complete macros. If a path gave kcal + protein but no carbs/fat, fill from the
+// trusted numbers so the card can't be zero-dragged. Only fills when BOTH are absent, so a
+// legit all-protein meal (kcal ≈ protein×4) still lands ~0.
+export async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
+  let carbsInt = params.carbsInt;
+  let fatInt = params.fatInt;
+  if (params.kcalInt > 0 && carbsInt <= 0 && fatInt <= 0) {
+    const est = estimateCarbsFat(params.kcalInt, params.proteinInt);
+    carbsInt = est.carbs; fatInt = est.fat;
+  }
   let prevCals = 0;
   try {
     const existingTotals = await recomputeTodayFoodTotals(params.userId);
@@ -172,8 +180,8 @@ async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLog
         source: params.source,
         kcalInt: params.kcalInt,
         proteinInt: params.proteinInt,
-        carbsInt: params.carbsInt,
-        fatInt: params.fatInt,
+        carbsInt,
+        fatInt,
         items: params.items,
         mealLabel: params.mealLabel,
         loggedAt: params.loggedAt,
@@ -492,18 +500,14 @@ export async function handleFoodContext(ctx: {
         if (vt) {
           const vKcal = parseInt(vt[1].replace(/,/g, ""), 10);
           const vProt = parseInt(vt[2], 10);
-          const vMac = estimateCarbsFat(vKcal, vProt);
-          await db.insert(mealLogs).values({
-            userId: user.id, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
-            kcalInt: vKcal, proteinInt: vProt, carbsInt: vMac.carbs, fatInt: vMac.fat,
+          // Through the one write door — macros guaranteed, day recomputed.
+          const cv = await commitFoodLog({
+            userId: user.id, phone, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
+            kcalInt: vKcal, proteinInt: vProt, carbsInt: 0, fatInt: 0, items: [],
             mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }, user, await getSlotContext(user.id)),
-          }).catch(e => console.warn("[verdict log-it]", e));
-          invalidatePatternCache(user.id);
-          invalidateFoodTotalsCache(user.id);
-          const recV = await recomputeTodayFoodTotals(user.id);
-          await db.update(users).set({ todayCalories: recV.calories, todayProteinG: recV.protein, todayCaloriesDate: sastToday() })
-            .where(eq(users.id, user.id)).catch(() => {});
-          const vReply = `Logged ✅ ~${vKcal} kcal | ${vProt}g protein.\n\n_Today: ${recV.calories} kcal | ${recV.protein}g protein_`;
+            loggedAt: new Date(),
+          });
+          const vReply = `Logged ✅ ~${vKcal} kcal | ${vProt}g protein.\n\n_Today: ${cv.runningCals} kcal | ${cv.runningProtein}g protein_`;
           await logChat(user.id, message, vReply, "FOOD_LOG");
           return vReply;
         }
@@ -523,26 +527,14 @@ export async function handleFoodContext(ctx: {
             parts.push(`${food.name} — ${food.adjustedCalories} kcal | ${food.adjustedProtein}g protein`);
           }
           await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
-          const slMac = estimateCarbsFat(totalCals, totalProt2);
-          await db.insert(mealLogs).values({
-            userId: user.id,
-            rawMessage: lastUnloggedFood.messageIn || "",
-            source: "text",
-            kcalInt: totalCals,
-            proteinInt: totalProt2,
-            carbsInt: slMac.carbs,
-            fatInt: slMac.fat,
+          // Through the one write door — macros guaranteed, day recomputed.
+          const cs = await commitFoodLog({
+            userId: user.id, phone, rawMessage: lastUnloggedFood.messageIn || "", source: "text",
+            kcalInt: totalCals, proteinInt: totalProt2, carbsInt: 0, fatInt: 0, items: [],
             mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }, user, await getSlotContext(user.id)),
-          }).catch(e => console.warn("[smart-log mealLogs write]", e));
-          invalidatePatternCache(user.id);
-          invalidateFoodTotalsCache(user.id);
-          const recomputed3 = await recomputeTodayFoodTotals(user.id);
-          await db.update(users).set({
-            todayCalories: recomputed3.calories,
-            todayProteinG: recomputed3.protein,
-            todayCaloriesDate: sastToday(),
-          }).where(eq(users.id, user.id)).catch(e => console.warn("[smart-log todayCalories sync]", e));
-          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${recomputed3.calories} kcal | ${recomputed3.protein}g protein_`;
+            loggedAt: new Date(),
+          });
+          return `Logged! ✅\n${parts.join("\n")}\n\n_Today: ${cs.runningCals} kcal | ${cs.runningProtein}g protein_`;
         }
       }
     } catch { /* non-fatal */ }
