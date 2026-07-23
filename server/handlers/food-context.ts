@@ -910,27 +910,19 @@ export async function handleFoodContext(ctx: {
 
     if (multiPlan.length >= 2) {
       const slotCtxMulti = await getSlotContext(user.id);
-      await Promise.all(multiPlan.map(p => {
-        const mdMac = estimateCarbsFat(p.kcal, p.prot);
-        return db.insert(mealLogs).values({
-          userId: user.id,
-          rawMessage: p.raw,
-          source: "text",
-          kcalInt: p.kcal,
-          proteinInt: p.prot,
-          carbsInt: mdMac.carbs,
-          fatInt: mdMac.fat,
-          loggedAt: p.date,
+      // Through the one write door — one per day, sequential so today's recompute doesn't race.
+      let recomp = { calories: 0, protein: 0 };
+      for (const p of multiPlan) {
+        const c = await commitFoodLog({
+          userId: user.id, phone, rawMessage: p.raw, source: "text",
+          kcalInt: p.kcal, proteinInt: p.prot, carbsInt: 0, fatInt: 0, items: [],
           mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user, slotCtxMulti),
-        }).catch(e => console.warn("[multiday-log insert]", e));
-      }));
+          loggedAt: p.date,
+        });
+        recomp = { calories: c.runningCals, protein: c.runningProtein };
+      }
       const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");
       await logChat(user.id, message, logSummary, "FOOD_LOG");
-      invalidatePatternCache(user.id);
-      invalidateFoodTotalsCache(user.id);
-      const recomp = await recomputeTodayFoodTotals(user.id);
-      await db.update(users).set({ todayCalories: recomp.calories, todayProteinG: recomp.protein, todayCaloriesDate: sastToday() })
-        .where(eq(users.id, user.id)).catch(e => console.error("[FOOD_TOTAL_UPDATE]", e?.message || e));
       const lines = multiPlan.map(p => {
         const cap = p.label.charAt(0).toUpperCase() + p.label.slice(1);
         return `*${cap}:* ${p.foods.map(f => f.name).join(", ")} — ${p.kcal} kcal | ${p.prot}g protein`;

@@ -1037,30 +1037,23 @@ export async function askCoachK(userMessage: string, user: any, extraInstruction
   let todayFoodContext = "";
   try {
     const todayStart = sastDayStart();
-    const todayMeals = await db.select({
-      kcal: mealLogs.kcalInt,
-      protein: mealLogs.proteinInt,
-      carbs: mealLogs.carbsInt,
-      fat: mealLogs.fatInt,
-      mealLabel: mealLogs.mealLabel,
-      rawMessage: mealLogs.rawMessage,
-      loggedAt: mealLogs.loggedAt,
-    }).from(mealLogs)
-      .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart), eq(mealLogs.corrected, false)))
-      .orderBy(mealLogs.loggedAt);
+    // Box 3 — the AI READS THE LEDGER. Its "today's numbers" come from the same getDayLedger
+    // the card and the diary read, so the coach can never speak a total that contradicts them.
+    const { getDayLedger } = await import("./day-ledger");
+    const ledger = await getDayLedger(user.id, { user });
 
-    if (todayMeals.length > 0) {
-      const totalCalToday = todayMeals.reduce((s, m) => s + (m.kcal || 0), 0);
-      const totalProtToday = todayMeals.reduce((s, m) => s + (m.protein || 0), 0);
-      const totalCarbsToday = todayMeals.reduce((s, m) => s + (m.carbs || 0), 0);
-      const totalFatToday = todayMeals.reduce((s, m) => s + (m.fat || 0), 0);
+    if (ledger.meals.length > 0) {
+      const totalCalToday = ledger.kcal;
+      const totalProtToday = ledger.protein;
+      const totalCarbsToday = ledger.carbs;
+      const totalFatToday = ledger.fat;
 
       const byMeal: Record<string, { kcal: number; prot: number }> = {};
-      for (const m of todayMeals) {
-        const label = m.mealLabel || "meal";
+      for (const m of ledger.meals) {
+        const label = m.label || "meal";
         byMeal[label] = byMeal[label] || { kcal: 0, prot: 0 };
-        byMeal[label].kcal += m.kcal || 0;
-        byMeal[label].prot += m.protein || 0;
+        byMeal[label].kcal += m.kcal;
+        byMeal[label].prot += m.protein;
       }
       const mealBreakdown = Object.entries(byMeal)
         .map(([label, v]) => `${label}: ${v.kcal} kcal / ${v.prot}g protein`)
