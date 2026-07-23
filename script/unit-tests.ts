@@ -3350,6 +3350,19 @@ test("qty correction: plain food log never matches", () => {
   assert.equal(parseQuantityCorrection("2 eggs and 3 viennas"), null);
 });
 
+// The live phrase verbatim (2026-07-23 screenshot): "Not 2 Viennas but only half a Vienna".
+test("qty correction: 'not 2 X but only half a X' parses — half is a real count", () => {
+  const r = parseQuantityCorrection("Why did you add 2 Viennas?????? Not 2 Viennas but only half a Vienna");
+  assert.ok(r, "should parse");
+  assert.equal(r!.oldCount, 2);
+  assert.equal(r!.count, 0.5);
+  assert.ok(r!.food.includes("vienna"), `food: ${r!.food}`);
+});
+test("qty correction: 'half a X not 2' parses through the first form too", () => {
+  const r = parseQuantityCorrection("it was half a vienna not 2");
+  assert.ok(r && r.count === 0.5 && r.oldCount === 2, JSON.stringify(r));
+});
+
 // The live bug (2026-07-23): voice correction "there were 3 slices there, not 2" on a photo
 // meal must parse cleanly ("slices", not "slices there") and NOT dead-end.
 test("qty correction: trailing filler is stripped from the food", () => {

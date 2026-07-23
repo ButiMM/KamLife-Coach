@@ -537,8 +537,10 @@ export function splitWhatsAppBody(text: string, maxLen = 1500): string[] {
 const NON_FOOD_UNIT_RE = /^(kgs?|kilograms?|grams?|ml|mls|litres?|liters?|kms?|kilometers?|kilometres?|steps?|reps?|sets?|kcal|cals?|calories|min|mins|minutes?|hrs?|hours?|days?|weeks?|percent|%)\b/i;
 
 export function parseQuantityCorrection(m: string): { count: number; food: string; oldCount: number } | null {
-  const match = m.match(/\b(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\s*[,.!]?\s+not\s+(\d+(?:\.\d+)?)\b/i)
-    || m.match(/\bnot\s+(\d+(?:\.\d+)?)\s*[,.]?\s*(?:it was|i had|just)\s+(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\b/i);
+  // "half a X" is a real count (2026-07-23 live: "Not 2 Viennas but only half a Vienna").
+  const norm = m.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
+  const match = norm.match(/\b(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\s*[,.!]?\s+not\s+(\d+(?:\.\d+)?)\b/i)
+    || norm.match(/\bnot\s+(\d+(?:\.\d+)?)\s*[a-z ]{0,12}?[,.]?\s*(?:it was|i had|just|but(?:\s+only)?|actually|only|make it|it'?s)\s+(\d+(?:\.\d+)?)\s+([a-z][a-z ]{2,24}?)\b/i);
   if (!match) return null;
   // First pattern: [new, food, old]; second: [old, new, food]
   const firstForm = /^\d/.test(match[1]) && !/^\d/.test(match[2]);
