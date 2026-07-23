@@ -26,7 +26,7 @@ import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
 import { foldLedgerRows, type LedgerRow } from "../server/day-ledger-core";
-import { stripDeadPromises, hasDeadPromise } from "../server/reply-hygiene";
+import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4941,6 +4941,20 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     for (const s of ["Let me break it down for you: 2 eggs is 140 kcal.", "Hold on to your progress — you're doing great.", "Give it a moment to settle after eating."]) {
       assert.ok(!hasDeadPromise(s), `should be kept: "${s}"`);
     }
+  });
+  test("reply-hygiene: content-free corporate filler is stripped", () => {
+    assert.equal(stripFiller("I appreciate your patience. Your total is 2,100 kcal."), "Your total is 2,100 kcal.");
+    assert.equal(stripFiller("I want to make sure we get this right for you. Log the meal and I'll add it."), "Log the meal and I'll add it.");
+    assert.ok(!/here to help/i.test(stripFiller("I'm here to help. Send your steps.")));
+  });
+  test("reply-hygiene: genuine warmth survives the filler strip", () => {
+    for (const s of ["That's a tough week — let's reset tomorrow.", "I hear you, and you're closer than you think.", "Nice work hitting your protein today."]) {
+      assert.equal(stripFiller(s), s, `warmth must survive: "${s}"`);
+    }
+  });
+  test("reply-hygiene: humanizeReply strips both stall and filler in one pass", () => {
+    const out = humanizeReply("I appreciate your patience. Let me check and get back to you. Your protein is 90g.");
+    assert.equal(out, "Your protein is 90g.");
   });
 }
 
