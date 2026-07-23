@@ -19,7 +19,7 @@
 
 import { eq, desc } from "drizzle-orm";
 import { db } from "../db";
-import { chatHistory } from "../../shared/schema";
+import { chatHistory, users } from "../../shared/schema";
 import { buildClientSnapshot } from "../brain/client-snapshot";
 import { seedUnderstanding } from "./seed";
 import { loadUnderstanding, saveUnderstanding } from "./store";
@@ -30,8 +30,10 @@ import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { sanitizeCoachReply } from "../handlers/food-scanner";
 import { safetyGate } from "../verifiers/response-gate";
 import { logChat } from "../handlers/chat-log";
-import { executeAction } from "./executor";
-import { describeAction, isStrategyOrEmotional } from "./actions";
+import { executeAction, setPendingConfirm, takePendingConfirm } from "./executor";
+import { describeAction, isStrategyOrEmotional, type CoachAction } from "./actions";
+import { classifyConfirmReply } from "./confirm-reply";
+export { classifyConfirmReply } from "./confirm-reply";
 
 export function engineLive(): boolean {
   return process.env.ENGINE_LIVE === "on";
@@ -69,6 +71,40 @@ function deriveSourceId(userId: string, message: string): string {
   const s = `${userId}:${message}`;
   for (let i = 0; i < s.length; i++) { h = (h * 31 + s.charCodeAt(i)) | 0; }
   return `d${(h >>> 0).toString(36)}`;
+}
+
+// RESUME a parked confirmation. Called EARLY in the pipeline (before any handler can swallow a
+// bare "yes") whenever awaitingInputType === "engine_confirm". Returns the executed reply, a
+// cancel line, or null — null meaning "not a yes/no, let the pipeline understand it fresh".
+// This is the landing pad the confirm question never had (2026-07-23 live: "yes" looped forever).
+export async function resumeEngineConfirm(ctx: {
+  phone: string; message: string; m: string; user: any; sourceMessageId?: string; actionsLive?: boolean;
+}): Promise<string | null> {
+  const { user } = ctx;
+  if (user?.awaitingInputType !== "engine_confirm") return null;
+  const verdict = classifyConfirmReply(ctx.message);
+  const pending: CoachAction | null = takePendingConfirm(user.id); // consume the parked offer
+  // The confirm turn is over either way — clear the flag so we can never get stuck awaiting.
+  await db.update(users).set({ awaitingInputType: null }).where(eq(users.id, user.id)).catch(() => {});
+  user.awaitingInputType = null;
+
+  if (verdict === "other") return null; // a fresh correction → the pipeline understands it
+  const name = (user?.name || "").split(" ")[0];
+  const hi = name ? `${name}, ` : "";
+  if (verdict === "no") return `${hi}left it as it was — nothing logged. 👍`;
+  if (!pending) return null; // "yes" but the offer expired (restart) → let the pipeline reparse
+
+  const cohortLive = ctx.actionsLive === true || engineActionsAll();
+  const exec = await executeAction(pending, {
+    user, phone: ctx.phone,
+    sourceMessageId: ctx.sourceMessageId || deriveSourceId(user.id, ctx.message),
+    confidence: 0.99, // the client explicitly confirmed
+    dryRun: !cohortLive,
+  });
+  await logChat(user.id, ctx.message,
+    `CONFIRM ${describeAction(pending)} → ${exec.performed ? "performed" : exec.error ? "error" : "noop"}`,
+    "ENGINE_CONFIRM").catch(() => {});
+  return exec.reply?.trim() ? exec.reply : `${hi}done. ✅`;
 }
 
 // SHADOW REVIEW — the confirmation lap in WhatsApp. In shadow mode every emitted action is
@@ -202,6 +238,13 @@ export async function runMeaningEngineLive(ctx: {
         await logChat(user.id, message,
           `${describeAction(result.action)} → ${exec.performed ? "performed" : exec.confirmed ? "confirm" : exec.skipped ? "skip(dup)" : exec.error ? "error" : "noop"}`,
           runDry ? "ENGINE_ACTION_SHADOW" : "ENGINE_ACTION").catch(() => {});
+        // Confirmation asked ("reply yes to log it") — PARK the action so the client's next
+        // "yes" has somewhere to land. resumeEngineConfirm (called early in the pipeline)
+        // picks it up. Without this the "yes" looped forever (2026-07-23 live disaster).
+        if (!runDry && exec.confirmed && result.action) {
+          setPendingConfirm(user.id, result.action);
+          await db.update(users).set({ awaitingInputType: "engine_confirm" }).where(eq(users.id, user.id)).catch(() => {});
+        }
         if (!runDry && (exec.performed || exec.confirmed) && exec.reply.trim()) {
           return exec.reply; // the deterministic side-effect + its reply
         }

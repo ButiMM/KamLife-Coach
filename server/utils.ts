@@ -54,6 +54,22 @@ export function slotFromSastHour(date: Date = new Date(), opts?: { nightWorker?:
   return "snack";
 }
 
+// EARLY-HOURS RETRO — the meal that lands in the small hours (00:00–04:59 SAST) almost always
+// belongs to the day that just ENDED, not a fresh one: a 4am "dinner" is LAST NIGHT's dinner
+// (2026-07-23 live: a dinner photo at 04:07 was filed under the new day, so the whole day's
+// numbers were wrong). Shift such a log back to the previous day — UNLESS the client explicitly
+// tied it to now/today, or it reads as a genuine early breakfast. Pure + conservative: only the
+// ambiguous small hours are ever touched, daytime logs are returned untouched. Known trade-off:
+// a true night-shift eater's 2–4am meal is rare next to people reporting the night just gone.
+export function effectiveMealLoggedAt(loggedAt: Date, rawMessage: string, mealLabel: string | null | undefined): Date {
+  const sastHour = new Date(loggedAt.getTime() + 2 * 3_600_000).getUTCHours();
+  if (sastHour >= 5) return loggedAt; // only 00:00–04:59 is ambiguous
+  const lo = (rawMessage || "").toLowerCase();
+  if (/\b(now|just|right now|just now|today|this morning|currently|about to|going to|tonight|early)\b/.test(lo)) return loggedAt;
+  if (mealLabel === "breakfast") return loggedAt; // a 3–4am breakfast is a real early start
+  return new Date(loggedAt.getTime() - 24 * 3_600_000); // → the day that just ended
+}
+
 // A clock time written in a caption tells us the meal SLOT even when the photo is batch-sent
 // hours later (2026-07-22, Puntsa's photo diary: shot at "11:00", the whole day sent at 19:49
 // — the send-clock mislabelled it dinner). Requires a colon-time or am/pm so it never fires on

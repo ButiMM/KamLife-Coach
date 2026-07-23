@@ -16,7 +16,7 @@ import { classifyLoggedFood, buildGroceryPersonalization, loggerType, type FoodP
 import { computeProgressScore } from "../server/progress-score";
 import { computeClientRisk, sortByRisk } from "../server/client-triage";
 import { classifyWorkoutFeedback } from "../server/workout-feedback";
-import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting, slotFromCaptionTime } from "../server/utils";
+import { normaliseMsisdn, buildContentVariables, stripInventedRetroDate, parseQuantityCorrection, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, parseMealDate, sastDayStart, hasGoalChangeVocabulary, timeGreeting, slotFromCaptionTime, effectiveMealLoggedAt } from "../server/utils";
 import { getSleepResponse } from "../server/handlers/sleep";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../server/meal-select";
 import { getGoalProfile, usesMacroTargets, GOAL_KEYS, looksLikeGoalAnswer, classifyGoalFromText } from "../server/goal-profiles";
@@ -614,6 +614,45 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const b = await executeAction(meal, ctx({ dryRun: true }));
     assert.equal(a.fingerprint, b.fingerprint, "same action + message = same key");
     assert.ok(a.fingerprint.includes("SM1"));
+  });
+}
+
+// PENDING CONFIRM — the "reply yes" question now has a landing pad (2026-07-23 live: "yes"
+// looped forever because the offered action was parked nowhere). Round-trip + one-shot.
+{
+  const { setPendingConfirm, takePendingConfirm, _resetPendingConfirm } = await import("../server/understanding/executor");
+  test("pending confirm: parked action is returned once, then gone", async () => {
+    _resetPendingConfirm();
+    const action = { type: "LOG_MEAL", foodText: "half a vienna" } as any;
+    setPendingConfirm("u1", action);
+    assert.deepEqual(takePendingConfirm("u1"), action, "first take returns the parked action");
+    assert.equal(takePendingConfirm("u1"), null, "second take is empty — never double-fires");
+  });
+  test("pending confirm: an unknown user has nothing parked", async () => {
+    _resetPendingConfirm();
+    assert.equal(takePendingConfirm("nobody"), null);
+  });
+}
+
+// CONFIRM-REPLY CLASSIFIER — a clean yes/no resolves the offer; anything else is a fresh
+// correction that must flow on to normal understanding (never silently cancel or mis-fire).
+{
+  const { classifyConfirmReply } = await import("../server/understanding/confirm-reply");
+  test("confirm reply: clean affirmations are 'yes'", () => {
+    for (const y of ["yes", "Yes", "yep", "yebo", "ja", "ok", "do it", "log it", "👍", "correct."]) {
+      assert.equal(classifyConfirmReply(y), "yes", `'${y}' should be yes`);
+    }
+  });
+  test("confirm reply: clean negations are 'no'", () => {
+    for (const n of ["no", "nope", "cancel", "leave it", "don't", "never mind"]) {
+      assert.equal(classifyConfirmReply(n), "no", `'${n}' should be no`);
+    }
+  });
+  test("confirm reply: a correction is 'other' — it must NOT be swallowed as yes/no", () => {
+    // The exact live message that broke the loop — starts with "not" but is a correction.
+    assert.equal(classifyConfirmReply("Not 2 Viennas but only half a Vienna"), "other");
+    assert.equal(classifyConfirmReply("no, make it 3 slices"), "other", "'no, <correction>' is not a bare no");
+    assert.equal(classifyConfirmReply("yes but only one egg"), "other", "'yes but <correction>' is not a bare yes");
   });
 }
 
@@ -3356,6 +3395,29 @@ test("serving-units: +1 slice adds one serving's worth, does not rescale the mea
   const deltaN = 3 - 2;
   const newKcal = 410 + Math.round(deltaN * per.kcal);
   assert.ok(newKcal > 410 && newKcal < 550, `incremental, not a rescale: ${newKcal}`);
+});
+
+// ============================================================
+// effectiveMealLoggedAt — a 4am "dinner" is LAST NIGHT's (2026-07-23 live: a dinner photo at
+// 04:07 was filed under the new day, wrecking the day's numbers).
+// ============================================================
+test("early-hours: a 4am dinner is dated to the previous day", () => {
+  const at = new Date(Date.UTC(2026, 6, 23, 2, 7)); // 04:07 SAST, Thu 23 Jul
+  const eff = effectiveMealLoggedAt(at, "[Photo]", "dinner");
+  assert.equal(sastDayStart(eff).getTime(), sastDayStart(new Date(at.getTime() - 86_400_000)).getTime(), "→ Wed 22");
+  assert.notEqual(sastDayStart(eff).getTime(), sastDayStart(at).getTime(), "not the same day it arrived");
+});
+test("early-hours: daytime logs are never shifted", () => {
+  const lunch = new Date(Date.UTC(2026, 6, 23, 11, 0)); // 13:00 SAST
+  assert.equal(effectiveMealLoggedAt(lunch, "rice and chicken", "lunch").getTime(), lunch.getTime());
+});
+test("early-hours: an explicit 'now'/'today' keeps the small-hours log on today", () => {
+  const at = new Date(Date.UTC(2026, 6, 23, 1, 0)); // 03:00 SAST
+  assert.equal(effectiveMealLoggedAt(at, "having my dinner now", "dinner").getTime(), at.getTime());
+});
+test("early-hours: a genuine 4am breakfast stays on today", () => {
+  const at = new Date(Date.UTC(2026, 6, 23, 2, 0)); // 04:00 SAST
+  assert.equal(effectiveMealLoggedAt(at, "Breakfast before my shift", "breakfast").getTime(), at.getTime());
 });
 
 // ============================================================

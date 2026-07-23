@@ -23,7 +23,7 @@ import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare } from "../utils";
+import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
 import { educationNote, remainingInMeals } from "../education";
@@ -160,6 +160,8 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
 
   const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
   const rawSlice = params.rawMessage.slice(0, 1000);
+  // Small-hours logs belong to the day that just ended (a 4am "dinner" is last night's).
+  const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
   const recentDup = await db.select({ id: mealLogs.id })
     .from(mealLogs)
     .where(and(
@@ -184,7 +186,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
         fatInt,
         items: params.items,
         mealLabel: params.mealLabel,
-        loggedAt: params.loggedAt,
+        loggedAt: effLoggedAt,
       });
       invalidatePatternCache(params.userId);
       invalidateFoodTotalsCache(params.userId);

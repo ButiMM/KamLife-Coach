@@ -49,7 +49,7 @@ import { handleReminderCommand } from "./handlers/reminders-handler";
 import { runCoachBrain } from "./brain/coach-brain";
 import { handleGptBlock } from "./handlers/gpt-block";
 import { runShadowEval, shadowEnabled } from "./understanding/shadow";
-import { runMeaningEngineLive, engineLive } from "./understanding/live";
+import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./understanding/live";
 import { mustStayDeterministic } from "./understanding/action-router";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
@@ -331,6 +331,13 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     }
   }
 
+  // ENGINE CONFIRM RESUME — a parked "reply *yes* to log it" lands here before any handler can
+  // swallow a bare "yes" (2026-07-23 live: the confirm had no landing pad → "yes" looped). A
+  // non-yes/no reply returns null and flows on to normal understanding.
+  if (user.awaitingInputType === "engine_confirm") {
+    const confirmReply = await resumeEngineConfirm({ phone, message, m, user, sourceMessageId, actionsLive: isCoach || isBetaTester });
+    if (confirmReply !== null) return isCoach ? `${confirmReply}\n\n_· 🧠 new engine ·_` : confirmReply;
+  }
   // ---- SUBSCRIPTION GATE — full product requires active subscription, no free tier ----
   // Safety messages (chest pain, crisis, emergency) always bypass.
   // Onboarding is handled before this point and bypasses via onboardingState check.
@@ -1054,22 +1061,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   if (lifecycleResult !== null) return lifecycleResult;
 
 
-  // ---- MODEL BRAIN — the conversation layer, LAST RESORT before the GPT fallback ----
-  // ARCHITECTURE (2026-07-13, completed after tester round 3): the brain used to run
-  // near the FRONT of the pipeline, so every phrasing not explicitly gated was front-run
-  // by the model — improvised workouts, generic meal plans, circular instructions. Now
-  // EVERY deterministic handler outranks it. The brain only ever sees messages no
-  // handler claimed — genuine conversation — and the gates below keep unparsed
-  // transactions (steps/water/weight phrasings the loggers missed) with gpt-block's
-  // pattern-aware fallback instead of the brain.
-  // ---- ENGINE LIVE (Days 31-40 rollout) — genuine conversation to the Meaning Engine ----
-  // Everything on the deterministic rails (sick/injury/pain, logging/payment, workout +
-  // programme delivery) has already been handled above; only conversation reaches here.
-  // Flag-gated (ENGINE_LIVE=on) and fail-open — a null defers to the brain/gpt-block below.
-  // COACH DIAGNOSTIC TAG defined above (front-door inversion). This TAIL is the final
-  // backstop: a message that stayed deterministic (mustStayDeterministic) but that no
-  // Misc/Lifecycle handler actually claimed still gets one last crack at Coach K rather
-  // than falling through to the raw brain.
+  // ---- MODEL BRAIN / ENGINE LIVE — the conversation layer, LAST RESORT before GPT fallback.
+  // Every deterministic handler outranks the brain (2026-07-13): it only sees messages no
+  // handler claimed. This TAIL is the final backstop — a message that stayed deterministic
+  // (mustStayDeterministic) but that no Misc/Lifecycle handler claimed gets one last crack at
+  // Coach K. Flag-gated (ENGINE_LIVE=on), fail-open — a null defers to the brain/gpt-block.
   if (engineLive() && !mediaUrl && !isTransactionReport && !isBareGreeting(m)) {
     const engineReply = await runMeaningEngineLive({ phone, message, m, user, openai, sourceMessageId, actionsLive: isCoach || isBetaTester });
     if (engineReply !== null) return tag(engineReply, "🧠 new engine");
