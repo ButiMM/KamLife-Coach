@@ -50,6 +50,7 @@ import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
 import { itemsFromVisionText } from "../serving-units";
+import { encodePendingFood } from "../food-referent";
 import { recordServiceCost } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
@@ -226,9 +227,8 @@ export async function handleMediaMessage(ctx: {
       let isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
         || (user.awaitingInputType === "steps");
 
-      // ---- IMAGE PRE-CLASSIFIER ----
-      // Runs for: (a) no caption, or (b) caption with no obvious food keywords —
-      // so body photos captioned "Alot of work to be done" still get correctly classified.
+      // IMAGE PRE-CLASSIFIER — runs when no caption / no food keywords, so body photos
+      // captioned "Alot of work to be done" still classify correctly.
       const hasObviousFoodCaption = /\b(ate|had|eat|eating|lunch|dinner|breakfast|meal|food|snack|protein|calories)\b/i.test(message || "");
       let isCollage = false;
       let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
@@ -379,9 +379,7 @@ export async function handleMediaMessage(ctx: {
           const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 35000;
           const acceptableLowCount = explicitStepIntent && extractedSteps >= 100 && extractedSteps < 500;
           if (!visionRejected && !isNaN(extractedSteps) && (looksLikeStepCount || acceptableLowCount)) {
-            // Match the text step logger exactly: same default target (8500, not 10000)
-            // and the same workout-day easing — a screenshot on a training day was being
-            // judged against the raw target while a typed count got the eased one.
+            // Match the text step logger exactly (default 8500 + workout-day easing).
             let workedOutTodayM = false;
             try { workedOutTodayM = (await getTodayWorkoutState(user)).alreadyDoneToday; } catch { /* non-critical */ }
             const { target } = getDailyStepContext(user.stepsTarget || 8500, user.goalType || "fat_loss", workedOutTodayM);
@@ -721,9 +719,7 @@ export async function handleMediaMessage(ctx: {
         }
       }
 
-      // ---- WATER BOTTLE / HYDRATION PHOTO ----
-      // Detect water bottles or glasses before falling through to food vision.
-      // Caption hints: "my water", "water bottle", "how much", "how full"
+      // WATER BOTTLE PHOTO — detect before food vision (captions: "my water", "how full").
       const isWaterCaption = /\b(my water|water bottle|water glass|hydration|how much water|how full|filled|refill|drinking water)\b/i.test(message || "");
       if (isWaterCaption || /^(water|💧)$/i.test((message || "").trim())) {
         try {
@@ -765,9 +761,8 @@ export async function handleMediaMessage(ctx: {
         }
       }
 
-      // ---- FOOD PHOTO ----
-      // An ASKING caption ("can I eat this?") gets a verdict + "reply log it" — NEVER an
-      // auto meal log. isAskingNotReporting is the floor; local phrases the extra belt.
+      // FOOD PHOTO — an ASKING caption ("can I eat this?") gets a verdict + "reply log
+      // it", never an auto meal log.
       const isApprovalCaption = isAskingNotReporting(message || "")
         || /\b(is this ok|is this good|is this fine|can i eat|can i have|should i eat|good or bad|ok for me|okay for me|allowed|this ok|this good|fits? my (goal|diet|plan)|for my goal)\b/i.test(message || "");
       // Number-free delivery for a numbers:low client (prompt omits figures + scrub net).
@@ -826,12 +821,9 @@ export async function handleMediaMessage(ctx: {
       recordServiceCost({ userId: user.id, feature: "vision", costUsd: estimateVisionCostUSD(foodVisionDecision, foodVisionTokens) }); // per-member cost + governor counting
 
       const visionReply = visionResponse.choices[0]?.message?.content?.trim();
-      // If the photo is unreadable or misclassified but the caption names real food,
-      // fall back to logging from the caption. The text pipeline applies its own gates
-      // (questions, future-tense, planning) so re-routing here is safe — no double log.
+      // Unreadable photo + caption naming real food → log from the caption (text pipeline gates apply; no double log).
       const captionHasFood = !!(message && message.trim().length > 1 && scanForSAFoods(message).length > 0);
-      // If the caption is just a meal label ("lunch") with no recognised food, we can't
-      // log from it — but we can ask a targeted question instead of a dead-end "can't read it".
+      // Caption that's just a meal label ("lunch"): ask a targeted question, not a dead-end.
       const mealLabelMatch = message ? message.match(/\b(breakfast|lunch|dinner|supper|snack|brunch)\b/i) : null;
       const mealAsk = mealLabelMatch
         ? `I can't make out the photo clearly — what did you have for ${mealLabelMatch[1].toLowerCase()}? Just type it (e.g. "chicken, rice, veg") and I'll log it.`
@@ -888,9 +880,8 @@ export async function handleMediaMessage(ctx: {
         return mealLabelMatch ? mealAsk : "That photo doesn't look like food to me. Send a photo of your plate or just type what you ate (e.g. \"pap, chicken, spinach\") and I'll log it.";
       }
       if (/^MENU_PHOTO\b/i.test(visionReply)) {
-        // RESTAURANT MENU (2026-07-11, Kam's ask + his manual pattern: "Go, but make
-        // better choices — LEAN meat, veggies, no alcohol"): read the menu and order FOR
-        // them. Decisive picks, one trap to skip, zero-sugar drink line. Never logged.
+        // RESTAURANT MENU (2026-07-11): order FOR them — decisive picks, one trap to
+        // skip, zero-sugar drink. Never logged.
         console.log(`[FOOD_VISION] menu photo detected user=${user.id.slice(-6)}`);
         const menuDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
         const { system: mSys, user: mUser } = buildMenuPickPrompt({ clientName, goal: user.goalType || "fat_loss" });
@@ -1024,6 +1015,19 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
               ? `\n\n✅ *Today allows it:* ~${Math.max(0, remainingToday)} kcal left${itemKcal !== null ? `, this is ~${itemKcal}` : ""}.`
               : `\n\n⚠️ *Today doesn't really allow it:* ${remainingToday <= 0 ? `you're ~${Math.abs(remainingToday)} kcal over already` : `only ~${remainingToday} kcal left${itemKcal !== null ? ` and this is ~${itemKcal}` : ""}`} — save it for tomorrow, or take half.`);
         }
+        // PARK THE REFERENT (2026-07-23: "reply log it" stored nothing — a dead promise).
+        // referent-log.ts resolves "log it" / "3 handfuls of it" against this next turn.
+        try {
+          const refItems = itemsFromVisionText(visionDisplay);
+          const refName = refItems[0]?.name || "that food";
+          const refKcal = parsedItem?.calories ?? refItems.reduce((s, i) => s + i.kcal, 0);
+          const refProt = parsedItem?.protein ?? refItems.reduce((s, i) => s + i.protein, 0);
+          if (refKcal > 0) {
+            const newNotes = encodePendingFood(user.profileNotes, { name: refName, kcal: refKcal, protein: refProt });
+            await db.update(users).set({ profileNotes: newNotes }).where(eq(users.id, user.id));
+            user.profileNotes = newNotes;
+          }
+        } catch (e) { console.warn("[VERDICT] referent park failed (non-fatal):", (e as any)?.message); }
         return `${verdict}${todayLine}\n\n_Eating it? Reply *log it* and I'll count it._`;
       }
 
@@ -1118,12 +1122,10 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
           return dupeReply;
         }
-        // ONE WRITE DOOR (Box 2): commitFoodLog inserts, dedups, updates the day, and
-        // GUARANTEES complete macros (fills carbs/fat from kcal+protein) — so a photo meal
-        // can never zero-drag the card again. CAPTION WINS over the clock for the slot.
+        // ONE WRITE DOOR (Box 2): commitFoodLog dedups + guarantees complete macros;
+        // caption wins over the clock for the slot.
         const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
-        // Structured items parsed from the vision reply — so "my meals" names the foods and a
-        // count-correction ("2 slices not 3") has a real item to scale (2026-07-23).
+        // Structured items from the vision reply — names in "my meals", scalable corrections.
         photoCommit = await commitFoodLog({
           userId: user.id, phone, rawMessage: photoDesc, source: "photo",
           kcalInt: totalPhotoKcal, proteinInt: totalPhotoProt, carbsInt: 0, fatInt: 0,
@@ -1501,9 +1503,8 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       return ack;
     }
 
-    // FORM CHECK video — extract frames and actually analyse the movement, then reply
-    // with 1-2 plain fixes (2026-07-09: used to refuse video outright). Async so the
-    // webhook stays fast; the breakdown lands as a follow-up, same pattern as the others.
+    // FORM CHECK video — extract frames, analyse, reply with 1-2 plain fixes. Async so
+    // the webhook stays fast; breakdown lands as a follow-up.
     const exerciseName = extractFormExercise(message);
     const clientNameVid = user.name || "";
     (async () => {

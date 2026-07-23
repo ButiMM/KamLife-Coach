@@ -347,6 +347,14 @@ export async function handleFoodContext(ctx: {
   // mindset/deep-support path. The person needs to be heard first; they can log later. ----
   if (looksLikeDeepEmotionalShare(message)) return null;
 
+  // PENDING REFERENT — "log it" / "had 3 handfuls of it" after a verdict resolves against
+  // the parked food (referent-log.ts), BEFORE the scanner can dead-end (2026-07-23 live).
+  if (!classifierQuestion) {
+    const { tryLogReferent } = await import("./referent-log");
+    const refDone = await tryLogReferent({ phone, message, user });
+    if (refDone) return refDone;
+  }
+
   // ---- BOT MISSED A MEAL — "you missed a meal", "you didn't log that", "you forgot my lunch" ----
   // Must be caught BEFORE the correction detector which would re-route "you missed a meal" as food
   const isBotMissedMeal = /\b(you (missed|forgot|skipped|left out|didn.?t (log|count|track|record))|bot (missed|forgot)|you never logged|didn.?t log (my|the|that|a))\b/i.test(m);
@@ -676,11 +684,8 @@ export async function handleFoodContext(ctx: {
     /\b(going to|went to|was at|ate at|ordered from|getting from|pick up from|buying from|takeaway from|eat(ing)? at|lunch at|dinner at|breakfast at|stop(ped)? at|from (nandos|kfc|steers|wimpy|debonairs|mcdonalds|mcdonald|chicken licken|ocean basket)|ate (some|their|the)|had (some|their|the))\b/i.test(m)
     || (/\b(nandos|kfc|steers|wimpy|debonairs|mcdonalds|chicken licken|ocean basket)\b/i.test(m)
         && /\b(today|for lunch|for dinner|for supper|for breakfast|just|tonight|this morning|yesterday|after work|on the way)\b/i.test(m));
-  // PAST-TENSE consumption = LOG IT, don't lecture. "I had 4 pieces of KFC with pap"
-  // wants the meal counted (KFC + pap are both in foods.ts, quantity-scaled) — giving
-  // ordering advice silently dropped ~800 kcal of chicken and infuriated the tester
-  // (prod, 2026-07-03). The guide is for PLANNING/asking ("going to KFC", "what to
-  // order"), never for a meal already eaten.
+  // PAST-TENSE consumption = LOG IT, don't lecture (prod 2026-07-03: ordering advice
+  // silently dropped ~800 kcal). The guide is only for PLANNING/asking.
   const atePastTakeaway = /\b(i had|i ate|i.?ve had|i just (had|ate)|just had|just ate|had \d+|ate \d+|my (lunch|dinner|breakfast|supper|meal) (is|was)|for (lunch|dinner|breakfast|supper) i had|ordered and ate|already (had|ate))\b/i.test(m);
   if (eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration && !atePastTakeaway) {
     const goal = user.goalType || "fat_loss";
@@ -1195,14 +1200,9 @@ export async function handleFoodContext(ctx: {
 
       const scannerLoggedAt = parseMealDate(message);
       const scannerIsRetro = isRetroactiveMeal(message);
-      // Carbs/fat per food: take the LOWER of two estimates.
-      //  • dry estimate  = per-100g × portion grams — overcounts cooked staples
-      //    (rice/pasta/lentils per-100g is dry weight, the portion is cooked: 3-4× too high)
-      //  • ratio estimate = portion calories × that macro's energy share — overcounts
-      //    alcohol (beer/wine calories are ethanol, not in 4P+4C+9F)
-      // The two error modes never hit the same food, so min() yields the right value
-      // for both. These totals feed the coach's "authoritative" daily macros (gpt.ts),
-      // so an inflated carb count was making the coach wrongly tell clients to cut staples.
+      // Carbs/fat per food: LOWER of the dry estimate (per-100g x grams — overcounts
+      // cooked staples) and the ratio estimate (energy share — overcounts alcohol).
+      // The error modes never hit the same food, so min() is right for both.
       const macroEnergy = (f: any) => 4 * (f.proteinPer100g || 0) + 4 * (f.carbsPer100g || 0) + 9 * (f.fatPer100g || 0);
       const totalCarbs = Math.round(allAdjustedFoods.reduce((s, f: any) => {
         const grams = (f.typicalPortionGrams || 100) * (f.quantity || 1);
@@ -1371,10 +1371,8 @@ export async function handleFoodContext(ctx: {
     // Up to 22 words is safe here: the GPT extractor self-filters non-food (only logs when it
     // confirms is_food), so longer run-on voice-note meals get a shot without false logs.
     && m.split(/\s+/).filter(Boolean).length <= 22;
-  // isFuturePlanning ("going to have 2L water", "I'll have chicken later") must never hit the
-  // GPT food extractor — the client hasn't eaten yet, so we'd generate a clarify-food reply
-  // for a water-planning or meal-planning message. The water handler already skips these correctly;
-  // without this guard the GPT path asks "I didn't catch what food that was."
+  // isFuturePlanning must never hit the GPT food extractor — not eaten yet; without this
+  // the GPT path asks "I didn't catch what food that was" about a plan.
   // bareMealTimeReference: "had breakfast" / "lunch" / "just had my dinner" — a meal-TIME word
   // with no actual food. The GPT extractor would FABRICATE a specific meal (e.g. "McDonald's Big
   // Breakfast") from it. Don't call it — let the coach ask what they actually ate.

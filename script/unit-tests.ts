@@ -26,6 +26,7 @@ import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
 import { foodMatchesText, foodMatchTerms, singularFood, perServingEstimate, itemsFromVisionText } from "../server/serving-units";
+import { encodePendingFood, readPendingFood, clearPendingFood, parseReferentReply } from "../server/food-referent";
 import { foldLedgerRows, freshTodayWater, type LedgerRow } from "../server/day-ledger-core";
 import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -3431,6 +3432,34 @@ test("vision items: TOTAL line and prose are skipped, empty text is safe", () =>
 test("vision items: parsed items are findable by a correction ('slices' matches Toast)", () => {
   const items = itemsFromVisionText("Toast (~2 slices): 150 kcal, 6g protein");
   assert.ok(items.length === 1 && foodMatchesText("slices", items[0].name), "correction can now target the item");
+});
+
+// ============================================================
+// FOOD REFERENT — "reply log it" must not be a dead promise (2026-07-23 live: verdict on
+// nuts → "I just had 3 handfuls of it" → "I didn't catch what food that was").
+// ============================================================
+test("referent: encode → read → clear round-trip through profileNotes", () => {
+  const notes = encodePendingFood("sick_until:2026-07-20", { name: "Mixed nuts", kcal: 200, protein: 7 });
+  const read = readPendingFood(notes);
+  assert.ok(read && read.name === "Mixed nuts" && read.kcal === 200 && read.protein === 7, JSON.stringify(read));
+  const cleared = clearPendingFood(notes);
+  assert.ok(!cleared.includes("pending_food"), "cleared");
+  assert.ok(cleared.includes("sick_until:2026-07-20"), "other notes survive");
+});
+test("referent: a stale referent (>6h) reads as null", () => {
+  const notes = encodePendingFood("", { name: "Nuts", kcal: 200, protein: 7, at: Date.now() - 7 * 3_600_000 });
+  assert.equal(readPendingFood(notes), null);
+});
+test("referent: the live message '3 handfuls of it' resolves to 3 servings", () => {
+  assert.deepEqual(parseReferentReply("I just had 3 handfuls of it"), { mult: 3 });
+  assert.deepEqual(parseReferentReply("log it"), { mult: 1 });
+  assert.deepEqual(parseReferentReply("had half of it"), { mult: 0.5 });
+  assert.deepEqual(parseReferentReply("ate some of it"), { mult: 0.5 });
+});
+test("referent: a real food message never resolves as a referent", () => {
+  assert.equal(parseReferentReply("I had chicken and rice"), null);
+  assert.equal(parseReferentReply("2 eggs and toast"), null);
+  assert.equal(parseReferentReply("what should I eat tonight?"), null);
 });
 
 // ============================================================
