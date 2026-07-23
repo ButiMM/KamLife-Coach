@@ -290,6 +290,19 @@ const CASES: Case[] = [
   { name: "takeaway: planning 'what should I order at KFC' STILL gets the guide", msg: "Going to KFC for lunch, what should I order?",
     expect: [/Coach K Pick|Streetwise|2 pieces original/i] },
 
+  // ── GAINS-FEAR / HEALTH QUICK-FIX (2026-07-23, Kam's churn buckets) ─────
+  { name: "gains-fear: 'I don't want to get lean, I'll lose my gains' gets the cut-first truth, not a compromise", msg: "I don't want to get lean, last time I did a deficit I lost all my gains",
+    expect: [/do not lose your muscle|protects it|water and glycogen/i, /8.12 weeks|lean phase/i],
+    reject: [/Food logged|kcal \| ~?\d+g protein_/i] },
+  { name: "gains-fear: 'scared of the deficit' lands the same truth", msg: "I'm scared of cutting because I'm worried about losing my muscle",
+    expect: [/do not lose your muscle|water and glycogen|heavy/i] },
+  { name: "gains-fear: 'I lost 2kg' is a WIN, never the gains-fear lecture", msg: "I lost 2kg this week",
+    reject: [/water and glycogen|lean phase/i] },
+  { name: "health: 'will losing weight fix my blood pressure' gets the honest 12-week timeline", msg: "Will losing weight fix my blood pressure?",
+    expect: [/12.week|steady project|5.10%/i, /doctor/i] },
+  { name: "health: 'my sugar is high' alone (no fix-ask) does not get the timeline lecture", msg: "my sugar levels are high today",
+    reject: [/5.10% of your body weight/i] },
+
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",
     expect: [/kcal|calorie/i, /1[,\s.]?800|target/i] },

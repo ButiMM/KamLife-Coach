@@ -76,7 +76,9 @@ export async function handleAdviceCommands(ctx: { message: string; m: string; us
   }
 
   // ---- FOODS TO AVOID / LIMIT ----
-  const isFoodsToAvoidQ = /\b(what.*avoid|what.*not.*eat|foods?.*cut|foods?.*limit|foods?.*avoid|avoid.*foods?|what.*skip|bad.*foods?|worst.*foods?|should.*avoid|cut.*out|what.*hurting|what.*killing|killing.*results|what.*blocking|what.*slowing|bad for.*loss|bad for.*gain|what (not|never) (to )?eat)\b/i.test(m);
+  // "cut.*out" was unanchored — it hijacked "scared of CUTting because I'm worried abOUT
+  // losing my muscle" (2026-07-23). Anchored to the actual phrase "cut(ting) out".
+  const isFoodsToAvoidQ = /\b(what.*avoid|what.*not.*eat|foods?.*cut|foods?.*limit|foods?.*avoid|avoid.*foods?|what.*skip|bad.*foods?|worst.*foods?|should.*avoid|cut(?:ting)?\s+out|what.*hurting|what.*killing|killing.*results|what.*blocking|what.*slowing|bad for.*loss|bad for.*gain|what (not|never) (to )?eat)\b/i.test(m);
   if (process.env.ENGINE_LIVE !== "on" && isFoodsToAvoidQ) {
     const goal = user.goalType || "fat_loss";
     let avoidReply = "";
@@ -351,6 +353,34 @@ export async function handleAdviceCommands(ctx: { message: string; m: string; us
     const bellyReply = `${capName}, the mkhaba — the most common target, and the most frustrating one. Here's the honest version:\n\n*You cannot spot-reduce belly fat.* No amount of sit-ups or crunches removes fat from a specific area — that's not how the body burns fat. Fat leaves from everywhere when you're in a calorie deficit, and the belly is usually the *last* area to go because that's where your body stores it last.\n\n*What actually shrinks it:*\n✅ Calorie deficit — eating less than you burn\n✅ High protein — preserves muscle while fat is lost\n✅ Steps — walking is the single most effective belly fat activity\n✅ Sleep — poor sleep raises cortisol, which stores fat specifically in the belly\n\n*What doesn't:*\n❌ Sit-ups (build abs under the fat, don't remove the fat)\n❌ Green tea, detoxes, waist trainers\n\n${goal === "fat_loss" || goal === "recomposition" ? "The good news: you're already on the right programme for this. Hit your calorie target, walk your steps, and the mkhaba goes — it just takes the full 3 months to become visible." : "For your muscle gain goal, eating a small surplus means the mkhaba won't grow — and once you build muscle, your metabolism burns more fat at rest. Recomp mode handles this well."}\n\nKeep logging. The belly is the last place it shows up and the last place it leaves — but it does leave.`;
     await logChat(user.id, message, bellyReply, "BELLY_FAT");
     return bellyReply;
+  }
+
+  // ---- GAINS-FEAR / "I don't want to get lean" — the intermediate myth-victim ----
+  // (2026-07-23, Kam: intermediates at high body fat refuse the deficit because "last time
+  // I lost all my gains" — social media lied to them; they leave when the truth has no soft
+  // landing. Meet the fear with respect, hold the cut-first line, leave the door open.)
+  const isGainsFear =
+    (/\b(los(?:e|ing|t)\s+(?:my\s+|all\s+(?:my\s+)?)?(?:gains|muscle|size))\b/i.test(m)
+      && /\b(deficit|cut(?:ting)?|lean(?:ing)?(?:\s+out)?|diet(?:ing)?|drop(?:ping)?\s+(?:weight|fat)|scared|afraid|worried|don'?t want)\b/i.test(m))
+    || /\b(?:don'?t|do not|won'?t|not)\s+want(?:\s+to)?\s+(?:get|be|go)\s+(?:lean|small(?:er)?|skinny)\b/i.test(m)
+    || /\b(?:scared|afraid|worried)\s+(?:of\s+|about\s+)?(?:the\s+)?(?:deficit|cutting|getting\s+lean|losing\s+(?:my\s+)?(?:muscle|gains))\b/i.test(m);
+  if (process.env.ENGINE_LIVE !== "on" && isGainsFear) {
+    const gainsReply = `${capName}, I hear you — and this fear is the most common one serious trainers carry. Social media planted it. Here's the truth:\n\n*In a proper deficit you do not lose your muscle.* High protein + heavy lifting protects it — what you lose is the fat covering it. What you "lost" last time was water and glycogen: muscles look flatter within days of dieting and fill straight back up when you eat normally. That, or it was a crash diet with no lifting — which is not what we do.\n\n*The order matters:*\n1️⃣ Lean phase — 8–12 weeks. Deficit, protein high, lifting stays HEAVY.\n2️⃣ Then rebuild — glutes, hamstrings, back, shoulders — on a frame where you can actually see them grow.\n\nYou cannot build a visible physique under fat the body keeps feeding. The stomach you mentioned is fat, not gains — and it only goes one way: the deficit.\n\nEverything you're afraid of losing comes back bigger, on a leaner body. That's the whole plan. In or out, I'll coach you either way — but I won't pretend there's a version where the stomach goes and the deficit doesn't happen.`;
+    await logChat(user.id, message, gainsReply, "GAINS_FEAR");
+    return gainsReply;
+  }
+
+  // ---- HEALTH QUICK-FIX EXPECTATION — "will losing weight fix my BP/sugar fast?" ----
+  // (2026-07-23, Kam: clients with health problems expect a two-week cure, quit when the
+  // miracle doesn't come. Honest timeline up front keeps them — or filters them on day one.)
+  const isHealthQuickFix =
+    /\b(blood\s*pressure|bp|diabetes|diabetic|sugar\s+(?:is|levels?|problem)|cholesterol|knees?\s+(?:pain|hurt|problem))\b/i.test(m)
+    && /\b(fix|cure|heal|sort(?:\s+out)?|go\s+away|reverse|help)\b/i.test(m)
+    && /\b(weight|fat|slim|lose|losing|kg)\b/i.test(m);
+  if (process.env.ENGINE_LIVE !== "on" && isHealthQuickFix) {
+    const healthReply = `${capName}, straight answer: *yes, losing weight genuinely improves this* — blood pressure, sugar control, joint load all respond to fat loss. Doctors see it every day.\n\nBut I owe you the honest timeline: the real improvements show up after roughly *5–10% of your body weight* comes off and stays off — that's a *12-week-plus steady project*, not a two-week fix. Anyone promising faster is selling something.\n\nWhat you'll notice early (weeks 1–3): better energy, better sleep, clothes easing. The clinic numbers follow the consistency.\n\nTwo rules while we work:\n• Keep seeing your doctor — medication decisions stay with them, always.\n• Our lane: food logged, steps walked, strength trained — every day, boring, effective.\n\nIf you're in for the real timeline, I'm in with you the whole way.`;
+    await logChat(user.id, message, healthReply, "HEALTH_QUICK_FIX");
+    return healthReply;
   }
 
   // ---- CRIME / SAFETY WALKING OBJECTION ----
