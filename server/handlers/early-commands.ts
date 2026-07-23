@@ -1,5 +1,6 @@
 import { db } from "../db";
 import { dailyMacroCardMarker } from "../macro-card-attach";
+import { whichMacroAsked, macroStatusReply } from "../macro-status";
 import { reportCardMarker } from "../report-card";
 import { users, workoutLogs, chatHistory, mealLogs, stepLogs } from "../../shared/schema";
 import { eq, and, gte, desc, count, sql } from "drizzle-orm";
@@ -123,6 +124,22 @@ export async function handleEarlyCommands(ctx: {
       : `${first}nothing to report for the ${period} yet — log a few meals and workouts and your ${period} scorecard will fill up. 💪`;
     await logChat(user.id, message, reply.replace(/\s*\[MEDIA:[^\]]+\]/g, ""), isMonth ? "MONTHLY_REPORT" : "WEEKLY_REPORT");
     return reply;
+  }
+
+  // MACRO STATUS — "how are my fats looking? is it bad?" is a NUMBERS question and must be
+  // answered from the card's own rows, never the model (2026-07-23 live: card said Fat 88/86g
+  // OVER, engine said "~100g, within a reasonable range" — wrong number AND wrong verdict).
+  {
+    const which = whichMacroAsked(m);
+    if (which) {
+      const { todayRows } = await import("../macro-card-attach");
+      const t = await todayRows(user).catch(() => null);
+      if (t) {
+        const reply = macroStatusReply(t.rows as any, which, user.name?.split(" ")[0]);
+        await logChat(user.id, message, reply, "MACRO_STATUS");
+        return reply;
+      }
+    }
   }
 
   if (

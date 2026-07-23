@@ -46,7 +46,7 @@ type Row = { label: string; current: number; target: number; unit: string; overI
 // cut) so the card reddens them; protein (and calories on a bulk) never red — more is fine.
 // includeWater adds today's water as a final row — the DAILY scorecard shows it (founder:
 // "add total water to the daily scorecard"), the per-meal card stays the 4 macros.
-async function todayRows(user: any, includeWater = false, forDate?: Date): Promise<{ rows: Row[]; isBulk: boolean } | null> {
+export async function todayRows(user: any, includeWater = false, forDate?: Date): Promise<{ rows: Row[]; isBulk: boolean } | null> {
   const profile = getGoalProfile(user?.goalType);
   if (!profile.usesMacros) return null; // wellness → no card
   const calTarget = Number(user?.calorieTarget) || 0;

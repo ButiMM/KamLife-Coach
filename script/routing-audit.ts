@@ -303,6 +303,15 @@ const CASES: Case[] = [
   { name: "health: 'my sugar is high' alone (no fix-ask) does not get the timeline lecture", msg: "my sugar levels are high today",
     reject: [/5.10% of your body weight/i] },
 
+  // ── MACRO STATUS (2026-07-23: engine freestyled "~100g, reasonable" vs card's 88/86g) ──
+  { name: "macro-status: 'How are my fats looking for the day? Is it bad?' answers from the ledger, deterministically", msg: "How are my fats looking for the day? Is it bad?",
+    expect: [/Fat: \d+g of \d+g/i],
+    reject: [/reasonable range|within a/i] },
+  { name: "macro-status: 'how are my macros today' gives the full rundown", msg: "how are my macros today",
+    expect: [/Calories/i, /Protein/i, /Carbs/i, /Fat/i] },
+  { name: "macro-status: 'how much protein in eggs' stays a food question, never a status dump", msg: "how much protein in eggs",
+    reject: [/Protein: \d+g of \d+g/i] },
+
   // ── TOTALS / PROGRESS ───────────────────────────────────────────────────
   { name: "totals: today's calories", msg: "today's calories",
     expect: [/kcal|calorie/i, /1[,\s.]?800|target/i] },

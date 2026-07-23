@@ -27,6 +27,7 @@ import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink,
 import { estimateCarbsFat } from "../server/macro-estimate";
 import { foodMatchesText, foodMatchTerms, singularFood, perServingEstimate, itemsFromVisionText } from "../server/serving-units";
 import { encodePendingFood, readPendingFood, clearPendingFood, parseReferentReply } from "../server/food-referent";
+import { whichMacroAsked, macroStatusReply } from "../server/macro-status";
 import { foldLedgerRows, freshTodayWater, type LedgerRow } from "../server/day-ledger-core";
 import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -3460,6 +3461,41 @@ test("referent: a real food message never resolves as a referent", () => {
   assert.equal(parseReferentReply("I had chicken and rice"), null);
   assert.equal(parseReferentReply("2 eggs and toast"), null);
   assert.equal(parseReferentReply("what should I eat tonight?"), null);
+});
+
+// ============================================================
+// MACRO STATUS — "how are my fats looking?" is answered from the card's own rows (2026-07-23
+// live: card said Fat 88/86g OVER, the engine said "~100g, within a reasonable range").
+// ============================================================
+const msRows = [
+  { label: "Calories", current: 2540, target: 2862, unit: "", overIsBad: false },
+  { label: "Protein", current: 148, target: 185, unit: "g", overIsBad: false },
+  { label: "Carbs", current: 285, target: 337, unit: "g", overIsBad: true },
+  { label: "Fat", current: 88, target: 86, unit: "g", overIsBad: true },
+];
+test("macro status: the live question routes — 'How are my fats looking for the day? Is it bad?'", () => {
+  assert.equal(whichMacroAsked("How are my fats looking for the day? Is it bad?"), "Fat");
+  assert.equal(whichMacroAsked("am I over on carbs today?"), "Carbs");
+  assert.equal(whichMacroAsked("how are my macros today"), "Macros");
+});
+test("macro status: composition/nutrition questions never match", () => {
+  assert.equal(whichMacroAsked("how much protein in eggs"), null);
+  assert.equal(whichMacroAsked("is fat bad for you"), null, "no my/today anchor");
+  assert.equal(whichMacroAsked("what foods are high in protein"), null);
+});
+test("macro status: over-target fat gets the card's number AND an honest warning", () => {
+  const r = macroStatusReply(msRows as any, "Fat", "Kam");
+  assert.ok(r.includes("88g of 86g"), `card's exact numbers: ${r}`);
+  assert.ok(/⚠️.*2g over/.test(r), `honest over verdict: ${r}`);
+  assert.ok(!/reasonable range/i.test(r));
+});
+test("macro status: under-target carbs reads as available, not a warning", () => {
+  const r = macroStatusReply(msRows as any, "Carbs");
+  assert.ok(r.includes("285g of 337g") && r.includes("52g still available"), r);
+});
+test("macro status: 'Macros' gives the full four-line rundown", () => {
+  const r = macroStatusReply(msRows as any, "Macros");
+  for (const label of ["Calories", "Protein", "Carbs", "Fat"]) assert.ok(r.includes(label), label);
 });
 
 // ============================================================
