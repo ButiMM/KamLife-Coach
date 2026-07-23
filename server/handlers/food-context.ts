@@ -17,6 +17,7 @@ import {
   invalidateFoodTotalsCache,
 } from "./food-scanner";
 import { macroCardMarker } from "../macro-card-attach";
+import { estimateCarbsFat } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
@@ -491,9 +492,10 @@ export async function handleFoodContext(ctx: {
         if (vt) {
           const vKcal = parseInt(vt[1].replace(/,/g, ""), 10);
           const vProt = parseInt(vt[2], 10);
+          const vMac = estimateCarbsFat(vKcal, vProt);
           await db.insert(mealLogs).values({
             userId: user.id, rawMessage: "[Photo — checked first, then eaten]", source: "photo",
-            kcalInt: vKcal, proteinInt: vProt, carbsInt: 0, fatInt: 0,
+            kcalInt: vKcal, proteinInt: vProt, carbsInt: vMac.carbs, fatInt: vMac.fat,
             mealLabel: extractMealLabel(message, undefined, { kcal: vKcal, protein: vProt }, user, await getSlotContext(user.id)),
           }).catch(e => console.warn("[verdict log-it]", e));
           invalidatePatternCache(user.id);
@@ -521,14 +523,15 @@ export async function handleFoodContext(ctx: {
             parts.push(`${food.name} — ${food.adjustedCalories} kcal | ${food.adjustedProtein}g protein`);
           }
           await logChat(user.id, lastUnloggedFood.messageIn || "", parts.join("\n"), "FOOD_LOG");
+          const slMac = estimateCarbsFat(totalCals, totalProt2);
           await db.insert(mealLogs).values({
             userId: user.id,
             rawMessage: lastUnloggedFood.messageIn || "",
             source: "text",
             kcalInt: totalCals,
             proteinInt: totalProt2,
-            carbsInt: 0,
-            fatInt: 0,
+            carbsInt: slMac.carbs,
+            fatInt: slMac.fat,
             mealLabel: extractMealLabel(lastUnloggedFood.messageIn || "", undefined, { kcal: totalCals, protein: totalProt2 }, user, await getSlotContext(user.id)),
           }).catch(e => console.warn("[smart-log mealLogs write]", e));
           invalidatePatternCache(user.id);
@@ -915,19 +918,20 @@ export async function handleFoodContext(ctx: {
 
     if (multiPlan.length >= 2) {
       const slotCtxMulti = await getSlotContext(user.id);
-      await Promise.all(multiPlan.map(p =>
-        db.insert(mealLogs).values({
+      await Promise.all(multiPlan.map(p => {
+        const mdMac = estimateCarbsFat(p.kcal, p.prot);
+        return db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: p.raw,
           source: "text",
           kcalInt: p.kcal,
           proteinInt: p.prot,
-          carbsInt: 0,
-          fatInt: 0,
+          carbsInt: mdMac.carbs,
+          fatInt: mdMac.fat,
           loggedAt: p.date,
           mealLabel: extractMealLabel(p.raw, p.date, { kcal: p.kcal, protein: p.prot }, user, slotCtxMulti),
-        }).catch(e => console.warn("[multiday-log insert]", e))
-      ));
+        }).catch(e => console.warn("[multiday-log insert]", e));
+      }));
       const logSummary = multiPlan.map(p => `${p.label}: ${p.foods.map(f => f.name).join(", ")} (${p.kcal} kcal)`).join("\n");
       await logChat(user.id, message, logSummary, "FOOD_LOG");
       invalidatePatternCache(user.id);
@@ -1078,8 +1082,7 @@ export async function handleFoodContext(ctx: {
       }
     }
 
-    // Build the multi-meal breakdown AFTER supplement attribution, so each meal line
-    // includes its GPT-supplemented items (not just the running total).
+    // Build the multi-meal breakdown AFTER supplement attribution (so GPT items are included).
     const mealLines: string[] = [];
     if (isMultiMeal) {
       for (const b of segmentBuckets) {
@@ -1098,11 +1101,8 @@ export async function handleFoodContext(ctx: {
       const proteinTarget = user.proteinTarget || 120;
       const junkFoods = allAdjustedFoods.filter(f => f.category === "junk");
       const goodProteins = allAdjustedFoods.filter(f => f.category === "protein");
-      // JUNK-DOMINANT (2026-07-17 live: "beef bacon burger with fries" read as a clean
-      // protein meal — bacon's protein category cancelled the junk note, so the reply led
-      // with "🟢 Nicely done / Good protein 👍" on a takeaway). Judge the MEAL, not one
-      // item: when junk foods are the majority of the calories it's a treat, whatever else
-      // is on the plate. 0.6 spares "viennas + eggs" (~52%), where the egg genuinely helps.
+      // JUNK-DOMINANT: judge the MEAL, not one item — when junk is the majority of the calories
+      // it's a treat, whatever else is on the plate. 0.6 spares "viennas + eggs" (~52%).
       const mealJunkCals = junkFoods.reduce((s, f) => s + (f.adjustedCalories || 0), 0);
       const junkDominant = totalCals > 0 && mealJunkCals / totalCals >= 0.6;
 

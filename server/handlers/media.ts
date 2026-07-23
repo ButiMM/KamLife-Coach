@@ -48,6 +48,7 @@ import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
+import { estimateCarbsFat } from "../macro-estimate";
 import { recordServiceCost } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
@@ -991,8 +992,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
 
       let totalPhotoKcal = extractKcal(visionReply);
       let totalPhotoProt = extractProt(visionReply);
-      // Strip internal TOTAL: line — used for extraction only, not shown to user
-      const visionDisplay = visionReply.replace(/\nTOTAL:[^\n]*/i, "").trim();
+      // Strip the internal TOTAL: line, and unwrap a leading scare-quoted food name — the model
+      // echoes the caption in quotes ("Skinny hot chocolate" logged!) and it reads as sarcasm.
+      const visionDisplay = visionReply
+        .replace(/\nTOTAL:[^\n]*/i, "")
+        .replace(/^["“”‘’]([^"“”\n]{2,40})["“”‘’]/, "$1")
+        .trim();
 
       // Safety net: food vision returned NOT_FOOD (pre-classifier missed it or wasn't run).
       // Give a helpful response rather than showing "NOT_FOOD" to the user.
@@ -1002,13 +1007,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return notFoodReply;
       }
 
-      // "Can I eat this?" — a PRE-PURCHASE question, not a food report. Give the verdict but NEVER
-      // log (they're deciding, often in the aisle); "log it" later counts it from the TOTAL line.
+      // "Can I eat this?" — a PRE-PURCHASE question: give the verdict but NEVER log; "log it" later counts it.
       if (isApprovalCaption) {
         // Scrub any stray "Logged" claim so it can't contradict the "reply log it" line below.
         const verdict = stripFoodLoggedClaim(visionDisplay);
-        // DETERMINISTIC TODAY-VERDICT (2026-07-16): CODE computes "does today allow this?" from the
-        // parsed TOTAL + real remaining budget, so the education never depends on model manners.
+        // DETERMINISTIC TODAY-VERDICT: CODE computes "does today allow this?" from real budget.
         let todayLine = "";
         const parsedItem = parseFoodLogTotalsFromMessageOut(visionReply || visionDisplay);
         if (typeof remainingToday === "number") {
@@ -1102,30 +1105,29 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoLoggedAt = parseMealDate(message || "");
       const photoIsRetro = isRetroactiveMeal(message || "");
       if (totalPhotoKcal > 0 || totalPhotoProt > 0) {
-        // kcal-based dedup stays banned (different meals share totals; deliveries deduped
-        // upstream). Readable description: caption wins, else vision's first real line.
+        // Readable description: caption wins, else vision's first real line. (kcal dedup banned.)
         const photoDesc = (message && message.trim().length > 2 ? message.trim().slice(0, 110) : "")
           || (visionDisplay.split("\n").find(l => l.trim().length > 5) || "").replace(/[*_•]/g, " ").replace(/\s+/g, " ").trim().slice(0, 110)
           || "[Photo]";
-        // NAME-overlap duplicate guard (2026-07-16): photo of a meal ALREADY logged today
-        // by text/voice must not double-log — ask, don't silently inflate the day.
+        // NAME-overlap dupe guard: a photo of a meal ALREADY logged today must not double-log.
         const dupe = await findDuplicateMealToday(user.id, photoDesc);
         if (dupe) {
           const dupeReply = `📸 That looks like the *${dupe.desc}* you already logged today — I have NOT logged it again, your totals are safe.\n\nIf this is a second helping, say *"same as ${dupe.slot}"* and I'll log it properly.`;
           await logChat(user.id, "[Food Photo — duplicate held]", dupeReply, "FOOD_PHOTO_DUPE");
           return dupeReply;
         }
+        // Vision gives kcal + protein but not carbs/fat — estimate so the card isn't zero-dragged.
+        const photoMacros = estimateCarbsFat(totalPhotoKcal, totalPhotoProt);
         await db.insert(mealLogs).values({
           userId: user.id,
           rawMessage: photoDesc,
           source: "photo",
           kcalInt: totalPhotoKcal,
           proteinInt: totalPhotoProt,
-          carbsInt: 0,
-          fatInt: 0,
+          carbsInt: photoMacros.carbs,
+          fatInt: photoMacros.fat,
           loggedAt: photoLoggedAt,
-          // CAPTION WINS over the clock (2026-07-14, batch-loggers): "Breakfast" captioned
-          // at 1pm stays breakfast — client's word, then snack rule, clock last.
+          // CAPTION WINS over the clock: "Breakfast" captioned at 1pm stays breakfast.
           mealLabel: extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt),
         }).catch(e => console.warn("[photo mealLogs write]", e));
         invalidateFoodTotalsCache(user.id);
@@ -1176,7 +1178,6 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       console.log(`[MEDIA][${mediaTrace}] photo_ok total_ms=${photoTotalMs} retro=${photoIsRetro}`);
       await logMediaSuccess(user.id, "photo", photoTotalMs);
       const photoReplyRaw = `${visionDisplay}${extraSection}${multiPhotoNote}${retroNote}${photoCoachNudge}${photoPattern ? "\n\n" + photoPattern : ""}${photoDay || ""}${photoDailyTotal}`;
-      // numbers:low → scrub leaked figures; then the once-only first-win celebration.
       const photoReply = photoNumbersLow ? stripNumbersFromProse(photoReplyRaw) : photoReplyRaw;
       // BRANDED MACRO CARD on the PHOTO log too (2026-07-22 live: photo-logged drink missed it). Same contract as text; title = FOODS logged, not the model's preamble.
       const cardTitle = mealTitleFromReply(visionDisplay);
@@ -1187,8 +1188,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const photoFailMs = Date.now() - mediaFlowStart;
       console.error(`[MEDIA][${mediaTrace}] vision_error ms=${photoFailMs}:`, err);
       await logMediaFailure(user.id, "vision", err, photoFailMs);
-      // Only steer them to "what you ate" if the caption was actually about food. A gym
-      // machine or step screenshot that fails here must never get a food error.
+      // Only steer to "what you ate" if the caption was about food — a gym/step photo must not.
       const hadFoodContext = !!(message && message.trim() && scanForSAFoods(message).length > 0);
       return hadFoodContext
         ? "Eish, I cannot read that photo right now. Tell me what you ate in text — 'chicken and sweet potato' — and I will give you the full breakdown."

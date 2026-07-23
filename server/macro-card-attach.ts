@@ -88,7 +88,7 @@ export function mealTitleFromReply(text: string): string {
   for (const raw of (text || "").split("\n")) {
     const m = raw.match(/^\s*[•·\-\*]\s*(.+)/);           // bulleted item line
     if (!m) continue;
-    const name = m[1].split(/[(:]/)[0].replace(/[*_`#]/g, "").replace(/^\d+\s*x\s*/i, "").trim();
+    const name = stripWrapQuotes(m[1].split(/[(:]/)[0].replace(/[*_`#]/g, "").replace(/^\d+\s*x\s*/i, "").trim());
     if (name && name.length >= 2 && name.length <= 40 && !/^\d/.test(name)) names.push(name);
     if (names.length >= 3) break;
   }
@@ -100,7 +100,14 @@ export function mealTitleFromReply(text: string): string {
     .replace(/^\s*(this is|that'?s|it'?s|here'?s|i (?:can )?see|looks like|got it)[,:]?\s*/i, "")
     .replace(/^(a|an|the)\s+/i, "")                                               // leading article
     .replace(/\blogged\b.*$/i, "").replace(/[,:]\s*$/, "").trim().slice(0, 46);
-  return cleaned || "Meal";
+  return stripWrapQuotes(cleaned) || "Meal";
+}
+
+// Strip wrapping quote marks (straight or curly) from a food name — the vision model likes
+// to echo the caption in scare-quotes ("Skinny hot chocolate"), which read as sarcasm on
+// the card (2026-07-22, founder: "come on man"). Inner apostrophes (McDonald's) are kept.
+function stripWrapQuotes(s: string): string {
+  return (s || "").replace(/^["'“”‘’]+\s*/, "").replace(/\s*["'“”‘’]+$/, "").trim();
 }
 
 // PLAIN-LANGUAGE COACHING on the card (2026-07-22, founder: the card must TEACH, and it must

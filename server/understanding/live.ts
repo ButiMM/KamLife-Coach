@@ -164,6 +164,28 @@ export async function runMeaningEngineLive(ctx: {
     // THE INVERSION — Coach K decided on an action. Validate happened in the engine;
     // here we execute it (dry-run in shadow) and, in `on` mode, let the deterministic
     // executor's reply win. Fail-open: any miss falls back to the conversational reply.
+    // DESTRUCTIVE-ACTION BOUNCER (2026-07-22, live disaster: "No fix it. Recalculate everything"
+    // → the model emitted REMOVE_LAST_MEAL and silently DELETED a meal, dropping the day from
+    // 2526 → 1971 kcal). A delete may ONLY run when the client's ACTUAL words ask to remove
+    // something — never the model's reading of "fix it" / "recalculate" / "that's wrong". If the
+    // words aren't there, veto the write and let the conversational reply stand.
+    const EXPLICIT_REMOVE_RE = /\b(remove|delete|undo|scrap|erase|unlog|take (?:it|that|them|this) out|take out|get rid of|take (?:it|that) off|don'?t log|cancel (?:that|it|the last))\b/i;
+    const destructiveVetoed = result.action?.type === "REMOVE_LAST_MEAL" && !EXPLICIT_REMOVE_RE.test(message);
+    if (destructiveVetoed) {
+      console.warn("[ENGINE_ACTION] VETOED REMOVE_LAST_MEAL — no explicit removal words:", message.slice(0, 60));
+      // Never relay the model's (likely "Removed…") reply — that would be a lie. "Fix it /
+      // recalculate" means: show the honest total from everything logged, delete nothing.
+      const { recomputeTodayFoodTotals } = await import("../handlers/food-scanner");
+      const t = await recomputeTodayFoodTotals(user.id).catch(() => null);
+      const nm = (user?.name || "").split(" ")[0];
+      const hi = nm ? `${nm}, ` : "";
+      const reply = t
+        ? `${hi}nothing removed — I've recounted everything you logged today: *${Math.round(t.calories)} kcal | ${Math.round(t.protein)}g protein*. If one meal is wrong, tell me which and the right amount and I'll fix just that one.`
+        : `${hi}nothing removed. Tell me which meal is wrong and the right amount, and I'll fix just that one.`;
+      await logChat(user.id, message, reply, "REMOVE_VETO").catch(() => {});
+      return reply;
+    }
+
     if (actionMode !== "off" && result.action && result.action.type !== "JUST_REPLY") {
       try {
         // Cohort gate: execute for real only in `on` mode AND when this user is allowed

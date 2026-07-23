@@ -24,6 +24,7 @@ import { buildWeekCard, type WeekCardData } from "../server/week-card";
 import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
+import { estimateCarbsFat } from "../server/macro-estimate";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4840,6 +4841,47 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(slotFromCaptionTime("500ml water"), null);
     assert.equal(slotFromCaptionTime("Lunch time"), null); // no clock — the keyword path handles this
     assert.equal(slotFromCaptionTime(""), null);
+  });
+}
+
+// ============================================================
+// CARB/FAT UNDERCOUNT (2026-07-22, Kam: "I ate WAY more carbs than 107g — check my logs".
+// Photo/vision meals stored carbsInt=0, so the card's Carbs bar was zero-dragged. Estimate
+// carbs/fat from the trusted kcal + protein instead of leaving them at zero.)
+// ============================================================
+{
+  test("estimateCarbsFat: a real photo meal gets realistic carbs/fat, not zero", () => {
+    const e = estimateCarbsFat(548, 34); // the 548 kcal / 34g photo meal that logged 0 carbs
+    assert.ok(e.carbs > 40 && e.carbs < 80, `carbs should be realistic, got ${e.carbs}`);
+    assert.ok(e.fat > 10 && e.fat < 30, `fat should be realistic, got ${e.fat}`);
+  });
+  test("estimateCarbsFat: energy balances (protein + carbs + fat ≈ kcal)", () => {
+    const e = estimateCarbsFat(600, 30);
+    const kcalBack = 30 * 4 + e.carbs * 4 + e.fat * 9;
+    assert.ok(Math.abs(kcalBack - 600) <= 12, `should reconstruct ~kcal, got ${kcalBack}`);
+  });
+  test("estimateCarbsFat: zero/garbage input is safe", () => {
+    assert.deepEqual(estimateCarbsFat(0, 0), { carbs: 0, fat: 0 });
+    assert.deepEqual(estimateCarbsFat(NaN as any, 20), { carbs: 0, fat: 0 });
+  });
+}
+
+// ============================================================
+// DESTRUCTIVE-ACTION BOUNCER (2026-07-22 live disaster: "No fix it. Recalculate everything"
+// → the model deleted a meal, dropping the day 2526 → 1971 kcal). A delete may ONLY run on
+// EXPLICIT removal words. Mirrors EXPLICIT_REMOVE_RE in server/understanding/live.ts.
+// ============================================================
+{
+  const EXPLICIT_REMOVE_RE = /\b(remove|delete|undo|scrap|erase|unlog|take (?:it|that|them|this) out|take out|get rid of|take (?:it|that) off|don'?t log|cancel (?:that|it|the last))\b/i;
+  test("remove-guard: vague fix/recalculate words NEVER authorise a delete", () => {
+    for (const s of ["No fix it. Recalculate everything based on what I reported today", "are those numbers correct?", "that's wrong", "check my meals again", "the carbs are under-reported"]) {
+      assert.ok(!EXPLICIT_REMOVE_RE.test(s), `must NOT delete on: "${s}"`);
+    }
+  });
+  test("remove-guard: explicit removal words DO authorise a delete", () => {
+    for (const s of ["remove the last meal", "delete the rice", "get rid of the duplicates", "take that out", "undo my last log"]) {
+      assert.ok(EXPLICIT_REMOVE_RE.test(s), `must allow delete on: "${s}"`);
+    }
   });
 }
 
