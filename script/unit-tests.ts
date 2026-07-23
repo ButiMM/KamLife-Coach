@@ -26,6 +26,7 @@ import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
 import { foldLedgerRows, type LedgerRow } from "../server/day-ledger-core";
+import { stripDeadPromises, hasDeadPromise } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4917,6 +4918,29 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
   test("day-ledger: empty day is all zeros, no crash", () => {
     assert.deepEqual(foldLedgerRows([]), { kcal: 0, protein: 0, carbs: 0, fat: 0, meals: [] });
+  });
+}
+
+// ============================================================
+// FEELS HUMAN — no robotic dead promises (2026-07-22 live: "Let me check your meals again...
+// One moment!" — a promise the bot can't keep because there's no follow-up message).
+// ============================================================
+{
+  test("reply-hygiene: strips the stall, keeps the real answer", () => {
+    const out = stripDeadPromises("Your total today is 2,100 kcal. Let me check the rest and get back to you.");
+    assert.ok(/2,100 kcal/.test(out), `keeps the answer: ${out}`);
+    assert.ok(!/get back to you/i.test(out), `drops the promise: ${out}`);
+  });
+  test("reply-hygiene: catches the exact live offenders", () => {
+    for (const s of ["One moment!", "Give me a sec.", "I'll get back to you.", "Bear with me.", "Let me look into that and come back."]) {
+      assert.ok(hasDeadPromise(s), `should be flagged: "${s}"`);
+    }
+    assert.equal(stripDeadPromises("I appreciate that. One moment!"), "I appreciate that.");
+  });
+  test("reply-hygiene: real coaching is NOT mistaken for a stall", () => {
+    for (const s of ["Let me break it down for you: 2 eggs is 140 kcal.", "Hold on to your progress — you're doing great.", "Give it a moment to settle after eating."]) {
+      assert.ok(!hasDeadPromise(s), `should be kept: "${s}"`);
+    }
   });
 }
 

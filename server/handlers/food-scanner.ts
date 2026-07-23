@@ -4,6 +4,7 @@ import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote, remainingInMeals, weeklyNetWording } from "../education";
 import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
 import { stepBurnKcal } from "../targets";
+import { stripDeadPromises } from "../reply-hygiene";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
@@ -510,6 +511,11 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
     .replace(/\s*\bYou'?ve got this[.!]*/gi, "")
     .replace(/\s*\bHow does that sound\??/gi, "")
     .trim();
+
+  // DEAD-PROMISE STRIP — the bot has no follow-up channel, so "one moment" / "I'll get back to
+  // you" are lies that read as robotic stalling. Remove them everywhere (every AI reply funnels
+  // through here); if that empties the reply, the empty-reply handler below gives a real answer.
+  trimmed = stripDeadPromises(trimmed);
 
   // CAPABILITY-DISCLAIMER GUARD — the whole product runs on photo/video analysis (progress pics,
   // food photos, form checks, scale screenshots), but the raw model sometimes leaks its generic
