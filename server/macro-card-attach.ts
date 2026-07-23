@@ -53,27 +53,21 @@ async function todayRows(user: any, includeWater = false, forDate?: Date): Promi
   const protTarget = Number(user?.proteinTarget) || 0;
   if (!(calTarget > 0) || !(protTarget > 0)) return null;
   const isBulk = profile.energyStance === "surplus";
-  // Sum the RIGHT day: the meal's day for a retro log, else today.
-  const dayStart = forDate ? sastDayStartOf(forDate) : sastDayStart();
-  const dayEnd = new Date(dayStart.getTime() + 86_400_000);
-  const [sum] = await db.select({
-    kcal: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}),0)::int`,
-    protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}),0)::int`,
-    carbs: sql<number>`COALESCE(SUM(${mealLogs.carbsInt}),0)::int`,
-    fat: sql<number>`COALESCE(SUM(${mealLogs.fatInt}),0)::int`,
-  }).from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)));
+  // ONE SOURCE OF TRUTH: the card reads the SAME day-ledger as the running total and the diary,
+  // so the numbers on the card can never disagree with the text (2026-07-22 rebuild, Box 1).
+  const { getDayLedger } = await import("./day-ledger");
+  const ledger = await getDayLedger(user.id, { forDate, user });
   const fatTarget = Math.max(1, Math.round((calTarget * 0.27) / 9));
   const carbTarget = Math.max(1, Math.round((calTarget - protTarget * 4 - fatTarget * 9) / 4));
   const rows: Row[] = [
-    { label: "Calories", current: sum?.kcal || 0, target: calTarget, unit: "", overIsBad: !isBulk },
-    { label: "Protein", current: sum?.protein || 0, target: protTarget, unit: "g", overIsBad: false },
-    { label: "Carbs", current: sum?.carbs || 0, target: carbTarget, unit: "g", overIsBad: true },
-    { label: "Fat", current: sum?.fat || 0, target: fatTarget, unit: "g", overIsBad: true },
+    { label: "Calories", current: ledger.kcal, target: calTarget, unit: "", overIsBad: !isBulk },
+    { label: "Protein", current: ledger.protein, target: protTarget, unit: "g", overIsBad: false },
+    { label: "Carbs", current: ledger.carbs, target: carbTarget, unit: "g", overIsBad: true },
+    { label: "Fat", current: ledger.fat, target: fatTarget, unit: "g", overIsBad: true },
   ];
   if (includeWater && !forDate) { // water is only tracked for TODAY (no historical litres)
     const wTarget = waterTargetLitres(user?.currentWeight);
-    const wNow = Math.round((parseFloat(String(user?.todayWater || "0")) || 0) * 10) / 10;
-    rows.push({ label: "Water", current: wNow, target: wTarget, unit: "L", overIsBad: false, decimals: 1 });
+    rows.push({ label: "Water", current: ledger.water, target: wTarget, unit: "L", overIsBad: false, decimals: 1 });
   }
   return { rows, isBulk };
 }

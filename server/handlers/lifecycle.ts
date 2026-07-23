@@ -1230,12 +1230,10 @@ export async function handleLifecycle(ctx: {
       return legacyReply;
     }
 
-    let totalCal = 0; let totalProt = 0;
     const mealLines: string[] = [];
     for (const log of structuredLogs) {
       const mCal = log.kcalInt || 0;
       const mProt = log.proteinInt || 0;
-      totalCal += mCal; totalProt += mProt;
       const isPhoto = log.source === "photo";
       if (isPhoto && mCal === 0) {
         mealLines.push(`• Food photo logged — caption needed for calories`);
@@ -1260,6 +1258,12 @@ export async function handleLifecycle(ctx: {
           : `• ${displayName}`);
       }
     }
+    // ONE SOURCE OF TRUTH: the diary's total comes from the day-ledger — the SAME function the
+    // card and the running total read, so "today's meals" can never disagree with them.
+    const { getDayLedger } = await import("../day-ledger");
+    const diaryLedger = await getDayLedger(user.id, { user });
+    const totalCal = diaryLedger.kcal;
+    const totalProt = diaryLedger.protein;
     const calTarget = user.calorieTarget || 1800;
     const protTarget = user.proteinTarget || 120;
     const calRemaining = calTarget - totalCal;

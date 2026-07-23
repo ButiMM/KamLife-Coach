@@ -660,30 +660,25 @@ export async function recomputeTodayFoodTotals(userId: string): Promise<{ calori
 
   const todayStart = sastDayStart();
 
-  const [mealLogSum, legacyLogs] = await Promise.all([
-    db.select({
-      calories: sql<number>`COALESCE(SUM(${mealLogs.kcalInt}), 0)::int`,
-      protein: sql<number>`COALESCE(SUM(${mealLogs.proteinInt}), 0)::int`,
-    }).from(mealLogs).where(and(
-      eq(mealLogs.userId, userId),
-      gte(mealLogs.loggedAt, todayStart),
-    )).then(r => r[0]),
-
-    db.select({
-      messageIn: chatHistory.messageIn,
-      messageOut: chatHistory.messageOut,
-    }).from(chatHistory).where(and(
-      eq(chatHistory.userId, userId),
-      eq(chatHistory.intent, "FOOD_LOG"),
-      gte(chatHistory.createdAt, todayStart),
-    )),
-  ]);
-
-  if (mealLogSum && (mealLogSum.calories > 0 || mealLogSum.protein > 0)) {
-    const result = { calories: mealLogSum.calories || 0, protein: mealLogSum.protein || 0 };
+  // ONE SOURCE OF TRUTH (2026-07-22): the day total comes from the day-ledger, the same
+  // function the card and the diary read — so the running total can never disagree with them.
+  const { getDayLedger } = await import("../day-ledger");
+  const ledger = await getDayLedger(userId);
+  if (ledger.kcal > 0 || ledger.protein > 0) {
+    const result = { calories: ledger.kcal, protein: ledger.protein };
     _foodTotalsCache.set(userId, { ...result, cachedAt: Date.now() });
     return result;
   }
+
+  // Legacy fallback (pre-meal_logs users with only chatHistory FOOD_LOG rows).
+  const legacyLogs = await db.select({
+    messageIn: chatHistory.messageIn,
+    messageOut: chatHistory.messageOut,
+  }).from(chatHistory).where(and(
+    eq(chatHistory.userId, userId),
+    eq(chatHistory.intent, "FOOD_LOG"),
+    gte(chatHistory.createdAt, todayStart),
+  ));
 
   // Fallback: legacy chatHistory scanning (pre-meal_logs users)
   let calories = 0;

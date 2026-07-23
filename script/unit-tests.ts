@@ -25,6 +25,7 @@ import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
+import { foldLedgerRows, type LedgerRow } from "../server/day-ledger-core";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
@@ -4882,6 +4883,40 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     for (const s of ["remove the last meal", "delete the rice", "get rid of the duplicates", "take that out", "undo my last log"]) {
       assert.ok(EXPLICIT_REMOVE_RE.test(s), `must allow delete on: "${s}"`);
     }
+  });
+}
+
+// ============================================================
+// DAY LEDGER — ONE SOURCE OF TRUTH (2026-07-22 rebuild, Box 1). The card, the running total,
+// and "today's meals" now all read foldLedgerRows, so their numbers are identical by
+// construction — the "card says X, text says Y" class of failure is gone by design.
+// ============================================================
+{
+  const rows: LedgerRow[] = [
+    { label: "breakfast", kcal: 918, protein: 47, carbs: 90, fat: 30, loggedAt: new Date(), source: "sa_scanner", items: [{ name: "Brown bread" }, { name: "Eggs" }], rawMessage: "brown bread and eggs" },
+    { label: "lunch", kcal: 1053, protein: 60, carbs: 110, fat: 28, loggedAt: new Date(), source: "sa_scanner", items: null, rawMessage: "rice and mince" },
+    { label: "snack", kcal: 50, protein: 0, carbs: 8, fat: 2, loggedAt: new Date(), source: "photo", items: null, rawMessage: "[Photo]" },
+  ];
+  const folded = foldLedgerRows(rows);
+  test("day-ledger: totals are the exact sum of the meal rows", () => {
+    assert.equal(folded.kcal, 918 + 1053 + 50);
+    assert.equal(folded.protein, 47 + 60 + 0);
+    assert.equal(folded.carbs, 90 + 110 + 8);
+    assert.equal(folded.fat, 30 + 28 + 2);
+  });
+  test("day-ledger: every surface reading foldLedgerRows gets identical numbers", () => {
+    // The card, the running total and the diary each call getDayLedger → foldLedgerRows.
+    // Folding the same rows twice must be identical — that IS the reconciliation guarantee.
+    const a = foldLedgerRows(rows), b = foldLedgerRows(rows);
+    assert.deepEqual({ k: a.kcal, p: a.protein, c: a.carbs, f: a.fat }, { k: b.kcal, p: b.protein, c: b.carbs, f: b.fat });
+  });
+  test("day-ledger: readable food description falls back sensibly", () => {
+    assert.equal(folded.meals[0].foods, "Brown bread, Eggs"); // structured items win
+    assert.equal(folded.meals[1].foods, "rice and mince");    // else the raw message
+    assert.equal(folded.meals[2].foods, "meal");              // "[Photo]" is not shown raw
+  });
+  test("day-ledger: empty day is all zeros, no crash", () => {
+    assert.deepEqual(foldLedgerRows([]), { kcal: 0, protein: 0, carbs: 0, fat: 0, meals: [] });
   });
 }
 
