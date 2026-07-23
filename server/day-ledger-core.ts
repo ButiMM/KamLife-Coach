@@ -21,6 +21,7 @@ export interface DayLedger {
   carbs: number;
   fat: number;
   water: number; // litres — today only
+  steps: number; // the day's step count
   meals: LedgerMeal[];
 }
 
@@ -42,7 +43,7 @@ function foodsOf(items: unknown, raw: string | null): string {
 
 // PURE: fold DB meal rows into the day totals + meal list. Every surface (card, running total,
 // diary) reduces the same rows through this, so their numbers are identical by construction.
-export function foldLedgerRows(rows: LedgerRow[]): Omit<DayLedger, "water"> {
+export function foldLedgerRows(rows: LedgerRow[]): Omit<DayLedger, "water" | "steps"> {
   let kcal = 0, protein = 0, carbs = 0, fat = 0;
   const meals: LedgerMeal[] = [];
   for (const r of rows) {

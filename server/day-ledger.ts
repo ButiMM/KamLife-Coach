@@ -12,8 +12,8 @@
  */
 
 import { db } from "./db";
-import { mealLogs } from "../shared/schema";
-import { and, eq, gte, lt, desc } from "drizzle-orm";
+import { mealLogs, stepLogs } from "../shared/schema";
+import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
 import { sastDayStart } from "./utils";
 import { foldLedgerRows, type DayLedger, type LedgerRow } from "./day-ledger-core";
 
@@ -35,7 +35,12 @@ export async function getDayLedger(userId: string, opts?: { forDate?: Date; user
     .where(and(eq(mealLogs.userId, userId), gte(mealLogs.loggedAt, dayStart), lt(mealLogs.loggedAt, dayEnd)))
     .orderBy(desc(mealLogs.loggedAt));
 
+  const [stepRow] = await db.select({ steps: sql<number>`COALESCE(MAX(${stepLogs.steps}),0)::int` })
+    .from(stepLogs)
+    .where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, dayStart), lt(stepLogs.loggedAt, dayEnd)));
+
   const folded = foldLedgerRows(rows as LedgerRow[]);
   const water = opts?.forDate ? 0 : Math.round((parseFloat(String(opts?.user?.todayWater || "0")) || 0) * 10) / 10;
-  return { ...folded, water };
+  const steps = Number(stepRow?.steps || 0);
+  return { ...folded, water, steps };
 }
