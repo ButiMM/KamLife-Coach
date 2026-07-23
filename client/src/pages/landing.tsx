@@ -242,13 +242,15 @@ function HeroChat() {
   );
 }
 
+// "Sound familiar?" archetypes — honest pain-points the target market recognises, NOT
+// testimonials. No fabricated results; real proof goes here only once the cohort delivers it.
 const PERSONAS = [
-  { initials: "TM", name: "Thabo M.", city: "Soweto, JHB", avatarBg: "#162416", avatarText: ACCENT, quote: "Tried the gym 4 times in 3 years. Always quit by month 2. This is month 7. Down 11kg.", tags: ["YO-YO DIETER", "HOME WORKOUTS", "BUSY DAD"] },
-  { initials: "NP", name: "Nosipho P.", city: "Cape Town", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking. Lost 9kg in 10 weeks eating pap and eggs. Never weighed a single gram of food.", tags: ["HATES MEAL PREP", "FAT LOSS", "NIGHT SHIFT"] },
-  { initials: "KM", name: "Kamogelo M.", city: "Pretoria", avatarBg: "#281616", avatarText: "#FF6B35", quote: "I'm diabetic, 97kg. Coach K built around my meds and budget. Down 14kg in 5 months.", tags: ["DIABETIC", "BUDGET EATING", "RECOMP"] },
-  { initials: "SN", name: "Sipho N.", city: "Durban", avatarBg: "#162818", avatarText: "#22c55e", quote: "Skinny my whole life. Gained 7kg muscle in 4 months eating rice, eggs, and pilchards.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
-  { initials: "LZ", name: "Lerato Z.", city: "Johannesburg", avatarBg: "#221622", avatarText: "#d946ef", quote: "Had a baby 8 months ago. Lost 15kg since starting. No crash diet. Just daily WhatsApp check-ins.", tags: ["POST-PREGNANCY", "FAT LOSS", "HOME MOM"] },
-  { initials: "BK", name: "Bongani K.", city: "Ekurhuleni", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "Night shift, no time, no gym. Lost 8kg in 12 weeks. Coach K figured out my eating windows.", tags: ["NIGHT SHIFT", "RECOMP", "NO GYM"] },
+  { initials: "TM", name: "The one who's quit before", city: "Tried the gym 4 times", avatarBg: "#162416", avatarText: ACCENT, quote: "I always start strong and quit by month 2. I don't need more information — I need someone to keep me going.", tags: ["QUIT BEFORE", "NO ACCOUNTABILITY", "BUSY LIFE"] },
+  { initials: "NP", name: "The one who hates meal prep", city: "Lives on pap and eggs", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking and I don't have time. I need a plan built around real food I actually eat — not chicken and broccoli.", tags: ["HATES MEAL PREP", "NIGHT SHIFT", "SIMPLE FOOD"] },
+  { initials: "KM", name: "The one managing a condition", city: "Diabetic, on a budget", avatarBg: "#281616", avatarText: "#FF6B35", quote: "Every plan I find ignores my meds and my budget. I need one built around my real life, not a generic diet.", tags: ["DIABETIC", "BUDGET EATING", "OVER 40"] },
+  { initials: "SN", name: "The one who wants size", city: "Skinny their whole life", avatarBg: "#162818", avatarText: "#22c55e", quote: "I eat rice, eggs and pilchards. I want to put on real muscle without a fancy gym or expensive supplements.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
+  { initials: "LZ", name: "The one who lost herself", city: "New baby, no time", avatarBg: "#221622", avatarText: "#d946ef", quote: "Since the baby I've had no time and no energy. I don't want a crash diet — I want daily support that fits my life.", tags: ["POST-PREGNANCY", "NO TIME", "AT HOME"] },
+  { initials: "BK", name: "The one with no routine", city: "Night shift, no gym", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "My eating is all over the place with shift work. I need someone to make it simple and keep me honest.", tags: ["NIGHT SHIFT", "NO GYM", "IRREGULAR HOURS"] },
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────────────
@@ -286,7 +288,7 @@ export default function LandingPage() {
             </a>
           ))}
         </div>
-        <WaBtn href={WA_LINK}>Start Free Trial</WaBtn>
+        <WaBtn href={WA_LINK}>Start free on WhatsApp</WaBtn>
       </nav>
 
       {/* ── HERO ── */}
@@ -319,23 +321,25 @@ export default function LandingPage() {
             </div>
 
             <p className="text-white/45 text-base sm:text-lg font-medium mb-4 leading-snug">
-              That belly you've been trying to lose for years?<br />
-              You're not lazy. You just never had daily coaching.
+              That belly you've been trying to lose for years?
             </p>
 
-            <h1 className="text-[clamp(44px,7vw,96px)] font-black uppercase leading-[0.9] tracking-tight mb-8">
-              <span className="block text-white">ONE TRAINER SESSION:</span>
-              <span className="block" style={{ color: "rgba(255,255,255,0.2)" }}>R500.</span>
-              <span className="block" style={{ color: ACCENT }}>COACH K: R199/MONTH.</span>
+            <h1 className="text-[clamp(40px,6.6vw,88px)] font-black uppercase leading-[0.92] tracking-tight mb-8">
+              <span className="block text-white">YOU'RE NOT LAZY.</span>
+              <span className="block" style={{ color: "rgba(255,255,255,0.55)" }}>YOU JUST NEVER HAD</span>
+              <span className="block" style={{ color: ACCENT }}>A COACH.</span>
             </h1>
 
-            <p className="text-lg text-white/55 max-w-lg leading-relaxed mb-10">
-              A whole month of daily coaching costs less than a single PT session.
-              Knows pap, pilchards, braai, and KFC by name. Not a plan you download — a coach that re-tunes your numbers every week as your body changes.
+            <p className="text-lg text-white/60 max-w-lg leading-relaxed mb-4">
+              Your own coach, on WhatsApp — checking in every day, so this time you actually finish. Knows pap, pilchards and braai by name. No gym. Nothing to download.
+            </p>
+
+            <p className="text-base text-white/40 max-w-lg mb-10">
+              One personal-trainer session costs about R500. Coach K is <span className="text-white font-semibold">R199 for the whole month</span> — less than R7 a day.
             </p>
 
             <div className="flex flex-col sm:flex-row gap-3 mb-3">
-              <WaBtn href={WA_LINK} large>Start 7-Day Free Trial</WaBtn>
+              <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
               <a href="#how-it-works"
                 className="inline-flex items-center gap-2 px-8 py-4 rounded-full text-base font-semibold text-white/60 border border-white/12 hover:border-white/25 hover:text-white transition-all">
                 See how it works
@@ -471,7 +475,7 @@ export default function LandingPage() {
         <div className="flex" style={{ animation: "marquee 32s linear infinite", whiteSpace: "nowrap" }}>
           {[0, 1].map(ri => (
             <div key={ri} className="flex shrink-0 items-center">
-              {["No contracts", "Built for South Africa", "100% on WhatsApp", "2,400+ South Africans coached", "4.9/5 average rating", "R199/month", "7-day free trial", "Real-food meal plans", "Cancel anytime"].map(item => (
+              {["No contracts", "Built for South Africa", "100% on WhatsApp", "Real SA food — pap, wors, pilchards", "R199/month", "7-day money-back", "No app to download", "Cancel anytime"].map(item => (
                 <span key={item} className="inline-flex items-center gap-3 px-6 text-sm font-semibold text-white/30">
                   <span className="w-1 h-1 rounded-full shrink-0" style={{ background: ACCENT }} />
                   {item}
@@ -485,25 +489,15 @@ export default function LandingPage() {
       {/* ── RESULTS ── */}
       <section style={{ background: BG, borderBottom: `1px solid ${BORDER}` }} className="py-14 px-6 lg:px-16">
         <div className="max-w-6xl mx-auto">
-          <p className="text-xs font-bold uppercase tracking-[0.25em] text-white/25 text-center mb-8">Real results from real South Africans — no influencers</p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { name: "Zanele M.", city: "Cape Town", result: "−15kg", time: "16 weeks", start: "from 92kg", goal: "FAT LOSS", color: ACCENT },
-              { name: "Lerato K.", city: "Johannesburg", result: "−22kg", time: "6 months", start: "from 108kg", goal: "FAT LOSS", color: ACCENT },
-              { name: "Sipho N.", city: "Durban", result: "+7kg", time: "12 weeks", start: "from 61kg", goal: "MUSCLE", color: "#6B8AFF" },
-              { name: "Bongani T.", city: "Soweto", result: "−11kg", time: "10 weeks", start: "from 89kg", goal: "RECOMP", color: "#22c55e" },
-            ].map(r => (
-              <div key={r.name} style={{ background: CARD, border: `1px solid ${BORDER}` }}
-                className="rounded-2xl p-5 text-center hover:border-white/15 transition-all">
-                <div className="text-5xl font-black mb-1 tabular-nums" style={{ color: r.color }}>{r.result}</div>
-                <div className="text-xs text-white/25 mb-1">{r.time}</div>
-                <div className="text-[10px] text-white/18 mb-3">{r.start}</div>
-                <div className="font-semibold text-sm text-white">{r.name}</div>
-                <div className="text-xs text-white/30">{r.city}</div>
-                <div className="mt-2 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-wider inline-block"
-                  style={{ background: "rgba(255,255,255,0.05)", color: "rgba(255,255,255,0.28)" }}>{r.goal}</div>
-              </div>
-            ))}
+          <p className="text-xs font-bold uppercase tracking-[0.25em] text-center mb-4" style={{ color: ACCENT }}>Founding Members — Now Open</p>
+          <h2 className="text-[clamp(26px,4.4vw,42px)] font-black uppercase tracking-tight leading-[0.95] text-center max-w-3xl mx-auto mb-4">
+            No fake before-and-afters here.<br /><span style={{ color: "rgba(255,255,255,0.4)" }}>Just your own results, coming.</span>
+          </h2>
+          <p className="text-white/45 text-base text-center max-w-xl mx-auto mb-8">
+            We're taking on our first members right now. Real daily coaching, real SA food, and honest results we'll only ever show when they're real. Be one of the first — and help shape the coach that finally works.
+          </p>
+          <div className="flex justify-center">
+            <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
           </div>
         </div>
       </section>
@@ -558,7 +552,7 @@ export default function LandingPage() {
             ))}
           </div>
 
-          <WaBtn href={WA_LINK} large>Start wherever you are — 7 days free</WaBtn>
+          <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
         </div>
       </section>
 
@@ -574,7 +568,7 @@ export default function LandingPage() {
               <span className="block" style={{ color: ACCENT }}>READ THIS.</span>
             </h2>
             <p className="text-white/45 text-lg max-w-xl">
-              Real clients. Real lives. Real South Africa. No gym rats. No influencers.
+              If any of this sounds like you, you're exactly who Coach K is built for. Not gym rats. Not influencers. Real South African life.
             </p>
           </motion.div>
 
@@ -1012,8 +1006,18 @@ export default function LandingPage() {
             <p className="text-white/40 text-lg mb-10 max-w-lg mx-auto">
               A few quick questions on WhatsApp. Programme on Day 1. Coaching every day after that.
             </p>
-            <WaBtn href={WA_LINK} large>Start Coaching on WhatsApp</WaBtn>
+            <WaBtn href={WA_LINK} large>Start free on WhatsApp</WaBtn>
             <p className="text-white/18 text-sm mt-4">7 days free · R199/month · Cancel anytime · No app needed</p>
+
+            {/* Desktop QR — scan with your phone to open WhatsApp (ref=landing for attribution) */}
+            <div className="mt-12 flex flex-col items-center gap-3">
+              <div style={{ background: "#fff", borderRadius: "16px" }} className="p-3 shadow-2xl">
+                <img src="/admin/qr.png?plain=1&ref=landing" alt="Scan to start on WhatsApp"
+                  width={150} height={150} loading="lazy"
+                  style={{ display: "block", width: "150px", height: "150px" }} />
+              </div>
+              <p className="text-white/35 text-xs font-medium tracking-wide">On your computer? Scan with your phone 📱</p>
+            </div>
           </motion.div>
         </div>
       </section>
@@ -1026,7 +1030,7 @@ export default function LandingPage() {
             <div>
               <p className="text-xs font-bold uppercase tracking-widest text-white/25 mb-4">Get Started</p>
               <ul className="space-y-2.5 text-sm text-white/45">
-                <li><a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Start Free Trial</a></li>
+                <li><a href={WA_LINK} target="_blank" rel="noopener noreferrer" className="hover:text-white transition-colors">Start free on WhatsApp</a></li>
                 <li><a href="#how-it-works" className="hover:text-white transition-colors">How It Works</a></li>
                 <li><a href="#features" className="hover:text-white transition-colors">Features</a></li>
                 <li><a href="#pricing" className="hover:text-white transition-colors">Pricing</a></li>
