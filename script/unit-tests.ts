@@ -3478,6 +3478,14 @@ test("macro status: the live question routes — 'How are my fats looking for th
   assert.equal(whichMacroAsked("am I over on carbs today?"), "Carbs");
   assert.equal(whichMacroAsked("how are my macros today"), "Macros");
 });
+// The 15:22/15:24 argument spiral (2026-07-23 screenshots): the client challenged the wrong
+// answer and the engine caved ("indeed 88g, solid number" — still the wrong verdict). Every
+// phrasing in that spiral must route to the SAME deterministic answer — numbers can't be
+// argued into agreement.
+test("macro status: challenge phrasings route deterministically — no sycophancy loop", () => {
+  assert.equal(whichMacroAsked("No my fats are 88 for the day, you are wrong, do better"), "Fat");
+  assert.equal(whichMacroAsked("How can it be good when I'm over my daily limit of fats??"), "Fat");
+});
 test("macro status: composition/nutrition questions never match", () => {
   assert.equal(whichMacroAsked("how much protein in eggs"), null);
   assert.equal(whichMacroAsked("is fat bad for you"), null, "no my/today anchor");
