@@ -14,8 +14,8 @@
 import { db } from "./db";
 import { mealLogs, stepLogs } from "../shared/schema";
 import { and, eq, gte, lt, desc, sql } from "drizzle-orm";
-import { sastDayStart } from "./utils";
-import { foldLedgerRows, type DayLedger, type LedgerRow } from "./day-ledger-core";
+import { sastDayStart, sastToday } from "./utils";
+import { foldLedgerRows, freshTodayWater, type DayLedger, type LedgerRow } from "./day-ledger-core";
 
 export { foldLedgerRows } from "./day-ledger-core";
 export type { DayLedger, LedgerMeal, LedgerRow } from "./day-ledger-core";
@@ -40,7 +40,10 @@ export async function getDayLedger(userId: string, opts?: { forDate?: Date; user
     .where(and(eq(stepLogs.userId, userId), gte(stepLogs.loggedAt, dayStart), lt(stepLogs.loggedAt, dayEnd)));
 
   const folded = foldLedgerRows(rows as LedgerRow[]);
-  const water = opts?.forDate ? 0 : Math.round((parseFloat(String(opts?.user?.todayWater || "0")) || 0) * 10) / 10;
+  // Water shows on the card only if today_water was last reset today — else it's yesterday's
+  // stale litres (2026-07-23, Kam: "it says 2L — I've had no water today"). freshTodayWater is
+  // pure + unit-tested; the guard matches every other surface (client-snapshot, misc-commands).
+  const water = opts?.forDate ? 0 : freshTodayWater(opts?.user?.waterLastResetDate, sastToday(), opts?.user?.todayWater);
   const steps = Number(stepRow?.steps || 0);
   return { ...folded, water, steps };
 }

@@ -25,7 +25,8 @@ import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
-import { foldLedgerRows, type LedgerRow } from "../server/day-ledger-core";
+import { foodMatchesText, foodMatchTerms, singularFood, perServingEstimate } from "../server/serving-units";
+import { foldLedgerRows, freshTodayWater, type LedgerRow } from "../server/day-ledger-core";
 import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
@@ -3310,6 +3311,53 @@ test("qty correction: plain food log never matches", () => {
   assert.equal(parseQuantityCorrection("2 eggs and 3 viennas"), null);
 });
 
+// The live bug (2026-07-23): voice correction "there were 3 slices there, not 2" on a photo
+// meal must parse cleanly ("slices", not "slices there") and NOT dead-end.
+test("qty correction: trailing filler is stripped from the food", () => {
+  const r = parseQuantityCorrection("there were 3 slices there, not 2");
+  assert.ok(r, "should parse");
+  assert.equal(r!.count, 3);
+  assert.equal(r!.oldCount, 2);
+  assert.equal(r!.food, "slices", `food should be 'slices', got '${r!.food}'`);
+});
+
+// ============================================================
+// serving-units — a client names food by its serving unit ("slice" for toast), and photo
+// meals store no per-item macros, so a ±1 count change is answered incrementally.
+// ============================================================
+test("serving-units: singularFood strips trailing s/es", () => {
+  assert.equal(singularFood("slices"), "slice");
+  assert.equal(singularFood("eggs"), "egg");
+  assert.equal(singularFood("viennas"), "vienna");
+});
+
+test("serving-units: 'slice' resolves to bread/toast aliases", () => {
+  const terms = foodMatchTerms("slices");
+  assert.ok(terms.includes("toast"), `terms: ${terms.join(",")}`);
+  assert.ok(terms.includes("bread"), `terms: ${terms.join(",")}`);
+});
+
+test("serving-units: a photo labelled 'Toast, boiled eggs, viennas' matches 'slices'", () => {
+  assert.ok(foodMatchesText("slices", "Toast, boiled eggs, viennas"), "slice should match toast");
+  assert.ok(foodMatchesText("eggs", "Toast, boiled eggs, viennas"), "egg should match by name");
+  assert.ok(!foodMatchesText("rice", "Toast, boiled eggs, viennas"), "unrelated food must not match");
+});
+
+test("serving-units: per-serving estimates exist for common count foods", () => {
+  assert.ok(perServingEstimate("slices")!.kcal > 0, "slice");
+  assert.ok(perServingEstimate("eggs")!.protein > 0, "egg");
+  assert.ok(perServingEstimate("viennas")!.kcal > 0, "vienna");
+  assert.equal(perServingEstimate("teleporter"), null, "unknown food has no portion");
+});
+
+test("serving-units: +1 slice adds one serving's worth, does not rescale the meal", () => {
+  // Meal = 410 kcal / 18g. Client: "3 slices not 2" ⇒ +1 slice (~75 kcal, 3g), NOT ×1.5.
+  const per = perServingEstimate("slices")!;
+  const deltaN = 3 - 2;
+  const newKcal = 410 + Math.round(deltaN * per.kcal);
+  assert.ok(newKcal > 410 && newKcal < 550, `incremental, not a rescale: ${newKcal}`);
+});
+
 // ============================================================
 // energyFrameLine — one energy truth for every model prompt
 // ============================================================
@@ -4918,6 +4966,16 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
   test("day-ledger: empty day is all zeros, no crash", () => {
     assert.deepEqual(foldLedgerRows([]), { kcal: 0, protein: 0, carbs: 0, fat: 0, meals: [] });
+  });
+  // The card showed 2L of water on a day none was drunk (2026-07-23) — today_water held
+  // yesterday's value because it only rolls over when water is NEXT logged.
+  test("day-ledger: water from a previous day reads as 0 today", () => {
+    assert.equal(freshTodayWater("2026-07-22", "2026-07-23", "2.0"), 0, "stale day → 0");
+    assert.equal(freshTodayWater(null, "2026-07-23", "2.0"), 0, "never logged → 0");
+  });
+  test("day-ledger: water logged today reads through", () => {
+    assert.equal(freshTodayWater("2026-07-23", "2026-07-23", "1.5"), 1.5);
+    assert.equal(freshTodayWater("2026-07-23", "2026-07-23", "0"), 0);
   });
 }
 

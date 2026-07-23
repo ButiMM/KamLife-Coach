@@ -7,6 +7,7 @@ import { db } from "../db";
 import { users, chatHistory, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
+import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine } from "./food-scanner";
 
@@ -104,20 +105,22 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
   if (qc) {
     try {
       const todayStartQC = sastDayStart();
-      const foodSingular = qc.food.replace(/e?s$/, "");
-      const rowsQC = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
+      const foodSingular = singularFood(qc.food);
+      const rowsQC = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
         .from(mealLogs)
         .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStartQC)))
         .orderBy(desc(mealLogs.loggedAt))
         .limit(10);
+      // Match by the food AND its serving-unit aliases ("slice" ⇒ bread/toast), across the
+      // meal label, the raw message and any stored item names — a photo names itself by label.
       const targetQC = rowsQC.find(r => {
-        if ((r.rawMessage || "").toLowerCase().includes(foodSingular)) return true;
+        if (foodMatchesText(qc.food, r.rawMessage) || foodMatchesText(qc.food, r.mealLabel)) return true;
         const its = r.items as Array<{ name?: string; foodName?: string }> | null;
-        return Array.isArray(its) && its.some(i => (i.name || i.foodName || "").toLowerCase().includes(foodSingular));
+        return Array.isArray(its) && its.some(i => foodMatchesText(qc.food, i.name || i.foodName || ""));
       });
       if (targetQC) {
         const itemsQC = (targetQC.items as Array<{ name?: string; foodName?: string; kcal?: number; protein?: number }> | null) || [];
-        const itemQC = itemsQC.find(i => (i.name || i.foodName || "").toLowerCase().includes(foodSingular));
+        const itemQC = itemsQC.find(i => foodMatchesText(qc.food, i.name || i.foodName || ""));
         if (itemQC && typeof itemQC.kcal === "number" && itemQC.kcal > 0) {
           // Exact item-level maths: scale the corrected item by newCount/oldCount.
           const ratio = qc.count / qc.oldCount;
@@ -132,8 +135,25 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
           await db.update(users).set({ todayCalories: recQC.calories, todayProteinG: recQC.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
           return `Fixed — ${qc.food} corrected to ${qc.count}. ✅\n\nUpdated total today: ~${recQC.calories} kcal | ~${recQC.protein}g protein.`;
         }
-        // No per-item numbers to scale — honest remove-and-relog beats silent bad maths
-        // or a double-logged "correction".
+        // No per-item numbers to scale (photo meals store none). If we have a sensible
+        // per-serving portion for this food, apply the count DELTA incrementally — add or
+        // remove one serving's worth, leaving the rest of the plate untouched. This is the
+        // honest answer to "3 slices not 2": +1 slice, not a rescale of the whole meal.
+        const per = perServingEstimate(qc.food);
+        if (per) {
+          const deltaN = qc.count - qc.oldCount;
+          const newKcalD = Math.max(0, (targetQC.kcalInt || 0) + Math.round(deltaN * per.kcal));
+          const newProtD = Math.max(0, (targetQC.proteinInt || 0) + Math.round(deltaN * per.protein));
+          await db.update(mealLogs).set({ kcalInt: newKcalD, proteinInt: newProtD, corrected: true }).where(eq(mealLogs.id, targetQC.id));
+          invalidateFoodTotalsCache(user.id);
+          const recQCd = await recomputeTodayFoodTotals(user.id);
+          await db.update(users).set({ todayCalories: recQCd.calories, todayProteinG: recQCd.protein, todayCaloriesDate: sastToday() }).where(eq(users.id, user.id));
+          const verb = deltaN > 0 ? "Added" : "Took off";
+          const n = Math.abs(deltaN);
+          return `${verb} ${n} ${qc.food.replace(/s$/, "")}${n === 1 ? "" : "s"} — now ${qc.count}. ✅\n\nUpdated total today: ~${recQCd.calories} kcal | ~${recQCd.protein}g protein.`;
+        }
+        // No per-item numbers and no known portion — honest remove-and-relog beats silent
+        // bad maths or a double-logged "correction".
         await db.delete(mealLogs).where(eq(mealLogs.id, targetQC.id));
         invalidateFoodTotalsCache(user.id);
         const recQC2 = await recomputeTodayFoodTotals(user.id);

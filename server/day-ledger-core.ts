@@ -31,6 +31,15 @@ export interface LedgerRow {
   source: string | null; items: unknown; rawMessage: string | null;
 }
 
+// PURE: today's water, guarded by the reset date. today_water is a single running column
+// that only rolls over when water is NEXT logged, so it holds yesterday's litres until then.
+// Trust it only when it was last reset today; otherwise today's water is 0.
+export function freshTodayWater(waterLastResetDate: string | null | undefined, today: string, todayWater: unknown): number {
+  if (!waterLastResetDate || waterLastResetDate !== today) return 0;
+  const v = parseFloat(String(todayWater ?? "0")) || 0;
+  return Math.round(v * 10) / 10;
+}
+
 // A meal row → its readable food description.
 function foodsOf(items: unknown, raw: string | null): string {
   if (Array.isArray(items)) {

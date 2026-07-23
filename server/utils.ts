@@ -528,7 +528,10 @@ export function parseQuantityCorrection(m: string): { count: number; food: strin
   const firstForm = /^\d/.test(match[1]) && !/^\d/.test(match[2]);
   const count = parseFloat(firstForm ? match[1] : match[2]);
   const oldCount = parseFloat(firstForm ? match[3] : match[1]);
-  const food = (firstForm ? match[2] : match[3]).trim().toLowerCase();
+  // The lazy food capture can trail into filler ("3 slices THERE, not 2" → "slices there").
+  // Drop trailing position/filler words so the food is the noun the client actually named.
+  const food = (firstForm ? match[2] : match[3]).trim().toLowerCase()
+    .replace(/\s+(there|here|total|now|today|left|each|of them|in there|in total)$/i, "").trim();
   if (!Number.isFinite(count) || !Number.isFinite(oldCount)) return null;
   if (count <= 0 || count > 50 || oldCount <= 0 || oldCount > 50 || count === oldCount) return null;
   if (NON_FOOD_UNIT_RE.test(food)) return null;
