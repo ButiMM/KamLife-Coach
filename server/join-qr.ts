@@ -117,7 +117,9 @@ export function renderJoinCard(opts: JoinCardOpts = {}): Buffer {
   const ctx = canvas.getContext("2d");
   const tag = sanitiseSourceTag(opts.sourceTag);
   const link = opts.link || buildJoinLink(tag);
-  const price = opts.priceLabel || PRICING.monthlyDisplay;
+  // Per-day framing hits harder than the monthly for a mass market — derived from pricing,
+  // never hardcoded. ceil(199/30) = "less than R7 a day".
+  const price = opts.priceLabel || `less than R${Math.ceil(PRICING.monthlyPriceZAR / 30)} a day`;
 
   // Background.
   ctx.fillStyle = PAPER;
@@ -138,23 +140,25 @@ export function renderJoinCard(opts: JoinCardOpts = {}): Buffer {
   ctx.font = `bold 52px "${FONT}"`;
   ctx.fillText("KamLife Coach", 190, 90);
   ctx.font = `28px "${FONT}"`;
-  ctx.fillText("Your pocket coach on WhatsApp", 192, 132);
+  ctx.fillText("The coach in your pocket · WhatsApp", 192, 132);
 
-  // Headline (StoryBrand-plain: what it does FOR them, no jargon).
+  // Headline — lead with the DESIRE in the customer's own words, then the accountability hook
+  // ("for real this time" = the thing they've always been missing). Outcome, not the tool.
   ctx.fillStyle = INK;
   ctx.textAlign = "center";
-  ctx.font = `bold 62px "${FONT}"`;
-  ctx.fillText("Get fit on WhatsApp.", W / 2, 300);
-  ctx.font = `bold 62px "${FONT}"`;
-  ctx.fillText("No gym app. No guesswork.", W / 2, 372);
+  ctx.font = `bold 74px "${FONT}"`;
+  ctx.fillText("Lose the weight.", W / 2, 302);
+  ctx.fillStyle = ORANGE;
+  ctx.font = `bold 74px "${FONT}"`;
+  ctx.fillText("For real this time.", W / 2, 380);
 
-  // Three plain benefit lines.
+  // Three benefit lines — each ties the OUTCOME (burn fat / finish) to the coach, first-person.
   ctx.textAlign = "left";
   ctx.font = `34px "${FONT}"`;
   const benefits = [
-    "Snap your food — get calories & protein back",
-    "A workout that fits your home, gym or travel",
-    "A coach that checks in and keeps you honest",
+    "Snap your food — I keep you burning fat",
+    "Workouts for your life — home, gym or travel",
+    "I check in every day, so you actually finish",
   ];
   let by = 470;
   for (const b of benefits) {
@@ -177,10 +181,10 @@ export function renderJoinCard(opts: JoinCardOpts = {}): Buffer {
   ctx.fillStyle = INK;
   ctx.textAlign = "center";
   ctx.font = `bold 42px "${FONT}"`;
-  ctx.fillText("Point your camera & scan", W / 2, capY);
+  ctx.fillText("Scan to meet your coach", W / 2, capY);
   ctx.fillStyle = MUTED;
   ctx.font = `29px "${FONT}"`;
-  ctx.fillText(`WhatsApp opens — just hit send · ${price}`, W / 2, capY + 46);
+  ctx.fillText(`Opens in WhatsApp · ${price}`, W / 2, capY + 46);
 
   // Footer row — guarantee left, source label right (source is for Kam's own tracking).
   ctx.fillStyle = ORANGE;
