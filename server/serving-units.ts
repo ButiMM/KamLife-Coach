@@ -63,6 +63,25 @@ export function foodMatchesText(food: string, text: string | null | undefined): 
   return foodMatchTerms(food).some(t => t.length >= 2 && hay.includes(t));
 }
 
+// VISION ITEMS — parse per-item lines out of a food-photo analysis ("Toast (~2 slices): 150
+// kcal, 6g protein") into structured items. Photo meals used to store items: [] — so "my
+// meals" showed "Food photo" and a correction ("2 slices not 3") had no item to scale
+// (2026-07-23). Best-effort: unparseable lines are skipped, never guessed.
+export function itemsFromVisionText(text: string): Array<{ name: string; grams: number; kcal: number; protein: number; category: string }> {
+  const out: Array<{ name: string; grams: number; kcal: number; protein: number; category: string }> = [];
+  for (const line of (text || "").split("\n")) {
+    const l = line.trim();
+    if (!l || /^total\b/i.test(l)) continue;
+    const m = l.match(/^[-•*\s]*([A-Za-z][^:–—]{1,50}?)\s*(?:\(([^)]*)\))?\s*[:–—]\s*[~≈]?\s*(\d[\d,]*)\s*kcal(?:.*?(\d+)\s*g\s*protein)?/i);
+    if (!m) continue;
+    const name = m[1].replace(/[*_]/g, "").trim();
+    if (!name || name.length > 50) continue;
+    const grams = (() => { const g = (m[2] || "").match(/(\d+)\s*(?:g|ml)\b/i); return g ? parseInt(g[1], 10) : 0; })();
+    out.push({ name, grams, kcal: parseInt(m[3].replace(/,/g, ""), 10) || 0, protein: m[4] ? parseInt(m[4], 10) : 0, category: "photo" });
+  }
+  return out.slice(0, 12);
+}
+
 // Per-serving estimate for the corrected food, or null if we have no sensible portion for it.
 // Probes both the raw word and its singular so plurals ("slices") match a singular pattern.
 export function perServingEstimate(food: string): { kcal: number; protein: number } | null {

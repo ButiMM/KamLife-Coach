@@ -223,7 +223,10 @@ function normaliseWordNumbers(text: string): string {
     "six": "6", "seven": "7", "eight": "8", "nine": "9", "ten": "10",
     "half": "0.5", "a": "1", "an": "1",
   };
-  return text.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
+  // Phrase pass FIRST: "half a vienna" must become "0.5 vienna", not "0.5 1 vienna" —
+  // the a→1 word map was eating the half and logging a whole item (2026-07-23).
+  const phrased = text.replace(/\bhalf\s+(?:a|an|the)\s+/gi, "0.5 ");
+  return phrased.replace(/\b(one|two|three|four|five|six|seven|eight|nine|ten|half|a|an)\b/gi, w => map[w.toLowerCase()] ?? w);
 }
 
 export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal?: Map<string, PortionStat>) {
@@ -267,11 +270,33 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
         break;
       }
     }
+    // VAGUE PER-FOOD AMOUNT (2026-07-23 live: "half a Vienna" logged the 2-vienna default and
+    // the client argued the log DOWN — trust killer). "Half a <food>" = 0.5 of ONE item vs the
+    // portion's default count; "some/a few/a bit of <food>" = half the default. Lean LOW.
+    // Skipped when a global size phrase already scaled the segment (no double-halving).
+    let vagueQty = false;
+    if (!explicitQty && sizeMultiplier === 1) {
+      for (const alias of allAliases) {
+        const a = escapeRegex(alias);
+        // Match on the RAW text: normalisation rewrites "a"→"1", destroying "a bit of".
+        const halfM = segText.match(new RegExp(`\\bhalf\\s+(?:a\\s+|an\\s+|the\\s+|of\\s+(?:a\\s+|the\\s+)?)?(?:${a})`, "i"));
+        const vagueM = !halfM && segText.match(new RegExp(`\\b(?:some|a few|a couple(?:\\s+of)?|a bit of|a little(?:\\s+bit)?(?:\\s+of)?|a small piece of|a taste of)\\s+(?:${a})`, "i"));
+        if (halfM) {
+          quantity = 0.5 / Math.max(1, portionDefaultCount(f.typicalPortionDescription));
+          vagueQty = true;
+        } else if (vagueM) {
+          quantity = 0.5;
+          vagueQty = true;
+        }
+        if (vagueQty) break;
+      }
+    }
     quantity = quantity * sizeMultiplier;
     // ADAPTIVE PORTION (2026-07-17): when the client stated NO amount and NO size word,
     // their own median portion of this food (portion-memory, >=3 logs, clamped) beats
-    // the table default. Memory fills silence; it never overrides what they said.
-    if (!explicitQty && sizeMultiplier === 1 && personal) {
+    // the table default. Memory fills silence; it never overrides what they said —
+    // and a vague amount ("some", "half a") IS speech, so memory stays out of its way.
+    if (!explicitQty && !vagueQty && sizeMultiplier === 1 && personal) {
       const pp = personalPortionFor(personal, f.name, f.typicalPortionCalories, f.typicalPortionProtein);
       if (pp.personal) {
         return {
@@ -288,7 +313,7 @@ export function adjustFoodsForSegment(foods: SAFood[], segText: string, personal
     // the audit-trail atom the reviews keep asking for, and the signal the confidence layer
     // reads. "default" = a bare guess (no amount, no size word, no history) — the only case
     // that's genuinely uncertain.
-    const portionSource = explicitQty ? "explicit" as const : sizeMultiplier !== 1 ? "size" as const : "default" as const;
+    const portionSource = explicitQty ? "explicit" as const : vagueQty ? "vague" as const : sizeMultiplier !== 1 ? "size" as const : "default" as const;
     return {
       ...f,
       adjustedCalories: Math.round(f.typicalPortionCalories * quantity),
@@ -571,21 +596,13 @@ export async function handleFoodContext(ctx: {
   // Blocks directFoodScan and the main food scanner from firing on these messages.
   const isFuturePlanning = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|need\s+to\s+buy|need\s+to\s+get|want\s+to\s+buy|going\s+to\s+(?:buy|get|pick\s+up)|planning\s+to\s+(?:eat|have|cook)|want\s+to\s+(?:eat|have|try|order)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having)|still\s+to\s+(?:have|eat|grab|get|make|cook)|yet\s+to\s+(?:have|eat|grab|get)|haven.?t\s+(?:had|eaten|eat)|about\s+to\s+(?:have|eat|grab|make|cook|order)|still\s+(?:need|got|have)\s+to\s+(?:eat|have|grab))\b/i.test(m);
 
-  // A REQUEST for meal ideas ("give me meal suggestions for lunch and dinner", "suggest meals",
-  // "what should I eat for dinner", "meal ideas") is NOT a food log — but it contains "for
-  // lunch/dinner" which trips the food trigger. The client is ASKING, not reporting. Never send it
-  // to the food-log path (which would demand "describe the food"); defer so the coach answers with
-  // actual suggestions. (2026-07-21 live miss: a voice note asking for meal ideas was told to
-  // "describe what food that was".)
+  // Meal-idea REQUESTS ("what should I eat for dinner") are asking, not reporting — defer to the coach (2026-07-21).
   const isMealSuggestionRequest =
     /\b(give me|send me|suggest|recommend|any (ideas?|options?)|(ideas?|options?) for|help me (plan|with)|what (should|can|do|must) i (eat|have|make|cook)|what to (eat|have|make|cook)|meal (suggestions?|ideas?|options?|plan)|plan my meals?|what (should|can) i (have|make|cook) for)\b/i.test(m)
     && !/\b(i had|i ate|i just (had|ate)|just had|just ate|i'?ve (had|eaten)|having (a|some|my))\b/i.test(m);
 
-  // ---- "ATE IT" — confirm a previously planned meal and log it ----
-  // Closes the loop on FOOD_PLANNED: "gonna have X for lunch" → [eats] → "ate it" → logged.
-  // Humans never type the magic phrase exactly — "Omg I just had it", "ok ate it now",
-  // "finished it" must all land. Tolerates interjection prefixes and just/now padding,
-  // but stays anchored on (ate|had|eaten|finished)+(it|that) so real food logs
+  // ---- "ATE IT" — closes the FOOD_PLANNED loop. Tolerates interjections/padding ("Omg I
+  // just had it") but stays anchored on (ate|had|eaten|finished)+(it|that) so real food logs
   // ("I just had it with rice") fall through to the scanner instead.
   const ateItConfirm =
     /^(ate it|i ate it|had it|i had it|ate that|had that|done eating|finished eating|eaten|i.?ve eaten( it)?|log it|log that|log this|log the meal|yes log it)[.!\s]*$/i.test(m) ||
@@ -686,12 +703,9 @@ export async function handleFoodContext(ctx: {
     }
   }
 
-  // ---- RETRO-LOG GUIDANCE — repeat/same-as intent is owned by handlers/meal-repeat.ts (runs earlier in the pipeline) ----
-  // GUARD: "log/record yesterday's food" is a RETROACTIVE-LOGGING request — the user wants
-  // to tell me what they ate YESTERDAY, not copy a past meal into today. Without this, a
-  // voice note "I want to log yesterday's food" was being relogged as today's pasta.
-  // Repeat intent requires an explicit same/repeat/again; a logging verb + "yesterday"
-  // (without those) means retroactive capture, so it must fall through.
+  // ---- RETRO-LOG GUIDANCE — repeat/same-as is owned by meal-repeat.ts (earlier in pipeline).
+  // "log yesterday's food" WITHOUT same/repeat/again = retroactive capture, must fall through
+  // (a voice note asking to log yesterday was being relogged as today's pasta).
   const wantsRepeat = /\b(same|repeat|again)\b/i.test(m);
   const isRetroLogRequest = !wantsRepeat
     && /\b(log|logging|record|add|enter|capture|track|update|forgot|missed|didn.?t)\b/i.test(m)

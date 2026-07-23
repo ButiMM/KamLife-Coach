@@ -1385,6 +1385,42 @@ test("food quantity: size words scale the whole portion", () => {
   assert.ok(big && norm && big.adjustedCalories > norm.adjustedCalories, "big plate > normal plate");
 });
 
+// VAGUE QUANTITY (2026-07-23 live: "I said half a Vienna" → the bot logged the 2-vienna
+// default and the client had to argue the log DOWN). Vague amounts lean LOW, and a vague
+// amount is speech — portion memory must not override it.
+function viennaAdj(msg: string): any {
+  const adj = adjustFoodsForSegment(scanForSAFoods(msg), msg) as any[];
+  return adj.find(f => /vienna/i.test(f.name));
+}
+test("vague quantity: 'half a vienna' is a fraction of ONE vienna, never the 2-vienna default", () => {
+  const half = viennaAdj("half a vienna with my eggs");
+  const dflt = viennaAdj("viennas with my eggs");
+  assert.ok(half && dflt, "both scans find viennas");
+  assert.ok(half.adjustedCalories < dflt.adjustedCalories / 2 + 10, `half a vienna (${half.adjustedCalories}) must be way under the default (${dflt.adjustedCalories})`);
+  // "half" normalises to 0.5 and rides the explicit path (0.5 of ONE vienna against the
+  // 2-vienna default = 0.25×); the per-food vague matcher is the backstop. Either source
+  // is fine — the NUMBER is the contract.
+  assert.ok(["vague", "explicit"].includes(half.portionSource), `source: ${half.portionSource}`);
+  assert.ok(Math.abs(half.quantity - 0.25) < 0.01, `0.5 vienna of a 2-vienna portion = 0.25× (got ${half.quantity})`);
+});
+test("vague quantity: 'some viennas' leans LOW — half the table default", () => {
+  const some = viennaAdj("some viennas on the side");
+  const dflt = viennaAdj("viennas on the side");
+  assert.ok(some && dflt, "both scans find viennas");
+  assert.equal(some.adjustedCalories, Math.round(dflt.adjustedCalories * 0.5), "some = 0.5× default");
+  assert.equal(some.portionSource, "vague");
+});
+test("vague quantity: an explicit count still wins — '3 viennas' is not vague", () => {
+  const three = viennaAdj("3 viennas");
+  assert.equal(three.portionSource, "explicit");
+});
+test("vague quantity: global 'half the rice' does not double-halve per-food", () => {
+  const adj = adjustFoodsForSegment(scanForSAFoods("half the rice"), "half the rice") as any[];
+  const rice = adj.find(f => /rice/i.test(f.name));
+  assert.ok(rice, "rice found");
+  assert.ok(rice.quantity >= 0.45, `0.5 once, not 0.25 (got ${rice.quantity})`);
+});
+
 // ============================================================
 // DAY-14 RECEIPT (2026-07-13, Kam: "people lose interest within two weeks — we have to
 // do better in our retention"). The two-week milestone must show PROOF (their own

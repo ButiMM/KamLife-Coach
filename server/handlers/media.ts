@@ -49,6 +49,7 @@ import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipme
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
+import { itemsFromVisionText } from "../serving-units";
 import { recordServiceCost } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
 import { scribeTranscribe } from "../elevenlabs";
@@ -1121,10 +1122,12 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         // GUARANTEES complete macros (fills carbs/fat from kcal+protein) — so a photo meal
         // can never zero-drag the card again. CAPTION WINS over the clock for the slot.
         const photoLabel = extractMealLabel(message || "", photoLoggedAt, { kcal: totalPhotoKcal, protein: totalPhotoProt }, user, await (await import("../portion-memory")).getSlotContext(user.id)) || slotFromSastHour(photoLoggedAt);
+        // Structured items parsed from the vision reply — so "my meals" names the foods and a
+        // count-correction ("2 slices not 3") has a real item to scale (2026-07-23).
         photoCommit = await commitFoodLog({
           userId: user.id, phone, rawMessage: photoDesc, source: "photo",
           kcalInt: totalPhotoKcal, proteinInt: totalPhotoProt, carbsInt: 0, fatInt: 0,
-          items: [], mealLabel: photoLabel, loggedAt: photoLoggedAt,
+          items: itemsFromVisionText(visionDisplay), mealLabel: photoLabel, loggedAt: photoLoggedAt,
         });
       }
 

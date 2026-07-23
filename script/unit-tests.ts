@@ -25,7 +25,7 @@ import { verifyBrainReply } from "../server/brain/reply-verifier";
 import { weightInContextLine } from "../server/weight-context";
 import { parseSignupSource, stripSignupSource, sanitiseSourceTag, buildJoinLink, buildJoinPrefill } from "../server/signup-source";
 import { estimateCarbsFat } from "../server/macro-estimate";
-import { foodMatchesText, foodMatchTerms, singularFood, perServingEstimate } from "../server/serving-units";
+import { foodMatchesText, foodMatchTerms, singularFood, perServingEstimate, itemsFromVisionText } from "../server/serving-units";
 import { foldLedgerRows, freshTodayWater, type LedgerRow } from "../server/day-ledger-core";
 import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from "../server/reply-hygiene";
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
@@ -445,7 +445,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     // The silence-only guard (explicit counts and size words beat memory) lives in
     // adjustFoodsForSegment — source-guarded here, behaviour-verified in prod replies.
     const src = readFileSync(join("server", "handlers", "food-context.ts"), "utf-8");
-    assert.ok(/!explicitQty && sizeMultiplier === 1 && personal/.test(src), "memory must only fill silence");
+    assert.ok(/!explicitQty && !vagueQty && sizeMultiplier === 1 && personal/.test(src), "memory must only fill silence — explicit, vague AND size words all beat it");
   });
 }
 
@@ -3395,6 +3395,29 @@ test("serving-units: +1 slice adds one serving's worth, does not rescale the mea
   const deltaN = 3 - 2;
   const newKcal = 410 + Math.round(deltaN * per.kcal);
   assert.ok(newKcal > 410 && newKcal < 550, `incremental, not a rescale: ${newKcal}`);
+});
+
+// itemsFromVisionText — photo meals stored items:[] so "my meals" said "Food photo" and a
+// correction had no item to scale (2026-07-23).
+test("vision items: per-item lines parse into structured items", () => {
+  const items = itemsFromVisionText(
+    "Toast (~2 slices, 60g): 150 kcal, 6g protein\n• Boiled eggs (2 large): 156 kcal, 12g protein\nViennas (~80g): 232 kcal | 9g protein\nTOTAL: 538 kcal | 27g protein"
+  );
+  assert.equal(items.length, 3, `3 items, got ${items.length}: ${items.map(i => i.name).join("/")}`);
+  assert.equal(items[0].name, "Toast");
+  assert.equal(items[0].kcal, 150);
+  assert.equal(items[1].protein, 12);
+  assert.equal(items[2].kcal, 232);
+  assert.equal(items[2].grams, 80, "grams read from the bracket");
+});
+test("vision items: TOTAL line and prose are skipped, empty text is safe", () => {
+  assert.deepEqual(itemsFromVisionText("TOTAL: 500 kcal | 30g protein"), []);
+  assert.deepEqual(itemsFromVisionText(""), []);
+  assert.deepEqual(itemsFromVisionText("Nice balanced plate — well done!"), []);
+});
+test("vision items: parsed items are findable by a correction ('slices' matches Toast)", () => {
+  const items = itemsFromVisionText("Toast (~2 slices): 150 kcal, 6g protein");
+  assert.ok(items.length === 1 && foodMatchesText("slices", items[0].name), "correction can now target the item");
 });
 
 // ============================================================
