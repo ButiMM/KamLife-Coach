@@ -100,19 +100,35 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     // ── Food TODAY so far — running count, labelled meals, space left. "Remaining"
     // is food still to eat, never a "deficit".
     const todayStart = sastDayStart();
-    const todayMeals = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel })
+    // WHAT they ate, not just how much (2026-07-27 live: client logged chicken+rice+lentils
+    // for lunch, asked "any suggestions for dinner?" 90 min later, and the coach suggested
+    // grilled chicken + lentils — the exact same meal. The snapshot carried kcal and the slot
+    // label but never the FOODS, so the engine could not know.)
+    const todayMeals = await db.select({ kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt, mealLabel: mealLogs.mealLabel, items: mealLogs.items, rawMessage: mealLogs.rawMessage })
       .from(mealLogs).where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, todayStart)))
-      .catch(() => [] as { kcalInt: number | null; proteinInt: number | null; mealLabel: string | null }[]);
+      .catch(() => [] as any[]);
     if (todayMeals.length > 0) {
       const kcal = todayMeals.reduce((s, r) => s + (r.kcalInt || 0), 0);
       const prot = todayMeals.reduce((s, r) => s + (r.proteinInt || 0), 0);
-      const labels = todayMeals.map(r => r.mealLabel).filter(Boolean).join(", ");
+      const labels = todayMeals.map((r: any) => r.mealLabel).filter(Boolean).join(", ");
+      // The actual foods — so the coach never suggests what they just ate.
+      const eatenNames: string[] = [];
+      for (const r of todayMeals as any[]) {
+        if (Array.isArray(r.items)) {
+          for (const it of r.items) { const n = (it?.name || "").trim(); if (n) eatenNames.push(n); }
+        } else if (r.rawMessage && r.rawMessage !== "[Photo]") {
+          eatenNames.push(String(r.rawMessage).slice(0, 40));
+        }
+      }
+      const eatenLine = eatenNames.length
+        ? `\nALREADY EATEN TODAY: ${[...new Set(eatenNames)].slice(0, 8).join(", ")}. When suggesting a meal, do NOT repeat what they have already eaten today — offer something different unless they ask to repeat it.`
+        : "";
       // Health-led goals never get the "kcal still to eat / space left" budget framing —
       // for them, count meals, not calories (goal-profiles: usesMacros=false).
       const remaining = (profile.usesMacros && calTarget > 0) ? Math.max(0, calTarget - kcal) : null;
-      const foodCore = profile.usesMacros
+      const foodCore = (profile.usesMacros
         ? `Food TODAY so far: ~${kcal} kcal | ${prot}g protein across ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""}${labels ? ` (${labels})` : ""}.`
-        : `Food TODAY so far: ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""} logged${labels ? ` (${labels})` : ""} — coach the QUALITY of the plate (protein first, veg, one carb), never a calorie count.`;
+        : `Food TODAY so far: ${todayMeals.length} meal${todayMeals.length !== 1 ? "s" : ""} logged${labels ? ` (${labels})` : ""} — coach the QUALITY of the plate (protein first, veg, one carb), never a calorie count.`) + eatenLine;
       lines.push(`${foodCore}${remaining !== null ? ` ~${remaining} kcal still to eat today — that is the space LEFT in the day, NOT a deficit.` : ""}`);
     } else {
       lines.push(`Food TODAY: nothing logged yet — check the time above; early in the day this is normal. Don't scold, don't invent intake.`);
