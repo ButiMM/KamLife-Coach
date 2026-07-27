@@ -15,7 +15,10 @@ _Last updated: 2026-07-27_
 
 | # | Defect | Evidence | Class |
 |---|--------|----------|-------|
-| D4 | Proactive messages are state-blind (water nudge minutes after a rage message) | 11:00 thread | Missing capability |
+| D4 | Proactive messages are state-blind (water nudge minutes after a rage message) | 11:00 thread; **again 18:36** | Missing capability |
+| D13 | "It was X not Y" (identity correction) has NO handler — "The rice was white not brown" reached the engine, which tried to DELETE the meal; the destructive bouncer vetoed it and replied "nothing removed" to someone who never asked to remove anything | 18:29 | **Missing capability** |
+| D14 | "What?" / bare confusion returns the full help-menu dump instead of answering | 18:36 | Re-onboarding reflex |
+| D15 | Missed-session list contradicts itself: "You missed Thursday + Friday + Monday + Tuesday. Monday is still a training day" — Monday is both missed and available, and today IS Monday | 18:36 | Date logic |
 | D5 | No instrumentation — nothing measures where clients disengage | — | Must exist before any cohort |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
 | D7 | Workouts do not adapt to state (sick / returning / deload) — only food targets do | — | Adaptive layer half-covered |
@@ -52,6 +55,19 @@ rule this file exists to enforce._
   the coach told them to train again; it now goes through the same door as "done"
 - ✅ **D3** — "Wow" / "Jesus" answered with therapy-speak; a bare reaction carries no life
   content, so a feelings diagnosis is now rejected in code rather than banned in a prompt
+- ✅ Logger invented food the client never said ("Rice"→"Brown rice", "Tin fish"→"Pilchards in
+  tomato sauce"). The "don't rename the client's food" rule already existed — for Diet Coke
+  only. Now general: entry supplies the numbers, the client's words supply the name.
+- ✅ "That's the protein box ticked. 16g more to go today." — completion phrases were in the
+  random opener pool regardless of whether the day was actually complete
+- ✅ "Still room for a full dinner" in the reply that LOGGED dinner — the meal label was on
+  that very message; the wording just never looked at it
+- ✅ **"Teach me" → "Swaps for Peach"** — two existing guards, neither applied at that call
+  site: "can't eat" fired the swap trigger though "can't eat ANYMORE" means full, not fussy;
+  and `scanForSAFoods` ran fuzzy, so "Teach" matched "Peach" at edit distance 1
+- ✅ "Can't eat anymore today, what does that mean for my goal?" had no handler at all — the
+  chronic under-eating path needs "I only eat once a day" phrasing. Now answered from the
+  client's real numbers.
 
 ## NOT DEFECTS — checked and confirmed working
 

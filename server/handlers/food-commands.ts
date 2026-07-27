@@ -149,8 +149,27 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
   }
 
   // ---- FOOD SWAP — "I don't like pilchards", "what can I have instead of", "swap", "replace" ----
-  const isSwapRequest = /\b(don.?t like|hate|can.?t eat|swap|replace|instead of|alternative|substitute|other option|something else|what else|switch)\b/i.test(m)
-    && scanForSAFoods(m).length > 0;
+  // APPETITE ≠ DISLIKE (2026-07-27 live). "Honestly can't eat anymore today 🐷 what does that
+  // mean for my goal? Teach me" came back as "Swaps for Peach" — two guards that already exist
+  // in this codebase, neither applied here:
+  //   1. "can't eat" fired the swap trigger, but "can't eat ANYMORE" means full, not "I dislike
+  //      this food". Opposite meaning, same words.
+  //   2. scanForSAFoods ran FUZZY, so "Teach" matched "Peach" at edit distance 1. The exactOnly
+  //      flag was built for exactly this ("building phase" → mopani worms) and wasn't passed.
+  const isFullNotFussy = /\b(can.?t|cannot|couldn.?t)\s+eat\s+(any\s?more|anything else|another|more)\b|\b(too full|so full|stuffed|no appetite|not hungry)\b/i.test(m);
+  const isSwapRequest = !isFullNotFussy
+    && /\b(don.?t like|hate|can.?t eat|swap|replace|instead of|alternative|substitute|other option|something else|what else|switch)\b/i.test(m)
+    && scanForSAFoods(m, { exactOnly: true }).length > 0;
+
+  // ---- FULL FOR THE DAY — "can't eat anymore today, what does that mean for my goal?" ----
+  // The real question underneath the swap bug above, and it had no handler: the chronic
+  // under-eating path in advice-commands needs "I only eat once a day" phrasing, so a
+  // single honest day of coming up short matched nothing at all.
+  if (isFullNotFussy && /\b(what does that mean|does that matter|is that (ok|okay|bad|fine)|for my goal|teach me|explain|will that affect|affect my)\b/i.test(m)) {
+    const undereatReply = await fullForTodayReply(user);
+    await logChat(user.id, message, undereatReply, "UNDEREATING_TODAY");
+    return undereatReply;
+  }
   if (isSwapRequest) {
     const foods = scanForSAFoods(m);
     const foodName = foods[0].name;
@@ -387,4 +406,34 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
   }
 
   return null;
+}
+
+/**
+ * "I'm full, I can't eat any more today — what does that mean for my goal?"
+ *
+ * A real coaching question that deserves a real answer, built from THIS client's numbers, not
+ * a platitude. One honest short day is not a problem; the trap is protein, which can't be
+ * banked, and the rebound tomorrow. Deterministic — every number here is read, never guessed.
+ */
+async function fullForTodayReply(user: any): Promise<string> {
+  const { recomputeTodayFoodTotals } = await import("./food-scanner");
+  const t = await recomputeTodayFoodTotals(user.id).catch(() => null);
+  const eaten = Math.round(t?.calories || 0);
+  const prot = Math.round(t?.protein || 0);
+  const calTarget = user.calorieTarget || 2000;
+  const protTarget = user.proteinTarget || 120;
+  const shortKcal = Math.max(0, calTarget - eaten);
+  const shortProt = Math.max(0, protTarget - prot);
+  const fn = (user.name || "").split(" ")[0];
+  const hi = fn ? `${fn}, ` : "";
+
+  const head = `${hi}being full is not a failure — appetite moves day to day and forcing food down is not the goal.\n\nToday: *${eaten} kcal* of ${calTarget} and *${prot}g protein* of ${protTarget}g.`;
+
+  if (shortProt > 30) {
+    return `${head}\n\n*What actually matters:* the calories you can let go — one short day changes nothing. Protein is the one that doesn't carry over: your body uses what it gets each day and can't bank the rest. You're ${shortProt}g short.\n\n*If you can manage one small thing:* a yoghurt, a glass of milk, or two boiled eggs. Liquid protein goes down when food won't.\n\n*Tomorrow:* eat normally. Don't add today's shortfall onto tomorrow — that swing is what makes people binge.`;
+  }
+  if (shortKcal > 500) {
+    return `${head}\n\n*What it means:* you're ${shortKcal} kcal under. One day like this is fine — your body works on the weekly average, not one evening.\n\n*The thing to watch:* if it happens three or four days running, your body slows down to match and progress stalls. One day is nothing; a pattern is something.\n\n*Tomorrow:* eat normally. Never "make up" for a short day by eating less again.`;
+  }
+  return `${head}\n\n*What it means:* you're close enough — you've eaten roughly what you need and your protein is in. Stopping when you're full is exactly right.\n\n*Tomorrow:* normal day, no adjustment. This is what a good day looks like.`;
 }

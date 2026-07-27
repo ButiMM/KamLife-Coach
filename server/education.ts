@@ -89,8 +89,43 @@ export function educationNote(user: any, ctx: EduCtx): string {
   }
 }
 
-/** Translate "kcal remaining" into meals — the unit everyone understands. */
-export function remainingInMeals(kcal: number): string {
+/**
+ * Translate "kcal remaining" into meals — the unit everyone understands.
+ *
+ * MEAL-AWARE (2026-07-27 live: Kam logged "Dinner / Rice / Tin fish / Lentils" and the
+ * confirmation told him he had "room for a full dinner with room for a snack today"). The
+ * meal label was captured on that very message; this wording just never saw it. Once dinner
+ * is on the board the remaining budget is snack-and-tomorrow, not another dinner.
+ */
+export function dinnerIsLogged(mealLabel?: string | null): boolean {
+  return /\b(dinner|supper)\b/i.test(mealLabel || "");
+}
+
+/**
+ * The verdict once dinner is on the board. Every "one more meal" / "finish with a protein
+ * dinner" line in the day-assessment family is wrong at this point — the meals are done.
+ * This says what is actually true: the day is closed, here is the one thing still open.
+ */
+export function dinnerCloseLine(proteinRemaining: number, isMuscleGain: boolean): string {
+  if (proteinRemaining > 25) {
+    return isMuscleGain
+      ? `That's dinner done. Still ${Math.round(proteinRemaining)}g of protein short — a shake or yoghurt before bed keeps the build going.`
+      : `That's dinner done. ${Math.round(proteinRemaining)}g protein short — yoghurt or a boiled egg tonight closes it.`;
+  }
+  if (proteinRemaining > 0) {
+    return `That's dinner done and the day's tracking well. ${Math.round(proteinRemaining)}g protein left if you want a snack — otherwise you're finished.`;
+  }
+  return `That's dinner done — calories and protein both where they should be. Day closed. 👊`;
+}
+
+export function remainingInMeals(kcal: number, justLogged?: string | null): string {
+  if (dinnerIsLogged(justLogged)) {
+    // Never offer another dinner. Say what the leftover budget honestly is.
+    if (kcal >= 550) return "plenty spare — a snack tonight if you want one, the rest is buffer";
+    if (kcal >= 150) return "room for a snack tonight";
+    if (kcal > 0) return "a small snack at most — choose well";
+    return "";
+  }
   if (kcal >= 900) return "room for two proper meals";
   if (kcal >= 550) return "a full dinner with room for a snack";
   if (kcal >= 350) return "one solid meal";

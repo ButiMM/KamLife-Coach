@@ -35,6 +35,9 @@ import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocus
 import { buildDailyDirection } from "../server/daily-direction";
 import { parseSessionReport, sessionReportReply, readFeel } from "../server/session-report";
 import { looksLikeQuestion, isFutureIntent, mentionsNotDone } from "../server/utils";
+import { displayFoodName, inventedQualifiers } from "../server/food-naming";
+import { dinnerCloseLine, remainingInMeals } from "../server/education";
+import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../server/food-fuzzy";
 import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../server/reaction-guard";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
@@ -5585,6 +5588,58 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   test("reaction guard: an ordinary corrective reply is left alone", () => {
     const good = "That was wrong — your session is already logged for today. Type *my progress* for the week so far.";
     assert.equal(readsAsTherapySpeak(good), false);
+  });
+}
+
+// THE 18:28 THREAD — Kam logged "Dinner / Rice / Tin fish / Lentils" and the reply invented
+// two foods he never named, offered him a dinner he had just eaten, and contradicted itself
+// on protein inside one sentence. Then "Teach me" came back as "Swaps for Peach".
+{
+  test("naming: the client's word wins when the entry invents a variant", () => {
+    assert.equal(displayFoodName("rice", "Brown rice"), "Rice");
+    assert.equal(displayFoodName("tin fish", "Pilchards in tomato sauce"), "Tin fish");
+    assert.equal(displayFoodName("milk", "Full cream milk"), "Milk");
+  });
+
+  test("naming: the entry name stands when the client actually said it", () => {
+    assert.equal(displayFoodName("brown rice", "Brown rice"), "Brown rice");
+    assert.equal(displayFoodName("white rice", "White rice"), "White rice");
+    assert.equal(displayFoodName("lentils", "Lentils"), "Lentils");
+    // "pilchards" → "Pilchards": the tomato-sauce tin is the default the numbers came from,
+    // but the client didn't say it, so it isn't put in their mouth. Their word, shown back.
+    assert.equal(displayFoodName("pilchards", "Pilchards in tomato sauce"), "Pilchards");
+    assert.equal(displayFoodName("pilchards in oil", "Pilchards in oil"), "Pilchards in oil");
+  });
+
+  test("naming: only real variant words count as invented", () => {
+    assert.deepEqual(inventedQualifiers("rice", "Brown rice"), ["brown"]);
+    assert.deepEqual(inventedQualifiers("chicken", "Chicken thigh"), []);
+  });
+
+  test("dinner: the day-close wording never offers another dinner", () => {
+    for (const label of ["dinner", "Dinner", "supper"]) {
+      const out = remainingInMeals(760, label);
+      assert.doesNotMatch(out, /full dinner|two proper meals|one solid meal/i);
+    }
+    // Same budget, no dinner logged yet — the old wording is still correct.
+    assert.match(remainingInMeals(760, "lunch"), /full dinner/i);
+  });
+
+  test("dinner: the close line states what's actually left", () => {
+    assert.match(dinnerCloseLine(16, false), /dinner done/i);
+    assert.match(dinnerCloseLine(16, false), /16g/);
+    assert.doesNotMatch(dinnerCloseLine(16, false), /one more (solid )?meal/i);
+    assert.match(dinnerCloseLine(0, false), /Day closed/i);
+  });
+
+  test("fuzzy: everyday words are never mistaken for food", () => {
+    for (const w of ["teach", "reach", "coach", "beach", "past", "days"])
+      assert.ok(FUZZY_BLACKLIST.has(w), `"${w}" must be blacklisted from fuzzy food matching`);
+  });
+
+  test("fuzzy: 'teach' really is one edit from 'peach' — hence the blacklist", () => {
+    assert.equal(levenshtein("teach", "peach"), 1);
+    assert.equal(maxDistance("peach".length), 1);   // 5 chars → distance 1 allowed
   });
 }
 

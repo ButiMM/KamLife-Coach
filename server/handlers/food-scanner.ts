@@ -1,10 +1,12 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
-import { educationNote, remainingInMeals, weeklyNetWording } from "../education";
+import { educationNote, remainingInMeals, weeklyNetWording, dinnerIsLogged, dinnerCloseLine } from "../education";
 import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numbers-mode";
 import { stepBurnKcal } from "../targets";
 import { humanizeReply } from "../reply-hygiene";
+import { displayFoodName } from "../food-naming";
+import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
 import { mealLogs, chatHistory } from "../../shared/schema";
@@ -117,58 +119,6 @@ export function portionDefaultCount(desc: string): number {
   return n > 0 ? n : 1;
 }
 
-function levenshtein(a: string, b: string): number {
-  const la = a.length, lb = b.length;
-  if (la === 0) return lb;
-  if (lb === 0) return la;
-  const dp: number[][] = Array.from({ length: la + 1 }, () => Array(lb + 1).fill(0));
-  for (let i = 0; i <= la; i++) dp[i][0] = i;
-  for (let j = 0; j <= lb; j++) dp[0][j] = j;
-  for (let i = 1; i <= la; i++) {
-    for (let j = 1; j <= lb; j++) {
-      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(
-        dp[i - 1][j] + 1,
-        dp[i][j - 1] + 1,
-        dp[i - 1][j - 1] + cost
-      );
-    }
-  }
-  return dp[la][lb];
-}
-
-// Max edit distance allowed based on word length — VERY STRICT to avoid false matches
-// "better" → "butter" was distance 1 and matched. Now requiring longer words for any fuzzy.
-function maxDistance(wordLen: number): number {
-  if (wordLen <= 4) return 0;
-  if (wordLen <= 6) return 1;
-  if (wordLen <= 10) return 2;
-  return 2;
-}
-
-const FUZZY_BLACKLIST = new Set([
-  "just", "had", "have", "having", "that", "this", "with", "from", "for",
-  "what", "when", "where", "which", "about", "after", "before", "been",
-  "would", "could", "should", "want", "need", "like", "make", "made",
-  "take", "took", "give", "gave", "come", "came", "going", "went",
-  "here", "there", "then", "than", "them", "they", "their", "your",
-  "more", "some", "much", "many", "very", "also", "still", "well",
-  "good", "feel", "feeling", "today", "yesterday", "morning",
-  "afternoon", "evening", "night", "breakfast", "lunch", "dinner",
-  "supper", "snack", "meal", "food", "total", "remaining", "calories",
-  "protein", "daily", "target", "please", "thanks", "thank", "help",
-  "read", "again", "true", "adjust", "correct", "wrong", "right",
-  "better", "everything", "nothing", "something", "doing", "being",
-  "getting", "looking", "working", "trying", "never", "always",
-  "start", "stop", "keep", "send", "show", "tell", "look", "work",
-  "think", "know", "really", "thing", "things", "stuff", "great",
-  "terrible", "horrible", "broken", "fixed", "update", "check",
-  // Non-food words that fuzzy-match real foods (e.g. "past" → "pasta", "days" → "dates")
-  "past", "days", "havent", "trained", "training", "three", "down",
-  "flat", "week", "weeks", "month", "months", "year", "years",
-  "motivated", "motivation", "unmotivated", "struggling", "struggle",
-  "missed", "missing", "lately", "recently", "done", "gone",
-]);
 
 // Sugary sodas / energy drinks that have a true zero-calorie version. Matched against
 // a food entry's name + aliases, scoped to drink categories only, so real meals are never
@@ -224,18 +174,15 @@ function redirectSugarFreeDrinks(foods: SAFood[], lower: string): SAFood[] {
 // noun is its own food (Viennas, Polony…) whose alias does NOT contain the meat word,
 // so the substring dedup can't see the collision.
 const MEAT_MODIFIER_NOUNS = "viennas?|russians?|polony|polonny|poloni|sausages?|nuggets?|burgers?|patty|patties|schnitzels?|kievs?|strips?|fingers?|mayo|pies?|wraps?|bacon|ham|wors";
-// Meat words that carry a BARE single-word alias on a standalone cut entry, mapped to
-// that cut. Only "chicken" (→ "Chicken thigh") does today; the map keeps it extensible.
+// Meat words carrying a BARE single-word alias on a standalone cut entry, mapped to that cut.
 const GENERIC_MEAT_CUTS: Record<string, string[]> = {
   chicken: ["Chicken thigh"],
 };
 
-// Drop a phantom meat CUT that's actually qualifying a different processed food.
-// "2 chicken viennas" matches both "chicken" → Chicken thigh AND "viennas" → Viennas;
-// the Chicken thigh is protein the client never ate (and the "2" then doubles it).
-// We only drop the cut when EVERY occurrence of the meat word sits immediately before
-// such a noun — a real standalone "chicken and rice" or "chicken thigh and viennas"
-// keeps its chicken.
+// Drop a phantom meat CUT that's actually qualifying a different processed food: "2 chicken
+// viennas" matches "chicken" → Chicken thigh AND "viennas" → Viennas, and the thigh is protein
+// nobody ate (the "2" then doubles it). Only dropped when EVERY occurrence of the meat word
+// sits immediately before such a noun — "chicken and rice" keeps its chicken.
 function dropModifierMeats(foods: SAFood[], lower: string): SAFood[] {
   let out = foods;
   for (const [meat, cutNames] of Object.entries(GENERIC_MEAT_CUTS)) {
@@ -278,17 +225,25 @@ const COMBO_OVERRIDES: Record<string, string[]> = {
 
 const COMBO_NAMES = new Set(Object.keys(COMBO_OVERRIDES));
 
-// Final cleanup applied to EVERY scanner return path (this used to live only after
-// fuzzy matching, so when exact matching succeeded — the common case — it was skipped
-// entirely, which is how "i had lentils, rice and chicken breast" logged both
-// "Chicken breast" AND the phantom "Chicken and rice", double-counting the chicken).
-//
-// Combo dedup decides which to keep when a combo meal and its components both matched:
-//   - 2+ components ALSO matched separately  → the client listed them individually
-//     ("...rice and chicken breast...") and the combo is a phantom from word adjacency
-//     → DROP THE COMBO, keep the granular items.
-//   - ≤1 component matched → the client named the dish ("chicken and rice") and the
-//     stray component is the spurious substring → keep the combo, drop the component.
+/**
+ * Un-invent variant qualifiers the client never said. Runs LAST, after combo dedup, because
+ * that logic matches on the real entry names — renaming before it made the scanner
+ * double-count curry and toast combos (caught by gap-tests, 2026-07-27).
+ */
+function applyClientNaming(foods: SAFood[], aliases: Map<string, string>): SAFood[] {
+  return foods.map(f => {
+    const said = aliases.get(f.name);
+    if (!said) return f;
+    const shown = displayFoodName(said, f.name);
+    return shown === f.name ? f : { ...f, name: shown };
+  });
+}
+
+// Final cleanup applied to EVERY scanner return path (it once ran only after fuzzy
+// matching, so "i had lentils, rice and chicken breast" logged "Chicken breast" AND a
+// phantom "Chicken and rice", double-counting the chicken). Combo dedup: 2+ components
+// matched separately → the client listed them individually, drop the phantom combo; ≤1
+// matched → the client named the dish, keep the combo and drop the stray component.
 function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
   let cleaned = [...matched];
 
@@ -368,6 +323,9 @@ function finalizeMatches(matched: SAFood[], lower: string): SAFood[] {
 export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAFood[] {
   const lower = msg.toLowerCase();
   const matched: SAFood[] = [];
+  // Entry name -> the client's own words that matched it, used to un-invent variant
+  // qualifiers once dedup is done (see applyClientNaming).
+  const matchedAlias = new Map<string, string>();
 
   // PASS 1: Exact word-boundary matching (fast, preferred)
   const matchedWithAlias: { food: SAFood; alias: string }[] = [];
@@ -419,6 +377,11 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
         const brandName = entry.alias.replace(/\b\w/g, c => c.toUpperCase());
         matched.push({ ...entry.food, name: brandName });
       } else {
+        // GENERALISED (2026-07-27): that rule was built for drinks only, so "Rice" came back
+        // "Brown rice" and "Tin fish" came back "Pilchards in tomato sauce". The rename is
+        // applied AFTER dedup (combo logic matches on the real entry names), so just record
+        // which of the client's words won this entry.
+        matchedAlias.set(entry.food.name, entry.alias);
         matched.push(entry.food);
       }
     }
@@ -428,7 +391,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
   // exactOnly: callers gating AUTO-logging (no eating verb present) must not act on
   // fuzzy guesses — fuzzy matched "building phase" to mopani worms and logged a fake
   // meal over a goal-change request (caught by routing-audit).
-  if (matched.length > 0 || opts?.exactOnly) return finalizeMatches(matched, lower);
+  if (matched.length > 0 || opts?.exactOnly) return applyClientNaming(finalizeMatches(matched, lower), matchedAlias);
 
   const words = lower.replace(/[^a-z\s]/g, "").split(/\s+/).filter(w => w.length >= 4 && !FUZZY_BLACKLIST.has(w));
   const combos: string[] = [...words];
@@ -461,7 +424,7 @@ export function scanForSAFoods(msg: string, opts?: { exactOnly?: boolean }): SAF
     }
   }
 
-  return finalizeMatches(matched, lower);
+  return applyClientNaming(finalizeMatches(matched, lower), matchedAlias);
 }
 
 export function parseFoodLogTotalsFromMessageOut(messageOut: string): { calories: number; protein: number } | null {
@@ -579,11 +542,10 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
   return guarded.reply;
 }
 
-// PHOTO-vs-TEXT DUPLICATE GUARD (2026-07-16 live incident): a client logged a meal by
-// voice, then sent a PHOTO of the same plate "to show you" — and it logged AGAIN,
-// blowing the day's totals (2979 kcal vs 2862 target). kcal-based dedup was correctly
-// rejected long ago (different meals share totals); NAME overlap is safe — two or more
-// shared food words (4+ chars) with a meal already logged TODAY means the same dish.
+// PHOTO-vs-TEXT DUPLICATE GUARD (2026-07-16 live): a client logged a meal by voice, then
+// sent a PHOTO of the same plate "to show you" — it logged AGAIN (2979 vs 2862 target).
+// kcal dedup was rejected long ago (different meals share totals); NAME overlap is safe —
+// 2+ shared food words (4+ chars) with a meal logged TODAY means the same dish.
 // Fail-open: any error returns null and the meal logs normally (never block a log).
 const MEAL_STOP_WORDS = new Set(["with", "and", "some", "the", "this", "that", "today", "lunch", "dinner", "breakfast", "supper", "snack", "meal", "food", "cooked", "portion", "plate", "small", "large", "cups", "photo"]);
 const mealWords = (s: string) => new Set((s.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !MEAL_STOP_WORDS.has(w)));
@@ -818,7 +780,7 @@ export function buildFoodLogReply(p: {
   // When the running total is implausible for the time of day, SAY SO rather than hiding a
   // duplicate-inflated day (2026-07-06). PLAIN LANGUAGE (2026-07-14 tester: "I don't understand
   // calories"): every "X remaining" is paired with what it means as FOOD via remainingInMeals.
-  const mealsLeft = effectiveRemaining > 0 ? remainingInMeals(effectiveRemaining) : "";
+  const mealsLeft = effectiveRemaining > 0 ? remainingInMeals(effectiveRemaining, mealLabel) : "";
   const runningLine = prevCals > 0 && runningTotalSane
     ? `Running total today: ~${runningCals} kcal / ${calorieTarget} target${effectiveRemaining > 0 ? ` (${effectiveRemaining} to go${mealsLeft ? ` — ${mealsLeft}` : ""}${stepsNote})` : effectiveRemaining >= -100 ? ` ✅ on target${stepsNote}` : ` · over by ~${Math.abs(effectiveRemaining)} kcal${stepsNote}`}`
     : prevCals > 0
@@ -875,6 +837,11 @@ export function buildFoodLogReply(p: {
             "Steps cancelled the overage — effectively on target. Finish with something lean.",
           ]
       )}_`;
+    } else if (dinnerIsLogged(mealLabel) && calRemaining > 0) {
+      // Dinner is on the board — every "one more meal" / "strip dinner down" line below is
+      // factually wrong (2026-07-27 live: "Clean day. One more solid meal and you close it
+      // out." arrived in the reply that logged dinner). Outranks all the pace wording.
+      dayAssessment = `\n_${dinnerCloseLine(proteinRemaining, isMuscleGain)}_`;
     } else if (!earlyInDay && calPace < 0.6 && effectiveRemaining < 600) {
       dayAssessment = `\n_${pick([
         "Solid pace. One high-protein meal closes the day.",
@@ -948,10 +915,11 @@ export function buildFoodLogReply(p: {
     coachNote = `\n\n${coachNoteOverride}`;
   } else if (totalMealCals >= 100) {
     if (totalMealProtein >= 20) {
-      const protOpener = pick([
-        "Solid protein.", "Good protein hit.", "Protein sorted.", "Strong meal.",
-        "Protein locked in.", "That's the protein box ticked.",
-      ]);
+      // Completion words only when the day IS done (2026-07-27 live: "That's the protein box
+      // ticked. 16g more to go today." — a contradiction inside one breath).
+      const protOpener = pick(proteinRemaining <= 0
+        ? ["Protein sorted.", "Protein locked in.", "That's the protein box ticked.", "Solid protein."]
+        : ["Solid protein.", "Good protein hit.", "Strong meal.", "That's a proper protein meal."]);
       // When the daily protein target is already met, the single "target hit ✅"
       // is owned by the proteinTip block below. Emit only the opener here so one
       // reply never prints "Protein target hit" twice (which read as a glitch).
@@ -1179,7 +1147,9 @@ export function buildFoodLogReply(p: {
               : "🟡 Logged — that's a takeaway, no drama. Balance it out: keep the rest of today protein + veg.")
         : effectiveRemaining < 150
           ? "🟢 Right on track for today."
-          : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
+          : dinnerIsLogged(mealLabel)
+            ? "🟢 Nicely done — dinner's in and you're inside your day."
+            : `🟢 Nicely done — still room for ${(mealsLeft || "a bit more").replace(/^room for /, "")} today.`)
     : "";
   const head = verdictHeadline ? `${verdictHeadline}\n\n` : "";
 
