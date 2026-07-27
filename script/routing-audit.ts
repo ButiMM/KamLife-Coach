@@ -303,6 +303,16 @@ const CASES: Case[] = [
   { name: "health: 'my sugar is high' alone (no fix-ask) does not get the timeline lecture", msg: "my sugar levels are high today",
     reject: [/5.10% of your body weight/i] },
 
+  // ── ASKING FOR DATA IT ALREADY HAS (2026-07-27 live) ───────────────────
+  { name: "setup: 'I need more help' must NOT re-ask days+gym/home (client already has a programme)", msg: "Will guide me? I need more help",
+    reject: [/How many days can you train/i] },
+  { name: "setup: 'I need more help with my meals' is not a programme rebuild either", msg: "I need more help with my meals",
+    reject: [/How many days can you train/i] },
+  { name: "setup: a REAL programme request still opens setup (regression guard)", msg: "I want a new gym programme",
+    expect: [/How many days can you train/i] },
+  { name: "setup: 'I need more challenging workouts' still opens setup (regression guard)", msg: "I need more challenging workouts",
+    expect: [/How many days can you train/i] },
+
   // ── TAKEAWAY PAST-TENSE (2026-07-27 live: "Had SA breakfast from McDonald's + 2 extra
   // patties + 2 extra eggs" → the ordering guide answered 3× while the coach promised to log) ──
   { name: "takeaway: 'Had breakfast from McDonalds with extra patties' LOGS, never the menu pick", msg: "Had South African breakfast from macdonalds. But I had extra 2 patties and extra 2 eggs with it",

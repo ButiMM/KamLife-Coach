@@ -393,7 +393,12 @@ export async function handleEarlyCommands(ctx: {
   const isBodyPartWorkoutRequest = !m.includes("?")
     && /^(?:(?:doing|training|about to do|gonna do|going to do)\s+)?(?:upper\s+body|lower\s+body|legs?|chest|back|push(?:\s+day)?|pull(?:\s+day)?|arms?|shoulders?|core)(?:\s+(?:today|day|now|workout|session|training))[.!?]?\s*$/i.test(m);
 
-  if (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest || looksLikeWorkoutRequest(m)) {
+  // A request for a NEW/DIFFERENT programme must NEVER be answered by dumping the CURRENT one
+  // (2026-07-27 live: "I need a new programme" → the existing Week-1 wall of text). Those
+  // messages belong to the setup flow below, so this viewer must stand down.
+  const wantsDifferentProgramme = /\b(new|change|different|rebuild|another|switch|swap|upgrade)\b[^.!?]{0,30}\b(programme|program|workout|training|plan)\b/i.test(m)
+    || /\b(programme|program|workout|training|plan)\b[^.!?]{0,30}\b(new|change|different|rebuild|another)\b/i.test(m);
+  if (!wantsDifferentProgramme && (m === "my programme" || m === "programme" || m === "my program" || m === "program" || m === "my workout" || m === "1" || m === "workout" || /^today.?s?\s+workout\W*$/i.test(m) || /^(today|1|workout|my workout|my programme|programme)$/.test(m) || isBodyPartWorkoutRequest || looksLikeWorkoutRequest(m))) {
     // Equipment named in the request itself ("home workout with two dumbbells", "workout
     // with no equipment") overrides the mode for THIS serving via the same temp mechanism
     // holiday mode uses — 2026-07-13 tester screenshot: this phrasing used to reach the
@@ -575,7 +580,10 @@ export async function handleEarlyCommands(ctx: {
     /\b(a new one|different one|another one|new gym|new home|new workout|new training)\b/i.test(m) ||
     /\bi want to train\s+[2-6]\s*days?\b/i.test(m) ||
     /\btrain\s+[2-6]\s*days?\s*(?:a\s*week|per\s*week)\b/i.test(m) ||
-    /\b(i need more|need more|need harder|more challenging|harder workout|upgrade my (programme|program|workout|training)|i want harder|want harder|want more intense|more intense workout|want a harder|need a harder)\b/i.test(m)
+    // "need more"/"want harder" must name what — bare "I need more help" threw the client
+    // into programme setup and re-asked days+mode it already had (2026-07-27 live).
+    /\b(?:need|want)\s+(?:more|harder|a harder|more intense)\s+(?:challenging\s+)?(?:workouts?|training|programme|program|sessions?|volume|intensity)\b/i.test(m) ||
+    /\b(more challenging|harder workout|more intense workout|upgrade my (programme|program|workout|training))\b/i.test(m)
   );
 
   if (isNewProgrammeRequest) {
@@ -649,16 +657,21 @@ export async function handleEarlyCommands(ctx: {
     const reply = `Sharp. ${trainingDays} days/week. ${modeLabel}. ${experience.charAt(0).toUpperCase() + experience.slice(1)}. Here is your programme.\n\n${programme}${targetsLine}\n\n_Just talk to me like a coach — tell me what you ate, send your steps, ask what to eat, or say *workout* for a session. I'm here all day._`;
     await logChat(user.id, message, reply, "PROGRAMME_DELIVERY");
 
-    // Day 1 progress photo challenge — fires immediately after programme delivery.
-    // Don't wait for the 10am cron. The user is engaged RIGHT NOW and more likely
-    // to send a photo when they're still in the setup flow than hours later.
-    // 3-second delay so the programme message lands first, then the follow-up.
+    // Progress-photo prompt after programme delivery. NEVER call an existing client "Day 0"
+    // (2026-07-27 live: a months-old client re-ran setup and was told "This is your Day 0 —
+    // send baseline photos" → "How can this be my day zero???? I've been here a long time!!!!").
+    // Tenure decides the wording: a genuinely new account gets the baseline ask, an existing
+    // client gets a re-shoot framed as a COMPARISON against what we already have.
+    const daysOnBoard = user.createdAt
+      ? Math.floor((Date.now() - new Date(user.createdAt).getTime()) / 86_400_000) : 0;
+    const isExistingClient = daysOnBoard >= 14;
     setTimeout(async () => {
       try {
-        await sendWhatsApp(phone,
-          `One more thing — *send me your baseline photos right now.*\n\nThree shots: *front, side and back.* Fitted clothes or underwear, good lighting. This is your Day 0.\n\nFrom these I read where you're strong and which muscles to bring up — then every month we compare and I show you the exact difference. Without today's photos, we have nothing to compare later.\n\n*Send all three now before you forget.*`
+        await sendWhatsApp(phone, isExistingClient
+          ? `One more thing — *fresh progress photos when you can.*\n\nThree shots: *front, side and back*, same lighting as last time. You're ${daysOnBoard} days in, so these compare against your earlier set and I'll show you the exact difference.\n\n_No rush — send them when you're ready._`
+          : `One more thing — *send me your baseline photos right now.*\n\nThree shots: *front, side and back.* Fitted clothes or underwear, good lighting. This is your Day 0.\n\nFrom these I read where you're strong and which muscles to bring up — then every month we compare and I show you the exact difference. Without today's photos, we have nothing to compare later.\n\n*Send all three now before you forget.*`
         );
-        await logChat(user.id, "[auto]", "[Day 0 photo challenge sent]", "PHOTO_CHALLENGE_PROMPT");
+        await logChat(user.id, "[auto]", isExistingClient ? "[progress re-shoot prompt sent]" : "[Day 0 photo challenge sent]", "PHOTO_CHALLENGE_PROMPT");
       } catch { /* non-fatal */ }
     }, 3_000);
 
