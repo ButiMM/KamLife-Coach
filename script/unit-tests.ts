@@ -5198,6 +5198,47 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
 // Results
 // ============================================================
 
+
+// ============================================================
+// MEAL-PLAN SCALING (2026-07-27, founder: "the features are half built"). The 3-day plan
+// averaged ~1483 kcal/day against a 2862 target — 52% — and the validator DETECTED the
+// shortfall and shipped the plan anyway with "add ~1379 kcal yourself". A plan that tells
+// the client to fix it is not a plan.
+// ============================================================
+{
+  const { topUpsForDay, topUpLine } = await import("../server/meal-plan-scale");
+  test("meal-plan scale: a 1450 kcal day against a 2862 target is topped up to target", () => {
+    const tops = topUpsForDay(1450, 78, 2862, 185);
+    const kcal = 1450 + tops.reduce((s, t) => s + t.kcal, 0);
+    const prot = 78 + tops.reduce((s, t) => s + t.protein, 0);
+    assert.ok(kcal >= 2862 * 0.9, `must reach ~target, got ${kcal}`);
+    assert.ok(prot >= 185 * 0.9, `protein must reach ~target, got ${prot}`);
+  });
+  test("meal-plan scale: a day already on target gets NO top-ups", () => {
+    assert.deepEqual(topUpsForDay(2850, 190, 2862, 185), []);
+    assert.equal(topUpLine([]), "");
+  });
+  test("meal-plan scale: protein comes first — the macro the pools under-deliver", () => {
+    const tops = topUpsForDay(1450, 78, 2862, 185);
+    assert.ok(tops.length > 0 && tops[0].protein >= 8, `protein-dense first: ${JSON.stringify(tops[0])}`);
+  });
+  test("meal-plan scale: an OVER-target day is never given more food", () => {
+    assert.deepEqual(topUpsForDay(3200, 200, 2862, 185), []);
+  });
+}
+
+// The whole generator must now land on target — the end-to-end contract.
+{
+  const { generateMealPlan } = await import("../server/meal-plan");
+  test("meal plan: a 2862 kcal client gets a plan that actually hits ~2862, not ~1483", () => {
+    const out = generateMealPlan({ calorieTarget: 2862, proteinTarget: 185, weeklyFoodBudget: "under_100",
+      goalType: "muscle_gain", medicalConditions: "", otherMedicalNotes: "", firstName: "Kam" } as any);
+    const totals = [...out.matchAll(/Total: ~(\d+) kcal/g)].map(m => Number(m[1]));
+    assert.ok(totals.length >= 3, `3 day totals, got ${totals.length}`);
+    for (const t of totals) assert.ok(t >= 2500, `every day must be near 2862, got ${t}`);
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

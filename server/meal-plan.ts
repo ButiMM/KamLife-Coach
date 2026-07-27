@@ -12,6 +12,7 @@
 // ============================================================
 
 import { validateMealPlan, type DayTotals } from "./verifiers/meal-plan-validator";
+import { topUpsForDay, topUpLine } from "./meal-plan-scale";
 
 export type MealPlanOptions = {
   calorieTarget: number;
@@ -344,9 +345,21 @@ export function generateMealPlan(opts: MealPlanOptions): string {
       dinner = { ...dinner, kcal: dinner.kcal + 80, protein: dinner.protein + 10, items: `${dinner.items} + extra 50g protein` };
     }
 
+    // SCALE TO TARGET (2026-07-27): the pools are sized ~1400-1500 kcal/day, so a 2862 kcal
+    // client got a plan at 52% of target while the validator merely NOTED the shortfall.
+    // Close the gap with real cheap SA staples — protein first — so the plan is usable as-is.
+    const built = [breakfast, lunch, dinner, snack];
+    const dayKcal = built.reduce((s2, mm) => s2 + mm.kcal, 0);
+    const dayProt = built.reduce((s2, mm) => s2 + mm.protein, 0);
+    const tops = topUpsForDay(dayKcal, dayProt, calorieTarget, proteinTarget);
+    const extraMeals = tops.length
+      ? [{ emoji: "➕", label: "Extra to hit your target", items: tops.map(t => t.label).join(" + "),
+           kcal: tops.reduce((s2, t) => s2 + t.kcal, 0), protein: tops.reduce((s2, t) => s2 + t.protein, 0) } as Meal]
+      : [];
+
     days.push({
       day: `Day ${d + 1}`,
-      meals: [breakfast, lunch, dinner, snack],
+      meals: [...built, ...extraMeals],
       cookNote: proteinDay.cookNote,
     });
   }
