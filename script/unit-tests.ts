@@ -5280,6 +5280,72 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// ============================================================
+// ADAPTIVE TARGET ENGINE (2026-07-27, founder: "It doesn't adjust the calories when you are
+// sick. It doesn't adjust anything. There's no brain here."). He was right — targets were
+// frozen at onboarding. This is the brain: state in, today's targets out.
+// ============================================================
+{
+  const { adaptTargets } = await import("../server/adaptive-targets");
+  const base = { baseCalories: 2000, baseProtein: 150, baseSteps: 8000, goalType: "fat_loss", weightKg: 80, sick: false };
+
+  test("adaptive: SICK removes the deficit, keeps protein high, drops the step target to 0", () => {
+    const r = adaptTargets({ ...base, sick: true, daysSick: 2 });
+    assert.ok(r.calorieTarget > base.baseCalories, `no deficit while sick: ${r.calorieTarget}`);
+    assert.ok(r.proteinTarget >= 144, `protein protects muscle: ${r.proteinTarget}`);
+    assert.equal(r.stepsTarget, 0, "nobody fails a step target from bed");
+    assert.equal(r.reason, "sick");
+    assert.match(r.note, /rest numbers|no deficit/i);
+  });
+  test("adaptive: a week+ of illness adds the doctor nudge", () => {
+    assert.match(adaptTargets({ ...base, sick: true, daysSick: 8 }).note, /doctor/i);
+  });
+  test("adaptive: RECOVERING eases steps back at half, food normal", () => {
+    const r = adaptTargets({ ...base, recovering: true });
+    assert.equal(r.calorieTarget, 2000);
+    assert.equal(r.stepsTarget, 4000);
+    assert.equal(r.reason, "recovering");
+  });
+  test("adaptive: losing too fast puts calories UP — that is muscle going, not a win", () => {
+    const r = adaptTargets({ ...base, weeklyKgChange: -1.2 });
+    assert.ok(r.calorieTarget > 2000, `must go UP, got ${r.calorieTarget}`);
+    assert.equal(r.reason, "losing_too_fast");
+    assert.match(r.note, /muscle/i);
+  });
+  test("adaptive: gaining too fast on a build trims the surplus", () => {
+    const r = adaptTargets({ ...base, goalType: "muscle_gain", weeklyKgChange: 0.9 });
+    assert.ok(r.calorieTarget < 2000, `must come down, got ${r.calorieTarget}`);
+    assert.equal(r.reason, "gaining_too_fast");
+  });
+  test("adaptive: a 3-week stall gets a SMALL trim plus steps, never a crash", () => {
+    const r = adaptTargets({ ...base, stalledWeeks: 3 });
+    assert.equal(r.reason, "stalled");
+    assert.ok(r.calorieTarget >= 1760 && r.calorieTarget < 2000, `small trim only: ${r.calorieTarget}`);
+    assert.ok(r.stepsTarget > 8000, "steps move too");
+  });
+  test("adaptive: the floor holds — a stall never starves a light client", () => {
+    const r = adaptTargets({ ...base, baseCalories: 1400, weightKg: 55, stalledWeeks: 5 });
+    assert.ok(r.calorieTarget >= 1400 * 0.93 && r.calorieTarget >= 1210, `never below floor: ${r.calorieTarget}`);
+    assert.ok(r.stepsTarget > 8000, "moves with steps at the floor");
+  });
+  test("adaptive: an inactive week lowers a fat-loss target so the deficit is real", () => {
+    const r = adaptTargets({ ...base, avgSteps7d: 1500 });
+    assert.equal(r.reason, "inactive");
+    assert.ok(r.calorieTarget < 2000);
+  });
+  test("adaptive: a normal week changes NOTHING — a target that moves daily is noise", () => {
+    const r = adaptTargets({ ...base, weeklyKgChange: -0.4, avgSteps7d: 7800, stalledWeeks: 0 });
+    assert.equal(r.changed, false);
+    assert.equal(r.note, "");
+    assert.equal(r.calorieTarget, 2000);
+  });
+  test("adaptive: sick BEATS every other signal", () => {
+    const r = adaptTargets({ ...base, sick: true, stalledWeeks: 6, avgSteps7d: 200, weeklyKgChange: -1.5 });
+    assert.equal(r.reason, "sick");
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
