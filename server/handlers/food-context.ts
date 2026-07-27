@@ -337,9 +337,8 @@ export async function handleFoodContext(ctx: {
    *  question mentioning food ("what do you think about rice and sweet potato?") gets
    *  logged as a 588-kcal meal because "having" trips hasLogTrigger (prod, 2026-07-03). */
   classifierQuestion?: boolean;
-  /** EXECUTOR resolved an explicit LOG_MEAL: skip every advisory branch, go straight to the
-   *  scanner. Rewritten text ("breakfast from McDonald's…") has no past-tense marker, so the
-   *  ordering guide hijacked it and answered with a menu pick 3x instead of logging (2026-07-27). */
+  /** EXECUTOR resolved an explicit LOG_MEAL: skip advisory branches, go straight to the
+   *  scanner (2026-07-27: the ordering guide answered a log 3x instead of logging). */
   forceLog?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
