@@ -202,7 +202,10 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       const myth = !verifyBrainReply("We'll shock the muscle with new movements to confuse it.", {}).ok;
       const mark = (ok: boolean) => ok ? "✅ BLOCKED" : "❌ SLIPS THROUGH";
       // MEAL-CARD health: font loaded on this server + APP_URL has a scheme (else blank/leaked).
-      const appUrlOk = /^https?:\/\//i.test((process.env.APP_URL || "").trim());
+      // Check the URL the card ACTUALLY uses — cardBaseUrl() forces the https:// scheme when
+      // APP_URL was stored without one, so testing the raw env var reported a scary "card
+      // leaks as a link" while cards were rendering fine (2026-07-27 false alarm).
+      const appUrlOk = /^https?:\/\/.+/i.test((await import("./macro-card-attach")).cardBaseUrl());
       const cardOk = cardFontLoaded && appUrlOk;
       return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
     }

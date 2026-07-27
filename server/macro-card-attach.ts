@@ -33,7 +33,7 @@ import { waterTargetLitres } from "./targets";
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
 // instead of an image; forcing https:// makes it a valid media URL Twilio fetches.
-function cardBaseUrl(): string {
+export function cardBaseUrl(): string {
   let base = (process.env.APP_URL || "").trim().replace(/\/$/, "");
   if (base && !/^https?:\/\//i.test(base)) base = "https://" + base;
   return base;
