@@ -337,12 +337,9 @@ export async function handleFoodContext(ctx: {
    *  question mentioning food ("what do you think about rice and sweet potato?") gets
    *  logged as a 588-kcal meal because "having" trips hasLogTrigger (prod, 2026-07-03). */
   classifierQuestion?: boolean;
-  /** TRUE when the EXECUTOR resolved an explicit LOG_MEAL action (2026-07-27 live disaster):
-   *  the engine hands over rewritten text like "breakfast from McDonald's with 2 extra
-   *  patties", which has no past-tense marker — so the restaurant ORDERING GUIDE hijacked it
-   *  and answered with a menu pick instead of logging, three times in a row, while the coach
-   *  kept promising "I'll log it now". An explicit log intent must never be answered with
-   *  advice: this flag skips every advisory branch and goes straight to the scanner. */
+  /** EXECUTOR resolved an explicit LOG_MEAL: skip every advisory branch, go straight to the
+   *  scanner. Rewritten text ("breakfast from McDonald's…") has no past-tense marker, so the
+   *  ordering guide hijacked it and answered with a menu pick 3x instead of logging (2026-07-27). */
   forceLog?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
