@@ -1292,8 +1292,7 @@ export async function handleFoodContext(ctx: {
       const dn = unloggedPlaceNotice(message, allAdjustedFoods.map(f => f.name));
       const droppedNote = dn ? `\n\n${dn}` : "";
 
-      // REPLY CONTRACT: collapse a routine log to 3 lines (the CARD carries the macros).
-      // OFF by default — the product's VOICE is the founder's call. REPLY_CONTRACT=on enables.
+      // REPLY CONTRACT: 3-line log (card carries macros). OFF by default; REPLY_CONTRACT=on.
       const compact = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message)
         ? enforceReplyContract(reply) : reply;
       return `${compact}${droppedNote}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
