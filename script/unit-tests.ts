@@ -5746,6 +5746,14 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(ceilingState(5000, 5000), "over");
   });
 
+  test("auditor: counts foods missing from the database — the only honest coverage measure", () => {
+    const c = codes({
+      messageIn: "i had a bunny chow and a peach",
+      messageOut: "*Food logged* ✅\n\n⚠️ I could not price *bunny chow, peach* — that part is NOT in the total.",
+    });
+    assert.ok(c.includes("food-not-in-database"));
+  });
+
   test("auditor: summarise rolls turns into counts worst-first", () => {
     const s = summarise([
       { messageIn: "What?", messageOut: "*What you can send me:*\n🔍 Any meal" },

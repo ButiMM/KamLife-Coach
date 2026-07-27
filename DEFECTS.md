@@ -18,7 +18,6 @@ _Last updated: 2026-07-27_
 | D5 | No instrumentation — nothing measures where clients *disengage* (the reply auditor now catches defective replies; engagement/drop-off is still unmeasured) | — | Narrowed, still open |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
 | D8 | Card shows 4 macro bars + raw numbers to a market that doesn't think in calories | Every card | Product design |
-| D9 | Coverage: 838 foods / 18 restaurants / 46 menu items | Counted | Data grind |
 | D10 | Emotional/human-state coaching is shallow (the "I'm honestly depressed, only had alcohol" case) | Kamogelo thread | Needs product decision + build |
 | D12 | Meta clinical-language audit not done (coach prompt contains diabetes/hypertension playbooks) | Code audit | Compliance risk |
 
@@ -78,6 +77,24 @@ rule this file exists to enforce._
   replies for 10 known failure patterns; `npm run audit:replies` or text *audit* to the bot.
   Its tests replay the exact screenshots from 2026-07-27 — if a detector stops catching its
   own screenshot, the auditor has silently stopped working.
+
+## CORRECTED — I had this wrong
+
+- ❌ **D9 "Coverage: 838 foods / 18 restaurants — data grind" was NOT a defect.** The founder
+  challenged it against the review log and was right. Review #2's guard is explicit:
+  *"Undeniable-in-the-lane means deeper, not wider"*, and the invest list says
+  *"SA-food photo recognition **accuracy** (fixed cost, doesn't scale with users — where trust
+  is won or lost)"* — accuracy, not item count.
+
+  The evidence from 2026-07-27 says the same thing. Not one food failure that day was a missing
+  food. All three were matching/naming failures on foods already in the database ("Rice" →
+  "Brown rice", "Tin fish" → "Pilchards in tomato sauce"), and **"Teach" → "Peach" is proof that
+  more entries would make things worse**, not better — every added item is another fuzzy
+  collision with ordinary speech.
+
+  Replaced with a measurement instead of an argument: the auditor now counts
+  `food-not-in-database` (replies where the coach correctly said "I could not price X"). If that
+  number is high, coverage is real; if it's near zero, adding foods is pure risk. Run *audit*.
 
 ## NOT DEFECTS — checked and confirmed working
 

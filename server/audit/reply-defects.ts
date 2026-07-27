@@ -58,6 +58,15 @@ const TELLS_TO_TRAIN_RE = /\b(training day|reply \*?workout\*?|let'?s get it don
 const REPORTS_TRAINED_TODAY_RE = /\b(?:trained|worked out|went to the gym|hit the gym|first (?:day|session) back|did my (?:workout|session))\b/i;
 const FUTURE_OR_NEGATED_RE = /\b(will|going to|want to|plan to|tomorrow|didn'?t|couldn'?t|missed|skip)\b/i;
 
+/**
+ * A food the coach could not price. This is the ONLY honest measure of whether the food
+ * database is too small (2026-07-27: the founder challenged the "add more foods" plan against
+ * a reviewer note — "deeper, not wider" and "invest in recognition ACCURACY". He was right, and
+ * this makes the question answerable instead of arguable. Note it is not a defect in the reply:
+ * naming what it could not price is CORRECT behaviour — it is a coverage counter.)
+ */
+const UNPRICED_RE = /could not price \*([^*]+)\*/i;
+
 /** A food name in the reply that carries detail the client's message never contained. */
 const LOGGED_LINE_RE = /(?:^|\n)\s*✅?\s*\*?Logged:?\*?\s*([^\n]+)/i;
 
@@ -126,7 +135,13 @@ export function scanReply(turn: AuditTurn): ReplyDefect[] {
     found.push({ code: "dead-promise", detail: "promises a follow-up nothing will deliver" });
   }
 
-  // 10. The same claim printed twice — reads as a glitch.
+  // 10. Coverage counter — the coach behaved correctly, but a food was missing from the DB.
+  const unpriced = UNPRICED_RE.exec(out);
+  if (unpriced) {
+    found.push({ code: "food-not-in-database", detail: `could not price "${unpriced[1].trim()}"` });
+  }
+
+  // 11. The same claim printed twice — reads as a glitch.
   const hitCount = (out.match(/protein target (?:hit|met|reached)/gi) || []).length;
   if (hitCount > 1) {
     found.push({ code: "duplicate-claim", detail: `"protein target hit" printed ${hitCount} times` });

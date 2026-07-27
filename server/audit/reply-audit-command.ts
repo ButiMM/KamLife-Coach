@@ -26,6 +26,7 @@ const LABELS: Record<string, string> = {
   "capability-lie": "Claimed it cannot read photos",
   "dead-promise": "Promised a follow-up that never comes",
   "duplicate-claim": "Printed the same claim twice",
+  "food-not-in-database": "Food missing from the database (coach handled it correctly)",
 };
 
 export async function replyAuditCommand(message: string, _user?: unknown): Promise<string> {
