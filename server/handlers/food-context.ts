@@ -143,10 +143,9 @@ interface CommitFoodLogResult {
   runningProtein: number;
 }
 
-// THE single chokepoint for every food-log write (Box 2) — guarantees live in ONE place.
-// GUARANTEE: complete macros. If a path gave kcal + protein but no carbs/fat, fill from the
-// trusted numbers so the card can't be zero-dragged. Only fills when BOTH are absent, so a
-// legit all-protein meal (kcal ≈ protein×4) still lands ~0.
+// THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
+// protein with no carbs/fat get filled from the trusted numbers so the card can't be
+// zero-dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).
 export async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
   let carbsInt = params.carbsInt;
   let fatInt = params.fatInt;
