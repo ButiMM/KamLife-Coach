@@ -18,6 +18,13 @@ import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
 // sickness. Idioms are scrubbed FIRST because they contain the trigger words.
 const SICK_WORDS = /\b(sick|ill|flu|flue|flu.?like|fever|vomit|nausea|nauseous|throwing up|stomach bug|food poison|covid|covid.?19|not well|not feeling well|feeling sick|feeling ill|feel sick|feel ill|i.?m sick|i.?m ill|under the weather|hospital|doctor.?s|clinic|bed rest|body aches|headache.*bad|migraine|tonsil|sore throat|chest.*tight|can.?t breathe|difficulty breathing)\b/i;
 const RECOVERED = /\b(used to be sick|was sick last week|recovered|feeling better now|back to normal|got better|all better|not sick|not ill|not unwell|i.?m not sick|no longer sick|not sick anymore|i.?m better|i.?m fine now|i.?m okay now|i.?m ok now|feel better|feeling better|better now|i.?m well|i.?m healthy|recovered from|over the|over it now)\b/i;
+// PAST-TENSE REFERENCE (2026-07-27 live disaster): a client said "Now that I'm not sick
+// anymore how do we go about my plan?" — got the right plan — then added "But I was sick",
+// and the bare word "sick" threw them BACK into the sick flow: training cancelled, check-ins
+// paused 3 days. Explaining that you WERE ill is not reporting that you ARE ill. Only a
+// present-tense marker (still / today / now / since) makes a past-tense mention current.
+const PAST_SICK_REFERENCE = /\b(?:i|we)\s*(?:'?ve\s+)?(?:was|were)\s+(?:so\s+|very\s+|really\s+)?(?:sick|ill|unwell|down)\b|\bwhen i (?:was|got) (?:sick|ill)\b|\bbeen sick\b/i;
+const STILL_SICK_MARKER = /\b(still|today|right now|currently|since (?:yesterday|monday|tuesday|wednesday|thursday|friday|saturday|sunday)|again)\b/i;
 const SICK_SCRUB = /\bsick (?:and tired )?of\b|\bflu (?:shot|vaccine|vaccination|jab)s?\b/gi;
 const THIRD_PARTY_SICK = /\b(?:my (?:sister|brother|mom|mum|mother|dad|father|friend|colleague|co-?worker|wife|husband|partner|boyfriend|girlfriend|son|daughter|kids?|child|children|baby|gran(?:ny)?|grandma|grandpa|aunt|uncle|cousin|neighbou?r|boss)|everyone|everybody|people|the whole (?:office|house|family))\b[^.!?]{0,40}\b(?:sick|ill|flu|fever|covid|bug|vomit|not well)|\b(?:flu|covid|a bug|stomach bug|something)\b[^.!?]{0,30}\bgoing (?:a)?round\b/i;
 const FIRST_PERSON_SICK = /\bi\s*(?:'?m|am|feel|felt|'?ve got|'?ve been|have|got|caught|woke up)\b[^.!?]{0,30}\b(?:sick|ill|unwell|flu|fever|covid|nauseous|vomiting|throwing up|not well|terrible|awful|a cold|the flu)\b|\bdown with (?:the )?(?:flu|a cold|covid|a bug)\b|\bnot feeling well\b|\bunder the weather\b|\bcan'?t (?:get out of bed|stop (?:vomiting|throwing up))\b/i;
@@ -61,6 +68,8 @@ export function looksSickMention(m: string): boolean {
   if (REGRET_CONTEXT.test(s) && !HARD_ILLNESS.test(s)) {
     s = s.replace(/\b(?:i\s+)?feel(?:ing)?\s+(?:a bit\s+|so\s+|really\s+)?(?:sick|ill|nauseous)\b|\bnausea(?:ous)?\b/gi, " ");
   }
+  // A purely PAST-TENSE mention ("but I was sick") is context, not a new sick report.
+  if (PAST_SICK_REFERENCE.test(s) && !STILL_SICK_MARKER.test(s)) return false;
   return SICK_WORDS.test(s) && !RECOVERED.test(s) && !aboutSomeoneElse(s);
 }
 

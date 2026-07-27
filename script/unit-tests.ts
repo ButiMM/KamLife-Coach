@@ -5468,6 +5468,29 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// SICK STATE — PAST TENSE IS NOT A NEW REPORT (2026-07-27 live disaster): the client said
+// "Now that I'm not sick anymore how do we go about my plan?" (got the right plan), then
+// added "But I was sick" — and the bare word "sick" threw them BACK into the sick flow:
+// training cancelled, check-ins paused 3 days, and sick-state eating advice delivered to
+// someone who had just told the coach they were better.
+{
+  const { looksSickMention } = await import("../server/handlers/sick-flow");
+  test("sick: a past-tense mention is context, not a new sick report", () => {
+    assert.equal(looksSickMention("But I was sick"), false);
+    assert.equal(looksSickMention("when I was sick"), false);
+    assert.equal(looksSickMention("I was sick last week but I'm training again"), false);
+  });
+  test("sick: a genuine present report still fires", () => {
+    assert.equal(looksSickMention("I am sick"), true);
+    assert.equal(looksSickMention("I feel sick"), true);
+    assert.equal(looksSickMention("I have been sick since Monday"), true);
+  });
+  test("sick: past tense + a present marker is still sick", () => {
+    assert.equal(looksSickMention("I was sick but I am still sick today"), true);
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
