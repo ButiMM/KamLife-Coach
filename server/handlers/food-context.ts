@@ -23,6 +23,7 @@ import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
+import { unloggedPlaceNotice } from "../unlogged-notice";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
@@ -1038,9 +1039,8 @@ export async function handleFoodContext(ctx: {
       allAdjustedFoods.push(...adjusted);
     }
 
-    // ---- PARTIAL MATCH SUPPLEMENT — catch food items SA scanner missed ----
-    // Only fires when the message has substantive unmatched content (e.g. "mushroom sauce" with "pap").
-    // Each supplemented item is attributed back to the segment whose text mentions it.
+    // ---- PARTIAL MATCH SUPPLEMENT — catch items the SA scanner missed; attributed back to
+    // the segment whose text mentions them.
     if (allAdjustedFoods.length > 0 && hasUnmatchedFoodContent(m, allAdjustedFoods)) {
       try {
         const suppItems = await gptFoodSupplement(message, user, allAdjustedFoods.map(f => f.name));
@@ -1291,8 +1291,11 @@ export async function handleFoodContext(ctx: {
       const plannedNote = plannedSegs.length > 0
         ? `\n\n📋 Not logged yet (still coming): *${plannedSegs.join("; ")}*. Reply *ate it* once you've had it and I'll add it.`
         : "";
+      // NEVER SILENTLY DROP a named restaurant meal we couldn't price (2026-07-27).
+      const dn = unloggedPlaceNotice(message, allAdjustedFoods.map(f => f.name));
+      const droppedNote = dn ? `\n\n${dn}` : "";
 
-      return `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
+      return `${reply}${droppedNote}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
     }
 
     // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")

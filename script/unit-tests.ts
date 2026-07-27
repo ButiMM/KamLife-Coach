@@ -5239,6 +5239,47 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// ============================================================
+// NEVER SILENTLY DROP (2026-07-27 live): "Had South African breakfast from macdonalds. But I
+// had extra 2 patties and extra 2 eggs" → only the eggs + patties were logged (479 kcal) and
+// the McDonald's breakfast vanished without a word, costing twelve angry messages.
+// ============================================================
+{
+  const { unloggedPlaceNotice } = await import("../server/unlogged-notice");
+  test("unlogged notice: a named place with nothing logged from it is called out", () => {
+    const n = unloggedPlaceNotice("Had South African breakfast from macdonalds, but I had extra 2 patties and 2 eggs", ["Eggs", "patties"]);
+    assert.match(n, /could not price/i);
+    assert.match(n, /McDonald/i);
+  });
+  test("unlogged notice: silent when the place's item WAS logged", () => {
+    assert.equal(unloggedPlaceNotice("KFC streetwise 2", ["KFC Streetwise 2"]), "");
+  });
+  test("unlogged notice: silent when no place is named", () => {
+    assert.equal(unloggedPlaceNotice("2 eggs and toast", ["Eggs", "Toast"]), "");
+  });
+}
+
+
+// SA FAST-FOOD MENU NAMES (2026-07-27 live: "Had South African breakfast from macdonalds"
+// matched nothing — the alias list had "breakfast macdonalds" but not the connector form
+// "breakfast FROM macdonalds", so the whole meal was silently dropped).
+{
+  const { scanForSAFoods } = await import("../server/handlers/food-scanner");
+  const names = (t: string) => scanForSAFoods(t).map((f: any) => f.name).join(", ");
+  test("SA menu: the real live phrasing finds the McDonald's SA Big Breakfast", () => {
+    assert.match(names("Had South African breakfast from macdonalds"), /Big Breakfast/i);
+  });
+  test("SA menu: 'South African breakfast' alone is the menu item, not nothing", () => {
+    assert.match(names("south african breakfast"), /Big Breakfast/i);
+  });
+  test("SA menu: connector spellings all land", () => {
+    for (const t of ["breakfast from mcdonalds", "mcdonalds south african breakfast", "sa breakfast"]) {
+      assert.match(names(t), /Big Breakfast/i, t);
+    }
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
