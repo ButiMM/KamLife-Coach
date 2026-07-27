@@ -9,6 +9,7 @@ import { db } from "../db";
 import { users, workoutLogs, exerciseLogs, stepLogs, chatHistory } from "../../shared/schema";
 import { eq, and, gte, lt, desc } from "drizzle-orm";
 import { classifyWorkoutFeedback, workoutFeedbackReply } from "../workout-feedback";
+import { parseSessionReport, sessionReportReply, sessionMemoryLine, type SessionReport } from "../session-report";
 import {
   buildDayWorkout,
   buildFullProgramme, getKamlifeProgramme, WORKOUT_DONE_RESPONSES,
@@ -71,6 +72,17 @@ export async function handleWorkoutCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
   const firstName = user.name?.split(" ")[0] || "";
+
+  // ---- SESSION REPORTED IN PROSE — "today was my first day back, felt very bad" ----
+  // Runs BEFORE the difficulty-feedback gate and the terse `isDone` match, because a
+  // sentence reaches neither: the gate needs a WORKOUT_* intent in the last 6h (absent
+  // when someone just trains and then tells you) and `isDone` is anchored ^…$. The
+  // session was being dropped AND the feeling ignored — see server/session-report.ts.
+  const sessionReport = parseSessionReport(message);
+  if (sessionReport && !looksLikeQuestion(m) && !isFutureIntent(m) && !mentionsNotDone(m)) {
+    const handled = await logProseSession(user, phone, message, sessionReport, firstName);
+    if (handled) return handled;
+  }
 
   // ---- WORKOUT DIFFICULTY FEEDBACK — the post-session "how was it?" loop ----
   // Only interpret "too easy / just right / too hard" as session feedback when a
@@ -587,4 +599,61 @@ export async function handleWorkoutCommands(ctx: {
   }
 
   return null;
+}
+
+/**
+ * Commit a session the client described in prose, then answer how it FELT.
+ *
+ * Same door as the terse "done" path — one row per day, counters advanced, pattern cache
+ * invalidated — so `getTodayWorkoutState` reads ALREADY_DONE afterwards and nothing tells
+ * them to train again today. Returns null only if this module shouldn't own the message.
+ */
+async function logProseSession(
+  user: any, phone: string, message: string, report: SessionReport, firstName: string,
+): Promise<string | null> {
+  const todayStart = sastDayStart();
+  const existing = await db.select({ id: workoutLogs.id }).from(workoutLogs)
+    .where(and(eq(workoutLogs.userId, user.id), gte(workoutLogs.loggedAt, todayStart)))
+    .limit(1);
+
+  // Already on the board — don't double-count, but still answer the feeling, because
+  // being ignored is what the client actually complained about.
+  if (existing.length > 0) {
+    const dupe = sessionReportReply(report, firstName, user.totalWorkoutsCompleted || 0)
+      .replace(/^✅[^\n]*\n\n/, `✅ ${firstName ? firstName + ", " : ""}today's session is already logged.\n\n`);
+    await logChat(user.id, message, dupe, "WORKOUT_FEEDBACK");
+    return dupe;
+  }
+
+  await db.insert(workoutLogs).values({ userId: user.id, workoutCompleted: true });
+  invalidatePatternCache(user.id);
+
+  const newTotal = (user.totalWorkoutsCompleted || 0) + 1;
+  const trainingDays = user.trainingDaysPerWeek || 3;
+  const todaySlot = getTodaySlot(user);
+  const nextDay = (todaySlot % trainingDays) + 1;
+  const newWeek = todaySlot === trainingDays ? (user.programmeWeek || 1) + 1 : (user.programmeWeek || 1);
+
+  const dayStartSAST = (d: Date) => {
+    const sast = new Date(d.getTime() + 2 * 3_600_000);
+    return new Date(Date.UTC(sast.getUTCFullYear(), sast.getUTCMonth(), sast.getUTCDate())).getTime();
+  };
+  const lastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
+  const wasYesterday = lastWorkout && dayStartSAST(lastWorkout) === dayStartSAST(new Date(Date.now() - 86_400_000));
+
+  await db.update(users).set({
+    totalWorkoutsCompleted: newTotal,
+    programmeDayInWeek: nextDay,
+    programmeWeek: newWeek,
+    lastWorkoutDate: new Date(),
+    lastActiveAt: new Date(),
+    workoutStreak: wasYesterday ? (user.workoutStreak || 0) + 1 : 1,
+  }).where(eq(users.phoneNumber, phone));
+
+  // How it felt has to outlive this message — next session's coaching depends on it.
+  storeMemory(phone, sessionMemoryLine(report), "workout").catch(() => {});
+
+  const reply = sessionReportReply(report, firstName, newTotal);
+  await logChat(user.id, message, reply, "WORKOUT_DONE");
+  return reply;
 }

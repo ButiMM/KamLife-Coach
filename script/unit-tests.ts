@@ -33,6 +33,9 @@ import { stripDeadPromises, hasDeadPromise, stripFiller, humanizeReply } from ".
 import { buildFoodVisionUserPrompt, buildMenuPickPrompt } from "../server/handlers/food-vision-prompt";
 import { parsePhysiqueAnalysis, buildPhysiqueAnalysisPrompt, formatPhysiqueFocusLine, genderLaggingPriors, buildProgressComparisonPrompt, liftsForLaggingAreas } from "../server/physique-analysis";
 import { buildDailyDirection } from "../server/daily-direction";
+import { parseSessionReport, sessionReportReply, readFeel } from "../server/session-report";
+import { looksLikeQuestion, isFutureIntent, mentionsNotDone } from "../server/utils";
+import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../server/reaction-guard";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
 import { isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, stripFoodLoggedClaim, extractStepTargetChange, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest, parseSickDays, isReturnFromSicknessQuestion, isAskingNotReporting } from "../server/utils";
@@ -5488,6 +5491,100 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
   test("sick: past tense + a present marker is still sick", () => {
     assert.equal(looksSickMention("I was sick but I am still sick today"), true);
+  });
+}
+
+// SESSION REPORTED IN PROSE (2026-07-27 thread — D1 + D2 in ONE message). The client wrote
+// that today was his first day back after being sick and that it felt very bad, "like I
+// never trained before". Nothing was logged (isDone is anchored, retro needs "yesterday"),
+// the feeling was ignored (no concept of a session that felt BAD), and minutes later the
+// coach told him "Training day — reply *workout*" for a session he had already done.
+{
+  const first = "today was my first day back at the gym, it felt very bad, like I never trained before";
+
+  test("session report: the live message logs a session and reads the feel", () => {
+    const r = parseSessionReport(first);
+    assert.ok(r, "the failing live message must parse as a session report");
+    assert.equal(r!.trainedToday, true);
+    assert.equal(r!.feel, "bad");
+    assert.equal(r!.returning, true);
+  });
+
+  test("session report: the reply confirms the log, names the feeling, sets next session", () => {
+    const out = sessionReportReply(parseSessionReport(first)!, "Thabo", 12);
+    assert.match(out, /logged today's session/i);   // it is on the board
+    assert.match(out, /12 sessions/);                // deterministic tally, not a guess
+    assert.match(out, /never trained before/i);      // the feeling is answered, not ignored
+    assert.match(out, /60%/);                        // concrete instruction for next time
+    assert.doesNotMatch(out, /reply \*workout\*/i);  // never "go train" for a done session
+  });
+
+  test("session report: plain phrasings count as today's session", () => {
+    for (const msg of [
+      "I trained today", "went to the gym this morning", "just finished my session",
+      "did my workout today", "hit the gym today", "first day back today",
+    ]) assert.ok(parseSessionReport(msg)?.trainedToday, `should log: ${msg}`);
+  });
+
+  test("session report: plans, questions, misses and other days are NOT logged", () => {
+    for (const msg of [
+      "I want to train today", "going to the gym later today", "should I train today?",
+      "I didn't train today", "I missed today's session", "I trained yesterday",
+      "did legs on Monday", "will I train today", "what is today's workout",
+    ]) {
+      const r = parseSessionReport(msg);
+      const blocked = !r || looksLikeQuestion(msg) || isFutureIntent(msg) || mentionsNotDone(msg);
+      assert.ok(blocked, `must not log a session: ${msg}`);
+    }
+  });
+
+  test("session report: the feel scale reads worst-first", () => {
+    assert.equal(readFeel("it felt terrible"), "bad");
+    assert.equal(readFeel("I had no strength at all"), "bad");
+    assert.equal(readFeel("couldn't finish it"), "bad");
+    assert.equal(readFeel("it was brutal, really hard"), "hard");
+    assert.equal(readFeel("felt strong today"), "strong");
+    assert.equal(readFeel("it was fine"), "fine");
+    assert.equal(readFeel("I trained today"), null);
+  });
+
+  test("session report: a comeback with no feel still gets comeback coaching", () => {
+    const out = sessionReportReply({ trainedToday: true, feel: null, returning: true }, "", 3);
+    assert.match(out, /first one back/i);
+    assert.match(out, /60%/);
+  });
+}
+
+// BARE REACTION ≠ EMOTIONAL CRISIS (2026-07-27 thread — D3). "Wow" and then "Jesus" at two
+// bad replies came back as therapy-speak about feeling overwhelmed. The prompt already
+// banned that and the model did it anyway, so the bad output is now rejected in code.
+{
+  test("reaction guard: bare exclamations are reactions, not disclosures", () => {
+    for (const msg of ["Wow", "wow", "Jesus", "Jesus Christ", "omg", "eish", "!!!!", "???", "🙄", "wowwww", "ugh"])
+      assert.equal(isBareReaction(msg), true, `should be a bare reaction: ${msg}`);
+  });
+
+  test("reaction guard: real messages are never treated as bare reactions", () => {
+    for (const msg of [
+      "wow this plan looks good, can you send my workout",
+      "I am really struggling and I feel like giving up",
+      "Jesus I have been so depressed lately, only drinking",
+      "log 2 eggs and toast",
+    ]) assert.equal(isBareReaction(msg), false, `must not be bare: ${msg}`);
+  });
+
+  test("reaction guard: therapy-speak is detected and replaced", () => {
+    const bad = "I hear you — it sounds like you're feeling overwhelmed right now. Be kind to yourself, one day at a time. 💛";
+    assert.equal(readsAsTherapySpeak(bad), true);
+    const fixed = bareReactionFallback("Thabo");
+    assert.equal(readsAsTherapySpeak(fixed), false);
+    assert.match(fixed, /Thabo/);
+    assert.match(fixed, /missed the mark/i);
+  });
+
+  test("reaction guard: an ordinary corrective reply is left alone", () => {
+    const good = "That was wrong — your session is already logged for today. Type *my progress* for the week so far.";
+    assert.equal(readsAsTherapySpeak(good), false);
   });
 }
 

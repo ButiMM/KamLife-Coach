@@ -17,6 +17,7 @@ import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
 import { safetyGate } from "../verifiers/response-gate";
+import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../reaction-guard";
 
 // ── SCENARIO GUIDE — the coach's situation playbook ────────────────────────────
 // Module-level and byte-identical on every call: askCoachK places it in the STATIC
@@ -419,7 +420,8 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
       const lastOut = lastExchange[0]?.messageOut || "";
       const lastIntent = lastExchange[0]?.intent || "";
       const punctCtx = `Client sent only "${message}" (pure frustration/reaction). They are responding to your previous message (intent: ${lastIntent}): "${lastOut.slice(0, 300)}". This means they are either frustrated, confused, or surprised by your last reply. Acknowledge the reaction briefly and either clarify your last response or ask what specifically they need. Do not ask what they mean — you know they are reacting to your last message. Be direct, max 2 sentences, SA voice.`;
-      const punctReply = sanitizeCoachReply(await withTimeout("gpt_punct", 15000, () => askCoachK(message, user, punctCtx, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
+      let punctReply = sanitizeCoachReply(await withTimeout("gpt_punct", 15000, () => askCoachK(message, user, punctCtx, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
+      if (readsAsTherapySpeak(punctReply)) punctReply = bareReactionFallback(user.name?.split(" ")[0] || "");
       await logChat(user.id, message, punctReply, "SHORT_REPLY");
       return punctReply;
     } catch (e) { console.warn("[punct-reply]", e); }
@@ -445,7 +447,11 @@ RESPOND TO THIS CLIENT'S EXACT MESSAGE AS COACH K — apply the SCENARIO GUIDE f
   }
 
   // Ambiguous reactions — "wow", "eish", "omg", "sharp" — route through context to read the room
-  const AMBIGUOUS_REACTIONS = ["wow", "eish", "omg", "oh my god", "yoh", "hayibo", "haibo", "shem", "really", "seriously", "sharp", "lol", "wtf", "right"];
+  // "jesus"/"christ"/"my god" as a lone word is exasperation at the last reply, never a
+  // religious remark and never a life disclosure — they were falling through to the coach
+  // prompt and coming back as emotional support (2026-07-27 thread).
+  const AMBIGUOUS_REACTIONS = ["wow", "eish", "omg", "oh my god", "yoh", "hayibo", "haibo", "shem", "really", "seriously", "sharp", "lol", "wtf", "right",
+    "jesus", "jesus christ", "christ", "my god", "good god", "jeez", "hawu", "sies", "unbelievable"];
   const SHORT_REPLIES = ["yes", "no", "yeah", "nah", "nope", "yep", "yebo", "ja", "ok", "okay", "sure", "fine"];
   if (SHORT_REPLIES.includes(m) || AMBIGUOUS_REACTIONS.includes(m)) {
     try {
@@ -465,7 +471,15 @@ CRITICAL — READ THE TONE FIRST:
 - NEVER claim there was a technical issue ("it seems there was an issue") — nothing went wrong unless the client says so.
 - NEVER pivot to a different topic. If your previous message was about the workout, do NOT ask about meals. Stay on the subject of your previous message.
 Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
-      const shortReply = sanitizeCoachReply(await withTimeout("gpt_short", 20000, () => askCoachK(message, user, shortReplyContext, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
+      let shortReply = sanitizeCoachReply(await withTimeout("gpt_short", 20000, () => askCoachK(message, user, shortReplyContext, memoryContext)), message, user.weeklyFoodBudget, user.injuries);
+      // THERAPY-SPEAK REJECTION (2026-07-27: "Wow" and "Jesus" at two bad replies came
+      // back as a paragraph about feeling overwhelmed). The prompt above already forbids
+      // it and the model did it anyway, so the bad output is rejected in code rather than
+      // asked away again. A bare reaction carries no life content — there is nothing to be
+      // overwhelmed about — so a feelings diagnosis is always the wrong read.
+      if (isBareReaction(message) && readsAsTherapySpeak(shortReply)) {
+        shortReply = bareReactionFallback(user.name?.split(" ")[0] || "");
+      }
       await logChat(user.id, message, shortReply, "SHORT_REPLY");
       return shortReply;
     } catch (e) { console.warn("[short-reply]", e); }

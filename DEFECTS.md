@@ -15,9 +15,6 @@ _Last updated: 2026-07-27_
 
 | # | Defect | Evidence | Class |
 |---|--------|----------|-------|
-| D1 | Client said "felt very bad, like I never trained before" after returning from illness — completely ignored | 16:16 thread | **Missing capability** — no concept of how a session felt; nothing captures it |
-| D2 | Client said "today was my first day back" → coach replied "Today: Training day — reply workout" | 16:16 thread | **Missing capability** — doesn't know a session already happened today |
-| D3 | "Wow" / "Jesus" (frustration AT the bot) answered with therapy-speak about overwhelm | 16:17, 16:18 | **Missing distinction** — no separation between "struggling with life" and "annoyed with the coach" |
 | D4 | Proactive messages are state-blind (water nudge minutes after a rage message) | 11:00 thread | Missing capability |
 | D5 | No instrumentation — nothing measures where clients disengage | — | Must exist before any cohort |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
@@ -27,6 +24,9 @@ _Last updated: 2026-07-27_
 | D10 | Emotional/human-state coaching is shallow (the "I'm honestly depressed, only had alcohol" case) | Kamogelo thread | Needs product decision + build |
 | D11 | No monthly rand ceiling on total AI spend (per-client daily caps exist) | Code audit | Margin guardrail |
 | D12 | Meta clinical-language audit not done (coach prompt contains diabetes/hypertension playbooks) | Code audit | Compliance risk |
+
+_D1/D2/D3 were all in one thread and were fixed together, not one at a time — that is the
+rule this file exists to enforce._
 
 ## CLOSED — 2026-07-27
 
@@ -47,6 +47,11 @@ _Last updated: 2026-07-27_
 - ✅ Coach could not see WHAT was eaten today — suggested lunch again for dinner
 - ✅ Adaptive target engine — built AND wired (05:45 daily)
 - ✅ Reply contract — built, wired, tested (flag: REPLY_CONTRACT=on)
+- ✅ **D1** — a session that felt BAD had no representation at all; now read, answered and remembered
+- ✅ **D2** — a session described in prose ("today was my first day back") logged nothing, so
+  the coach told them to train again; it now goes through the same door as "done"
+- ✅ **D3** — "Wow" / "Jesus" answered with therapy-speak; a bare reaction carries no life
+  content, so a feelings diagnosis is now rejected in code rather than banned in a prompt
 
 ## NOT DEFECTS — checked and confirmed working
 
