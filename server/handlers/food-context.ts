@@ -23,7 +23,7 @@ import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
-import { unloggedPlaceNotice } from "../unlogged-notice";
+import { unloggedFoodNotice } from "../unlogged-notice";
 import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
@@ -1289,7 +1289,7 @@ export async function handleFoodContext(ctx: {
         ? `\n\n📋 Not logged yet (still coming): *${plannedSegs.join("; ")}*. Reply *ate it* once you've had it and I'll add it.`
         : "";
       // NEVER SILENTLY DROP a named restaurant meal we couldn't price (2026-07-27).
-      const dn = unloggedPlaceNotice(message, allAdjustedFoods.map(f => f.name));
+      const dn = unloggedFoodNotice(message, allAdjustedFoods.map(f => f.name));
       const droppedNote = dn ? `\n\n${dn}` : "";
 
       // REPLY CONTRACT: 3-line log (card carries macros). OFF by default; REPLY_CONTRACT=on.

@@ -5407,6 +5407,28 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// NEVER-DROP, GENERALISED (2026-07-27): the restaurant case was fixed first; this covers any
+// food the table doesn't know and the supplement couldn't price. Silent data loss is the
+// single fastest way to lose a client's trust.
+{
+  const { unloggedFoodNotice, unloggedFoodWords } = await import("../server/unlogged-notice");
+  test("never-drop: unrecognised foods are named, not swallowed", () => {
+    const n = unloggedFoodNotice("I had chicken feet and mogodu stew", ["Chicken"]);
+    assert.match(n, /could not price/i);
+    assert.match(n, /mogodu/i);
+  });
+  test("never-drop: silent when everything was logged", () => {
+    assert.equal(unloggedFoodNotice("2 eggs and toast", ["Eggs", "Toast"]), "");
+  });
+  test("never-drop: a single stray word does not trigger a false warning", () => {
+    assert.equal(unloggedFoodNotice("I had eggs quickly", ["Eggs"]), "");
+  });
+  test("never-drop: filler words are never mistaken for food", () => {
+    assert.deepEqual(unloggedFoodWords("I had some eggs for breakfast today", ["Eggs"]), []);
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
