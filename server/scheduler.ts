@@ -17,6 +17,7 @@ import {
 
 // Job imports
 import { runMorningCheckin } from "./scheduler/jobs/morning";
+import { runAdaptiveTargets } from "./scheduler/jobs/adaptive";
 import { runEveningAccountability } from "./scheduler/jobs/evening";
 import { runMilestoneCelebrations } from "./scheduler/jobs/milestones";
 import {
@@ -218,7 +219,7 @@ export async function initScheduler(): Promise<void> {
       console.error(`[SCHEDULER] ${name} failed (x${failures}):`, e);
       const isCritical = opts?.critical ?? false;
       const alertThreshold = isCritical ? 1 : 2;
-      const criticalJobs = ["runMorningCheckin", "runEveningAccountability", "runSundayWeeklyReport", "runPhaseAdvancement", "runSubscriptionExpiryCheck"];
+      const criticalJobs = ["runAdaptiveTargets", "runMorningCheckin", "runEveningAccountability", "runSundayWeeklyReport", "runPhaseAdvancement", "runSubscriptionExpiryCheck"];
       if (failures >= alertThreshold && (isCritical || criticalJobs.includes(name))) {
         const coachPhone = process.env.COACH_ALERT_PHONE || process.env.ADMIN_PHONE_OVERRIDE;
         if (coachPhone) {
@@ -235,6 +236,9 @@ export async function initScheduler(): Promise<void> {
   // ── Daily jobs ────────────────────────────────────────────────────────────
   cron.schedule("0 3 * * *",    () => safe("runBalanceCheck",           runBalanceCheck),             { timezone: "UTC" }); // 5am SAST — warn on low Twilio balance BEFORE the 6am fan-out drains it
   cron.schedule("30 8 * * *",   () => safe("runMonthlyPhotoCheckin",    runMonthlyPhotoCheckin),      { timezone: "UTC" }); // 10:30am SAST — monthly front/side/back re-shoot prompt (self-gates on 30 days)
+  // ADAPTIVE TARGETS run 15 min BEFORE the morning check-in so the day's message already
+  // carries today's real numbers (sick → rest targets, stall → trim, etc). 2026-07-27.
+  cron.schedule("45 3 * * *",   () => safe("runAdaptiveTargets",       runAdaptiveTargets, { critical: true }), { timezone: "UTC" }); // 5:45am SAST
   cron.schedule("0 4 * * *",    () => safe("runMorningCheckin",         runMorningCheckin, { critical: true }), { timezone: "UTC" }); // 6am SAST
   cron.schedule("0 17 * * *",   () => safe("runEveningAccountability",  runEveningAccountability),    { timezone: "UTC" }); // 7pm SAST
   cron.schedule("2 4 * * *",    () => safe("runWeek3Intervention",      runWeek3Intervention),        { timezone: "UTC" }); // 6am SAST
