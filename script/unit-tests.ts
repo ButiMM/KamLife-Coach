@@ -5346,6 +5346,67 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// ============================================================
+// THE REPLY CONTRACT (2026-07-27 — founder: "it's just too much reading"; three independent
+// reviews converged on this as the single highest-leverage fix). A routine coaching reply is
+// max 3 lines: acknowledge, the one thing, forward. Detail is REQUESTED, never unsolicited.
+// ============================================================
+{
+  const { enforceReplyContract, meetsReplyContract, clientAskedForDetail } = await import("../server/reply-contract");
+  // The exact live reply the founder photographed.
+  const verbose = [
+    "🟢 Nicely done — still room for two proper meals today.",
+    "",
+    "*Food logged* ✅",
+    "",
+    "• Weet-Bix: ~400 kcal, 15g protein (5 biscuits with milk (200g))",
+    "• cheerios: ~100 kcal, 2g protein (30g)",
+    "",
+    "*Meal total:* ~500 kcal | ~17g protein",
+    "Running total today: ~505 kcal / 2862 target (2357 to go)",
+    "",
+    "‣ My progress",
+    "‣ Today's workout",
+  ].join("\n");
+
+  test("reply contract: the live breakfast dump collapses to 3 lines or fewer", () => {
+    const out = enforceReplyContract(verbose);
+    const lines = out.split("\n").filter(l => l.trim());
+    assert.ok(lines.length <= 3, `max 3 lines, got ${lines.length}:\n${out}`);
+  });
+  test("reply contract: itemised macros, stacked totals and menus are all dropped", () => {
+    const out = enforceReplyContract(verbose);
+    assert.doesNotMatch(out, /Weet-Bix: ~400 kcal/i, "no item macro lines");
+    assert.doesNotMatch(out, /Running total/i, "no stacked totals — the card carries them");
+    assert.doesNotMatch(out, /‣/, "no unrequested menu buttons");
+  });
+  test("reply contract: the warm acknowledgement survives — meaning is kept, data is cut", () => {
+    assert.match(enforceReplyContract(verbose), /Nicely done/i);
+  });
+  test("reply contract: a REQUESTED detail reply is never truncated", () => {
+    assert.equal(enforceReplyContract(verbose, { askedForDetail: true }), verbose);
+    assert.ok(clientAskedForDetail("show me my meals"));
+    assert.ok(clientAskedForDetail("my progress"));
+    assert.ok(clientAskedForDetail("send my meal plan"));
+    assert.ok(!clientAskedForDetail("had eggs and toast"));
+  });
+  test("reply contract: the media marker survives compaction", () => {
+    const out = enforceReplyContract(verbose + " [MEDIA:https://x/card.png]");
+    assert.match(out, /\[MEDIA:https:\/\/x\/card\.png\]/);
+  });
+  test("reply contract: never returns empty — silence is worse than verbosity", () => {
+    const onlyData = "• Eggs: ~279 kcal, 24g protein\n*Meal total:* ~279 kcal";
+    assert.ok(enforceReplyContract(onlyData).trim().length > 0);
+  });
+  test("reply contract: an already-short reply passes through untouched", () => {
+    const good = "Logged your breakfast.\n\n43g protein to go — tin fish at lunch closes it.";
+    assert.equal(enforceReplyContract(good), good);
+    assert.ok(meetsReplyContract(good));
+    assert.ok(!meetsReplyContract(verbose));
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

@@ -24,6 +24,7 @@ import { checkFoodPatterns, checkPerfectDay } from "./checks";
 import { gptFoodFallback, gptFoodSupplement, type GptFoodItem, askCoachK } from "../gpt";
 import { logChat, withTimeout } from "./chat-log";
 import { unloggedPlaceNotice } from "../unlogged-notice";
+import { enforceReplyContract, clientAskedForDetail } from "../reply-contract";
 import { sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, slotFromCaptionTime, isNightWorker, looksLikeDeepEmotionalShare, effectiveMealLoggedAt } from "../utils";
 import { getPortionMemory, personalPortionFor, getSlotContext, resolveInferredSlot, type PortionStat, type SlotContext } from "../portion-memory";
 import { invalidatePatternCache } from "../cache";
@@ -864,11 +865,9 @@ export async function handleFoodContext(ctx: {
     return shoppingReply;
   }
 
-  // ---- PLANNED MEAL — food described in future EATING tense ("gonna have X for lunch").
-  // Be honest that it is NOT logged, and give a one-word path to log it once eaten.
-  // Without this, GPT chats about the meal and the client believes it was logged —
-  // then "dinner same as lunch" copies a stale meal and the coach contradicts itself.
-  // Eating-future only: shopping intents ("need to buy") fall through to other handlers.
+  // ---- PLANNED MEAL — future EATING tense ("gonna have X for lunch"). Say plainly it is
+  // NOT logged + give a one-word path to log it once eaten (else the client believes it was
+  // logged and "same as lunch" later copies a stale meal). Shopping intents fall through.
   const isFutureEating = /\b(i.?ll\s+have|i\s+will\s+have|gonna\s+have|going\s+to\s+have|planning\s+to\s+(?:eat|have|cook)|thinking\s+of\s+(?:eating|having|cooking)|will\s+be\s+(?:eating|having)|still\s+to\s+(?:have|eat|grab|get|make|cook)|yet\s+to\s+(?:have|eat|grab|get)|haven.?t\s+(?:had|eaten|eat)|about\s+to\s+(?:have|eat|grab|make|cook|order)|still\s+(?:need|got|have)\s+to\s+(?:eat|have|grab))\b/i.test(m);
   if (isFutureEating && !isQuestion && !isFrustration && hasActualFood) {
     const junkPlanned = foodsInMsg.filter(f => f.category === "junk");
@@ -1015,11 +1014,9 @@ export async function handleFoodContext(ctx: {
     // GPT-supplemented items) to the correct meal in the breakdown, not just the total.
     const segmentBuckets: { label: string; text: string; foods: AdjFood[] }[] = [];
 
-    // PLANNED-SEGMENT GUARD (2026-07-22, Kam's day-dump screenshot: a client reports the
-    // whole day in one message — "Lunch: apple, couscous, wings... Dinner is going to be
-    // stir fry fish"). The lunch was eaten; the dinner is a PLAN. Logging the planned
-    // dinner as eaten inflates the day. Detect future/planned segments, DON'T log them,
-    // and surface them as "not logged yet — reply 'ate it' when you've had it".
+    // PLANNED-SEGMENT GUARD (2026-07-22 day-dump): in "lunch was X... dinner is going to be
+    // Y", the lunch was eaten and the dinner is a PLAN. Capture planned segments, never log
+    // them as eaten, and surface them as "not logged yet — reply 'ate it'".
     const FUTURE_SEG_RE = /\b(going to be|gonna be|will be|is going to|are going to|i'?ll have|i will have|gonna have|going to have|planning to (?:eat|have|cook|make)|plan(?:ning)? to have|still to (?:have|eat|make|cook|come)|yet to (?:have|eat|make|cook)|about to (?:have|eat|make|cook)|for (?:tonight|later)|(?:will|going to) (?:eat|make|cook)|haven'?t (?:had|eaten) (?:yet|dinner|lunch|supper|breakfast))\b/i;
     const plannedSegs: string[] = [];
 
@@ -1295,7 +1292,11 @@ export async function handleFoodContext(ctx: {
       const dn = unloggedPlaceNotice(message, allAdjustedFoods.map(f => f.name));
       const droppedNote = dn ? `\n\n${dn}` : "";
 
-      return `${reply}${droppedNote}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
+      // REPLY CONTRACT: collapse a routine log to 3 lines (the CARD carries the macros).
+      // OFF by default — the product's VOICE is the founder's call. REPLY_CONTRACT=on enables.
+      const compact = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message)
+        ? enforceReplyContract(reply) : reply;
+      return `${compact}${droppedNote}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
     }
 
     // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")
