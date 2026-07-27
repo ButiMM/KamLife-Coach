@@ -4786,7 +4786,14 @@ test("coachingHint: plain-language, goal-aware over/under coaching", async () =>
   for (const h of many(() => coachingHint(rows({ prot: 160, cal: 1200 }), false))) assert.match(h, /protein|nail|textbook/i);
   for (const h of many(() => coachingHint(rows({ cal: 400, prot: 40 }), false))) assert.match(h, /room|day left|protein/i);
   for (const h of many(() => coachingHint(rows({ cal: 800, prot: 40 }), true))) assert.match(h, /build|fuel|muscle/i);
-  assert.ok(many(() => coachingHint(rows({ cal: 900, prot: 40 }), false)).size >= 2, "the default cue varies across logs");
+  // SPECIFIC, not varied (2026-07-23, founder + reviewers: "the same generic thing over and
+  // over — it doesn't coach"). The default cue must now name the REAL gap and what closes it;
+  // a rotating platitude ("One good choice at a time") is a fridge magnet, not coaching.
+  const dflt = coachingHint(rows({ cal: 900, prot: 40 }), false);
+  assert.match(dflt, /\d+g protein to go/i, `must name the actual gap: ${dflt}`);
+  assert.doesNotMatch(dflt, /one good choice|small steady|consistency beats/i, "no platitudes");
+  // 110g protein short vs 10g short must give DIFFERENT next moves — advice scales to the gap.
+  assert.notEqual(coachingHint(rows({ cal: 900, prot: 40 }), false), coachingHint(rows({ cal: 900, prot: 140 }), false));
 });
 
 // CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,

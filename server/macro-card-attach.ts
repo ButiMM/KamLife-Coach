@@ -124,8 +124,18 @@ export function coachingHint(rows: Row[], isBulk: boolean): string {
   // Goal reached — celebrate AND teach why it matters.
   if (proteinHit && !isBulk && ratio(cal) >= 0.9 && ratio(cal) <= 1.05) return pick(["Textbook day — protein in, calories on point. This is exactly it.", "Nailed it: enough protein, right calories. Repeat this and results follow."]);
   if (proteinHit) return pick(["Protein hit — the one that matters most. It protects muscle while you lean out.", "Protein's in — that's the win that keeps you full and strong."]);
-  if (ratio(cal) < 0.5) return pick(["Plenty of room left — protein first at your next meal.", "Lots of day left — lead with protein and you'll stay full."]);
-  return pick(["One good choice at a time.", "Small steady choices — that's the whole game.", "Consistency beats perfection. Keep logging."]);
+  // SPECIFIC NEXT MOVE, not a platitude (2026-07-23, founder + reviewers: "it's the same
+  // generic thing over and over — it doesn't coach"). A coach names the gap and what closes
+  // it; "One good choice at a time" is a fridge magnet. Use THEIR real remaining numbers.
+  const protLeft = prot ? Math.round(prot.target - prot.current) : 0;
+  const calLeft = cal ? Math.round(cal.target - cal.current) : 0;
+  if (protLeft > 0) {
+    const fix = protLeft >= 60 ? "two protein meals" : protLeft >= 35 ? "a proper protein meal" : protLeft >= 18 ? "eggs, tin fish or a shake" : "a yoghurt or a boiled egg";
+    if (calLeft < 200 && calLeft > -200) return `${protLeft}g protein to go — ${fix}, easy on the oil.`;
+    return `${protLeft}g protein to go — ${fix} closes it.`;
+  }
+  if (calLeft > 400) return `${calLeft} kcal still to eat — your body needs the fuel.`;
+  return pick(["Everything's in for today — logged, on target, done. Repeat tomorrow.", "Targets met and logged. This is the day that builds the result."]);
 }
 
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's

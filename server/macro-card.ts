@@ -81,9 +81,10 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   const cardX = M, cardW = W - M * 2;
   const P = 60;                    // card inner padding
   const headerH = 118;
-  const mealH = 104;
+  const mealH = 86;   // title is one line — 104 left an airy gap before the first bar (2026-07-23)
   const rowH = 104;
-  const footerH = 108;
+  const footerH = 116; // the coaching line now sits on its own row under the wordmark
+
   const cardH = P + headerH + mealH + d.rows.length * rowH + footerH + P - 20;
   const H = cardH + M * 2;
 
@@ -192,10 +193,12 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   for (const r of d.rows) {
     const raw = r.target > 0 ? r.current / r.target : 0;
     const pct = Math.max(0, Math.min(1, raw));
-    // COACHING COLOUR: red when you've gone over a limit that matters (fat/carbs/calories on
-    // a cut); green when you've hit the target (or any protein win); orange while filling.
-    const over = raw > 1.05 && !!r.overIsBad;
-    const hit = raw >= 0.95;
+    // COACHING COLOUR: red the moment you're OVER a limit that matters (fat/carbs/calories on
+    // a cut) — the bar must match the honest text verdict, not stay green until 5% over
+    // (2026-07-23: card showed Fat 88/86g as a full GREEN bar while the coach said "2g over").
+    // Green only when on target without exceeding it; orange while still filling.
+    const over = !!r.overIsBad && r.current > r.target;
+    const hit = !over && raw >= 0.95;
     const c1 = over ? RED : hit ? GREEN : ORANGE;
     const c2 = over ? RED_LT : hit ? GREEN_LT : ORANGE_LT;
 
@@ -227,27 +230,37 @@ export function renderMacroCard(d: MacroCardData): Buffer {
     y += rowH;
   }
 
-  // ── Footer: divider, KamLife wordmark, hint ──
-  y += 6;
+  // ── Footer: divider, KamLife wordmark, and the coaching line on its OWN full-width row ──
+  // (2026-07-23: a long hint was drawn right-aligned in the SAME row as the wordmark with no
+  // width guard, so it ran straight under "KAMLIFE" — "KAMLIFEbuild — add a proper meal…".
+  // Its own line can never collide; ellipsis only if it somehow exceeds the full card width.)
+  y += 8;
   ctx.strokeStyle = "#eceef1";
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.moveTo(x, y);
   ctx.lineTo(x + innerW, y);
   ctx.stroke();
-  y += 52;
-  ctx.font = `bold 32px "${FONT}"`;
+  y += 50;
+  // Wordmark a touch larger — this is the ONE thing a viewer must remember (2026-07-23 review).
+  ctx.font = `bold 38px "${FONT}"`;
   ctx.fillStyle = INK;
   ctx.fillText("KAM", x, y);
   const kamW = ctx.measureText("KAM").width;
   ctx.fillStyle = ORANGE;
   ctx.fillText("LIFE", x + kamW, y);
   if (d.hint) {
-    ctx.font = `500 27px "${FONT}"`;
-    ctx.fillStyle = MUTED;
-    ctx.textAlign = "right";
-    ctx.fillText(d.hint, x + innerW, y);
-    ctx.textAlign = "left";
+    // The coaching line is the POINT of the card ("that's what separates it from a
+    // calculator") — it was 27px in light grey and barely legible on a phone. Bigger and
+    // near-ink so it reads at a glance.
+    ctx.font = `600 28px "${FONT}"`;
+    ctx.fillStyle = "#4a4f58";
+    let h = d.hint;
+    if (ctx.measureText(h).width > innerW) {
+      while (h.length > 1 && ctx.measureText(h + "…").width > innerW) h = h.slice(0, -1);
+      h = h.replace(/[\s,–—-]+$/, "") + "…";
+    }
+    ctx.fillText(h, x, y + 44);
   }
 
   return canvas.toBuffer("image/png");
