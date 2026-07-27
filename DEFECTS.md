@@ -19,7 +19,7 @@ _Last updated: 2026-07-27_
 | D13 | "It was X not Y" (identity correction) has NO handler — "The rice was white not brown" reached the engine, which tried to DELETE the meal; the destructive bouncer vetoed it and replied "nothing removed" to someone who never asked to remove anything | 18:29 | **Missing capability** |
 | D14 | "What?" / bare confusion returns the full help-menu dump instead of answering | 18:36 | Re-onboarding reflex |
 | D15 | Missed-session list contradicts itself: "You missed Thursday + Friday + Monday + Tuesday. Monday is still a training day" — Monday is both missed and available, and today IS Monday | 18:36 | Date logic |
-| D5 | No instrumentation — nothing measures where clients disengage | — | Must exist before any cohort |
+| D5 | No instrumentation — nothing measures where clients *disengage* (the reply auditor now catches defective replies; engagement/drop-off is still unmeasured) | — | Narrowed, still open |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
 | D7 | Workouts do not adapt to state (sick / returning / deload) — only food targets do | — | Adaptive layer half-covered |
 | D8 | Card shows 4 macro bars + raw numbers to a market that doesn't think in calories | Every card | Product design |
@@ -68,6 +68,10 @@ rule this file exists to enforce._
 - ✅ "Can't eat anymore today, what does that mean for my goal?" had no handler at all — the
   chronic under-eating path needs "I only eat once a day" phrasing. Now answered from the
   client's real numbers.
+- ✅ **The founder was the regression suite.** `server/audit/reply-defects.ts` scans real
+  replies for 10 known failure patterns; `npm run audit:replies` or text *audit* to the bot.
+  Its tests replay the exact screenshots from 2026-07-27 — if a detector stops catching its
+  own screenshot, the auditor has silently stopped working.
 
 ## NOT DEFECTS — checked and confirmed working
 

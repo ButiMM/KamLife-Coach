@@ -201,14 +201,16 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       const freelance = !verifyBrainReply("To improve, incorporate exercises like rows and planks.", {}).ok;
       const myth = !verifyBrainReply("We'll shock the muscle with new movements to confuse it.", {}).ok;
       const mark = (ok: boolean) => ok ? "✅ BLOCKED" : "❌ SLIPS THROUGH";
-      // MEAL-CARD health: font loaded on this server + APP_URL has a scheme (else blank/leaked).
-      // Check the URL the card ACTUALLY uses — cardBaseUrl() forces the https:// scheme when
-      // APP_URL was stored without one, so testing the raw env var reported a scary "card
-      // leaks as a link" while cards were rendering fine (2026-07-27 false alarm).
+      // MEAL-CARD health: font loaded + APP_URL has a scheme. Check the URL the card ACTUALLY
+      // uses — cardBaseUrl() forces https:// when APP_URL lacks it, so testing the raw env var
+      // reported a scary "card leaks as a link" while cards rendered fine (2026-07-27).
       const appUrlOk = /^https?:\/\/.+/i.test((await import("./macro-card-attach")).cardBaseUrl());
       const cardOk = cardFontLoaded && appUrlOk;
       return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
     }
+
+    // "audit" → scan real replies for known defect patterns (server/audit/reply-defects.ts).
+    if (/^(?:reply\s+)?audit(?:\s+\d{2,5})?$/i.test(m.trim())) return await (await import("./audit/reply-audit-command")).replyAuditCommand(m);
 
     const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
     if (rc) {
@@ -226,15 +228,14 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
     }
 
     // ---- COACH COMMAND: "action replay" → grade Coach K against the HAND-VERIFIED truth ----
-    // Scores whether Coach K picks the RIGHT ACTION against the gold set (real answers a human
-    // verified), NOT production's noisy intent labels. A decisive pass IS the gate — the gold
-    // set is fixed, so there's no calendar to wait out. Missed + (dangerous) false writes.
+    // Scores whether Coach K picks the RIGHT ACTION against the gold set, NOT production's noisy
+    // intent labels. A decisive pass IS the gate — the gold set is fixed, so no calendar to wait
+    // out. Reports missed actions + (dangerous) false writes.
     if (/^action[\s-]?replay$/i.test(m.trim()) || /^replay[\s-]?actions?$/i.test(m.trim()) || /^action[\s-]?gold$/i.test(m.trim())) {
       (async () => {
         try {
           const { runGoldReplay } = await import("./eval/action-replay");
-          // NEVER-SILENT: even if the whole run stalls, a hard cap guarantees a reply so the
-          // command can't go quiet on you again. The per-call timeouts inside make this rare.
+          // NEVER-SILENT: a hard cap guarantees a reply even if the run stalls.
           const report = await Promise.race([
             runGoldReplay(openai),
             new Promise<null>(res => setTimeout(() => res(null), 100_000)),

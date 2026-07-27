@@ -38,6 +38,7 @@ import { looksLikeQuestion, isFutureIntent, mentionsNotDone } from "../server/ut
 import { displayFoodName, inventedQualifiers } from "../server/food-naming";
 import { dinnerCloseLine, remainingInMeals } from "../server/education";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../server/food-fuzzy";
+import { scanReply, summarise } from "../server/audit/reply-defects";
 import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../server/reaction-guard";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
@@ -5640,6 +5641,74 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   test("fuzzy: 'teach' really is one edit from 'peach' — hence the blacklist", () => {
     assert.equal(levenshtein("teach", "peach"), 1);
     assert.equal(maxDistance("peach".length), 1);   // 5 chars → distance 1 allowed
+  });
+}
+
+// THE AUDITOR — the whole point is that it would have caught today's defects without a human
+// reading screenshots. These are the ACTUAL replies that shipped, pasted verbatim. If a
+// detector stops catching its own screenshot, the auditor has silently stopped working.
+{
+  const codes = (t: { messageIn: string; messageOut: string }) => scanReply(t).map(d => d.code);
+
+  test("auditor: catches the real 18:28 reply — invented food + dinner offered + protein contradiction", () => {
+    const shipped = {
+      messageIn: "Dinner\nRice\nTin fish\nLentils",
+      messageOut: "🟢 Nicely done — still room for a full dinner with room for a snack today.\n"
+        + "✅ *Logged:* Brown rice, Pilchards in tomato sauce, Lentils — ~719 kcal | 50g protein\n\n"
+        + "*Dinner: ~719 kcal | ~50g protein*\n"
+        + "_Clean day. One more solid meal and you close it out._\n\n"
+        + "That's the protein box ticked. 16g more to go today.",
+    };
+    const c = codes(shipped);
+    assert.ok(c.includes("invented-food"), "must flag Brown rice / Pilchards in tomato sauce");
+    assert.ok(c.includes("meal-offered-after-logging"), "must flag offering dinner after logging dinner");
+    assert.ok(c.includes("protein-contradiction"), "must flag 'box ticked' + '16g more to go'");
+  });
+
+  test("auditor: catches the real 18:29 reply — a removal answer to a correction", () => {
+    assert.ok(codes({
+      messageIn: "The rice was white not brown",
+      messageOut: "Kam, nothing removed — I've recounted everything you logged today: *2102 kcal | 169g protein*. If one meal is wrong, tell me which and the right amount and I'll fix just that one.",
+    }).includes("removal-nonsequitur"));
+  });
+
+  test("auditor: catches the real 18:36 reply — full help menu to 'What?'", () => {
+    assert.ok(codes({
+      messageIn: "What?",
+      messageOut: "Good evening Kam 👋 You missed Thursday + Friday + Monday + Tuesday.\n\n*What you can send me:*\n🔍 Any meal — photo, voice note or plain text.",
+    }).includes("menu-dump"));
+  });
+
+  test("auditor: catches being told to train after reporting a session", () => {
+    assert.ok(codes({
+      messageIn: "today was my first day back at the gym, it felt very bad",
+      messageOut: "Here's your plan 👇\n\n*Today:*\n💪 Training day — reply *workout* and your session's ready",
+    }).includes("train-after-session"));
+  });
+
+  test("auditor: healthy replies are left alone — a noisy report gets ignored", () => {
+    const healthy = [
+      { messageIn: "Dinner\nRice\nTin fish\nLentils",
+        messageOut: "🟢 Nicely done — dinner's in and you're inside your day.\n✅ *Logged:* Rice, Tin fish, Lentils — ~719 kcal | 50g protein\n\n*Dinner: ~719 kcal | ~50g protein*\n_That's dinner done. 16g protein short — yoghurt or a boiled egg tonight closes it._" },
+      { messageIn: "menu", messageOut: "*What you can send me:*\n🔍 Any meal — photo, voice note or plain text." },
+      { messageIn: "remove my last meal", messageOut: "Kam, nothing removed — tell me which meal and I'll fix just that one." },
+      { messageIn: "I trained today", messageOut: "✅ Logged today's session. That's *12 sessions* logged." },
+      { messageIn: "wow", messageOut: "That reply missed the mark. Tell me in one line what you needed." },
+    ];
+    for (const t of healthy) assert.deepEqual(codes(t), [], `false positive on: ${t.messageIn}`);
+  });
+
+  test("auditor: summarise rolls turns into counts worst-first", () => {
+    const s = summarise([
+      { messageIn: "What?", messageOut: "*What you can send me:*\n🔍 Any meal" },
+      { messageIn: "Eish", messageOut: "*What you can send me:*\n🔍 Any meal" },
+      { messageIn: "hi", messageOut: "Sharp." },
+    ]);
+    assert.equal(s.scanned, 3);
+    assert.equal(s.clean, 1);
+    assert.equal(s.defects, 2);
+    assert.equal(s.byCode[0].code, "menu-dump");
+    assert.equal(s.byCode[0].count, 2);
   });
 }
 
