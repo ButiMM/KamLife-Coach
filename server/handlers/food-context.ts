@@ -1292,10 +1292,12 @@ export async function handleFoodContext(ctx: {
       const dn = unloggedFoodNotice(message, allAdjustedFoods.map(f => f.name));
       const droppedNote = dn ? `\n\n${dn}` : "";
 
-      // REPLY CONTRACT: 3-line log (card carries macros). OFF by default; REPLY_CONTRACT=on.
-      const compact = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message)
-        ? enforceReplyContract(reply) : reply;
-      return `${compact}${droppedNote}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}${macroCard}`;
+      // REPLY CONTRACT: 3-line log (card carries macros). REPLY_CONTRACT=on. Applied to the
+      // FULLY-ASSEMBLED reply — menu rows append after the body (2026-07-27 live).
+      const assembled = `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}`;
+      const contractOn = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message);
+      const finalBody = contractOn ? enforceReplyContract(assembled) : assembled;
+      return `${finalBody}${droppedNote}${macroCard}`;
     }
 
     // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")

@@ -32,7 +32,7 @@ export function clientAskedForDetail(message: string): boolean {
 }
 
 // A line that is pure data-dump: bulleted item macros ("• Eggs: ~279 kcal, 24g protein").
-const ITEM_LINE_RE = /^\s*[•·\-*]\s*.+?[:\-–]\s*~?\s*\d[\d,]*\s*kcal/i;
+const ITEM_LINE_RE = /^\s*[•·‣]\s*.+?[:\-–]\s*~?\s*\d[\d,]*\s*kcal/i;
 // Stacked totals / budget lines the card already carries.
 const TOTALS_LINE_RE = /^\s*(?:_?\s*)?(?:meal total|running total|total today|remaining today|today so far|your week|target)\b/i;
 // Tap-through menu affordances ("‣ My progress").
@@ -63,12 +63,13 @@ export function enforceReplyContract(reply: string, opts?: { askedForDetail?: bo
   for (const raw of body.split("\n")) {
     const line = raw.trim();
     if (!line) continue;
-    const item = line.match(ITEM_LINE_RE) ? line.match(/^\s*[•·\-*]\s*([^:\-–]+)/) : null;
+    const item = line.match(ITEM_LINE_RE) ? line.match(/^\s*[•·‣]\s*([^:\-–]+)/) : null;
     if (item) { const n = item[1].replace(/[*_`]/g, "").trim(); if (n) foodNames.push(n); continue; }
-    const tot = line.match(/^\s*\*?_?\s*meal total:?\*?_?\s*~?\s*([\d,]+)\s*kcal[^\d]*(\d+)?/i);
+    const tot = line.match(/^[*_\s]*meal total[:*_\s]*~?\s*([\d,]+)\s*kcal(?:[^\d]*(\d+)\s*g)?/i);
     if (tot) { mealTotal = `~${tot[1]} kcal${tot[2] ? ` | ${tot[2]}g protein` : ""}`; continue; }
     if (TOTALS_LINE_RE.test(line)) continue;
     if (MENU_LINE_RE.test(line)) continue;
+    if (/^[*_\s]*food logged[\s✅*_]*$/i.test(line)) continue; // redundant with "Logged:"
     prose.push(line);
   }
 
