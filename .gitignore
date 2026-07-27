@@ -23,6 +23,7 @@ tmp/
 !CLAUDE.md
 !LAUNCH_BLOCKERS.md
 !TESTING_CHECKLIST.md
+!DEFECTS.md
 # All docs/ markdown is tracked — this folder is project documentation, not scratch.
 # (A blanket *.md ignore was silently dropping new docs from commits.)
 !docs/*.md
