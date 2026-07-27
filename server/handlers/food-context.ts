@@ -337,8 +337,7 @@ export async function handleFoodContext(ctx: {
    *  question mentioning food ("what do you think about rice and sweet potato?") gets
    *  logged as a 588-kcal meal because "having" trips hasLogTrigger (prod, 2026-07-03). */
   classifierQuestion?: boolean;
-  /** EXECUTOR resolved an explicit LOG_MEAL: skip advisory branches, go straight to the
-   *  scanner (2026-07-27: the ordering guide answered a log 3x instead of logging). */
+  /** EXECUTOR resolved an explicit LOG_MEAL: skip advisory branches (2026-07-27: the ordering guide answered a log 3x). */
   forceLog?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
@@ -755,11 +754,9 @@ export async function handleFoodContext(ctx: {
     && (m.split(/\s+/).length <= 12 || (m.split(/\s+/).length <= 22 && exactFoodCount >= 3))
     && exactFoodCount >= 1
     && (exactFoodCount >= 2 || hasQuantityWord);
-  // foodLogOverride: Only bypass the isQuestion guard when the message is a past-eating
-  // statement with a trivial trailing "?" (confirmation, e.g. "I had eggs?") — NOT when
-  // the message contains a substantive nutritional question ("is that enough protein?",
-  // "how many calories in that?"). Logging food in response to a genuine question
-  // would silently discard the question and never answer it.
+  // foodLogOverride: bypass the isQuestion guard ONLY for a past-eating statement with a
+  // trivial trailing "?" ("I had eggs?") — never for a real question ("is that enough
+  // protein?"), which logging would silently discard instead of answering.
   const hasSubstantiveQuestion = classifierQuestion
     || /\b(is that enough|how much|how many|is it (ok|good|healthy|bad|enough|too much)|good for|bad for|enough protein|enough calories|too (many|much)|any good|is this (ok|good|healthy|bad|enough)|is (that|this) (bad|good|ok|healthy)|have protein|contain protein|much protein|has protein)\b/i.test(m)
     // Opinion / advice questions that MENTION food but aren't logging it.
@@ -829,11 +826,9 @@ export async function handleFoodContext(ctx: {
     } catch { /* non-fatal */ }
   }
 
-  // ---- SHOPPING LIST / PANTRY INVENTORY DETECTION ----
-  // A dash-formatted list of pantry staples (or a long list with no meal context) is NOT a meal.
-  // 3+ dash-listed items + shopping/pantry language → block.
-  // 7+ dash-listed items alone → block (nobody eats 7+ bulleted items as one sitting).
-  // NOTE: must use original `message` for line splitting — `m` collapses all whitespace to spaces.
+  // ---- SHOPPING LIST / PANTRY DETECTION — a dash-list of staples is NOT a meal.
+  // 3+ dash items + shopping language, or 7+ dash items alone → block. Split on the ORIGINAL
+  // `message` (`m` collapses whitespace).
   const dashLineCount = message.split("\n").filter(l => /^\s*-\s*\S/.test(l)).length;
   const SHOPPING_CONTEXT_RE = /\b(isle\s*by\s*isle|go\s*(?:isle|aisle)|aisle|what\s+i\s+have\s+(?:at\s+home|here)|have\s+at\s+home|at\s+home\s+i\s+(?:have|keep|stock)|what\s+i\s+(?:normally\s+)?(?:buy|stock|keep)|what.*(?:think|choose|chose)\s+(?:is\s+)?missing|shopping\s+list|groceries?|pantry|in\s+(?:my\s+)?fridge|what.?s\s+in\s+(?:my|the)\s+(?:fridge|pantry|house|cupboard)|i\s+stock|need\s+to\s+buy|running\s+low|picked\s+up\s+from|went\s+to\s+(?:the\s+)?(?:shop|store|checkers|shoprite|pick\s*n\s*pay|woolworths|spar))\b/i;
   // Plain-line list safety net: 12+ non-empty lines with no eating verbs = grocery list.
