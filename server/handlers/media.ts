@@ -1,8 +1,4 @@
-/**
- * Media message handler — images, audio/voice, video.
- * Extracted from handleMessage in routes.ts.
- * Always returns a string (every branch is a return).
- */
+/** Media message handler — images, audio/voice, video. Every branch returns a string. */
 
 import crypto from "crypto";
 import { tmpdir } from "os";
@@ -50,6 +46,7 @@ import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
 import { itemsFromVisionText } from "../serving-units";
+import { tryLogDistanceScreenshot } from "./distance-log";
 import { encodePendingFood } from "../food-referent";
 import { recordServiceCost } from "../cost-tracking";
 import { allowExpensiveOp } from "../usage-governor";
@@ -227,8 +224,7 @@ export async function handleMediaMessage(ctx: {
       let isStepScreenshot = /\b(steps?|pedometer|walked|walking|step count|staps?|my walk|fitness app|samsung health|google fit|apple health|health app|screenshot)\b/i.test(message)
         || (user.awaitingInputType === "steps");
 
-      // IMAGE PRE-CLASSIFIER — runs when no caption / no food keywords, so body photos
-      // captioned "Alot of work to be done" still classify correctly.
+      // IMAGE PRE-CLASSIFIER — runs when no caption / no food keywords (so body photos still classify).
       const hasObviousFoodCaption = /\b(ate|had|eat|eating|lunch|dinner|breakfast|meal|food|snack|protein|calories)\b/i.test(message || "");
       let isCollage = false;
       let uncaptionedType: "food" | "steps" | "exercise" | "progress" | "other" | null = null;
@@ -302,8 +298,7 @@ export async function handleMediaMessage(ctx: {
             return exFallback;
           }
           if ((uncaptionedType as any) === "equipment") {
-            // HOME / TRAVEL KIT DECLARATION ("this is my kit", "at home", "on holiday") → read the
-            // kit shown and hand back a full adapted session (home-workout.ts), no menu friction.
+            // HOME/TRAVEL KIT ("this is my kit") → read it, hand back a full adapted session.
             const hasEquipCaption = /\b(i have (this|these|a set|dumbbell|band|kettlebell|barbell)|my (own )?(equipment|kit|gym|setup|weights)|i (just )?(got|bought) (this|these|a|some|new)|these are my|this is (my|what) (equipment|kit|gym|setup|home|i have|he has|she has)|at home|on holiday|travel(?:ling|ing)?|away (?:for|on)|hotel (?:gym|room))\b/i.test(message || "");
             if (hasEquipCaption) {
               const equipReply = await coachHomeEquipmentFromPhoto(openai, user, base64, contentType, message);
@@ -353,7 +348,7 @@ export async function handleMediaMessage(ctx: {
             model: "gpt-4o-mini",
             max_tokens: 50,
             messages: [
-              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is labelled but a RUN/WALK DISTANCE is clearly shown (e.g. 10.2 km on a Strava/Runkeeper/Adidas/Nike/Garmin activity screen), reply DISTANCE:<km> — e.g. DISTANCE:10.2 — and add RUN or WALK after it if the activity type is visible, e.g. DISTANCE:10.2 RUN. If neither is clearly shown, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
+              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps (next to the word 'steps', a footprint icon, or a clearly identified steps card). Calories, heart rate, dates, phone numbers, prices, times — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is labelled but a RUN/WALK DISTANCE is clearly shown (e.g. 10.2 km on a Strava/Runkeeper/Adidas/Nike/Garmin activity screen), reply DISTANCE:<km> — e.g. DISTANCE:10.2 — and add RUN or WALK after it if the activity type is visible, e.g. DISTANCE:10.2 RUN. If neither is clearly shown, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
               { role: "user", content: [
                 { type: "text", text: "Extract the labelled step count from this screenshot, or reply NOT_STEPS." },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -373,23 +368,8 @@ export async function handleMediaMessage(ctx: {
               return wkR;
             }
           }
-          // DISTANCE screenshot (2026-07-27): a 10km run used to log NOTHING because the
-          // extractor was told to ignore km. Convert it to step-equivalent + burn and log it.
-          const distMatch = stepText.match(/DISTANCE:\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(RUN|WALK)?/i);
-          if (distMatch) {
-            const km = parseFloat(distMatch[1].replace(",", "."));
-            if (Number.isFinite(km) && km > 0 && km <= 100) {
-              const { convertDistance, distanceReply, detectMode } = await import("../run-conversion");
-              const mode = (distMatch[2] || "").toLowerCase() === "walk" ? "walk"
-                : (distMatch[2] || "").toLowerCase() === "run" ? "run" : detectMode(message || "");
-              const act = convertDistance(km, parseFloat(String(user.currentWeight || "")) || 75, mode);
-              const { logStepsForUser: logSteps } = await import("./steps");
-              await logSteps(user.id, act.stepEquivalent).catch(() => {});
-              const dReply = distanceReply(act, user.name?.split(" ")[0]);
-              await logChat(user.id, `[${act.km}km ${act.mode} screenshot]`, dReply, "DISTANCE_LOG");
-              return dReply;
-            }
-          }
+          const distReply = await tryLogDistanceScreenshot(stepText, message || "", user);
+          if (distReply) return distReply;
           const visionRejected = /\b(NOT_STEPS|UNKNOWN|DISTANCE:)\b/i.test(stepText);
           const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
           const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
