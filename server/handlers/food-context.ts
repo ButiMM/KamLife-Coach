@@ -337,9 +337,17 @@ export async function handleFoodContext(ctx: {
    *  question mentioning food ("what do you think about rice and sweet potato?") gets
    *  logged as a 588-kcal meal because "having" trips hasLogTrigger (prod, 2026-07-03). */
   classifierQuestion?: boolean;
+  /** TRUE when the EXECUTOR resolved an explicit LOG_MEAL action (2026-07-27 live disaster):
+   *  the engine hands over rewritten text like "breakfast from McDonald's with 2 extra
+   *  patties", which has no past-tense marker — so the restaurant ORDERING GUIDE hijacked it
+   *  and answered with a menu pick instead of logging, three times in a row, while the coach
+   *  kept promising "I'll log it now". An explicit log intent must never be answered with
+   *  advice: this flag skips every advisory branch and goes straight to the scanner. */
+  forceLog?: boolean;
 }): Promise<string | null> {
   const { phone, message, m, user, stepReplyPart, handleMessage } = ctx;
   const classifierQuestion = !!ctx.classifierQuestion;
+  const forceLog = !!ctx.forceLog;
 
   // ---- SUPPORT BEFORE LOGGING (2026-07-14) — a deep emotional share ("I ate a whole
   // cake, I've tried everything, I want to quit") must reach emotional support, NOT get
@@ -687,7 +695,7 @@ export async function handleFoodContext(ctx: {
   // PAST-TENSE consumption = LOG IT, don't lecture (prod 2026-07-03: ordering advice
   // silently dropped ~800 kcal). The guide is only for PLANNING/asking.
   const atePastTakeaway = /\b(i had|i ate|i.?ve had|i just (had|ate)|just had|just ate|had \d+|ate \d+|my (lunch|dinner|breakfast|supper|meal) (is|was)|for (lunch|dinner|breakfast|supper) i had|ordered and ate|already (had|ate))\b/i.test(m);
-  if (eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration && !atePastTakeaway) {
+  if (!forceLog && eatingOutPlace && hasEatingIntent && !isQuestion && !isFrustration && !atePastTakeaway) {
     const goal = user.goalType || "fat_loss";
     const guides: Record<string, string> = {
       nandos: `*Nando's — Coach K Pick*\n\n✅ Best: Quarter chicken (skin off) + peri-peri chips + coleslaw = ~650 kcal, 35g protein\n✅ Good: Grilled chicken wrap (no sauce, extra coleslaw)\n⚠️ Watch: Double chicken = fine if that's your big meal\n❌ Avoid: Chips as main + roll + dessert = 1,200 kcal\n\nFlame-grilled is always better than fried. Skin off saves 80-100 kcal.`,

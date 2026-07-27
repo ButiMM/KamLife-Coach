@@ -154,7 +154,11 @@ async function perform(action: CoachAction, ctx: ExecuteContext): Promise<string
     case "LOG_MEAL": {
       const { handleFoodContext } = await import("../handlers/food-context");
       const text = `${action.foodText}${action.meal ? ` for ${action.meal}` : ""}${action.retro ? ` ${action.retro}` : ""}`;
-      const reply = await handleFoodContext({ phone, message: text, m: text.toLowerCase(), user, stepReplyPart: "", handleMessage: async () => "" });
+      // forceLog: this is an EXPLICIT log action — never let an advisory branch (the
+      // restaurant ordering guide) answer it. The rewritten text carries no past-tense
+      // marker, so "breakfast from McDonald's…" returned a menu pick instead of logging
+      // (2026-07-27 live: three identical guides while the coach promised to log).
+      const reply = await handleFoodContext({ phone, message: text, m: text.toLowerCase(), user, stepReplyPart: "", handleMessage: async () => "", forceLog: true });
       return reply || "";
     }
     case "REMOVE_LAST_MEAL": {

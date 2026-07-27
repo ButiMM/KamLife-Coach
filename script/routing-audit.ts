@@ -303,6 +303,15 @@ const CASES: Case[] = [
   { name: "health: 'my sugar is high' alone (no fix-ask) does not get the timeline lecture", msg: "my sugar levels are high today",
     reject: [/5.10% of your body weight/i] },
 
+  // ── TAKEAWAY PAST-TENSE (2026-07-27 live: "Had SA breakfast from McDonald's + 2 extra
+  // patties + 2 extra eggs" → the ordering guide answered 3× while the coach promised to log) ──
+  { name: "takeaway: 'Had breakfast from McDonalds with extra patties' LOGS, never the menu pick", msg: "Had South African breakfast from macdonalds. But I had extra 2 patties and extra 2 eggs with it",
+    expect: [/Food logged|kcal/i],
+    reject: [/Coach K Pick|McFeast|Grilled chicken wrap/i] },
+  { name: "takeaway: PLANNING at McDonald's still gets the order guide (regression guard)", msg: "Going to McDonalds for lunch, what should I order?",
+    expect: [/smart order|Coach K Pick|McFeast|Best for/i],
+    reject: [/Food logged/i] },
+
   // ── MACRO STATUS (2026-07-23: engine freestyled "~100g, reasonable" vs card's 88/86g) ──
   { name: "macro-status: 'How are my fats looking for the day? Is it bad?' answers from the ledger, deterministically", msg: "How are my fats looking for the day? Is it bad?",
     expect: [/Fat: \d+g of \d+g/i],
