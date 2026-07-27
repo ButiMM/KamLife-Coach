@@ -48,6 +48,20 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
   const s = summarise(turns);
   const pct = ((s.defects / s.scanned) * 100).toFixed(1);
 
+  // TREND (2026-07-27): the founder ran this and saw 55 protein contradictions — all from
+  // BEFORE the fix shipped that afternoon. A single lifetime number can't show whether a fix
+  // worked, so the newest slice is reported separately. Rows arrive newest-first.
+  const recent = turns.slice(0, Math.min(200, turns.length));
+  const rs = summarise(recent);
+  const recentPct = rs.scanned ? ((rs.defects / rs.scanned) * 100).toFixed(1) : "0.0";
+  const trend = `\n\n📈 *Last ${rs.scanned} replies:* ${rs.defects} defective (${recentPct}%) — vs ${pct}% over the whole sample. This is the number that shows whether a fix landed.`;
+
+  // Don't invite a wider scan once every stored reply has been read.
+  const hitCeiling = turns.length < limit;
+  const wider = hitCeiling
+    ? `\n\nThat's every reply on record — nothing further back to scan.`
+    : `\n\nSend *audit ${Math.min(20000, limit * 2)}* to scan wider.`;
+
   if (s.byCode.length === 0) {
     return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies.\n\n✅ No defects detected.\n\nThat means none of the ${Object.keys(LABELS).length} known failure patterns appear. It does not mean the coach is perfect — it means these specific bugs are not recurring.`;
   }
@@ -63,5 +77,5 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     ? `\n\n*Worst one — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
     : "";
 
-  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${example}\n\nEvery line above is a pattern, not a one-off. Send *audit ${Math.min(20000, limit * 2)}* to scan wider.`;
+  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}${wider}`;
 }

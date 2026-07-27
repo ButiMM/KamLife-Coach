@@ -245,6 +245,17 @@ export async function claimProactive(
   opts?: { critical?: boolean },
 ): Promise<boolean> {
   if (isProactivePaused()) return false;
+  // STATE GATE (2026-07-27, twice in one day): a water nudge landed minutes after a client
+  // raged at the bot. A routine nudge is optional by definition, so it yields to the human.
+  // Critical billing/safety messages never reach here — they go through claimCritical.
+  if (!opts?.critical) {
+    const { shouldHoldProactive } = await import("../verifiers/proactive-state");
+    const held = await shouldHoldProactive(userId);
+    if (held.hold) {
+      console.log(`[PROACTIVE_STATE] held ${messageKey} for ${userId.slice(0, 8)} — ${held.reason}`);
+      return false;
+    }
+  }
   const inMemKey = weeklyKeyedKey(userId, messageKey, dedupeWindow);
   if (weeklyKeyedSent.has(inMemKey)) return false;
   try {

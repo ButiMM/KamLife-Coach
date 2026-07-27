@@ -39,6 +39,9 @@ import { displayFoodName, inventedQualifiers } from "../server/food-naming";
 import { dinnerCloseLine, remainingInMeals } from "../server/education";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../server/food-fuzzy";
 import { scanReply, summarise } from "../server/audit/reply-defects";
+import { parseIdentityCorrection, correctionCandidates } from "../server/food-identity-correction";
+import { adaptTraining, applySetsDelta } from "../server/adaptive-training";
+import { ceilingState } from "../server/spend-ceiling";
 import { isBareReaction, readsAsTherapySpeak, bareReactionFallback } from "../server/reaction-guard";
 import { suggestSwap, swapNudge } from "../server/food-swaps";
 import { buildFormCheckPrompt, extractFormExercise } from "../server/form-check-prompt";
@@ -5696,6 +5699,51 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
       { messageIn: "wow", messageOut: "That reply missed the mark. Tell me in one line what you needed." },
     ];
     for (const t of healthy) assert.deepEqual(codes(t), [], `false positive on: ${t.messageIn}`);
+  });
+
+  test("identity correction: the live message parses as a food swap", () => {
+    const c = parseIdentityCorrection("The rice was white not brown");
+    assert.ok(c, "the 18:29 message must parse");
+    assert.equal(c!.right, "white");
+    assert.equal(c!.wrong, "brown");
+    assert.equal(c!.subject, "rice");
+    assert.deepEqual(correctionCandidates(c!).rightNames, ["white rice", "white"]);
+  });
+
+  test("identity correction: other natural shapes", () => {
+    assert.equal(parseIdentityCorrection("it was tuna not pilchards")?.right, "tuna");
+    assert.equal(parseIdentityCorrection("that was full cream milk not low fat")?.wrong, "low fat");
+    assert.equal(parseIdentityCorrection("not brown, it was white")?.right, "white");
+  });
+
+  test("identity correction: NOT fired by ordinary 'not' sentences", () => {
+    for (const msg of [
+      "I'm not sure what to eat", "not today", "why not", "I'm not hungry",
+      "2 eggs not 3", "I did not train", "that's not going to work for me",
+    ]) assert.equal(parseIdentityCorrection(msg), null, `must not parse: ${msg}`);
+  });
+
+  test("adaptive training: state changes the session, not just the advice", () => {
+    assert.equal(adaptTraining({ sick: true }).skip, true);
+    const rec = adaptTraining({ recovering: true });
+    assert.equal(rec.loadPct, 60);
+    assert.equal(rec.setsDelta, -1);
+    assert.equal(adaptTraining({ daysSinceLastWorkout: 21 }).loadPct, 60);
+    assert.equal(adaptTraining({ daysSinceLastWorkout: 8 }).loadPct, 80);
+    assert.equal(adaptTraining({ daysSinceLastWorkout: 2 }).changed, false);
+  });
+
+  test("adaptive training: the printed sets match the instruction", () => {
+    // A note saying "drop a set" beside a sheet still reading 3×10 is the contradiction.
+    assert.equal(applySetsDelta("Squat — 3×10\nHip thrust — 4×12", -1), "Squat — 2×10\nHip thrust — 3×12");
+    assert.equal(applySetsDelta("Squat — 3×10", 0), "Squat — 3×10");
+  });
+
+  test("AI spend ceiling: warns at 80%, blocks at 100%, off when unset", () => {
+    assert.equal(ceilingState(1000, null), "ok");
+    assert.equal(ceilingState(1000, 5000), "ok");
+    assert.equal(ceilingState(4200, 5000), "warn");
+    assert.equal(ceilingState(5000, 5000), "over");
   });
 
   test("auditor: summarise rolls turns into counts worst-first", () => {

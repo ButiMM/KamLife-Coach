@@ -105,8 +105,13 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
 
   // Missed sessions — flag it in the greeting
   if (workoutState.type === "MISSED") {
-    const missed = workoutState.missedSessions.join(" + ");
-    return `${hey} You missed ${missed}. ${workoutState.todayName} is still a training day — let's get it done.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
+    // Name days only when they're unambiguous; otherwise report the count. Naming a weekday
+    // that is ALSO today read as a contradiction ("you missed Monday… Monday is a training day").
+    const n = workoutState.missedCount || workoutState.missedSessions.length;
+    const missed = workoutState.missedSessions.length > 0
+      ? `You missed ${workoutState.missedSessions.join(" + ")}.`
+      : `You've missed ${n} session${n === 1 ? "" : "s"}.`;
+    return `${hey} ${missed} ${workoutState.todayName} is still a training day — let's get it done.${tail}[BUTTONS:Today's workout|Log food|My progress]`;
   }
 
   // Returning after silence

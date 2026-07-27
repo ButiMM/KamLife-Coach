@@ -19,6 +19,7 @@ import { db } from "./db";
 import { gptCosts } from "../shared/schema";
 import { eq, and, gte, inArray, sql } from "drizzle-orm";
 import { sastDayStart } from "./utils";
+import { ceilingState, monthlyCeilingZar, usdToZarRate } from "./spend-ceiling";
 
 export type CappedOp = "voice" | "vision";
 
@@ -58,6 +59,12 @@ export async function usedToday(userId: string, op: CappedOp): Promise<number> {
  * when USAGE_CAPS=off. Logs each cap-hit so it's visible in the logs and the cost view.
  */
 export async function allowExpensiveOp(userId: string | null | undefined, op: CappedOp): Promise<boolean> {
+  // Business-level ceiling first: past the monthly rand cap the expensive ops degrade for
+  // everyone, while all deterministic coaching keeps working. See monthlyCeilingHit below.
+  if (process.env.USAGE_CAPS !== "off" && await monthlyCeilingHit()) {
+    console.warn(`[AI_CEILING] blocked ${op} — monthly rand ceiling reached`);
+    return false;
+  }
   if (!userId || process.env.USAGE_CAPS === "off") return true;
   try {
     const cap = capFor(op);
@@ -68,5 +75,43 @@ export async function allowExpensiveOp(userId: string | null | undefined, op: Ca
   } catch (e) {
     console.warn(`[USAGE_CAP] ${op} check failed (allowing):`, (e as any)?.message || e);
     return true;
+  }
+}
+
+// MONTHLY RAND CEILING — see server/spend-ceiling.ts for the rationale and the pure decision.
+// This half is the DB read: total spend this calendar month across ALL clients, in rand.
+
+/** Total AI spend this calendar month, in rand, across ALL clients. */
+export async function monthSpendZar(): Promise<number> {
+  const now = new Date(Date.now() + 2 * 3_600_000);              // SAST
+  const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+  const [row] = await db
+    .select({ usd: sql<string>`COALESCE(SUM(${gptCosts.costUsd}), 0)` })
+    .from(gptCosts)
+    .where(gte(gptCosts.createdAt, monthStart));
+  return Number(row?.usd || 0) * usdToZarRate();
+}
+
+// Cached so the ceiling check costs one query a minute, not one per message.
+let _spendCache: { at: number; zar: number } | null = null;
+
+/**
+ * Is total AI spend this month past the ceiling? Fail-OPEN on any error and when no ceiling is
+ * configured — a margin guard must never be the reason coaching stops.
+ */
+export async function monthlyCeilingHit(): Promise<boolean> {
+  const ceiling = monthlyCeilingZar();
+  if (!ceiling) return false;
+  try {
+    if (!_spendCache || Date.now() - _spendCache.at > 60_000) {
+      _spendCache = { at: Date.now(), zar: await monthSpendZar() };
+    }
+    const state = ceilingState(_spendCache.zar, ceiling);
+    if (state !== "ok") {
+      console.warn(`[AI_CEILING] month spend R${_spendCache.zar.toFixed(0)} of R${ceiling} — ${state}`);
+    }
+    return state === "over";
+  } catch {
+    return false;
   }
 }

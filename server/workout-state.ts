@@ -47,7 +47,8 @@ export type WorkoutState = {
   type: WorkoutStateType;
   todayName: string;       // e.g. "Saturday"
   nextTrainingName: string; // e.g. "Monday"
-  missedSessions: string[]; // e.g. ["Wednesday", "Friday"]
+  missedSessions: string[]; // named ONLY when unambiguous (last 6 days, never today)
+  missedCount: number;      // total missed, including ones too old to name safely
   alreadyDoneToday: boolean;
   isTrainingDay: boolean;
 };
@@ -83,7 +84,13 @@ export async function getTodayWorkoutState(user: any): Promise<WorkoutState> {
 
   // Calculate missed sessions: scheduled training days between lastWorkoutDate and today
   // (exclusive of today, exclusive of lastWorkoutDate itself)
+  // NAMES MUST BE UNAMBIGUOUS (2026-07-27 live: "You missed Thursday + Friday + Monday +
+  // Tuesday. Monday is still a training day" — on a Monday. The loop ran past a full week, so
+  // it named a PREVIOUS Monday, and today's own weekday appeared in the missed list.)
+  // Only the last 6 days are named; anything older is counted, never named. Today's weekday is
+  // never listed — it hasn't been missed while it's still happening.
   const missedSessions: string[] = [];
+  let missedCount = 0;
   const lastWorkout = user.lastWorkoutDate ? new Date(user.lastWorkoutDate) : null;
 
   if (lastWorkout) {
@@ -93,10 +100,12 @@ export async function getTodayWorkoutState(user: any): Promise<WorkoutState> {
     for (let d = 1; d < daysSinceLast; d++) {
       const candidateMs = lastWorkout.getTime() + d * 86_400_000;
       const dow = new Date(candidateMs + 2 * 3_600_000).getDay();
-      if (schedDOWs.includes(dow)) {
-        const name = DOW_NAMES[dow];
-        if (!missedSessions.includes(name)) missedSessions.push(name);
-      }
+      if (!schedDOWs.includes(dow)) continue;
+      missedCount++;
+      const daysAgo = daysSinceLast - d;
+      if (daysAgo > 6 || dow === sastDOW) continue;   // ambiguous or is today
+      const name = DOW_NAMES[dow];
+      if (!missedSessions.includes(name)) missedSessions.push(name);
     }
   }
 
@@ -106,11 +115,11 @@ export async function getTodayWorkoutState(user: any): Promise<WorkoutState> {
     type = "REST";
   } else if (alreadyDoneToday) {
     type = "ALREADY_DONE";
-  } else if (missedSessions.length > 0) {
+  } else if (missedCount > 0) {
     type = "MISSED";
   } else {
     type = "NORMAL";
   }
 
-  return { type, todayName, nextTrainingName, missedSessions, alreadyDoneToday, isTrainingDay };
+  return { type, todayName, nextTrainingName, missedSessions, missedCount, alreadyDoneToday, isTrainingDay };
 }

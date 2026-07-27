@@ -15,17 +15,11 @@ _Last updated: 2026-07-27_
 
 | # | Defect | Evidence | Class |
 |---|--------|----------|-------|
-| D4 | Proactive messages are state-blind (water nudge minutes after a rage message) | 11:00 thread; **again 18:36** | Missing capability |
-| D13 | "It was X not Y" (identity correction) has NO handler — "The rice was white not brown" reached the engine, which tried to DELETE the meal; the destructive bouncer vetoed it and replied "nothing removed" to someone who never asked to remove anything | 18:29 | **Missing capability** |
-| D14 | "What?" / bare confusion returns the full help-menu dump instead of answering | 18:36 | Re-onboarding reflex |
-| D15 | Missed-session list contradicts itself: "You missed Thursday + Friday + Monday + Tuesday. Monday is still a training day" — Monday is both missed and available, and today IS Monday | 18:36 | Date logic |
 | D5 | No instrumentation — nothing measures where clients *disengage* (the reply auditor now catches defective replies; engagement/drop-off is still unmeasured) | — | Narrowed, still open |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
-| D7 | Workouts do not adapt to state (sick / returning / deload) — only food targets do | — | Adaptive layer half-covered |
 | D8 | Card shows 4 macro bars + raw numbers to a market that doesn't think in calories | Every card | Product design |
 | D9 | Coverage: 838 foods / 18 restaurants / 46 menu items | Counted | Data grind |
 | D10 | Emotional/human-state coaching is shallow (the "I'm honestly depressed, only had alcohol" case) | Kamogelo thread | Needs product decision + build |
-| D11 | No monthly rand ceiling on total AI spend (per-client daily caps exist) | Code audit | Margin guardrail |
 | D12 | Meta clinical-language audit not done (coach prompt contains diabetes/hypertension playbooks) | Code audit | Compliance risk |
 
 _D1/D2/D3 were all in one thread and were fixed together, not one at a time — that is the
@@ -68,6 +62,18 @@ rule this file exists to enforce._
 - ✅ "Can't eat anymore today, what does that mean for my goal?" had no handler at all — the
   chronic under-eating path needs "I only eat once a day" phrasing. Now answered from the
   client's real numbers.
+- ✅ **D4** — routine proactive nudges now yield to recent friction (12h quiet window); critical
+  billing/safety messages are untouched
+- ✅ **D7** — training adapts to state like food already did: sick = no session, recovering /
+  14-day gap = 60% load and a set dropped, and the printed set counts are rewritten so the sheet
+  can never contradict the instruction above it
+- ✅ **D11** — monthly rand ceiling on total AI spend (`AI_MONTHLY_CEILING_ZAR`); past it the
+  expensive ops degrade while every deterministic thing keeps working
+- ✅ **D13** — "the rice was white not brown" now rewrites the log instead of reaching the engine
+  as a deletion
+- ✅ **D14** — "What?" is a reaction to the last reply, not a request for the sitemap
+- ✅ **D15** — missed-session days are named only when unambiguous; today's weekday is never
+  listed as missed, and older misses are counted rather than mis-named
 - ✅ **The founder was the regression suite.** `server/audit/reply-defects.ts` scans real
   replies for 10 known failure patterns; `npm run audit:replies` or text *audit* to the bot.
   Its tests replay the exact screenshots from 2026-07-27 — if a detector stops catching its

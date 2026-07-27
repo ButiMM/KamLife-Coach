@@ -9,7 +9,8 @@ import { eq, and, gte, desc, asc } from "drizzle-orm";
 import { sastDayStart, sastToday, looksLikeQuestion, parseQuantityCorrection } from "../utils";
 import { foodMatchesText, singularFood, perServingEstimate } from "../serving-units";
 import { goalStatusLine } from "../education";
-import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine } from "./food-scanner";
+import { recomputeTodayFoodTotals, invalidateFoodTotalsCache, weeklyNetLine, scanForSAFoods } from "./food-scanner";
+import { parseIdentityCorrection, correctionCandidates, type IdentityCorrection } from "../food-identity-correction";
 
 export async function handleFoodLogMgmt(user: any, m: string): Promise<string | null> {
 
@@ -94,6 +95,18 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
       } catch (err) {
         console.error("[FOOD_NEGATION]", err);
       }
+    }
+  }
+
+  // ---- IDENTITY CORRECTION — "the rice was white not brown", "it was tuna not pilchards" ----
+  // Runs before the quantity path (that one owns numeric "not"s) and before the quick-exit,
+  // since these carry no mgmt keyword. Without it the message reached the meaning engine,
+  // which read it as a deletion — see server/food-identity-correction.ts.
+  if (!looksLikeQuestion(m) && !parseQuantityCorrection(m)) {
+    const ic = parseIdentityCorrection(m);
+    if (ic) {
+      const fixed = await applyIdentityCorrection(user, ic);
+      if (fixed) return fixed;
     }
   }
 
@@ -475,6 +488,76 @@ export async function handleFoodLogMgmt(user: any, m: string): Promise<string | 
     // heavy day reads as a data point, not a failure (2026-07-16 founder review).
     const weekLine = await weeklyNetLine(user);
     return `*Today's meals (${logs.length})*\n${lines.map(x => `• ${x}`).join("\n")}\n\n*Total:* ~${totalCals} kcal | ~${totalProtein}g protein\n${remainingLine}${weekLine ? `\n\n${weekLine}` : ""}`;
+  }
+
+  return null;
+}
+
+/**
+ * Swap the wrongly-identified food in today's log for what they actually ate.
+ *
+ * Deliberately narrow: it only fires when BOTH halves resolve — the wrong food is really in
+ * today's log, and the right one is a food we can price. Anything else returns null and the
+ * message flows on, because a half-understood correction that silently rewrites someone's day
+ * is worse than no correction at all.
+ */
+async function applyIdentityCorrection(user: any, c: IdentityCorrection): Promise<string | null> {
+  const { rightNames, wrongNames } = correctionCandidates(c);
+
+  // What they actually ate has to resolve to a real food — exactOnly, never a fuzzy guess.
+  let replacement: { name: string; typicalPortionCalories: number; typicalPortionProtein: number } | null = null;
+  for (const n of rightNames) {
+    const hit = scanForSAFoods(n, { exactOnly: true })[0];
+    if (hit) { replacement = hit as any; break; }
+  }
+  if (!replacement) return null;
+
+  const rows = await db.select({ id: mealLogs.id, rawMessage: mealLogs.rawMessage, mealLabel: mealLogs.mealLabel, items: mealLogs.items, kcalInt: mealLogs.kcalInt, proteinInt: mealLogs.proteinInt })
+    .from(mealLogs)
+    .where(and(eq(mealLogs.userId, user.id), gte(mealLogs.loggedAt, sastDayStart())))
+    .orderBy(desc(mealLogs.loggedAt))
+    .limit(10);
+
+  const matches = (name: string, target: string) => {
+    const a = (name || "").toLowerCase(), b = (target || "").toLowerCase();
+    return !!a && !!b && (a.includes(b) || b.includes(a));
+  };
+
+  for (const row of rows) {
+    const items = (row.items as Array<{ name?: string; kcal?: number; protein?: number }> | null) || [];
+    const idx = items.findIndex(i => wrongNames.some(w => matches(i.name || "", w))
+      || (c.subject && matches(i.name || "", c.subject)));
+    if (idx === -1) continue;
+
+    const old = items[idx];
+    if (old.name === replacement.name) return null;   // already right — nothing to correct
+    const oldKcal = old.kcal || 0;
+    const oldProt = old.protein || 0;
+    // Keep the portion the client logged: scale the new food to the same serving count.
+    const servings = oldKcal > 0 && replacement.typicalPortionCalories > 0
+      ? Math.max(0.25, Math.round((oldKcal / replacement.typicalPortionCalories) * 4) / 4)
+      : 1;
+    const newKcal = Math.round(replacement.typicalPortionCalories * servings);
+    const newProt = Math.round(replacement.typicalPortionProtein * servings);
+
+    const newItems = [...items];
+    newItems[idx] = { ...old, name: replacement.name, kcal: newKcal, protein: newProt };
+    await db.update(mealLogs).set({
+      items: newItems,
+      kcalInt: Math.max(0, row.kcalInt - oldKcal + newKcal),
+      proteinInt: Math.max(0, row.proteinInt - oldProt + newProt),
+      corrected: true,
+    }).where(eq(mealLogs.id, row.id));
+
+    invalidateFoodTotalsCache(user.id);
+    const totals = await recomputeTodayFoodTotals(user.id);
+    await db.update(users)
+      .set({ todayCalories: totals.calories, todayProteinG: totals.protein, todayCaloriesDate: sastToday() })
+      .where(eq(users.id, user.id));
+
+    const delta = newKcal - oldKcal;
+    const shift = delta === 0 ? "Same calories either way." : `That's ${delta > 0 ? "+" : ""}${delta} kcal on the day.`;
+    return `Fixed — logged as *${replacement.name}*, not ${old.name}. ${shift}\n\nToday: *${totals.calories} kcal | ${totals.protein}g protein*.`;
   }
 
   return null;

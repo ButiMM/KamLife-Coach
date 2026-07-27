@@ -1200,6 +1200,20 @@ ${goal === "fat_loss" ? "Fat loss focus: protein and veg first, carbs last. Cut 
     || /^(\?{2,}|!{2,}|\?!+)$/.test(m)
     || /\b(i.?m (lost|confused|not sure)|don.?t (understand|get it)|what do i do( now)?|not sure what to (do|say|send)|how does this work)\b/i.test(m);
   if (isConfused) {
+    // "What?" / "Huh?" right after a bad reply is a REACTION to that reply, not a request for
+    // the sitemap (2026-07-27 live: a nonsense answer got "What?" and the client received the
+    // entire help menu, which reads as the bot ignoring them twice). If there is something to
+    // react to, own it and ask what they needed. The menu is for someone genuinely starting.
+    const [lastOut] = await db.select({ messageOut: chatHistory.messageOut })
+      .from(chatHistory)
+      .where(and(eq(chatHistory.userId, user.id), gte(chatHistory.createdAt, new Date(Date.now() - 30 * 60_000))))
+      .orderBy(desc(chatHistory.createdAt)).limit(1);
+    if (lastOut?.messageOut) {
+      const { bareReactionFallback } = await import("../reaction-guard");
+      const reply = bareReactionFallback(user.name?.split(" ")[0] || "");
+      await logChat(user.id, message, reply, "CONFUSED_REACTION");
+      return reply;
+    }
     const menuReply = await getMenuText(user, { showCommands: true });
     await logChat(user.id, message, menuReply.replace(/\[BUTTONS:[^\]]+\]/g, "").trim(), "CONFUSED_RECOVERY");
     return menuReply;

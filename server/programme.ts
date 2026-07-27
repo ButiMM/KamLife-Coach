@@ -5,6 +5,7 @@
 
 import { resolveExerciseSlug } from "./exercise-media";
 import { validateProgramme } from "./verifiers/programme-validator";
+import { adaptTraining, trainingAdjustHeader, applySetsDelta, type TrainingInput } from "./adaptive-training";
 
 // Verify pass — appends an injury-safety note when the delivered workout still
 // contains a movement that loads a flagged injury. The programme builder already
@@ -13,7 +14,33 @@ import { validateProgramme } from "./verifiers/programme-validator";
 // No-op (returns text unchanged) for clients with no injuries.
 function withSafetyNote(text: string, user: any): string {
   try {
-    return text + validateProgramme(text, user?.injuries).warningNote;
+    return withStateAdjustment(text + validateProgramme(text, user?.injuries).warningNote, user);
+  } catch {
+    return text;
+  }
+}
+
+/**
+ * ADAPTIVE TRAINING (2026-07-27): food targets moved with the client's state and training never
+ * did, so someone back from flu got a reduced calorie target beside their pre-illness weights.
+ * Reads the same signals the daily adaptive job uses (sick_until in notes, lastWorkoutDate) and
+ * both HEADS the session with the adjustment AND rewrites the set counts, so the sheet can never
+ * contradict the instruction above it. Fail-open — any error serves the normal programme.
+ */
+function withStateAdjustment(text: string, user: any): string {
+  try {
+    const notes = String(user?.notes || "");
+    const today = new Date().toISOString().slice(0, 10);
+    const sickUntil = notes.match(/sick_until:(\d{4}-\d{2}-\d{2})/)?.[1];
+    const sick = !!sickUntil && new Date(sickUntil) >= new Date(today);
+    const recovering = !sick && !!sickUntil
+      && (Date.now() - new Date(sickUntil).getTime()) / 86_400_000 <= 3;
+    const daysSinceLastWorkout = user?.lastWorkoutDate
+      ? Math.floor((Date.now() - new Date(user.lastWorkoutDate).getTime()) / 86_400_000)
+      : 0;
+    const adj = adaptTraining({ sick, recovering, daysSinceLastWorkout } as TrainingInput);
+    if (!adj.changed) return text;
+    return trainingAdjustHeader(adj) + applySetsDelta(text, adj.setsDelta);
   } catch {
     return text;
   }
