@@ -5429,6 +5429,45 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+
+// ============================================================
+// RUN / DISTANCE CONVERSION (2026-07-27, founder: "if somebody has run a ten kilometer —
+// does the bot know what to do with that screenshot?"). It did not: the step extractor was
+// told to IGNORE km, so a 10km run logged nothing. ~800 kcal of real work, invisible.
+// ============================================================
+{
+  const { parseDistanceKm, detectMode, convertDistance, distanceReply } = await import("../server/run-conversion");
+  test("run: distance is read from the screenshot text and the message", () => {
+    assert.equal(parseDistanceKm("Distance 10.2 km"), 10.2);
+    assert.equal(parseDistanceKm("ran 8km this morning"), 8);
+    assert.equal(parseDistanceKm("10,5 kilometres"), 10.5);
+    assert.equal(parseDistanceKm("no distance here"), null);
+  });
+  test("run: OCR garbage is rejected, never logged as a 900km run", () => {
+    assert.equal(parseDistanceKm("900 km"), null);
+    assert.equal(parseDistanceKm("0 km"), null);
+  });
+  test("run: a 10km RUN converts to a real burn and step-equivalent", () => {
+    const a = convertDistance(10, 80, "run");
+    assert.ok(a.burnKcal >= 700 && a.burnKcal <= 850, `~1 kcal/kg/km: ${a.burnKcal}`);
+    assert.ok(a.stepEquivalent >= 10000 && a.stepEquivalent <= 11000, `~1050/km: ${a.stepEquivalent}`);
+  });
+  test("run: walking the same distance burns LESS — we never over-credit", () => {
+    assert.ok(convertDistance(10, 80, "walk").burnKcal < convertDistance(10, 80, "run").burnKcal);
+  });
+  test("run: mode is detected from the client's words, defaulting to the low-burn read", () => {
+    assert.equal(detectMode("ran 10km"), "run");
+    assert.equal(detectMode("did my 5k"), "run");
+    assert.equal(detectMode("10km this morning"), "walk", "default is conservative");
+  });
+  test("run: the reply is short, names the work, and warns against eating it back", () => {
+    const r = distanceReply(convertDistance(10, 80, "run"), "Kam");
+    assert.match(r, /10km run/i);
+    assert.match(r, /kcal/i);
+    assert.match(r, /don.t try to|save/i, "must warn against eating the burn back");
+  });
+}
+
 console.log(`\nunit-tests: ${passed}/${passed + failed} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");

@@ -353,7 +353,7 @@ export async function handleMediaMessage(ctx: {
             model: "gpt-4o-mini",
             max_tokens: 50,
             messages: [
-              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is clearly labelled, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
+              { role: "system", content: "You verify and extract step counts from screenshots of pedometer/fitness apps (Samsung Health, Google Fit, Apple Health, Fitbit, Huawei Health, Garmin, etc). The number MUST be visibly labelled as steps in the image (next to the word 'steps', a footprint icon, or inside a clearly identified steps card). Distance (km), calories, heart rate, dates, phone numbers, prices, times, or any other number — DO NOT extract. If the labelled number is a WEEKLY or multi-day AVERAGE (labelled 'avg'/'average'/'daily average', or a weekly summary chart) reply WEEKLY_AVG:<number> instead. If no step count is labelled but a RUN/WALK DISTANCE is clearly shown (e.g. 10.2 km on a Strava/Runkeeper/Adidas/Nike/Garmin activity screen), reply DISTANCE:<km> — e.g. DISTANCE:10.2 — and add RUN or WALK after it if the activity type is visible, e.g. DISTANCE:10.2 RUN. If neither is clearly shown, reply NOT_STEPS. Otherwise reply with ONLY the step number, no other text." },
               { role: "user", content: [
                 { type: "text", text: "Extract the labelled step count from this screenshot, or reply NOT_STEPS." },
                 { type: "image_url", image_url: { url: `data:${contentType};base64,${base64}` } },
@@ -373,7 +373,24 @@ export async function handleMediaMessage(ctx: {
               return wkR;
             }
           }
-          const visionRejected = /\b(NOT_STEPS|UNKNOWN)\b/i.test(stepText);
+          // DISTANCE screenshot (2026-07-27): a 10km run used to log NOTHING because the
+          // extractor was told to ignore km. Convert it to step-equivalent + burn and log it.
+          const distMatch = stepText.match(/DISTANCE:\s*(\d{1,3}(?:[.,]\d{1,2})?)\s*(RUN|WALK)?/i);
+          if (distMatch) {
+            const km = parseFloat(distMatch[1].replace(",", "."));
+            if (Number.isFinite(km) && km > 0 && km <= 100) {
+              const { convertDistance, distanceReply, detectMode } = await import("../run-conversion");
+              const mode = (distMatch[2] || "").toLowerCase() === "walk" ? "walk"
+                : (distMatch[2] || "").toLowerCase() === "run" ? "run" : detectMode(message || "");
+              const act = convertDistance(km, parseFloat(String(user.currentWeight || "")) || 75, mode);
+              const { logStepsForUser: logSteps } = await import("./steps");
+              await logSteps(user.id, act.stepEquivalent).catch(() => {});
+              const dReply = distanceReply(act, user.name?.split(" ")[0]);
+              await logChat(user.id, `[${act.km}km ${act.mode} screenshot]`, dReply, "DISTANCE_LOG");
+              return dReply;
+            }
+          }
+          const visionRejected = /\b(NOT_STEPS|UNKNOWN|DISTANCE:)\b/i.test(stepText);
           const extractedSteps = visionRejected ? NaN : parseInt(stepText.replace(/[^0-9]/g, ""));
           const explicitStepIntent = /\b(steps?|pedometer|walk|walking|step count|screenshot)\b/i.test(message) || (user.awaitingInputType === "steps");
           const looksLikeStepCount = extractedSteps >= 500 && extractedSteps <= 35000;
