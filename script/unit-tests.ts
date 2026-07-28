@@ -46,6 +46,7 @@ import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagem
 import { analyseSurface, classifyIntent } from "../server/surface";
 import { fadeState, fadingClients } from "../server/engagement";
 import { guardMalformed, safeFallback } from "../server/malformed-guard";
+import { calorieCeiling } from "../server/adaptive-targets";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
@@ -6193,6 +6194,16 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(out, /Kam/);
     assert.match(out, /say it again/i);
     assert.equal(guardMalformed(out).pass, true, "the fallback must itself pass the guard");
+  });
+}
+
+// ABSURD-TARGET CEILING (2026-07-28, from third-party review).
+{
+  test("targets: a small client can never be handed a huge number", () => {
+    // The old flat 6,000 ceiling would let a bug give a 55kg woman a bodybuilder's target.
+    assert.ok(calorieCeiling(55, "fat_loss") <= 2500, "55kg fat-loss ceiling must be sane");
+    assert.ok(calorieCeiling(120, "muscle_gain") <= 4500, "never above the hard 4,500 cap");
+    assert.ok(calorieCeiling(45, "fat_loss") >= 2200, "but never so low it blocks a real target");
   });
 }
 

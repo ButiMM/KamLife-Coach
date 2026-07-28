@@ -59,6 +59,19 @@ export interface AdaptiveTargets {
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 const round10 = (n: number) => Math.round(n / 10) * 10;
 
+/**
+ * ABSURD-TARGET CEILING (2026-07-28, third-party review: "This prevents a bug from telling a
+ * 60kg client to eat 800 kcal or 5,000 kcal"). The floor was already enforced; the ceiling was
+ * a flat 6,000 — high enough that a bug could hand a small person a target they could never
+ * eat, and nobody would be told. Now weight-aware, and anything the maths wants ABOVE it is
+ * clamped and logged loudly rather than shipped quietly.
+ */
+export function calorieCeiling(weightKg: number, goalType: string): number {
+  const w = Number.isFinite(weightKg) && weightKg > 0 ? weightKg : 75;
+  const byWeight = Math.round(w * (goalType === "muscle_gain" ? 55 : 45));
+  return Math.max(2200, Math.min(byWeight, 4500));
+}
+
 /** Absolute safety floor — we never send anyone below this, whatever the maths says. */
 function calorieFloor(weightKg: number, goalType: string): number {
   const byWeight = Math.round(weightKg * 22);          // ~22 kcal/kg is a conservative floor
@@ -73,13 +86,14 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
     stepsTarget: Math.round(inp.baseSteps),
   };
   const floor = calorieFloor(inp.weightKg, inp.goalType);
+  const ceiling = calorieCeiling(inp.weightKg, inp.goalType);
   const unchanged = (reason: AdaptReason = "none"): AdaptiveTargets =>
     ({ ...base, reason, note: "", changed: false });
 
   // 1. SICK — highest priority. Rest, maintenance calories, protein HIGH, no step target.
   //    A deficit while ill is how people lose muscle and stay ill longer.
   if (inp.sick) {
-    const maintenance = round10(clamp(inp.baseCalories * (inp.goalType === "fat_loss" ? 1.12 : 1.0), floor, 6000));
+    const maintenance = round10(clamp(inp.baseCalories * (inp.goalType === "fat_loss" ? 1.12 : 1.0), floor, ceiling));
     const protein = Math.round(Math.max(inp.baseProtein, inp.weightKg * 1.8));
     const days = inp.daysSick ?? 0;
     return {
@@ -107,7 +121,7 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
   // 3. LOSING TOO FAST — over 1% of bodyweight per week is muscle, not just fat. Eat MORE.
   const wk = inp.weeklyKgChange;
   if (typeof wk === "number" && inp.goalType !== "muscle_gain" && wk <= -(inp.weightKg * 0.011)) {
-    const cal = round10(clamp(inp.baseCalories * 1.10, floor, 6000));
+    const cal = round10(clamp(inp.baseCalories * 1.10, floor, ceiling));
     return {
       calorieTarget: cal, proteinTarget: base.proteinTarget, stepsTarget: base.stepsTarget,
       reason: "losing_too_fast",
@@ -118,7 +132,7 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
 
   // 4. GAINING TOO FAST on a build — over 0.5%/week is mostly fat. Trim the surplus.
   if (typeof wk === "number" && inp.goalType === "muscle_gain" && wk >= inp.weightKg * 0.006) {
-    const cal = round10(clamp(inp.baseCalories * 0.94, floor, 6000));
+    const cal = round10(clamp(inp.baseCalories * 0.94, floor, ceiling));
     return {
       calorieTarget: cal, proteinTarget: base.proteinTarget, stepsTarget: base.stepsTarget,
       reason: "gaining_too_fast",
@@ -129,7 +143,7 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
 
   // 5. STALLED — 3+ weeks with no movement. SMALL trim OR more steps, never a crash.
   if ((inp.stalledWeeks ?? 0) >= 3 && inp.goalType === "fat_loss") {
-    const cal = round10(clamp(inp.baseCalories * 0.93, floor, 6000));
+    const cal = round10(clamp(inp.baseCalories * 0.93, floor, ceiling));
     if (cal >= floor && cal < base.calorieTarget) {
       return {
         calorieTarget: cal, proteinTarget: base.proteinTarget,
@@ -152,7 +166,7 @@ export function adaptTargets(inp: AdaptiveInput): AdaptiveTargets {
   // 6. INACTIVE WEEK — barely moving means a lower burn; a fat-loss target must follow it
   //    down or the "deficit" is imaginary.
   if (typeof inp.avgSteps7d === "number" && inp.avgSteps7d < base.stepsTarget * 0.45 && inp.goalType === "fat_loss") {
-    const cal = round10(clamp(inp.baseCalories * 0.95, floor, 6000));
+    const cal = round10(clamp(inp.baseCalories * 0.95, floor, ceiling));
     if (cal < base.calorieTarget) {
       return {
         calorieTarget: cal, proteinTarget: base.proteinTarget, stepsTarget: base.stepsTarget,
