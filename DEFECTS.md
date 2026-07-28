@@ -15,7 +15,6 @@ _Last updated: 2026-07-27_
 
 | # | Defect | Evidence | Class |
 |---|--------|----------|-------|
-| D5 | No instrumentation — nothing measures where clients *disengage* (the reply auditor now catches defective replies; engagement/drop-off is still unmeasured) | — | Narrowed, still open |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
 
 _D1/D2/D3 were all in one thread and were fixed together, not one at a time — that is the
@@ -82,6 +81,15 @@ rule this file exists to enforce._
 - ✅ **D10** — the band between a bad week and a crisis had nothing in it. Sustained low mood,
   drinking instead of eating and disordered eating now get an honest boundary and a real referral
   (SADAG), never deeper therapy from a fitness coach. Disordered eating pauses the numbers.
+- ✅ **D5** — engagement instrumentation. Text *engagement* (or `npm run audit:engagement`):
+  who is slipping right now, the drop-off curve (still logging at day 1/3/7/14/30, with
+  too-new clients excluded from the denominator rather than counted as churned), and — the
+  reason it exists — **what the coach said last to everyone who then went quiet**.
+- ✅ **Landing page compliance.** It promised drug-food interaction handling and
+  condition-specific nutrition safety, badged itself "Diabetes-friendly", and made a diagnosis
+  someone's identity. All removed and reframed to welcome-first ("Your doctor told you to lose
+  weight — we help you actually do it"), with a scope notice in the footer. A unit test reads
+  the page source so the claims cannot return.
 - ✅ **The founder was the regression suite.** `server/audit/reply-defects.ts` scans real
   replies for 10 known failure patterns; `npm run audit:replies` or text *audit* to the bot.
   Its tests replay the exact screenshots from 2026-07-27 — if a detector stops catching its

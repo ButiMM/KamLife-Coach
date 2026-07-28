@@ -42,6 +42,7 @@ import { scanReply, summarise } from "../server/audit/reply-defects";
 import { nextMoveLine } from "../server/macro-card-attach";
 import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeContext } from "../server/life-context";
 import { comebackPlan } from "../server/adaptive-training";
+import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
 import { mustStayDeterministic } from "../server/understanding/action-router";
@@ -5917,6 +5918,88 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.doesNotMatch(page, /Diabetes-friendly|Blood pressure-aware/i);
     assert.match(page, /not a medical or healthcare provider/i);
     assert.match(page, /does not diagnose, treat, or manage/i);
+  });
+}
+
+// D5 — ENGAGEMENT. Nothing measured whether people were still here.
+{
+  const DAY = 86_400_000;
+  const now = new Date("2026-07-28T12:00:00Z");
+  const ago = (d: number) => new Date(now.getTime() - d * DAY);
+  const row = (o: Partial<ActivityRow> & { userId: string }): ActivityRow => ({
+    name: "Test", createdAt: ago(30), lastInboundAt: ago(0), activeDays: [], lastCoachIntent: null, ...o,
+  });
+
+  test("engagement: risk bands match how this product is actually used", () => {
+    assert.equal(bandFor(0), "active");
+    assert.equal(bandFor(2), "active");
+    assert.equal(bandFor(3), "slipping");
+    assert.equal(bandFor(7), "quiet");
+    assert.equal(bandFor(14), "gone");
+  });
+
+  test("engagement: a client who NEVER spoke counts from signup, not forever-active", () => {
+    const [r] = assessClients([row({ userId: "a", createdAt: ago(9), lastInboundAt: null })], now);
+    assert.equal(r.daysSinceActive, 9);
+    assert.equal(r.band, "quiet");
+  });
+
+  test("engagement: worst first — the list is for acting on, not browsing", () => {
+    const out = assessClients([
+      row({ userId: "a", lastInboundAt: ago(1) }),
+      row({ userId: "b", lastInboundAt: ago(20) }),
+      row({ userId: "c", lastInboundAt: ago(5) }),
+    ], now);
+    assert.deepEqual(out.map(r => r.userId), ["b", "c", "a"]);
+  });
+
+  test("engagement: the drop-off curve excludes clients too new to have an answer", () => {
+    // One 30-day client still logging at day 30; one who joined 2 days ago and can say nothing
+    // about day 30. Counting the newcomer as churned is the classic way to fake a bad number.
+    const curve = dropOffCurve([
+      row({ userId: "old", createdAt: ago(40), activeDays: [0, 1, 7, 30] }),
+      row({ userId: "new", createdAt: ago(2), activeDays: [0, 1] }),
+    ], now);
+    const d30 = curve.find(p => p.day === 30)!;
+    assert.equal(d30.of, 1, "only the 30-day-old client is eligible");
+    assert.equal(d30.pct, 100);
+    const d1 = curve.find(p => p.day === 1)!;
+    assert.equal(d1.of, 2, "both are old enough to answer day 1");
+    assert.equal(d1.pct, 100);
+  });
+
+  test("engagement: a client with no activity at all counts as churned, not skipped", () => {
+    const curve = dropOffCurve([row({ userId: "ghost", createdAt: ago(10), activeDays: [] })], now);
+    const d7 = curve.find(p => p.day === 7)!;
+    assert.equal(d7.of, 1);
+    assert.equal(d7.stillActive, 0);
+    assert.equal(d7.pct, 0);
+  });
+
+  test("engagement: names what the coach said last before people went quiet", () => {
+    const risks = assessClients([
+      row({ userId: "a", lastInboundAt: ago(9), lastCoachIntent: "FOOD_LOG" }),
+      row({ userId: "b", lastInboundAt: ago(20), lastCoachIntent: "FOOD_LOG" }),
+      row({ userId: "c", lastInboundAt: ago(30), lastCoachIntent: "MENU" }),
+      row({ userId: "d", lastInboundAt: ago(1), lastCoachIntent: "WORKOUT" }),   // still active
+    ], now);
+    const t = silenceTriggers(risks);
+    assert.equal(t[0].intent, "FOOD_LOG");
+    assert.equal(t[0].count, 2);
+    assert.ok(!t.some(x => x.intent === "WORKOUT"), "active clients are not silence evidence");
+  });
+
+  test("engagement: the summary holds together", () => {
+    const s = summariseEngagement([
+      row({ userId: "a", lastInboundAt: ago(0), activeDays: [0] }),
+      row({ userId: "b", lastInboundAt: ago(4), activeDays: [0, 1] }),
+      row({ userId: "c", lastInboundAt: ago(20), activeDays: [0] }),
+    ], now);
+    assert.equal(s.total, 3);
+    assert.equal(s.byBand.active, 1);
+    assert.equal(s.byBand.slipping, 1);
+    assert.equal(s.byBand.gone, 1);
+    assert.equal(s.atRisk.length, 1, "gone clients are not 'reach out first' — slipping ones are");
   });
 }
 

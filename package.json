@@ -22,7 +22,8 @@
     "test:onboarding": "tsx script/onboarding-e2e.ts",
     "test:video": "tsx script/video-path-verify.ts",
     "diagnose:env": "tsx script/diagnose-env.ts",
-    "audit:replies": "tsx script/reply-audit.ts"
+    "audit:replies": "tsx script/reply-audit.ts",
+    "audit:engagement": "tsx script/engagement-report.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
