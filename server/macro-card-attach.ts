@@ -138,6 +138,46 @@ export function coachingHint(rows: Row[], isBulk: boolean): string {
   return pick(["Everything's in for today — logged, on target, done. Repeat tomorrow.", "Targets met and logged. This is the day that builds the result."]);
 }
 
+
+/**
+ * THE NEXT MOVE — one instruction a person can act on without knowing what a calorie is.
+ *
+ * (2026-07-27, founder: "the card tells the client what your next move is, what you need to do.
+ * It's so important for the layman… most people don't care about calories, they just want to
+ * lose the belly.") His open question was how to serve both audiences at once. The answer is
+ * ordering, not a setting: this line is the biggest thing on the card, the bars sit underneath.
+ * Nobody chooses a mode — the person who doesn't count reads one line and stops; the person who
+ * does reads on. Same card, both served.
+ *
+ * Rules: an ACTION (verb first), in food, never a macro name, never a number the reader has to
+ * interpret. "Add eggs or tin fish to your next meal" — not "43g protein remaining".
+ */
+export function nextMoveLine(rows: Row[], isBulk: boolean): string {
+  const r = (label: string) => rows.find(x => x.label === label);
+  const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
+  const cal = r("Calories"), prot = r("Protein"), fat = r("Fat");
+  const protLeft = prot ? Math.round(prot.target - prot.current) : 0;
+  const calLeft = cal ? Math.round(cal.target - cal.current) : 0;
+
+  // Over the day's food — the move is about the NEXT meal, never guilt about the last one.
+  if (!isBulk && ratio(cal) > 1.05) {
+    return calLeft < -400 ? "Keep tonight light — protein and veg only" : "Go lean at the next meal — grilled, no starch";
+  }
+  if (ratio(fat) > 1.25) return "Grill it, don't fry it — that's the whole fix today";
+
+  // Building and under-fuelled.
+  if (isBulk && calLeft > 500) return "Eat more today — add a proper meal";
+
+  // Protein is the one that actually moves the result, so it owns the instruction.
+  if (protLeft >= 60) return "Get protein into your next two meals";
+  if (protLeft >= 35) return "Make your next meal a proper protein meal";
+  if (protLeft >= 18) return "Add eggs, tin fish or a shake today";
+  if (protLeft > 0) return "One yoghurt or a boiled egg finishes today";
+
+  if (calLeft > 400) return "Eat a proper meal — you're short on food today";
+  return "Nothing left to do — today is done properly";
+}
+
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
  *  logged-at date) makes a RETRO log show that DAY'S totals — e.g. yesterday's card with the
  *  new pizza slices added — instead of today's. */
@@ -153,6 +193,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       subtitle: retro ? "Logged to yesterday" : "Meal logged",
       pill: `+${Math.max(0, Math.round(opts.mealKcal || 0))} cal`,
       rows: t.rows,
+      nextMove: nextMoveLine(t.rows, t.isBulk),
       hint: coachingHint(t.rows, t.isBulk),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
@@ -175,6 +216,7 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
       subtitle: "Today so far",
       pill: `${kcal} cal in`,
       rows: t.rows,
+      nextMove: nextMoveLine(t.rows, t.isBulk),
       hint: coachingHint(t.rows, t.isBulk),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;

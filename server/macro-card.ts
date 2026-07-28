@@ -62,6 +62,7 @@ export interface MacroCardData {
   pill?: string;       // right-side pill, e.g. "+420 cal" or "721 cal so far"; omit to hide
   rows: MacroRow[];    // Calories / Protein / Carbs / Fat (each with today's total vs target)
   hint?: string;       // one short line, e.g. "Protein first — you've got this today"
+  nextMove?: string;   // THE instruction — big, top of card, no numbers needed to understand it
 }
 
 function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
@@ -84,8 +85,13 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   const mealH = 86;   // title is one line — 104 left an airy gap before the first bar (2026-07-23)
   const rowH = 104;
   const footerH = 116; // the coaching line now sits on its own row under the wordmark
+  // NEXT MOVE (2026-07-27, founder: "the card tells the client what your next move is… most
+  // people don't care about calories, they just want to lose the belly"). One instruction, in
+  // words, as the biggest thing on the card. The bars stay underneath for whoever wants them —
+  // nobody has to pick a mode: the layman reads the top line and stops, the tracker reads on.
+  const nextMoveH = d.nextMove ? 128 : 0;
 
-  const cardH = P + headerH + mealH + d.rows.length * rowH + footerH + P - 20;
+  const cardH = P + headerH + mealH + nextMoveH + d.rows.length * rowH + footerH + P - 20;
   const H = cardH + M * 2;
 
   const canvas = createCanvas(W, H);
@@ -188,6 +194,32 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   }
 
   y += mealH;
+
+  // ── NEXT MOVE — the one instruction, in the largest type on the card ──
+  if (d.nextMove) {
+    const bandH = nextMoveH - 22;
+    ctx.fillStyle = "rgba(242,104,31,0.08)";
+    roundRect(ctx, x, y, innerW, bandH, 20);
+    ctx.fill();
+    ctx.fillStyle = ORANGE;
+    roundRect(ctx, x, y, 8, bandH, 4);          // orange spine, so the eye lands here first
+    ctx.fill();
+
+    ctx.fillStyle = "#6b7280";
+    ctx.font = `bold 24px "${FONT}"`;
+    ctx.fillText("YOUR NEXT MOVE", x + 34, y + 40);
+
+    ctx.fillStyle = INK;
+    ctx.font = `600 40px "${FONT}"`;
+    let nm = d.nextMove;
+    const nmMaxW = innerW - 68;
+    if (ctx.measureText(nm).width > nmMaxW) {
+      while (nm.length > 1 && ctx.measureText(nm + "…").width > nmMaxW) nm = nm.slice(0, -1);
+      nm = nm.replace(/[\s,–-]+$/, "") + "…";
+    }
+    ctx.fillText(nm, x + 34, y + 88);
+    y += nextMoveH;
+  }
 
   // ── Macro rows: label, value, bar (track + orange fill, rounded) ──
   for (const r of d.rows) {

@@ -39,6 +39,8 @@ import { displayFoodName, inventedQualifiers } from "../server/food-naming";
 import { dinnerCloseLine, remainingInMeals } from "../server/education";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../server/food-fuzzy";
 import { scanReply, summarise } from "../server/audit/reply-defects";
+import { nextMoveLine } from "../server/macro-card-attach";
+import { classifyScope, scopeReply, pausesNumbers } from "../server/mental-health-scope";
 import { parseIdentityCorrection, correctionCandidates } from "../server/food-identity-correction";
 import { adaptTraining, applySetsDelta } from "../server/adaptive-training";
 import { ceilingState } from "../server/spend-ceiling";
@@ -5765,6 +5767,69 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(s.defects, 2);
     assert.equal(s.byCode[0].code, "menu-dump");
     assert.equal(s.byCode[0].count, 2);
+  });
+}
+
+// D12 CLINICAL LANGUAGE + D8 THE CARD + D10 SCOPE (2026-07-27 evening).
+{
+  test("clinical: the coach prompt gives no medication instructions", () => {
+    const prompt = readFileSync("server/coach-prompt.ts", "utf-8");
+    // Both of these shipped in the prompt: "Metformin causes nausea without food — time it
+    // correctly" and "Take ARVs with food". Instructing on medicine is not coaching.
+    assert.doesNotMatch(prompt, /Metformin causes nausea/i);
+    assert.doesNotMatch(prompt, /Take ARVs with food/i);
+    assert.doesNotMatch(prompt, /20 years of real coaching experience/i);
+  });
+
+  test("clinical: medication timing advice is blocked in code, not just removed", () => {
+    for (const bad of [
+      "Take your metformin with food to avoid the nausea.",
+      "Have your ARVs with a meal, it settles the stomach.",
+      "Take your tablets on an empty stomach in the morning.",
+    ]) assert.equal(verifyBrainReply(bad, {}).ok, false, `must be blocked: ${bad}`);
+  });
+
+  test("clinical: legitimate coaching about the same clients still passes", () => {
+    for (const ok of [
+      "Slow-release carbs like samp and beans suit you well — keep meals regular.",
+      "Go easy on the polony and Aromat, and walk every day. Your doctor guides the blood pressure.",
+      "Protein needs are higher — eggs, tin fish, amasi. Anything about your treatment is your clinic's call.",
+    ]) assert.equal(verifyBrainReply(ok, {}).ok, true, `must pass: ${ok}`);
+  });
+
+  test("card: the next move is an action in food, never a macro number", () => {
+    const rows = (protCur: number, protTgt: number, calCur: number, calTgt: number) => ([
+      { label: "Calories", current: calCur, target: calTgt, unit: "", overIsBad: true },
+      { label: "Protein", current: protCur, target: protTgt, unit: "g", overIsBad: false },
+      { label: "Fat", current: 40, target: 80, unit: "g", overIsBad: true },
+    ] as any);
+    const big = nextMoveLine(rows(60, 185, 1200, 2862), false);
+    assert.match(big, /protein/i);
+    assert.doesNotMatch(big, /\d/, "the layman's line must carry no numbers");
+    assert.match(nextMoveLine(rows(185, 185, 3400, 2862), false), /lean|light/i);
+    assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false), /done/i);
+  });
+
+  test("scope: the live 'only alcohol' case gets a boundary, not coaching", () => {
+    const sig = classifyScope("I'm honestly depressed, the only thing I've had today is alcohol");
+    assert.ok(sig);
+    const out = scopeReply(sig!, "Kam");
+    assert.match(out, /0800 567 567/);              // a real referral, not a platitude
+    assert.doesNotMatch(out, /protein target|calorie/i);
+    assert.equal(readsAsTherapySpeak(out), false);  // never the feelings-diagnosis register
+  });
+
+  test("scope: ordinary coaching moments are NOT diverted", () => {
+    for (const msg of [
+      "I'm depressed about my weight", "just tired today", "I had a beer with dinner",
+      "feeling down about my progress", "I'm stressed at work",
+    ]) assert.equal(classifyScope(msg), null, `must stay coaching: ${msg}`);
+  });
+
+  test("scope: disordered eating pauses the numbers", () => {
+    const sig = classifyScope("I make myself sick after I eat");
+    assert.equal(sig, "disordered_eating");
+    assert.equal(pausesNumbers(sig!), true);
   });
 }
 

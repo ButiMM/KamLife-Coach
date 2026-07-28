@@ -17,9 +17,6 @@ _Last updated: 2026-07-27_
 |---|--------|----------|-------|
 | D5 | No instrumentation — nothing measures where clients *disengage* (the reply auditor now catches defective replies; engagement/drop-off is still unmeasured) | — | Narrowed, still open |
 | D6 | Two engines coexist; old brain emits malformed text ("3 meals (breakfast and lunch)", literal asterisks, truncated sentences) | 12:45 thread | Migration incomplete — highest risk item |
-| D8 | Card shows 4 macro bars + raw numbers to a market that doesn't think in calories | Every card | Product design |
-| D10 | Emotional/human-state coaching is shallow (the "I'm honestly depressed, only had alcohol" case) | Kamogelo thread | Needs product decision + build |
-| D12 | Meta clinical-language audit not done (coach prompt contains diabetes/hypertension playbooks) | Code audit | Compliance risk |
 
 _D1/D2/D3 were all in one thread and were fixed together, not one at a time — that is the
 rule this file exists to enforce._
@@ -73,6 +70,18 @@ rule this file exists to enforce._
 - ✅ **D14** — "What?" is a reaction to the last reply, not a request for the sitemap
 - ✅ **D15** — missed-session days are named only when unambiguous; today's weekday is never
   listed as missed, and older misses are counted rather than mis-named
+- ✅ **D12 (compliance)** — the prompt claimed "20 years of real coaching experience" with
+  clinical populations, and gave medication instructions ("Metformin causes nausea without food
+  — time it correctly", "Take ARVs with food"). Removed, condition notes reframed as ordinary
+  healthy-eating guidance with the condition deferred to the client's doctor, and a
+  MEDICATION_TIMING rule added to the verifier so no prompt edit can reintroduce it.
+- ✅ **D8** — the card now leads with YOUR NEXT MOVE: one instruction, in food, no numbers needed
+  to understand it. The bars stay underneath. The founder's open question was how to serve both
+  the people who count calories and the majority who don't; the answer is ORDERING, not a setting
+  — no one picks a mode, the layman reads one line and stops, the tracker reads on.
+- ✅ **D10** — the band between a bad week and a crisis had nothing in it. Sustained low mood,
+  drinking instead of eating and disordered eating now get an honest boundary and a real referral
+  (SADAG), never deeper therapy from a fitness coach. Disordered eating pauses the numbers.
 - ✅ **The founder was the regression suite.** `server/audit/reply-defects.ts` scans real
   replies for 10 known failure patterns; `npm run audit:replies` or text *audit* to the bot.
   Its tests replay the exact screenshots from 2026-07-27 — if a detector stops catching its

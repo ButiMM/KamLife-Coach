@@ -81,6 +81,15 @@ const PROGRAMME_FREELANCE_RE =
 const MEDICAL_CURE_RE =
   /\b(?:cure|reverse|heal|get rid of|eliminate|fix)\s+(?:your\s+|the\s+|his\s+|her\s+)?(?:diabetes|diabetic|hypertension|high blood pressure|blood pressure|cholesterol|pcos|thyroid|arthritis|ibs|cancer|condition|illness|disease|diagnosis)\b/i
 ;
+// MEDICATION ADMINISTRATION (2026-07-27 clinical audit): the guard below caught CHANGING a
+// dose but not instructing HOW or WHEN to take one. The coach prompt itself carried "Metformin
+// causes nausea without food — time it correctly" and "Take ARVs with food" — both removed, and
+// both now blocked in code so no prompt edit can reintroduce them. Telling someone when to take
+// medicine is a pharmacist's job; a coach has no business anywhere near it.
+const MEDICATION_TIMING_RE =
+  /\b(?:take|takes|taking|swallow|have)\s+(?:your |his |her |the |their )?(?:[a-z][\w-]*\s+){0,2}?(?:insulin|medication|meds|medicine|dose|doses|dosage|tablets?|pills?|metformin|statins?|arvs?|antiretrovirals?|treatment|prescription)\b[^.!?]{0,40}\b(?:with food|on an empty stomach|before (?:bed|meals?|eating|breakfast)|after (?:meals?|eating|breakfast|supper)|at night|in the morning|with (?:a )?meal|first thing)\b/i
+;
+
 const MEDICATION_CHANGE_RE =
   /\b(?:stop|start|adjust|change|increase|reduce|lower|skip|come off|go off|wean off|double|halve|cut)\s+(?:your |his |her |the |taking )?(?:[a-z][\w-]*\s+){0,3}?(?:insulin|medication|meds|medicine|dose|dosage|tablets|pills|metformin|statins?|treatment|prescription)\b/i
 ;
@@ -91,6 +100,9 @@ export function verifyBrainReply(reply: string, facts: VerifierFacts): VerifierR
   // Compliance first — a medical claim is the highest-stakes thing the bot can say.
   if (MEDICAL_CURE_RE.test(r)) {
     return { ok: false, violation: "Your reply claims to cure/reverse/heal a medical CONDITION. KamLife is a wellness coach, NOT a doctor or medical device — this is a compliance and liability breach and must NEVER be said. Rewrite: coach the healthy HABITS (movement, food, sleep, consistency) that support how they feel, and for anything about the condition itself defer to their doctor ('I'm your coach, not your doctor — your doctor guides the condition, I'll help you build the habits around it'). Never promise to cure, reverse or fix a disease." };
+  }
+  if (MEDICATION_TIMING_RE.test(r)) {
+    return { ok: false, violation: "Your reply instructs the client on HOW or WHEN to take medication (with food, on an empty stomach, at night, before bed). That is a pharmacist's or doctor's job and never a coach's — remove it entirely. Say that the timing of their medicine is a question for their doctor or pharmacist, and coach only what you actually coach: the food, the training, the sleep, the consistency." };
   }
   if (MEDICATION_CHANGE_RE.test(r)) {
     return { ok: false, violation: "Your reply directs a change to the client's MEDICATION (stopping / adjusting / skipping a dose). You must NEVER touch medication — it is dangerous and outside a coach's scope. Rewrite: tell them only their doctor decides anything about their medication, and steer back to the habits you DO coach (food, movement, sleep). Remove any instruction about medicine, insulin or dose." };
