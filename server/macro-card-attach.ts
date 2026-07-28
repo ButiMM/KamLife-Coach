@@ -27,7 +27,7 @@ function isPastDay(d: Date): boolean {
 }
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard, renderWelcomeCard } from "./macro-card";
-import { achievementFor, renderAchievementCard } from "./achievement-card";
+import { achievementFor, renderAchievementCard, type AchievementCardData } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 import { getNumbersMode } from "./numbers-mode";
@@ -265,6 +265,18 @@ export function distinctHint(hint: string, nextMove: string): string {
   if (subject && subject === hintSubject(nextMove)) return WHY_LINE[subject] || "";
   const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
   return shared >= 3 ? "" : hint;
+}
+
+/** Render an achievement card and return its media marker, or "" if it can't be served. */
+export function achievementCardMarker(ach: AchievementCardData): string {
+  try {
+    const base = cardBaseUrl();
+    if (!base) return "";
+    return ` [MEDIA:${base}/card/${putCard(renderAchievementCard(ach))}.png]`;
+  } catch (e) {
+    console.warn("[ACHIEVEMENT_CARD] skipped:", (e as any)?.message || e);
+    return "";
+  }
 }
 
 /**

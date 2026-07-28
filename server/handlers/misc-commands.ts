@@ -11,6 +11,9 @@ import {
 } from "../../shared/schema";
 import { eq, desc, asc, and, gte, sql } from "drizzle-orm";
 import { SUPPLEMENT_GUIDE } from "../constants";
+import { shareAchievement } from "../achievement-card";
+import { achievementCardMarker } from "../macro-card-attach";
+import { computeFoodLogStreak } from "./food-scanner";
 import { getExerciseGifUrl, getPrimaryWorkoutGifUrl, getPortionGuide, getExerciseDemoFormCue } from "../exercise-media";
 import { matchVariantGuideRequest, formatVariantGuide } from "../exercise-variants";
 import {
@@ -1285,24 +1288,23 @@ export async function handleMiscCommands(ctx: {
     const totalWorkouts = user.totalWorkoutsCompleted || 0;
     const daysOn = user.programmeStartDate ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86_400_000) : 0;
     const streak = user.workoutStreak || 0;
+    const foodStreakForShare = await computeFoodLogStreak(user.id).catch(() => 0);
 
     let weightLine = "";
     try {
       const weights2 = await db.select({ weight: weightLogs.weight }).from(weightLogs)
         .where(eq(weightLogs.userId, user.id)).orderBy(asc(weightLogs.loggedAt));
-      if (weights2.length >= 2) {
-        const diff = parseFloat(String(weights2[0].weight)) - parseFloat(String(weights2[weights2.length - 1].weight));
-        if (diff > 1) weightLine = `\n⚖️ Down ${diff.toFixed(1)}kg`;
-      }
+      const diff = weights2.length >= 2 ? parseFloat(String(weights2[0].weight)) - parseFloat(String(weights2[weights2.length - 1].weight)) : 0;
+      if (diff > 1) weightLine = `\n⚖️ Down ${diff.toFixed(1)}kg`;
     } catch { /* non-fatal */ }
 
-    const shareCard = `*💪 ${name}'s KamLife Coach Progress*\n\n` +
-      `📅 ${daysOn} days on programme\n` +
-      `✅ ${totalWorkouts} workouts completed\n` +
-      `🔥 ${streak}-session streak${weightLine}\n\n` +
-      `_Coached by KamLife Coach on WhatsApp — SA's AI fitness coach._\n` +
-      `_R199/month. Real food. Real workouts. Real results._\n\n` +
-      `Copy this and share it in your WhatsApp status or group. Show them what you are building. 💪`;
+    // A PICTURE, NOT HOMEWORK (2026-07-28, founder: "if a person wants to share it with their friends, THAT is what it brings up"). This used to hand back text ending in "copy this and share it" — asking the client to do the work, in a format nobody forwards. Now it is the achievement card, built from their strongest REAL number; fail-open to the old text.
+    const kgDown = weightLine ? parseFloat(weightLine.replace(/[^\d.]/g, "")) : 0;
+    const ach = shareAchievement({ firstName: name, weightChangeKg: kgDown > 0 ? -kgDown : undefined, streak: foodStreakForShare, sessions: totalWorkouts });
+    const marker = ach ? achievementCardMarker(ach) : "";
+    const shareCard = marker
+      ? `${name}, here's your card. 👇\n\nSave it or put it straight on your status — everything on it is real, and it's yours.${marker}`
+      : `*💪 ${name}'s KamLife Coach Progress*\n\n📅 ${daysOn} days on programme\n✅ ${totalWorkouts} workouts completed\n🔥 ${streak}-session streak${weightLine}\n\n_Coached by KamLife Coach on WhatsApp._\n\nLog a few more days and I'll make you a proper card to share.`;
 
     await logChat(user.id, message, shareCard, "SHARE_CARD");
     return shareCard;

@@ -4890,6 +4890,19 @@ test("achievement card: a shared screenshot never carries an infrastructure host
   process.env.APP_URL = prevApp; if (prevBrand) process.env.BRAND_DOMAIN = prevBrand; else delete process.env.BRAND_DOMAIN;
 });
 
+test("shareAchievement: answers with their strongest REAL number, or says nothing", async () => {
+  const { shareAchievement } = await import("../server/achievement-card");
+  // No milestone gate — they asked, so anything real qualifies. Ranked by what people are proud of.
+  assert.equal(shareAchievement({ firstName: "Kam", weightChangeKg: -3.4, streak: 12, sessions: 20 })!.figure, "3.4kg");
+  assert.equal(shareAchievement({ firstName: "Kam", streak: 12, sessions: 20 })!.figure, "12");
+  assert.equal(shareAchievement({ firstName: "Kam", sessions: 20 })!.figure, "20");
+  assert.match(shareAchievement({ firstName: "Kam", weightChangeKg: -5.0 })!.figure, /^5kg$/, "no trailing .0 on the hero number");
+
+  // Nothing real yet → null, so the caller can say so instead of inventing a win.
+  assert.equal(shareAchievement({ firstName: "Kam", streak: 2, sessions: 1 }), null);
+  assert.equal(shareAchievement({ firstName: "Kam", weightChangeKg: 2 }), null, "gaining weight is never dressed up as a win");
+});
+
 test("one celebration, not two: the card carries the milestone, the text stands down", async () => {
   const { getFoodStreakCelebration, shortStreakNote } = await import("../server/handlers/food-scanner");
   const { achievementCardShown } = await import("../server/macro-card-attach");

@@ -209,12 +209,55 @@ export function achievementFor(f: AchievementFacts): AchievementCardData | null 
     };
   }
 
-  const n = f.sessions || 0;
-  if (SESSION_MILESTONES.includes(n)) {
+  const n2 = f.sessions || 0;
+  if (SESSION_MILESTONES.includes(n2)) {
     return {
-      figure: String(n),
+      figure: String(n2),
       unit: "sessions done",
-      line: `${who} ${f.firstName ? "has" : "have"} trained ${n} times.`,
+      line: `${who} ${f.firstName ? "has" : "have"} trained ${n2} times.`,
+      sub: "Every one of them was a choice to show up.",
+    };
+  }
+  return null;
+}
+
+/**
+ * ON DEMAND — "share my progress".
+ *
+ * (2026-07-28, founder, looking at a live screen: "if a person says today's progress and they
+ * want to share it with their friends, THAT is what it brings up.") Today's totals are for
+ * clarity, not for sharing — nobody forwards "1341 of 2860 kcal" to a group chat, and the old
+ * share command handed back a block of text ending in "copy this and share it", which is asking
+ * the client to do the work.
+ *
+ * So this returns the same card as a milestone, built from their strongest TRUE number. No
+ * milestone gate: they asked, so we answer with whatever is real, ranked by what a person is
+ * actually proud of. Null only when there is genuinely nothing yet — and then we say so rather
+ * than inventing a win, because a fake milestone is worse than none.
+ */
+export function shareAchievement(f: AchievementFacts): AchievementCardData | null {
+  const who = f.firstName ? f.firstName : "You";
+  const has = f.firstName ? "has" : "have";
+  const lost = typeof f.weightChangeKg === "number" ? -f.weightChangeKg : 0;
+
+  if (lost >= 1) {
+    return {
+      figure: `${lost.toFixed(1).replace(/\.0$/, "")}kg`, unit: "down",
+      line: `${who} ${f.firstName ? "is" : "are"} ${lost.toFixed(1).replace(/\.0$/, "")}kg lighter.`,
+      sub: "Not a diet. A different way of eating that stuck.",
+    };
+  }
+  if ((f.streak || 0) >= 3) {
+    return {
+      figure: String(f.streak), unit: "days straight",
+      line: `${who} logged food ${f.streak} days in a row.`,
+      sub: "Most people stop at day two.",
+    };
+  }
+  if ((f.sessions || 0) >= 3) {
+    return {
+      figure: String(f.sessions), unit: "sessions done",
+      line: `${who} ${has} trained ${f.sessions} times.`,
       sub: "Every one of them was a choice to show up.",
     };
   }
