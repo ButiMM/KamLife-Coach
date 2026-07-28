@@ -4870,6 +4870,50 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// DATA EXPORT (2026-07-28) — POPIA right of access, and the hedge against living inside Meta's
+// app. Deletion existed; access did not, while the landing page said "POPIA protected".
+test("asksForExport: catches the real phrasings, never the deletion one", async () => {
+  const { asksForExport } = await import("../server/data-export");
+  for (const yes of [
+    "export my data", "can you send me my data", "give me my records",
+    "I want a copy of my information", "download my history", "popia access request", "my data please",
+  ]) assert.equal(asksForExport(yes), true, `should export: "${yes}"`);
+
+  // Erasure is a different branch and must never be swallowed by this one.
+  for (const no of [
+    "delete my data", "forget me", "erase my data", "popia delete",
+    "what data do you have on protein", "my data shows I'm doing well",
+  ]) assert.equal(asksForExport(no), false, `must NOT export: "${no}"`);
+});
+
+test("formatExport: their whole record, honest, and split for WhatsApp", async () => {
+  const { formatExport, EXPORT_ROW_LIMIT } = await import("../server/data-export");
+  const out = formatExport({
+    profile: {
+      name: "Koketso Mokgokolo", goalType: "fat_loss", startedAt: "2026-05-01T08:00:00Z",
+      heightCm: 178, startWeightKg: 96.4, currentWeightKg: 91.2,
+      calorieTarget: 1980, proteinTarget: 165, stepsTarget: 8500,
+    },
+    weights: Array.from({ length: 40 }, (_, i) => ({ at: `2026-07-${String(28 - (i % 27)).padStart(2, "0")}T06:00:00Z`, kg: 91.2 + i * 0.1 })),
+    foodDays: [{ day: "2026-07-28", kcal: 1904, protein: 158, meals: 3 }],
+    workouts: 22, activeDays: 61,
+  });
+
+  assert.match(out, /Koketso Mokgokolo/);
+  assert.match(out, /Fat loss/, "the goal must read as English, not fat_loss");
+  assert.match(out, /-5\.2kg/, "the real change, computed not claimed");
+  assert.match(out, /1904 kcal, 158g protein/);
+  assert.match(out, /Training sessions: \*22\*/);
+  assert.ok(out.split("\n\n---\n\n").length >= 5, "must split into separate WhatsApp messages");
+  assert.match(out, new RegExp(`and ${40 - EXPORT_ROW_LIMIT} earlier`), "long lists are truncated with an honest count");
+  assert.match(out, /delete my data/, "the export must point at the erasure right too");
+
+  // A brand-new client with nothing on file still gets a valid, non-embarrassing document.
+  const empty = formatExport({ profile: {}, weights: [], foodDays: [], workouts: 0, activeDays: 0 });
+  assert.match(empty, /None recorded/);
+  assert.doesNotMatch(empty, /undefined|NaN|null/, "an empty record must never leak placeholders");
+});
+
 // JOB HEALTH (2026-07-28, engineering review: the scheduler records how long each job took and
 // nothing reads it). At 50 clients the 6am fan-out finishes in seconds; the point is to see the
 // problem months before a client says the messages stopped.

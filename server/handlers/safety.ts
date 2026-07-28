@@ -13,11 +13,12 @@ import {
   sentProactive, clientActions, adminEvents,
   gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
-import { eq } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
 import { readLifeContext, lifeContextReply } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
 import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
+import { asksForExport, formatExport } from "../data-export";
 import { logChat } from "./chat-log";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
@@ -200,6 +201,44 @@ export async function runSafetyGuards(
     const injReply = `Ha${injName ? ", " + injName : ""} — nice try. 😄 I'm Coach K: I coach food and training, that's the whole job, and I can't be talked into being anything else.\n\nWhat do you actually need — a workout, a meal sorted, or your steps?`;
     try { await logChat(injUser[0]?.id || "unknown", message, injReply, "INJECTION_BLOCKED"); } catch (e) { console.warn("[non-fatal]", e); }
     return injReply;
+  }
+
+  // ---- EXPORT MY DATA (POPIA right of ACCESS, and the Meta dependency hedge) ----
+  // Deletion was built; access was not, while the landing page said "POPIA protected". And a
+  // client who can pull their own history is a client who can follow you off WhatsApp if Meta
+  // ever suspends the number. Sent as text in this thread — never a hosted link to someone's
+  // weight history. See server/data-export.ts.
+  if (asksForExport(m)) {
+    const eu = await db.select().from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    if (eu.length === 0) return "No account found for this number.";
+    const u = eu[0];
+    const [ws, ml] = await Promise.all([
+      db.select({ at: weightLogs.loggedAt, kg: weightLogs.weight }).from(weightLogs).where(eq(weightLogs.userId, u.id)).orderBy(desc(weightLogs.loggedAt)),
+      db.select({ at: mealLogs.loggedAt, kcal: mealLogs.kcalInt, protein: mealLogs.proteinInt }).from(mealLogs).where(eq(mealLogs.userId, u.id)).orderBy(desc(mealLogs.loggedAt)),
+    ]);
+    const byDay = new Map<string, { day: string; kcal: number; protein: number; meals: number }>();
+    for (const r of ml) {
+      const day = new Date(new Date(r.at).getTime() + 2 * 3_600_000).toISOString().slice(0, 10); // SAST
+      const e = byDay.get(day) || { day, kcal: 0, protein: 0, meals: 0 };
+      e.kcal += r.kcal || 0; e.protein += r.protein || 0; e.meals += 1;
+      byDay.set(day, e);
+    }
+    const foodDays = [...byDay.values()].sort((a2, b2) => b2.day.localeCompare(a2.day));
+    const weighDays = new Set(ws.map(w => new Date(w.at as any).toISOString().slice(0, 10)));
+    const reply = formatExport({
+      profile: {
+        name: u.name, goalType: u.goalType, startedAt: u.createdAt, heightCm: u.heightCm,
+        startWeightKg: ws.length ? Number(ws[ws.length - 1].kg) : null,
+        currentWeightKg: u.currentWeight != null ? Number(u.currentWeight) : null,
+        calorieTarget: u.calorieTarget, proteinTarget: u.proteinTarget, stepsTarget: u.stepsTarget,
+      },
+      weights: ws.map(w => ({ at: w.at as any, kg: Number(w.kg) })),
+      foodDays,
+      workouts: u.totalWorkoutsCompleted || 0,
+      activeDays: new Set([...byDay.keys(), ...weighDays]).size,
+    });
+    try { await logChat(u.id, message, "[data export sent]", "POPIA_EXPORT"); } catch (e) { console.warn("[non-fatal]", e); }
+    return reply;
   }
 
   // ---- DELETE MY DATA (POPIA) ----
