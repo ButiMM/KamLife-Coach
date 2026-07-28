@@ -22,6 +22,7 @@ import {
 } from "../programme";
 import { buildWorkoutViewerUrl } from "../workout-viewer";
 import { buildDailyDirection } from "../daily-direction";
+import { oneActionCommand } from "./one-action-command";
 import { getTodayWorkoutState } from "../workout-state";
 import { getOnboardingMealPlan } from "../onboarding";
 import { askCoachK } from "../gpt";
@@ -57,9 +58,10 @@ export async function handleMiscCommands(ctx: {
 }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
 
-  // ---- DIRECTION / OVERALL PLAN ---- "Give me direction", "what do I do today and this week", "what's my overall plan" — the client wants the WHOLE plan across every pillar (train/rest, food,
-  // steps, water), not a bare workout dump (2026-07-09: a client asked exactly this and got an exercise list). Deterministic + plain, pulls their real targets and today's training state. Single shared detector (utils.looksLikeDirectionRequest)
-  // — the SAME check gates the brain in routes.ts, so a direction ask can never be swallowed by the model again (2026-07-11: brain answered it with contradicting workout dumps on a rest day).
+  // ---- DIRECTION / OVERALL PLAN ---- The client wants the WHOLE plan across every pillar (train/rest, food, steps, water), not a bare workout dump (2026-07-09: a client asked and got an exercise list). Deterministic, from their real targets and today's training state. The shared detector (utils.looksLikeDirectionRequest) ALSO gates the brain in routes.ts, so a direction ask can never be swallowed by the model (2026-07-11: the brain answered it with a workout dump on a rest day).
+  // THE ONE ACTION FIRST (2026-07-28): "just tell me what to do" is a different question from "give me my whole plan", and the answer to the first must never be the second. See server/one-action.ts.
+  if (/^(?:one thing|what now|what should i do(?: today)?|whats? my one thing|today.?s one thing)\??$/i.test(m.trim())) return await oneActionCommand(user);
+
   if (looksLikeDirectionRequest(m)) {
     const ws = await getTodayWorkoutState(user).catch(() => ({ type: "NORMAL" as const }));
     return buildDailyDirection(user, ws as any);
@@ -191,12 +193,11 @@ export async function handleMiscCommands(ctx: {
     }
   }
 
-  // ---- PAIN TRIAGE — soreness vs. real injury (2026-07-12, Kam: "the coach needs to
-  // catch whether it's just sensitivity from a workout or a real injury"). The old
-  // handler fired the full STOP-72-HOURS protocol on ANY pain mention — over-reacting
-  // to normal DOMS kills momentum and trust. Now: clear injury signals → protocol
-  // (and the injury is PERSISTED so the programme trains around it); ambiguous pain →
-  // ONE triage question; plain soreness → falls through to the DOMS handler.
+  // ---- PAIN TRIAGE — soreness vs. real injury (2026-07-12, Kam: "catch whether it's just
+  // sensitivity from a workout or a real injury"). The old handler fired the full STOP-72-HOURS
+  // protocol on ANY pain mention, and over-reacting to normal DOMS kills momentum. Now: clear
+  // injury → protocol (PERSISTED, so the programme trains around it); ambiguous → ONE triage
+  // question; plain soreness → the DOMS handler.
   const painClass = classifyPainReport(m);
   if (painClass === "injury" || painClass === "ambiguous") {
     const injuredArea = m.includes("knee") ? "knee" : m.includes("shoulder") ? "shoulder" : m.includes("back") ? "back" : m.includes("ankle") ? "ankle" : m.includes("wrist") ? "wrist" : m.includes("hip") ? "hip" : m.includes("neck") ? "neck" : m.includes("elbow") ? "elbow" : "the affected area";

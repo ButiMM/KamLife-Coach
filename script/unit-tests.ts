@@ -4870,6 +4870,88 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// THE ONE ACTION (2026-07-28, founder: "what is the single thing Coach K should make this person
+// do today?"). This is the coaching. Ordering is the whole design.
+{
+  const day = (o: any): any => ({
+    firstName: "Kam", goal: o.goal || "fat_loss", dreamGoal: o.dream, biggestStruggle: o.struggle,
+    weeksOnProgramme: o.weeks ?? 4, daysSinceAnyLog: o.silent ?? 0,
+    daysSinceWeighIn: o.weighed === undefined ? 2 : o.weighed,
+    loggedToday: o.loggedToday ?? true, proteinPct: o.prot ?? 0.9, caloriePct: o.cal ?? 0.9,
+    sessionsThisWeek: o.sess ?? 3, sessionsTarget: o.sessTarget ?? 3,
+    stepsToday: o.steps ?? 9000, stepsTarget: o.stepsTarget ?? 8000, sick: o.sick, hour: o.hour ?? 18,
+  });
+
+  test("one action: what matters most wins, whatever else is also wrong", async () => {
+    const { chooseAction } = await import("../server/one-action");
+    // Someone who vanished gets no protein tip — a coach talking to an empty room.
+    assert.equal(chooseAction(day({ silent: 4, prot: 0.1, steps: 0, weighed: 40 })).kind, "come_back");
+    // Sick outranks everything except being gone. The right action is sometimes nothing.
+    assert.equal(chooseAction(day({ sick: true, prot: 0.1, sess: 0 })).kind, "rest");
+    assert.equal(chooseAction(day({ sick: true, silent: 5 })).kind, "come_back");
+    // You cannot show progress you never measured — the scale outranks the food.
+    assert.equal(chooseAction(day({ weighed: null, weeks: 3, prot: 0.2 })).kind, "weigh");
+    assert.equal(chooseAction(day({ weighed: 14, prot: 0.2 })).kind, "weigh");
+    // Then protein, the highest-leverage food action for BOTH goals.
+    assert.equal(chooseAction(day({ prot: 0.3 })).kind, "protein");
+    assert.equal(chooseAction(day({ goal: "muscle_gain", prot: 0.3 })).kind, "protein");
+    // A brand-new client isn't chased for a weigh-in on day one.
+    assert.notEqual(chooseAction(day({ weighed: null, weeks: 0 })).kind, "weigh");
+  });
+
+  test("one action: it never nags someone who is doing everything right", async () => {
+    const { chooseAction, formatOneAction } = await import("../server/one-action");
+    const a = chooseAction(day({}));
+    assert.equal(a.kind, "hold");
+    assert.match(a.todo, /Nothing new today/i);
+    // A coach who always finds one more note teaches you that you can never be doing well.
+    assert.doesNotMatch(formatOneAction(a, "Kam"), /\b(?:should|need to|must|try to)\b/i);
+  });
+
+  test("one action: it answers the obstacle they actually told us about", async () => {
+    const { chooseAction } = await import("../server/one-action");
+    // Someone who said they get home late must never be told to meal-prep. Being ignored after
+    // answering the question is worse than never being asked.
+    const late = chooseAction(day({ prot: 0.2, struggle: "I get home from work after 9pm most nights" }));
+    assert.match(late.todo, /two minutes|tin fish|eggs/i);
+    const broke = chooseAction(day({ prot: 0.2, struggle: "I can't afford expensive food" }));
+    assert.match(broke.todo, /eggs|pilchards|beans/i);
+    const flat = chooseAction(day({ sess: 1, struggle: "I lose motivation after a week" }));
+    assert.match(flat.todo, /even a bad one/i);
+  });
+
+  test("one action: their own words carry the why — safely", async () => {
+    const { chooseAction, dreamClause } = await import("../server/one-action");
+    const a = chooseAction(day({ prot: 0.2, dream: "Fit into my wedding suit in December" }));
+    assert.match(a.why, /fit into my wedding suit in december/i, "the dream is the reason, not decoration");
+
+    // Free text a client typed months ago — never spliced in blind.
+    assert.equal(dreamClause("hi"), "", "too short to be a dream");
+    assert.equal(dreamClause("a".repeat(200)), "", "a ramble reads worse than saying nothing");
+    assert.equal(dreamClause("look <b>good</b>"), "", "anything that isn't a sentence is dropped");
+    assert.equal(dreamClause("12345678"), "", "not actual words");
+    assert.equal(dreamClause("Lose the belly.*"), "lose the belly", "markdown stripped, trailing stop removed");
+    // With no dream on file the line still reads as English.
+    const noDream = chooseAction(day({ prot: 0.2 }));
+    assert.ok(noDream.why.length > 20 && !noDream.why.includes("**"));
+  });
+
+  test("one action: two lines, no numbers to decode", async () => {
+    const { chooseAction, formatOneAction } = await import("../server/one-action");
+    for (const state of [
+      day({ silent: 5 }), day({ sick: true }), day({ weighed: null, weeks: 2 }),
+      day({ prot: 0.2 }), day({ loggedToday: false, hour: 19 }), day({ steps: 1000, hour: 14 }),
+      day({ sess: 0 }), day({}),
+    ]) {
+      const out = formatOneAction(chooseAction(state), "Kam");
+      assert.ok(out.split("\n\n").length <= 3, `must stay short: ${out}`);
+      assert.doesNotMatch(out, /\d+\s*(?:kcal|g protein|grams)/i, `no macro figures in the daily action: ${out}`);
+      assert.doesNotMatch(out, /undefined|null|NaN/, out);
+      assert.match(out, /^Kam — one thing today:/);
+    }
+  });
+}
+
 // SELF-CHECK (2026-07-28, founder: "things being promised to clients, things being promised to
 // me, that are not going through"). The defect is SILENT FAIL-OPEN: 174 swallowed failures and 48
 // env-gated capabilities, each warning going to a Railway log nobody reads.

@@ -347,6 +347,19 @@ const CASES: Case[] = [
   { name: "progress: how's my day", msg: "how's my day",
     expect: [/Today so far|no food logged/i], reject: [/what do you think/i] },
 
+  // THE ONE ACTION — "just tell me what to do" must get ONE instruction, not the whole plan.
+  { name: "one action: what should I do today", msg: "what should I do today",
+    expect: [/one thing today/i], reject: [/didn'?t catch/i] },
+  { name: "one action: one thing", msg: "one thing", expect: [/one thing today/i] },
+  // NOT "just tell me what to do" — the numbers-mode handler already owns that phrasing ("no
+  // more numbers, I'll tell you in plain words"), which is a fair reading of it. Deferring to the
+  // established handler beats two handlers fighting over one sentence.
+  { name: "one action: numbers-mode keeps its phrasing", msg: "just tell me what to do",
+    expect: [/plain words|no more numbers/i], reject: [/one thing today/i] },
+  // …but the full-plan ask still gets the full plan.
+  { name: "one action: direction still returns the whole plan", msg: "give me direction",
+    reject: [/one thing today/i] },
+
   // ── GOAL CHANGE ─────────────────────────────────────────────────────────
   { name: "goal: canonical phrasing updates with targets", msg: "change my goal to muscle gain",
     expect: [/muscle gain/i, /kcal/i, /protein/i] },
