@@ -7,7 +7,7 @@ being worked on — and if it is here and open, nobody gets to say "it's fixed."
 
 Rule: **enumerate every failure in a thread before fixing any of them.**
 
-_Last updated: 2026-07-27_
+_Last updated: 2026-07-28_
 
 ---
 
@@ -19,6 +19,29 @@ _Last updated: 2026-07-27_
 
 _D1/D2/D3 were all in one thread and were fixed together, not one at a time — that is the
 rule this file exists to enforce._
+
+## CLOSED — 2026-07-28 (review mail)
+
+- ✅ **The global monthly rand ceiling degraded service for everyone.** All four reviewers
+  called it backwards in the same words — heavy users hit a global cap first, and heavy users
+  are the ones you most need to keep. It now ALERTS the founder; margin is held by the
+  per-client daily caps, which are predictable and identical for everyone.
+- ✅ **The malformed-output guard triggered silently.** It now counts every decision and
+  reports through the *audit* command, with the reviewer's 5% escalation line committed in
+  code: past it, finishing the engine migration outranks any new feature (D6).
+- ✅ **The card made the client do work.** The loudest corner said "+795 cal" — a number
+  already in the text reply, answering a question nobody asked. It now carries a verdict
+  (On track / Over today / Perfect day), read from the same rows the bars are drawn from.
+- ✅ **The card gave the same instruction twice** ("Get protein into your next two meals" over
+  "62g protein to go"). Repetition is now detected by subject, and the footer changes job
+  rather than vanishing: the band gives the action, the footer gives the reason.
+- ✅ **Nothing in the product was shareable.** Milestone days (streaks, whole kilos lost,
+  session counts) now get an achievement card instead of a receipt — one number, one line,
+  the wordmark and the address. Deliberately scarce: a card for every meal is wallpaper.
+- ✅ **Full-size phone photos went to vision.** Downscaled to 1024px once, at the download, so
+  every reader below gets the cheap image. Fail-open.
+- ✅ **The voice guard contradicted its own copy** — it passed 16MB (about two hours) while
+  telling clients to keep it under 90 seconds. Both now say three minutes.
 
 ## CLOSED — 2026-07-27
 
