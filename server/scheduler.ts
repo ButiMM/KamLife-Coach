@@ -21,7 +21,7 @@ import { runAdaptiveTargets } from "./scheduler/jobs/adaptive";
 import { runEveningAccountability } from "./scheduler/jobs/evening";
 import { runMilestoneCelebrations } from "./scheduler/jobs/milestones";
 import {
-  runWeek3Intervention, runSilenceDetection, runDeepSilenceEscalation,
+  runWeek3Intervention, runSilenceDetection, runDeepSilenceEscalation, runFadeDetection,
   runComebackMessages, runBuddyAccountability, runStreakAtRisk,
   runPausedClientLite, runWeightStallIntervention,
 } from "./scheduler/jobs/retention";
@@ -274,6 +274,8 @@ export async function initScheduler(): Promise<void> {
 
   // ── Every 12 hours ────────────────────────────────────────────────────────
   cron.schedule("4 4,16 * * *",  () => safe("runSilenceDetection",    runSilenceDetection),    { timezone: "UTC" });
+  // Fade: still replying, stopped logging — the churn the silence job structurally cannot see.
+  cron.schedule("20 15 * * 2",   () => safe("runFadeDetection",       runFadeDetection),       { timezone: "UTC" }); // Tue 17:20 SAST
   cron.schedule("0 5,18 * * *",  () => safe("runDeepSilenceEscalation", runDeepSilenceEscalation), { timezone: "UTC" });
 
   // ── Every minute — fire user-set reminders whose time has come ─────────────

@@ -119,12 +119,16 @@ This was never about perfection. Nobody's perfect. It's about showing up — for
 }
 
 /**
- * A far shorter version for someone who has ALREADY gone quiet — they didn't ask, we noticed.
- * Wall-of-text at a person who stopped replying is how you get blocked.
+ * THE FADE NUDGE — for someone still around who has quietly stopped doing the work.
+ *
+ * Deliberately SHORT. runSilenceDetection already handles people who go quiet, and its copy is
+ * good; this is the other case, where they are still replying and the logging has stopped. A
+ * wall of text at someone drifting is how you get blocked, so this names what happened, removes
+ * the shame, and asks for one thing.
  */
 export function silentQuitNudge(f: QuitFacts): string {
   const fn = f.firstName ? `${f.firstName}, ` : "";
   const days = f.daysSinceLog ?? 0;
   const banked = f.sessions > 0 ? ` You've got *${f.sessions} sessions* banked — those don't expire.` : "";
-  return `${fn}it's been ${days} days. No lecture, nothing to explain.${banked}\n\nMost people disappear at exactly this point and never come back, and it's almost never because it got too hard — it's because they thought they'd blown it. You haven't.\n\nOne walk or one logged meal today and you're back in it. Nothing to catch up.`;
+  return `${fn}I've noticed the logging has gone quiet — ${days} days. No lecture, nothing to explain.${banked}\n\nThis is the exact point most people drift off for good, and it's almost never because it got too hard. It's because they thought they'd blown it. You haven't.\n\nOne meal or one walk logged today puts you straight back in. Nothing to catch up on.`;
 }

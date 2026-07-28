@@ -4,7 +4,7 @@ import {
   sendWhatsApp, canSendProactive, recordProactiveSend,
   getActiveClients, isPaused, dayStart, loadState, saveState,
   TRAINING_SCHEDULES, wasSickOrInjured, isSickOrInjuredToday,
-  todaySAST, claimProactive, claimDailySlot, isProactivePaused,
+  todaySAST, thisWeekUTC, claimProactive, claimDailySlot, isProactivePaused,
   escalations,
 } from "../shared";
 import { selectVariantMessage, recordDelivery } from "../../ab";
@@ -88,6 +88,62 @@ export async function runSilenceDetection(): Promise<void> {
       }
     } catch (err) {
       console.error(`[SCHEDULER] Silence detection error — ${client.phoneNumber}:`, err);
+    }
+  }
+}
+
+/**
+ * FADE DETECTION — still replying, stopped logging.
+ *
+ * (2026-07-28.) runSilenceDetection above keys on `lastActiveAt`, which EVERY inbound message
+ * bumps. So a client who still answers "ok" twice a week while logging nothing for a fortnight
+ * never trips it — and that is precisely the founder's churn pattern: "people come in excited,
+ * then after a month or two they drop it off." They go passive long before they go quiet, and
+ * the passive phase is the only window where a nudge still lands.
+ *
+ * Fires once per client per fortnight, respects every existing gate (pause, friction/life quiet
+ * window, the shared daily budget). Silent clients are deliberately left to the silence job so
+ * nobody gets both.
+ */
+export async function runFadeDetection(): Promise<void> {
+  console.log("[SCHEDULER] JOB: Fade detection (still talking, stopped logging)");
+  if (isProactivePaused()) return;
+  const { fadeState } = await import("../../engagement");
+  const { silentQuitNudge } = await import("../../quit-save");
+  const clients = await getActiveClients();
+  const now = Date.now();
+  const DAYMS = 86_400_000;
+
+  for (const client of clients) {
+    if (isPaused(client)) continue;
+    try {
+      if (!client.lastActiveAt) continue;
+      const daysSinceMessage = Math.floor((now - new Date(client.lastActiveAt).getTime()) / DAYMS);
+
+      const [lastMeal] = await db.select({ at: mealLogs.loggedAt }).from(mealLogs)
+        .where(eq(mealLogs.userId, client.id)).orderBy(desc(mealLogs.loggedAt)).limit(1);
+      const [lastWorkout] = await db.select({ at: workoutLogs.loggedAt }).from(workoutLogs)
+        .where(eq(workoutLogs.userId, client.id)).orderBy(desc(workoutLogs.loggedAt)).limit(1);
+
+      const lastDid = Math.max(
+        lastMeal?.at ? new Date(lastMeal.at).getTime() : 0,
+        lastWorkout?.at ? new Date(lastWorkout.at).getTime() : 0,
+      );
+      if (!lastDid) continue;                       // never logged anything — onboarding owns them
+      const daysSinceLog = Math.floor((now - lastDid) / DAYMS);
+
+      if (fadeState(daysSinceLog, daysSinceMessage) !== "fading") continue;
+
+      const ok = await claimProactive(client.id, "fade_nudge", thisWeekUTC());
+      if (!ok) continue;                            // budget, dedupe, friction/life quiet all say no
+      await sendWhatsApp(client.phoneNumber, silentQuitNudge({
+        firstName: (client.name || "").split(" ")[0],
+        sessions: client.totalWorkoutsCompleted || 0,
+        weeks: 0,
+        daysSinceLog,
+      }));
+    } catch (err) {
+      console.error(`[SCHEDULER] Fade detection error — ${client.phoneNumber}:`, err);
     }
   }
 }

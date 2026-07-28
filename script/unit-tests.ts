@@ -44,6 +44,7 @@ import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeC
 import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
+import { fadeState, fadingClients } from "../server/engagement";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
@@ -6108,6 +6109,51 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(out, /9 days/);
     assert.match(out, /6 sessions/);
     assert.doesNotMatch(out, /guilt|shame|disappoint/i);
+  });
+}
+
+// THE FADE — still talking, stopped doing. The churn runSilenceDetection cannot see.
+{
+  test("fade: someone still replying but not logging is FADING, not silent", () => {
+    // The founder's exact pattern: says "ok" every couple of days, logged nothing in two weeks.
+    assert.equal(fadeState(14, 2), "fading");
+    assert.equal(fadeState(6, 0), "fading");
+  });
+
+  test("fade: a client doing the work is left alone", () => {
+    assert.equal(fadeState(0, 0), "engaged");
+    assert.equal(fadeState(4, 1), "engaged", "4 days is a bad week, not a fade");
+  });
+
+  test("fade: people who stopped TALKING belong to the silence job, not this one", () => {
+    assert.equal(fadeState(20, 8), "silent");
+    assert.equal(fadeState(30, 21), "lapsed");
+    // No client should ever be eligible for both nudges.
+    const rows = [
+      { userId: "fading", name: "A", daysSinceLog: 12, daysSinceMessage: 1, sessions: 9 },
+      { userId: "silent", name: "B", daysSinceLog: 12, daysSinceMessage: 10, sessions: 4 },
+      { userId: "fine", name: "C", daysSinceLog: 1, daysSinceMessage: 0, sessions: 20 },
+    ];
+    const out = fadingClients(rows);
+    assert.deepEqual(out.map(r => r.userId), ["fading"]);
+  });
+
+  test("fade: the nudge is short, names the gap, and never shames", () => {
+    const out = silentQuitNudge({ sessions: 9, weeks: 0, daysSinceLog: 12, firstName: "T" });
+    assert.ok(out.length < 460, "a wall of text at someone drifting gets you blocked");
+    assert.match(out, /12 days/);
+    assert.match(out, /9 sessions/);
+    assert.doesNotMatch(out, /guilt|shame|disappoint|failed/i);
+    assert.match(out, /thought they'd blown it/i);
+  });
+
+  test("fade: the job is registered and gated like every other proactive job", () => {
+    const sched = readFileSync(join("server", "scheduler.ts"), "utf-8");
+    assert.match(sched, /runFadeDetection/, "must be wired into the cron table");
+    const job = readFileSync(join("server", "scheduler", "jobs", "retention.ts"), "utf-8");
+    assert.match(job, /claimProactive\(client\.id, "fade_nudge"/, "goes through the shared budget");
+    assert.match(job, /isProactivePaused\(\)/, "honours the global killswitch");
+    assert.match(job, /if \(isPaused\(client\)\) continue;/, "honours a paused client");
   });
 }
 

@@ -145,3 +145,34 @@ export function summariseEngagement(rows: ActivityRow[], now: Date, atRiskLimit 
     atRisk: risks.filter(r => r.band === "slipping" || r.band === "quiet").slice(0, atRiskLimit),
   };
 }
+
+/**
+ * THE FADE — still talking, stopped doing.
+ *
+ * (2026-07-28, founder: "people come in excited, then after a month or two they drop it off.")
+ * runSilenceDetection has covered people who stop MESSAGING since long before this, and its copy
+ * is good. But it keys on `lastActiveAt`, which every inbound message bumps — so a client who
+ * still says "ok" or "sharp" twice a week, while logging nothing for a fortnight, never trips it.
+ * That is the actual churn pattern: people go passive before they go quiet, and the passive phase
+ * is the only window where a nudge still works.
+ *
+ * Fading = the gap between "last did something" and "last said something" has opened up.
+ */
+export type EngagementState = "engaged" | "fading" | "silent" | "lapsed";
+
+export function fadeState(daysSinceLog: number, daysSinceMessage: number): EngagementState {
+  if (daysSinceMessage >= 7) return daysSinceMessage >= 14 ? "lapsed" : "silent";
+  // Still in contact — so it is the DOING that stopped.
+  if (daysSinceLog >= 5) return "fading";
+  return "engaged";
+}
+
+/** Fading clients only, worst first — the ones a silence job will never see. */
+export function fadingClients(
+  rows: Array<{ userId: string; name: string | null; daysSinceLog: number; daysSinceMessage: number; sessions: number }>,
+): Array<{ userId: string; name: string; daysSinceLog: number; sessions: number }> {
+  return rows
+    .filter(r => fadeState(r.daysSinceLog, r.daysSinceMessage) === "fading")
+    .sort((a, b) => b.daysSinceLog - a.daysSinceLog)
+    .map(r => ({ userId: r.userId, name: (r.name || "").split(" ")[0] || "there", daysSinceLog: r.daysSinceLog, sessions: r.sessions }));
+}
