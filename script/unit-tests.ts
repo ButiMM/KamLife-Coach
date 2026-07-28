@@ -4819,6 +4819,57 @@ test("coachingHint: plain-language, goal-aware over/under coaching", async () =>
   assert.notEqual(coachingHint(rows({ cal: 900, prot: 40 }), false), coachingHint(rows({ cal: 900, prot: 140 }), false));
 });
 
+// THE VERDICT PILL (2026-07-28, founder: "clarity without confusing them, but giving them what
+// they want"). The loudest corner of the card must answer "am I okay today", not restate a
+// number already in the text reply.
+test("dayStatusPill: a plain verdict, never a number, and it matches the bars", async () => {
+  const { dayStatusPill } = await import("../server/macro-card-attach");
+  const rows = (o: any) => [
+    { label: "Calories", current: o.cal ?? 1000, target: 2000, unit: "", overIsBad: true },
+    { label: "Protein", current: o.prot ?? 100, target: 150, unit: "g", overIsBad: false },
+  ];
+  const all = [
+    dayStatusPill(rows({ cal: 2200 }), false),
+    dayStatusPill(rows({ cal: 1900, prot: 160 }), false),
+    dayStatusPill(rows({ cal: 900, prot: 160 }), false),
+    dayStatusPill(rows({ cal: 1750 }), false),
+    dayStatusPill(rows({ cal: 600 }), false),
+    dayStatusPill(rows({ cal: 500 }), true),
+    dayStatusPill(rows({ cal: 1900, prot: 160 }), true),
+  ];
+  for (const p of all) {
+    assert.doesNotMatch(p.text, /\d/, `the pill must never carry a number: ${p.text}`);
+    assert.ok(p.text.length <= 12, `too long, it would eat the meal title: ${p.text}`);
+  }
+  // The verdict must agree with the bars it sits above — over is over, and it must look it.
+  assert.deepEqual(dayStatusPill(rows({ cal: 2200 }), false), { text: "Over today", tone: "bad" });
+  assert.equal(dayStatusPill(rows({ cal: 1900, prot: 160 }), false).tone, "good");
+  assert.match(dayStatusPill(rows({ cal: 1900, prot: 160 }), false).text, /perfect/i);
+  assert.equal(dayStatusPill(rows({ cal: 600 }), false).text, "On track", "early and under is on track, not a warning");
+  // A bulk client is never told "over" for eating, and is chased when under-fuelled.
+  assert.equal(dayStatusPill(rows({ cal: 2200 }), true).tone, "good");
+  assert.equal(dayStatusPill(rows({ cal: 500 }), true).text, "Eat more");
+});
+
+// ONE INSTRUCTION PER CARD (2026-07-28). The band gives the action; the footer must not give
+// the same action back in different words — it gives the reason instead.
+test("distinctHint: same subject twice becomes action + reason, never the order twice", async () => {
+  const { distinctHint, WHY_LINE } = await import("../server/macro-card-attach");
+  const out = distinctHint("62g protein to go — two protein meals closes it.", "Get protein into your next two meals");
+  assert.equal(out, WHY_LINE.protein, "the repeat becomes the WHY");
+  assert.doesNotMatch(out, /\b(?:add|get|make|eat|keep|grill)\b/i, "the footer teaches, it never gives a second order");
+  assert.equal(
+    distinctHint("Fat ran a bit high — keep the rest lean. Grilled, not fried.", "Grill it, don't fry it — that's the whole fix today"),
+    WHY_LINE.fat,
+  );
+  // Different subjects are left alone — that footer is earning its space. A line's subject is
+  // what it OPENS with, so this one is about carbs even though it mentions protein later.
+  const kept = "Carbs are maxed — protein and veg from here.";
+  assert.equal(distinctHint(kept, "Eat more today — add a proper meal"), kept);
+  // Every WHY line must fit the card's footer width — a truncated fact teaches nothing.
+  for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
+});
+
 // CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,
 // Rice, Mixed veggies' — never the model's 'Based on what you mentioned…' preamble).
 test("mealTitleFromReply: summarises the foods from the bullet lines", async () => {

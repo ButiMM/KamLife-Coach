@@ -179,11 +179,83 @@ export function nextMoveLine(rows: Row[], isBulk: boolean): string {
 }
 
 
-/** Blank the footer when it repeats the next-move line — one instruction per card. */
+/**
+ * THE VERDICT PILL — two words that answer the only question the client actually has.
+ *
+ * (2026-07-28, founder: "clarity without confusing them, but giving them what they want.")
+ * The pill used to be "+795 cal": a number nobody asked for, already printed in the text reply,
+ * occupying the loudest corner of the card. Nobody reads a card to find out what one meal cost.
+ * They read it to find out whether they're okay. So the pill says that, in plain words and a
+ * colour, and every number stays on the bars below for whoever wants to check the working.
+ *
+ * It reads the SAME rows the bars are drawn from, so the verdict can never contradict them.
+ * Kept to ~12 characters — the title yields to the pill, so a long verdict eats the meal name.
+ */
+export function dayStatusPill(rows: Row[], isBulk: boolean): { text: string; tone: "good" | "warn" | "bad" } {
+  const r = (label: string) => rows.find(x => x.label === label);
+  const ratio = (x?: Row) => (x && x.target > 0 ? x.current / x.target : 0);
+  const cal = r("Calories"), prot = r("Protein");
+  const calR = ratio(cal), protHit = !!(prot && prot.current >= prot.target);
+
+  if (isBulk) {
+    if (calR < 0.6) return { text: "Eat more", tone: "warn" };
+    if (protHit && calR >= 0.9) return { text: "Perfect day", tone: "good" };
+    return { text: "On track", tone: "good" };
+  }
+  if (calR > 1.05) return { text: "Over today", tone: "bad" };
+  if (protHit && calR >= 0.9) return { text: "Perfect day", tone: "good" };
+  if (protHit) return { text: "Protein in", tone: "good" };
+  if (calR >= 0.85) return { text: "Nearly there", tone: "warn" };
+  return { text: "On track", tone: "good" };
+}
+
+/**
+ * Blank the footer when it repeats the next-move line — ONE instruction per card.
+ *
+ * The old word-overlap count was too lenient: "Get protein into your next two meals" over
+ * "62g protein to go — two protein meals closes it" shared only two long words and both
+ * survived, so the card gave the same order twice in different clothes. That is precisely the
+ * cognitive load to cut. The reliable signal isn't word count, it's SUBJECT: if both lines are
+ * about the same macro, they are the same instruction.
+ *
+ * And when they collide we don't just delete the footer — we give it a different JOB. The band
+ * above is the ACTION; the footer becomes the WHY. Same space on the card, no repetition, and
+ * the client walks away knowing one more thing than they did. That's the difference between a
+ * calculator and a coach.
+ */
+const HINT_SUBJECTS: Array<[string, RegExp]> = [
+  ["protein", /\bprotein\b/i],
+  ["fat", /\bfat\b|\bfried?\b|\bgrill/i],
+  ["carbs", /\bcarb|\bstarch\b/i],
+  ["calories", /\bcalorie|\bkcal\b|\beat more\b|\bfuel\b/i],
+];
+
+// One plain sentence of education per subject. A fact, never a second instruction. Kept short
+// enough to render whole — a footer that ends in "…" teaches nobody anything.
+export const WHY_LINE: Record<string, string> = {
+  protein: "Protein protects your muscle while you lose fat.",
+  fat: "Fat is the densest fuel — oil adds up fastest.",
+  carbs: "Starch isn't the problem. The portion size is.",
+  calories: "Your body reads the week, not one single meal.",
+};
+
+// EARLIEST mention wins, not list order — a line's subject is what it opens with. "Carbs are
+// maxed — protein and veg from here" is about carbs; scanning in list order would call it protein.
+function hintSubject(s: string): string | null {
+  let best: string | null = null, at = Infinity;
+  for (const [name, re] of HINT_SUBJECTS) {
+    const m = re.exec(s || "");
+    if (m && m.index < at) { at = m.index; best = name; }
+  }
+  return best;
+}
+
 export function distinctHint(hint: string, nextMove: string): string {
   const norm = (x: string) => (x || "").toLowerCase().replace(/[^a-z ]/g, "").trim();
   const h = norm(hint), n = norm(nextMove);
   if (!h || !n) return hint;
+  const subject = hintSubject(hint);
+  if (subject && subject === hintSubject(nextMove)) return WHY_LINE[subject] || "";
   const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
   return shared >= 3 ? "" : hint;
 }
@@ -202,10 +274,12 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     const retro = opts.forDate ? isPastDay(opts.forDate) : false;
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
+    const verdict = dayStatusPill(t.rows, t.isBulk);
     const png = renderMacroCard({
       title: (opts.mealName || "Meal").slice(0, 42),
       subtitle: retro ? "Logged to yesterday" : "Meal logged",
-      pill: `+${Math.max(0, Math.round(opts.mealKcal || 0))} cal`,
+      pill: verdict.text,
+      pillTone: verdict.tone,
       rows: t.rows,
       nextMove: nextMoveLine(t.rows, t.isBulk),
       // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
@@ -226,11 +300,12 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
     if (!base) return "";
     const t = await todayRows(user, true); // daily scorecard includes today's water
     if (!t) return "";
-    const kcal = t.rows[0]?.current || 0;
+    const verdict = dayStatusPill(t.rows, t.isBulk);
     const png = renderMacroCard({
       title: user?.name ? `${String(user.name).split(" ")[0]}'s day so far` : "Your day so far",
       subtitle: "Today so far",
-      pill: `${kcal} cal in`,
+      pill: verdict.text,
+      pillTone: verdict.tone,
       rows: t.rows,
       nextMove: nextMoveLine(t.rows, t.isBulk),
       // The next-move band and the footer must never say the same thing twice (2026-07-28 live:

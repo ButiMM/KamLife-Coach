@@ -59,7 +59,8 @@ export interface MacroRow { label: string; current: number; target: number; unit
 export interface MacroCardData {
   title: string;       // big line: the meal ("Pilchards + pap") or "Your day so far"
   subtitle?: string;   // under Coach K — default "Meal logged"; e.g. "Today so far" on demand
-  pill?: string;       // right-side pill, e.g. "+420 cal" or "721 cal so far"; omit to hide
+  pill?: string;       // right-side pill — a VERDICT ("On track"), not a number. Omit to hide.
+  pillTone?: "good" | "warn" | "bad"; // colours the verdict; default orange
   rows: MacroRow[];    // Calories / Protein / Carbs / Fat (each with today's total vs target)
   hint?: string;       // one short line, e.g. "Protein first — you've got this today"
   nextMove?: string;   // THE instruction — big, top of card, no numbers needed to understand it
@@ -182,12 +183,21 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   }
   ctx.fillText(titleTxt, x, y + 44);
   if (pillTxt) {
+    // THE PILL IS A VERDICT, NOT A NUMBER (2026-07-28, founder: "clarity without confusing
+    // them, but giving them what they want"). It used to read "+795 cal" — a figure the client
+    // never asked for, already in the text reply, sitting in the loudest spot on the card. The
+    // only question they actually have is "am I doing okay today", so the pill answers that in
+    // two words and a colour, and the bars underneath still hold every number for whoever wants
+    // it. Nothing was removed from the card; one thing stopped needing to be decoded.
+    const tone = d.pillTone;
+    const ink = tone === "good" ? GREEN : tone === "bad" ? RED : ORANGE;
+    const wash = tone === "good" ? "rgba(34,176,75,0.10)" : tone === "bad" ? "rgba(224,83,58,0.10)" : "rgba(242,104,31,0.10)";
     const pillX = x + innerW - pillW;
     ctx.font = `bold 32px "${FONT}"`;
-    ctx.fillStyle = "rgba(242,104,31,0.10)";
+    ctx.fillStyle = wash;
     roundRect(ctx, pillX, y + 6, pillW, pillH, pillH / 2);
     ctx.fill();
-    ctx.fillStyle = ORANGE;
+    ctx.fillStyle = ink;
     ctx.textAlign = "center";
     ctx.fillText(pillTxt, pillX + pillW / 2, y + 6 + pillH / 2 + 11);
     ctx.textAlign = "left";
