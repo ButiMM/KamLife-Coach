@@ -13,6 +13,7 @@ import { desc, isNotNull } from "drizzle-orm";
 import { db } from "../db";
 import { chatHistory } from "../../shared/schema";
 import { summarise } from "./reply-defects";
+import { guardStatsLine } from "../malformed-guard";
 
 /** Plain-language name for each detector, so the report reads like coaching, not like a log. */
 const LABELS: Record<string, string> = {
@@ -78,5 +79,5 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     ? `\n\n*Worst one — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
     : "";
 
-  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}${wider}`;
+  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}${wider}`;
 }

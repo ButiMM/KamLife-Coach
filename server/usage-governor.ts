@@ -59,12 +59,16 @@ export async function usedToday(userId: string, op: CappedOp): Promise<number> {
  * when USAGE_CAPS=off. Logs each cap-hit so it's visible in the logs and the cost view.
  */
 export async function allowExpensiveOp(userId: string | null | undefined, op: CappedOp): Promise<boolean> {
-  // Business-level ceiling first: past the monthly rand cap the expensive ops degrade for
-  // everyone, while all deterministic coaching keeps working. See monthlyCeilingHit below.
-  if (process.env.USAGE_CAPS !== "off" && await monthlyCeilingHit()) {
-    console.warn(`[AI_CEILING] blocked ${op} — monthly rand ceiling reached`);
-    return false;
-  }
+  // THE GLOBAL CEILING ALERTS, IT NO LONGER BLOCKS (2026-07-28). Four independent reviewers read
+  // this design and all four called it backwards, in the same words: heavy users hit a global
+  // ceiling FIRST, and heavy users are the engaged ones you most need to retain. "A reverse-
+  // loyalty tax." "It punishes your best clients." "Degrading service to heavy users is a churn
+  // accelerator disguised as a cost control."
+  //
+  // They were right. Margin is protected by the PER-CLIENT daily caps below, which are
+  // predictable and fair — everyone gets the same allowance. The monthly rand figure is a
+  // tripwire for the founder, not a switch that quietly downgrades the product mid-month.
+  if (process.env.USAGE_CAPS !== "off") { void monthlyCeilingHit(); }
   if (!userId || process.env.USAGE_CAPS === "off") return true;
   try {
     const cap = capFor(op);

@@ -45,7 +45,7 @@ import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
 import { fadeState, fadingClients } from "../server/engagement";
-import { guardMalformed, safeFallback } from "../server/malformed-guard";
+import { guardMalformed, safeFallback, recordGuardResult, guardStats, guardStatsLine, GUARD_ESCALATION_THRESHOLD } from "../server/malformed-guard";
 import { calorieCeiling } from "../server/adaptive-targets";
 import { unloggedFoodNotice } from "../server/unlogged-notice";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
@@ -6195,6 +6195,27 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(out, /Kam/);
     assert.match(out, /say it again/i);
     assert.equal(guardMalformed(out).pass, true, "the fallback must itself pass the guard");
+  });
+
+  test("guard: counts itself, and escalates at the 5% line", () => {
+    // "A guard that triggers silently is rot; a guard that reports is instrumented debt."
+    // The counter is process-wide, so measure the delta rather than assuming a clean start.
+    const before = guardStats();
+
+    for (let i = 0; i < 400; i++) recordGuardResult(true);
+    recordGuardResult(false);
+    let s = guardStats();
+    assert.equal(s.checked, before.checked + 401, "every decision is counted");
+    assert.equal(s.blocked, before.blocked + 1, "blocks are counted separately");
+    assert.ok(s.rate < GUARD_ESCALATION_THRESHOLD, "well under the line");
+    assert.equal(s.escalate, false, "under the line the migration can wait");
+    assert.match(guardStatsLine(), /Under the 5% escalation line/);
+
+    for (let i = 0; i < 200; i++) recordGuardResult(false); // pushes the rate well past 5%
+    s = guardStats();
+    assert.ok(s.rate > GUARD_ESCALATION_THRESHOLD, "past the line");
+    assert.equal(s.escalate, true, "past the line the migration becomes priority #1");
+    assert.match(guardStatsLine(), /priority #1/);
   });
 }
 

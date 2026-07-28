@@ -78,3 +78,39 @@ export function safeFallback(firstName = ""): string {
   const fn = firstName ? `${firstName}, ` : "";
   return `${fn}that came out garbled on my side — my fault, not yours.\n\nSay it again in one line and I'll answer it properly.`;
 }
+
+// ── OBSERVABILITY (2026-07-28, from review: "If the guard triggers silently or logs generically,
+// it is rot. If every trigger fires a specific alert with the input/output pair, it is
+// instrumented debt.") A guard nobody counts is a guard nobody removes.
+//
+// The threshold is the reviewer's, and it is a commitment: if this fires on more than 5% of
+// model replies in the first week of the cohort, finishing the engine migration becomes
+// priority #1 over any new feature.
+export const GUARD_ESCALATION_THRESHOLD = 0.05;
+
+let _checked = 0;
+let _blocked = 0;
+
+/** Record one guard decision. Called by the reply path; cheap and in-memory. */
+export function recordGuardResult(passed: boolean): void {
+  _checked++;
+  if (!passed) _blocked++;
+}
+
+export interface GuardStats { checked: number; blocked: number; rate: number; escalate: boolean }
+
+/** Current guard health. `escalate` true = stop adding features, finish the migration. */
+export function guardStats(): GuardStats {
+  const rate = _checked > 0 ? _blocked / _checked : 0;
+  return { checked: _checked, blocked: _blocked, rate, escalate: _checked >= 100 && rate > GUARD_ESCALATION_THRESHOLD };
+}
+
+/** One line for the founder-facing report. */
+export function guardStatsLine(): string {
+  const s = guardStats();
+  if (s.checked === 0) return "🧱 *Old-engine guard:* nothing checked yet.";
+  const pct = (s.rate * 100).toFixed(1);
+  return s.escalate
+    ? `🧱 *Old-engine guard:* blocked *${s.blocked}* of ${s.checked} replies (*${pct}%*).\n\n🚨 Past the ${GUARD_ESCALATION_THRESHOLD * 100}% line — finishing the engine migration is now priority #1 over new features.`
+    : `🧱 *Old-engine guard:* blocked *${s.blocked}* of ${s.checked} replies (${pct}%). Under the ${GUARD_ESCALATION_THRESHOLD * 100}% escalation line.`;
+}

@@ -6,7 +6,7 @@ import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numb
 import { stepBurnKcal } from "../targets";
 import { humanizeReply } from "../reply-hygiene";
 import { displayFoodName } from "../food-naming";
-import { guardMalformed, safeFallback } from "../malformed-guard";
+import { guardMalformed, safeFallback, recordGuardResult } from "../malformed-guard";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
@@ -546,6 +546,7 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
   // A full engine migration is weeks; this is the cheap protection that stops the worst of it
   // reaching a client today. Catches are logged so the real fix has evidence.
   const integrity = guardMalformed(guarded.reply);
+  recordGuardResult(integrity.pass);
   if (!integrity.pass) {
     console.warn(`[MALFORMED_GUARD] blocked reply — ${integrity.reasons.join(", ")}: ${guarded.reply.slice(0, 120)}`);
     return safeFallback();
