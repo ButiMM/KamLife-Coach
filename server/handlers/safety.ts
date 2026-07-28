@@ -17,6 +17,7 @@ import { eq } from "drizzle-orm";
 import { readLifeContext, lifeContextReply } from "../life-context";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
+import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
 import { logChat } from "./chat-log";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
@@ -58,17 +59,8 @@ async function sendAlertWithRetry(opts: {
   }
 }
 
-// ── Crisis detection ──────────────────────────────────────────
-const CRISIS_PHRASES = [
-  "want to die", "kill myself", "end it all", "cannot go on", "can't go on",
-  "suicidal", "self harm", "self-harm", "cutting myself", "hurting myself",
-  "not worth living", "end my life", "no reason to live", "give up on life",
-  "want to hurt myself", "harm myself", "take my life",
-  "no point in living", "better off dead", "hang myself",
-  "everyone would be better off without me",
-  "don't want to be here", "do not want to be here", "dont want to be here",
-  "wish i was dead", "wish i were dead", "nothing to live for", "tired of living",
-];
+// Crisis detection + reply live in server/crisis-reply.ts — pure, so a test can read the phrase
+// list and the reply together. The liability is the gap between them, not either one alone.
 
 // ── Terminal command guard ────────────────────────────────────
 const TERMINAL_PATTERNS = [
@@ -117,7 +109,7 @@ export async function runSafetyGuards(
   // getting a protein target. Every reply is comfort + fewer demands, never treatment — see
   // server/life-context.ts for the compliance posture.
   const life = readLifeContext(message);
-  if (life && !CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
+  if (life && !isCrisisMessage(m)) {
     const lu = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const reply = lifeContextReply(life, (lu[0]?.name || "").split(" ")[0]);
     // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
@@ -127,11 +119,11 @@ export async function runSafetyGuards(
   }
 
   // ---- CRISIS ----
-  if (CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
+  if (isCrisisMessage(m)) {
     const crisisUser = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
     const crisisName = crisisUser[0]?.name || "friend";
-    const crisisReply = `${crisisName}, I hear you and I am concerned. Please contact SADAG right now — 0800 567 567, free, 24 hours, confidential. Lifeline SA: 0861 322 322. You matter far more than any fitness goal. Reach out to them — they are trained for exactly this moment.`;
-    try { await logChat(crisisUser[0]?.id || "unknown", message, crisisReply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
+    const reply = crisisReply(crisisName);
+    try { await logChat(crisisUser[0]?.id || "unknown", message, reply, "CRISIS"); } catch (e) { console.warn("[non-fatal]", e); }
     const coachAlertPhone = process.env.COACH_ALERT_PHONE;
     if (!coachAlertPhone) {
       console.error(`[CRISIS] ⚠️  COACH_ALERT_PHONE not configured — coach NOT notified! Client: ${crisisName} (${phone}). Message: "${message.slice(0, 150)}"`);
@@ -141,13 +133,13 @@ export async function runSafetyGuards(
         label: "CRISIS",
         from: fromNum!,
         to: `whatsapp:${coachAlertPhone}`,
-        body: `⚠️ CRISIS ALERT\nClient: ${crisisName} (${phone})\nMessage: "${message.slice(0, 150)}"\n\nThey have been given SADAG 0800 567 567. Please check on this client.`,
+        body: crisisAlertBody(crisisName, phone, message),
         phone,
         name: crisisName,
         originalMessage: message,
       });
     }
-    return crisisReply;
+    return reply;
   }
 
   // ---- ACUTE MEDICAL EMERGENCY ----

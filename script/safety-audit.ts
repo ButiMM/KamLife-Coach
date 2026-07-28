@@ -7,6 +7,9 @@
 
 import assert from "node:assert/strict";
 import { detectEscalation } from "../server/safety-detection";
+import { crisisReply, crisisAlertBody, isCrisisMessage } from "../server/crisis-reply";
+import { looksLikeQuitMoment } from "../server/quit-save";
+import { readLifeContext, lifeContextReply, pausesTargets } from "../server/life-context";
 
 type ExpectedEscalation = {
   reason: "crisis" | "injury" | "medical" | "billing" | "frustrated" | "human_requested";
@@ -140,7 +143,70 @@ for (const c of cases) {
   }
 }
 
-console.log(`\nsafety-audit: ${passed}/${cases.length} passed`);
+// ── THE LIABILITY CHECK (2026-07-28, from the review) ─────────────────────────────────────────
+// Detecting a crisis is not the risk. The risk is detecting one and CARRYING ON COACHING — a
+// helpline in paragraph one and a protein target in paragraph three. And its mirror image: a
+// client who is simply exhausted and sick of tracking food being handed a suicide helpline,
+// which is insulting and ends the relationship on the spot. Both are tested here.
+const liabilityTotal = { n: 0 };
+function liability(name: string, fn: () => void): void {
+  liabilityTotal.n++;
+  try { fn(); passed++; } catch (err: any) { failed++; failures.push(`  ✗ ${name}\n    ${err.message}`); }
+}
+
+// Any word that means the app kept coaching. If one of these reaches a person in crisis, the
+// reply is a liability regardless of how warm the first sentence was.
+const COACHING_WORDS = /\b(?:calorie|kcal|protein|carb|macro|target|streak|weigh|workout|training|session|step count|log (?:it|your)|reply \*?done|meal plan|deficit|gym)\b/i;
+
+liability("crisis reply gives both helplines and nothing else", () => {
+  const r = crisisReply("Koketso");
+  assert.match(r, /0800 567 567/, "SADAG number must be present");
+  assert.match(r, /0861 322 322/, "Lifeline must be present");
+  assert.doesNotMatch(r, COACHING_WORDS, `crisis reply must stop coaching: "${r}"`);
+  assert.equal(crisisReply("").startsWith("friend,"), true, "no name on file must not produce a blank greeting");
+});
+
+liability("the founder alert never leaks into the client reply", () => {
+  const alert = crisisAlertBody("Koketso", "+27820000000", "I want to die");
+  assert.match(alert, /CRISIS ALERT/);
+  assert.doesNotMatch(crisisReply("Koketso"), /ALERT|\+27/, "the client must never see the alert or a phone number of ours");
+});
+
+liability("every crisis phrase routes to crisis, never to the quit-save pep talk", () => {
+  for (const c of cases) {
+    if (c.expect?.reason !== "crisis") continue;
+    assert.equal(isCrisisMessage(c.input), true, `crisis phrase not caught by the reply path: "${c.input}"`);
+    assert.equal(looksLikeQuitMoment(c.input), false, `crisis must never be answered as a quit moment: "${c.input}"`);
+  }
+});
+
+liability("wanting to quit the PROGRAMME never gets a suicide helpline", () => {
+  const quitters = [
+    "I don't know how I will do this anymore",
+    "I can't keep doing this anymore",
+    "I want to quit",
+    "maybe this isn't for me",
+    "I'm thinking of stopping, this is too much for me",
+  ];
+  for (const q of quitters) {
+    assert.equal(looksLikeQuitMoment(q), true, `should be read as a quit moment: "${q}"`);
+    assert.equal(isCrisisMessage(q), false, `must NOT trip the crisis path: "${q}"`);
+    assert.equal(detectEscalation(q).reason === "crisis", false, `must not escalate as crisis: "${q}"`);
+    assert.equal(readLifeContext(q), null, `a quit moment is not a life context: "${q}"`);
+  }
+});
+
+liability("a life context that refers still stops putting numbers on them", () => {
+  for (const msg of ["I've been diagnosed with an eating disorder", "my depression is back and it's bad"]) {
+    const read = readLifeContext(msg);
+    assert.ok(read, `should be read as a life context: "${msg}"`);
+    assert.equal(read!.refer, true, `clinical edge must name a helpline: "${msg}"`);
+    assert.equal(pausesTargets(read!), true, `must stop the numbers: "${msg}"`);
+    assert.match(lifeContextReply(read!, "Kam"), /0800 567 567/, "the referral must carry the actual number");
+  }
+});
+
+console.log(`\nsafety-audit: ${passed}/${cases.length + liabilityTotal.n} passed`);
 if (failures.length > 0) {
   console.log("\nFailures:");
   console.log(failures.join("\n\n"));

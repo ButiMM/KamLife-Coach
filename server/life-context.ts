@@ -54,7 +54,10 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
   // ── Clinical edge — ordered first, most serious wins ───────────────────────────────
   {
     context: "disordered_eating", refer: true, demand: "pause",
-    re: /\b(?:make\s+myself\s+(?:sick|throw\s+up|vomit)|purge|purging|binge(?:ing|d)?\s+(?:and|then)\s+(?:purg|starv)|starv(?:e|ing)\s+myself|laxatives?\s+to\s+lose|not\s+eaten\s+(?:in|for)\s+(?:\d+\s+|a\s+few\s+)?days?)\b/i,
+    // NAMING IT COUNTS (2026-07-28): the behaviour patterns below were the only trigger, so
+    // "I've been diagnosed with an eating disorder" fell through to own_illness and got "rest
+    // up, you'll be back". Someone who says the words out loud must reach the clinical branch.
+    re: /\b(?:eating\s+disorder|anorexi(?:a|c)|bulimi(?:a|c)|make\s+myself\s+(?:sick|throw\s+up|vomit)|purge|purging|binge(?:ing|d)?\s+(?:and|then)\s+(?:purg|starv)|starv(?:e|ing)\s+myself|laxatives?\s+to\s+lose|not\s+eaten\s+(?:in|for)\s+(?:\d+\s+|a\s+few\s+)?days?)\b/i,
   },
   {
     context: "alcohol_coping", refer: true, demand: "pause",
@@ -62,7 +65,7 @@ const P: Array<{ re: RegExp; context: LifeContext; refer: boolean; demand: Conte
   },
   {
     context: "crisis_adjacent", refer: true, demand: "pause",
-    re: /\b(?:i(?:'?m| am)|been|feeling)\s+(?:really\s+|so\s+|honestly\s+|very\s+|quite\s+|just\s+)?(?:depressed|hopeless|worthless|numb|empty)\b|\bcan'?t\s+(?:get\s+out\s+of\s+bed|face\s+the\s+day|cope|go\s+on|do\s+this\s+any\s?more)\b|\bno\s+(?:point|reason)\s+(?:in\s+)?(?:any\s?more|to\s+anything)\b|\bnothing\s+matters\b|\bbreaking\s+down\b|\bfalling\s+apart\b/i,
+    re: /\b(?:i(?:'?m| am)|been|feeling)\s+(?:really\s+|so\s+|honestly\s+|very\s+|quite\s+|just\s+)?(?:depressed|hopeless|worthless|numb|empty)\b|\b(?:my\s+)?depression\s+(?:is\s+back|came\s+back|has\s+come\s+back|got\s+worse|is\s+bad)\b|\bcan'?t\s+(?:get\s+out\s+of\s+bed|face\s+the\s+day|cope|go\s+on|do\s+this\s+any\s?more)\b|\bno\s+(?:point|reason)\s+(?:in\s+)?(?:any\s?more|to\s+anything)\b|\bnothing\s+matters\b|\bbreaking\s+down\b|\bfalling\s+apart\b/i,
   },
 
   // ── Hard life — the common case ───────────────────────────────────────────────────
