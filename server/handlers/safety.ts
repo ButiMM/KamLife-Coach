@@ -19,6 +19,7 @@ import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
 import { isCrisisMessage, crisisReply, crisisAlertBody } from "../crisis-reply";
 import { asksForExport, formatExport } from "../data-export";
+import { sastDayKey } from "../sast";
 import { logChat } from "./chat-log";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
@@ -218,7 +219,7 @@ export async function runSafetyGuards(
     ]);
     const byDay = new Map<string, { day: string; kcal: number; protein: number; meals: number }>();
     for (const r of ml) {
-      const day = new Date(new Date(r.at).getTime() + 2 * 3_600_000).toISOString().slice(0, 10); // SAST
+      const day = sastDayKey(new Date(r.at));
       const e = byDay.get(day) || { day, kcal: 0, protein: 0, meals: 0 };
       e.kcal += r.kcal || 0; e.protein += r.protein || 0; e.meals += 1;
       byDay.set(day, e);

@@ -12,7 +12,7 @@
     "test:safety": "tsx script/safety-audit.ts",
     "test:unit": "tsx script/unit-tests.ts",
     "test:scanner": "tsx script/food-scanner-tests.ts",
-    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts && tsx script/routing-audit.ts && tsx script/gap-tests.ts && tsx script/onboarding-e2e.ts && tsx script/video-path-verify.ts && tsx script/phrasing-battery.ts && tsx script/check-file-sizes.ts && tsx script/check-pricing.ts && tsx script/check-schema-safety.ts",
+    "test": "tsx script/unit-tests.ts && tsx script/integration-tests.ts && tsx script/food-scanner-tests.ts && tsx script/safety-audit.ts && tsx script/golden-regression.ts && tsx script/routing-audit.ts && tsx script/gap-tests.ts && tsx script/onboarding-e2e.ts && tsx script/video-path-verify.ts && tsx script/phrasing-battery.ts && tsx script/check-file-sizes.ts && tsx script/check-pricing.ts && tsx script/check-schema-safety.ts && tsx script/check-sast.ts",
     "check:filesize": "tsx script/check-file-sizes.ts",
     "check:pricing": "tsx script/check-pricing.ts",
     "db:push": "drizzle-kit push",
@@ -26,7 +26,8 @@
     "audit:engagement": "tsx script/engagement-report.ts",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "check:schema": "tsx script/check-schema-safety.ts"
+    "check:schema": "tsx script/check-schema-safety.ts",
+    "check:sast": "tsx script/check-sast.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

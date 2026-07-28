@@ -12,19 +12,8 @@
 import { db } from "./db";
 import { mealLogs } from "../shared/schema";
 import { eq, and, gte, lt, sql } from "drizzle-orm";
-import { sastDayStart } from "./utils";
+import { isPastSastDay } from "./sast";
 
-// SAST midnight of the day containing `d` (UTC+2). Lets the card sum a SPECIFIC day, so a
-// retroactive log ("4 slices of pizza to yesterday") shows YESTERDAY'S totals, not today's.
-function sastDayStartOf(d: Date): Date {
-  const sast = new Date(d.getTime() + 2 * 3_600_000);
-  sast.setUTCHours(0, 0, 0, 0);
-  return new Date(sast.getTime() - 2 * 3_600_000);
-}
-/** True when `d` falls on an earlier SAST day than now — i.e. a retro (past-day) log. */
-function isPastDay(d: Date): boolean {
-  return sastDayStartOf(d).getTime() < sastDayStart().getTime();
-}
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard, renderWelcomeCard } from "./macro-card";
 import { achievementFor, renderAchievementCard, type AchievementCardData } from "./achievement-card";
@@ -337,7 +326,7 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     if ((opts.mealKcal || 0) < 50) return "";
     const base = cardBaseUrl();
     if (!base) return "";
-    const retro = opts.forDate ? isPastDay(opts.forDate) : false;
+    const retro = opts.forDate ? isPastSastDay(opts.forDate) : false;
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
     const verdict = dayStatusPill(t.rows, t.isBulk);

@@ -4870,6 +4870,54 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// SAST — ONE DEFINITION OF A DAY (ledger D6, 2026-07-28). The offset lived in 98 places and the
+// hand-rolled versions did not agree with each other. These pin the one that survives.
+test("sast: one day key format, zero-padded, everywhere", async () => {
+  const { sastDayKey, sastDayStart, sastHour } = await import("../server/sast");
+  // 08:30 UTC on 8 July = 10:30 SAST, same day.
+  assert.equal(sastDayKey(Date.UTC(2026, 6, 8, 8, 30)), "2026-07-08");
+  // THE BUG THIS EXISTS TO KILL: food-scanner built "2026-7-8" by hand while utils built
+  // "2026-07-08". Both were "the SAST day key" and they can never be equal.
+  assert.doesNotMatch(sastDayKey(Date.UTC(2026, 6, 8)), /-\d-|-\d$/, "single-digit month or day must be padded");
+
+  // 23:30 UTC on the 7th is already 01:30 SAST on the 8th — the case that misfiles a late meal.
+  assert.equal(sastDayKey(Date.UTC(2026, 6, 7, 23, 30)), "2026-07-08");
+  assert.equal(sastHour(Date.UTC(2026, 6, 7, 23, 30)), 1);
+  // 21:59 UTC is 23:59 SAST — still the 7th.
+  assert.equal(sastDayKey(Date.UTC(2026, 6, 7, 21, 59)), "2026-07-07");
+  // SAST midnight is 22:00 UTC the previous day. Not UTC midnight.
+  assert.equal(sastDayStart(Date.UTC(2026, 6, 8, 12)).toISOString(), "2026-07-07T22:00:00.000Z");
+});
+
+test("sast: day arithmetic survives month and year ends", async () => {
+  const { sastDayKeyBefore, sastDaysBetween, isPastSastDay } = await import("../server/sast");
+  const mar1 = Date.UTC(2026, 2, 1, 10);
+  assert.equal(sastDayKeyBefore(1, mar1), "2026-02-28");
+  assert.equal(sastDayKeyBefore(2, mar1), "2026-02-27");
+  const jan1 = Date.UTC(2026, 0, 1, 10);
+  assert.equal(sastDayKeyBefore(1, jan1), "2025-12-31", "a streak must not break on New Year");
+  // 2028 is a leap year — 29 February has to exist.
+  assert.equal(sastDayKeyBefore(1, Date.UTC(2028, 2, 1, 10)), "2028-02-29");
+
+  assert.equal(sastDaysBetween(Date.UTC(2026, 6, 1, 12), Date.UTC(2026, 6, 8, 12)), 7);
+  assert.equal(sastDaysBetween(Date.UTC(2026, 6, 8, 6), Date.UTC(2026, 6, 8, 20)), 0, "same day is zero");
+  // A 01:00 SAST log and a 23:00 SAST log on the same SAST day are the same day.
+  assert.equal(sastDaysBetween(Date.UTC(2026, 6, 7, 23), Date.UTC(2026, 6, 8, 21)), 0);
+
+  assert.equal(isPastSastDay(Date.UTC(2026, 6, 7, 12), Date.UTC(2026, 6, 8, 12)), true);
+  // Both of these are 8 July in SAST (01:00 and 23:00 SAST), so neither is retro.
+  assert.equal(isPastSastDay(Date.UTC(2026, 6, 7, 23), Date.UTC(2026, 6, 8, 21)), false, "same SAST day is not retro");
+  // 23:00 UTC IS already the next SAST day — the small-hours case that misfiles a late meal.
+  assert.equal(isPastSastDay(Date.UTC(2026, 6, 8, 12), Date.UTC(2026, 6, 8, 23)), true);
+});
+
+test("sast: utils re-exports resolve to the canonical module", async () => {
+  const { sastToday, sastDayStart: fromUtils } = await import("../server/utils");
+  const { sastDayKey, sastDayStart } = await import("../server/sast");
+  assert.equal(sastToday(), sastDayKey(), "utils.sastToday must BE the canonical key");
+  assert.equal(fromUtils().getTime(), sastDayStart().getTime());
+});
+
 // THE SHARE MOMENT (2026-07-28, founder, from two live screenshots). Three separate failures on
 // one screen: the card carried an infrastructure hostname, the milestone was congratulated twice,
 // and "Today's progress" reached the model — which then produced its own numbers about his day.

@@ -1,4 +1,5 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
+import { sastDayKey, sastDayKeyBefore } from "../sast";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote, remainingInMeals, weeklyNetWording, dinnerIsLogged, dinnerCloseLine } from "../education";
@@ -47,17 +48,13 @@ const _lowCalWarnedToday = new Map<string, string>();
 // Track streak celebration shown today — prevents it firing on every meal log
 const _streakShownToday = new Map<string, string>();
 
-function _todaySastKey(): string {
-  const d = new Date(Date.now() + 2 * 3_600_000);
-  return `${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`;
-}
 
 export function hasShownStreakToday(userId: string): boolean {
-  return _streakShownToday.get(userId) === _todaySastKey();
+  return _streakShownToday.get(userId) === sastDayKey();
 }
 
 export function markStreakShownToday(userId: string): void {
-  _streakShownToday.set(userId, _todaySastKey());
+  _streakShownToday.set(userId, sastDayKey());
 }
 
 export async function computeFoodLogStreak(userId: string): Promise<number> {
@@ -70,18 +67,12 @@ export async function computeFoodLogStreak(userId: string): Promise<number> {
     if (logs.length === 0) return 0;
     const days = new Set<string>();
     for (const l of logs) {
-      if (!l.createdAt) continue;
-      const d = new Date(new Date(l.createdAt).getTime() + 2 * 3_600_000);
-      days.add(`${d.getUTCFullYear()}-${d.getUTCMonth() + 1}-${d.getUTCDate()}`);
+      if (l.createdAt) days.add(sastDayKey(new Date(l.createdAt)));
     }
+    // Walk backwards a day at a time from today. sastDayKeyBefore steps through real day starts,
+    // so a streak spanning the end of a month or a year cannot break on the boundary.
     let streak = 0;
-    const checkDate = new Date(Date.now() + 2 * 3_600_000);
-    while (true) {
-      const key = `${checkDate.getUTCFullYear()}-${checkDate.getUTCMonth() + 1}-${checkDate.getUTCDate()}`;
-      if (!days.has(key)) break;
-      streak++;
-      checkDate.setUTCDate(checkDate.getUTCDate() - 1);
-    }
+    while (days.has(sastDayKeyBefore(streak))) streak++;
     return streak;
   } catch { return 0; }
 }

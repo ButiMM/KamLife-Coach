@@ -24,21 +24,12 @@ export function buildContentVariables(vars?: Record<string, string | number | nu
   return JSON.stringify(Object.fromEntries(entries.map(([k, v]) => [k, String(v)])));
 }
 
-export function sastToday(): string {
-  const sast = new Date(Date.now() + 2 * 3_600_000);
-  return sast.toISOString().slice(0, 10);
-}
-
-// SAST = UTC+2, no DST. Returns the UTC Date representing SAST midnight of the given date
-// (or today if omitted). Use this everywhere instead of new Date(); setHours(0,0,0,0) which
-// resolves to UTC midnight = 2am SAST, causing meals logged at midnight–2am to be misattributed.
-export function sastDayStart(date?: Date): Date {
-  const SAST_OFFSET = 2 * 3_600_000;
-  const base = date ? date.getTime() : Date.now();
-  const inSAST = new Date(base + SAST_OFFSET);
-  const sastDateStr = inSAST.toISOString().slice(0, 10); // "YYYY-MM-DD" in SAST
-  return new Date(`${sastDateStr}T00:00:00+02:00`); // back to real UTC
-}
+// Day boundaries live in server/sast.ts (ledger D6) — ONE definition of a SAST day for the whole
+// codebase. These two stay as re-exports so the existing call sites keep working unchanged while
+// they migrate; new code should import from ./sast directly.
+import { sastDayKey, sastDayStart } from "./sast";
+export { sastDayStart };
+export const sastToday = sastDayKey;
 
 // Deterministic meal slot from the SAST hour — used to label a food log when the client
 // doesn't say which meal it is. Total over all 24h (no gaps): the 15:00–17:00 window
