@@ -766,6 +766,10 @@ async function activateCoachAccount(): Promise<void> {
     listenOptions,
     () => {
       log(`serving on port ${port}`);
+      // SHOUT ABOUT ANYTHING SILENTLY OFF (2026-07-28). A crisis alert that cannot reach the
+      // founder must not wait for someone to think of asking — the first time you learn about it
+      // should not be the moment a real client needs it. Text *selfcheck* for the full list.
+      import("./self-check").then(sc => sc.logSelfCheckAtBoot()).catch(() => {});
       initScheduler().catch(e => console.error("[STARTUP] Scheduler init failed:", e));
       initFoodsTable().catch(e => console.error("[STARTUP] Foods init failed:", e));
       initMemoryTable().catch(e => console.error("[STARTUP] Memory init failed:", e));

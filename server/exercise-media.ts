@@ -34,6 +34,10 @@ const CUSTOM_CDN = BASE && !BASE.includes("placeholder") ? BASE : "";
 // images working whether or not MEDIA_BASE_URL is set.
 const UPLOADED_GIF_SLUGS = new Set<string>([]);
 
+/** How many slugs are actually wired. Zero means every CDN upload is doing nothing — the
+ *  pending human task in CLAUDE.md. Surfaced by the self-check so it can't stay forgotten. */
+export function uploadedGifCount(): number { return UPLOADED_GIF_SLUGS.size; }
+
 // ── Free-exercise-db fallback images (public domain, no upload needed) ────────
 // Source: github.com/yuhonas/free-exercise-db — CC0 / public domain
 // If a URL 404s the image silently won't send — no crash, no error.

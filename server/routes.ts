@@ -210,11 +210,12 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
     }
 
-    // Founder reports: engagement, surface (feature usage), audit (reply defects), outcomes (results).
+    // Founder reports: engagement, surface, audit (defects), outcomes (results), selfcheck (what's off).
     if (/^(?:engagement|retention|who.?s quiet|drop.?off)$/i.test(m.trim())) return await (await import("./audit/engagement-command")).engagementCommand();
     if (/^(?:surface|features?|what.?s used)$/i.test(m.trim())) return await (await import("./audit/surface-command")).surfaceCommand();
     if (/^(?:reply\s+)?audit(?:\s+\d{2,5})?$/i.test(m.trim())) return await (await import("./audit/reply-audit-command")).replyAuditCommand(m);
     if (/^(?:outcomes?|results?|does it work)(?:\s+\d{1,2})?$/i.test(m.trim())) return await (await import("./audit/outcomes-command")).outcomesCommand(m);
+    if (/^(?:self.?check|what.?s (?:broken|off)|health)$/i.test(m.trim())) { const sc = await import("./self-check"); return sc.formatSelfCheck(sc.runSelfCheck()); }
 
     const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
     if (rc) {
@@ -754,10 +755,9 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   }
 
   // ---- FUTURE-INTENT WORKOUT GUARD — defer like a coach, don't dump the session ----
-  // "I'll do today's workout tomorrow", "gonna train later", "going to hit the gym tonight"
-  // are PLANS, not requests to see the session now. The Normalizer strips the tense
-  // ("tomorrow" → bare "today's workout"), so without this the sentence matches the view
-  // trigger in early-commands and dumps the full workout — ignoring what the user said.
+  // "I'll do today's workout tomorrow" is a PLAN, not a request to see the session now. The
+  // Normalizer strips the tense ("tomorrow" → bare "today's workout"), so without this the
+  // sentence matches the view trigger in early-commands and dumps the full workout.
   // Test the ORIGINAL pre-normalization message, and require a first-person future verb +
   // an explicit later-time word, so "tomorrow's session" / "next session" (legit future-view
   // commands) and "about to do my workout" (imminent) still reach the real handler. Stricter

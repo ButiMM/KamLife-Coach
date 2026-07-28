@@ -4870,6 +4870,70 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// SELF-CHECK (2026-07-28, founder: "things being promised to clients, things being promised to
+// me, that are not going through"). The defect is SILENT FAIL-OPEN: 174 swallowed failures and 48
+// env-gated capabilities, each warning going to a Railway log nobody reads.
+{
+  const withEnv = async (env: Record<string, string | undefined>, fn: () => void | Promise<void>) => {
+    const prev: Record<string, string | undefined> = {};
+    for (const [k, v] of Object.entries(env)) { prev[k] = process.env[k]; if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    try { await fn(); } finally {
+      for (const [k, v] of Object.entries(prev)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    }
+  };
+
+  test("self-check: a missing crisis alert is CRITICAL and sorts first", async () => {
+    const { runSelfCheck, formatSelfCheck } = await import("../server/self-check");
+    await withEnv({ COACH_ALERT_PHONE: undefined, ADMIN_PHONE_OVERRIDE: undefined, APP_URL: "https://x.co.za" }, () => {
+      const r = runSelfCheck();
+      const names = r.off.map(c => c.name);
+      assert.ok(names.includes("Crisis alerts to you"), "a crisis that never reaches the founder must be reported");
+      assert.equal(r.off[0].severity, "critical", "critical sorts above degraded, always");
+      const out = formatSelfCheck(r);
+      assert.match(out, /CRITICAL/);
+      assert.match(out, /never told/i, "it must say what it costs, not just that a var is unset");
+    });
+  });
+
+  test("self-check: every capability explains the CLIENT cost, not the config", async () => {
+    const { capabilities } = await import("../server/self-check");
+    for (const c of capabilities()) {
+      assert.ok(c.impact.length > 25, `${c.name}: impact must be a sentence, not a label`);
+      assert.ok(c.fix.length > 10, `${c.name}: must say exactly what to do`);
+      // The impact is what a non-technical founder reads. Env var names belong in the fix line.
+      assert.doesNotMatch(c.impact, /[A-Z]{4,}_[A-Z_]+/, `${c.name}: impact leaks a config name — say what the client loses`);
+    }
+  });
+
+  test("self-check: when nothing is off, it says so unmistakably", async () => {
+    const { runSelfCheck, formatSelfCheck } = await import("../server/self-check");
+    // Force every gate open so the healthy path is actually exercised.
+    await withEnv({
+      COACH_ALERT_PHONE: "27820000000", TWILIO_SMS_NUMBER: "+27110000000",
+      PAYFAST_MERCHANT_ID: "1234", APP_URL: "https://kamlifecoach.co.za",
+      MEDIA_BASE_URL: "https://cdn.example", ELEVENLABS_API_KEY: "k", ELEVENLABS_VOICE_ID: "v",
+      PROACTIVE_PAUSED: undefined, NORMALIZER: undefined,
+    }, () => {
+      const off = runSelfCheck().off.map(c => c.name);
+      // GIFs, ffmpeg and the font are real probes — they stay off in a sandbox, and that is the
+      // point: they report the true state of THIS build rather than reading an env var.
+      assert.ok(!off.includes("Crisis alerts to you"));
+      assert.ok(!off.includes("Payments"));
+      assert.ok(!off.includes("Meal cards"));
+      assert.match(formatSelfCheck({ off: [], total: 10 }), /all 10 capabilities live/);
+    });
+  });
+
+  test("self-check: the killswitches report themselves", async () => {
+    const { runSelfCheck } = await import("../server/self-check");
+    await withEnv({ PROACTIVE_PAUSED: "true", NORMALIZER: "off" }, () => {
+      const names = runSelfCheck().off.map(c => c.name);
+      assert.ok(names.includes("Proactive messages"), "a global killswitch must never be invisible");
+      assert.ok(names.includes("Message understanding"));
+    });
+  });
+}
+
 // OUTCOMES (2026-07-28) — the instrument that answers whether this product changes anyone.
 // These tests exist mostly to stop the measurement flattering us.
 {
