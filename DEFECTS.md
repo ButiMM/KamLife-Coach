@@ -42,6 +42,19 @@ rule this file exists to enforce._
   every reader below gets the cheap image. Fail-open.
 - ✅ **The voice guard contradicted its own copy** — it passed 16MB (about two hours) while
   telling clients to keep it under 90 seconds. Both now say three minutes.
+- ✅ **Naming a condition out loud missed the clinical branch.** "I've been diagnosed with an
+  eating disorder" matched *been diagnosed* and landed on own_illness — answered with "rest up,
+  you'll be back". Found by the new crisis liability test, which also pins that a crisis reply
+  contains no coaching vocabulary and that a quit moment never receives a helpline.
+- ✅ **The scheduler recorded every job's duration and nothing read it.** Overdue and slow are
+  both reported on the *audit* command, with the cadence derived from each job's own cron
+  expression so it cannot drift from the schedule.
+- ✅ **POPIA had erasure but no access.** *export my data* returns the client's whole record as
+  text in the thread — never a hosted link to somebody's weight history. Also the cheapest
+  hedge against living inside Meta's app.
+- ✅ **A client who opted into numbers could get none.** The card is fail-open; when it failed,
+  a *numbers:full* client's food log carried no figures anywhere. Found by the new day-one
+  journey test, which drives a real signed-up client through the real pipeline.
 
 ## CLOSED — 2026-07-27
 
