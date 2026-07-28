@@ -4962,6 +4962,31 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   });
 }
 
+test("outcomes: every query renders to real SQL with bound parameters", async () => {
+  // THE TEST THAT WAS MISSING (2026-07-28). The outcomes command shipped with
+  // sql`user_id = ANY(${ids})` — a raw JS array inside a sql template, which drizzle flattens
+  // into SQL chunks rather than binding as one parameter. It built nonsense, every call threw,
+  // and the founder found it before any test did. Rendering needs no database, so there is no
+  // excuse for a hand-written query reaching production unrendered.
+  const { drizzle } = await import("drizzle-orm/node-postgres");
+  const { outcomesQueries } = await import("../server/audit/outcomes-command");
+  const offline = drizzle({} as any);
+  const ids = ["11111111-1111-1111-1111-111111111111", "22222222-2222-2222-2222-222222222222"];
+
+  const rendered = outcomesQueries(offline as any, ids).map(q => q.toSQL());
+  assert.equal(rendered.length, 4);
+  for (const { sql: text } of rendered) {
+    assert.ok(text.length > 20, `query rendered to nothing: ${text}`);
+    // The tell-tale of the bug: an array spliced in as SQL text instead of parameters.
+    assert.doesNotMatch(text, /1111-1111/, "client ids must be BOUND, never inlined into the SQL");
+    assert.doesNotMatch(text, /undefined|\[object Object\]/, `malformed SQL: ${text}`);
+  }
+  // The three per-client queries must bind one parameter per id; the referral roll-up binds none.
+  assert.deepEqual(rendered.map(r => r.params.length), [2, 2, 2, 0]);
+  assert.match(rendered[0].sql, /"weight_logs"\."user_id" in \(\$1, \$2\)/);
+  assert.match(rendered[1].sql, /interval '2 hours'/, "food days must be counted in SAST, not UTC");
+});
+
 test("outcomes: the founder's phrasings all reach the command", () => {
   // Coach-only, so routing-audit (which runs as a client) is the wrong harness — this pins the
   // gate itself. Kam will type whichever of these comes to mind at 6am.
