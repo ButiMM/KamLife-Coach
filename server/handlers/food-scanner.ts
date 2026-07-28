@@ -1,5 +1,6 @@
 import { SA_FOODS_SEED, type SAFood } from "../foods";
-import { sastDayKey, sastDayKeyBefore } from "../sast";
+import { sastDayKey, sastDayKeyBefore, sastHour } from "../sast";
+import { claimOncePerDay } from "../once-daily";
 import { swapNudge } from "../food-swaps";
 import { enforceCoachGuardrails } from "../coach-guardrails";
 import { educationNote, remainingInMeals, weeklyNetWording, dinnerIsLogged, dinnerCloseLine } from "../education";
@@ -41,9 +42,6 @@ setInterval(() => {
     if (now - entry.cachedAt > FOOD_TOTALS_CACHE_TTL_MS) _foodTotalsCache.delete(key);
   }
 }, 60_000).unref();
-
-// Track which users have already received the low-cal warning today (SAST date key)
-const _lowCalWarnedToday = new Map<string, string>();
 
 // Track streak celebration shown today — prevents it firing on every meal log
 const _streakShownToday = new Map<string, string>();
@@ -720,7 +718,7 @@ export function wellnessFoodLogReply(p: {
   return `${foodLines}\n\n${first ? `${first}, ` : ""}${nudge}\n\n${habit}`;
 }
 
-export function buildFoodLogReply(p: {
+export async function buildFoodLogReply(p: {
   foodLines: string;
   mealLabel: string;
   totalMealCals: number;
@@ -745,7 +743,7 @@ export function buildFoodLogReply(p: {
   /** A card is coming, so the CARD owns the day's instruction and the text stands down.
    *  See server/card-policy.ts — one meal used to carry this instruction five times. */
   cardComing?: boolean;
-}): string {
+}): Promise<string> {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
     runningCals, runningProtein, calorieTarget, proteinTarget,
@@ -1110,14 +1108,14 @@ export function buildFoodLogReply(p: {
     ? `💚 _${(user.name || "").split(" ")[0] || "Hey"} — one rough day with your reflection doesn't undo the work. You still logged a proper meal, and that's what actually moves things._\n\n`
     : "";
 
-  const sastNow = new Date(Date.now() + 2 * 3_600_000);
-  const sastHour = sastNow.getUTCHours();
-  const todayKey = `${sastNow.getUTCFullYear()}-${sastNow.getUTCMonth() + 1}-${sastNow.getUTCDate()}`;
-  const warnKey = `${user.id}:${todayKey}`;
-  const alreadyWarned = _lowCalWarnedToday.get(warnKey) === todayKey;
+  // PERSISTED once-per-day (2026-07-28): this was an in-memory Map, so a redeploy meant the same
+  // client could be warned about under-eating twice in one evening. Same defect as the milestone
+  // card. The claim happens only when the warning actually applies, so a quiet day costs nothing.
+  const hourNow = sastHour();
   const lowCalThreshold = calorieTarget * 0.45;
   let calorieFloorNote = "";
-  if (!alreadyWarned && sastHour >= 18 && runningCals > 0 && runningCals < lowCalThreshold) {
+  const lowCalApplies = hourNow >= 18 && runningCals > 0 && runningCals < lowCalThreshold;
+  if (lowCalApplies && await claimOncePerDay(user.id, "low_cal_warning")) {
     const proteinLogged = Math.round(runningProtein);
     const dayNum = user.totalWorkoutsCompleted || 1;
     if (dayNum <= 3) {
@@ -1127,7 +1125,6 @@ export function buildFoodLogReply(p: {
       // Established user — coach tone, ask why
       calorieFloorNote = `\n\n⚡ You're under your calorie target today (${runningCals} kcal). Intentional or just a busy day? Either way — have something real before bed. Eggs, pap, chicken. Your body needs fuel to recover from training.`;
     }
-    _lowCalWarnedToday.set(warnKey, todayKey);
   }
 
   // SA shelf swap — ONE plain "next time" line when a logged food has a real better

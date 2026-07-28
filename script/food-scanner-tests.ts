@@ -21,13 +21,25 @@ let passed = 0;
 let failed = 0;
 const failures: string[] = [];
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    passed++;
-  } catch (err: any) {
+// AWAITS THE BODY (2026-07-28). The signature was `() => void`, so an async test that threw
+// returned a REJECTED PROMISE the try/catch never saw — it counted as passed while the assertion
+// had actually failed. A harness that can silently pass a broken test is worse than no harness.
+// Registered eagerly and awaited at the end, so ordering and output are unchanged.
+const pending: Promise<void>[] = [];
+function test(name: string, fn: () => void | Promise<void>) {
+  const record = (err: any) => {
     failed++;
-    failures.push(`  ✗ ${name}\n    ${err.message}`);
+    failures.push(`  ✗ ${name}\n    ${err?.message || err}`);
+  };
+  try {
+    const out = fn();
+    if (out && typeof (out as Promise<void>).then === "function") {
+      pending.push((out as Promise<void>).then(() => { passed++; }, record));
+    } else {
+      passed++;
+    }
+  } catch (err: any) {
+    record(err);
   }
 }
 
@@ -271,15 +283,15 @@ const logReply = (over: Record<string, any>) => buildFoodLogReply({
   ...over,
 });
 
-test("a ≥20g meal that crosses the protein target declares 'target hit' exactly once", () => {
+test("a ≥20g meal that crosses the protein target declares 'target hit' exactly once", async () => {
   for (let i = 0; i < 80; i++) {
-    const r = logReply({});
+    const r = await logReply({});
     assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
   }
 });
-test("a 10–20g meal with target already hit never says 'push for 20g+' next to 'target hit'", () => {
+test("a 10–20g meal with target already hit never says 'push for 20g+' next to 'target hit'", async () => {
   for (let i = 0; i < 80; i++) {
-    const r = logReply({ totalMealProtein: 15 });
+    const r = await logReply({ totalMealProtein: 15 });
     assert.equal(protHitCount(r), 1, `expected exactly one 'target hit', got ${protHitCount(r)}:\n${r}`);
     assert.ok(!/20g\+/.test(r), `self-contradicting 'push for 20g+' present:\n${r}`);
   }
@@ -324,5 +336,7 @@ if (failed > 0) {
   console.error(`\nfood-scanner-tests: ${passed} passed, ${failed} FAILED\n${failures.join("\n")}`);
   process.exit(1);
 }
+await Promise.all(pending);
+
 console.log(`\nfood-scanner-tests: ${passed}/${passed} passed`);
 console.log("✓ all food scanner checks passed");

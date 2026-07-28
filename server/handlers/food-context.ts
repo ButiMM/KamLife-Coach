@@ -13,11 +13,11 @@ import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
   portionDefaultCount,
   computeFoodLogStreak, getFoodStreakCelebration, shortStreakNote,
-  hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
 import { macroCardMarker, cardOrTotals, achievementCardShown, cardBaseUrl } from "../macro-card-attach";
 import { cardWillAttach } from "../card-policy";
+import { claimOncePerDay } from "../once-daily";
 import { estimateCarbsFat } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
@@ -114,11 +114,11 @@ export function scalePortionDescription(desc: string, quantity: number): string 
   });
 }
 
-function getStreakNote(userId: string, streak: number, name: string): string {
-  if (hasShownStreakToday(userId)) return "";
+// PERSISTED, not in-memory (2026-07-28 live: the 30-day card fired at 13:34 AND 21:25 because a redeploy wiped the Map). Keyed by streak number, so 30 today and 31 tomorrow are different moments.
+async function getStreakNote(userId: string, streak: number, name: string): Promise<string> {
   const note = getFoodStreakCelebration(streak, name);
-  if (note) markStreakShownToday(userId);
-  return note;
+  if (!note) return "";
+  return (await claimOncePerDay(userId, `streak_${streak}`)) ? note : "";
 }
 
 interface CommitFoodLogParams {
@@ -1240,7 +1240,7 @@ export async function handleFoodContext(ctx: {
       }
       const { prevCals, runningCals, runningProtein } = committed;
 
-      const reply = buildFoodLogReply({
+      const reply = await buildFoodLogReply({
         foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
         cardComing: cardWillAttach(user, totalCals, !!cardBaseUrl()),
         runningCals, runningProtein, calorieTarget, proteinTarget, prevCals,
@@ -1258,7 +1258,7 @@ export async function handleFoodContext(ctx: {
         checkPerfectDay(user.id, user.proteinTarget || 120),
         computeFoodLogStreak(user.id),
       ]);
-      const streakCelebration = getStreakNote(user.id, foodStreak, user.name || "");
+      const streakCelebration = await getStreakNote(user.id, foodStreak, user.name || "");
       const stepAppend = stepReplyPart ? `\n\n${stepReplyPart}` : "";
 
       // Combo meal upsell — after logging a high-protein SA combo, suggest a veg side
@@ -1331,7 +1331,7 @@ export async function handleFoodContext(ctx: {
           loggedAt: gptLoggedAt,
         });
         const { prevCals: fbPrevCals, runningCals, runningProtein } = committed;
-        const fallbackReply = buildFoodLogReply({
+        const fallbackReply = await buildFoodLogReply({
           foodLines, mealLabel: fbIsDessert ? "Dessert" : fbIsSnack ? "Snack" : "Meal total",
           totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
           cardComing: cardWillAttach(user, gptFallbackResult.totalKcal, !!cardBaseUrl()),
@@ -1352,7 +1352,7 @@ export async function handleFoodContext(ctx: {
           ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
           : "";
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-        const fbStreakNote = getStreakNote(user.id, fbStreak, user.name || "");
+        const fbStreakNote = await getStreakNote(user.id, fbStreak, user.name || "");
         const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
         return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${cardOrTotals(fbCard, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
       }
@@ -1407,7 +1407,7 @@ export async function handleFoodContext(ctx: {
         loggedAt: fb2LoggedAt,
       });
       const { prevCals: fb2PrevCals, runningCals, runningProtein } = committed2;
-      const fallbackReply = buildFoodLogReply({
+      const fallbackReply = await buildFoodLogReply({
         foodLines, mealLabel: fb2IsDessert ? "Dessert" : fb2IsSnack ? "Snack" : "Meal total",
         totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
         cardComing: cardWillAttach(user, gptFallbackResult.totalKcal, !!cardBaseUrl()),
@@ -1429,7 +1429,7 @@ export async function handleFoodContext(ctx: {
         ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
         : "";
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-      const fb2StreakNote = getStreakNote(user.id, fb2Streak, user.name || "");
+      const fb2StreakNote = await getStreakNote(user.id, fb2Streak, user.name || "");
       const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
       return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${cardOrTotals(fb2Card, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
     }

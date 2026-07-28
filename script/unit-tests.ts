@@ -1353,21 +1353,21 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
     junkDominant, user: { goalType: goal, profileNotes: notes },
   });
-  test("junk verdict: a takeaway never gets 🟢 'Nicely done' or protein praise (fat loss)", () => {
-    const r = junkMeal("fat_loss", "numbers:full", true);
+  test("junk verdict: a takeaway never gets 🟢 'Nicely done' or protein praise (fat loss)", async () => {
+    const r = await junkMeal("fat_loss", "numbers:full", true);
     assert.ok(/takeaway/i.test(r) && !/Nicely done/i.test(r), `honest treat verdict: ${r.split("\n")[0]}`);
     assert.ok(!/Good protein in that one/i.test(r), "no praise on junk protein");
   });
-  test("junk verdict: number-free path also honest, with a forward-coaching nudge", () => {
-    const r = junkMeal("fat_loss", "", true);
+  test("junk verdict: number-free path also honest, with a forward-coaching nudge", async () => {
+    const r = await junkMeal("fat_loss", "", true);
     assert.ok(/takeaway/i.test(r) && /protein.*next meal|more protein/i.test(r), `plain honest: ${r}`);
     assert.ok(!/Good protein in that one/i.test(r));
   });
-  test("junk verdict: muscle gain — fuel acknowledged, pushed to whole-food protein", () => {
-    assert.ok(/whole.?food protein|actually builds/i.test(junkMeal("muscle_gain", "numbers:full", true)));
+  test("junk verdict: muscle gain — fuel acknowledged, pushed to whole-food protein", async () => {
+    assert.ok(/whole.?food protein|actually builds/i.test(await junkMeal("muscle_gain", "numbers:full", true)));
   });
-  test("junk verdict: a CLEAN meal still keeps the green light", () => {
-    const r = buildFoodLogReply({
+  test("junk verdict: a CLEAN meal still keeps the green light", async () => {
+    const r = await buildFoodLogReply({
       foodLines: "• Chicken\n• Rice", mealLabel: "lunch",
       totalMealCals: 500, totalMealProtein: 40, runningCals: 500, runningProtein: 40,
       calorieTarget: 2400, proteinTarget: 150, prevCals: 200, hasGoodProteins: true,
@@ -1383,7 +1383,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 {
   const { dominantSlotByHour, resolveInferredSlot } = await import("../server/portion-memory");
   const at = (sastHour: number, label: string) => ({ loggedAt: new Date(Date.UTC(2026, 6, 10, (sastHour - 2 + 24) % 24, 15)), mealLabel: label });
-  test("slot learning: hour qualifies at >=3 logs and >=70% share — never on noise", () => {
+  test("slot learning: hour qualifies at >=3 logs and >=70% share — never on noise", async () => {
     const strong = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "lunch"), at(10, "breakfast")]);
     assert.equal(strong.get(10), "lunch", "3/4 lunch at 10:00 = personal lunch hour");
     const weak = dominantSlotByHour([at(10, "lunch"), at(10, "lunch"), at(10, "breakfast"), at(10, "breakfast")]);
@@ -1391,13 +1391,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     const thin = dominantSlotByHour([at(10, "lunch"), at(10, "lunch")]);
     assert.ok(!thin.has(10), "2 logs is not a pattern");
   });
-  test("slot learning: personal hour beats the clock; shift worker learned without a flag", () => {
+  test("slot learning: personal hour beats the clock; shift worker learned without a flag", async () => {
     const ctx = { personalByHour: new Map([[10, "lunch"], [2, "night meal"]]), todaySlots: [] };
     assert.equal(resolveInferredSlot("breakfast", 10, ctx, 600), "lunch", "the reviewer's 10:00 case");
     assert.equal(resolveInferredSlot("snack", 2, ctx, 250), "night meal", "02:00 history wins, no onboarding flag needed");
     assert.equal(resolveInferredSlot("breakfast", 7, ctx, 400), "breakfast", "no pattern for 07:00 = clock stands");
   });
-  test("slot learning: light second meal on a used slot = snack; a real plate keeps its slot", () => {
+  test("slot learning: light second meal on a used slot = snack; a real plate keeps its slot", async () => {
     const ctx = { personalByHour: new Map<number, string>(), todaySlots: ["breakfast"] };
     assert.equal(resolveInferredSlot("breakfast", 9, ctx, 180), "snack", "09:30 fruit after 07:30 breakfast");
     assert.equal(resolveInferredSlot("breakfast", 9, ctx, 650), "breakfast", "a second full plate is honestly a second breakfast");
@@ -1411,19 +1411,19 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 {
   const { slotFromSastHour, isNightWorker } = await import("../server/utils");
   const at = (sastHour: number) => new Date(Date.UTC(2026, 6, 17, (sastHour - 2 + 24) % 24, 30));
-  test("slots: day windows unchanged (breakfast/lunch/dinner/snack)", () => {
+  test("slots: day windows unchanged (breakfast/lunch/dinner/snack)", async () => {
     assert.equal(slotFromSastHour(at(7)), "breakfast");
     assert.equal(slotFromSastHour(at(12)), "lunch");
     assert.equal(slotFromSastHour(at(19)), "dinner");
     assert.equal(slotFromSastHour(at(16)), "snack", "15:00-17:00 gap stays snack");
   });
-  test("slots: night window — light bite stays snack, real plate or night worker = night meal", () => {
+  test("slots: night window — light bite stays snack, real plate or night worker = night meal", async () => {
     assert.equal(slotFromSastHour(at(2)), "snack", "2am biscuit is a snack");
     assert.equal(slotFromSastHour(at(2), { substantial: true }), "night meal", "2am 700-kcal plate is a MEAL");
     assert.equal(slotFromSastHour(at(23), { nightWorker: true }), "night meal", "night worker's 23:00 plate");
     assert.equal(slotFromSastHour(at(12), { nightWorker: true }), "lunch", "day windows never touched");
   });
-  test("slots: isNightWorker reads the onboarding answers", () => {
+  test("slots: isNightWorker reads the onboarding answers", async () => {
     assert.ok(isNightWorker({ workSchedule: "night shift" }));
     assert.ok(isNightWorker({ lifeSituation: "security guard, night-shift" }));
     assert.ok(!isNightWorker({ workSchedule: "office 9-5" }));
@@ -1435,7 +1435,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // send grocery-store questions; the answer must be the SAME every time, goal-aware).
 {
   const { parseSwapAsk, answerSwapAsk, suggestSwap } = await import("../server/food-swaps");
-  test("swap ask: question phrasings extract the food", () => {
+  test("swap ask: question phrasings extract the food", async () => {
     assert.equal(parseSwapAsk("what can i use instead of mayonnaise?"), "mayonnaise");
     assert.equal(parseSwapAsk("alternative to banana?"), "banana");
     assert.equal(parseSwapAsk("healthier option than coke please"), "coke");
@@ -1443,13 +1443,13 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(parseSwapAsk("i had eggs and pap"), null, "food logs are not swap asks");
     assert.equal(parseSwapAsk("show me my meals"), null);
   });
-  test("swap ask: deterministic answers ride the one swap table, goal-aware", () => {
+  test("swap ask: deterministic answers ride the one swap table, goal-aware", async () => {
     assert.match(answerSwapAsk("what can i use instead of mayonnaise?", "fat_loss") || "", /light mayo/i);
     assert.match(answerSwapAsk("alternative to banana?", "fat_loss") || "", /berries/i);
     assert.equal(answerSwapAsk("alternative to banana?", "muscle_gain"), null, "banana is FINE for building — Coach K handles it");
     assert.match(answerSwapAsk("healthier option than coke?", "fat_loss") || "", /zero/i);
   });
-  test("swaps: founder's cases — nuts/avo get PORTION caps, never removal", () => {
+  test("swaps: founder's cases — nuts/avo get PORTION caps, never removal", async () => {
     assert.match(suggestSwap("cashews", "fat_loss")?.swap || "", /handful|palm/i);
     assert.match(suggestSwap("avocado", "fat_loss")?.swap || "", /half/i);
     assert.equal(suggestSwap("avocado", "muscle_gain"), null, "builders keep the avo");
@@ -1462,7 +1462,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 {
   const { parseBodyState, recommendGoalFromRead } = await import("../server/physique-analysis");
   const { bodyPhotoAsk } = await import("../server/onboarding-physique");
-  test("body state: model output parses to canonical states", () => {
+  test("body state: model output parses to canonical states", async () => {
     assert.equal(parseBodyState("DOMINANT: back\nLAGGING: chest\nBODY: carrying extra fat\nNOTE: solid base."), "overfat");
     assert.equal(parseBodyState("BODY: skinny-fat"), "skinny_fat");
     assert.equal(parseBodyState("BODY: underweight"), "underweight");
@@ -1470,23 +1470,23 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
     assert.equal(parseBodyState("BODY: average"), "average");
     assert.equal(parseBodyState("no body line at all"), "unknown");
   });
-  test("goal rec: the curves woman — chose muscle gain, carrying fat → fat loss, shape protected", () => {
+  test("goal rec: the curves woman — chose muscle gain, carrying fat → fat loss, shape protected", async () => {
     const r = recommendGoalFromRead("overfat", "muscle_gain");
     assert.ok(r && r.goal === "fat_loss", "must recommend fat loss");
     assert.ok(/curves|shape/i.test(r!.reason) && /stay/i.test(r!.reason), `reason must protect the fear: ${r!.reason}`);
   });
-  test("goal rec: underweight NEVER gets a cut; skinny-fat → recomp; lean cutter → recomp", () => {
+  test("goal rec: underweight NEVER gets a cut; skinny-fat → recomp; lean cutter → recomp", async () => {
     assert.equal(recommendGoalFromRead("underweight", "fat_loss")?.goal, "muscle_gain");
     assert.equal(recommendGoalFromRead("skinny_fat", "fat_loss")?.goal, "recomposition");
     assert.equal(recommendGoalFromRead("lean", "fat_loss")?.goal, "recomposition");
   });
-  test("goal rec: agreement and unreadable photos change NOTHING (client's choice wins)", () => {
+  test("goal rec: agreement and unreadable photos change NOTHING (client's choice wins)", async () => {
     assert.equal(recommendGoalFromRead("overfat", "fat_loss"), null);
     assert.equal(recommendGoalFromRead("underweight", "muscle_gain"), null);
     assert.equal(recommendGoalFromRead("average", "muscle_gain"), null);
     assert.equal(recommendGoalFromRead("unknown", "fat_loss"), null);
   });
-  test("photo ask: always optional, skip in the same breath; height-blind gets the stronger why", () => {
+  test("photo ask: always optional, skip in the same breath; height-blind gets the stronger why", async () => {
     for (const known of [true, false]) assert.ok(/\*skip\*/i.test(bodyPhotoAsk(known)), "skip offered");
     assert.ok(/without your height/i.test(bodyPhotoAsk(false)), "height-unknown framing present");
   });
@@ -1497,7 +1497,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // routing map, so production and the nightly alert can never disagree about who owns it.
 {
   const { looksLikeSurplusDeficitQuestion } = await import("../server/utils");
-  test("surplus predicate: definitional/status asks ARE claimed", () => {
+  test("surplus predicate: definitional/status asks ARE claimed", async () => {
     for (const s of [
       "on a regular normal eating day how much should my surplus be? 500 calories, 200 calories, what?",
       "am i in a deficit? i've only had breakfast",
@@ -1507,7 +1507,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
       "how big should my deficit be?",
     ]) assert.ok(looksLikeSurplusDeficitQuestion(s), `should claim: ${s}`);
   });
-  test("surplus predicate: reasoning and reports stay with Coach K", () => {
+  test("surplus predicate: reasoning and reports stay with Coach K", async () => {
     for (const s of [
       "why am i not losing weight in a deficit",
       "i was in a surplus yesterday",
@@ -1521,7 +1521,7 @@ test("week context: a real beginner (few sessions) still gets the ease-in", () =
 // The workout cooldown ("scroll up ↑") was REMOVED entirely on 2026-07-16 after it
 // refused the founder's direct request twice in one night — a client who asks for
 // their session gets their session, always. The guard below keeps it dead.
-test("no workout cooldown: 'scroll up' refusal must not exist in any handler", () => {
+test("no workout cooldown: 'scroll up' refusal must not exist in any handler", async () => {
   const src = readFileSync(join("server", "handlers", "early-commands.ts"), "utf-8");
   assert.ok(!/scroll up ↑ to see it/i.test(src), "the cooldown refusal text has returned — remove it");
 });
@@ -1544,7 +1544,7 @@ for (const tier of TIERS) {
   });
 }
 
-test("shopping list alternates week A/B for variety", () => {
+test("shopping list alternates week A/B for variety", async () => {
   const week1 = getShoppingList("100_300", 1);
   const week2 = getShoppingList("100_300", 2);
   // Week 2 should be different from week 1 (variety rotation)
@@ -1553,7 +1553,7 @@ test("shopping list alternates week A/B for variety", () => {
   assert.notEqual(week1Names, week2Names, "week 1 and 2 shopping lists should differ");
 });
 
-test("all shopping list items have item name and category", () => {
+test("all shopping list items have item name and category", async () => {
   const list = getShoppingList("100_300", 1);
   for (const item of list.items) {
     assert.ok(item.item, `item missing item name`);
@@ -1562,14 +1562,14 @@ test("all shopping list items have item name and category", () => {
   }
 });
 
-test("formatShoppingList returns non-empty string", () => {
+test("formatShoppingList returns non-empty string", async () => {
   const list = getShoppingList("100_300", 1);
   const formatted = formatShoppingList(list, "Kamogelo", "fat_loss");
   assert.ok(typeof formatted === "string", "not a string");
   assert.ok(formatted.length > 100, "formatted list too short");
 });
 
-test("formatShoppingList includes protein section", () => {
+test("formatShoppingList includes protein section", async () => {
   const list = getShoppingList("100_300", 1);
   const formatted = formatShoppingList(list, "Test", "fat_loss");
   assert.ok(
@@ -1578,7 +1578,7 @@ test("formatShoppingList includes protein section", () => {
   );
 });
 
-test("over_600 tier estimated total string differs from under_100", () => {
+test("over_600 tier estimated total string differs from under_100", async () => {
   const cheap = getShoppingList("under_100", 1);
   const premium = getShoppingList("over_600", 1);
   // Extract numeric value from strings like "~R320" or "R1,200"
@@ -1587,7 +1587,7 @@ test("over_600 tier estimated total string differs from under_100", () => {
     `premium ${premium.estimatedTotal} should cost more than cheap ${cheap.estimatedTotal}`);
 });
 
-test("Tier 3 and Tier 4 shopping lists have Week B for variety", () => {
+test("Tier 3 and Tier 4 shopping lists have Week B for variety", async () => {
   const t3a = getShoppingList("300_600", 1);
   const t3b = getShoppingList("300_600", 2);
   assert.ok(t3a, "Tier 3 Week A should exist");
@@ -1604,7 +1604,7 @@ test("Tier 3 and Tier 4 shopping lists have Week B for variety", () => {
 // GROCERY PERSONALIZATION (2026-07-12, Kam: "they need to know the user"). The list
 // stays prescriptive for cold-start beginners, then adapts to what the client actually
 // logs — keep their staples, swap their junk, fill the gap.
-test("grocery: classifier buckets SA foods into protein/veg/wholecarb/fruit", () => {
+test("grocery: classifier buckets SA foods into protein/veg/wholecarb/fruit", async () => {
   assert.equal(classifyLoggedFood("eggs"), "protein");
   assert.equal(classifyLoggedFood("chicken breast"), "protein");
   assert.equal(classifyLoggedFood("morogo"), "veg");
@@ -1614,7 +1614,7 @@ test("grocery: classifier buckets SA foods into protein/veg/wholecarb/fruit", ()
   assert.equal(classifyLoggedFood("coke"), "other");
 });
 
-test("grocery: loggerType segments new / learning / established by distinct foods", () => {
+test("grocery: loggerType segments new / learning / established by distinct foods", async () => {
   assert.equal(loggerType(0), "new");
   assert.equal(loggerType(2), "new");
   assert.equal(loggerType(3), "learning");
@@ -1623,7 +1623,7 @@ test("grocery: loggerType segments new / learning / established by distinct food
   assert.equal(loggerType(15), "established");
 });
 
-test("grocery: cold-start client gets a CALM 'you're covered' block + how to send their own list", () => {
+test("grocery: cold-start client gets a CALM 'you're covered' block + how to send their own list", async () => {
   const thin: FoodProfile = { topFoods: [{ name: "eggs", count: 2 }, { name: "pap", count: 1 }], distinctCount: 2 };
   const block = buildGroceryPersonalization(thin, "fat_loss");
   assert.ok(/covered/i.test(block), "reassures the anxious beginner they're covered");
@@ -1631,7 +1631,7 @@ test("grocery: cold-start client gets a CALM 'you're covered' block + how to sen
   assert.ok(!/Kept in/i.test(block), "must NOT fake knowing a brand-new client's foods");
 });
 
-test("grocery: a learning logger's list names staples, swaps junk, fills the gap, nudges logging", () => {
+test("grocery: a learning logger's list names staples, swaps junk, fills the gap, nudges logging", async () => {
   const profile: FoodProfile = {
     topFoods: [
       { name: "eggs", count: 6 }, { name: "chicken", count: 5 },
@@ -1647,7 +1647,7 @@ test("grocery: a learning logger's list names staples, swaps junk, fills the gap
   assert.ok(/keep logging/i.test(block), "nudges them that logging sharpens it");
 });
 
-test("grocery: an established logger gets quiet-confidence framing, no beginner nudges", () => {
+test("grocery: an established logger gets quiet-confidence framing, no beginner nudges", async () => {
   const foods = ["eggs", "chicken", "spinach", "brown rice", "pilchards", "morogo", "butternut", "oats"]
     .map((name, i) => ({ name, count: 8 - i }));
   const block = buildGroceryPersonalization({ topFoods: foods, distinctCount: foods.length }, "muscle_gain");
@@ -1663,27 +1663,27 @@ test("grocery: an established logger gets quiet-confidence framing, no beginner 
 
 const REMOVE_REGEX = /^(no\s+)?(remove|delete|undo)\s+(it|that meal|that one|that|last|last one|last meal|the meal|the last one)$/i;
 
-test("'Remove that meal' matches meal removal regex", () => {
+test("'Remove that meal' matches meal removal regex", async () => {
   assert.ok(REMOVE_REGEX.test("Remove that meal"), "should match 'Remove that meal'");
 });
 
-test("'remove last meal' still matches", () => {
+test("'remove last meal' still matches", async () => {
   assert.ok(REMOVE_REGEX.test("remove last meal"), "should match 'remove last meal'");
 });
 
-test("'delete that meal' matches", () => {
+test("'delete that meal' matches", async () => {
   assert.ok(REMOVE_REGEX.test("delete that meal"), "should match 'delete that meal'");
 });
 
-test("'undo that' matches", () => {
+test("'undo that' matches", async () => {
   assert.ok(REMOVE_REGEX.test("undo that"), "should match 'undo that'");
 });
 
-test("'Remove that meal please' does NOT match (extra words)", () => {
+test("'Remove that meal please' does NOT match (extra words)", async () => {
   assert.ok(!REMOVE_REGEX.test("Remove that meal please"), "should not match phrases with extra words");
 });
 
-test("'remove the meal' matches", () => {
+test("'remove the meal' matches", async () => {
   assert.ok(REMOVE_REGEX.test("remove the meal"), "should match 'remove the meal'");
 });
 
@@ -1704,24 +1704,24 @@ function testSoftStruggle(msg: string): boolean {
   );
 }
 
-test("\"Haven't trained for the past 3 days. Feeling down and unmotivated\" triggers soft struggle", () => {
+test("\"Haven't trained for the past 3 days. Feeling down and unmotivated\" triggers soft struggle", async () => {
   assert.ok(testSoftStruggle("Haven't trained for the past 3 days. Feeling down and unmotivated"),
     "should detect motivational dip with 'haven't trained' + 'feeling down and unmotivated'");
 });
 
-test("\"feeling unmotivated\" triggers soft struggle", () => {
+test("\"feeling unmotivated\" triggers soft struggle", async () => {
   assert.ok(testSoftStruggle("feeling unmotivated"), "should detect 'feeling unmotivated'");
 });
 
-test("\"I haven't worked out in 5 days\" triggers soft struggle", () => {
+test("\"I haven't worked out in 5 days\" triggers soft struggle", async () => {
   assert.ok(testSoftStruggle("I haven't worked out in 5 days"), "should detect 'haven't worked out in 5 days'");
 });
 
-test("\"just had coffee\" does NOT trigger soft struggle", () => {
+test("\"just had coffee\" does NOT trigger soft struggle", async () => {
   assert.ok(!testSoftStruggle("just had coffee"), "food log should not trigger struggle handler");
 });
 
-test("\"done\" does NOT trigger soft struggle", () => {
+test("\"done\" does NOT trigger soft struggle", async () => {
   assert.ok(!testSoftStruggle("done"), "workout log should not trigger struggle handler");
 });
 
@@ -1729,7 +1729,7 @@ test("\"done\" does NOT trigger soft struggle", () => {
 // Step streak logic — SAST timezone correctness
 // ============================================================
 
-test("streak calculation: consecutive days count correctly", () => {
+test("streak calculation: consecutive days count correctly", async () => {
   const SAST_OFFSET = 2 * 3_600_000;
   function computeStreak(logs: Date[]): number {
     const days = new Set<string>();
@@ -1760,7 +1760,7 @@ test("streak calculation: consecutive days count correctly", () => {
   assert.equal(computeStreak([]), 0, "no logs = streak 0");
 });
 
-test("streak: late-night SAST log (11pm) counts as correct date", () => {
+test("streak: late-night SAST log (11pm) counts as correct date", async () => {
   const SAST_OFFSET = 2 * 3_600_000;
   function dateKey(d: Date): string {
     const s = new Date(d.getTime() + SAST_OFFSET);
@@ -1787,28 +1787,28 @@ const RETRO_DIET_RE = /\b(within\s+the\s+week|this\s+week\s+i.?(?:ve|have|had|be
 const TODAY_SIGNAL_RE = /\b(today|just\s+had|just\s+ate|right\s+now)\b/i;
 const isRetroDiet = (msg: string) => RETRO_DIET_RE.test(msg.toLowerCase()) && !TODAY_SIGNAL_RE.test(msg.toLowerCase());
 
-test("'within the week' is detected as retro", () => {
+test("'within the week' is detected as retro", async () => {
   assert.ok(isRetroDiet("I has oats eggs and bread for breakfast within the week"), "within the week should be retro");
 });
-test("'I usually eat chicken' is detected as retro", () => {
+test("'I usually eat chicken' is detected as retro", async () => {
   assert.ok(isRetroDiet("I usually eat chicken rice and veg"), "usually eat = retro");
 });
-test("'I normally have oats' is detected as retro", () => {
+test("'I normally have oats' is detected as retro", async () => {
   assert.ok(isRetroDiet("I normally have oats and eggs for breakfast"), "normally have = retro");
 });
-test("'during the week' is detected as retro", () => {
+test("'during the week' is detected as retro", async () => {
   assert.ok(isRetroDiet("During the week I eat pap and mince"), "during the week = retro");
 });
-test("'last few days' is detected as retro", () => {
+test("'last few days' is detected as retro", async () => {
   assert.ok(isRetroDiet("Last few days I have been eating chicken and sweet potato"), "last few days = retro");
 });
-test("'today I had eggs' is NOT retro (today override)", () => {
+test("'today I had eggs' is NOT retro (today override)", async () => {
   assert.ok(!isRetroDiet("Today I had eggs and oats for breakfast"), "explicit 'today' should NOT be retro");
 });
-test("plain 'I had chicken for dinner' is NOT retro", () => {
+test("plain 'I had chicken for dinner' is NOT retro", async () => {
   assert.ok(!isRetroDiet("I had chicken for dinner"), "plain today log must not be retro");
 });
-test("'usually but today I had' respects today-signal override", () => {
+test("'usually but today I had' respects today-signal override", async () => {
   assert.ok(!isRetroDiet("I usually eat oats but today I had eggs"), "today override must suppress retro flag");
 });
 
@@ -1825,23 +1825,23 @@ const isShoppingList = (msg: string, hasLogTrig: boolean) => {
   return !hasLogTrig && ((dc >= 3 && SHOPPING_CONTEXT_RE_TEST.test(mLow)) || dc >= 7);
 };
 
-test("'isle by isle' + dash list is detected as shopping list", () => {
+test("'isle by isle' + dash list is detected as shopping list", async () => {
   const msg = "I just go isle by isle and choose what I think is missing\n-Wheetbix\n-eggs\n-full cream milk\n-peanut butter\n-brown rice\n-maize meal\n-pasta";
   assert.ok(isShoppingList(msg, false), "isle by isle + 7 items should be shopping list");
 });
-test("7+ dash items alone (no context) is detected as shopping list", () => {
+test("7+ dash items alone (no context) is detected as shopping list", async () => {
   const msg = "-rice\n-chicken\n-eggs\n-pasta\n-oats\n-banana\n-cheese\n-peanut butter";
   assert.ok(isShoppingList(msg, false), "8 dash items alone should be shopping list");
 });
-test("'shopping list' + 3 dash items is detected", () => {
+test("'shopping list' + 3 dash items is detected", async () => {
   const msg = "Here is my shopping list\n-oats\n-eggs\n-chicken";
   assert.ok(isShoppingList(msg, false), "explicit shopping list text should be detected");
 });
-test("3 dash items with log trigger (meal listing) is NOT shopping list", () => {
+test("3 dash items with log trigger (meal listing) is NOT shopping list", async () => {
   const msg = "For lunch I had:\n-rice\n-chicken\n-salad";
   assert.ok(!isShoppingList(msg, true), "dash list WITH log trigger should not be intercepted");
 });
-test("2 dash items without context is NOT shopping list", () => {
+test("2 dash items without context is NOT shopping list", async () => {
   const msg = "I had for dinner\n-pap\n-wors";
   assert.ok(!isShoppingList(msg, true), "only 2 items should not trigger shopping list guard");
 });
@@ -1854,35 +1854,35 @@ import { handleConversionObjection } from "../server/handlers/conversion";
 const fakeUser = { goalType: "fat_loss", proteinTarget: 130, calorieTarget: 1800 };
 const convCtx = (m: string) => ({ user: fakeUser, m: m.toLowerCase(), payLink: "https://example.com/pay", name: "Sipho" });
 
-test("'can't afford' triggers CONVERSION_MONEY", () => {
+test("'can't afford' triggers CONVERSION_MONEY", async () => {
   const r = handleConversionObjection(convCtx("I can't afford it right now"));
   assert.ok(r !== null && r.intent === "CONVERSION_MONEY", `expected CONVERSION_MONEY, got ${r?.intent}`);
 });
-test("'too expensive' triggers CONVERSION_MONEY", () => {
+test("'too expensive' triggers CONVERSION_MONEY", async () => {
   const r = handleConversionObjection(convCtx("That's too expensive for me"));
   assert.ok(r !== null && r.intent === "CONVERSION_MONEY", `expected CONVERSION_MONEY, got ${r?.intent}`);
 });
-test("'let me think about it' triggers CONVERSION_STALL", () => {
+test("'let me think about it' triggers CONVERSION_STALL", async () => {
   const r = handleConversionObjection(convCtx("Let me think about it"));
   assert.ok(r !== null && r.intent === "CONVERSION_STALL", `expected CONVERSION_STALL, got ${r?.intent}`);
 });
-test("'maybe later' triggers CONVERSION_STALL", () => {
+test("'maybe later' triggers CONVERSION_STALL", async () => {
   const r = handleConversionObjection(convCtx("Maybe later, I'm not ready"));
   assert.ok(r !== null && r.intent === "CONVERSION_STALL", `expected CONVERSION_STALL, got ${r?.intent}`);
 });
-test("'how much is it' triggers CONVERSION_PRICE", () => {
+test("'how much is it' triggers CONVERSION_PRICE", async () => {
   const r = handleConversionObjection(convCtx("How much is it per month?"));
   assert.ok(r !== null && r.intent === "CONVERSION_PRICE", `expected CONVERSION_PRICE, got ${r?.intent}`);
 });
-test("'what does it cost' triggers CONVERSION_PRICE", () => {
+test("'what does it cost' triggers CONVERSION_PRICE", async () => {
   const r = handleConversionObjection(convCtx("What does it cost?"));
   assert.ok(r !== null && r.intent === "CONVERSION_PRICE", `expected CONVERSION_PRICE, got ${r?.intent}`);
 });
-test("plain goal message returns null (no objection)", () => {
+test("plain goal message returns null (no objection)", async () => {
   const r = handleConversionObjection(convCtx("I want to lose weight"));
   assert.ok(r === null, "non-objection message should return null");
 });
-test("money objection reply contains R6.63", () => {
+test("money objection reply contains R6.63", async () => {
   const r = handleConversionObjection(convCtx("No money right now"));
   assert.ok(r !== null && r.reply.includes("R6.63"), "money reply should frame the daily cost");
 });
@@ -1891,42 +1891,42 @@ test("money objection reply contains R6.63", () => {
 // getSleepResponse — pure function, no DB needed
 // ============================================================
 
-test("sleep: null hours + isBadSleep=true → cortisol advice", () => {
+test("sleep: null hours + isBadSleep=true → cortisol advice", async () => {
   const r = getSleepResponse(null, true);
   assert.ok(r.includes("cortisol") || r.includes("fat loss") || r.includes("Cortisol"), `unexpected: ${r}`);
 });
-test("sleep: null hours + isBadSleep=false → log prompt", () => {
+test("sleep: null hours + isBadSleep=false → log prompt", async () => {
   const r = getSleepResponse(null, false);
   assert.ok(r.includes("Log") || r.includes("log") || r.includes("hours"), `unexpected: ${r}`);
 });
-test("sleep: 3 hours (< 5) → hard-insufficient message with specific advice", () => {
+test("sleep: 3 hours (< 5) → hard-insufficient message with specific advice", async () => {
   const r = getSleepResponse(3, false);
   assert.ok(r.includes("3 hours"), `should mention the hour count: ${r}`);
   assert.ok(r.includes("not enough") || r.includes("screens"), `should warn about insufficient sleep: ${r}`);
 });
-test("sleep: 4 hours mentions the exact count", () => {
+test("sleep: 4 hours mentions the exact count", async () => {
   const r = getSleepResponse(4, false);
   assert.ok(r.startsWith("4 hours"), `should start with the hour count: ${r}`);
 });
-test("sleep: 6 hours (low but >= 5) → low-sleep response mentioning 6", () => {
+test("sleep: 6 hours (low but >= 5) → low-sleep response mentioning 6", async () => {
   const r = getSleepResponse(6, false);
   assert.ok(r.includes("6"), `low-sleep reply should reference the count: ${r}`);
 });
-test("sleep: 7 hours (good) → positive reinforcement", () => {
+test("sleep: 7 hours (good) → positive reinforcement", async () => {
   const r = getSleepResponse(7, false);
   assert.ok(r.includes("7"), `good-sleep reply should reference the count: ${r}`);
   assert.ok(r.includes("solid") || r.includes("quality") || r.includes("hours"), `should be positive: ${r}`);
 });
-test("sleep: 9 hours (good boundary) → still positive", () => {
+test("sleep: 9 hours (good boundary) → still positive", async () => {
   const r = getSleepResponse(9, false);
   assert.ok(r.includes("9"), `should reference 9 hours: ${r}`);
 });
-test("sleep: 10 hours (> 9) → oversleeping response mentioning energy check", () => {
+test("sleep: 10 hours (> 9) → oversleeping response mentioning energy check", async () => {
   const r = getSleepResponse(10, false);
   assert.ok(r.includes("10"), `oversleep reply should mention count: ${r}`);
   assert.ok(r.includes("energy") || r.includes("stress") || r.includes("burnout") || r.includes("iron"), `should flag potential burnout/anaemia: ${r}`);
 });
-test("sleep: 5 hours (exact low boundary) → low not critical response", () => {
+test("sleep: 5 hours (exact low boundary) → low not critical response", async () => {
   const r = getSleepResponse(5, false);
   assert.ok(r.includes("5"), `should mention 5 hours: ${r}`);
 });
@@ -1937,22 +1937,22 @@ test("sleep: 5 hours (exact low boundary) → low not critical response", () => 
 
 const CRIME_RE_TEST = /\b(can.?t\s+walk\s+(?:outside|outside here|outside in my area|in my area|near me|around here|on the street)|not\s+safe\s+to\s+walk|unsafe\s+to\s+walk|scared\s+to\s+walk|afraid\s+to\s+walk|dangerous\s+(?:to walk|outside|around here|in my area|near me)|crime\s+(?:in my area|is bad|is high|outside|near me|around here)|too\s+much\s+crime|high\s+crime|crime\s+rate|it.?s\s+not\s+safe\s+(?:outside|to walk|here)|can.?t\s+go\s+outside|don.?t\s+feel\s+safe\s+(?:walking|outside)|neighbourhood\s+(?:is\s+)?(?:dangerous|unsafe|not safe))\b/i;
 
-test("'not safe to walk' matches crime objection", () => {
+test("'not safe to walk' matches crime objection", async () => {
   assert.ok(CRIME_RE_TEST.test("it's not safe to walk in my area"), "not safe to walk should match");
 });
-test("'too much crime' matches crime objection", () => {
+test("'too much crime' matches crime objection", async () => {
   assert.ok(CRIME_RE_TEST.test("there is too much crime outside"), "too much crime should match");
 });
-test("'scared to walk outside' matches", () => {
+test("'scared to walk outside' matches", async () => {
   assert.ok(CRIME_RE_TEST.test("I'm scared to walk outside"), "scared to walk should match");
 });
-test("'can't walk outside' matches", () => {
+test("'can't walk outside' matches", async () => {
   assert.ok(CRIME_RE_TEST.test("I can't walk outside here"), "can't walk outside should match");
 });
-test("'high crime rate' matches", () => {
+test("'high crime rate' matches", async () => {
   assert.ok(CRIME_RE_TEST.test("the crime rate in my area is very high"), "high crime rate should match");
 });
-test("plain 'I walked 5km' does NOT match crime objection", () => {
+test("plain 'I walked 5km' does NOT match crime objection", async () => {
   assert.ok(!CRIME_RE_TEST.test("I walked 5km this morning"), "walked 5km should not trigger crime handler");
 });
 
@@ -1960,7 +1960,7 @@ test("plain 'I walked 5km' does NOT match crime objection", () => {
 // Subscription gate: inactive users should be blocked from media
 // ============================================================
 
-test("inactive user string detection", () => {
+test("inactive user string detection", async () => {
   // Verify the gate condition logic is correct
   const statuses = ["inactive", "active", "trial", ""];
   const gated = statuses.filter(s => s === "inactive");
@@ -2037,204 +2037,204 @@ const wouldLog = (m: string, foodCount: number, exactFoodCount: number = foodCou
 };
 
 // --- hasLogTrigger: must match real meal logs ---
-test("hasLogTrigger: 'I ate chicken and rice' matches", () => {
+test("hasLogTrigger: 'I ate chicken and rice' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("i ate chicken and rice"), "ate should match");
 });
-test("hasLogTrigger: 'I had oats for breakfast' matches", () => {
+test("hasLogTrigger: 'I had oats for breakfast' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("i had oats for breakfast"), "had should match");
 });
-test("hasLogTrigger: 'just ate 2 eggs' matches", () => {
+test("hasLogTrigger: 'just ate 2 eggs' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("just ate 2 eggs"), "just ate should match");
 });
-test("hasLogTrigger: 'lunch was pap and mince' matches", () => {
+test("hasLogTrigger: 'lunch was pap and mince' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("lunch was pap and mince"), "lunch was should match");
 });
-test("hasLogTrigger: 'for dinner I had chicken' matches", () => {
+test("hasLogTrigger: 'for dinner I had chicken' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("for dinner i had chicken"), "for dinner should match");
 });
-test("hasLogTrigger: 'post workout shake and banana' matches", () => {
+test("hasLogTrigger: 'post workout shake and banana' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("post workout shake and banana"), "post workout should match");
 });
-test("hasLogTrigger: 'having my oats now' matches", () => {
+test("hasLogTrigger: 'having my oats now' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("having my oats now"), "having should match");
 });
-test("hasLogTrigger: 'added 2 eggs to my log' matches", () => {
+test("hasLogTrigger: 'added 2 eggs to my log' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("added 2 eggs to my log"), "added should match");
 });
-test("hasLogTrigger: 'pre workout oats and peanut butter' matches", () => {
+test("hasLogTrigger: 'pre workout oats and peanut butter' matches", async () => {
   assert.ok(HAS_LOG_TRIGGER.test("pre workout oats and peanut butter"), "pre workout should match");
 });
 
 // --- hasLogTrigger: must NOT match future tense (removed in this revision) ---
-test("hasLogTrigger: 'I'll have chicken later' does NOT match", () => {
+test("hasLogTrigger: 'I'll have chicken later' does NOT match", async () => {
   assert.ok(!HAS_LOG_TRIGGER.test("i'll have chicken later"), "future i'll have must be removed from trigger");
 });
-test("hasLogTrigger: 'I will have rice for dinner' — dinner still matches but isFuturePlanning blocks gate", () => {
+test("hasLogTrigger: 'I will have rice for dinner' — dinner still matches but isFuturePlanning blocks gate", async () => {
   // hasLogTrigger matches 'dinner', but IS_FUTURE_PLANNING catches 'i will have' → gate still blocks
   assert.ok(IS_FUTURE_PLANNING.test("i will have rice for dinner"), "i will have must be caught by future planning guard");
   assert.ok(!wouldLog("I will have rice for dinner", 1), "full gate must block future planning even when log trigger fires");
 });
-test("hasLogTrigger: 'gonna have chicken tonight' does NOT match", () => {
+test("hasLogTrigger: 'gonna have chicken tonight' does NOT match", async () => {
   assert.ok(!HAS_LOG_TRIGGER.test("gonna have chicken tonight"), "gonna have must be removed");
 });
-test("hasLogTrigger: 'going to have rice and chicken' does NOT match", () => {
+test("hasLogTrigger: 'going to have rice and chicken' does NOT match", async () => {
   assert.ok(!HAS_LOG_TRIGGER.test("going to have rice and chicken"), "going to have must be removed");
 });
 
 // --- isFuturePlanning: must match planning/shopping intent ---
-test("isFuturePlanning: 'I need to buy eggs and chicken' matches", () => {
+test("isFuturePlanning: 'I need to buy eggs and chicken' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("i need to buy eggs and chicken"), "need to buy should be planning");
 });
-test("isFuturePlanning: 'I'll have chicken and rice for dinner' matches", () => {
+test("isFuturePlanning: 'I'll have chicken and rice for dinner' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("i'll have chicken and rice for dinner"), "i'll have should be planning");
 });
-test("isFuturePlanning: 'going to have dinner tonight' matches", () => {
+test("isFuturePlanning: 'going to have dinner tonight' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("going to have dinner tonight"), "going to have should be planning");
 });
-test("isFuturePlanning: 'want to eat rice tonight' matches", () => {
+test("isFuturePlanning: 'want to eat rice tonight' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("want to eat rice tonight"), "want to eat should be planning");
 });
-test("isFuturePlanning: 'planning to have fish for dinner' matches", () => {
+test("isFuturePlanning: 'planning to have fish for dinner' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("planning to have fish for dinner"), "planning to have should be planning");
 });
-test("isFuturePlanning: 'gonna have breakfast soon' matches", () => {
+test("isFuturePlanning: 'gonna have breakfast soon' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("gonna have breakfast soon"), "gonna have should be planning");
 });
-test("isFuturePlanning: 'need to get some oats from the shop' matches", () => {
+test("isFuturePlanning: 'need to get some oats from the shop' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("need to get some oats from the shop"), "need to get should be planning");
 });
-test("isFuturePlanning: 'thinking of having chicken for dinner' matches", () => {
+test("isFuturePlanning: 'thinking of having chicken for dinner' matches", async () => {
   assert.ok(IS_FUTURE_PLANNING.test("thinking of having chicken for dinner"), "thinking of having should be planning");
 });
 
 // --- isFuturePlanning: must NOT block real past-eating logs ---
-test("isFuturePlanning: 'I had chicken and rice for lunch' does NOT match", () => {
+test("isFuturePlanning: 'I had chicken and rice for lunch' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("i had chicken and rice for lunch"), "real log must not be planning");
 });
-test("isFuturePlanning: 'just ate oats and eggs' does NOT match", () => {
+test("isFuturePlanning: 'just ate oats and eggs' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("just ate oats and eggs"), "just ate must not be planning");
 });
-test("isFuturePlanning: 'for breakfast I ate pap and eggs' does NOT match", () => {
+test("isFuturePlanning: 'for breakfast I ate pap and eggs' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("for breakfast i ate pap and eggs"), "for breakfast ate must not be planning");
 });
-test("isFuturePlanning: 'lunch was rice and mince' does NOT match", () => {
+test("isFuturePlanning: 'lunch was rice and mince' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("lunch was rice and mince"), "lunch was must not be planning");
 });
-test("isFuturePlanning: 'pap and wors' does NOT match", () => {
+test("isFuturePlanning: 'pap and wors' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("pap and wors"), "bare food must not be planning");
 });
-test("isFuturePlanning: 'post workout shake and banana' does NOT match", () => {
+test("isFuturePlanning: 'post workout shake and banana' does NOT match", async () => {
   assert.ok(!IS_FUTURE_PLANNING.test("post workout shake and banana"), "post workout must not be planning");
 });
 
 // --- Full gate: should LOG (true positives) ---
-test("gate LOGS: 'I had chicken and rice for lunch' (past tense + food)", () => {
+test("gate LOGS: 'I had chicken and rice for lunch' (past tense + food)", async () => {
   assert.ok(wouldLog("I had chicken and rice for lunch", 2), "past meal should log");
 });
-test("gate LOGS: 'pap and wors' (2 foods, directFoodScan)", () => {
+test("gate LOGS: 'pap and wors' (2 foods, directFoodScan)", async () => {
   assert.ok(wouldLog("pap and wors", 2), "bare 2-food message should log");
 });
-test("gate LOGS: 'rice and chicken' (2 foods, directFoodScan)", () => {
+test("gate LOGS: 'rice and chicken' (2 foods, directFoodScan)", async () => {
   assert.ok(wouldLog("rice and chicken", 2), "bare 2-food message should log");
 });
-test("gate LOGS: '2 eggs and toast' (quantity + food, directFoodScan)", () => {
+test("gate LOGS: '2 eggs and toast' (quantity + food, directFoodScan)", async () => {
   assert.ok(wouldLog("2 eggs and toast", 2), "quantity + food should log");
 });
-test("gate LOGS: 'for dinner I ate chicken breast' (for dinner + ate)", () => {
+test("gate LOGS: 'for dinner I ate chicken breast' (for dinner + ate)", async () => {
   assert.ok(wouldLog("for dinner I ate chicken breast", 1), "for dinner + ate should log");
 });
-test("gate LOGS: 'breakfast was oats and milk' (breakfast was)", () => {
+test("gate LOGS: 'breakfast was oats and milk' (breakfast was)", async () => {
   assert.ok(wouldLog("breakfast was oats and milk", 2), "breakfast was should log");
 });
-test("gate LOGS: 'just ate a bowl of mielie pap with stew' (just ate)", () => {
+test("gate LOGS: 'just ate a bowl of mielie pap with stew' (just ate)", async () => {
   assert.ok(wouldLog("just ate a bowl of mielie pap with stew", 2), "just ate should log");
 });
-test("gate LOGS: 'lunch was rice, tuna and eggs' (meal label + foods)", () => {
+test("gate LOGS: 'lunch was rice, tuna and eggs' (meal label + foods)", async () => {
   assert.ok(wouldLog("lunch was rice, tuna and eggs", 3), "lunch was with foods should log");
 });
-test("gate LOGS: 'post workout: protein shake and banana' (post workout)", () => {
+test("gate LOGS: 'post workout: protein shake and banana' (post workout)", async () => {
   assert.ok(wouldLog("post workout: protein shake and banana", 2), "post workout should log");
 });
-test("gate LOGS: 'oats and eggs' (2 foods, directFoodScan)", () => {
+test("gate LOGS: 'oats and eggs' (2 foods, directFoodScan)", async () => {
   assert.ok(wouldLog("oats and eggs", 2), "oats and eggs should log");
 });
 
 // --- Full gate: must NOT LOG (false positives — the known failure patterns) ---
-test("gate BLOCKS: 'I need to buy eggs and chicken' (shopping intent)", () => {
+test("gate BLOCKS: 'I need to buy eggs and chicken' (shopping intent)", async () => {
   assert.ok(!wouldLog("I need to buy eggs and chicken", 2), "shopping intent must not log");
 });
-test("gate BLOCKS: 'I'll have chicken and rice for dinner' (future tense)", () => {
+test("gate BLOCKS: 'I'll have chicken and rice for dinner' (future tense)", async () => {
   assert.ok(!wouldLog("I'll have chicken and rice for dinner", 2), "future tense must not log");
 });
-test("gate BLOCKS: 'going to have rice tonight' (future tense)", () => {
+test("gate BLOCKS: 'going to have rice tonight' (future tense)", async () => {
   assert.ok(!wouldLog("going to have rice tonight", 1), "going to have must not log");
 });
-test("gate BLOCKS: 'want to eat rice and chicken for lunch' (planning)", () => {
+test("gate BLOCKS: 'want to eat rice and chicken for lunch' (planning)", async () => {
   assert.ok(!wouldLog("want to eat rice and chicken for lunch", 2), "want to eat must not log");
 });
-test("gate BLOCKS: 'planning to have chicken tomorrow' (planning)", () => {
+test("gate BLOCKS: 'planning to have chicken tomorrow' (planning)", async () => {
   assert.ok(!wouldLog("planning to have chicken tomorrow", 1), "planning to have must not log");
 });
-test("gate BLOCKS: 'should I eat eggs or oats?' (question)", () => {
+test("gate BLOCKS: 'should I eat eggs or oats?' (question)", async () => {
   assert.ok(!wouldLog("should I eat eggs or oats?", 2), "question must not log");
 });
-test("gate BLOCKS: 'is chicken good for weight loss?' (question)", () => {
+test("gate BLOCKS: 'is chicken good for weight loss?' (question)", async () => {
   assert.ok(!wouldLog("is chicken good for weight loss?", 1), "question must not log");
 });
-test("gate BLOCKS: 'what should I have for breakfast?' (question)", () => {
+test("gate BLOCKS: 'what should I have for breakfast?' (question)", async () => {
   assert.ok(!wouldLog("what should I have for breakfast?", 0), "question must not log");
 });
-test("gate BLOCKS: 'I need to get oats and eggs from checkers' (shopping)", () => {
+test("gate BLOCKS: 'I need to get oats and eggs from checkers' (shopping)", async () => {
   assert.ok(!wouldLog("I need to get oats and eggs from checkers", 2), "shopping errand must not log");
 });
-test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", () => {
+test("gate BLOCKS: 'thinking of having chicken and rice tonight' (planning)", async () => {
   assert.ok(!wouldLog("thinking of having chicken and rice tonight", 2), "thinking of having must not log");
 });
 
 // --- Substantive nutritional questions must NOT silently log (foodLogOverride guard) ---
 // These contain a real eating verb ("I had") AND food, so the old helper logged them and
 // dropped the question. The real fix: foodLogOverride excludes substantive questions.
-test("gate BLOCKS: 'I had 2 eggs, is that enough protein?' (eaten food + question — must answer, not log)", () => {
+test("gate BLOCKS: 'I had 2 eggs, is that enough protein?' (eaten food + question — must answer, not log)", async () => {
   assert.ok(!wouldLog("I had 2 eggs, is that enough protein?", 1), "nutritional question must not silently log the eggs");
 });
-test("gate BLOCKS: 'I had chicken and rice, is that enough?' (eaten food + 'is that enough')", () => {
+test("gate BLOCKS: 'I had chicken and rice, is that enough?' (eaten food + 'is that enough')", async () => {
   assert.ok(!wouldLog("I had chicken and rice, is that enough?", 2), "'is that enough' question must not log");
 });
-test("gate BLOCKS: 'does chicken and rice have protein' (does-prefix nutrition question)", () => {
+test("gate BLOCKS: 'does chicken and rice have protein' (does-prefix nutrition question)", async () => {
   assert.ok(!wouldLog("does chicken and rice have protein", 2), "'does ... have protein' question must not log");
 });
-test("gate BLOCKS: 'how much protein in 2 eggs and toast' (how much question)", () => {
+test("gate BLOCKS: 'how much protein in 2 eggs and toast' (how much question)", async () => {
   assert.ok(!wouldLog("how much protein in 2 eggs and toast", 2), "'how much' question must not log");
 });
 
 // --- Frustration must NOT log even with food words present (isFrustration guard) ---
-test("gate BLOCKS: 'this is nonsense, wrong again' (pure frustration, no eating verb)", () => {
+test("gate BLOCKS: 'this is nonsense, wrong again' (pure frustration, no eating verb)", async () => {
   assert.ok(!wouldLog("this is nonsense, wrong again with the rice", 1), "frustration without eating verb must not log");
 });
 // But frustration phrased as a correction of a logged meal SHOULD still log:
-test("gate LOGS: 'no that's wrong, I had chicken not beef' (correction with eating verb)", () => {
+test("gate LOGS: 'no that's wrong, I had chicken not beef' (correction with eating verb)", async () => {
   assert.ok(wouldLog("no that's wrong, I had chicken not beef", 2), "meal correction must still log despite frustration words");
 });
 
 // --- directFoodScan: exact-vs-fuzzy match modelling (food-context.ts requires exactFoodCount >= 1) ---
 // A bare food message with only FUZZY matches (exactFoodCount=0) must NOT auto-log — a guess
 // is never enough evidence to write to the food log without an eating verb.
-test("gate BLOCKS: 'something with mince' (2 fuzzy, 0 exact — no auto-log on a guess)", () => {
+test("gate BLOCKS: 'something with mince' (2 fuzzy, 0 exact — no auto-log on a guess)", async () => {
   assert.ok(!wouldLog("something with mince and stuff", 2, 0), "fuzzy-only matches must not directFoodScan");
 });
-test("gate BLOCKS: bare single fuzzy food (1 fuzzy, 0 exact)", () => {
+test("gate BLOCKS: bare single fuzzy food (1 fuzzy, 0 exact)", async () => {
   assert.ok(!wouldLog("some kind of stew", 1, 0), "single fuzzy match must not directFoodScan");
 });
 // Two EXACT matches with no eating verb SHOULD auto-log (directFoodScan).
-test("gate LOGS: 'rice and chicken' (2 exact, directFoodScan)", () => {
+test("gate LOGS: 'rice and chicken' (2 exact, directFoodScan)", async () => {
   assert.ok(wouldLog("rice and chicken", 2, 2), "two exact bare foods should directFoodScan");
 });
 // One EXACT match alone (no quantity, no verb) must NOT auto-log — needs 2 exact OR a quantity.
-test("gate BLOCKS: 'chicken' (1 exact, no quantity, no verb)", () => {
+test("gate BLOCKS: 'chicken' (1 exact, no quantity, no verb)", async () => {
   assert.ok(!wouldLog("chicken", 1, 1), "single exact food without quantity must not directFoodScan");
 });
 // One EXACT match WITH a quantity word SHOULD auto-log.
-test("gate LOGS: '2 eggs' (1 exact + quantity, directFoodScan)", () => {
+test("gate LOGS: '2 eggs' (1 exact + quantity, directFoodScan)", async () => {
   assert.ok(wouldLog("2 eggs", 1, 1), "single exact food with quantity should directFoodScan");
 });
 
@@ -2251,13 +2251,13 @@ const PERFECT_WEEK = {
   goalType: "fat_loss",
 };
 
-test("score: a perfect week is 100/100", () => {
+test("score: a perfect week is 100/100", async () => {
   const s = computeProgressScore(PERFECT_WEEK);
   assert.equal(s.score, 100, "all components maxed must total 100");
   assert.ok(s.bottleneck.startsWith("None"), "no bottleneck on a perfect week");
 });
 
-test("score: a totally silent week is 0/100", () => {
+test("score: a totally silent week is 0/100", async () => {
   const s = computeProgressScore({
     completedSessions: 0, plannedSessions: 3,
     avgDailyProtein: 0, proteinTarget: 130,
@@ -2269,7 +2269,7 @@ test("score: a totally silent week is 0/100", () => {
   assert.equal(s.score, 0, "nothing logged must score 0");
 });
 
-test("score: never exceeds 100 even when metrics beat target", () => {
+test("score: never exceeds 100 even when metrics beat target", async () => {
   const s = computeProgressScore({
     ...PERFECT_WEEK,
     completedSessions: 6, avgDailyProtein: 220, avgSteps: 18000,
@@ -2279,7 +2279,7 @@ test("score: never exceeds 100 even when metrics beat target", () => {
 
 // THE retention case: weight is flat (bad scale read) but habits are strong.
 // The score must stay high so a flat scale never reads as failure.
-test("score: scale flat but habits strong still scores high (retention case)", () => {
+test("score: scale flat but habits strong still scores high (retention case)", async () => {
   const s = computeProgressScore({
     completedSessions: 3, plannedSessions: 3,
     avgDailyProtein: 125, proteinTarget: 130,
@@ -2291,7 +2291,7 @@ test("score: scale flat but habits strong still scores high (retention case)", (
   assert.ok(s.score >= 80, `flat-scale-but-consistent should stay >=80, got ${s.score}`);
 });
 
-test("score: identifies the single lowest area as the bottleneck", () => {
+test("score: identifies the single lowest area as the bottleneck", async () => {
   // Everything strong except steps (0 logged) → steps is the bottleneck.
   const s = computeProgressScore({
     completedSessions: 3, plannedSessions: 3,
@@ -2304,13 +2304,13 @@ test("score: identifies the single lowest area as the bottleneck", () => {
   assert.equal(s.bottleneck, "Steps", "the empty steps area must be named the bottleneck");
 });
 
-test("score: recomposition rewards a flat weight (goal-aware trend)", () => {
+test("score: recomposition rewards a flat weight (goal-aware trend)", async () => {
   const recompFlat = computeProgressScore({ ...PERFECT_WEEK, goalType: "recomposition", weightChangeKg: 0.1 });
   const recompBig  = computeProgressScore({ ...PERFECT_WEEK, goalType: "recomposition", weightChangeKg: 3.0 });
   assert.ok(recompFlat.score > recompBig.score, "recomp should score a stable weight above a big swing");
 });
 
-test("score: muscle_gain rewards gaining, fat_loss rewards losing (same change, opposite credit)", () => {
+test("score: muscle_gain rewards gaining, fat_loss rewards losing (same change, opposite credit)", async () => {
   const gaining = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: 0.4 });
   const losingOnBulk = computeProgressScore({ ...PERFECT_WEEK, goalType: "muscle_gain", weightChangeKg: -0.4 });
   assert.ok(gaining.score > losingOnBulk.score, "muscle_gain must credit a gain over a loss");
@@ -2325,36 +2325,36 @@ const ACTIVE_ON_TRACK = {
   subscriptionStatus: "active", plannedSessionsPerWeek: 3, workoutsLast7: 3,
 };
 
-test("triage: safety escalation is always red, beats everything", () => {
+test("triage: safety escalation is always red, beats everything", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, hasOpenUrgentEscalation: true });
   assert.equal(t.level, "red");
   assert.match(t.reason, /escalation/i);
 });
-test("triage: cancelled subscription is red (win-back)", () => {
+test("triage: cancelled subscription is red (win-back)", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, subscriptionStatus: "cancelled" });
   assert.equal(t.level, "red");
 });
-test("triage: silent 5+ days is red", () => {
+test("triage: silent 5+ days is red", async () => {
   assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 6 }).level, "red");
 });
-test("triage: quiet 2-4 days is yellow", () => {
+test("triage: quiet 2-4 days is yellow", async () => {
   assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 3 }).level, "yellow");
 });
-test("triage: active but missing most sessions is yellow", () => {
+test("triage: active but missing most sessions is yellow", async () => {
   assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: 1, workoutsLast7: 0 }).level, "yellow");
 });
-test("triage: active and on track is green", () => {
+test("triage: active and on track is green", async () => {
   assert.equal(computeClientRisk(ACTIVE_ON_TRACK).level, "green");
 });
-test("triage: brand-new signup with no messages yet is green (onboarding, not silent)", () => {
+test("triage: brand-new signup with no messages yet is green (onboarding, not silent)", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: null, daysSinceSignup: 0 });
   assert.equal(t.level, "green");
 });
-test("triage: old account that never engaged is red", () => {
+test("triage: old account that never engaged is red", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, daysSinceActive: null, daysSinceSignup: 10 });
   assert.equal(t.level, "red");
 });
-test("triage: sortByRisk puts red first, then most-silent within a level", () => {
+test("triage: sortByRisk puts red first, then most-silent within a level", async () => {
   const mk = (level: "red"|"yellow"|"green", days: number|null) => ({ triage: { level, reason: "", nextAction: "" }, daysSinceActive: days });
   const sorted = sortByRisk([mk("green", 0), mk("red", 2), mk("yellow", 1), mk("red", 8)]);
   assert.equal(sorted[0].triage.level, "red");
@@ -2362,20 +2362,20 @@ test("triage: sortByRisk puts red first, then most-silent within a level", () =>
   assert.equal(sorted[3].triage.level, "green");
 });
 // Friction Monitor — a client can be active every day yet fighting the bot; the queue must see it.
-test("triage: active-but-fighting-the-bot (4+ friction) is RED even with 0 days silent", () => {
+test("triage: active-but-fighting-the-bot (4+ friction) is RED even with 0 days silent", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 5 });
   assert.equal(t.level, "red");
   assert.match(t.reason, /fighting the bot/i);
 });
-test("triage: mild friction (2-3) on an otherwise-green client is yellow", () => {
+test("triage: mild friction (2-3) on an otherwise-green client is yellow", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 2 });
   assert.equal(t.level, "yellow");
   assert.match(t.reason, /rough moments/i);
 });
-test("triage: a stray single correction (friction 1) does NOT flag — stays green", () => {
+test("triage: a stray single correction (friction 1) does NOT flag — stays green", async () => {
   assert.equal(computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 1 }).level, "green");
 });
-test("triage: safety still beats heavy friction", () => {
+test("triage: safety still beats heavy friction", async () => {
   const t = computeClientRisk({ ...ACTIVE_ON_TRACK, frictionLast7: 9, hasOpenUrgentEscalation: true });
   assert.match(t.reason, /escalation/i);
 });
@@ -2447,7 +2447,7 @@ test("home-workout: inventory vision prompt asks for the specific equipment word
 // user"; tester: "it talks in calories and I don't understand calories").
 test("food-log: a wellness client's reply carries NO calorie/gram numbers, coaches the habit", async () => {
   const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
-  const reply = buildFoodLogReply({
+  const reply = await buildFoodLogReply({
     foodLines: "🍗 Chicken and pap", mealLabel: "lunch", totalMealCals: 600, totalMealProtein: 35,
     runningCals: 1200, runningProtein: 60, calorieTarget: 0, proteinTarget: 0, prevCals: 600,
     user: { goalType: "general", name: "Lerato" },
@@ -2459,7 +2459,7 @@ test("food-log: a wellness client's reply carries NO calorie/gram numbers, coach
 });
 test("food-log: a fat-loss client does NOT take the wellness branch (macro path unchanged)", async () => {
   const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
-  const reply = buildFoodLogReply({
+  const reply = await buildFoodLogReply({
     foodLines: "🍗 Chicken and pap", mealLabel: "lunch", totalMealCals: 600, totalMealProtein: 35,
     runningCals: 1200, runningProtein: 60, calorieTarget: 1900, proteinTarget: 150, prevCals: 600,
     user: { goalType: "fat_loss", name: "Sipho" },
@@ -4921,8 +4921,8 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
       calorieTarget: 2860, proteinTarget: 185, prevCals: 1631,
       user: { goalType: "muscle_gain", calorieTarget: 2860, proteinTarget: 185, profileNotes: "numbers:full" },
     };
-    const withCard = buildFoodLogReply({ ...base, cardComing: true });
-    const withoutCard = buildFoodLogReply({ ...base, cardComing: false });
+    const withCard = await buildFoodLogReply({ ...base, cardComing: true });
+    const withoutCard = await buildFoodLogReply({ ...base, cardComing: false });
 
     // The log confirmation survives either way — the client must always see what was recorded.
     for (const r of [withCard, withoutCard]) {
