@@ -336,6 +336,16 @@ const CASES: Case[] = [
     expect: [/kcal|calorie/i, /1[,\s.]?800|target/i] },
   { name: "progress: my progress", msg: "my progress",
     expect: [/progress|week|log|start/i] },
+  // TODAY'S PROGRESS MUST BE DETERMINISTIC (2026-07-28 live: it found no owner, fell through to
+  // the model, and the model then produced its OWN numbers about the client's day — the one
+  // thing that must never happen. It is also the message someone taps before sharing, so it
+  // gets the card, not a paragraph ending in "What do you think?").
+  { name: "progress: today's progress is TODAY and deterministic", msg: "Today's progress",
+    expect: [/Today so far|No food logged yet today/i, /protein/i], reject: [/what do you think/i, /how about some/i] },
+  { name: "progress: progress today", msg: "progress today",
+    expect: [/Today so far|No food logged yet today/i], reject: [/what do you think/i] },
+  { name: "progress: how's my day", msg: "how's my day",
+    expect: [/Today so far|no food logged/i], reject: [/what do you think/i] },
 
   // ── GOAL CHANGE ─────────────────────────────────────────────────────────
   { name: "goal: canonical phrasing updates with targets", msg: "change my goal to muscle gain",

@@ -31,10 +31,22 @@ export interface AchievementCardData {
   sub?: string;
 }
 
-/** Where a shared screenshot sends people. Configurable so it can never go stale in code. */
+/**
+ * Where a shared screenshot sends people.
+ *
+ * NOT `APP_URL` (2026-07-28 live: the first real card went out reading
+ * "kamlife-coach-production.up.railway.app"). APP_URL is where Twilio fetches media from — an
+ * infrastructure address that changes with the host. This is the line a stranger reads off
+ * somebody's phone and types in, so it is the brand's own domain, set separately and hardcoded
+ * to the right default rather than inherited from wherever we happen to be deployed.
+ */
+export const BRAND_DOMAIN = "kamlifecoach.co.za";
+
 function publicAddress(): string {
-  const raw = (process.env.APP_URL || "kamlifecoach.co.za").trim();
-  return raw.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  const raw = (process.env.BRAND_DOMAIN || BRAND_DOMAIN).trim();
+  const clean = raw.replace(/^https?:\/\//i, "").replace(/\/$/, "");
+  // Never let an infrastructure hostname reach a card a client might share.
+  return /railway|herokuapp|vercel\.app|onrender|localhost|\d+\.\d+\.\d+\.\d+/i.test(clean) ? BRAND_DOMAIN : clean;
 }
 
 export function renderAchievementCard(d: AchievementCardData): Buffer {

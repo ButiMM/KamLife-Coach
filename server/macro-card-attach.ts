@@ -268,6 +268,22 @@ export function distinctHint(hint: string, nextMove: string): string {
 }
 
 /**
+ * Will this log produce an ACHIEVEMENT card rather than the usual macro card?
+ *
+ * The caller needs to know, because when the card carries the milestone the text celebration
+ * must stand down — otherwise a client gets the same congratulation twice, once in a paragraph
+ * and once in a picture (2026-07-28 live, the 30-day log).
+ *
+ * Deliberately a PURE re-check rather than a flag left behind by the last render: two clients
+ * logging in the same second would read each other's flag, and the bug would be invisible until
+ * somebody got a stranger's celebration.
+ */
+export function achievementCardShown(user: any, streak: number | undefined, marker: string): boolean {
+  if (!marker || !streak) return false;
+  return achievementFor({ firstName: firstNameOf(user), streak }) !== null;
+}
+
+/**
  * THE CARD OR THE NUMBERS — for the client who asked for numbers.
  *
  * (2026-07-28, found by the day-one journey test.) The card is fail-open by design: no APP_URL,

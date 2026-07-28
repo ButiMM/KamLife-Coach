@@ -4870,6 +4870,48 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// THE SHARE MOMENT (2026-07-28, founder, from two live screenshots). Three separate failures on
+// one screen: the card carried an infrastructure hostname, the milestone was congratulated twice,
+// and "Today's progress" reached the model — which then produced its own numbers about his day.
+test("achievement card: a shared screenshot never carries an infrastructure hostname", async () => {
+  const { renderAchievementCard, BRAND_DOMAIN } = await import("../server/achievement-card");
+  // The live card read "kamlife-coach-production.up.railway.app". APP_URL is where Twilio
+  // fetches media; it is not the line a stranger types into a phone.
+  const prevApp = process.env.APP_URL, prevBrand = process.env.BRAND_DOMAIN;
+  process.env.APP_URL = "https://kamlife-coach-production.up.railway.app";
+  delete process.env.BRAND_DOMAIN;
+  const png = renderAchievementCard({ figure: "30", unit: "days in a row", line: "Kam logged food 30 days in a row." });
+  assert.ok(Buffer.isBuffer(png) && png.length > 5000);
+
+  // A deploy host set as the brand domain is refused too — a card is forever, a host is not.
+  process.env.BRAND_DOMAIN = "some-app.up.railway.app";
+  assert.ok(Buffer.isBuffer(renderAchievementCard({ figure: "7", unit: "days", line: "x" })));
+  assert.equal(BRAND_DOMAIN, "kamlifecoach.co.za");
+  process.env.APP_URL = prevApp; if (prevBrand) process.env.BRAND_DOMAIN = prevBrand; else delete process.env.BRAND_DOMAIN;
+});
+
+test("one celebration, not two: the card carries the milestone, the text stands down", async () => {
+  const { getFoodStreakCelebration, shortStreakNote } = await import("../server/handlers/food-scanner");
+  const { achievementCardShown } = await import("../server/macro-card-attach");
+  const user = { name: "Kam Mokgokolo" };
+  const marker = " [MEDIA:https://x/card/abc.png]";
+
+  // 30 days is an achievement-card milestone → the long paragraph must not also fire.
+  assert.equal(achievementCardShown(user, 30, marker), true);
+  const short = shortStreakNote(30, "Kam Mokgokolo");
+  assert.ok(short.length < 60, `the stand-down line must be short, got: ${short}`);
+  assert.match(short, /30 days straight/);
+  assert.ok(getFoodStreakCelebration(30, "Kam").length > short.length * 3, "the long version is for when there is no card");
+
+  // 3 and 5 days are text-only milestones — no card fires, so the full paragraph still does the
+  // work. The stand-down is decided at the call site by achievementCardShown, never guessed.
+  assert.equal(achievementCardShown(user, 3, marker), false);
+  assert.ok(getFoodStreakCelebration(3, "Kam").length > 40, "day 3 keeps its full message");
+  assert.equal(shortStreakNote(4, "Kam"), "", "a non-milestone day says nothing either way");
+  // No card marker at all → never stand down, whatever the streak.
+  assert.equal(achievementCardShown(user, 30, ""), false);
+});
+
 // DATA EXPORT (2026-07-28) — POPIA right of access, and the hedge against living inside Meta's
 // app. Deletion existed; access did not, while the landing page said "POPIA protected".
 test("asksForExport: catches the real phrasings, never the deletion one", async () => {

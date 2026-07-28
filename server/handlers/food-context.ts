@@ -12,11 +12,11 @@ import { type SAFood } from "../foods";
 import {
   scanForSAFoods, recomputeTodayFoodTotals, buildFoodLogReply, escapeRegex,
   portionDefaultCount,
-  computeFoodLogStreak, getFoodStreakCelebration,
+  computeFoodLogStreak, getFoodStreakCelebration, shortStreakNote,
   hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
-import { macroCardMarker, cardOrTotals } from "../macro-card-attach";
+import { macroCardMarker, cardOrTotals, achievementCardShown } from "../macro-card-attach";
 import { estimateCarbsFat } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
@@ -1275,11 +1275,11 @@ export async function handleFoodContext(ctx: {
       const guiltNote = hasGuiltSignal ? `\n\n_No judgment — it's logged and counted. One off-plan meal doesn't undo weeks of work. Your next meal is the reset._` : "";
       const activationNote = await firstActionCelebration(user, phone, "meal");
 
-      // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar
-      // image on the log (marker stripped + sent as media downstream). Wellness clients get
-      // "" — no card forced on them. Fail-open — a card never blocks the text reply.
+      // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar image on the log (marker stripped + sent as media downstream). Wellness clients get "" — no card forced on them. Fail-open.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
       const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
+      // ONE CELEBRATION, NOT TWO (2026-07-28 live: the 30-day paragraph landed directly above a 30-day card saying the same thing). When the card carries the moment, the text stands down to a line.
+      const streakLine = achievementCardShown(user, streakCelebration ? foodStreak : undefined, macroCard) ? shortStreakNote(foodStreak, user.name || "") : streakCelebration;
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
       // Day-dump: a planned meal the client mentioned but hasn't eaten yet — captured, not counted.
       const plannedNote = plannedSegs.length > 0
@@ -1290,7 +1290,7 @@ export async function handleFoodContext(ctx: {
       const droppedNote = dn ? `\n\n${dn}` : "";
 
       // REPLY CONTRACT (REPLY_CONTRACT=on): compact the FULLY-ASSEMBLED reply — menus append after the body.
-      const assembled = `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}`;
+      const assembled = `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakLine}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}`;
       const contractOn = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message);
       const finalBody = contractOn ? enforceReplyContract(assembled) : assembled;
       return `${finalBody}${droppedNote}${cardOrTotals(macroCard, totalCals, totalProtein, user)}`;

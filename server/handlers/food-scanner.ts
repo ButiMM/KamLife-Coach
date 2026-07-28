@@ -101,6 +101,19 @@ export function getFoodStreakCelebration(streak: number, name: string): string {
   return FOOD_STREAK_MESSAGES[streak]?.(fn) ?? "";
 }
 
+/**
+ * The one-line version, for when the ACHIEVEMENT CARD is carrying the milestone.
+ *
+ * (2026-07-28 live: the full 30-day paragraph landed directly above a 30-day card saying the
+ * same thing in the same words.) The picture is what they keep and what they forward, so the
+ * text stops competing with it and just points at it.
+ */
+export function shortStreakNote(streak: number, name: string): string {
+  if (!FOOD_STREAK_MESSAGES[streak]) return "";
+  const fn = name.split(" ")[0] || "";
+  return `\n\n${fn ? fn + ", t" : "T"}hat's *${streak} days straight* 👇`;
+}
+
 export function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
