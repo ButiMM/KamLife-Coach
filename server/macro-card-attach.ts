@@ -20,6 +20,7 @@ import { achievementFor, renderAchievementCard, type AchievementCardData } from 
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 import { getNumbersMode } from "./numbers-mode";
+import { cardWillAttach } from "./card-policy";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -193,6 +194,19 @@ export function dayStatusPill(rows: Row[], isBulk: boolean): { text: string; ton
   const cal = r("Calories"), prot = r("Protein");
   const calR = ratio(cal), protHit = !!(prot && prot.current >= prot.target);
 
+  // READ EVERY BAR, NOT TWO OF THEM (2026-07-28 live: a green "On track" pill sat directly above
+  // a RED Fat 94/86g bar on the same card). The comment above this function claimed the verdict
+  // "can never contradict the bars" — it only ever looked at Calories and Protein, so any client
+  // over on carbs or fat got a green light from the loudest element on the card. A verdict that
+  // ignores the evidence beside it is worse than no verdict.
+  const blown = rows.filter(x => x.overIsBad && x.target > 0 && x.current > x.target);
+  if (blown.length > 0 && !(isBulk && blown.every(x => x.label === "Calories"))) {
+    const worst = blown.sort((a, b) => (b.current / b.target) - (a.current / a.target))[0];
+    return worst.label === "Calories"
+      ? { text: "Over today", tone: "bad" }
+      : { text: `${worst.label} over`, tone: "bad" };
+  }
+
   if (isBulk) {
     if (calR < 0.6) return { text: "Eat more", tone: "warn" };
     if (protHit && calR >= 0.9) return { text: "Perfect day", tone: "good" };
@@ -323,9 +337,8 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     // NO CARD FOR A TRIVIAL ITEM (2026-07-28 live: a full four-bar macro card rendered for a
     // 10 kcal black coffee). A card is a moment; spending one on a zero-calorie drink cheapens
     // every other card and costs a render. The log still happens — only the picture is skipped.
-    if ((opts.mealKcal || 0) < 50) return "";
     const base = cardBaseUrl();
-    if (!base) return "";
+    if (!cardWillAttach(opts.user, opts.mealKcal, !!base)) return "";
     const retro = opts.forDate ? isPastSastDay(opts.forDate) : false;
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";

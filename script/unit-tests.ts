@@ -4870,6 +4870,72 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// ONE INSTRUCTION PER REPLY (2026-07-28, founder looking at one real log: "what the hell is going
+// on here?"). That single meal told him to eat a protein meal FIVE times — text head, text
+// assessment, text nudge, card next-move, card footer — from five components that don't know each
+// other exists. And a green "On track" pill sat directly above a RED Fat 94/86g bar.
+{
+  const rows = (o: any) => [
+    { label: "Calories", current: o.cal ?? 2353, target: 2860, unit: "", overIsBad: !o.bulk },
+    { label: "Protein", current: o.prot ?? 149, target: 185, unit: "g", overIsBad: false },
+    { label: "Carbs", current: o.carb ?? 203, target: 337, unit: "g", overIsBad: true },
+    { label: "Fat", current: o.fat ?? 94, target: 86, unit: "g", overIsBad: true },
+  ];
+
+  test("verdict pill: it reads EVERY bar, so green can never sit above red", async () => {
+    const { dayStatusPill } = await import("../server/macro-card-attach");
+    // The exact live card: calories and protein fine, fat blown. It said "On track".
+    const live = dayStatusPill(rows({}), true);
+    assert.equal(live.tone, "bad", "a red bar on the card must not carry a green verdict");
+    assert.match(live.text, /Fat over/i, "and it must name WHICH one, or the client can't act");
+
+    // Carbs over reads the same way.
+    assert.match(dayStatusPill(rows({ fat: 40, carb: 400 }), false).text, /Carbs over/i);
+    // Nothing over → the ordinary verdicts still work.
+    assert.equal(dayStatusPill(rows({ fat: 40, carb: 100, cal: 1200 }), false).text, "On track");
+    // A bulk client is never called "over" merely for eating past their calorie target.
+    assert.equal(dayStatusPill(rows({ fat: 40, carb: 100, cal: 3200 }), true).tone, "good");
+    // …but a bulk client over on FAT is still told so — the bar is red either way.
+    assert.equal(dayStatusPill(rows({ cal: 3200 }), true).tone, "bad");
+  });
+
+  test("card policy: text and card can never both claim the next move", async () => {
+    const { cardWillAttach, CARD_MIN_KCAL } = await import("../server/card-policy");
+    const macro = { goalType: "muscle_gain", calorieTarget: 2860, proteinTarget: 185 };
+
+    assert.equal(cardWillAttach(macro, 722, true), true);
+    assert.equal(cardWillAttach(macro, 10, true), false, "no card for a black coffee");
+    assert.equal(cardWillAttach(macro, 722, false), false, "no APP_URL, no card");
+    // A wellness client never gets a card, so their text must KEEP its instruction.
+    assert.equal(cardWillAttach({ goalType: "general", calorieTarget: 2000, proteinTarget: 120 }, 722, true), false);
+    // No targets → no card, so again the text has to carry the day.
+    assert.equal(cardWillAttach({ goalType: "fat_loss" }, 722, true), false);
+    assert.ok(CARD_MIN_KCAL === 50);
+  });
+
+  test("food reply: the day's instruction appears once, not five times", async () => {
+    const { buildFoodLogReply } = await import("../server/handlers/food-scanner");
+    const base = {
+      foodLines: "• Beef mince\n• Bacon\n• Cream", mealLabel: "Meal total",
+      totalMealCals: 722, totalMealProtein: 61, runningCals: 2353, runningProtein: 149,
+      calorieTarget: 2860, proteinTarget: 185, prevCals: 1631,
+      user: { goalType: "muscle_gain", calorieTarget: 2860, proteinTarget: 185, profileNotes: "numbers:full" },
+    };
+    const withCard = buildFoodLogReply({ ...base, cardComing: true });
+    const withoutCard = buildFoodLogReply({ ...base, cardComing: false });
+
+    // The log confirmation survives either way — the client must always see what was recorded.
+    for (const r of [withCard, withoutCard]) {
+      assert.match(r, /Beef mince/);
+      assert.match(r, /722 kcal/);
+    }
+    // With a card coming, the text stops instructing; the card carries the next move.
+    assert.ok(withCard.length < withoutCard.length, "the card-bearing reply must be the shorter one");
+    // Without a card the client would otherwise get NO guidance, so the day lines stay.
+    assert.ok(withoutCard.length > withCard.length);
+  });
+}
+
 // THE ONE ACTION (2026-07-28, founder: "what is the single thing Coach K should make this person
 // do today?"). This is the coaching. Ordering is the whole design.
 {

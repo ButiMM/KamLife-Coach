@@ -742,6 +742,9 @@ export function buildFoodLogReply(p: {
   userMessage?: string;
   /** the meal was logged to a PAST day (retro) — it must NOT touch TODAY's running total. */
   isRetro?: boolean;
+  /** A card is coming, so the CARD owns the day's instruction and the text stands down.
+   *  See server/card-policy.ts — one meal used to carry this instruction five times. */
+  cardComing?: boolean;
 }): string {
   const {
     foodLines, mealLabel, totalMealCals, totalMealProtein,
@@ -1178,8 +1181,13 @@ export function buildFoodLogReply(p: {
     // a burger a protein meal. junkDominant forces the forward-looking nudge instead.
     const nudge = plainProteinNudge({ proteinRemaining, isMuscleGain, hasGoodProteins: !!hasGoodProteins && !junkDominant });
     const foods = stripFoodLineNumbers(foodLines);
-    return `${gentlePrefix}${plainHead}\n\n*Logged ✅*\n${foods}\n\n${nudge}[BUTTONS:My progress|Today's workout]`;
+    const plainNudge = p.cardComing ? "" : `${nudge}`;
+    return `${gentlePrefix}${plainHead}\n\n*Logged ✅*\n${foods}\n\n${plainNudge}[BUTTONS:My progress|Today's workout]`;
   }
 
-  return `${gentlePrefix}${head}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayAssessment}${addOn}[BUTTONS:My progress|Today's workout]`;
+  // ONE INSTRUCTION PER REPLY (2026-07-28). When a card is coming it carries the next move and
+  // the reason, so the text keeps ONLY the log confirmation and the running total. Sending both
+  // is how a single meal ended up telling the client to eat a protein meal five times over.
+  const dayLines = p.cardComing ? "" : `${dayAssessment}${addOn}`;
+  return `${gentlePrefix}${head}*Food logged ✅*\n\n${foodLines}\n\n*${mealLabel}: ~${totalMealCals} kcal | ~${Math.round(totalMealProtein)}g protein*\n${runningLine}${dayLines}[BUTTONS:My progress|Today's workout]`;
 }

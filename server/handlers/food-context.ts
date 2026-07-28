@@ -16,7 +16,8 @@ import {
   hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
-import { macroCardMarker, cardOrTotals, achievementCardShown } from "../macro-card-attach";
+import { macroCardMarker, cardOrTotals, achievementCardShown, cardBaseUrl } from "../macro-card-attach";
+import { cardWillAttach } from "../card-policy";
 import { estimateCarbsFat } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
@@ -160,7 +161,6 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
 
   const dedupWindow = new Date(Date.now() - 4 * 60 * 1000);
   const rawSlice = params.rawMessage.slice(0, 1000);
-  // Small-hours logs belong to the day that just ended (a 4am "dinner" is last night's).
   const effLoggedAt = effectiveMealLoggedAt(params.loggedAt, params.rawMessage, params.mealLabel);
   const recentDup = await db.select({ id: mealLogs.id })
     .from(mealLogs)
@@ -1242,6 +1242,7 @@ export async function handleFoodContext(ctx: {
 
       const reply = buildFoodLogReply({
         foodLines, mealLabel, totalMealCals: totalCals, totalMealProtein: totalProtein,
+        cardComing: cardWillAttach(user, totalCals, !!cardBaseUrl()),
         runningCals, runningProtein, calorieTarget, proteinTarget, prevCals,
         junkNoteText, hasGoodProteins: goodProteins.length > 0, junkDominant,
         hasCarbs: allAdjustedFoods.some(f => f.category === "carb"),
@@ -1278,14 +1279,11 @@ export async function handleFoodContext(ctx: {
       // BRANDED MACRO CARD (2026-07-21): a macro-goal client gets the orange progress-bar image on the log (marker stripped + sent as media downstream). Wellness clients get "" — no card forced on them. Fail-open.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
       const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
-      // ONE CELEBRATION, NOT TWO (2026-07-28 live: the 30-day paragraph landed directly above a 30-day card saying the same thing). When the card carries the moment, the text stands down to a line.
       const streakLine = achievementCardShown(user, streakCelebration ? foodStreak : undefined, macroCard) ? shortStreakNote(foodStreak, user.name || "") : streakCelebration;
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
-      // Day-dump: a planned meal the client mentioned but hasn't eaten yet — captured, not counted.
       const plannedNote = plannedSegs.length > 0
         ? `\n\n📋 Not logged yet (still coming): *${plannedSegs.join("; ")}*. Reply *ate it* once you've had it and I'll add it.`
         : "";
-      // NEVER SILENTLY DROP a named restaurant meal we couldn't price (2026-07-27).
       const dn = unloggedFoodNotice(message, allAdjustedFoods.map(f => f.name));
       const droppedNote = dn ? `\n\n${dn}` : "";
 
@@ -1336,6 +1334,7 @@ export async function handleFoodContext(ctx: {
         const fallbackReply = buildFoodLogReply({
           foodLines, mealLabel: fbIsDessert ? "Dessert" : fbIsSnack ? "Snack" : "Meal total",
           totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
+          cardComing: cardWillAttach(user, gptFallbackResult.totalKcal, !!cardBaseUrl()),
           runningCals, runningProtein, calorieTarget, proteinTarget, prevCals: fbPrevCals, userMessage: message,
           coachNoteOverride: gptFallbackResult.coachNote || undefined,
           hasGoodProteins: gptFallbackResult.foods.some((f: any) => f.category === "protein"),
@@ -1411,6 +1410,7 @@ export async function handleFoodContext(ctx: {
       const fallbackReply = buildFoodLogReply({
         foodLines, mealLabel: fb2IsDessert ? "Dessert" : fb2IsSnack ? "Snack" : "Meal total",
         totalMealCals: gptFallbackResult.totalKcal, totalMealProtein: gptFallbackResult.totalProtein,
+        cardComing: cardWillAttach(user, gptFallbackResult.totalKcal, !!cardBaseUrl()),
         runningCals, runningProtein, calorieTarget, proteinTarget: user.proteinTarget || 120,
         prevCals: fb2PrevCals, userMessage: message,
         coachNoteOverride: gptFallbackResult.coachNote || undefined,
