@@ -405,10 +405,15 @@ export interface JobRunInfo {
   lastError: string | null;
   runs: number;
   failures: number;
+  /** The cron expression it was registered with — job-health derives the expected cadence from
+   *  this rather than a second table, which would drift out of step with the schedule. */
+  cron?: string;
 }
 export const jobRegistry = new Map<string, JobRunInfo>();
+/** When the process came up — a weekly job hasn't "never run" five minutes after a redeploy. */
+export const schedulerStartedAt = Date.now();
 
-export function recordJobRun(name: string, ok: boolean, durationMs: number, error?: string): void {
+export function recordJobRun(name: string, ok: boolean, durationMs: number, error?: string, cron?: string): void {
   const prev = jobRegistry.get(name);
   jobRegistry.set(name, {
     lastRunAt: new Date().toISOString(),
@@ -417,7 +422,13 @@ export function recordJobRun(name: string, ok: boolean, durationMs: number, erro
     lastError: ok ? null : (error || "unknown").slice(0, 300),
     runs: (prev?.runs || 0) + 1,
     failures: (prev?.failures || 0) + (ok ? 0 : 1),
+    cron: cron || prev?.cron,
   });
+}
+
+/** The registry as job-health wants it. Kept here so callers never touch the Map directly. */
+export function jobSnapshots(): Array<JobRunInfo & { name: string }> {
+  return [...jobRegistry.entries()].map(([name, info]) => ({ name, ...info }));
 }
 
 function resetDeliveryStatsIfNeeded() {

@@ -14,6 +14,8 @@ import { db } from "../db";
 import { chatHistory } from "../../shared/schema";
 import { summarise } from "./reply-defects";
 import { guardStatsLine } from "../malformed-guard";
+import { assessJobs, jobHealthLines } from "../job-health";
+import { jobSnapshots, schedulerStartedAt } from "../scheduler/shared";
 
 /** Plain-language name for each detector, so the report reads like coaching, not like a log. */
 const LABELS: Record<string, string> = {
@@ -64,8 +66,15 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     ? `\n\nThat's every reply on record — nothing further back to scan.`
     : `\n\nSend *audit ${Math.min(20000, limit * 2)}* to scan wider.`;
 
+  // The scheduler block rides along: the founder asks "is it working" once, not three times, and
+  // an overdue job is invisible until a client says the messages stopped (2026-07-28 review).
+  // Computed BEFORE the clean-replies early return — a quiet audit is exactly when a stalled
+  // job is the only bad news there is.
+  const snaps = jobSnapshots();
+  const jobs = jobHealthLines(assessJobs(snaps, Date.now(), Date.now() - schedulerStartedAt), snaps.length);
+
   if (s.byCode.length === 0) {
-    return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies.\n\n✅ No defects detected.\n\nThat means none of the ${Object.keys(LABELS).length} known failure patterns appear. It does not mean the coach is perfect — it means these specific bugs are not recurring.`;
+    return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies.\n\n✅ No defects detected.\n\nThat means none of the ${Object.keys(LABELS).length} known failure patterns appear. It does not mean the coach is perfect — it means these specific bugs are not recurring.\n\n${guardStatsLine()}\n\n${jobs}`;
   }
 
   const lines = s.byCode.map(r => {
@@ -79,5 +88,5 @@ export async function replyAuditCommand(message: string, _user?: unknown): Promi
     ? `\n\n*Worst one — ${LABELS[worst.code] || worst.code}:*\nThey said: _"${ex.in || "(nothing)"}"_\nCoach said: _"${ex.out.replace(/\n/g, " ").slice(0, 160)}"_`
     : "";
 
-  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}${wider}`;
+  return `🔍 *Reply audit*\n\nScanned *${s.scanned}* real replies — *${s.defects}* carry a defect (${pct}%).\n\n${lines}${trend}${example}\n\n${guardStatsLine()}\n\n${jobs}${wider}`;
 }

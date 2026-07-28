@@ -4870,6 +4870,61 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// JOB HEALTH (2026-07-28, engineering review: the scheduler records how long each job took and
+// nothing reads it). At 50 clients the 6am fan-out finishes in seconds; the point is to see the
+// problem months before a client says the messages stopped.
+test("expectedGapHours: reads the cadence off the cron expression, not a second table", async () => {
+  const { expectedGapHours } = await import("../server/job-health");
+  assert.equal(expectedGapHours("* * * * *"), 1 / 60, "every minute");
+  assert.equal(expectedGapHours("*/2 * * * *"), 2 / 60);
+  assert.equal(expectedGapHours("0 * * * *"), 1, "hourly");
+  assert.equal(expectedGapHours("0 4 * * *"), 24, "daily");
+  assert.equal(expectedGapHours("4 4,16 * * *"), 12, "twice a day");
+  assert.equal(expectedGapHours("0 5 * * 1"), 24 * 7, "Mondays only");
+  assert.equal(expectedGapHours("0 8 * * 2,4"), 24 * 3.5, "twice a week");
+  assert.equal(expectedGapHours(undefined), 24, "unknown cadence assumes daily, never zero");
+});
+
+test("assessJobs: catches overdue, slow and failing — and stays quiet otherwise", async () => {
+  const { assessJobs, durationBudgetMs } = await import("../server/job-health");
+  const now = Date.UTC(2026, 6, 28, 12, 0, 0);
+  const ago = (h: number) => new Date(now - h * 3_600_000).toISOString();
+  const base = { lastOk: true as boolean | null, runs: 10, failures: 0, lastDurationMs: 1200 };
+
+  const healthy = assessJobs([
+    { ...base, name: "runMorningCheckin", cron: "0 4 * * *", lastRunAt: ago(8) },
+    { ...base, name: "runWeeklyKpiReport", cron: "0 5 * * 1", lastRunAt: ago(100) },
+  ], now);
+  assert.deepEqual(healthy, [], "a healthy scheduler must produce no noise at all");
+
+  const found = assessJobs([
+    { ...base, name: "runMorningCheckin", cron: "0 4 * * *", lastRunAt: ago(60) },
+    { ...base, name: "runDueReminders", cron: "* * * * *", lastRunAt: ago(0.01), lastDurationMs: 45_000 },
+    { ...base, name: "runBalanceCheck", cron: "0 3 * * *", lastRunAt: ago(2), lastOk: false, failures: 3 },
+  ], now);
+  assert.deepEqual(found.map(f => f.verdict), ["overdue", "failing", "slow"], "worst first");
+  assert.match(found[0].detail, /60h ago/);
+  assert.match(found[2].detail, /45s/);
+
+  // A weekly job is not "never ran" five minutes after a redeploy.
+  const fresh = [{ ...base, name: "runWeeklyKpiReport", cron: "0 5 * * 1", lastRunAt: null }];
+  assert.deepEqual(assessJobs(fresh, now, 10 * 60_000), [], "a restart must not report the whole weekly schedule as broken");
+  assert.equal(assessJobs(fresh, now, 40 * 86_400_000)[0].verdict, "never_ran");
+
+  // The duration budget scales with the cadence — 30s is fine weekly, alarming every minute.
+  assert.ok(durationBudgetMs(1 / 60) < durationBudgetMs(24 * 7));
+});
+
+test("jobHealthLines: silence is the good news", async () => {
+  const { jobHealthLines } = await import("../server/job-health");
+  assert.match(jobHealthLines([], 40), /all 40 jobs on time/);
+  assert.match(jobHealthLines([], 0), /no jobs registered/);
+  const many = Array.from({ length: 9 }, (_, i) => ({ name: `job${i}`, verdict: "slow" as const, detail: "took 90s" }));
+  const out = jobHealthLines(many, 40);
+  assert.match(out, /9 of 40/);
+  assert.match(out, /and 3 more/, "a wall of 9 lines on WhatsApp is unreadable");
+});
+
 // COST CONTROLS FROM THE CFO REVIEW (2026-07-28). Both must fail OPEN — a saving that can break
 // a client's photo or voice note is not a saving.
 test("downscaleForVision: shrinks a big photo, leaves a small one, never throws", async () => {
