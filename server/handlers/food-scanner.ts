@@ -93,7 +93,7 @@ const FOOD_STREAK_MESSAGES: Record<number, (name: string) => string> = {
   10: (n) => `\n\n🔥 *${n}, 10 days straight.* Double figures. The habit is forming — your brain is starting to do this automatically. That's exactly where you want to be.`,
   14: (n) => `\n\n🔥 *${n}, 14 days.* Two weeks of consistent logging. The clients who get results are the clients who do this. You are one of them.`,
   21: (n) => `\n\n🔥 *${n}, 21 days logging.* Three weeks. This is a habit now — not discipline, not willpower. Habit. The data you've built is yours forever.`,
-  30: (n) => `\n\n🏆 *${n}, 30 days.* A full month of food logs. I do not see many people get here. Your consistency record is real — take a moment with that.`,
+  30: (n) => `\n\n🏆 *${n}, 30 days.* A full month of food logs. Thirty days of showing up, including the days you did not feel like it. That is the whole game.`,
 };
 
 export function getFoodStreakCelebration(streak: number, name: string): string {

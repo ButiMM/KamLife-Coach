@@ -178,11 +178,25 @@ export function nextMoveLine(rows: Row[], isBulk: boolean): string {
   return "Nothing left to do — today is done properly";
 }
 
+
+/** Blank the footer when it repeats the next-move line — one instruction per card. */
+export function distinctHint(hint: string, nextMove: string): string {
+  const norm = (x: string) => (x || "").toLowerCase().replace(/[^a-z ]/g, "").trim();
+  const h = norm(hint), n = norm(nextMove);
+  if (!h || !n) return hint;
+  const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
+  return shared >= 3 ? "" : hint;
+}
+
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
  *  logged-at date) makes a RETRO log show that DAY'S totals — e.g. yesterday's card with the
  *  new pizza slices added — instead of today's. */
 export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date }): Promise<string> {
   try {
+    // NO CARD FOR A TRIVIAL ITEM (2026-07-28 live: a full four-bar macro card rendered for a
+    // 10 kcal black coffee). A card is a moment; spending one on a zero-calorie drink cheapens
+    // every other card and costs a render. The log still happens — only the picture is skipped.
+    if ((opts.mealKcal || 0) < 50) return "";
     const base = cardBaseUrl();
     if (!base) return "";
     const retro = opts.forDate ? isPastDay(opts.forDate) : false;
@@ -194,7 +208,9 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
       pill: `+${Math.max(0, Math.round(opts.mealKcal || 0))} cal`,
       rows: t.rows,
       nextMove: nextMoveLine(t.rows, t.isBulk),
-      hint: coachingHint(t.rows, t.isBulk),
+      // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
+      // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
+      hint: distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
@@ -217,7 +233,9 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
       pill: `${kcal} cal in`,
       rows: t.rows,
       nextMove: nextMoveLine(t.rows, t.isBulk),
-      hint: coachingHint(t.rows, t.isBulk),
+      // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
+      // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
+      hint: distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {

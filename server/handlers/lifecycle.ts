@@ -1804,7 +1804,12 @@ export async function handleLifecycle(ctx: {
   // Fires only when: (a) clear food-log trigger word present, (b) SA database found no foods,
   // (c) not a question/frustration, (d) not already handled by water/steps/braai/restaurant/etc.
   // Provide instant format guidance instead of sending to GPT (which may return generic advice).
-  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration;
+  // ASKING ABOUT DATA IS NOT LOGGING FOOD (2026-07-28 live: "Today's meal progress" contains the
+  // word "meal", so it tripped this gate and came back as «I don't have *today's* in my SA
+  // database — try "I had today's for lunch"». A request to SEE the day was answered as an
+  // unknown food.) A progress/summary/status request never logs anything.
+  const isDataRequest = /\b(progress|summary|total|totals|status|report|so far|how am i|where am i|my (?:day|week|numbers|stats|card)|show me|what have i|recap)\b/i.test(m);
+  const seemsFoodLogAttempt = hasLogTrigger && !hasActualFood && !isQuestion && !isFrustration && !isDataRequest;
   if (seemsFoodLogAttempt) {
     // Compute candidate word count — if very short we can't do much
     const wordCount = m.split(/\s+/).length;
