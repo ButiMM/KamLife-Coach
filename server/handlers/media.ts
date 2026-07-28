@@ -43,6 +43,8 @@ import { firstActionCelebration } from "../activation";
 import { sendWhatsApp } from "../scheduler/shared";
 import { coachGymMachineFromPhoto, coachHomeEquipmentFromPhoto } from "./equipment-vision";
 import { macroCardMarker, mealTitleFromReply } from "../macro-card-attach";
+import { downscaleForVision } from "../image-downscale";
+import { checkVoiceLength } from "../media-limits";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
 import { commitFoodLog } from "./food-context";
 import { itemsFromVisionText } from "../serving-units";
@@ -82,9 +84,7 @@ export function clearVoiceFailure(userId: string): void {
   voiceFailureMap.delete(userId);
 }
 
-// ============================================================
 // WORKOUT IDENTIFICATION (TikTok/IG screenshots & video frames)
-// ============================================================
 
 interface IdentifiedExercise {
   name: string;
@@ -214,8 +214,11 @@ export async function handleMediaMessage(ctx: {
       }
       const imgDownloadMs = Date.now() - imgDownloadStart;
       console.log(`[MEDIA][${mediaTrace}] image_download_ok bytes=${buffer.byteLength} ms=${imgDownloadMs}`);
-      const base64 = Buffer.from(buffer).toString("base64");
-      const contentType = imageResponse.headers.get("content-type") || "image/jpeg";
+      // DOWNSCALE ONCE, HERE (2026-07-28, CFO review): vision charges per tile, so a 4000px phone photo costs several times a 1024px one and reads a plate no better. Doing it at the download means every reader below gets the cheap image for free. Fail-open.
+      const shrunk = await downscaleForVision(Buffer.from(buffer).toString("base64"), imageResponse.headers.get("content-type") || "image/jpeg");
+      if (shrunk.resized) console.log(`[MEDIA][${mediaTrace}] image_downscaled ${shrunk.fromEdge}px -> ${shrunk.toEdge}px bytes=${Buffer.byteLength(shrunk.b64, "base64")}`);
+      const base64 = shrunk.b64;
+      const contentType = shrunk.ct;
       const clientName = user.name || "there";
       const goal = user.goalType || "fat_loss";
 
@@ -262,8 +265,7 @@ export async function handleMediaMessage(ctx: {
           if (uncaptionedType === "exercise") {
             const isFormCheckCaption = /\b(form|check|correct|right|wrong|how does|how do i look|am i doing|my form|check my|is this right|watch me|look at me)\b/i.test(message || "");
             if (isFormCheckCaption) {
-              // FORM CHECK from a photo — analyse the movement and give 1-2 plain fixes (2026-07-09: used to refuse; the whole point of remote coaching is to direct
-              // form without touching people). If the model can't judge the angle it says so and asks for a side-on shot — that instruction is in the prompt.
+              // FORM CHECK from a photo — 1-2 plain fixes (2026-07-09: it used to refuse; directing form without touching people IS remote coaching). If the model can't judge the angle it asks for a side-on shot.
               const { system: fSys, user: fUser } = buildFormCheckPrompt({ clientName: user.name || "", exerciseName: extractFormExercise(message || "") });
               const fDecision = selectVisionModel("progress_compare", isCoach ? "active" : user.subscriptionStatus);
               const formReply = await withTimeout("form_check_photo", 15000, () => openai.chat.completions.create({
@@ -306,8 +308,7 @@ export async function handleMediaMessage(ctx: {
               return equipReply;
             }
 
-            // ── Smart machine identification → match against today's real plan ────── exact → "that's the machine your plan calls for — here's your sets + how" substitute → "same muscles, same movement —
-            // swap it in" other → "here's how to use it; it's not on today's plan" Prescription (sets/how/mistake) comes from the user's real programme, so the photo reply never contradicts their workout text.
+            // Smart machine identification → matched against today's real plan (exact / substitute / not on the plan). The prescription comes from their real programme, so the photo reply can never contradict their workout text.
             const equipReply = (await coachGymMachineFromPhoto(openai, user, base64, contentType, message))
               || `Nice. Reply *workout* for today's session, or type *show me* followed by any exercise name for a form demo.`;
             await logChat(user.id, "[Equipment Photo]", equipReply, "EQUIPMENT_ID");
@@ -356,8 +357,7 @@ export async function handleMediaMessage(ctx: {
             ],
           }));
           const stepText = stepVisionResponse.choices[0]?.message?.content?.trim() || "UNKNOWN";
-          // Weekly-average screenshots are a valid check-in — coach on the week, but never
-          // write it as TODAY's count (it would corrupt the day and the 7-day trend).
+          // Weekly-average screenshots are a valid check-in — coach on the week, but never write it as TODAY's count (it would corrupt the day and the 7-day trend).
           const weeklyAvgOcr = stepText.match(/^WEEKLY_AVG:\s*([\d,]+)/i);
           if (weeklyAvgOcr) {
             const avgSteps = parseInt(weeklyAvgOcr[1].replace(/,/g, ""), 10);
@@ -480,8 +480,8 @@ export async function handleMediaMessage(ctx: {
                     if (!r?.ok) { console.warn(`[ALBUM_FOOD] download failed url=${extraUrl.slice(-20)}`); continue; }
                     const buf = await r.arrayBuffer();
                     if (buf.byteLength > 10 * 1024 * 1024) continue;
-                    const b64 = Buffer.from(buf).toString("base64");
-                    const ct = r.headers.get("content-type") || "image/jpeg";
+                    const shrunkAlbum = await downscaleForVision(Buffer.from(buf).toString("base64"), r.headers.get("content-type") || "image/jpeg");
+                    const b64 = shrunkAlbum.b64, ct = shrunkAlbum.ct;
                     const vis = await withTimeout("album_food_vision", 22000, () => openai.chat.completions.create({
                       model: "gpt-4o-mini", max_tokens: 250,
                       messages: [
@@ -592,8 +592,8 @@ export async function handleMediaMessage(ctx: {
               if (!r.ok) continue;
               const buf = await r.arrayBuffer();
               if (buf.byteLength > 10 * 1024 * 1024) continue;
-              const extraB64 = Buffer.from(buf).toString("base64");
-              const extraCtype = r.headers.get("content-type") || "image/jpeg";
+              const shrunkProg = await downscaleForVision(Buffer.from(buf).toString("base64"), r.headers.get("content-type") || "image/jpeg");
+              const extraB64 = shrunkProg.b64, extraCtype = shrunkProg.ct;
               const nextNum = (await db.select({ id: progressPhotos.id }).from(progressPhotos).where(eq(progressPhotos.userId, user.id))).length + 1;
               await db.insert(progressPhotos).values({ userId: user.id, photoNumber: nextNum, photoBase64: extraB64, contentType: extraCtype });
               await logChat(user.id, `[Progress Photo ${nextNum}]`, "[Album photo received]", "PROGRESS_PHOTO");
@@ -1225,16 +1225,18 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return "I got your voice note but the audio did not download properly. Please send it again, or type your message and I will respond immediately.";
       }
 
-      const audioLen = parseInt(audioResponse.headers.get("content-length") || "0", 10);
-      if (audioLen > 16 * 1024 * 1024) {
-        console.warn(`[MEDIA][${mediaTrace}] audio_too_large content_length=${audioLen}`);
-        return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
-      }
+      // LENGTH CAP THAT MATCHES THE COPY (2026-07-28, CFO review): the old guard passed 16MB — about two hours — while telling the client to keep it under 90 seconds. See media-limits.ts.
+      const audioCt = (audioResponse.headers.get("content-type") || ctype || "audio/ogg");
+      const tooLong = (bytes: number) => {
+        const v = checkVoiceLength(bytes, audioCt);
+        if (!v.ok) console.warn(`[MEDIA][${mediaTrace}] voice_too_long ~${Math.round(v.seconds)}s bytes=${bytes}`);
+        return v.ok ? "" : v.reply!;
+      };
+      const headRefusal = tooLong(parseInt(audioResponse.headers.get("content-length") || "0", 10));
+      if (headRefusal) return headRefusal;
       const audioBuffer = await audioResponse.arrayBuffer();
-      if (audioBuffer.byteLength > 16 * 1024 * 1024) {
-        console.warn(`[MEDIA][${mediaTrace}] audio_buffer_too_large bytes=${audioBuffer.byteLength}`);
-        return "That voice note is too large to process reliably. Keep it under about 90 seconds and resend.";
-      }
+      const bodyRefusal = tooLong(audioBuffer.byteLength);
+      if (bodyRefusal) return bodyRefusal;
 
       const sourceAudioType = (audioResponse.headers.get("content-type") || ctype || "audio/ogg").split(";")[0].trim().toLowerCase();
       const extMap: Record<string, string> = {

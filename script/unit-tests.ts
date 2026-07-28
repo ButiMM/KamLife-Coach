@@ -4870,6 +4870,50 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// COST CONTROLS FROM THE CFO REVIEW (2026-07-28). Both must fail OPEN — a saving that can break
+// a client's photo or voice note is not a saving.
+test("downscaleForVision: shrinks a big photo, leaves a small one, never throws", async () => {
+  const { downscaleForVision, scaleFor, MAX_EDGE } = await import("../server/image-downscale");
+  const { createCanvas } = await import("@napi-rs/canvas");
+
+  assert.equal(scaleFor(800, 600), null, "already small enough — don't re-encode for nothing");
+  assert.equal(scaleFor(4000, 3000), MAX_EDGE / 4000);
+
+  const big = createCanvas(3000, 2000);
+  const bctx = big.getContext("2d");
+  bctx.fillStyle = "#c04a12"; bctx.fillRect(0, 0, 3000, 2000);
+  bctx.fillStyle = "#ffffff"; bctx.fillRect(300, 300, 1200, 900);
+  const bigB64 = big.toBuffer("image/png").toString("base64");
+
+  const out = await downscaleForVision(bigB64, "image/png");
+  assert.equal(out.resized, true, "a 3000px photo must be shrunk");
+  assert.equal(out.toEdge, MAX_EDGE);
+  assert.ok(Buffer.byteLength(out.b64, "base64") < Buffer.byteLength(bigB64, "base64"), "must actually be cheaper");
+
+  const small = createCanvas(400, 300).toBuffer("image/png").toString("base64");
+  assert.equal((await downscaleForVision(small, "image/png")).resized, false);
+
+  // Fail-open: garbage in, the ORIGINAL back out — never an exception, never an empty image.
+  const junk = await downscaleForVision("bm90LWFuLWltYWdl", "image/jpeg");
+  assert.equal(junk.resized, false);
+  assert.equal(junk.b64, "bm90LWFuLWltYWdl");
+  assert.equal((await downscaleForVision(bigB64, "image/gif")).resized, false, "animated formats pass through");
+});
+
+test("checkVoiceLength: the guard and the refusal agree on the same number", async () => {
+  const { checkVoiceLength, estimateVoiceSeconds, VOICE_MAX_SECONDS } = await import("../server/media-limits");
+  // WhatsApp opus ~16kbps: a 45-second note is about 90KB.
+  assert.ok(Math.abs(estimateVoiceSeconds(90_000, "audio/ogg") - 45) < 5);
+  assert.equal(checkVoiceLength(90_000, "audio/ogg").ok, true, "a normal voice note goes through");
+  assert.equal(checkVoiceLength(0, "audio/ogg").ok, true, "no content-length header must not block a client");
+
+  const long = checkVoiceLength(3_000_000, "audio/ogg"); // ~25 minutes
+  assert.equal(long.ok, false);
+  // The refusal must state the REAL limit — the old copy said 90 seconds while passing two hours.
+  assert.match(long.reply!, new RegExp(`${Math.round(VOICE_MAX_SECONDS / 60)} minutes?`));
+  assert.match(long.reply!, /type it|shorter/i, "never a dead end — always a way through");
+});
+
 // ACHIEVEMENT CARD (2026-07-28, marketing review: "people don't share a receipt, they share an
 // achievement"). Scarcity is the value — a card for every meal is wallpaper.
 test("achievementFor: only real milestones, and weight outranks logging", async () => {
