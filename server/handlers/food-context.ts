@@ -16,7 +16,7 @@ import {
   hasShownStreakToday, markStreakShownToday,
   invalidateFoodTotalsCache,
 } from "./food-scanner";
-import { macroCardMarker } from "../macro-card-attach";
+import { macroCardMarker, cardOrTotals } from "../macro-card-attach";
 import { estimateCarbsFat } from "../macro-estimate";
 import { captureFriction } from "../friction";
 import { nutritionGuardrailNudge } from "../nutrition-guardrails";
@@ -1293,7 +1293,7 @@ export async function handleFoodContext(ctx: {
       const assembled = `${reply}${scannerRetroNote}${saPattern ? "\n\n" + saPattern : ""}${saDay || ""}${streakCelebration}${upsellNote}${guiltNote}${plannedNote}${stepAppend}${activationNote}${guardrail}`;
       const contractOn = process.env.REPLY_CONTRACT === "on" && !clientAskedForDetail(message);
       const finalBody = contractOn ? enforceReplyContract(assembled) : assembled;
-      return `${finalBody}${droppedNote}${macroCard}`;
+      return `${finalBody}${droppedNote}${cardOrTotals(macroCard, totalCals, totalProtein, user)}`;
     }
 
     // All segments were planned/future (e.g. a lone "dinner is going to be stir fry fish")
@@ -1355,7 +1355,7 @@ export async function handleFoodContext(ctx: {
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
         const fbStreakNote = getStreakNote(user.id, fbStreak, user.name || "");
         const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${fbCard}`;
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${cardOrTotals(fbCard, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
       }
     }
   }
@@ -1431,7 +1431,7 @@ export async function handleFoodContext(ctx: {
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
       const fb2StreakNote = getStreakNote(user.id, fb2Streak, user.name || "");
       const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${fb2Card}`;
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${cardOrTotals(fb2Card, gptFallbackResult.totalKcal, gptFallbackResult.totalProtein, user)}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),
     // ask them to clarify rather than silently dropping. But if we only got here on the loose

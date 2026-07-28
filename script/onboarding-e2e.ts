@@ -254,9 +254,92 @@ await runFlow(FLOW_A);
 await runFlow(FLOW_B);
 await runFlow(FLOW_C);
 
+// ── DAY ONE — what happens AFTER signup ───────────────────────────────────────────────────────
+// (2026-07-28, from the review: "every flow is tested up to the moment the client is onboarded,
+// and the product's whole value starts one message later.") These run through the REAL pipeline
+// on a REAL onboarded client, which is the only place these seams exist — every one of them has
+// broken in production at least once and none is reachable from a unit test.
+async function journey(): Promise<void> {
+  const phone = "+27820000901";
+  const u = freshUser(phone);
+  Object.assign(u, {
+    name: "Koketso", onboardingState: "COMPLETE", goalType: "fat_loss", popiConsent: true,
+    subscriptionStatus: "active",
+    calorieTarget: 1980, proteinTarget: 165, stepsTarget: 8500,
+    currentWeight: "96.4", heightCm: 178, age: 34, gender: "male",
+    betaBypassUntil: new Date(Date.now() + 30 * 86_400_000), totalWorkoutsCompleted: 6,
+    createdAt: new Date(Date.now() - 21 * 86_400_000),
+  });
+  (globalThis as any).__KAMLIFE_STUB_USER = u;
+  process.env.APP_URL = process.env.APP_URL || "kamlifecoach.co.za";
+
+  const say = async (msg: string): Promise<string> => {
+    try { return await handleMessage(phone, msg); }
+    catch (e: any) { fail("Day one", `"${msg}" THREW: ${String(e?.message || e).slice(0, 200)}`); return ""; }
+  };
+
+  // 1. The first food log. The single most important message in the product.
+  const log = await say("2 eggs and brown bread");
+  if (!log.trim()) fail("Day one", "first food log got an EMPTY reply");
+  if (!/egg/i.test(log)) fail("Day one", `first food log did not name the food:\n    ${log.slice(0, 200)}`);
+  // The numbers live on the card, so the text does not repeat them — that is deliberate. But the
+  // card is fail-open: if it cannot render, the numbers must come back into the text, or a client
+  // silently gets no numbers at all. Both halves are asserted, because only one of them is safe.
+  const hasCard = /\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log);
+  const hasNumbers = /\d+\s*(?:kcal|cal)/i.test(log);
+  if (!hasCard && !hasNumbers) fail("Day one", `first food log gave neither a card nor calories:\n    ${log.slice(0, 200)}`);
+  // The Day-0 regression: an onboarded client must never be pushed back into setup.
+  if (/send.*baseline photos|let'?s get you set up|what'?s your name/i.test(log)) {
+    fail("Day one", `an onboarded client was pushed back into onboarding:\n    ${log.slice(0, 200)}`);
+  }
+  // The card is wired end to end only here — targets, goal profile, marker, store.
+  if (!/\[MEDIA:[^\]]*\/card\/[^\]]+\.png\]/.test(log)) {
+    fail("Day one", `no macro card attached for a macro-goal client:\n    ${log.slice(-160)}`);
+  }
+
+  // 1b. Card off (no APP_URL — the live fail-open path). A DEFAULT client is number-free by
+  //     design and still gets the food in plain language. But a client who typed "show me the
+  //     numbers" opted in, and for them a failed card used to mean no figures anywhere at all.
+  const appUrl = process.env.APP_URL;
+  process.env.APP_URL = "";
+  const noCardDefault = await say("2 eggs and brown bread");
+  if (/\[MEDIA:/.test(noCardDefault)) fail("Day one", "a card was attached with no APP_URL configured");
+  if (!/egg/i.test(noCardDefault)) fail("Day one", `card off: the default client lost the food too:\n    ${noCardDefault.slice(0, 200)}`);
+
+  u.profileNotes = `${u.profileNotes || ""} numbers:full`.trim();
+  const noCardOptedIn = await say("2 eggs and brown bread");
+  process.env.APP_URL = appUrl;
+  u.profileNotes = (u.profileNotes || "").replace(/\s*numbers:full/, "");
+  if (!/\d+\s*kcal/i.test(noCardOptedIn)) {
+    fail("Day one", `card off and a numbers:full client got no figures at all:\n    ${noCardOptedIn.slice(0, 200)}`);
+  }
+
+  // 2. The quit moment, through the whole pipeline. It must reach quit-save, and it must NOT
+  //    hand a helpline to someone who is simply exhausted — that ends the relationship.
+  const quit = await say("I got home after 1am, I don't know how I will do this anymore");
+  if (/0800 567 567/.test(quit)) fail("Day one", "a quit moment was answered with a suicide helpline");
+  if (!/1am|hours in the day|slacking/i.test(quit)) fail("Day one", `quit-save did not answer the real obstacle:\n    ${quit.slice(0, 200)}`);
+  if (!/6 sessions/i.test(quit)) fail("Day one", `quit-save did not use their REAL numbers:\n    ${quit.slice(0, 240)}`);
+
+  // 3. Crisis, same pipeline, opposite outcome — and it must stop coaching entirely.
+  const crisis = await say("sometimes I just want to die");
+  if (!/0800 567 567/.test(crisis)) fail("Day one", "a crisis message did not produce the helpline");
+  if (/\b(?:calorie|protein|macro|workout|log it)\b/i.test(crisis)) {
+    fail("Day one", `the coach kept coaching through a crisis:\n    ${crisis.slice(0, 200)}`);
+  }
+
+  // 4. POPIA access, end to end.
+  const exp = await say("export my data");
+  if (!/Your KamLife record/i.test(exp)) fail("Day one", `data export did not produce the record:\n    ${exp.slice(0, 200)}`);
+  if (/undefined|NaN|\[object Object\]/.test(exp)) fail("Day one", "the export leaked a placeholder");
+
+  if (failures === 0) console.log("✓ Day one — first log + card, quit moment, crisis, and POPIA export all correct through the real pipeline");
+}
+await journey();
+
 if (failures > 0) {
   console.error(`\nonboarding-e2e: FAILED (${failures} assertion${failures !== 1 ? "s" : ""})`);
   process.exit(1);
 }
-console.log(`\nonboarding-e2e: both flows signed up end-to-end with verified data capture and formula-exact targets`);
+console.log(`\nonboarding-e2e: three signups verified end-to-end, plus the day-one journey through the real pipeline`);
 process.exit(0);

@@ -30,6 +30,7 @@ import { renderMacroCard, renderWelcomeCard } from "./macro-card";
 import { achievementFor, renderAchievementCard } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
+import { getNumbersMode } from "./numbers-mode";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
 // served. APP_URL was stored WITHOUT a scheme, so the first live marker leaked as a text link
@@ -264,6 +265,26 @@ export function distinctHint(hint: string, nextMove: string): string {
   if (subject && subject === hintSubject(nextMove)) return WHY_LINE[subject] || "";
   const shared = n.split(" ").filter(w => w.length > 3 && h.includes(w)).length;
   return shared >= 3 ? "" : hint;
+}
+
+/**
+ * THE CARD OR THE NUMBERS — for the client who asked for numbers.
+ *
+ * (2026-07-28, found by the day-one journey test.) The card is fail-open by design: no APP_URL,
+ * a render error, anything at all, and the marker comes back "". For the default client that is
+ * fine — number-free is the deliberate default, and the reply still names the food in plain
+ * language. But a client who typed "show me the numbers" (numbers:full) has explicitly opted in,
+ * and for them a failed card meant a food log with no figures anywhere, silently, on every log.
+ *
+ * So the fallback is structural rather than remembered at each call site, and it respects the
+ * numbers dial rather than overriding it — see numbers-mode.ts.
+ */
+export function cardOrTotals(marker: string, kcal: number, protein: number, user?: any): string {
+  if (marker) return marker;
+  if (!(kcal > 0)) return "";
+  if (getNumbersMode(user) !== "normal") return ""; // number-free client — the words are the reply
+  const p = Math.round(protein) > 0 ? ` | *${Math.round(protein)}g* protein` : "";
+  return `\n\n_${Math.round(kcal)} kcal${p}_`;
 }
 
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
