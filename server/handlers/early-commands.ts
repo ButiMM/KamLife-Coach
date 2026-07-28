@@ -174,7 +174,19 @@ export async function handleEarlyCommands(ctx: {
         const eduNote = educationNote(user, { event: "totals", calorieTarget: cal, proteinTarget: prot, overBy: remaining < 0 ? -remaining : 0 });
         // "Show me my daily calories" → the branded card too (macro goals; "" for wellness).
         const dailyCard = await dailyMacroCardMarker(user);
-        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}${dailyCard}`;
+        // THE CARD IS THE ANSWER (2026-07-28 live). This block used to print every number the
+        // card already carries — totals, targets, what's left — plus an instruction, plus an
+        // education line, and THEN attach the card. The client read their day twice and the same
+        // order four times. When the card is coming it IS the report; the text is one plain
+        // sentence so a person knows what they're looking at. Same rule as the food log path,
+        // which was fixed two commits before this one and left this call site untouched.
+        if (dailyCard) {
+          const lead = remaining > 0
+            ? `${name}here's your day so far. *${remaining} kcal and ${protRemaining > 0 ? `${protRemaining}g protein` : "protein done"}* left.`
+            : `${name}here's your day. *Calorie target reached.*${protShortNote}`;
+          return `${lead}${dailyCard}`;
+        }
+        return `${name}*Today so far: ${todayCals} kcal | ${todayProt}g protein*\nTarget: ${cal} kcal | ${prot}g protein\n${remaining > 0 ? `\n*${remaining} kcal and ${protRemaining > 0 ? protRemaining + "g protein" : "✅ protein hit"}* still to go${inMeals ? ` — ${inMeals}` : ""}.` : `\nCalorie target reached. ✅${protShortNote}`}${actionLine}${eduNote}`;
       }
       return `${name}${cal} calories and ${prot}g protein daily. Hit protein first — everything else follows.\n\nNo food logged yet today. Tell me what you ate.`;
     } catch (err) {

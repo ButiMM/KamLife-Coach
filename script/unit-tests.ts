@@ -4936,6 +4936,51 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   });
 }
 
+// EVERY CARD PATH, NOT THE ONE I HAPPENED TO BE LOOKING AT (2026-07-28).
+// I fixed text/card duplication on the food-log path and shipped it. Two commits later the
+// founder sent a screenshot of "Today's progress" doing exactly the same thing on a DIFFERENT
+// call site I never touched — his numbers twice, the same order four times, and a "Fat over"
+// pill above "Eat more today". Fixing one call site and calling it done is the systemic defect
+// itself. This test enumerates the paths so a new one cannot quietly join them.
+test("card paths: every attach site is accounted for", async () => {
+  const { readFileSync } = await import("node:fs");
+  const files = [
+    "server/handlers/food-context.ts", "server/handlers/early-commands.ts",
+    "server/handlers/meal-repeat.ts", "server/handlers/lifecycle.ts", "server/handlers/media.ts",
+  ];
+  const attachers = files.filter(f => /(?:macroCardMarker|dailyMacroCardMarker)\(/.test(readFileSync(f, "utf-8")));
+  // If this count changes, a new card path was added — go and check its TEXT stands down too.
+  assert.equal(attachers.length, 5, `card-attaching files changed: ${attachers.join(", ")}`);
+
+  // The three sites that print the day's numbers must all consult the card before repeating them.
+  for (const f of ["server/handlers/food-context.ts", "server/handlers/early-commands.ts", "server/handlers/meal-repeat.ts"]) {
+    const src = readFileSync(f, "utf-8");
+    assert.ok(/cardComing|if \(dailyCard\)|card \? "" :/.test(src),
+      `${f} attaches a card but never checks it before printing the day again`);
+  }
+});
+
+test("next move: the instruction can never contradict the pill", async () => {
+  const { nextMoveLine, dayStatusPill } = await import("../server/macro-card-attach");
+  // The exact live card: a bulk client with calories left AND fat already blown. The pill said
+  // "Fat over" while the next move said "Eat more today — add a proper meal".
+  const rows = [
+    { label: "Calories", current: 2353, target: 2860, unit: "", overIsBad: false },
+    { label: "Protein", current: 149, target: 185, unit: "g", overIsBad: false },
+    { label: "Carbs", current: 203, target: 337, unit: "g", overIsBad: true },
+    { label: "Fat", current: 94, target: 86, unit: "g", overIsBad: true },
+  ];
+  const pill = dayStatusPill(rows, true);
+  const move = nextMoveLine(rows, true);
+  assert.match(pill.text, /Fat over/i);
+  assert.match(move, /lean|grilled/i, `pill says "${pill.text}" — the move must agree: "${move}"`);
+  assert.doesNotMatch(move, /^Eat more today — add a proper meal$/, "a bare 'eat more' contradicts a blown fat bar");
+
+  // With fat in range, the plain instruction is still right.
+  const clean = [...rows.slice(0, 3), { label: "Fat", current: 40, target: 86, unit: "g", overIsBad: true }];
+  assert.match(nextMoveLine(clean, true), /Eat more today/);
+});
+
 // THE ONE ACTION (2026-07-28, founder: "what is the single thing Coach K should make this person
 // do today?"). This is the coaching. Ordering is the whole design.
 {

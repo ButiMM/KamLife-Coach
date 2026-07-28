@@ -172,9 +172,12 @@ export async function handleMealRepeat(ctx: {
     const itemNames = Array.isArray(match.items) ? (match.items as Array<{ name?: string }>).map(i => i?.name).filter(Boolean).join(", ") : "";
     const rawLabel = itemNames ? `_${itemNames}_\n` : match.rawMessage ? `_${match.rawMessage.slice(0, 80)}_\n` : "";
 
-    const sameReply = `✅ *${labelDisplay} logged* (${fromNote})\n${rawLabel}\n*+${match.kcalInt} kcal · +${match.proteinInt}g protein*\n${remaining > 0 ? `${remaining} kcal remaining.` : "Calorie target hit. ✅"} ${protGap > 0 ? `${protGap}g protein left.` : "Protein hit. ✅"}`;
-    await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
     const card = await dailyMacroCardMarker(user); // scorecard on a repeat-log too (founder: every log gets the card)
+    // What's LEFT is on the card when there is one; what was just LOGGED is not, so that stays.
+    // Printing both is how one meal ended up describing the same day four times (2026-07-28).
+    const leftLine = card ? "" : `\n${remaining > 0 ? `${remaining} kcal remaining.` : "Calorie target hit. ✅"} ${protGap > 0 ? `${protGap}g protein left.` : "Protein hit. ✅"}`;
+    const sameReply = `✅ *${labelDisplay} logged* (${fromNote})\n${rawLabel}\n*+${match.kcalInt} kcal · +${match.proteinInt}g protein*${leftLine}`;
+    await logChat(user.id, message, sameReply, "SAME_AS_YESTERDAY");
     return `${sameReply}${card}`;
   } catch (err) {
     console.error("[SAME_AS]", err);

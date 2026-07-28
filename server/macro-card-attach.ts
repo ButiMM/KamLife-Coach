@@ -162,8 +162,14 @@ export function nextMoveLine(rows: Row[], isBulk: boolean): string {
   }
   if (ratio(fat) > 1.25) return "Grill it, don't fry it — that's the whole fix today";
 
-  // Building and under-fuelled.
-  if (isBulk && calLeft > 500) return "Eat more today — add a proper meal";
+  // Building and under-fuelled — but NEVER a bare "eat more" when a limiting macro is already
+  // blown (2026-07-28 live: the pill read "Fat over" directly above "Eat more today — add a
+  // proper meal"). Calories left and fat over are both true; the instruction has to hold both,
+  // or the card argues with itself and the client trusts neither half.
+  if (isBulk && calLeft > 500) {
+    const fatOver = !!fat && fat.target > 0 && fat.current > fat.target;
+    return fatOver ? "Eat more — but make it lean. Grilled, not fried" : "Eat more today — add a proper meal";
+  }
 
   // Protein is the one that actually moves the result, so it owns the instruction.
   if (protLeft >= 60) return "Get protein into your next two meals";

@@ -21,7 +21,7 @@ const CANONICAL = ["server/sast.ts"];
 
 // Today's count, 2026-07-28. LOWER THIS as call sites migrate. Never raise it: a rise means a
 // new hand-rolled day boundary was written, which is the exact bug this exists to stop.
-const BUDGET = 87;
+const BUDGET = 86;
 
 const RAW_OFFSET = /\b2\s*\*\s*3[_,]?600[_,]?000\b|\b7[_,]?200[_,]?000\b/g;
 
