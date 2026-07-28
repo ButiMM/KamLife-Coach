@@ -42,6 +42,7 @@ import { scanReply, summarise } from "../server/audit/reply-defects";
 import { nextMoveLine } from "../server/macro-card-attach";
 import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeContext } from "../server/life-context";
 import { comebackPlan } from "../server/adaptive-training";
+import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
 import { mustStayDeterministic } from "../server/understanding/action-router";
 import { parseIdentityCorrection, correctionCandidates } from "../server/food-identity-correction";
@@ -5882,6 +5883,40 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     // Plain logs and chatter must NOT be captured by it.
     for (const other of ["I trained today", "back in 10 minutes", "what should I eat"])
       assert.equal(mustStayDeterministic(other) && looksLikeComebackQuestion(other), false, other);
+  });
+}
+
+// NOBODY IS TURNED AWAY (2026-07-28, founder: "their doctors told them to join a gym… do we turn
+// people like that away?"). The line is WHAT we touch, not WHO we serve.
+{
+  test("condition: a disclosure is recognised, including pre-diabetes", () => {
+    for (const msg of [
+      "I have diabetes", "I'm pre-diabetic", "I'm on metformin",
+      "my doctor said I have hypertension", "I was just diagnosed",
+    ]) assert.equal(mentionsConditionOrMedication(msg), true, msg);
+    for (const msg of ["I had chicken and rice", "my knee is sore", "I want to lose weight"])
+      assert.equal(mentionsConditionOrMedication(msg), false, msg);
+  });
+
+  test("condition: the reply welcomes them and makes no clinical claim", () => {
+    const out = conditionWelcome("Kam");
+    assert.match(out, /right place/i);                     // welcome, not a brush-off
+    assert.match(out, /lifestyle coach, not a medical service/i);
+    assert.match(out, /your doctor/i);
+    // The claims that must never return.
+    assert.doesNotMatch(out, /safe for your condition/i);
+    assert.doesNotMatch(out, /\b(dose|dosage|medication is|take your)\b/i);
+    // It must end by coaching, not by closing the door.
+    assert.match(out, /food, or getting moving\?$/);
+  });
+
+  test("landing page carries no clinical claims and states the scope", () => {
+    const page = readFileSync("client/src/pages/landing.tsx", "utf-8");
+    assert.doesNotMatch(page, /avoids foods that interact with common medications/i);
+    assert.doesNotMatch(page, /within safe ranges for your condition/i);
+    assert.doesNotMatch(page, /Diabetes-friendly|Blood pressure-aware/i);
+    assert.match(page, /not a medical or healthcare provider/i);
+    assert.match(page, /does not diagnose, treat, or manage/i);
   });
 }
 

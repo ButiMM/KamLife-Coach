@@ -53,6 +53,7 @@ import { runMeaningEngineLive, engineLive, resumeEngineConfirm } from "./underst
 import { mustStayDeterministic } from "./understanding/action-router";
 import { getDisplayName, checkGptRateLimit, sastDayStart, sastToday, parseMealDate, isRetroactiveMeal, mealDateLabel, isFutureIntent, normaliseMsisdn, stripInventedRetroDate, mentionsNotDone, looksLikeStepsReport, looksLikeWaterReport, looksLikeWeightReport, hasGoalChangeVocabulary, isBareGreeting, looksLikeStepsTargetChange, looksLikeBillingOrCancel, looksLikeDirectionRequest, looksLikeLowMobility, looksLikeDefeatedNoResults, looksLikeDigestiveIssue, looksLikeFoodDislike, looksLikeOvertrainingPlan, classifyPainReport, looksLikeWorkoutRequest } from "./utils";
 import { invalidatePatternCache } from "./cache";
+import { mentionsConditionOrMedication, conditionWelcome } from "./condition-welcome";
 
 const openaiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
 if (!openaiKey) {
@@ -468,13 +469,10 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // ---- MEDICAL CONDITION / MEDICATION DISCLAIMER ----
   // When a client mentions medication, a new diagnosis, or asks for condition-specific advice —
   // return a clear disclaimer and redirect. Still logs (triggers escalation → coach alert).
-  const MEDICATION_SIGNAL = /\b(on medication|taking medication|my medication|my meds|my pills|blood thinners|antiretroviral|ARVs?|antiretrovirals?|insulin|metformin|warfarin|blood pressure (pills?|medication|tablets?)|epilepsy (medication|tablets?|pills?)|seizure medication|newly diagnosed|just diagnosed|just found out i have|blood test results?|doctor said i have|specialist said)\b/i.test(m);
-  const CHRONIC_CONDITION_SIGNAL = /\b(i have diabetes|i.?m diabetic|type [12] diabetes|my blood sugar|i have hypertension|i.?m hypertensive|my blood pressure is|i have (heart disease|a heart condition|kidney disease|liver disease|thyroid|pcos|epilepsy|hiv|aids))\b/i.test(m);
-  if (MEDICATION_SIGNAL || CHRONIC_CONDITION_SIGNAL) {
-    const medName = user.name?.split(" ")[0] || "";
-    const medDisclaimer = `${medName}, noted. Coach K is a fitness and nutrition guide — not a medical professional. For anything involving medication, diagnoses, blood sugar, blood pressure, or condition-specific advice, your doctor or a registered dietitian must be your first stop.\n\nWhat Coach K *can* do: suggest food choices that are generally safe for your condition, keep exercise intensity appropriate, and hold you accountable to the habits your doctor recommends.\n\n*Important: Any nutrition or exercise guidance from Coach K does not replace medical advice. Always follow your doctor's instructions.*\n\nWhat specifically did you want help with on the fitness side?`;
-    await logChat(user.id, message, medDisclaimer, "MEDICAL_DISCLAIMER");
-    return medDisclaimer;
+  if (mentionsConditionOrMedication(m)) {
+    const welcome = conditionWelcome(user.name?.split(" ")[0] || "");
+    await logChat(user.id, message, welcome, "MEDICAL_DISCLAIMER");
+    return welcome;
   }
 
   // ---- FRUSTRATION HELPERS — shared intent guard used by both frustration handlers ----

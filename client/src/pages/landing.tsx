@@ -247,7 +247,7 @@ function HeroChat() {
 const PERSONAS = [
   { initials: "TM", name: "The one who's quit before", city: "Tried the gym 4 times", avatarBg: "#162416", avatarText: ACCENT, quote: "I always start strong and quit by month 2. I don't need more information — I need someone to keep me going.", tags: ["QUIT BEFORE", "NO ACCOUNTABILITY", "BUSY LIFE"] },
   { initials: "NP", name: "The one who hates meal prep", city: "Lives on pap and eggs", avatarBg: "#161628", avatarText: "#6B8AFF", quote: "I hate cooking and I don't have time. I need a plan built around real food I actually eat — not chicken and broccoli.", tags: ["HATES MEAL PREP", "NIGHT SHIFT", "SIMPLE FOOD"] },
-  { initials: "KM", name: "The one managing a condition", city: "Diabetic, on a budget", avatarBg: "#281616", avatarText: "#FF6B35", quote: "Every plan I find ignores my meds and my budget. I need one built around my real life, not a generic diet.", tags: ["DIABETIC", "BUDGET EATING", "OVER 40"] },
+  { initials: "KM", name: "The one who's been told to lose weight", city: "On a budget, over 40", avatarBg: "#281616", avatarText: "#FF6B35", quote: "Every plan I find ignores what I can actually afford. I need one built around my real life, not a generic diet.", tags: ["BUDGET EATING", "OVER 40", "SUSTAINABLE"] },
   { initials: "SN", name: "The one who wants size", city: "Skinny their whole life", avatarBg: "#162818", avatarText: "#22c55e", quote: "I eat rice, eggs and pilchards. I want to put on real muscle without a fancy gym or expensive supplements.", tags: ["HARDGAINER", "MUSCLE GAIN", "STUDENT"] },
   { initials: "LZ", name: "The one who lost herself", city: "New baby, no time", avatarBg: "#221622", avatarText: "#d946ef", quote: "Since the baby I've had no time and no energy. I don't want a crash diet — I want daily support that fits my life.", tags: ["POST-PREGNANCY", "NO TIME", "AT HOME"] },
   { initials: "BK", name: "The one with no routine", city: "Night shift, no gym", avatarBg: "#161e28", avatarText: "#06b6d4", quote: "My eating is all over the place with shift work. I need someone to make it simple and keep me honest.", tags: ["NIGHT SHIFT", "NO GYM", "IRREGULAR HOURS"] },
@@ -692,13 +692,13 @@ export default function LandingPage() {
                 GET HEALTHY
               </div>
               <h3 className="text-2xl font-black text-white mb-3 leading-tight">
-                Diabetes? Hypertension? Just Want to Feel Better?
+                Your Doctor Told You to Lose Weight. We Help You Actually Do It.
               </h3>
               <p className="text-white/45 text-sm leading-relaxed mb-5">
-                Safe, gradual adjustments to your diet and movement. No extreme anything. Your medical conditions are factored into every recommendation. This is about longevity, not a 30-day challenge.
+                "Eat better, move more, lose some weight" — and then you're on your own to work out how. That's the part we do: real South African food, portions that make sense, walking you can keep up, and someone checking in every day. Your doctor stays in charge of your health; we handle the daily habits they asked you to change.
               </p>
               <div className="flex flex-wrap gap-x-5 gap-y-1">
-                {["Diabetes-friendly", "Blood pressure-aware", "Injury-safe", "All ages welcome"].map(t => (
+                {["Gradual, not extreme", "Gentle on joints", "Injury-safe", "All ages welcome"].map(t => (
                   <span key={t} className="flex items-center gap-1 text-xs text-white/35">
                     <CheckCircle className="w-3 h-3 text-white/20" />{t}
                   </span>
@@ -969,7 +969,7 @@ export default function LandingPage() {
               { q: "What is body recomp and why do most people choose it?", a: "Body recomposition means losing fat and building muscle at the same time — what most people actually want when they say they want to \"get fit\". Coach K manages this with high-protein eating, progressive training, and weekly adjustments. Results last because you're changing body composition, not just weight." },
               { q: "What if I can only afford cheap food?", a: "The under-R100 weekly meal plan is built around eggs, pilchards, pap, sugar beans, and spinach — all available at Shoprite. Good results do not require an expensive diet." },
               { q: "Is this a real coach or a bot?", a: "An AI coach trained specifically on South African food, lifestyle, and fitness. It knows pap from polenta, pilchards from salmon, and Nando's from a generic chicken restaurant. Over time it remembers your wins, your patterns, and adapts." },
-              { q: "What if I have diabetes, hypertension, PCOS, or I'm on ARVs?", a: "Coach K adjusts for all of these. It flags when doctor clearance is needed, avoids foods that interact with common medications, and keeps nutrition within safe ranges for your condition." },
+              { q: "I'm managing a health condition — can I still join?", a: "Yes, and you're exactly who this was built for. Most people come to us because a doctor told them to lose weight, eat better and get moving — and then left them to figure out how. That 'how' is the whole job: real South African food, sensible portions, walking you can sustain, and daily accountability. To be clear about the line: Coach K is a lifestyle coach, not a medical service. It won't manage your condition, interpret your results, or say anything about your medicine — your doctor owns all of that, and you should tell them you're doing this. But the habits they want you to build? That's what we do every single day." },
               { q: "How do I cancel?", a: "Reply CANCEL to Coach K at any time. No phone calls. No forms. No hassle. Your programme and progress are saved for 90 days — come back whenever you're ready." },
               { q: "Can I message Coach K in isiZulu, isiXhosa, or Afrikaans?", a: "Yes. Coach K understands isiZulu, isiXhosa, and Afrikaans — send in whichever language feels most natural. English works best for complex questions, but you'll be understood either way." },
             ].map((faq, i) => (
@@ -1062,6 +1062,19 @@ export default function LandingPage() {
                 <li className="pt-2 text-white/25 text-xs leading-relaxed">Not affiliated with WhatsApp, Meta, or Twilio.</li>
               </ul>
             </div>
+          </div>
+          {/* SCOPE NOTICE (2026-07-28 compliance pass) — the page previously promised drug-food
+              interaction handling and condition-specific nutrition safety. Both were clinical
+              claims we cannot make, and both are gone. This states plainly what we are, so nobody
+              arrives expecting a medical service. A unit test keeps those claims from returning. */}
+          <div style={{ borderTop: `1px solid ${BORDER}` }} className="pt-6 pb-6">
+            <p className="text-xs text-white/30 leading-relaxed max-w-3xl">
+              <strong className="text-white/45">KamLife is a lifestyle and fitness coaching service — not a medical or healthcare provider.</strong>{" "}
+              It does not diagnose, treat, or manage any medical condition, and it gives no advice about medication.
+              Nothing here replaces guidance from your doctor, dietitian, or clinic. Speak to a healthcare professional
+              before changing how you eat or exercise, especially if you are managing a health condition, are pregnant,
+              or are taking any medication. If you feel unwell, stop and seek medical help.
+            </p>
           </div>
           <div style={{ borderTop: `1px solid ${BORDER}` }} className="pt-6 flex flex-col sm:flex-row justify-between items-center gap-2">
             <span className="text-xl font-black">KAM<span style={{ color: ACCENT }}>LIFE</span></span>
