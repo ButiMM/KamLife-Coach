@@ -4949,6 +4949,35 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
     assert.match(goodReport, /80%/);
   });
 
+  test("outcomes: no verdict on an anecdote, in EITHER direction", async () => {
+    const { formatOutcomesReport, summariseCohort, MIN_SAMPLE } = await import("../server/outcomes");
+    // THE LIVE BUG (2026-07-28): one client, 100%, and the report said "this works — that is the
+    // sentence you can put in front of a stranger". It was the founder's own account. The design
+    // guarded against declaring FAILURE on thin evidence and not at all against declaring SUCCESS.
+    const one = [client({ goal: "muscle_gain", start: 82, latest: 83.3, weeks: 12 })];
+    const report = formatOutcomesReport(one, 8);
+    assert.equal(summariseCohort(one, 8).tooFewToJudge, true);
+    assert.match(report, /No verdict yet/i);
+    assert.match(report, /do not put it in front of anyone/i);
+    assert.doesNotMatch(report, /This works/i, "one client must never read as proof");
+    assert.doesNotMatch(report, /sentence you can put in front of a stranger/i);
+
+    // The goal split must show even for a single client — "+1.3kg" is only readable once you
+    // know the goal is muscle gain, and the first live run suppressed exactly that line.
+    assert.match(report, /Muscle gain: 1\/1/);
+
+    // And a tiny BAD sample is equally silent — 1 failure is not proof it's broken either.
+    const oneBad = [client({ goal: "fat_loss", start: 90, latest: 92, weeks: 12 })];
+    const badReport = formatOutcomesReport(oneBad, 8);
+    assert.match(badReport, /No verdict yet/i);
+    assert.doesNotMatch(badReport, /signal is weak/i);
+
+    // At the floor, verdicts resume.
+    const five = Array.from({ length: MIN_SAMPLE }, (_, i) => client({ id: `g${i}`, start: 90, latest: 85 }));
+    assert.equal(summariseCohort(five, 8).tooFewToJudge, false);
+    assert.match(formatOutcomesReport(five, 8), /This works/i);
+  });
+
   test("outcomes: blindness outranks a bad result — you cannot conclude from what you didn't measure", async () => {
     const { formatOutcomesReport } = await import("../server/outcomes");
     // Low coverage AND a poor measured rate: the report must say "we don't know", not "it fails".

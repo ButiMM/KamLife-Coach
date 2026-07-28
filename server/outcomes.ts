@@ -40,6 +40,18 @@ export const WEAK_SIGNAL_RATE = 0.3;
 /** Coverage under this means we have a measurement problem, not (yet) a results problem. */
 export const MIN_COVERAGE = 0.6;
 
+/**
+ * Below this many MEASURED clients, there is no verdict — in either direction.
+ *
+ * (2026-07-28, first live run: one client, 100%, and the report said "that is the sentence you
+ * can put in front of a stranger". It was the founder's own account.) The original design
+ * guarded carefully against declaring FAILURE on thin evidence and not at all against declaring
+ * SUCCESS on it. That asymmetry is backwards: a false "it works" is the expensive one, because
+ * it is the one that justifies spending money and making claims. Five is still small — it is the
+ * floor at which a number stops being an anecdote, not the point at which it becomes proof.
+ */
+export const MIN_SAMPLE = 5;
+
 export interface ClientOutcome {
   userId: string;
   /** SAST day key of signup — cohorts are grouped by the week containing it. */
@@ -139,6 +151,8 @@ export interface CohortSummary {
   referralRate: number;
   /** True when this cohort is old enough to judge and the signal is bad. */
   weakSignal: boolean;
+  /** True when there are too few measured clients to claim anything at all, either way. */
+  tooFewToJudge: boolean;
   /** True when the problem is missing measurement rather than missing results. */
   blindSpot: boolean;
 }
@@ -174,8 +188,9 @@ export function summariseCohort(all: ClientOutcome[], atWeeks: number, label = `
     weighInRate: n > 0 ? eligible.filter(o => o.weighIns > 0).length / n : 0,
     referralRate: n > 0 ? eligible.reduce((s, o) => s + o.referrals, 0) / n : 0,
     // Only cry wolf on a real sample. Three people is an anecdote, not a signal.
-    weakSignal: atWeeks >= 4 && measured >= 5 && successRate < WEAK_SIGNAL_RATE,
-    blindSpot: n >= 5 && coverage < MIN_COVERAGE,
+    weakSignal: atWeeks >= 4 && measured >= MIN_SAMPLE && successRate < WEAK_SIGNAL_RATE,
+    blindSpot: n >= MIN_SAMPLE && coverage < MIN_COVERAGE,
+    tooFewToJudge: measured < MIN_SAMPLE,
   };
 }
 
@@ -217,16 +232,29 @@ export function formatOutcomesReport(all: ClientOutcome[], atWeeks = 8): string 
     + (c.medianChangeKg !== null ? `\n• Median weight change: *${c.medianChangeKg > 0 ? "+" : ""}${c.medianChangeKg.toFixed(1)}kg*` : "")
     + `\n• Followed the plan: *${pct(c.adherenceRate)}* of days\n• Weighed at all: *${pct(c.weighInRate)}*\n• Referrals per client: *${c.referralRate.toFixed(2)}*`;
 
+  // ALWAYS show the goal split, even for a single client. The first live run read "1 of 1 got
+  // what they came for" above "median weight change +1.3kg", and suppressed the one line that
+  // explained it — that the client was on muscle gain, where +1.3kg IS the win. A number nobody
+  // can interpret is worse than no number.
   const goals = byGoal(all, atWeeks);
-  const goalLines = goals.length > 1
+  const goalLines = goals.length > 0
     ? `\n\n*By goal:*\n${goals.map(g => `• ${GOAL_WORDS[g.label] || g.label}: ${g.success}/${g.measured} (${pct(g.successRate)}) of ${g.n}`).join("\n")}`
     : "";
 
   // The verdict line. Blindness first — you cannot conclude anything about results from a
   // sample you mostly failed to measure, and saying "results are bad" would be a lie.
+  // ORDER MATTERS. Blindness is checked FIRST: with ten clients and one weigh-in, "too few to
+  // judge" would tell him to go and find more clients when he already has them and simply is not
+  // measuring them. Naming the real fix beats naming the symptom.
   let verdict: string;
   if (c.blindSpot) {
     verdict = `\n\n⚠️ *You are flying blind.* Only ${pct(c.coverage)} of this cohort has a measurement. Fix the weigh-in rate before drawing a single conclusion about whether the coaching works — right now the honest answer is "we don't know".`;
+  } else if (c.tooFewToJudge) {
+    // NO VERDICT ON AN ANECDOTE (2026-07-28, first live run). One client at 100% previously read
+    // "this works — that is the sentence you can put in front of a stranger". It was the
+    // founder's own account. Saying nothing is the only honest option here.
+    const need = MIN_SAMPLE - c.measured;
+    verdict = `\n\n⏳ *No verdict yet — ${c.measured} measured client${c.measured === 1 ? "" : "s"} is not a result.*\n\nThis tells you the instrument works, not that the product does. ${need} more measured client${need === 1 ? "" : "s"} at week ${atWeeks} and this number starts to mean something. Until then, do not put it in front of anyone.`;
   } else if (c.weakSignal) {
     verdict = `\n\n🚨 *The signal is weak.* Under ${pct(WEAK_SIGNAL_RATE)} of measured clients are getting the result they joined for. Stop feature work and stop spending on acquisition. Something in the targets, the programme or the coaching is not doing its job — and finding it is now the only priority.`;
   } else if (c.successRate >= 0.6) {
