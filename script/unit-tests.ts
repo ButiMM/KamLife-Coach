@@ -43,6 +43,7 @@ import { nextMoveLine } from "../server/macro-card-attach";
 import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeContext } from "../server/life-context";
 import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
+import { analyseSurface, classifyIntent } from "../server/surface";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
 import { mustStayDeterministic } from "../server/understanding/action-router";
@@ -6000,6 +6001,46 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.equal(s.byBand.slipping, 1);
     assert.equal(s.byBand.gone, 1);
     assert.equal(s.atRisk.length, 1, "gone clients are not 'reach out first' — slipping ones are");
+  });
+}
+
+// SURFACE — the market is niche, the product is not. Measure before cutting.
+{
+  test("surface: core is what the product is FOR; the rest is surface", () => {
+    const r = analyseSurface([
+      { intent: "FOOD_LOG", count: 500 },
+      { intent: "WORKOUT_DONE", count: 200 },
+      { intent: "FOOD_SWAP", count: 40 },
+      { intent: "REFERRAL_NUDGE", count: 1 },
+      { intent: "SUPPLEMENT_GUIDE", count: 0 },
+    ], 60);
+    const byIntent = Object.fromEntries(r.rows.map(x => [x.intent, x.klass]));
+    assert.equal(byIntent["FOOD_LOG"], "core");
+    assert.equal(byIntent["WORKOUT_DONE"], "core");
+    assert.equal(byIntent["FOOD_SWAP"], "periphery");
+    assert.equal(byIntent["REFERRAL_NUDGE"], "dead");
+    assert.ok(r.coreShare > 90, "core should dominate a healthy product");
+  });
+
+  test("surface: 'dead' means under one use a fortnight, measured against the window", () => {
+    // 2 uses over 60 days is under 1 per fortnight; 2 uses over 7 days is not.
+    assert.equal(classifyIntent("FOOD_SWAP", 2, 60), "dead");
+    assert.equal(classifyIntent("FOOD_SWAP", 2, 7), "periphery");
+    // Safety is never dead, however rarely it fires — that's the whole point of it.
+    assert.equal(classifyIntent("CRISIS", 0, 365), "core");
+    assert.equal(classifyIntent("LIFE_BEREAVEMENT", 1, 365), "core");
+  });
+
+  test("surface: nudges are capped at one a day", () => {
+    const src = readFileSync(join("server", "scheduler", "shared.ts"), "utf-8");
+    assert.match(src, /MAX_PROACTIVE_PER_DAY\) \|\| 1\)/, "default cap must be 1, not 3");
+  });
+
+  test("surface: the menu promotes four things, not twelve", () => {
+    const src = readFileSync(join("server", "onboarding.ts"), "utf-8");
+    for (const gone of ["shopping list_", "meal prep_", "supplements_", "badges_", "referral_", "connect steps_"])
+      assert.ok(!src.includes(gone), `menu must not promote ${gone}`);
+    assert.match(src, /just talk to me normally/i, "it teaches the real interface instead");
   });
 }
 

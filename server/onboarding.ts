@@ -81,7 +81,11 @@ export async function getMenuText(user: any, opts?: { showCommands?: boolean }):
     ? `\n📸 *At the gym?* Send a photo of any machine — I'll tell you if it's right for today and how to use it.`
     : "";
   const commandsBlock = opts?.showCommands
-    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.${machineLine}\n💪 _workout_ · _done_ · _tomorrow's session_\n📊 _my progress_ · _weight 82_ · _steps 6000_\n🛒 _shopping list_ · _meal prep_ · _supplements_\n⚙️ _my water_ · _badges_ · _referral_ · _connect steps_ · _pause_`
+    // FOUR THINGS, NOT TWELVE (2026-07-28). The menu used to promote shopping lists, meal prep,
+    // supplements, badges, referrals, step-connect and pause — surface a beginner does not need
+    // and cannot hold. All of it still WORKS when asked for by name; it just isn't pushed. The
+    // last line teaches the real interface: talk normally, the coach works it out.
+    ? `\n\n*What you can send me:*\n🍳 Any meal — photo, voice note or plain text. I do the maths.${machineLine}\n💪 _workout_ · _done_\n📊 _my progress_ · _weight 82_\n\n_Or just talk to me normally — tell me what you ate, how you feel, what you need. I'll work it out._`
     : "";
 
   const tail = `${commandsBlock}${trialLine}`;

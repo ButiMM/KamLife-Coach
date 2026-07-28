@@ -126,7 +126,11 @@ export function isProactivePaused(): boolean {
 // Restart-safe: each consumed slot is an atomic DAILY_CAP_<n> row insert, so a
 // container recycle can't grant extra slots. The in-memory count is the fast path
 // and is hydrated from the DB on startup.
-export const DAILY_PROACTIVE_CAP = Math.max(1, Number(process.env.MAX_PROACTIVE_PER_DAY) || 3);
+// ONE A DAY (2026-07-28). At 3/day and 24 jobs a client could receive 21 unsolicited messages a
+// week from a service they pay R199 for — every one a chance to be wrong, and until this week
+// they were all state-blind. One good message beats three forgettable ones. Raise deliberately
+// via MAX_PROACTIVE_PER_DAY if the data ever says people want more, not because a job exists.
+export const DAILY_PROACTIVE_CAP = Math.max(1, Number(process.env.MAX_PROACTIVE_PER_DAY) || 1);
 export const dailyProactiveCount = new Map<string, number>(); // `${today}:${clientId}` → sends today
 
 export function dailyKey(clientId: string): string {
