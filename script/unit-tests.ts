@@ -47,6 +47,7 @@ import { analyseSurface, classifyIntent } from "../server/surface";
 import { fadeState, fadingClients } from "../server/engagement";
 import { guardMalformed, safeFallback } from "../server/malformed-guard";
 import { calorieCeiling } from "../server/adaptive-targets";
+import { unloggedFoodNotice } from "../server/unlogged-notice";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
@@ -6204,6 +6205,34 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.ok(calorieCeiling(55, "fat_loss") <= 2500, "55kg fat-loss ceiling must be sane");
     assert.ok(calorieCeiling(120, "muscle_gain") <= 4500, "never above the hard 4,500 cap");
     assert.ok(calorieCeiling(45, "fat_loss") >= 2200, "but never so low it blocks a real target");
+  });
+}
+
+// CLARIFICATION MODE — turn a coverage gap into a coaching moment (third-party review, 28 Jul).
+{
+  test("clarify: an unmatched restaurant item asks instead of dead-ending", () => {
+    const out = unloggedFoodNotice("Had South African breakfast from McDonald's", ["Coffee"]);
+    assert.match(out, /McDonald's/);
+    assert.match(out, /\?/, "must ask a question, not just confess");
+    assert.match(out, /one or two words/i, "answerable in one word");
+  });
+
+  test("clarify: an unmatched food asks for the two things that change the number", () => {
+    const out = unloggedFoodNotice("I had bunny chow and skopo for lunch", ["Rice"]);
+    assert.match(out, /bunny|skopo/i);
+    assert.match(out, /how much/i);
+    assert.match(out, /fried or grilled/i);
+  });
+
+  test("clarify: still says NOTHING when everything was priced", () => {
+    assert.equal(unloggedFoodNotice("I had rice and chicken", ["Rice", "Chicken"]), "");
+  });
+
+  test("clarify: the never-drop guarantee survives — the food is always named", () => {
+    // The rule that must never regress: an unpriced food is NEVER silently swallowed.
+    const out = unloggedFoodNotice("kota and a stony", ["Chips"]);
+    assert.notEqual(out, "");
+    assert.match(out, /kota/i);
   });
 }
 

@@ -69,11 +69,39 @@ export function unloggedFoodWords(message: string, loggedNames: string[]): strin
   return [...new Set(dropped)].slice(0, 4);
 }
 
-/** One honest line naming what we could not log, or "" when everything landed. */
-export function unloggedFoodNotice(message: string, loggedNames: string[]): string {
-  const place = unloggedPlaceNotice(message, loggedNames);
-  if (place) return place;                       // the specific case wins
+/**
+ * CLARIFY, DON'T JUST CONFESS (2026-07-28, third-party review). Naming what we could not price
+ * was already correct — silence would be worse. But it dead-ends: the client is told something
+ * is missing and left to work out the fix. Asking instead turns a coverage gap into a coaching
+ * moment, gets the meal logged, and hands us the exact words real people use — which is the only
+ * honest way to grow the food table. "Do not let perfect coverage block the cohort. Let perfect
+ * handling of uncertainty block it."
+ *
+ * The question is deliberately answerable with one word.
+ */
+export function clarifyPlaceAsk(placeName: string): string {
+  return `⚠️ I could not price the *${placeName}* item, so it's not in the total yet.\n\nWhat was it — the breakfast, a burger, chicken and chips? One or two words and I'll add it.`;
+}
+
+export function clarifyFoodAsk(words: string[]): string {
+  const list = words.join(", ");
+  return `⚠️ I could not price *${list}* — not in the total yet.\n\nRoughly how much was it, and was it fried or grilled? Tell me and I'll add it properly.`;
+}
+
+/**
+ * One honest line naming what we could not log, or "" when everything landed.
+ * `ask` (default) turns the confession into a question the client can answer in one word.
+ */
+export function unloggedFoodNotice(message: string, loggedNames: string[], ask = true): string {
+  const lo = (message || "").toLowerCase();
+  const place = PLACES.find(p => p.re.test(lo));
+  const loggedJoined = loggedNames.join(" ").toLowerCase();
+  if (place && !loggedJoined.includes(place.stem)) {
+    return ask ? clarifyPlaceAsk(place.name) : unloggedPlaceNotice(message, loggedNames);
+  }
   const words = unloggedFoodWords(message, loggedNames);
   if (words.length < 2) return "";               // one stray word is usually not a food
-  return `⚠️ I could not price *${words.join(", ")}* — that part is NOT in the total. Tell me roughly what it was and I'll add it.`;
+  return ask
+    ? clarifyFoodAsk(words)
+    : `⚠️ I could not price *${words.join(", ")}* — that part is NOT in the total. Tell me roughly what it was and I'll add it.`;
 }
