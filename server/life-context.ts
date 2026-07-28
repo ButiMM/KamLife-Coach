@@ -24,6 +24,8 @@
  * Pure — no DB, no clock, no model. Unit-tested.
  */
 
+import { looksLikeQuitMoment } from "./quit-save";
+
 export type LifeContext =
   // Clinical edge — refer, and mean it.
   | "crisis_adjacent"        // sustained hopelessness (below self-harm, which safety.ts owns)
@@ -111,6 +113,10 @@ export function readLifeContext(message: string): ContextRead | null {
   const s = (message || "").trim();
   if (!s) return null;
   if (ORDINARY.test(s)) return null;
+  // WANTING TO QUIT THE PROGRAMME IS NOT A MENTAL-HEALTH EVENT (2026-07-28). "I can't do this
+  // anymore" about tracking food was being answered with a suicide helpline — insulting to
+  // someone who is simply exhausted, and it ends the relationship. server/quit-save.ts owns it.
+  if (looksLikeQuitMoment(s)) return null;
   for (const p of P) {
     if (p.re.test(s)) return { context: p.context, refer: p.refer, demand: p.demand };
   }

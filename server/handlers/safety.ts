@@ -15,6 +15,7 @@ import {
 } from "../../shared/schema";
 import { eq } from "drizzle-orm";
 import { readLifeContext, lifeContextReply } from "../life-context";
+import { looksLikeQuitMoment, quitSaveReply, readObstacle } from "../quit-save";
 import { markLifeQuiet } from "../life-quiet";
 import { logChat } from "./chat-log";
 
@@ -86,6 +87,28 @@ export async function runSafetyGuards(
   message: string,
   m: string,
 ): Promise<string | null> {
+
+  // ---- THE QUIT MOMENT — "I don't know how I will do this anymore" ----
+  // The single highest-value conversation in the product, and it had no handler: it fell to the
+  // general coach, or (worse) tripped the crisis path and got a helpline. Answered from their
+  // REAL numbers — see server/quit-save.ts.
+  if (looksLikeQuitMoment(message)) {
+    const qu = await db.select({ id: users.id, name: users.name, createdAt: users.createdAt, totalWorkoutsCompleted: users.totalWorkoutsCompleted })
+      .from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const u = qu[0];
+    if (u) {
+      const weeks = u.createdAt ? Math.max(1, Math.round((Date.now() - new Date(u.createdAt).getTime()) / (7 * 86_400_000))) : 1;
+      const reply = quitSaveReply({
+        firstName: (u.name || "").split(" ")[0],
+        sessions: u.totalWorkoutsCompleted || 0,
+        weeks,
+        obstacle: readObstacle(message),
+      });
+      if (u.id) markLifeQuiet(u.id, { context: "overwhelmed", refer: false, demand: "lighten" }).catch(() => {});
+      try { await logChat(u.id, message, reply, "QUIT_SAVE"); } catch (e) { console.warn("[non-fatal]", e); }
+      return reply;
+    }
+  }
 
   // ---- LIFE CONTEXT — the band between a hard week and a crisis (ledger D10) ----
   // Widened 2026-07-27 evening on the founder's push: "people going through illnesses, people

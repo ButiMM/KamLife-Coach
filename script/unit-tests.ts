@@ -44,6 +44,7 @@ import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeC
 import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
+import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
 import { mustStayDeterministic } from "../server/understanding/action-router";
@@ -6041,6 +6042,72 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     for (const gone of ["shopping list_", "meal prep_", "supplements_", "badges_", "referral_", "connect steps_"])
       assert.ok(!src.includes(gone), `menu must not promote ${gone}`);
     assert.match(src, /just talk to me normally/i, "it teaches the real interface instead");
+  });
+}
+
+// THE QUIT MOMENT (2026-07-28, 09:16 live). "I don't know how I will do this anymore" from a
+// client who got home from work at 1am. The founder answered it by hand; the product could not.
+{
+  test("quit: the exact live message is recognised", () => {
+    assert.equal(looksLikeQuitMoment("I don't know how I will do this anymore"), true);
+    for (const msg of [
+      "I can't keep doing this anymore", "I want to quit", "thinking of stopping",
+      "maybe this isn't for me", "I'm ready to give up",
+    ]) assert.equal(looksLikeQuitMoment(msg), true, msg);
+  });
+
+  test("quit: wanting to quit is NOT routed to a mental-health helpline", () => {
+    // This was the bug: "I can't do this anymore" hit crisis_adjacent and got SADAG.
+    assert.equal(readLifeContext("I can't do this anymore"), null);
+    assert.equal(readLifeContext("I don't know how I will do this anymore"), null);
+    // Real crisis language still goes where it should.
+    assert.equal(readLifeContext("I'm honestly depressed")?.context, "crisis_adjacent");
+  });
+
+  test("quit: ordinary messages don't trip it", () => {
+    for (const msg of [
+      "I don't know how to do this exercise", "how do I do this?", "this is hard but I'm doing it",
+      "I stopped at 3 sets",
+    ]) assert.equal(looksLikeQuitMoment(msg), false, msg);
+  });
+
+  test("quit: the honest paragraph never flatters a log that says otherwise", () => {
+    const strong = quitSaveReply({ firstName: "T", sessions: 14, weeks: 6 });
+    assert.match(strong, /14 sessions/);
+    assert.match(strong, /on track/i);
+
+    const weak = quitSaveReply({ firstName: "T", sessions: 1, weeks: 5 });
+    assert.doesNotMatch(weak, /on track/i, "never tell someone with 1 session they're on track");
+    assert.match(weak, /week one looks like/i);
+
+    const none = quitSaveReply({ firstName: "T", sessions: 0, weeks: 2 });
+    assert.doesNotMatch(none, /doing well/i);
+  });
+
+  test("quit: it answers the obstacle they actually named", () => {
+    assert.equal(readObstacle("I got home after 1am"), "late_work");
+    assert.equal(readObstacle("I have no money for food"), "money");
+    assert.equal(readObstacle("I'm exhausted"), "exhausted");
+    const out = quitSaveReply({ firstName: "T", sessions: 9, weeks: 4, obstacle: "late_work" });
+    assert.match(out, /1am/);
+    assert.match(out, /not someone who's slacking/i);
+  });
+
+  test("quit: it carries the founder's structure — cost, alternative, and a smaller ask", () => {
+    const out = quitSaveReply({ firstName: "T", sessions: 9, weeks: 4 });
+    assert.match(out, /same place — probably heavier/i);   // the cost of stopping
+    assert.match(out, /this time next year/i);              // the alternative
+    assert.match(out, /showing up/i);                       // the reset standard
+    assert.match(out, /don't quit\. Shrink it/i);           // an action, not a speech
+    assert.doesNotMatch(out, /0800 567 567/);               // never a helpline for this
+  });
+
+  test("quit: the silent version is short — a wall of text at someone gone gets blocked", () => {
+    const out = silentQuitNudge({ sessions: 6, weeks: 4, daysSinceLog: 9, firstName: "T" });
+    assert.ok(out.length < 420, "must stay short");
+    assert.match(out, /9 days/);
+    assert.match(out, /6 sessions/);
+    assert.doesNotMatch(out, /guilt|shame|disappoint/i);
   });
 }
 
