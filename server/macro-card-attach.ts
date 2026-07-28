@@ -27,6 +27,7 @@ function isPastDay(d: Date): boolean {
 }
 import { getGoalProfile } from "./goal-profiles";
 import { renderMacroCard, renderWelcomeCard } from "./macro-card";
+import { achievementFor, renderAchievementCard } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
 
@@ -40,6 +41,11 @@ export function cardBaseUrl(): string {
 }
 
 type Row = { label: string; current: number; target: number; unit: string; overIsBad?: boolean; decimals?: number };
+
+/** First name for card copy — "" when we don't have one, so the copy falls back to "You". */
+function firstNameOf(user: any): string {
+  return String(user?.name || "").trim().split(/\s+/)[0] || "";
+}
 
 // Shared: today's macro rows for a macro-goal client, or null when a card doesn't apply.
 // `overIsBad` marks the macros where GOING OVER is a warning (carbs, fat, and calories on a
@@ -263,8 +269,19 @@ export function distinctHint(hint: string, nextMove: string): string {
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
  *  logged-at date) makes a RETRO log show that DAY'S totals — e.g. yesterday's card with the
  *  new pizza slices added — instead of today's. */
-export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date }): Promise<string> {
+export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
   try {
+    // ON A MILESTONE DAY THE RECEIPT STANDS ASIDE (2026-07-28, marketing review: "people don't
+    // share a receipt, they share an achievement"). The macro card is useful and nobody has ever
+    // forwarded one. Seven days straight is about the person, and that is the thing they show
+    // someone. One card, so the moment isn't split — the numbers are still in the text reply.
+    const ach = opts.achievementStreak
+      ? achievementFor({ firstName: firstNameOf(opts.user), streak: opts.achievementStreak })
+      : null;
+    if (ach) {
+      const b = cardBaseUrl();
+      if (b) return ` [MEDIA:${b}/card/${putCard(renderAchievementCard(ach))}.png]`;
+    }
     // NO CARD FOR A TRIVIAL ITEM (2026-07-28 live: a full four-bar macro card rendered for a
     // 10 kcal black coffee). A card is a moment; spending one on a zero-calorie drink cheapens
     // every other card and costs a render. The log still happens — only the picture is skipped.

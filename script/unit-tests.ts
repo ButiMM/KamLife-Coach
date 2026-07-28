@@ -4870,6 +4870,44 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// ACHIEVEMENT CARD (2026-07-28, marketing review: "people don't share a receipt, they share an
+// achievement"). Scarcity is the value — a card for every meal is wallpaper.
+test("achievementFor: only real milestones, and weight outranks logging", async () => {
+  const { achievementFor } = await import("../server/achievement-card");
+  assert.equal(achievementFor({ firstName: "Kam", streak: 4 }), null, "day 4 is not a milestone");
+  assert.equal(achievementFor({ firstName: "Kam", streak: 0, sessions: 3 }), null);
+  assert.equal(achievementFor({ firstName: "Kam", weightChangeKg: -0.6 }), null, "under a whole kg is not a card");
+
+  const seven = achievementFor({ firstName: "Kam", streak: 7 })!;
+  assert.equal(seven.figure, "7");
+  assert.match(seven.line, /^Kam\b/);
+
+  // What they came for beats how they got there.
+  const both = achievementFor({ firstName: "Kam", streak: 7, weightChangeKg: -5.2 })!;
+  assert.equal(both.figure, "5kg");
+  assert.match(both.unit, /down/i);
+
+  // The same kilo is never celebrated twice.
+  assert.equal(achievementFor({ firstName: "Kam", weightChangeKg: -5.2, weightMilestonesDone: [5] }), null);
+  assert.equal(achievementFor({ firstName: "Kam", weightChangeKg: -6.1, weightMilestonesDone: [5] })!.figure, "6kg");
+
+  // GAINING weight must never be dressed up as an achievement.
+  assert.equal(achievementFor({ firstName: "Kam", weightChangeKg: 3 }), null);
+
+  // No name on file — the copy still reads as English, never "You is 5kg lighter".
+  assert.match(achievementFor({ weightChangeKg: -5 })!.line, /^You are\b/);
+  assert.match(achievementFor({ sessions: 25 })!.line, /^You have\b/);
+});
+
+test("renderAchievementCard: a real PNG, and a wide figure still fits the ring", async () => {
+  const { renderAchievementCard } = await import("../server/achievement-card");
+  for (const figure of ["7", "5kg", "100", "12.5kg"]) {
+    const png = renderAchievementCard({ figure, unit: "days straight", line: "Koketso logged food every single day for a week.", sub: "Most people stop at day two." });
+    assert.ok(Buffer.isBuffer(png) && png.length > 5000, `valid PNG for ${figure}`);
+    assert.strictEqual(png.slice(1, 4).toString("ascii"), "PNG");
+  }
+});
+
 // CARD MEAL SUMMARY (2026-07-22, founder: the card title must name the MEAL logged — 'Tin fish,
 // Rice, Mixed veggies' — never the model's 'Based on what you mentioned…' preamble).
 test("mealTitleFromReply: summarises the foods from the bullet lines", async () => {

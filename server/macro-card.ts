@@ -66,7 +66,11 @@ export interface MacroCardData {
   nextMove?: string;   // THE instruction — big, top of card, no numbers needed to understand it
 }
 
-function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
+/** Shared with the achievement card so both speak the same visual language. */
+export const CARD_FONT = FONT;
+export const CARD_COLOURS = { ORANGE, ORANGE_LT, INK, MUTED, GREEN };
+
+export function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
   ctx.moveTo(x + rr, y);

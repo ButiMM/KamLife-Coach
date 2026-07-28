@@ -48,13 +48,13 @@ export function extractMealLabel(msg: string, atDate?: Date, macros?: { kcal?: n
   // A light, low-protein log with no meal keyword (fruit, drink, biscuit) is a SNACK — clock-
   // slotting it as a meal steals the slot and lets "same breakfast" later copy it (bug 2026-07-01).
   if (macros && macros.kcal != null && macros.kcal < 250 && (macros.protein ?? 0) <= 4) return "snack";
-  // CAPTION TIME wins over the send-clock (Puntsa's photo diary: shot at "11:00", batch-sent
-  // at 19:49 — the clock mislabelled it dinner). See slotFromCaptionTime in utils.
+  // CAPTION TIME beats the send-clock (a photo diary shot at 11:00 and batch-sent at 19:49 was
+  // mislabelled dinner). See slotFromCaptionTime in utils.
   const captionSlot = slotFromCaptionTime(msg);
   if (captionSlot) return captionSlot;
-  // Time-of-day fallback — no keyword. Night-shift/substantial late plate → "night meal",
-  // never a demoted "snack". LEARNED layer: the client's own hour-pattern beats the clock,
-  // and a light second meal on a used main slot demotes to snack (Review #7, 2026-07-17).
+  // Time-of-day fallback — no keyword. Night-shift/substantial late plate → "night meal", never
+  // a demoted "snack". LEARNED: the client's own hour-pattern beats the clock, and a light
+  // second meal on a used main slot demotes to snack (Review #7, 2026-07-17).
   const fallback = slotFromSastHour(atDate, { nightWorker: isNightWorker(user), substantial: (macros?.kcal ?? 0) >= 300 });
   const sastHour = new Date((atDate ? atDate.getTime() : Date.now()) + 2 * 3_600_000).getUTCHours();
   return resolveInferredSlot(fallback, sastHour, slotCtx, macros?.kcal);
@@ -93,9 +93,8 @@ function hasUnmatchedFoodContent(message: string, matchedFoods: Array<{ name: st
   return tokens.length > 0;
 }
 
-// Scale EVERY number in a portion description by the quantity — count AND grams.
-// "2 slices (60g)" ×2 must become "4 slices (120g)", never "4 slices (60g)";
-// a label whose grams contradict its count destroys trust in all the numbers.
+// Scale EVERY number in a portion description by the quantity — count AND grams. "2 slices
+// (60g)" ×2 becomes "4 slices (120g)"; grams contradicting the count destroy trust in all of them.
 const SINGULAR_UNITS = new Set([
   "cup", "bowl", "scoop", "tablespoon", "teaspoon",
   "serving", "portion", "piece", "packet", "slice", "biscuit", "roti",
@@ -144,8 +143,8 @@ interface CommitFoodLogResult {
 }
 
 // THE single chokepoint for every food-log write (Box 2). GUARANTEE: complete macros — kcal +
-// protein with no carbs/fat get filled from the trusted numbers so the card can't be
-// zero-dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).
+// protein with no carbs/fat get filled from the trusted numbers so the card can't be zero-
+// dragged. Fills only when BOTH are absent (an all-protein meal still lands ~0).
 export async function commitFoodLog(params: CommitFoodLogParams): Promise<CommitFoodLogResult> {
   let carbsInt = params.carbsInt;
   let fatInt = params.fatInt;
@@ -216,8 +215,7 @@ export async function commitFoodLog(params: CommitFoodLogParams): Promise<Commit
 
 type HandleMessageFn = (phone: string, message: string, mediaUrl?: string, mediaContentType?: string, allMediaUrls?: string[]) => Promise<string>;
 
-// Quantity/portion scaling — shared by the main scanner path, smart-log, and
-// multi-day logging so "3 eggs" and "big plate of pap" scale identically everywhere.
+// Quantity/portion scaling — shared by the scanner, smart-log and multi-day paths.
 function normaliseWordNumbers(text: string): string {
   const map: Record<string, string> = {
     "one": "1", "two": "2", "three": "3", "four": "4", "five": "5",
@@ -1281,7 +1279,7 @@ export async function handleFoodContext(ctx: {
       // image on the log (marker stripped + sent as media downstream). Wellness clients get
       // "" — no card forced on them. Fail-open — a card never blocks the text reply.
       const cardName = allAdjustedFoods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || mealLabel;
-      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined });
+      const macroCard = await macroCardMarker({ user, mealName: cardName, mealKcal: totalCals, forDate: scannerIsRetro ? scannerLoggedAt : undefined, achievementStreak: streakCelebration ? foodStreak : undefined });
       const guardrail = await nutritionGuardrailNudge(user); // "too much of something" health-standard nudge
       // Day-dump: a planned meal the client mentioned but hasn't eaten yet — captured, not counted.
       const plannedNote = plannedSegs.length > 0
@@ -1355,8 +1353,9 @@ export async function handleFoodContext(ctx: {
           ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
           : "";
         const fbCardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined });
-        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fbStreak, user.name || "")}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${fbCard}`;
+        const fbStreakNote = getStreakNote(user.id, fbStreak, user.name || "");
+        const fbCard = await macroCardMarker({ user, mealName: fbCardName, mealKcal: gptFallbackResult.totalKcal, forDate: gptIsRetro ? gptLoggedAt : undefined, achievementStreak: fbStreakNote ? fbStreak : undefined });
+        return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fbStreakNote}${fbGuiltNote}${protClarifyNote}${fbDroppedNote}${fbCard}`;
       }
     }
   }
@@ -1430,8 +1429,9 @@ export async function handleFoodContext(ctx: {
         ? `\n\n⚠️ I left part of that out — I wasn't sure I read it right, and I won't put a number on your day that I'm guessing at. Send the rest one item per line (like "1 cup rice") and I'll add it.`
         : "";
       const fb2CardName = gptFallbackResult.foods.map((f: any) => f.name).filter(Boolean).slice(0, 2).join(" + ") || "Meal";
-      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined });
-      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${getStreakNote(user.id, fb2Streak, user.name || "")}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${fb2Card}`;
+      const fb2StreakNote = getStreakNote(user.id, fb2Streak, user.name || "");
+      const fb2Card = await macroCardMarker({ user, mealName: fb2CardName, mealKcal: gptFallbackResult.totalKcal, forDate: fb2IsRetro ? fb2LoggedAt : undefined, achievementStreak: fb2StreakNote ? fb2Streak : undefined });
+      return `${fallbackReply}${fbPattern ? "\n\n" + fbPattern : ""}${fbDay || ""}${fb2StreakNote}${fb2GuiltNote}${fb2ProtClarifyNote}${fb2DroppedNote}${fb2Card}`;
     }
     // GPT returned null / is_food=false. If the user clearly signalled food (strong trigger),
     // ask them to clarify rather than silently dropping. But if we only got here on the loose
