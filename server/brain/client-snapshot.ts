@@ -74,7 +74,7 @@ export async function buildClientSnapshot(user: any): Promise<string> {
     // return plan. The proactive machine is already on hold via paused_until.
     const sickMatch = String(user.profileNotes || "").match(/sick_until:(\d{4}-\d{2}-\d{2})/);
     if (sickMatch && new Date(sickMatch[1]) >= new Date(sastToday())) {
-      lines.push(`⚠️ CLIENT IS SICK (resting until ~${sickMatch[1]}). No training pushes, no calorie pressure — care first. If they ask about coming back: nothing resets, first session back at ~70%, then normal.`);
+      lines.push(`⚠️ CLIENT IS SICK (resting until ~${sickMatch[1]}). No training pushes, no calorie pressure — care first. If they ask about coming back: nothing resets. Session 1 at 60% with one less set, sessions 2-3 at 70-80%, full weight only by week 2-3. NEVER say they go back to full speed on session two.`);
     }
 
     // Who this client is, in their own words (captured at onboarding) — reference their

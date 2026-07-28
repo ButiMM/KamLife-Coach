@@ -66,7 +66,7 @@ export async function scheduleReturnNudge(userId: string, phone: string, dateStr
   if (!nudgeAt) return; // malformed date, or the evening-before is already past
   await cancelReturnNudges(userId);
   const body = kind === "sick"
-    ? "Tomorrow's the day you're cleared to get back to it. 💪 How are you feeling? If you're good, we start easy — session one at about 70%. Reply *I'm back* and I'll set it up. No rush if you need another day."
+    ? "Tomorrow's the day you're cleared to get back to it. 💪 How are you feeling? If you're good, we start easy — session one at 60%, one less set. Reply *I'm back* and I'll set it up. No rush if you need another day."
     : "Tomorrow you're back! Ready to pick up right where you left off — nothing reset, your plan's exactly where you left it. Reply *I'm back* and we go again. 💪";
   await db.insert(reminders).values({ userId, phoneNumber: phone, body, fireAt: nudgeAt, kind: "return" });
 }

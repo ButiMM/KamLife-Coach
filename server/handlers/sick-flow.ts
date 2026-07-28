@@ -7,8 +7,9 @@
 import { db } from "../db";
 import { users } from "../../shared/schema";
 import { eq } from "drizzle-orm";
+import { comebackPlan } from "../adaptive-training";
 import { logChat } from "./chat-log";
-import { parseSickDays, isReturnFromSicknessQuestion } from "../utils";
+import { parseSickDays, isReturnFromSicknessQuestion, looksLikeComebackQuestion } from "../utils";
 import { scheduleReturnNudge, cancelReturnNudges } from "../reminders";
 
 // ── Precision guards (2026-07-13, cross-intent sweep) ─────────────────────────
@@ -147,7 +148,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
       return ackReply;
     }
 
-    if (isReturnFromSicknessQuestion(m)) {
+    if (isReturnFromSicknessQuestion(m) || looksLikeComebackQuestion(m)) {
       // Answering the question must not LOSE the report — "I can't walk today, I'm
       // sick... how does that affect my progress? ...next 5 days" both declares and
       // asks. Record first, then answer.
@@ -160,7 +161,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
           heldLine = `I've paused your check-ins for ~${rec.sickDays} day${rec.sickDays !== 1 ? "s" : ""} so I'm not nagging you while you rest. `;
         }
       }
-      const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n*Nothing resets.* Your programme, your week, your streak — all saved exactly where you left them. Sick days don't count against you.\n\n*First session back:* go at ~70% — lighter weights, fewer sets, listen to your body. Session two, back to normal. Your strength returns within a week; it never left, it was just resting with you.\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}When you're ready, just say *I'm back* and I'll set up your first session.`;
+      const comebackReply = `Good question — here's your comeback plan${capName ? ", " + capName : ""}:\n\n${comebackPlan()}\n\n*Food while sick still counts* — keep logging what you can, no calorie pressure.\n\n${backDate ? `${heldLine}I've got you resting until around *${backDate}*. ` : ""}When you're ready, just say *I'm back* and I'll set up your first session.`;
       await logChat(user.id, message, comebackReply, "SICK_COMEBACK_PLAN");
       return comebackReply;
     }
@@ -228,8 +229,11 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
   // still-sick client). A future/maybe is NOT a recovery declaration — stand down and let
   // the sick-aware brain answer.
   const isDeferredReturn = /\b(i'?ll let you know|let you know (after|by|on|how)|after (mon|tues|wednes|thurs|fri|satur|sun)day|not (yet|now|sure)|maybe|might|thinking (of|about)|will (see|decide)|we'?ll see|if i (feel|am)|once i (feel|am)|when i (feel|am)|hopefully)\b/i.test(m);
+  // "I'm not sick" / "I'm fine now" were in the RECOVERED vocabulary at the top of this file but
+  // NOT in the clear-list below, so a client correcting the coach ("I'm not sick") could not clear
+  // the hold and kept getting sick-adjusted targets every morning (2026-07-28 live).
   if (!isDeferredReturn
-      && /\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu)\b/i.test(m)
+      && /\b(i'?m back|feeling better|i'?m better|recovered|all better|ready to train|back to training|flu'?s? gone|over the flu|i'?m not sick|not sick any\s?more|no longer sick|i'?m fine now|i'?m ok(?:ay)? now|i'?m well now|i'?m healthy)\b/i.test(m)
       && /sick_until:\d{4}-\d{2}-\d{2}/.test(user.profileNotes || "")) {
     try {
       const cleaned = (user.profileNotes || "").replace(/\s*\|?\s*(?:paused_until|sick_until|sick_since):\d{4}-\d{2}-\d{2}/g, "").trim();
@@ -237,7 +241,7 @@ export async function handleSickFlow(ctx: { message: string; m: string; user: an
       // Already back — cancel the pending night-before nudge so we don't ping someone who returned early.
       await cancelReturnNudges(user.id).catch((e) => console.error("[SICK] cancel return nudge failed:", e));
     } catch (e) { console.error("[SICK] failed to clear sick state:", e); }
-    const backReply = `Welcome back${capName ? ", " + capName : ""} — that's what I like to see. 💪\n\n*First session back: ~70%.* Lighter weights, fewer sets, feel it out. Session two, we're back to full speed. Nothing reset while you were out.\n\n[BUTTONS:Today's workout|Log food]`;
+    const backReply = `Welcome back${capName ? ", " + capName : ""} — that's what I like to see. 💪\n\n${comebackPlan()}\n\n[BUTTONS:Today's workout|Log food]`;
     await logChat(user.id, message, backReply, "SICK_RECOVERED");
     return backReply;
   }

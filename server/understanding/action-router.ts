@@ -18,6 +18,8 @@
  * only decides whether Coach K gets FIRST crack or the deterministic pipeline does.
  */
 
+import { looksLikeComebackQuestion } from "../utils";
+
 // Actions / commands / data / transactions / health-safety / billing — the deterministic
 // keepers. NOT the advisory templates (plate method, myth-busters, meal timing) — those are
 // conversation and belong to Coach K.
@@ -65,5 +67,9 @@ const DETERMINISTIC_ACTION = new RegExp([
  * owns it. Biased toward "true" (keep deterministic) so a log is never lost to the engine.
  */
 export function mustStayDeterministic(message: string): boolean {
+  // A COMEBACK question has one correct answer — a fixed physiological ramp — so the engine must
+  // never take it (2026-07-28 live: it answered "would you like to focus on strength training, or
+  // incorporate some running?" to a client who said "tell me how we are going to approach this").
+  if (looksLikeComebackQuestion(message || "")) return true;
   return DETERMINISTIC_ACTION.test(message || "");
 }

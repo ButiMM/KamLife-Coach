@@ -775,6 +775,25 @@ export function looksLikeDeepEmotionalShare(m: string): boolean {
 // A QUESTION about the return/aftermath of being sick — must get the comeback plan,
 // never the rest-up template ("what happens when I come back from the flu?", "how does
 // that affect my progress/my week?", "what do I do when I'm better?").
+/**
+ * A COMEBACK QUESTION — "I'm back in the gym, yesterday was my first day. What's the next move?"
+ *
+ * (2026-07-28 live.) This reached the meaning engine, which replied "Would you like to focus on
+ * strength training, or do you want to incorporate some running too?" — asking a man who had just
+ * said "tell me how we are going to approach this". A comeback has ONE correct answer and it is a
+ * fixed physiological ramp, so it belongs on the deterministic rails, not in a conversation.
+ *
+ * Deliberately does NOT require the word "sick" — this client never used it.
+ */
+export function looksLikeComebackQuestion(m: string): boolean {
+  const s = m || "";
+  const backMarker = /\b(?:first (?:day|session|time) back|back (?:in|at) (?:the )?gym|back to (?:the )?gym|just got back|coming back|came back|returned to training|getting back into it)\b/i.test(s);
+  if (!backMarker) return false;
+  const asking = /\b(?:what'?s the next move|what (?:do|should|must) i do|how (?:do|should) (?:we|i)|what now|where (?:do|to) (?:i|we) start|tell me how|how are we going to|what'?s the plan|next steps?)\b/i.test(s)
+    || /\?/.test(s);
+  return asking;
+}
+
 export function isReturnFromSicknessQuestion(m: string): boolean {
   const s = m || "";
   if (!/\b(sick|ill|flu|flue|fever|covid|better|recover)/i.test(s)) return false;

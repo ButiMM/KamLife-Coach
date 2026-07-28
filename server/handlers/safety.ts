@@ -14,7 +14,8 @@ import {
   gptCosts, userIntegrations, clientIntelligenceProfiles,
 } from "../../shared/schema";
 import { eq } from "drizzle-orm";
-import { classifyScope, scopeReply } from "../mental-health-scope";
+import { readLifeContext, lifeContextReply } from "../life-context";
+import { markLifeQuiet } from "../life-quiet";
 import { logChat } from "./chat-log";
 
 // Send a Twilio message with exponential-backoff retries. On complete failure,
@@ -86,16 +87,19 @@ export async function runSafetyGuards(
   m: string,
 ): Promise<string | null> {
 
-  // ---- MENTAL-HEALTH SCOPE — below crisis, above coaching (ledger D10) ----
-  // Runs AFTER the crisis check below in severity terms but is placed here so it sits inside the
-  // safety guard; the crisis branch returns first for self-harm. This is the band the product had
-  // nothing for: sustained low mood, drinking instead of eating, disordered eating. The answer is
-  // an honest boundary and a real referral — never deeper therapy from a fitness coach.
-  const scopeSignal = classifyScope(message);
-  if (scopeSignal && !CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
-    const su = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
-    const reply = scopeReply(scopeSignal, (su[0]?.name || "").split(" ")[0]);
-    try { await logChat(su[0]?.id || "unknown", message, reply, "SCOPE_REFERRAL"); } catch (e) { console.warn("[non-fatal]", e); }
+  // ---- LIFE CONTEXT — the band between a hard week and a crisis (ledger D10) ----
+  // Widened 2026-07-27 evening on the founder's push: "people going through illnesses, people
+  // going through this and that — they want some sort of comfort." Bereavement, own illness,
+  // caring for someone, retrenchment, divorce, burnout, loneliness now land properly instead of
+  // getting a protein target. Every reply is comfort + fewer demands, never treatment — see
+  // server/life-context.ts for the compliance posture.
+  const life = readLifeContext(message);
+  if (life && !CRISIS_PHRASES.some(phrase => m.includes(phrase))) {
+    const lu = await db.select({ id: users.id, name: users.name }).from(users).where(eq(users.phoneNumber, phone)).limit(1);
+    const reply = lifeContextReply(life, (lu[0]?.name || "").split(" ")[0]);
+    // Comfort that isn't followed by silence is just a nice sentence — go quiet on nudges too.
+    if (lu[0]?.id) markLifeQuiet(lu[0].id, life).catch(() => {});
+    try { await logChat(lu[0]?.id || "unknown", message, reply, `LIFE_${life.context.toUpperCase()}`); } catch (e) { console.warn("[non-fatal]", e); }
     return reply;
   }
 

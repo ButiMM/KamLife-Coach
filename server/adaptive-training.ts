@@ -102,3 +102,25 @@ export function applySetsDelta(programmeText: string, setsDelta: number): string
     return `${next}×${reps}`;
   });
 }
+
+/**
+ * THE RETURN PROTOCOL — one copy, because seven copies disagreed.
+ *
+ * (2026-07-28 live, founder: "Come on, I'm weak. You want me to go full speed with session 2???")
+ * The comeback text existed in seven places and said three different things: "session two, we're
+ * back to full speed" (sick-flow), "session two, back to normal" (comeback plan), and a correct
+ * three-week ramp (injury path). The one the client hit was the wrong one, and it contradicted
+ * the adaptive engine in this very file.
+ *
+ * Strength does not return in one session. This is the conservative ramp, and every path that
+ * talks about coming back now renders THIS — change it here or nowhere.
+ */
+export function returnProtocolLines(): string {
+  return `*Session 1:* 60% of your old weights, one less set. Just move.\n*Sessions 2–3:* 70–80% if session 1 felt fine.\n*Week 2–3:* back to full weight, and only if nothing hurts.`;
+}
+
+/** The whole comeback block — heading, ramp, and the reassurance that nothing was lost. */
+export function comebackPlan(firstName = ""): string {
+  const fn = firstName ? `${firstName}, ` : "";
+  return `${fn}here's exactly how we do this — no guessing.\n\n${returnProtocolLines()}\n\n*Nothing resets.* Your programme, your week and your streak are exactly where you left them.\n\nStrength comes back faster than it left, but it takes 2–3 weeks — not one session. Rushing it is how people get hurt in week one.`;
+}

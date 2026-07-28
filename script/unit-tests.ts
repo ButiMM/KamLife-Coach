@@ -40,7 +40,10 @@ import { dinnerCloseLine, remainingInMeals } from "../server/education";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../server/food-fuzzy";
 import { scanReply, summarise } from "../server/audit/reply-defects";
 import { nextMoveLine } from "../server/macro-card-attach";
-import { classifyScope, scopeReply, pausesNumbers } from "../server/mental-health-scope";
+import { readLifeContext, lifeContextReply, pausesTargets, quietDays, type LifeContext } from "../server/life-context";
+import { comebackPlan } from "../server/adaptive-training";
+import { looksLikeComebackQuestion } from "../server/utils";
+import { mustStayDeterministic } from "../server/understanding/action-router";
 import { parseIdentityCorrection, correctionCandidates } from "../server/food-identity-correction";
 import { adaptTraining, applySetsDelta } from "../server/adaptive-training";
 import { ceilingState } from "../server/spend-ceiling";
@@ -5810,26 +5813,75 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(nextMoveLine(rows(185, 185, 2800, 2862), false), /done/i);
   });
 
-  test("scope: the live 'only alcohol' case gets a boundary, not coaching", () => {
-    const sig = classifyScope("I'm honestly depressed, the only thing I've had today is alcohol");
-    assert.ok(sig);
-    const out = scopeReply(sig!, "Kam");
-    assert.match(out, /0800 567 567/);              // a real referral, not a platitude
-    assert.doesNotMatch(out, /protein target|calorie/i);
-    assert.equal(readsAsTherapySpeak(out), false);  // never the feelings-diagnosis register
+  test("life: the clinical edge still refers", () => {
+    const alc = readLifeContext("I'm honestly depressed, the only thing I've had today is alcohol");
+    assert.ok(alc); assert.equal(alc!.refer, true); assert.equal(alc!.demand, "pause");
+    const out = lifeContextReply(alc!, "Kam");
+    assert.match(out, /0800 567 567/);
+    assert.equal(readsAsTherapySpeak(out), false);
+    assert.equal(readLifeContext("I make myself sick after I eat")!.context, "disordered_eating");
   });
 
-  test("scope: ordinary coaching moments are NOT diverted", () => {
+  test("life: the COMMON cases now land — a coach hears the whole person", () => {
+    const cases: Array<[string, LifeContext]> = [
+      ["my mother passed away on Sunday, funeral is Friday", "bereavement"],
+      ["I'm in hospital, had surgery yesterday", "own_illness"],
+      ["my son is sick, I've been at the clinic all week", "family_illness"],
+      ["I got retrenched, there's no income coming in", "job_or_money"],
+      ["we're getting divorced and it's a mess", "relationship"],
+      ["I'm burnt out, double shifts every day", "burnout"],
+      ["I feel so lonely doing this", "loneliness"],
+      ["I have panic attacks most days", "anxious"],
+      ["there is too much going on, I'm drowning", "overwhelmed"],
+    ];
+    for (const [msg, want] of cases) {
+      const r = readLifeContext(msg);
+      assert.ok(r, `must be read: ${msg}`);
+      assert.equal(r!.context, want, msg);
+    }
+  });
+
+  test("life: comfort replies never diagnose, prescribe or mention medicine", () => {
+    const BANNED = /\b(medication|medicine|meds|dose|dosage|tablets?|pills?|prescri|diagnos|symptom|treatment plan|you (?:have|are suffering from))\b/i;
+    for (const c of ["bereavement", "own_illness", "family_illness", "job_or_money", "relationship",
+                     "burnout", "loneliness", "anxious", "overwhelmed"] as LifeContext[]) {
+      const out = lifeContextReply({ context: c, refer: false, demand: "lighten" }, "Kam");
+      assert.doesNotMatch(out, BANNED, `${c} must stay a lifestyle coach`);
+      assert.ok(out.length > 80, `${c} must actually say something`);
+    }
+  });
+
+  test("life: ordinary coaching talk is never diverted", () => {
     for (const msg of [
-      "I'm depressed about my weight", "just tired today", "I had a beer with dinner",
-      "feeling down about my progress", "I'm stressed at work",
-    ]) assert.equal(classifyScope(msg), null, `must stay coaching: ${msg}`);
+      "I'm depressed about my weight", "sick of eating chicken every day",
+      "that session was killing my legs", "I'm dying after that workout",
+      "sad about my progress this week",
+    ]) assert.equal(readLifeContext(msg), null, `must stay coaching: ${msg}`);
   });
 
-  test("scope: disordered eating pauses the numbers", () => {
-    const sig = classifyScope("I make myself sick after I eat");
-    assert.equal(sig, "disordered_eating");
-    assert.equal(pausesNumbers(sig!), true);
+  test("life: bereavement and illness pause the programme, hard weeks lighten it", () => {
+    assert.equal(pausesTargets(readLifeContext("my father passed away")!), true);
+    assert.equal(quietDays(readLifeContext("my father passed away")!), 7);
+    assert.equal(quietDays(readLifeContext("I got retrenched last week")!), 3);
+  });
+
+  // 2026-07-28 07:57 — "Session two, we're back to full speed" to a man who had just said he
+  // was weak. The comeback text lived in seven places and said three different things.
+  test("comeback: one protocol, and it never promises full speed at session two", () => {
+    const plan = comebackPlan("Kam");
+    assert.match(plan, /60%/);
+    assert.match(plan, /2–3 weeks|2-3 weeks/);
+    assert.doesNotMatch(plan, /full speed/i);
+    assert.doesNotMatch(plan, /session two, back to normal/i);
+  });
+
+  test("comeback: the live question routes deterministically, never to the engine", () => {
+    const msg = "I'm back in the gym yesterday was my first day like I explained What's the next move for me?";
+    assert.equal(looksLikeComebackQuestion(msg), true);
+    assert.equal(mustStayDeterministic(msg), true);
+    // Plain logs and chatter must NOT be captured by it.
+    for (const other of ["I trained today", "back in 10 minutes", "what should I eat"])
+      assert.equal(mustStayDeterministic(other) && looksLikeComebackQuestion(other), false, other);
   });
 }
 
