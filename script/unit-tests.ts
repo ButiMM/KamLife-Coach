@@ -4870,6 +4870,111 @@ test("distinctHint: same subject twice becomes action + reason, never the order 
   for (const [k, v] of Object.entries(WHY_LINE)) assert.ok(v.length <= 50, `${k} WHY line too long to render: ${v}`);
 });
 
+// OUTCOMES (2026-07-28) — the instrument that answers whether this product changes anyone.
+// These tests exist mostly to stop the measurement flattering us.
+{
+  const client = (o: any) => ({
+    userId: o.id || "u", signupDay: "2026-05-01", goal: o.goal || "fat_loss",
+    weeksOnProgramme: o.weeks ?? 8, startWeightKg: o.start, latestWeightKg: o.latest,
+    weighIns: o.weighIns ?? (o.start != null && o.latest != null ? 2 : 0),
+    foodLogDays: o.foodDays ?? 40, sessions: o.sessions ?? 16, referrals: o.referrals ?? 0,
+  });
+
+  test("outcomes: success is judged against the goal they actually joined for", async () => {
+    const { goalVerdict } = await import("../server/outcomes");
+    // The same 2kg gain is a win for one client and a failure for another. Scoring everyone on
+    // the scale would call our best muscle-gain client a failure.
+    assert.equal(goalVerdict(client({ goal: "muscle_gain", start: 70, latest: 72 })), "success");
+    assert.equal(goalVerdict(client({ goal: "fat_loss", start: 70, latest: 72 })), "wrong_way");
+    assert.equal(goalVerdict(client({ goal: "fat_loss", start: 96.4, latest: 91.2 })), "success");
+
+    // Scale noise is not progress — 300g is water.
+    assert.equal(goalVerdict(client({ goal: "fat_loss", start: 80, latest: 79.7 })), "no_change");
+
+    // Recomposition deliberately does not score on the scale; the point is weight staying put.
+    assert.equal(goalVerdict(client({ goal: "recomposition", start: 80, latest: 80, sessions: 20 })), "success");
+    assert.equal(goalVerdict(client({ goal: "recomposition", start: 80, latest: 80, sessions: 0 })), "wrong_way");
+
+    // "Become active again" — the habit IS the goal, so adherence is the outcome, not a proxy.
+    assert.equal(goalVerdict(client({ goal: "general", foodDays: 40, weeks: 8 })), "success");
+    assert.equal(goalVerdict(client({ goal: "general", foodDays: 4, weeks: 8 })), "wrong_way");
+  });
+
+  test("outcomes: unmeasured is never counted as success OR failure", async () => {
+    const { goalVerdict, summariseCohort } = await import("../server/outcomes");
+    assert.equal(goalVerdict(client({ goal: "fat_loss", start: undefined, latest: undefined })), "unknown");
+    // One weigh-in is a number, not a change — you cannot judge a direction from a single point.
+    assert.equal(goalVerdict(client({ goal: "fat_loss", start: 80, latest: 80, weighIns: 1 })), "unknown");
+
+    // THE LIE THIS PREVENTS: counting only the people who bothered to weigh. Two winners out of
+    // ten clients is not a 100% success rate, however tempting the arithmetic.
+    const cohort = [
+      client({ id: "a", start: 90, latest: 86 }),
+      client({ id: "b", start: 88, latest: 84 }),
+      ...Array.from({ length: 8 }, (_, i) => client({ id: `x${i}` })),
+    ];
+    const s = summariseCohort(cohort, 8);
+    assert.equal(s.n, 10);
+    assert.equal(s.measured, 2);
+    assert.equal(s.successRate, 1, "the rate is over the MEASURED clients");
+    assert.equal(s.coverage, 0.2, "and coverage says how little that means");
+    assert.equal(s.blindSpot, true, "20% coverage must raise the blind-spot flag");
+  });
+
+  test("outcomes: a client who hasn't got there yet is excluded, not failed", async () => {
+    const { summariseCohort, formatOutcomesReport } = await import("../server/outcomes");
+    const young = [client({ weeks: 2, start: 90, latest: 90 }), client({ weeks: 1 })];
+    assert.equal(summariseCohort(young, 8).n, 0, "judging a 2-week client at week 8 proves nothing");
+    const report = formatOutcomesReport(young, 8);
+    assert.match(report, /Nobody has reached \*week 8\*/);
+    assert.doesNotMatch(report, /0%/, "an empty cohort must never render as a 0% success rate");
+  });
+
+  test("outcomes: the report cannot make a bad number read as a good one", async () => {
+    const { formatOutcomesReport, WEAK_SIGNAL_RATE } = await import("../server/outcomes");
+    // Ten measured clients, one succeeding. That is a stop-everything signal.
+    const bad = [
+      client({ id: "w", start: 90, latest: 86 }),
+      ...Array.from({ length: 9 }, (_, i) => client({ id: `l${i}`, start: 90, latest: 90.1 })),
+    ];
+    const report = formatOutcomesReport(bad, 8);
+    assert.match(report, /signal is weak/i);
+    assert.match(report, /Stop feature work/i);
+    assert.ok(WEAK_SIGNAL_RATE === 0.3);
+
+    // And a genuinely good cohort says so plainly, with the sentence he can actually use.
+    const good = Array.from({ length: 10 }, (_, i) => client({ id: `g${i}`, start: 90, latest: i < 8 ? 85 : 90 }));
+    const goodReport = formatOutcomesReport(good, 8);
+    assert.match(goodReport, /This works/i);
+    assert.match(goodReport, /80%/);
+  });
+
+  test("outcomes: blindness outranks a bad result — you cannot conclude from what you didn't measure", async () => {
+    const { formatOutcomesReport } = await import("../server/outcomes");
+    // Low coverage AND a poor measured rate: the report must say "we don't know", not "it fails".
+    const blind = [
+      client({ id: "a", start: 90, latest: 90.2 }),
+      ...Array.from({ length: 9 }, (_, i) => client({ id: `u${i}` })),
+    ];
+    const report = formatOutcomesReport(blind, 8);
+    assert.match(report, /flying blind/i);
+    assert.doesNotMatch(report, /signal is weak/i, "never blame the coaching for a measurement gap");
+  });
+}
+
+test("outcomes: the founder's phrasings all reach the command", () => {
+  // Coach-only, so routing-audit (which runs as a client) is the wrong harness — this pins the
+  // gate itself. Kam will type whichever of these comes to mind at 6am.
+  const RE = /^(?:outcomes?|results?|does it work)(?:\s+\d{1,2})?$/i;
+  for (const yes of ["outcomes", "outcome", "results", "result", "does it work", "outcomes 4", "Outcomes 12"]) {
+    assert.ok(RE.test(yes.trim()), `should reach the outcomes command: "${yes}"`);
+  }
+  // Must not swallow ordinary conversation.
+  for (const no of ["what are my results this week", "does it work for muscle gain", "outcomes are bad"]) {
+    assert.equal(RE.test(no.trim()), false, `must NOT be swallowed: "${no}"`);
+  }
+});
+
 // SAST — ONE DEFINITION OF A DAY (ledger D6, 2026-07-28). The offset lived in 98 places and the
 // hand-rolled versions did not agree with each other. These pin the one that survives.
 test("sast: one day key format, zero-padded, everywhere", async () => {

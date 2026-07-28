@@ -210,10 +210,11 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
       return `🚀 *Running build*\nCommit: *${sha}* (${process.env.RAILWAY_GIT_BRANCH || "main"})\nBooted: ${bootAt} SAST · up ${Math.max(1, Math.round(process.uptime() / 60))} min\nEngine: ENGINE_LIVE=*${engine}*\n\n*Live self-test* (the running code checking itself now):\n• "incorporate exercises like rows and planks" → ${mark(freelance)}\n• "shock the muscle to confuse it" → ${mark(myth)}\n• Meal card → ${cardOk ? "✅ font loaded, image URL valid" : `⚠️ ${!cardFontLoaded ? "font NOT loaded (card text blank)" : "APP_URL missing https:// (card leaks as a link)"}`}\n\n${freelance && myth ? "The engine fix is LIVE." : "⚠️ Engine fix NOT live yet — give Railway a minute and send *version* again."}`;
     }
 
-    // Founder reports: engagement (retention), surface (feature usage), audit (reply defects).
+    // Founder reports: engagement, surface (feature usage), audit (reply defects), outcomes (results).
     if (/^(?:engagement|retention|who.?s quiet|drop.?off)$/i.test(m.trim())) return await (await import("./audit/engagement-command")).engagementCommand();
     if (/^(?:surface|features?|what.?s used)$/i.test(m.trim())) return await (await import("./audit/surface-command")).surfaceCommand();
     if (/^(?:reply\s+)?audit(?:\s+\d{2,5})?$/i.test(m.trim())) return await (await import("./audit/reply-audit-command")).replyAuditCommand(m);
+    if (/^(?:outcomes?|results?|does it work)(?:\s+\d{1,2})?$/i.test(m.trim())) return await (await import("./audit/outcomes-command")).outcomesCommand(m);
 
     const rc = m.trim().match(/^replay(?:\s+scorecard)?(?:\s+(\d{1,3}))?$/i) || m.trim().match(/^(?:run\s+)?scorecard(?:\s+(\d{1,3}))?$/i);
     if (rc) {
@@ -833,12 +834,11 @@ Coach K tone: direct, warm, SA voice. Two sentences. Nothing else.`;
   // button-less, differently every time (2026-07-10 audit). Content-carrying greetings
   // ("hi, I ate eggs") are not bare, so they still flow to the brain/handlers normally.
   // ---- EARLY COMMANDS — instant answers, programme, holiday, shopping, etc ----
-  // ARCHITECTURE FLIP (2026-07-13, tester round 3): early-commands now runs BEFORE the
-  // brain. The brain-first order meant every phrasing not explicitly gated got front-run
-  // by the model — bare "Workout" got an improvised wall-of-text session instead of the
-  // real programme. Deterministic code OWNS its commands; the brain fronts only what no
-  // handler claims. The gates above still protect messages owned by LATER handlers
-  // (steps/water/weight logs, direction, billing, pain triage in misc).
+  // ARCHITECTURE FLIP (2026-07-13, tester round 3): early-commands runs BEFORE the brain. The
+  // brain-first order let the model front-run every phrasing that wasn't explicitly gated — bare
+  // "Workout" got an improvised wall of text instead of the real programme. Deterministic code
+  // OWNS its commands; the brain fronts only what no handler claims. The gates above still
+  // protect messages owned by LATER handlers (steps/water/weight, direction, billing, pain).
   // ---- REMINDERS — a real capability the coach owns, before the keyword wall + brain so
   // nothing hijacks "remind me to take creatine at 8pm". Deterministic parser = a kept promise.
   const reminderResult = await handleReminderCommand({ phone, message, m, user });
