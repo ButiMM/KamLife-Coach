@@ -6,6 +6,7 @@ import { getNumbersMode, stripFoodLineNumbers, plainProteinNudge } from "../numb
 import { stepBurnKcal } from "../targets";
 import { humanizeReply } from "../reply-hygiene";
 import { displayFoodName } from "../food-naming";
+import { guardMalformed, safeFallback } from "../malformed-guard";
 import { levenshtein, maxDistance, FUZZY_BLACKLIST } from "../food-fuzzy";
 import { usesMacroTargets } from "../goal-profiles";
 import { db } from "../db";
@@ -539,6 +540,16 @@ export function sanitizeCoachReply(reply: string, userMessage: string, budgetTie
   }
 
   const guarded = enforceCoachGuardrails(trimmed, { userMessage, budgetTier, injuries });
+
+  // MALFORMED-OUTPUT GUARD (ledger D6 mitigation, 2026-07-28). The old brain occasionally emits
+  // structurally broken text — a literal asterisk, an unclosed bracket, a sentence cut mid-word.
+  // A full engine migration is weeks; this is the cheap protection that stops the worst of it
+  // reaching a client today. Catches are logged so the real fix has evidence.
+  const integrity = guardMalformed(guarded.reply);
+  if (!integrity.pass) {
+    console.warn(`[MALFORMED_GUARD] blocked reply — ${integrity.reasons.join(", ")}: ${guarded.reply.slice(0, 120)}`);
+    return safeFallback();
+  }
   return guarded.reply;
 }
 

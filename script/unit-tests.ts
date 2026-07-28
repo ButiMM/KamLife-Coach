@@ -45,6 +45,7 @@ import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
 import { fadeState, fadingClients } from "../server/engagement";
+import { guardMalformed, safeFallback } from "../server/malformed-guard";
 import { looksLikeQuitMoment, quitSaveReply, readObstacle, silentQuitNudge } from "../server/quit-save";
 import { mentionsConditionOrMedication, conditionWelcome } from "../server/condition-welcome";
 import { looksLikeComebackQuestion } from "../server/utils";
@@ -6154,6 +6155,44 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     assert.match(job, /claimProactive\(client\.id, "fade_nudge"/, "goes through the shared budget");
     assert.match(job, /isProactivePaused\(\)/, "honours the global killswitch");
     assert.match(job, /if \(isPaused\(client\)\) continue;/, "honours a paused client");
+  });
+}
+
+// MALFORMED-OUTPUT GUARD — the cheap D6 mitigation. Catches breakage, never tone.
+{
+  test("guard: catches the exact old-brain breakage patterns", () => {
+    const cases: Array<[string, string]> = [
+      ["Good work *Kam — keep going.", "literal_asterisk"],
+      ["Your plan (3 days a week is ready.", "unclosed_parens"],
+      ["You had 3 meals (breakfast and lunch).", "count_mismatch"],
+      ["Eat more protein today and", "truncated"],
+      ["You ate undefined kcal today.", "unrendered_template"],
+    ];
+    for (const [reply, why] of cases) {
+      const r = guardMalformed(reply);
+      assert.equal(r.pass, false, `should be blocked: ${reply}`);
+      assert.ok(r.reasons.includes(why), `${reply} → expected ${why}, got ${r.reasons.join(",")}`);
+    }
+  });
+
+  test("guard: healthy replies pass untouched — a guard that eats good output is worse", () => {
+    for (const ok of [
+      "Good breakfast, Kam. *Pap and eggs* — you're on track. Reply *done* when you eat.",
+      "You had 2 meals (breakfast and lunch). Dinner is still open.",
+      "✅ *Logged:* Rice, Tin fish, Lentils — ~719 kcal | 50g protein",
+      "That's dinner done — calories and protein both where they should be. Day closed. 👊",
+      "Yes, amasi counts as protein. Have it with your pap tonight.",
+    ]) {
+      const r = guardMalformed(ok);
+      assert.equal(r.pass, true, `must pass: ${ok} (blocked for ${r.reasons.join(",")})`);
+    }
+  });
+
+  test("guard: the fallback asks, it never invents", () => {
+    const out = safeFallback("Kam");
+    assert.match(out, /Kam/);
+    assert.match(out, /say it again/i);
+    assert.equal(guardMalformed(out).pass, true, "the fallback must itself pass the guard");
   });
 }
 
