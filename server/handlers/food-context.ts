@@ -596,11 +596,11 @@ export async function handleFoodContext(ctx: {
     /\b(from where|where can|where do|where to|how much|how many|is it|is that|are they|are those|should i|can i|do i|does it|what is|what are|which one|good for|bad for|healthy|unhealthy|worth it|better than|worse than|is that enough|enough protein|enough calories|is it enough|any good|any protein)\b/.test(m);
   const hasFrustrationWords = /\b(no no|that.?s not|not true|not right|wrong|incorrect|read everything|come on|what the hell|terrible|rubbish|nonsense|adjust it|fix it|change it|update it|that.?s wrong|bull|crap|ridiculous|do a better|better job|what\??!*$|huh\??|excuse me|are you sure|doesn.?t look right|not correct|try again|redo|recalculate)\b/i.test(m);
   const isFrustration = hasFrustrationWords && !/\b(i had|i ate|i said|had|ate|having|eating|the above|for lunch|for dinner|for breakfast|for supper|go with|goes with|part of|same meal|i was correcting)\b/i.test(m);
-  // "have" alone is too broad — matches possession ("I have eggs at home"), negation ("don't have"),
-  // and questions ("do you have"). Keep only explicit past/active eating forms.
-  // "add" alone matches too many non-food contexts ("add me", "add to cart").
-  // Future tense ("i'll have", "going to have", "gonna have") removed — those are planning, not eating.
-  const hasLogTrigger = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|brunch|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
+  // Explicit eating forms only: "have" is possession/questions, "add" is "add to cart", future
+  // tense is planning. A MEAL WORD IS NOT AN ASSERTION EITHER (2026-07-29) — bare breakfast|lunch|
+  // dinner|snack was here, so "dinner" in ANY context meant "log this": the alternative that made
+  // this logger OPT-OUT. The paired forms ("for dinner", "dinner was") were already listed.
+  const hasLogTrigger = /\b(ate|had|having|eating|for breakfast|for lunch|for dinner|for supper|for snack|for brunch|breakfast was|lunch was|dinner was|supper was|just had|just ate|meal was|meal is|food was|i ate|i had|i've had|ive had|pre.?workout|pre workout|post.?workout|post workout|before.*gym|after.*gym|before.*training|after.*training|added|put in|putting in)\b/.test(m);
 
   // Future / planning / shopping intent — describes intended eating or shopping, NOT food consumed today.
   // Blocks directFoodScan and the main food scanner from firing on these messages.
