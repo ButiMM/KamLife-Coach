@@ -7131,6 +7131,50 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── The engine's own failures, detectable from stored history ────────────────────────────────
+// Every earlier detector was written for a deterministic handler. The engine now answers most
+// conversation, and none of them could see it. These read reply text only, so `audit` finds them
+// in real history — no API key, no model, nothing to ask the founder for.
+{
+  const LIVE_1429 = "Shame, Kam, it's tough coming back after being unwell. Your body is still recovering from the illness, which can make you feel weaker and more tired than usual. It's normal to feel like this after a break, especially when you've been sick. Here's what to do: 1. *Listen to Your Body:* If you're feeling too winded or weak, it's okay to stop and rest. Recovery comes first. 2. *Ease Back In:* Start with lighter weights or fewer reps than usual. Give your body time to adjust. 3. *Focus on Nutrition:* Make sure you're eating enough protein and calories to support your recovery. 4. *Hydration:* Keep drinking water throughout the day to help your body recover. Take it one step at a time, and don't rush.";
+
+  test("engine defects: the live 14:29 reply is caught", async () => {
+    const { scanReply } = await import("../server/audit/reply-defects");
+    const codes = scanReply({ messageIn: "I need more help", messageOut: LIVE_1429 }).map(d => d.code);
+    assert.ok(codes.includes("wall-of-text"), `expected wall-of-text, got ${codes.join(",")}`);
+    assert.ok(codes.includes("listicle"), `expected listicle, got ${codes.join(",")}`);
+    assert.ok(codes.includes("generic-advice"), `expected generic-advice, got ${codes.join(",")}`);
+  });
+
+  test("engine defects: one piece of general advice is fine, two is generic", async () => {
+    const { scanReply } = await import("../server/audit/reply-defects");
+    const one = scanReply({ messageIn: "how much water", messageOut: "Drink plenty of water today — about 2L. That's it." }).map(d => d.code);
+    assert.ok(!one.includes("generic-advice"), "a single honest hydration answer is not generic");
+    const two = scanReply({ messageIn: "how am I doing", messageOut: "Listen to your body and stay hydrated. Take it one day at a time." }).map(d => d.code);
+    assert.ok(two.includes("generic-advice"), "two platitudes and no client data IS generic");
+  });
+
+  test("engine defects: real coaching replies stay clean", async () => {
+    const { scanReply } = await import("../server/audit/reply-defects");
+    for (const good of [
+      "Good question — here's your comeback plan, Kam:\n\n*Session 1:* 60% of your old weights, one less set.\n*Sessions 2–3:* 70–80% if session 1 felt fine.",
+      "Logged — pap and chicken stew. That's 620 kcal and 41g protein, so you've got room for a solid dinner.",
+      "That's the most demoralising part of the whole thing, Kam — and it's where most people quit. You're not doing it wrong.\n\n*This week:* keep logging.",
+    ]) {
+      const d = scanReply({ messageIn: "how am I doing", messageOut: good });
+      assert.deepEqual(d, [], `must be clean: "${good.slice(0, 50)}" → ${d.map(x => x.code).join(",")}`);
+    }
+  });
+
+  test("engine defects: a long reply WITH line breaks is not a wall of text", async () => {
+    const { scanReply } = await import("../server/audit/reply-defects");
+    // The distinction that matters: length alone is fine, unreadable length is not.
+    const long = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a properly formatted answer that runs on.`).join("\n");
+    const codes = scanReply({ messageIn: "explain", messageOut: long }).map(d => d.code);
+    assert.ok(!codes.includes("wall-of-text"), `line breaks make it readable: ${codes.join(",")}`);
+  });
+}
+
 // ── Reply hygiene must not reformat the reply it is cleaning ─────────────────────────────────
 // (2026-07-29 live.) The filters split on sentence boundaries and rejoined with a SPACE, which
 // flattened every line break in every AI reply. Three screenshots in a row showed a numbered

@@ -30,6 +30,9 @@ const LABELS: Record<string, string> = {
   "dead-promise": "Promised a follow-up that never comes",
   "duplicate-claim": "Printed the same claim twice",
   "food-not-in-database": "Food missing from the database (coach handled it correctly)",
+  "wall-of-text": "Sent a wall of text with no line breaks",
+  "listicle": "Answered with a numbered list instead of coaching",
+  "generic-advice": "Advice that would fit any client — nothing about them",
 };
 
 export async function replyAuditCommand(message: string, _user?: unknown): Promise<string> {

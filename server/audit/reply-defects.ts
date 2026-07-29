@@ -160,8 +160,48 @@ export function scanReply(turn: AuditTurn): ReplyDefect[] {
   const dup = repeatedInstruction(out);
   if (dup) found.push({ code: "repeated-instruction", detail: dup });
 
+  // 13–15. THE ENGINE'S FAILURES (2026-07-29). Three consecutive live replies, to a client
+  // saying "I need more help", then "Come on, I need more support", then "give me actionable
+  // things" — each answered with the same four- or five-point wellness listicle. Every detector
+  // before this one was written for a deterministic handler; the engine now answers most
+  // conversation and none of them could see it. These read the reply text only, so they work on
+  // stored history — which is how they reach an engine reply without an API key.
+  const words = out.trim().split(/\s+/).filter(Boolean).length;
+
+  if (words > 70 && !out.includes("\n")) {
+    found.push({ code: "wall-of-text", detail: `${words} words with no line break` });
+  }
+
+  const enumerated = (out.match(/(?:^|[\s\n])\d\.\s/g) || []).length;
+  if (enumerated >= 4) {
+    found.push({ code: "listicle", detail: `${enumerated} numbered points — a coach answers, it doesn't publish a list` });
+  }
+
+  const generic = GENERIC_WELLNESS.filter(re => re.test(out)).length;
+  if (generic >= 2) {
+    found.push({ code: "generic-advice", detail: `${generic} pieces of advice that would fit any client — nothing here is about THEM` });
+  }
+
   return found;
 }
+
+/**
+ * Advice so general it could go to a stranger. Any one of these can be legitimate; TWO of them
+ * in one reply means nothing in it came from this client's data — which is precisely what
+ * "it's generic, it's a bot" has meant every time it has been said about this product.
+ */
+const GENERIC_WELLNESS: RegExp[] = [
+  /\blisten to your body\b/i,
+  /\b(?:stay hydrated|drink (?:plenty of|more|lots of) water|keep drinking water|hydration is key)\b/i,
+  /\btake it (?:one (?:day|step) at a time|slow|easy)\b/i,
+  /\byou'?re not alone\b/i,
+  /\byou'?(?:ve| have) got this\b/i,
+  /\bbe (?:kind|gentle) (?:to|with) yourself\b/i,
+  /\b(?:gentle movement|light stretching|gentle stretches)\b/i,
+  /\bdon'?t (?:rush|push too hard|overdo it)\b/i,
+  /\bget (?:enough|plenty of) (?:rest|sleep)\b/i,
+  /\blet me know how you feel\b/i,
+];
 
 // Verb-first, or carrying one of the action verbs this coach actually uses.
 const INSTRUCTION_RE = /^(?:add|eat|get|make|keep|log|walk|drink|grill|have|go|send|stand|tell|finish|hit|push|swap|rest|do)\b|\b(?:add|eat|get|make|keep|log|walk|drink|grill) (?:a|an|one|your|some|it|more|today)\b/i;
