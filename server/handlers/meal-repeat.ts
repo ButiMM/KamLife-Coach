@@ -14,7 +14,7 @@
 import { db } from "../db";
 import { users, mealLogs } from "../../shared/schema";
 import { eq, and, gte, desc } from "drizzle-orm";
-import { sastDayStart } from "../utils";
+import { sastDayStart, slotFromSastHour } from "../utils";
 import { selectMealToCopy, parseMealRepeatTarget, type CopyableMeal } from "../meal-select";
 import { recomputeTodayFoodTotals, invalidateFoodTotalsCache } from "./food-scanner";
 import { logChat } from "./chat-log";
@@ -97,10 +97,31 @@ export async function handleMealRepeat(ctx: {
     let todayCrossMatch: (typeof allMeals)[number] | null = null;
     if (crossish && daysBack === 0 && sourceHint) {
       const todaySub = todayMeals.filter(l => (l.kcalInt || 0) >= 100);
+      // THE CLIENT KNOWS WHICH MEAL WAS LUNCH; THE CLOCK ONLY GUESSES (2026-07-29 live).
+      // "My dinner is the same as my lunch" was answered "I don't have today's lunch logged" to
+      // a man who had logged everything — because his meals went in after 17:00, so every one
+      // was FILED as dinner. Nothing was labelled lunch, so the lookup found nothing and told
+      // him he had not done the thing he had just done.
+      //
+      // So the label is only the first guess. Failing that, take the meal actually EATEN in that
+      // slot's hours, and failing that, take its ordinal place in the day — breakfast is the
+      // first meal, dinner the last, lunch the one in between. Their word for the meal outranks
+      // our timestamp for it.
+      const inSlotHours = todaySub.filter(l => l.loggedAt && slotFromSastHour(new Date(l.loggedAt)) === sourceHint);
+      const byOrdinal = () => {
+        const ordered = [...todaySub].sort((a, b) => new Date(a.loggedAt!).getTime() - new Date(b.loggedAt!).getTime());
+        if (ordered.length < 2) return null;
+        if (sourceHint === "breakfast") return ordered[0];
+        if (sourceHint === "dinner") return ordered[ordered.length - 1];
+        if (sourceHint === "lunch") return ordered[Math.floor((ordered.length - 1) / 2)];
+        return null;
+      };
       todayCrossMatch =
         todaySub.find(l => l.rawMessage && new RegExp(`\\b${sourceHint}\\b`, "i").test(l.rawMessage))
         || todaySub.find(l => (l.mealLabel || "").toLowerCase() === sourceHint)
-        || (todaySub.length === 1 ? todaySub[0] : null);
+        || inSlotHours[0]
+        || (todaySub.length === 1 ? todaySub[0] : null)
+        || byOrdinal();
       if (!todayCrossMatch) {
         const honestMiss = `I don't have today's ${sourceHint} logged, so I can't copy it. Tell me what it was — "rice, tin fish and veg" — and I'll log it as your ${targetLabel || "meal"} now.`;
         await logChat(user.id, message, honestMiss, "SAME_AS_TODAY_MISS");
