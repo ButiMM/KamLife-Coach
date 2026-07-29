@@ -13,14 +13,41 @@
 const DEAD_PROMISE_RE =
   /\b(one moment|just a (?:sec|second|moment)|give me (?:a (?:sec|second|moment|minute)|one (?:sec|second|moment))|bear with me|hang on a (?:sec|second|moment)|(?:i'?ll|let me|i will) (?:get|come) back to you|i'?ll look into (?:that|this|it)|let me look into (?:that|this|it) and (?:get|come) back|let me check[^.!?]*\band (?:get|come) back|checking (?:that|this|it) now|i'?ll be right back|i'?ll (?:check|find out|confirm)[^.!?]*and (?:let you know|get back|come back))\b/i;
 
+/**
+ * Drop every sentence matching `re`, KEEPING the whitespace between the sentences that stay.
+ *
+ * (2026-07-29 live — the single worst readability defect in the product.) Every filter here used
+ * to `split(/(?<=[.!?])\s+/)` and rejoin with a space, which silently flattened every line break
+ * in every AI reply. The model was writing a properly formatted numbered list; the client got one
+ * unbroken paragraph — "1. *Rest:* … 2. *Nutrition:* … 3. *Hydration:* …" run together — which is
+ * exactly the wall of text the founder and a real client both described as "too much".
+ *
+ * It also destroyed the "\n\n---\n\n" marker that splits a reply into separate WhatsApp bubbles,
+ * so that mechanism had never once worked on an AI reply and the literal "---" was left inline.
+ *
+ * Splitting with a CAPTURING group keeps the original separators, so a filter can remove a
+ * sentence without reformatting everything around it.
+ */
+function dropSentences(text: string, re: RegExp): string {
+  const t = (text || "").trim();
+  if (!t) return "";
+  const parts = t.split(/(?<=[.!?])(\s+)/); // [sentence, sep, sentence, sep, …]
+  let out = "";
+  for (let i = 0; i < parts.length; i += 2) {
+    const sentence = parts[i];
+    if (!sentence || re.test(sentence)) continue;
+    out += sentence + (parts[i + 1] ?? "");
+  }
+  return out
+    .replace(/[ \t]{2,}/g, " ")   // collapse runs of SPACES only — never newlines
+    .replace(/\n{3,}/g, "\n\n")   // tidy gaps a removed sentence may have left
+    .trim();
+}
+
 // Remove any SENTENCE that is a stall, keeping the rest of the reply intact. If the whole
 // reply was a stall, returns "" — the caller's empty-reply handler then gives a real answer.
 export function stripDeadPromises(text: string): string {
-  const t = (text || "").trim();
-  if (!t) return "";
-  const sentences = t.split(/(?<=[.!?])\s+/);
-  const kept = sentences.filter((s) => !DEAD_PROMISE_RE.test(s));
-  return kept.join(" ").replace(/\s{2,}/g, " ").trim();
+  return dropSentences(text, DEAD_PROMISE_RE);
 }
 
 // True if the reply contains a dead promise anywhere (for tests / guards).
@@ -37,11 +64,7 @@ const FILLER_RE =
 
 // Remove content-free filler SENTENCES, keeping the substance. Sibling to stripDeadPromises.
 export function stripFiller(text: string): string {
-  const t = (text || "").trim();
-  if (!t) return "";
-  const sentences = t.split(/(?<=[.!?])\s+/);
-  const kept = sentences.filter((s) => !FILLER_RE.test(s));
-  return kept.join(" ").replace(/\s{2,}/g, " ").trim();
+  return dropSentences(text, FILLER_RE);
 }
 
 // The full humanize pass — strip stalls AND corporate filler in one go. This is what
@@ -81,11 +104,7 @@ const ASK_TO_REPEAT_RE =
  * like stripDeadPromises. Pure; the caller decides the fallback.
  */
 export function stripVoiceDenial(text: string): string {
-  const t = (text || "").trim();
-  if (!t) return "";
-  const sentences = t.split(/(?<=[.!?])\s+/);
-  const kept = sentences.filter(s => !VOICE_DENIAL_RE.test(s) && !ASK_TO_REPEAT_RE.test(s));
-  return kept.join(" ").replace(/\s{2,}/g, " ").trim();
+  return dropSentences(text, new RegExp(`${VOICE_DENIAL_RE.source}|${ASK_TO_REPEAT_RE.source}`, "i"));
 }
 
 /** True if the reply denies a voice note we demonstrably received (for guards and the auditor). */

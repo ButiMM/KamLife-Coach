@@ -7131,6 +7131,46 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── Reply hygiene must not reformat the reply it is cleaning ─────────────────────────────────
+// (2026-07-29 live.) The filters split on sentence boundaries and rejoined with a SPACE, which
+// flattened every line break in every AI reply. Three screenshots in a row showed a numbered
+// list arriving as one unbroken paragraph. The model was formatting correctly the whole time.
+{
+  test("hygiene: a numbered list survives with its line breaks", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    const listy = "Here's how:\n\n1. *Rest:* Skip the workout if you need to.\n2. *Food:* Protein first.\n3. *Water:* Keep sipping.\n\nOne day at a time.";
+    const out = humanizeReply(listy);
+    assert.ok(out.includes("\n"), "line breaks must survive — this was the wall of text");
+    assert.match(out, /1\. \*Rest:\*[\s\S]*\n[\s\S]*2\. \*Food:\*/, "each item must stay on its own line");
+  });
+
+  test("hygiene: the WhatsApp bubble split survives", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    // CLAUDE.md: "\n\n---\n\n splits into separate WA messages". It had never once worked on an
+    // AI reply, and the literal "---" was left sitting inline in the text.
+    const multi = "Good news on your week.\n\n---\n\nYour protein is on track.";
+    assert.ok(humanizeReply(multi).includes("\n\n---\n\n"), "the bubble split must survive hygiene");
+  });
+
+  test("hygiene: a stall is still removed, and the list around it is untouched", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    const out = humanizeReply("Let me check your meals and get back to you.\n\n1. Log lunch.\n2. Get a walk in.");
+    assert.ok(!/get back to you/i.test(out), "the stall must still go");
+    assert.match(out, /1\. Log lunch\.\n2\. Get a walk in\./, "the surrounding list must be untouched");
+  });
+
+  test("hygiene: ordinary single-line replies are unchanged", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    const plain = "Logged — pap and chicken. Protein's on track for today.";
+    assert.equal(humanizeReply(plain), plain);
+  });
+
+  test("hygiene: a reply that is ONLY a stall still returns empty", async () => {
+    const { humanizeReply } = await import("../server/reply-hygiene");
+    assert.equal(humanizeReply("One moment."), "");
+  });
+}
+
 // ── What the engine is not allowed to take ───────────────────────────────────────────────────
 // With ENGINE_LIVE=on the engine runs BEFORE the Misc and Lifecycle handlers, so anything it is
 // willing to answer never reaches them. Every entry here is a question with one right answer
