@@ -7131,6 +7131,58 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── The voice-note denial: never say we missed what we are quoting ───────────────────────────
+{
+  test("voice: the exact live reply loses its denial and its ask to retype", async () => {
+    const { stripVoiceDenial } = await import("../server/reply-hygiene");
+    // Verbatim from production, printed directly under an accurate transcript of the note.
+    const live = "Eish, Kam, I'm really sorry about that. I didn't catch the voice note. Let's sort this out. Could you please repeat what you need here in text?";
+    const out = stripVoiceDenial(live);
+    assert.ok(!/didn'?t catch/i.test(out), `denial must go: "${out}"`);
+    assert.ok(!/repeat what you need/i.test(out), `must not ask them to retype it: "${out}"`);
+    assert.match(out, /sort this out/i, "the human part of the reply must survive");
+  });
+
+  test("voice: every phrasing of 'I didn't get your voice note'", async () => {
+    const { deniesVoiceNote } = await import("../server/reply-hygiene");
+    for (const s of [
+      "I didn't catch the voice note.",
+      "I couldn't hear your voice note.",
+      "I can't process that audio.",
+      "I wasn't able to make out the recording.",
+      "Sorry, I didn't get your voice message.",
+      "Your voice note didn't come through.",
+      "Could you please repeat that in text?",
+      "Please type it out again.",
+    ]) assert.ok(deniesVoiceNote(s), `must be caught as a denial: "${s}"`);
+  });
+
+  test("voice: a normal coaching reply is never touched", async () => {
+    const { stripVoiceDenial } = await import("../server/reply-hygiene");
+    for (const s of [
+      "Logged — pap and chicken, that's a solid dinner. Protein's on track for today.",
+      "Good session. Next one is Lower B on Thursday.",
+      "I hear you — that week sounds brutal. One meal today is enough.",
+    ]) assert.equal(stripVoiceDenial(s), s, "an honest reply must survive untouched");
+  });
+
+  test("voice: a reply that was ONLY denial returns empty so the caller answers properly", async () => {
+    const { stripVoiceDenial } = await import("../server/reply-hygiene");
+    assert.equal(stripVoiceDenial("I didn't catch the voice note. Please send it again."), "");
+  });
+
+  test("voice: SA languages are heard, English is left alone", async () => {
+    const { detectVoiceLanguageNote } = await import("../server/voice-language");
+    assert.match(detectVoiceLanguageNote("sawubona coach, ngicela isidlo"), /Zulu/);
+    assert.match(detectVoiceLanguageNote("Dumela ntate, ke kopa thuso"), /Sesotho/);
+    assert.match(detectVoiceLanguageNote("Molo, ndicela uncedo"), /Xhosa/);
+    assert.match(detectVoiceLanguageNote("Avuxeni, ndzi lava"), /Xitsonga/);
+    assert.match(detectVoiceLanguageNote("Dankie, dit was lekker"), /Afrikaans/);
+    assert.equal(detectVoiceLanguageNote("I had chicken and rice for lunch today"), "");
+    assert.equal(detectVoiceLanguageNote(""), "");
+  });
+}
+
 // ── Despair: the sentence a client says right before they quit ───────────────────────────────
 {
   test("despair: every way people say it isn't working", async () => {

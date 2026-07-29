@@ -36,6 +36,8 @@ import { buildProgressComparisonPrompt } from "../physique-analysis";
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
 import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName} from "../utils";
+import { stripVoiceDenial } from "../reply-hygiene";
+import { detectVoiceLanguageNote } from "../voice-language";
 import { extractMealLabel } from "./food-context";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { remainingInMeals, goalStatusLine } from "../education";
@@ -1400,20 +1402,7 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
         return "I got your voice note but couldn't make it out clearly this time. Please send it again, or type your message and I'll reply straight away.";
       }
 
-      const ZULU_WORDS = ["sawubona", "yebo", "ngiyabonga", "unjani", "siyabonga", "hawu", "eish", "askies", "ngicela", "ngifuna"];
-      const SOTHO_WORDS = ["dumela", "ke a leboga", "o kae", "kea leboha", "ntate", "mme", "ke kopa", "ke batla"];
-      const XHOSA_WORDS = ["molo", "enkosi", "unjani", "ewe", "hayi", "camagu", "ndiyabona", "ndicela", "ndifuna"];
-      const TSWANA_WORDS = ["go siame", "ke a leboga", "rra", "lo kae", "ke tsile", "ke kopa", "thobela", "pula"];
-      const TSONGA_WORDS = ["avuxeni", "nkhensa", "ndza khensa", "hi kona", "ndzi lava", "ndzi kopa", "swinene"];
-      const AFRIKAANS_WORDS = ["dankie", "asseblief", "môre", "more", "lekker", "baie", "nee", "ja nee", "ag nee", "eina", "ek is", "ek het"];
-      const lowerTranscribed = transcribedText.toLowerCase();
-      let languageNote = "";
-      if (ZULU_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Zulu. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Zulu.";
-      else if (SOTHO_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Sesotho. Respond in simple SA English but acknowledge their language naturally.";
-      else if (XHOSA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xhosa. Respond in simple SA English but acknowledge their language naturally.";
-      else if (TSWANA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Setswana. Respond in simple SA English but acknowledge their language naturally.";
-      else if (TSONGA_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Xitsonga. Respond in simple SA English but acknowledge their language naturally.";
-      else if (AFRIKAANS_WORDS.some(w => lowerTranscribed.includes(w))) languageNote = "The client is communicating in Afrikaans. Respond in simple SA English but acknowledge their language naturally — you may use a word or two of Afrikaans.";
+      const languageNote = detectVoiceLanguageNote(transcribedText);
 
       const transcribeMs = Date.now() - voiceStageStart;
       console.log(`[MEDIA][${mediaTrace}] transcribe_ok words=${wordCount} ms=${transcribeMs} lang=${whisperLang || "auto"}${languageNote ? " detected=" + languageNote.split(" ")[4] : ""}`);
@@ -1435,7 +1424,11 @@ ${goal === "fat_loss" ? "Fat loss: protein and veg first. Remove sugary drinks, 
       const cut = transcribedText.length > 220 ? transcribedText.slice(0, 217) : "";
       const echoTrimmed = cut ? cut.slice(0, Math.max(cut.lastIndexOf(" "), 150)) + " …" : transcribedText;
       const echoClean = echoTrimmed.replace(/\b(f+u+c+k\w*|s+h+i+t\w*|bull\s*shit|kak|poes|bitch\w*|bastard|dammit|idiot)\b/gi, "***");
-      return `🎤 I heard: "${echoClean}"\n\n${voiceReply}`;
+      // NEVER DENY A VOICE NOTE WE ARE QUOTING (2026-07-29 live): handleMessage got only the
+      // transcript, so a client complaining theirs was ignored reads as a failure report, and the
+      // model apologised for not catching the note quoted two lines up. Here we hold the proof.
+      const voiceOut = stripVoiceDenial(voiceReply) || `I've got your voice note — the words are above. Tell me which part to take first and I'll answer it properly.`;
+      return `🎤 I heard: "${echoClean}"\n\n${voiceOut}`;
 
     } catch (err) {
       if (_tmpAudioCleanup) _tmpAudioCleanup();

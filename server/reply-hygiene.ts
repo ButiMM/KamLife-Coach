@@ -49,3 +49,46 @@ export function stripFiller(text: string): string {
 export function humanizeReply(text: string): string {
   return stripFiller(stripDeadPromises(text));
 }
+
+// ── THE VOICE-NOTE DENIAL ────────────────────────────────────────────────────────────────────
+// (2026-07-29 live, and the worst thing this product has produced.) A client sent a voice note.
+// It transcribed PERFECTLY. The reply printed that transcript — "🎤 I heard: …" — and directly
+// underneath said:
+//
+//     "Eish, Kam, I'm really sorry about that. I didn't catch the voice note.
+//      Could you please repeat what you need here in text?"
+//
+// It caught the voice note. The proof was in the same message. It denied its own working
+// feature and asked a frustrated person to do the work again, in the format they were avoiding.
+//
+// The cause is structural: the voice path transcribes, then re-enters handleMessage with the
+// TEXT only, so nothing downstream knows a voice note existed. A client complaining that their
+// voice note was ignored therefore looks, to the model, like a report that the voice note
+// failed — and it apologises for a failure that did not happen.
+//
+// This is the one place where the lie is provably a lie, because we are holding the transcript.
+// Both halves must go: the denial, AND the request to type it out — we already have the words.
+const VOICE_DENIAL_RE =
+  /\b(?:i\s*(?:did\s*n.?t|could\s*n.?t|can'?t|cannot|was\s*n.?t able to)\s*(?:quite\s+|really\s+)?(?:catch|get|hear|receive|make out|pick up|access|process|listen to)\b[^.!?]*\b(?:voice|audio|note|recording|message)|(?:voice note|audio|recording)[^.!?]{0,30}\b(?:did\s*n.?t|has\s*n.?t|was\s*n.?t)\s+(?:come through|arrive|download|register))\b/i;
+
+/** Asking them to say it again — in any form — when the transcript is already in our hands. */
+const ASK_TO_REPEAT_RE =
+  /\b(?:(?:could|can|would) you (?:please )?(?:repeat|resend|send)\b[^.!?]*|(?:please )?(?:repeat|resend|send|say) (?:it|that|what you need)\b[^.!?]*|type (?:it|that|your message)\b[^.!?]*)(?:again|here|in text|as text|by text)\b/i;
+
+/**
+ * Remove any SENTENCE that denies receiving the voice note, or asks them to send it again.
+ * Returns "" when the whole reply was denial — the caller then supplies a real answer, exactly
+ * like stripDeadPromises. Pure; the caller decides the fallback.
+ */
+export function stripVoiceDenial(text: string): string {
+  const t = (text || "").trim();
+  if (!t) return "";
+  const sentences = t.split(/(?<=[.!?])\s+/);
+  const kept = sentences.filter(s => !VOICE_DENIAL_RE.test(s) && !ASK_TO_REPEAT_RE.test(s));
+  return kept.join(" ").replace(/\s{2,}/g, " ").trim();
+}
+
+/** True if the reply denies a voice note we demonstrably received (for guards and the auditor). */
+export function deniesVoiceNote(text: string): boolean {
+  return VOICE_DENIAL_RE.test(text || "") || ASK_TO_REPEAT_RE.test(text || "");
+}
