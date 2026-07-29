@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import { queryFoodDatabase } from "./foods";
 import { HANDLING_CONFUSION } from "./coach-prompt";
 import { assertAiOnline, isAiOfflineError } from "./ai-offline";
+import { getDisplayName } from "./utils";
 
 const openai = new OpenAI({
   apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "sk-missing-key",
@@ -25,7 +26,7 @@ ABSOLUTE RULES:
 - Always use the client's actual name`;
 
 export async function nutritionAgent(user: any, message: string, memoryContext: string, saFlags: string, liveSnapshot = ""): Promise<string> {
-  const name = user.name || "there";
+  const name = getDisplayName(user) || "there";
   const goal = user.goalType || "fat_loss";
   const calorieTarget = user.calorieTarget || 1800;
   const proteinTarget = user.proteinTarget || 120;
@@ -92,7 +93,7 @@ ABSOLUTE RULES:
 - Always use the client's actual name`;
 
 export async function programmingAgent(user: any, message: string, memoryContext: string, programme: string, saFlags: string, liveSnapshot = ""): Promise<string> {
-  const name = user.name || "there";
+  const name = getDisplayName(user) || "there";
   const mode = user.trainingMode || "home";
   const experience = user.trainingExperience || "beginner";
   const days = user.trainingDaysPerWeek || 3;
@@ -191,7 +192,7 @@ export async function mindsetAgent(user: any, message: string, memoryContext: st
     return `${firstName ? firstName + ", I" : "I"} hear you and I'm taking this seriously. Please reach out right now:\n\n*SADAG* 0800 567 567 — free, 24/7, confidential\n*SMS* 31393\n\nYou don't have to carry this alone. Call them now — they are trained for exactly this moment. I'll be here when you're ready.`;
   }
 
-  const name = user.name || "there";
+  const name = getDisplayName(user) || "there";
   const situation = user.lifeSituation || "office";
   const workouts = user.totalWorkoutsCompleted || 0;
 
@@ -244,7 +245,7 @@ ABSOLUTE RULES:
 - Always use the client's actual name`;
 
 export async function adminAgent(user: any, message: string, logType: string, logValue: string, targetValue: string): Promise<string> {
-  const name = user.name || "there";
+  const name = getDisplayName(user) || "there";
 
   const systemPrompt = `${ADMIN_SYSTEM}
 

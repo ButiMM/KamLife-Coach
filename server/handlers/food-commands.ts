@@ -20,7 +20,7 @@ import { generateMealPlan } from "../meal-plan";
 import { answerSwapAsk } from "../food-swaps";
 import { matchRestaurant, formatRestaurantGuide, listRestaurantNames } from "../restaurants";
 import { matchStreetDish, isStreetContext, formatStreetDish, streetGuide } from "../street-food";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel , commaName} from "../utils";
 
 export async function handleFoodCommands(ctx: { phone: string; message: string; m: string; user: any }): Promise<string | null> {
   const { phone, message, m, user } = ctx;
@@ -210,7 +210,7 @@ export async function handleFoodCommands(ctx: { phone: string; message: string; 
     const otherNotes = (user.otherMedicalNotes || "").toLowerCase();
     const noFish = otherNotes.includes("fish") || otherNotes.includes("pilchard");
     const noDairy = otherNotes.includes("dairy") || otherNotes.includes("milk");
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
 
     let plan = `*🍳 Meal Prep Plan — Cook Once, Eat All Week*\n\n`;
 

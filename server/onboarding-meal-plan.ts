@@ -1,6 +1,10 @@
 // Onboarding meal-plan builder — extracted from onboarding.ts (2026-07-12) to keep
 // that file under its size budget after the intake-question additions. Pure string
-// builder: takes a user, returns the formatted meal plan. No external dependencies.
+// builder: takes a user, returns the formatted meal plan. Its one import is the shared
+// display-name rule (2026-07-29) — this file used to interpolate the FULL name, so the plan
+// opened by addressing people the way a bank does.
+
+import { getDisplayName } from "./utils";
 
 export function getOnboardingMealPlan(user: any): string {
   const budget = user.weeklyFoodBudget || "100_300";
@@ -9,7 +13,7 @@ export function getOnboardingMealPlan(user: any): string {
   const situation = user.lifeSituation || "office";
   const schedule = user.workSchedule || "standard";
   const daysPerWeek = user.trainingDaysPerWeek || 3;
-  const name = user.name || "there";
+  const name = getDisplayName(user) || "there";
   const cal = user.calorieTarget || 1800;
   const prot = user.proteinTarget || 140;
   const otherNotes = (user.otherMedicalNotes || "").toLowerCase();

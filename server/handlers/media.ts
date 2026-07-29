@@ -35,7 +35,7 @@ import { buildProgressComparisonPrompt } from "../physique-analysis";
 // photo saves immediately, timer resets, one job processes the whole set 15s after the last.
 const _progressBurst = new Map<string, ReturnType<typeof setTimeout>>();
 import { getTodayWorkoutState } from "../workout-state";
-import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting } from "../utils";
+import { sastDayStart, parseMealDate, isRetroactiveMeal, mealDateLabel, slotFromSastHour, stripFoodLoggedClaim, isAskingNotReporting , getDisplayName} from "../utils";
 import { extractMealLabel } from "./food-context";
 import { getNumbersMode, stripNumbersFromProse } from "../numbers-mode";
 import { remainingInMeals, goalStatusLine } from "../education";
@@ -219,7 +219,7 @@ export async function handleMediaMessage(ctx: {
       if (shrunk.resized) console.log(`[MEDIA][${mediaTrace}] image_downscaled ${shrunk.fromEdge}px -> ${shrunk.toEdge}px bytes=${Buffer.byteLength(shrunk.b64, "base64")}`);
       const base64 = shrunk.b64;
       const contentType = shrunk.ct;
-      const clientName = user.name || "there";
+      const clientName = getDisplayName(user) || "there";
       const goal = user.goalType || "fat_loss";
 
       // ---- STEP SCREENSHOT DETECTION ----

@@ -29,7 +29,7 @@ import { getGroceryPersonalization } from "../grocery-personalize";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sendCriticalAlert } from "../scheduler/shared";
-import { sastToday, sastDayStart, proteinOptions } from "../utils";
+import { sastToday, sastDayStart, proteinOptions , commaName, spaceName, getDisplayName} from "../utils";
 import { getMenuText } from "../onboarding";
 import { SA_FOODS_SEED } from "../foods";
 import { scanForSAFoods, weeklyNetLine } from "./food-scanner";
@@ -260,7 +260,7 @@ export async function handleLifecycle(ctx: {
       const stomachFeel = STOMACH.find(k => m.includes(k)) || "not specified";
       const overallFeel = OVERALL.find(k => m.includes(k)) || "not specified";
       const weekNum = user.programmeWeek || 1;
-      const clientName = user.name ? `, ${user.name}` : "";
+      const clientName = commaName(user);
       try {
         await db.insert(clothingCheckins).values({ userId: user.id, jeansFit, energyLevel, stomachFeel, overallFeel, weekNumber: weekNum });
         await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
@@ -444,7 +444,7 @@ export async function handleLifecycle(ctx: {
       // Deliver a home workout directly instead of just telling them to reply
       const homeUser = { ...user, trainingMode: "home" };
       const homeWorkout = buildDayWorkout(homeUser);
-      const nameStr = user.name || "there";
+      const nameStr = getDisplayName(user) || "there";
       equipReply = `No gym? No problem, ${nameStr}. Here is your home workout:\n\n${homeWorkout}\n\nYour bodyweight is the gym. Reply *DONE* when finished.`;
     }
     await logChat(user.id, message, equipReply, "EQUIPMENT_ALTERNATIVES");
@@ -606,7 +606,7 @@ export async function handleLifecycle(ctx: {
   // Bare "stop" is the industry-standard opt-out keyword. Must be respected
   // even when the user hasn't cancelled — sets a 1-year messaging pause.
   if (m === "stop" || m === "stop all" || m === "opt out" || m === "opt-out") {
-    const name = user.name || "there";
+    const name = getDisplayName(user) || "there";
     const pauseUntil = new Date(Date.now() + 365 * 86_400_000).toISOString().slice(0, 10);
     const existingNotes = user.profileNotes || "";
     const cleanedNotes = existingNotes.replace(/\s*\|?\s*paused_until:\d{4}-\d{2}-\d{2}/, "").trim();
@@ -704,7 +704,7 @@ export async function handleLifecycle(ctx: {
   if (user.awaitingInputType === "cancel_confirm") {
     await db.update(users).set({ awaitingInputType: null }).where(eq(users.phoneNumber, phone));
     if (/^(yes|confirm|cancel|yep|ja|yeah)$/i.test(m)) {
-      const name = user.name || "there";
+      const name = getDisplayName(user) || "there";
       await db.update(users).set({
         subscriptionStatus: "inactive",
         cancelledAt: new Date(),
@@ -770,7 +770,7 @@ export async function handleLifecycle(ctx: {
   if (!isNegativePayment && !isCancellationIntent && !ctx.isQuestion && /\b(pay|paying|payment|rejoin|re-join|reactivate|subscribe|subscription|renew|renewal)\b/i.test(m)) {
     const merchantId = process.env.PAYFAST_MERCHANT_ID;
     const appUrl = process.env.APP_URL || "https://kamlifecoach.co.za";
-    const clientName = user.name ? `, ${user.name}` : "";
+    const clientName = commaName(user);
     if (merchantId && appUrl) {
       const cleanPhone = phone.replace(/^whatsapp:/, "");
       const payLink = `${appUrl}/api/payfast/link?phone=${encodeURIComponent(cleanPhone)}`;
@@ -938,7 +938,7 @@ export async function handleLifecycle(ctx: {
       .where(eq(users.phoneNumber, phone));
     const updatedUser = { ...user, trainingMode: "gym", gymName };
     const gymProg = buildFullProgramme(updatedUser);
-    const clientName = user.name ? `, ${user.name}` : "";
+    const clientName = commaName(user);
     const gymReply = `${gymName ? `${gymName}` : "Gym"} programme loaded${clientName}. *${user.trainingDaysPerWeek || 3} days/week* — progressive overload from session 1.\n\n${gymProg}`;
     await logChat(user.id, message, gymReply, "PROGRAMME_DELIVERY");
     return gymReply;
@@ -970,7 +970,7 @@ export async function handleLifecycle(ctx: {
     else if (/recomposition|recomp|both/i.test(m)) pendingGoal = "recomposition";
 
     if (pendingGoal && pendingGoal !== user.goalType) {
-      const clientName = user.name ? `, ${user.name}` : "";
+      const clientName = commaName(user);
       const goalLabelsT: Record<string, string> = { fat_loss: "fat loss", muscle_gain: "muscle gain", recomposition: "body recomposition" };
       const fromLabel = goalLabelsT[user.goalType || "muscle_gain"] || (user.goalType || "your current goal");
       const toLabel = goalLabelsT[pendingGoal] || pendingGoal;
@@ -996,7 +996,7 @@ export async function handleLifecycle(ctx: {
     // Training mode — ask which gym before applying
     if (/joined.*gym|got.*gym|have.*gym|going to.*gym|gym.*membership|now.*gym|want to gym|start.*gym|going to gym/i.test(m) && user.trainingMode !== "gym") {
       await db.update(users).set({ awaitingInputType: "gym_name" }).where(eq(users.phoneNumber, phone));
-      const clientName = user.name ? `, ${user.name}` : "";
+      const clientName = commaName(user);
       const gymQ = `Lekker${clientName}. Which gym?`;
       await logChat(user.id, message, gymQ, "PROFILE_UPDATE");
       return gymQ;
@@ -1323,7 +1323,7 @@ export async function handleLifecycle(ctx: {
     const goal = user.goalType || "fat_loss";
     const cal = user.calorieTarget || 1800;
     const prot = user.proteinTarget || 120;
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const hungerReply = `Hunger on a deficit is normal${name} — but hunger that feels unbearable means something is off.\n\n*Check these first:*\n🥩 *Protein* — Are you hitting ${prot}g per day? Protein is the most filling macro. Low protein = constant hunger. If you are under, add eggs, chicken, or tinned tuna to every meal.\n🥬 *Volume* — Vegetables add bulk without calories. Cabbage, spinach, morogo — eat them in big quantities. They physically fill your stomach.\n💧 *Water* — Thirst and hunger feel identical. Drink 500ml of water right now and wait 10 minutes.\n😴 *Sleep* — Under 7 hours spikes ghrelin (hunger hormone) and crashes leptin (fullness hormone). If sleep is poor, hunger is worse — always.\n\n${goal === "fat_loss" ? `At ${cal} kcal you should not be unbearably hungry. If you are — your protein is likely too low. What did you eat today so far?` : `On a surplus hunger is your friend — eat when you are hungry, especially around your training window.`}`;
     await logChat(user.id, message, hungerReply, "HUNGER");
     return hungerReply;
@@ -1336,7 +1336,7 @@ export async function handleLifecycle(ctx: {
 
   if (isAlcoholMsg) {
     const goal = user.goalType || "fat_loss";
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const beerCals: Record<string, string> = {
       castle: "150 kcal",
       "black label": "160 kcal",
@@ -1374,7 +1374,7 @@ export async function handleLifecycle(ctx: {
     const kgLost = kgMatch ? parseFloat(kgMatch[1]) : null;
     const total = user.totalWorkoutsCompleted || 0;
     const weeks = user.programmeWeek || 1;
-    const name = user.name || "there";
+    const name = getDisplayName(user) || "there";
 
     let winReply: string;
     if (isWeightWin && kgLost) {
@@ -1433,7 +1433,7 @@ export async function handleLifecycle(ctx: {
     !/\b(i.?m hungry|starving)\b/i.test(m); // Don't double-fire with hunger handler
 
   if (process.env.ENGINE_LIVE !== "on" && isCravingMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const goal = user.goalType || "fat_loss";
     const isSugar = /\b(sugar|sweet|chocolate|sweets|biscuit|cake|ice cream)\b/i.test(m);
     const cravingReply = isSugar
@@ -1449,7 +1449,7 @@ export async function handleLifecycle(ctx: {
     /\b(eat|eating|what should|how do i|tips|going to|this weekend|tonight|tomorrow|coming up|worried|nervous|scared|what do i do)\b/i.test(m);
 
   if (process.env.ENGINE_LIVE !== "on" && isSocialEvent) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const goal = user.goalType || "fat_loss";
     const socialReply = `Social events are part of life${name} — not an excuse to abandon the programme and not a reason to feel guilty.\n\n*Before the event:*\n• Eat a high-protein meal 2 hours before — eggs, chicken, anything filling. Arriving hungry is how you overeat.\n• Decide in advance: "I will have one plate" — not a restriction, a plan.\n\n*At the event:*\n• Protein first on the plate — meat, chicken, fish. Then vegetables. Then carbs/starch last.\n• One plate, not three. Enjoy it fully — no guilt.\n• Alcohol: alternate with water. Every second drink is water.\n\n*After the event:*\n• Do NOT skip meals the next day to "make up for it". That starts a restrict-binge cycle.\n• Normal meals tomorrow. Hit your protein. Train if scheduled.\n• One event does not break a programme. Seven events with no plan in between does.\n\n${goal === "fat_loss" ? "Your deficit runs across weeks, not one meal. Enjoy it and get back on track." : "Extra calories at an event are fuel — use them in your next session."}`;
     await logChat(user.id, message, socialReply, "SOCIAL_EVENT");
@@ -1468,7 +1468,7 @@ export async function handleLifecycle(ctx: {
     /\b(breakfast|lunch|dinner|meal|food|ate)\b/i.test(m);
 
   if (isUnderEating) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const remaining = calTarget2 - todayCalCheck;
     const underEatReply = `Only ${todayCalCheck} kcal by this time of day${name} — that is too low.\n\nEating too little is not aggressive fat loss. It is the fastest way to lose muscle, crash your metabolism, and end up bingeing at 10pm.\n\n*Your target is ${calTarget2} kcal.* You have ${remaining} kcal left today — eat them. A proper dinner with protein and vegetables. Not snacks, a real meal.\n\nThe goal is a sustainable deficit, not starvation.`;
     await logChat(user.id, message, underEatReply, "UNDER_EATING");
@@ -1480,7 +1480,7 @@ export async function handleLifecycle(ctx: {
     /\b(cheat(?:ed|ing|s|meal|day)?|i slipped|slipped up|fell off|fell off track|off track|bad weekend|bad week|ate badly|ate everything|went off plan|broke my diet|broke the diet|ruined.*diet|ruined.*week|i binged|had a binge|ate too much|overdid it|over ate|overate|ate junk|bad food day|terrible eating|ate like crazy|couldn't control|lost control.*eating|eating got out of hand|whole weekend|entire weekend.*ate|pigged out)\b/i.test(m);
 
   if (isCheatMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const total = user.totalWorkoutsCompleted || 0;
     const week = user.programmeWeek || 1;
     const sessionLine = total > 0 ? `You have ${total} training session${total > 1 ? "s" : ""} logged. That does not disappear overnight.` : `You are in Week ${week} of your programme. One rough day does not erase that.`;
@@ -1494,7 +1494,7 @@ export async function handleLifecycle(ctx: {
     /\b(scale.*not.*moving|scale.*same|scale.*hasn.?t moved|scale.*stuck|not losing.*weight|weight.*not.*changing|weight.*not.*moving|weight.*the same|weight.*stuck|not dropping|no.*weight loss|haven.?t lost|didn.?t lose|losing nothing|same weight|still the same|haven.?t changed|weight.*hasn.?t|not seeing.*change|scale.*lie|scale.*wrong|the scale|why.*not losing|why am i not losing|why aren.?t i losing|why isn.?t.*working|why is nothing|nothing.*happening)\b/i.test(m);
 
   if (isScaleStuck) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const week = user.programmeWeek || 1;
     const total = user.totalWorkoutsCompleted || 0;
     const goal = user.goalType || "fat_loss";
@@ -1523,7 +1523,7 @@ export async function handleLifecycle(ctx: {
     /\b(i.?m stressed|so stressed|very stressed|feeling stressed|work stress|life stress|stressed out|anxious|anxiety|overwhelmed|too much going on|can.?t cope|everything is too much|mental health|burnout|burned out|burnt out|exhausted mentally|emotionally drained)\b/i.test(m);
 
   if (process.env.ENGINE_LIVE !== "on" && isStressMsg) { // JUDGMENT/EMOTIONAL: the brain owns this when live (its low-mood guard keeps the SADAG net)
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const goal = user.goalType || "fat_loss";
     const stressReply = `Stress is not just a feeling${name} — it is a physical event that directly blocks fat loss.\n\nWhen you are chronically stressed, cortisol stays elevated. Cortisol tells your body to store fat, especially belly fat, break down muscle, spike hunger, and crave carbs and sugar. This is biology, not weakness.\n\n*What to do right now:*\n1. *Walk* — 20 minutes outside. Not for fitness. To drop cortisol. It works within minutes.\n2. *Eat your protein* — stress eats muscle. Protect it. Eggs, chicken, or tinned tuna right now.\n3. *Sleep tonight* — cortisol from one bad night undoes two good training days. Bed by 10pm.\n4. *Training still counts* — a 30-minute session is better than nothing. Lower weight, same movement.\n\n${goal === "fat_loss" ? "Stress is the hidden reason most people plateau. Fix the stress and the fat loss often restarts on its own." : "Cortisol and muscle gain are opposites — manage the stress or the gains slow down."}\n\nWhat is actually causing the stress right now?`;
     await logChat(user.id, message, stressReply, "STRESS");
@@ -1536,7 +1536,7 @@ export async function handleLifecycle(ctx: {
     !/\b(tired of|tired with|sick and tired)\b/i.test(m);
 
   if (isTiredMsg) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const tiredReply = `Three questions${name} before I give you advice:\n\n1. *Sleep* — How many hours last night? Under 7 means your body is not recovering properly. This is the most common cause of low energy by far.\n\n2. *Food* — What did you eat today? Low energy by afternoon is almost always low carbs or skipped meals. Your muscles need fuel.\n\n3. *Water* — Have you drunk 1.5-2L today? Even mild dehydration drops energy by 20%.\n\nWhich of these is off? Tell me and I will give you a specific fix — not "rest more" or "drink water" in general, the actual solution.`;
     await logChat(user.id, message, tiredReply, "TIRED");
     return tiredReply;
@@ -1576,7 +1576,7 @@ export async function handleLifecycle(ctx: {
     /\b(rest day|no gym today|off today|taking a rest|rest today|not training today|skipping gym|not going to gym|day off|recovery day|active recovery|not working out today|off day)\b/i.test(m);
 
   if (isRestDayMsg) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const stepsT = user.stepsTarget || 8500;
     const prot = user.proteinTarget || 120;
     const restReply = `Rest day is part of the programme${name} — not a break from it.\n\n*What happens on rest days:*\nYour muscles repair and grow. Strength is built during rest, not during the session. Skipping rest days is how people overtrain and plateau.\n\n*Rest day checklist:*\n✅ *Steps* — still hit ${stepsT.toLocaleString()}. Walk, do not train. Low intensity movement speeds recovery.\n✅ *Protein* — still hit ${prot}g. Muscle repair needs amino acids even when you are not lifting.\n✅ *Sleep* — 7-9 hours tonight. This is where the gains actually happen.\n✅ *Stretch* — 10 minutes. Hips, quads, chest, shoulders. Whatever is tight.\n\nCome back to your next session fresher than if you had trained today.`;
@@ -1589,7 +1589,7 @@ export async function handleLifecycle(ctx: {
     /\b(missed.*(?:workout|session|gym|training)|couldn.?t.*(?:train|gym|workout)|skipped.*(?:gym|session|workout|training)|didn.?t.*(?:train|go to gym|workout)|missed.*gym|didn.?t make it|couldn.?t make it|no gym yesterday|missed yesterday|no training today|didn.?t train)\b/i.test(m);
 
   if (isMissedWorkout) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const total = user.totalWorkoutsCompleted || 0;
     const missedReply = `One missed session${name} — that is all it is.\n\n${total > 0 ? `You have ${total} sessions completed. One miss does not erase that.` : "Getting back on track starts now."}\n\n*The rule:* Never miss twice. One miss is life. Two misses in a row is the start of a habit.\n\n*What to do right now:*\nDecide when you train next — not "tomorrow maybe", give me the specific time. 6am? 12pm? After work at 5pm?\n\nThat is your only job. Pick the time.`;
     await logChat(user.id, message, missedReply, "MISSED_WORKOUT");
@@ -1603,7 +1603,7 @@ export async function handleLifecycle(ctx: {
     || /\b(stiff|aching)\b/i.test(m) && /\b(legs?|arms?|muscles?|body|everywhere|workout|gym|training|leg day|yesterday)\b/i.test(m);
 
   if (isSoreMsg) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const soreArea = /\b(legs?|quads?|hamstrings?|glutes?|calves?)\b/i.test(m) ? "legs"
       : /\b(chest|pecs?|push|bench)\b/i.test(m) ? "chest"
       : /\b(back|lats?|rows?|pull)\b/i.test(m) ? "back"
@@ -1624,7 +1624,7 @@ export async function handleLifecycle(ctx: {
     /\b(how much water|water target|water goal|daily water|water intake|how many litres|how many liters|litres of water|liters of water|water per day|water recommendation|should i drink|water a day)\b/i.test(m);
 
   if (isWaterTargetMsg) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const waterLitres = waterTargetLitres(user.currentWeight).toFixed(1);
     const waterReply = `${name ? name.trimStart() + " — " : ""}your water target is *${waterLitres}L per day* (based on your body weight × 0.033).\n\nSimplest way to hit it: 500ml when you wake up, 500ml mid-morning, 500ml before lunch, 500ml mid-afternoon, 500ml before dinner. That is 2.5L without thinking about it.\n\nThirst and hunger feel identical — most cravings at 3pm are actually dehydration. Drink first, eat after. Log your water by sending "2L water" or "drank 1.5 litres".`;
     await logChat(user.id, message, waterReply, "WATER_TARGET");
@@ -1636,7 +1636,7 @@ export async function handleLifecycle(ctx: {
     /\b(what.*eat.*(?:before|pre).?(?:gym|workout|training|session)|(?:before|pre).?(?:gym|workout|training).*(?:eat|food|meal|snack)|pre.?workout.*(?:food|meal|eat|nutrition)|what.*eat.*after.*(?:gym|workout|training)|post.?workout.*(?:food|meal|eat|nutrition)|after.*gym.*eat|eat.*after.*training)\b/i.test(m);
 
   if (process.env.ENGINE_LIVE !== "on" && isWorkoutNutrition) {
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const goal = user.goalType || "fat_loss";
     const isPre = /\b(before|pre.?workout|pre.?gym)\b/i.test(m);
     const isPost = /\b(after|post.?workout|post.?gym)\b/i.test(m);
@@ -1660,7 +1660,7 @@ export async function handleLifecycle(ctx: {
   if (process.env.ENGINE_LIVE !== "on" && isMealSpecificQ) {
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
-    const name = user.name ? ` ${user.name}` : "";
+    const name = spaceName(user);
     const isMealBreakfast = /breakfast/i.test(m);
     const isMealLunch = /lunch/i.test(m);
     const isMealDinner = /dinner|supper/i.test(m);
@@ -1701,7 +1701,7 @@ export async function handleLifecycle(ctx: {
 
   if (process.env.ENGINE_LIVE !== "on" && isSpotReductionMsg) {
     const goal = user.goalType || "fat_loss";
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const spotReply = `*The truth about belly fat${name}:*\n\nYou cannot choose where your body burns fat. Spot reduction is not real — no exercise burns fat from one specific area. Not crunches, not planks, not waist trainers, not anything.\n\nBelly fat is the LAST place most people lose it and the first place they gain it. That is genetics, not a technique problem.\n\n*What actually works:*\n• Calorie deficit — eat less than you burn\n• Strength training — builds muscle that burns fat 24/7\n• Steps — 8,500+ daily keeps your metabolism active\n• Sleep — poor sleep spikes cortisol which stores fat around the belly\n\nSit-ups build ab muscles. They do not burn belly fat. You need to lose fat OVER the abs — that happens through your diet and overall activity, not through any specific exercise.\n\n${goal === "fat_loss" ? `Your calorie target is ${user.calorieTarget || 1800} kcal/day. Hit that consistently for 8 weeks and the belly changes — no special exercise needed.` : `Keep training and eating at your targets — the belly responds when the overall programme is consistent.`}`;
     await logChat(user.id, message, spotReply, "MYTH_BUSTER");
     return spotReply;
@@ -1713,7 +1713,7 @@ export async function handleLifecycle(ctx: {
     (/\btiktok\b/i.test(m) && /\b(tea|drink|weight|fat|slim|detox|lose)\b/i.test(m));
 
   if (process.env.ENGINE_LIVE !== "on" && isTeaMythMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const teaReply = `Eish${name} — that is one of the biggest myths in the industry.\n\n*Slimming teas, detox teas, and TikTok weight loss drinks do not work.*\n\nThere is no tea, drink, or "detox" that burns fat. Not green tea. Not lemon water. Not apple cider vinegar. Not anything boiled with cinnamon and ginger.\n\n*What they actually do:*\n• Most are strong laxatives — you lose water weight, not fat\n• The weight comes back within 48 hours\n• Some damage your gut bacteria long-term\n• All of them are a waste of money\n\nThe companies selling these products are targeting people who want a shortcut. There is no shortcut.\n\n*What burns fat:*\n1. Consistent calorie deficit over weeks\n2. Strength training 3x per week\n3. 8,500+ steps daily\n4. 7-9 hours sleep\n\nThat is it. Your programme already has all four. Trust the process.`;
     await logChat(user.id, message, teaReply, "MYTH_BUSTER");
     return teaReply;
@@ -1724,7 +1724,7 @@ export async function handleLifecycle(ctx: {
     /\b(ozempic|semaglutide|wegovy|mounjaro|tirzepatide|weight loss injection|slimming injection|slimming jab|fat jab|skinny jab|injection.*weight|weight.*injection)\b/i.test(m);
 
   if (process.env.ENGINE_LIVE !== "on" && isOzempicMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const ozempicReply = `Sharp question${name}.\n\n*The truth about Ozempic and weight loss injections:*\n\nOzempic (semaglutide) is a real medication — it works by reducing appetite and slowing digestion. Studies show real weight loss. It is not a scam.\n\n*But here is what nobody on TikTok tells you:*\n\n• It does not replace the basics. You still need to eat right, walk daily, and strength train — or the moment you stop taking it, the weight comes back\n• Side effects are real — nausea, vomiting, gut issues, and it is extremely expensive (R2,000-R8,000/month in SA)\n• It was designed for diabetics with severe obesity — not general weight loss\n• You cannot build muscle on Ozempic alone without strength training\n• Without resistance training you lose muscle with the fat — this makes long-term maintenance harder\n\n*My position:* Build the habits first. Walk. Train. Eat right. Sleep. If after 3 months of real effort you are still not moving, speak to a doctor about whether medication is appropriate for you. But medication without the habits is just expensive weight you will regain.\n\nYour programme already works — if you are consistent. Are you hitting your sessions this week?`;
     await logChat(user.id, message, ozempicReply, "MYTH_BUSTER");
     return ozempicReply;
@@ -1736,7 +1736,7 @@ export async function handleLifecycle(ctx: {
     (/\b(running|jogging|run)\b/i.test(m) && /\b(weight loss|lose weight|fat loss|get fit|get in shape|burn fat|lose fat)\b/i.test(m));
 
   if (process.env.ENGINE_LIVE !== "on" && isRunningClubMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const steps = user.stepsTarget || 8500;
     const runningReply = `Real talk${name}.\n\n*Running for weight loss is one of the most common mistakes I see.*\n\nHere is what actually happens: you join a running club, you burn 400 calories on the run, you come home starving and eat 600 calories extra. Net result — weight gain.\n\nRunning also:\n• Is hard on joints, especially if you are overweight\n• Does not build muscle — which is what drives long-term fat loss\n• Makes you HUNGRY — harder to maintain a deficit\n• People get injured in the first 6 weeks before any real progress\n\n*What I use instead:*\n✅ *Walking* — 8,500-15,000 steps daily. Low intensity, sustainable, burns fat without spiking hunger, protects joints. A 10,000 step day burns 400-500 extra calories without making you ravenous.\n✅ *Strength training* — 3 days per week. Builds muscle. Muscle burns calories 24/7, even while you sleep. This is the engine.\n\nYou can run if you enjoy it — that is great for your heart and mental health. But do not depend on running to lose weight. Depend on your programme and your daily steps.\n\nYour target is ${steps.toLocaleString()} steps per day. Are you hitting that consistently?`;
     await logChat(user.id, message, runningReply, "MYTH_BUSTER");
@@ -1750,7 +1750,7 @@ export async function handleLifecycle(ctx: {
 
   if (process.env.ENGINE_LIVE !== "on" && isAvocadoMsg) {
     const goal = user.goalType || "fat_loss";
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const avoReply = goal === "fat_loss"
       ? `Yes avocados are healthy${name} — but they are calorie-dense and that matters when you are trying to lose fat.\n\n*Avocado calorie reality:*\n• Half an avo: ~160 kcal, 2g protein\n• Full avo: ~320 kcal, 4g protein\n• That is 18% of your daily calorie budget in one fruit\n\nHealthy fats are still calories. An avo on toast with eggs can easily be 600 kcal before 8am.\n\n*My rule:* Half an avo, 2-3 times a week maximum when you are cutting. The healthy fat is real — but so are the calories. Pair it with eggs for protein. Never as a snack on its own.`
       : `Avocados are excellent${name} — healthy fats that support hormone production, which matters for muscle building.\n\nFull avo is ~320 kcal, 30g healthy fat. In a muscle gain phase, fat calories are your friend. Use it freely — just track it as a fat source, not a protein source. Pair with eggs or chicken.`;
@@ -1764,7 +1764,7 @@ export async function handleLifecycle(ctx: {
     /\b(lose weight|fat loss|diet|exercise|burn fat|slim|weight loss|calories|protein|carb|food|workout|supplement|detox|cleanse|tea|drink)\b/i.test(m);
 
   if (process.env.ENGINE_LIVE !== "on" && isSocialMediaMythMsg) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const socialReply = `Eish${name} — this is important.\n\nSocial media fitness advice is almost always wrong, exaggerated, or selling something.\n\n*The algorithm rewards:* drama, extreme claims, quick fixes, and shocking content. It does NOT reward: "eat protein, walk daily, strength train 3 times a week, sleep 8 hours" — because that is boring and it does not sell anything.\n\n*Real results come from boring basics:*\n1. Consistent strength training 3-4 days\n2. 8,500-15,000 steps daily\n3. Enough protein every meal\n4. 7-9 hours sleep\n5. Patience\n\nAnything promising faster than 0.5-1kg per week is either a lie or dangerous. What specifically did you see — I will tell you whether it is real or rubbish.`;
     await logChat(user.id, message, socialReply, "MYTH_BUSTER");
     return socialReply;
@@ -1774,7 +1774,7 @@ export async function handleLifecycle(ctx: {
   const carbonWords = (m.match(/\b(pap|samp|rice|bread|potato|sweet potato|butternut|maize)\b/gi) || []);
   const hasLogTrigger2 = /\b(ate|had|having|eating|breakfast|lunch|dinner|supper|snack|just had|meal)\b/.test(m);
   if (carbonWords.length >= 3 && hasLogTrigger2) {
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const doubleCarbReply = `Too many carbs in one meal${name}.\n\nI can see ${carbonWords.slice(0, 3).join(", ")} — that is three carb sources together. Your body can only use one portion of carbs per meal; the rest gets stored as fat.\n\n*Fix this meal:* Keep ONE carb source (pap OR rice OR bread — whichever is your staple). Fill the rest of your plate with protein and vegetables.\n\n*The plate rule:* One carb + protein + as many vegetables as you want. Every meal. Simple.`;
     await logChat(user.id, message, doubleCarbReply, "MYTH_BUSTER");
     return doubleCarbReply;
@@ -1788,7 +1788,7 @@ export async function handleLifecycle(ctx: {
   if (process.env.ENGINE_LIVE !== "on" && isPlateMethodQ) {
     const goal = user.goalType || "fat_loss";
     const budget = user.weeklyFoodBudget || "100_300";
-    const name = user.name ? `, ${user.name}` : "";
+    const name = commaName(user);
     const plateReply = `*The Coach K plate method${name}:*\n\nForget calorie counting. I don't count calories, I make the right choices. Here is the whole system:\n\n*Every meal, every time:*\n🥩 *Protein first* — takes up half your plate. Eggs, chicken, pilchards, mince, beans. If there is no protein on the plate, it is not a meal.\n🍠 *One carb* — takes up a quarter of your plate. Pap, brown rice, sweet potato, oats. ONE — not all three.\n🥬 *Vegetables* — fills the rest. Spinach, cabbage, morogo, tomatoes, cucumber. Unlimited. The more the better.\n\n*That is it.* No app. No scale. No counting. Just: protein + one carb + vegetables.\n\nDo this for every meal and your body does the rest.\n\n${goal === "fat_loss" ? "For fat loss: make the protein portion bigger and the carb portion smaller." : "For muscle gain: make the carb portion bigger, especially before and after training."}\n\n${budget === "under_100" ? "At your budget: eggs + pap + spinach. Pilchards + pap + cabbage. Repeat. Simple and it works." : "Best SA options: pilchards, eggs, chicken thigh, tinned tuna — paired with sweet potato or pap and whatever vegetable you have."}`;
     await logChat(user.id, message, plateReply, "PLATE_METHOD");
     return plateReply;

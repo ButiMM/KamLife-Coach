@@ -12,7 +12,7 @@ import { sanitizeCoachReply, scanForSAFoods } from "./food-scanner";
 import { logChat, withTimeout } from "./chat-log";
 import { checkFoodPatterns, getDamageControlNote, checkPerfectDay } from "./checks";
 import { detectLanguage } from "../constants";
-import { checkGptRateLimit, sastDayStart, sastToday, looksLikeDeepEmotionalShare } from "../utils";
+import { checkGptRateLimit, sastDayStart, sastToday, looksLikeDeepEmotionalShare , getDisplayName} from "../utils";
 import { getKamlifeProgramme } from "../programme";
 import { energyFrameLine } from "../targets";
 import { sendWhatsApp } from "../scheduler";
@@ -264,7 +264,7 @@ export async function handleGptBlock(ctx: {
   const dayOfWeek = now.toLocaleDateString("en-ZA", { weekday: "long", timeZone: "Africa/Johannesburg" });
   const hour = new Date(Date.now() + 2 * 3_600_000).getUTCHours(); // SAST hour — getHours() is UTC on Railway, telling the model the wrong time of day
   const timeOfDay = hour < 12 ? "morning" : hour < 17 ? "afternoon" : "evening";
-  const clientName = user.name || "there";
+  const clientName = getDisplayName(user) || "there";
   const trainingMode = user.trainingMode || "home";
   // ADAPTATION IN CONVERSATION (2026-07-15): tone was only reaching food/photo/morning,
   // never a normal back-and-forth. Fold the per-client tone steer into saContext, which
@@ -491,7 +491,7 @@ Do not ask "what do you mean" — interpret from context. Max 2 sentences.`;
     /\b(this|service|app|bot|coach|you)\b/i.test(m);
 
   if (severeServiceRiskComplaint) {
-    const name = user.name || "there";
+    const name = getDisplayName(user) || "there";
     const injuryCtx = user.injuries && user.injuries !== "none"
       ? ` I still have your injury noted: ${user.injuries}.`
       : "";
@@ -554,7 +554,7 @@ SA voice. Direct. Coach forward, not backward.`;
   // Daily GPT call cap — prevents runaway costs from heavy users
   const underLimit = await isUnderGPTCallLimit(user.id);
   if (!underLimit) {
-    const capName = user.name || "there";
+    const capName = getDisplayName(user) || "there";
     const capGoal = user.goalType === "muscle_gain" ? "hit your protein and get 8 hours sleep tonight" : "hit your step target and keep your last meal clean tonight";
     // Never announce a "limit" or lock the client out mid-conversation — a furious
     // tester got "resumes tomorrow morning" in the middle of a dispute (2026-07-03).

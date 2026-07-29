@@ -33,7 +33,7 @@ import { getStepStreak } from "./steps";
 import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
-import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport } from "../utils";
+import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
 import { SA_FOODS_SEED } from "../foods";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -572,7 +572,7 @@ export async function handleMiscCommands(ctx: {
       ? Math.floor((Date.now() - new Date(user.programmeStartDate).getTime()) / 86400000)
       : 0;
     const w = user.currentWeight ? `${user.currentWeight}kg` : "not logged";
-    const name = user.name || "there";
+    const name = getDisplayName(user) || "there";
     return `*${name}'s Progress*\n\n✅ Workouts completed: *${user.totalWorkoutsCompleted || 0}*\n📅 Days on programme: *${daysOn}*\n📊 Programme week: *${user.programmeWeek || 1}*\n⚖️ Current weight: *${w}*\n\nFor your full 7-day breakdown send *this week*.`;
   }
   if (["targets", "my targets", "goals"].includes(m)) {
@@ -614,7 +614,7 @@ export async function handleMiscCommands(ctx: {
       } else if (user.currentWeight) {
         weightLine = `\n⚖️ Current weight: ${user.currentWeight}kg`;
       }
-      const name = user.name || "there";
+      const name = getDisplayName(user) || "there";
       const statsReply = `*${name}'s Journey with Coach K* 💪\n\n✅ Workouts completed: ${totalWorkouts}\n👟 Total steps logged: ${totalSteps.toLocaleString()}\n📅 Days on programme: ${daysOn}\n🔥 Current streak: ${streak} day${streak !== 1 ? "s" : ""}${weightLine}\n\nThis is what you have built. Keep going.`;
       await logChat(user.id, message, statsReply, "STATS_LOOKUP");
       return statsReply;

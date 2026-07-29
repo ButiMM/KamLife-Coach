@@ -373,6 +373,25 @@ export function mealDateLabel(date: Date): string {
  * purpose: two clear asks, or a genuinely long message with a question in it. A short "how many
  * calories left?" must still reach its fast deterministic answer.
  */
+/**
+ * ", Thandi" — a comma-led address, or "" when there is no usable name.
+ *
+ * (2026-07-29 sweep: "The scale is one data point, Thandi Mokoena".) getDisplayName has existed
+ * for exactly this since the start, and 48 call sites interpolated `user.name` raw instead —
+ * so the coach addressed people by their full name, like a bank SMS, in the middle of a
+ * sentence meant to sound like a person. Two helpers so the 48 opinions become one.
+ */
+export function commaName(user: any): string {
+  const n = getDisplayName(user);
+  return n ? `, ${n}` : "";
+}
+
+/** " Thandi" — a space-led address, or "" when there is no usable name. */
+export function spaceName(user: any): string {
+  const n = getDisplayName(user);
+  return n ? ` ${n}` : "";
+}
+
 export function isMultiPartAsk(message: string): boolean {
   const s = (message || "").trim();
   if (s.length < 60) return false;                       // short asks are single asks
