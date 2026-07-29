@@ -45,6 +45,8 @@ import { comebackPlan } from "../server/adaptive-training";
 import { bandFor, assessClients, dropOffCurve, silenceTriggers, summariseEngagement, type ActivityRow } from "../server/engagement";
 import { analyseSurface, classifyIntent } from "../server/surface";
 import { TEMPLATES, validateTemplate, invalidTemplates, placeholders, templateSid, WINDOW_RECOVERY_TEMPLATE } from "../server/whatsapp-templates";
+import { wrapLines, renderMacroCard } from "../server/macro-card";
+import { cardNumbersOff, cardProse } from "../server/macro-card-attach";
 import { fadeState, fadingClients } from "../server/engagement";
 import { guardMalformed, safeFallback, recordGuardResult, guardStats, guardStatsLine, GUARD_ESCALATION_THRESHOLD } from "../server/malformed-guard";
 import { calorieCeiling } from "../server/adaptive-targets";
@@ -7053,6 +7055,65 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
     const out = unloggedFoodNotice("kota and a stony", ["Chips"]);
     assert.notEqual(out, "");
     assert.match(out, /kota/i);
+  });
+}
+
+// ── The card obeys number-free mode, and never truncates the instruction ─────────────────────
+// (2026-07-29, from a real client call: "it's confusing in terms of the calories — it needs to
+// be simpler.") Every prose surface honoured number-free since 14 July; the card did not.
+{
+  // A fake measure: 10px per character. Exact, so the arithmetic in these tests is readable.
+  const m = (s: string) => s.length * 10;
+
+  test("card: a short instruction stays on one line", () => {
+    assert.deepEqual(wrapLines(m, "Eat more today", 500, 2), ["Eat more today"]);
+  });
+
+  test("card: a long instruction WRAPS instead of being cut off mid-word", () => {
+    // The live defect: "Make your next meal a proper protein m…" — the client never read
+    // the last word of the only thing they were asked to do.
+    const out = wrapLines(m, "Make your next meal a proper protein meal", 300, 2);
+    assert.equal(out.length, 2);
+    assert.ok(!out.join(" ").includes("…"), `should not ellipsis when it fits in 2 lines: ${JSON.stringify(out)}`);
+    assert.equal(out.join(" "), "Make your next meal a proper protein meal", "no word may be lost");
+  });
+
+  test("card: text too long for even two lines ellipsises the LAST line only", () => {
+    const out = wrapLines(m, "Go lean at the next meal grilled no starch and keep the portion small tonight", 200, 2);
+    assert.equal(out.length, 2);
+    assert.ok(out[1].endsWith("…"), `last line should end with an ellipsis: ${JSON.stringify(out)}`);
+    assert.ok(!out[0].includes("…"), "the first line must not be ellipsised");
+  });
+
+  test("card: empty instruction produces no lines, so the band collapses", () => {
+    assert.deepEqual(wrapLines(m, "", 300, 2), []);
+    assert.deepEqual(wrapLines(m, "   ", 300, 2), []);
+  });
+
+  test("card: number-free is the DEFAULT, and only numbers:full turns figures on", () => {
+    assert.equal(cardNumbersOff({ profileNotes: "" }), true, "a new client must not meet a figure");
+    assert.equal(cardNumbersOff({}), true);
+    assert.equal(cardNumbersOff({ profileNotes: "numbers:low" }), true);
+    assert.equal(cardNumbersOff({ profileNotes: "diet:halal numbers:full" }), false, "opted in — show figures");
+  });
+
+  test("card: the instruction band is scrubbed for a number-free client", () => {
+    assert.equal(cardProse("36g protein to go today", false), "36g protein to go today", "opted-in client keeps figures");
+    const free = cardProse("36g protein to go today", true);
+    assert.ok(!/\d/.test(free), `a number-free client must see no digit: "${free}"`);
+  });
+
+  test("card: numbersOff actually reaches the renderer — the picture differs", () => {
+    // Without this the flag can be defined, documented, tested at the policy layer, and never
+    // passed through — which is exactly how the card drifted from the text in the first place.
+    const rows = [
+      { label: "Calories", current: 1180, target: 1750, unit: "kcal", overIsBad: true },
+      { label: "Protein", current: 71, target: 130, unit: "g" },
+    ];
+    const base = { title: "Chicken and rice", pill: "On track" as const, rows, nextMove: "Eat more today" };
+    const withNums = renderMacroCard({ ...base, numbersOff: false });
+    const without = renderMacroCard({ ...base, numbersOff: true });
+    assert.ok(without.length < withNums.length, "the number-free card must render less ink, not the same card");
   });
 }
 

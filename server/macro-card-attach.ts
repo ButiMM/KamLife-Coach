@@ -19,7 +19,7 @@ import { renderMacroCard, renderWelcomeCard } from "./macro-card";
 import { achievementFor, renderAchievementCard, type AchievementCardData } from "./achievement-card";
 import { putCard } from "./card-store";
 import { waterTargetLitres } from "./targets";
-import { getNumbersMode } from "./numbers-mode";
+import { getNumbersMode, stripNumbersFromProse } from "./numbers-mode";
 import { cardWillAttach } from "./card-policy";
 
 // Shared: the public base URL (forced to https:// — see below) or "" when a card can't be
@@ -334,6 +334,24 @@ export function cardOrTotals(marker: string, kcal: number, protein: number, user
 /** Meal-log card marker: " [MEDIA:…]" for a macro-goal client, else "". `forDate` (the meal's
  *  logged-at date) makes a RETRO log show that DAY'S totals — e.g. yesterday's card with the
  *  new pizza slices added — instead of today's. */
+/**
+ * Is this client on the number-free setting? Both card builders ask here rather than reading
+ * getNumbersMode themselves, so the card can never drift from the text the way it did until
+ * 2026-07-29 — every prose surface honoured number-free while the picture ignored it.
+ */
+export function cardNumbersOff(user: any): boolean {
+  return getNumbersMode(user) !== "normal";
+}
+
+/**
+ * The instruction band and footer line on a number-free card. They are prose, so they can carry
+ * a figure ("36g protein to go") that the bars no longer show — same leak, different surface.
+ */
+export function cardProse(text: string, numbersOff: boolean): string {
+  if (!numbersOff) return text;
+  return stripNumbersFromProse(text || "").trim();
+}
+
 export async function macroCardMarker(opts: { user: any; mealName: string; mealKcal: number; forDate?: Date; achievementStreak?: number }): Promise<string> {
   try {
     // ON A MILESTONE DAY THE RECEIPT STANDS ASIDE (2026-07-28, marketing review: "people don't
@@ -356,16 +374,18 @@ export async function macroCardMarker(opts: { user: any; mealName: string; mealK
     const t = await todayRows(opts.user, false, retro ? opts.forDate : undefined);
     if (!t) return "";
     const verdict = dayStatusPill(t.rows, t.isBulk);
+    const numbersOff = cardNumbersOff(opts.user);
     const png = renderMacroCard({
       title: (opts.mealName || "Meal").slice(0, 42),
       subtitle: retro ? "Logged to yesterday" : "Meal logged",
       pill: verdict.text,
       pillTone: verdict.tone,
       rows: t.rows,
-      nextMove: nextMoveLine(t.rows, t.isBulk),
+      numbersOff,
+      nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
       // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
       // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
-      hint: distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)),
+      hint: cardProse(distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)), numbersOff),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {
@@ -382,16 +402,18 @@ export async function dailyMacroCardMarker(user: any): Promise<string> {
     const t = await todayRows(user, true); // daily scorecard includes today's water
     if (!t) return "";
     const verdict = dayStatusPill(t.rows, t.isBulk);
+    const numbersOff = cardNumbersOff(user);
     const png = renderMacroCard({
       title: user?.name ? `${String(user.name).split(" ")[0]}'s day so far` : "Your day so far",
       subtitle: "Today so far",
       pill: verdict.text,
       pillTone: verdict.tone,
       rows: t.rows,
-      nextMove: nextMoveLine(t.rows, t.isBulk),
+      numbersOff,
+      nextMove: cardProse(nextMoveLine(t.rows, t.isBulk), numbersOff),
       // The next-move band and the footer must never say the same thing twice (2026-07-28 live:
       // "Eat more today — add a proper meal" above "Still room to build — add a proper meal").
-      hint: distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)),
+      hint: cardProse(distinctHint(coachingHint(t.rows, t.isBulk), nextMoveLine(t.rows, t.isBulk)), numbersOff),
     });
     return ` [MEDIA:${base}/card/${putCard(png)}.png]`;
   } catch (e) {

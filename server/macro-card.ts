@@ -64,11 +64,66 @@ export interface MacroCardData {
   rows: MacroRow[];    // Calories / Protein / Carbs / Fat (each with today's total vs target)
   hint?: string;       // one short line, e.g. "Protein first — you've got this today"
   nextMove?: string;   // THE instruction — big, top of card, no numbers needed to understand it
+  /**
+   * NUMBER-FREE CARD (2026-07-29, from a 15-minute call with a real client: she likes the
+   * product, "but the calories are confusing — it needs to be simpler").
+   *
+   * numbers-mode.ts has defaulted every client to number-free since 14 July and the whole TEXT
+   * pipeline honours it — food lines, prose, photo replies, the totals line, the morning brief.
+   * The CARD never asked. So a number-free client had every figure stripped from the words and
+   * was then sent a picture consisting of nothing but figures: "1420 / 1750kcal". The loudest
+   * numeric surface in the product was the one surface exempt from the rule.
+   *
+   * When set, the bars, colours, verdict pill and instruction all stay — she keeps the picture
+   * that shows her she's on track. Only the "current / target" readouts go. Suppressing the card
+   * entirely would have been the easy fix and the wrong one: she did not ask for less coaching,
+   * she asked for fewer numbers.
+   */
+  numbersOff?: boolean;
 }
 
 /** Shared with the achievement card so both speak the same visual language. */
 export const CARD_FONT = FONT;
 export const CARD_COLOURS = { ORANGE, ORANGE_LT, INK, MUTED, GREEN };
+
+/**
+ * Word-wrap to at most `maxLines`, ellipsing only if even that overflows.
+ *
+ * (2026-07-29.) The next-move band clipped its text to ONE line: every client whose instruction
+ * ran long read "Make your next meal a proper protein m…". That band is the largest type on the
+ * card and carries the only thing the client is asked to do — truncating it mid-word is the
+ * product failing at the exact point it is supposed to be clearest. A second line costs 44px.
+ *
+ * Takes a `measure` function rather than a canvas context so it is pure and unit-testable.
+ */
+export function wrapLines(measure: (s: string) => number, text: string, maxW: number, maxLines: number): string[] {
+  const words = (text || "").trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  const lines: string[] = [];
+  let line = "";
+  for (const w of words) {
+    const next = line ? `${line} ${w}` : w;
+    if (line && measure(next) > maxW) {
+      lines.push(line);
+      line = w;
+      if (lines.length === maxLines) break;
+    } else {
+      line = next;
+    }
+  }
+  if (lines.length < maxLines && line) lines.push(line);
+
+  // Everything fitted — done.
+  const consumed = lines.join(" ");
+  if (consumed.replace(/\s+/g, " ") === words.join(" ")) return lines;
+
+  // It did not fit in maxLines. Ellipsis on the LAST line only, so the client still reads the
+  // start of the instruction rather than a cut-off word with no terminator.
+  let last = lines[lines.length - 1] || "";
+  while (last.length > 1 && measure(`${last}…`) > maxW) last = last.slice(0, -1);
+  lines[lines.length - 1] = last.replace(/[\s,–-]+$/, "") + "…";
+  return lines;
+}
 
 export function roundRect(ctx: SKRSContext2D, x: number, y: number, w: number, h: number, r: number): void {
   const rr = Math.min(r, w / 2, h / 2);
@@ -94,7 +149,15 @@ export function renderMacroCard(d: MacroCardData): Buffer {
   // people don't care about calories, they just want to lose the belly"). One instruction, in
   // words, as the biggest thing on the card. The bars stay underneath for whoever wants them —
   // nobody has to pick a mode: the layman reads the top line and stops, the tracker reads on.
-  const nextMoveH = d.nextMove ? 128 : 0;
+  // Measured BEFORE the canvas is sized, because a two-line instruction makes the card taller.
+  // A scratch context is the cheapest way to measure text without laying anything out.
+  const scratch = createCanvas(8, 8).getContext("2d");
+  scratch.font = `600 40px "${FONT}"`;
+  const NM_LINE_H = 46;
+  const nmLines = d.nextMove
+    ? wrapLines(s => scratch.measureText(s).width, d.nextMove, (W - M * 2 - P * 2) - 68, 2)
+    : [];
+  const nextMoveH = nmLines.length ? 128 + (nmLines.length - 1) * NM_LINE_H : 0;
 
   const cardH = P + headerH + mealH + nextMoveH + d.rows.length * rowH + footerH + P - 20;
   const H = cardH + M * 2;
@@ -225,13 +288,7 @@ export function renderMacroCard(d: MacroCardData): Buffer {
 
     ctx.fillStyle = INK;
     ctx.font = `600 40px "${FONT}"`;
-    let nm = d.nextMove;
-    const nmMaxW = innerW - 68;
-    if (ctx.measureText(nm).width > nmMaxW) {
-      while (nm.length > 1 && ctx.measureText(nm + "…").width > nmMaxW) nm = nm.slice(0, -1);
-      nm = nm.replace(/[\s,–-]+$/, "") + "…";
-    }
-    ctx.fillText(nm, x + 34, y + 88);
+    nmLines.forEach((ln, i) => ctx.fillText(ln, x + 34, y + 88 + i * NM_LINE_H));
     y += nextMoveH;
   }
 
@@ -252,13 +309,18 @@ export function renderMacroCard(d: MacroCardData): Buffer {
     ctx.font = `bold 34px "${FONT}"`;
     ctx.fillText(r.label, x, y + 34);
 
-    const fmt = (n: number) => r.decimals != null ? n.toFixed(r.decimals) : String(Math.round(n));
-    const valTxt = `${fmt(r.current)} / ${fmt(r.target)}${r.unit}`;
-    ctx.font = `600 30px "${FONT}"`;
-    ctx.fillStyle = over ? RED : hit ? GREEN : MUTED;
-    ctx.textAlign = "right";
-    ctx.fillText(valTxt, x + innerW, y + 34);
-    ctx.textAlign = "left";
+    // The "1420 / 1750kcal" readout — the only numeric text on the card, and the only thing a
+    // number-free client must not see. The bar below still carries the same information as a
+    // shape, which is the point: she can read "nearly there" without reading a figure.
+    if (!d.numbersOff) {
+      const fmt = (n: number) => r.decimals != null ? n.toFixed(r.decimals) : String(Math.round(n));
+      const valTxt = `${fmt(r.current)} / ${fmt(r.target)}${r.unit}`;
+      ctx.font = `600 30px "${FONT}"`;
+      ctx.fillStyle = over ? RED : hit ? GREEN : MUTED;
+      ctx.textAlign = "right";
+      ctx.fillText(valTxt, x + innerW, y + 34);
+      ctx.textAlign = "left";
+    }
 
     const barY = y + 56, barH = 26;
     ctx.fillStyle = TRACK;
