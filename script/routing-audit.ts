@@ -598,6 +598,21 @@ const CASES: Case[] = [
         { reject: [SICK_TPL] }),
       x("hypothetical fever question", "Can you train with a fever or is that dangerous?",
         { reject: [SICK_TPL] }),
+      // SWEEP 2026-07-29. "this isn't working" is what a client says just before they quit, and
+      // the progress command's bare `working\??` alternative claimed it — so despair was answered
+      // with "❌ Training: 0/3 sessions… without data I am coaching blind". Right numbers, worst
+      // possible moment, and it reads as blaming them. It belongs to the frustration intercept.
+      x("despair is never answered with a scorecard", "this isn't working",
+        { reject: [/coaching blind/i, /Where you'?re heading/i, /❌ Training/] }),
+      x("despair, contracted", "it's not working",
+        { reject: [/coaching blind/i, /Where you'?re heading/i] }),
+      // ...but the genuine progress QUESTION must still get the scorecard.
+      x("asking if it works still gets the progress read", "is it working?",
+        { reject: [/that response wasn'?t good enough/i] }),
+      // The plateau reply was 181 words of physiology with four questions fired back at someone
+      // who had just said the discouraging thing. Short, and it must not open with a lecture.
+      x("plateau reply leads with the person, not the physiology", "I'm not losing weight",
+        { expect: [/not doing it wrong/i], reject: [/What the scale does NOT show/i, /Glycogen/i] }),
       // SWEEP 2026-07-29. A confused client got the entire help menu — a sitemap in answer to
       // "I don't understand" — whenever their last reply was over 30 minutes old, which on
       // WhatsApp is the common case, not the rare one. Confusion now returns ONE plain action.

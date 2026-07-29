@@ -34,6 +34,7 @@ import { scanForSAFoods } from "./food-scanner";
 import { storeMemory } from "../memory";
 import { sendWhatsApp } from "../scheduler";
 import { sastToday, sastDayStart, looksLikeDirectionRequest, classifyPainReport , getDisplayName} from "../utils";
+import { isDespairNotAQuestion } from "../despair";
 import { SA_FOODS_SEED } from "../foods";
 
 // Protein keywords built from SA food database (same logic as routes.ts)
@@ -622,10 +623,9 @@ export async function handleMiscCommands(ctx: {
   }
 
   // ---- TRAJECTORY: "on track?", "where am I going", "is this working" ----
-  // Gives a directional assessment — not a wall of numbers, just honest + specific.
-  // Days 31-40: gated to the engine (the 3rd/4th "how am I doing" duplicate) when live.
+  // A directional assessment, not a wall of numbers. Gated to the engine when live.
   if (
-    process.env.ENGINE_LIVE !== "on" && (
+    process.env.ENGINE_LIVE !== "on" && !isDespairNotAQuestion(m) && (
     /\b(where am i going|on track\??|am i on track|will i reach|when will i see results|how long will this take|is this working|where is my body going|any progress|am i making progress|is it working|heading somewhere|see(ing)? results|showing results|progress\??|working\??)\b/i.test(m)
     || ["trajectory", "on track", "progress check", "am i progressing", "body check", "check in"].includes(m)
   )) {

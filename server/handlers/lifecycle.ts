@@ -1500,18 +1500,24 @@ export async function handleLifecycle(ctx: {
     const goal = user.goalType || "fat_loss";
     const prot = user.proteinTarget || 120;
 
-    let scaleReply = `The scale is one data point${name} — and it is often the least honest one in the first 4–8 weeks.\n\n*What the scale does NOT show:*\n• Muscle gain — 1kg of muscle takes up less space than 1kg of fat. You can lose fat and gain muscle and the scale barely moves — but your body is completely different\n• Water retention — sodium, stress, poor sleep, and your cycle (for women) all cause 1–3kg swings that are not fat\n• Glycogen — when you start training, muscles store more glycogen (with water attached). Scale goes up. Body fat goes down. Both things are true.\n\n*The real questions:*\n• Do your clothes fit differently?\n• Is your energy better?\n• Are you stronger in the gym?\n• Are you sleeping better?\n\nIf yes to any of those — your body is changing. The scale will catch up.\n\n`;
+    // SHORT, BECAUSE OF WHO IS READING IT (2026-07-29 sweep + a real client call: "it needs to
+    // be simpler"). This was 181 words — two headed lists, three physiology lessons, and FOUR
+    // questions fired back at somebody who had just said the discouraging thing. Every fact in
+    // it was true and none of it was the point. A person saying "I'm not losing weight" is at
+    // the moment most people quit; they need to hear that they are not doing it wrong, one true
+    // reason, and one thing to do. Everything else is a lecture wearing a coach's voice.
+    let scaleReply = `That's the most demoralising part of the whole thing${name} — and it's where most people quit. You're not doing it wrong.\n\nIn the first weeks the scale mostly measures water and food weight, not fat. It moves last, not first.\n\n`;
 
     if (week <= 3) {
-      scaleReply += `You are in Week ${week}. The first 3 weeks are adaptation — your body is building the foundation. Real visible changes show up at Week 4–6 for most people. Stay consistent.`;
+      scaleReply += `You're in week ${week}. Nothing visible happens before week 4 — that's not you, that's just how it goes.\n\n*This week:* keep logging. That's the whole job.`;
     } else if (total > 0 && week >= 4) {
-      scaleReply += `*If the scale has genuinely not moved in 3+ weeks:*\n1. Log your food honestly for 3 days — portion sizes creep up without noticing\n2. Add a 20-minute walk on top of your current steps target\n3. Check sodium — SA processed food (polony, chips, takeaways) retains water\n4. Is sleep under 7 hours? Cortisol from poor sleep actively holds fat, especially belly fat\n\nPick one of these and fix it this week. Then update me.`;
+      scaleReply += `*One thing this week:* log your food honestly for three days — portions creep up without anyone noticing, and it's the reason nine times out of ten.\n\nDo that and send me the three days. Then I'll know what to change.`;
     } else {
-      scaleReply += `Stay consistent with your ${prot}g protein target and your sessions. Body recomposition is happening even when the scale lies. Trust the 8-week process — not the 1-week number.`;
+      scaleReply += `*One thing this week:* hit your protein and get your sessions in. Nothing else matters yet.`;
     }
 
     if (goal === "muscle_gain") {
-      scaleReply = `${user.name ? user.name + ", the" : "The"} scale going up is the goal on a muscle-building programme. If it is not moving, you are likely not eating enough. Your body cannot build muscle in a deficit — it needs fuel.\n\nAre you hitting your calorie and protein targets consistently? That is where muscle gain starts.`;
+      scaleReply = `${getDisplayName(user) ? getDisplayName(user) + ", the" : "The"} scale going up is the goal on a muscle-building programme. If it's not moving, you're almost certainly not eating enough — your body can't build on empty.\n\n*One thing:* are you hitting your calories every day, not just most days?`;
     }
 
     await logChat(user.id, message, scaleReply, "SCALE_STUCK");

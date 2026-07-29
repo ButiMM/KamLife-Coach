@@ -15,6 +15,7 @@ import { buildDayWorkout, buildFullProgramme, getKamlifeProgramme, getDayType } 
 import { askCoachK, selectModel, buildPatternSummary, getSAContextFlags, isUnderGPTCallLimit, selectVisionModel, estimateVisionCostUSD, classifyIntent, type ClassifiedIntent, type IntentClassification } from "./gpt";
 import { calculateTargets, getDailyStepContext } from "./targets";
 import { handleOnboarding, getMenuText, getOnboardingMealPlan } from "./onboarding";
+import { saysNotWorking } from "./despair";
 import { getShoppingList, formatShoppingList } from "./shopping-lists";
 import { nutritionAgent, programmingAgent, mindsetAgent, adminAgent, routeToAgent } from "./agents";
 import { storeMemory, retrieveMemories } from "./memory";
@@ -485,9 +486,8 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   const HAS_CLEAR_ACTION = /\b(today.?s workout|my workout|workout|training session|log food|log steps|steps|my progress|shopping list|meal plan|menu|protein|calories|water)\b/i.test(m);
 
   // ---- BRIEF FRUSTRATION — short expressive outbursts with no action request ----
-  // "Omg", "wtf", "ugh", "seriously?" etc. fall through to GPT without this guard.
-  // GPT sees recent workout history and re-writes a hallucinated workout — exactly the
-  // wrong response. Catch these early and return a short deterministic reply instead.
+  // "Omg", "wtf", "ugh" fall through to GPT without this guard, and GPT sees recent workout
+  // history and re-writes a hallucinated workout. Catch early, reply short and deterministically.
   const BRIEF_FRUSTRATION_RE = /^(omg+|o\.?m\.?g\.?|wtf|wth|ugh+|eish+|agg+|argh+|ffs|smh|seriously\??|come on\.?|what the hell\.?|what is this\.?|this is ridiculous\.?|not again\.?|unbelievable\.?|oh come on\.?|really\?+|for real\??|yoh+|yhoh+|haibo\.?)$/i;
   if (BRIEF_FRUSTRATION_RE.test(m.trim()) && !HAS_CLEAR_ACTION) {
     captureFriction("frustration", { userId: user.id, phone, messageIn: message, detail: "brief frustration outburst" });
@@ -503,7 +503,7 @@ export async function handleMessage(phone: string, message: string, mediaUrl?: s
   // link). HAS_CLEAR_ACTION guard: frustration + explicit request ("Today's workout omg it's not
   // working") → action wins. "broken"/"doesn't work"/"nothing works" are NOT single-signal (they
   // describe things — "my knee is broken") — they count in the 2-signal list below instead.
-  const STRONG_FRUSTRATION = /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|scam|rip.?off)\b/i.test(m);
+  const STRONG_FRUSTRATION = saysNotWorking(m) /* single-signal — see despair.ts */ || /\b(not paying|won.?t pay|i.?m not paying|not worth the money|waste of money|this is rubbish|this is terrible|this is garbage|this is pathetic|this is useless|not worth it|i.?m done|i am done|giving up|shut down|shut it down|terrible service|bad service|scam|rip.?off)\b/i.test(m);
   const frustrationSignalCount = [
     /\b(useless|useless(ly)?)\b/i.test(m),
     /\b(terrible|pathetic|garbage|rubbish|broken|nothing works|doesn.?t work)\b/i.test(m),

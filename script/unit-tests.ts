@@ -7131,6 +7131,47 @@ test("workout-request: spoken programme phrasings deliver, questions still coach
   });
 }
 
+// ── Despair: the sentence a client says right before they quit ───────────────────────────────
+{
+  test("despair: every way people say it isn't working", async () => {
+    const { saysNotWorking } = await import("../server/despair");
+    for (const m of [
+      "this isn't working", "this isnt working", "it's not working", "its not working",
+      "this is not working", "nothing is working", "that ain't working",
+      "not working for me", "it never works",
+    ]) assert.ok(saysNotWorking(m), `must be heard as despair: "${m}"`);
+  });
+
+  test("despair: a status QUESTION is not despair", async () => {
+    const { saysNotWorking } = await import("../server/despair");
+    for (const m of ["is it working?", "is this working", "how is it working", "working on it"]) {
+      assert.ok(!saysNotWorking(m), `must NOT be heard as despair: "${m}"`);
+    }
+  });
+
+  test("despair: the progress command declines anything a scorecard would insult", async () => {
+    const { isDespairNotAQuestion } = await import("../server/despair");
+    // A table of missed sessions is the wrong reply to all of these, whoever handles them.
+    for (const m of ["this isn't working", "I give up", "I'm done", "giving up", "it's not working for me"]) {
+      assert.ok(isDespairNotAQuestion(m), `a scorecard must not claim: "${m}"`);
+    }
+    // ...but the real question still reaches the report.
+    for (const m of ["is it working?", "am i on track", "any progress"]) {
+      assert.ok(!isDespairNotAQuestion(m), `the progress read must still answer: "${m}"`);
+    }
+  });
+
+  test("despair: the two call sites can never disagree", async () => {
+    const { saysNotWorking, isDespairNotAQuestion } = await import("../server/despair");
+    // The whole reason this module exists: the frustration intercept must CLAIM whatever the
+    // progress command DECLINES. If saysNotWorking ever fires where isDespairNotAQuestion does
+    // not, a message falls between the two handlers — which is exactly what happened live.
+    for (const m of ["this isn't working", "it's not working", "nothing is working", "never works"]) {
+      if (saysNotWorking(m)) assert.ok(isDespairNotAQuestion(m), `would fall between handlers: "${m}"`);
+    }
+  });
+}
+
 // ── WhatsApp templates: catch Meta's rejections offline, not one per day ─────────────────────
 // Each Meta rejection costs a day of review. Every rule tested here is a real rejection cause,
 // so a template that fails one of these must never reach a submission.
